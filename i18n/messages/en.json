@@ -496,6 +496,12 @@
       "untitledSession": "(untitled)",
       "noApiKey": "No API key",
       "ariaSettings": "Session settings",
+      "accountSwitcher": {
+        "aria": "Switch account for this session",
+        "noOverride": "Inherit",
+        "active": "active",
+        "toast": "Next message will use account {label}"
+      },
       "title": "Session settings",
       "description": "Override defaults for this chat. Empty = use global.",
       "modelLabel": "Model",
@@ -536,6 +542,15 @@
         "default": "Default",
         "other": "Other"
       },
+      "presetPill": {
+        "ariaLabel": "Active preset — click to switch",
+        "none": "No preset",
+        "searchPlaceholder": "Search presets…",
+        "searchAriaLabel": "Search presets",
+        "empty": "No presets match.",
+        "defaultBadge": "Default",
+        "manageAll": "Manage all presets…"
+      },
       "skills": {
         "aria": "Skills active in this session",
         "counter": "{active}/{total} skills",
@@ -561,6 +576,18 @@
       "placeholderDisabled": "Select a session to start chatting…",
       "placeholder": "Send a message — try /, @, !, or #",
       "ariaMessage": "Message",
+      "sandboxShield": {
+        "label": {
+          "os": "Sandbox active — OS tier",
+          "microvm": "Sandbox active — microVM tier",
+          "off": "Sandbox off"
+        },
+        "tooltip": {
+          "os": "Bash / Edit / Write run inside the per-platform OS sandbox.",
+          "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
+          "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session."
+        }
+      },
       "ariaUploadImage": "Upload image",
       "ariaAttachImage": "Attach image",
       "attachImageTooltip": "Attach image",
@@ -1492,14 +1519,83 @@
       "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
       "retryButton": "Run health probe",
       "strictModeNote": "Strict mode: when unavailable, sandboxed tool calls are refused — no bypass option.",
-      "backend": { "label": "Backend" },
-      "version": { "label": "Version" },
-      "lastError": { "label": "Last error" },
-      "ipcError": { "label": "IPC error" },
+      "backend": {
+        "label": "Backend"
+      },
+      "version": {
+        "label": "Version"
+      },
+      "lastError": {
+        "label": "Last error"
+      },
+      "ipcError": {
+        "label": "IPC error"
+      },
       "status": {
         "ok": "Active",
         "setup": "Setup required",
         "down": "Unavailable"
+      },
+      "tier": {
+        "title": "Default sandbox tier",
+        "description": "Which sandbox layer runs Bash / Edit / Write when a session has sandbox enabled. Characters can override.",
+        "os": {
+          "label": "OS sandbox (default)",
+          "description": "sandbox-exec on macOS, bwrap on Linux, codex-windows-sandbox on Windows. Lowest latency."
+        },
+        "microvm": {
+          "label": "microVM (e2b Firecracker)",
+          "description": "Routes calls to an ephemeral Firecracker microVM via the cognia-e2b-sandbox plugin. Requires @e2b/sdk + E2B_API_KEY."
+        }
+      },
+      "automationPolicy": {
+        "title": "Per-action policy",
+        "description": "Extra constraints applied after permission gate + consent for Computer Use actions. Empty lists impose no constraint; any non-empty allowlist hard-fails actions whose facts don't satisfy it.",
+        "emptyNote": "No constraints configured — Computer Use actions follow only the permission gate and consent broker.",
+        "add": "Add row",
+        "remove": "Remove row",
+        "rowAriaLabel": "{label} entry {index}",
+        "regexInvalid": "Invalid regex",
+        "saveError": "Could not save policy: {error}",
+        "allowedProcessNames": {
+          "label": "Allowed processes",
+          "description": "Case-insensitive process names the action's target must match.",
+          "placeholder": "Chrome"
+        },
+        "allowedWindowTitlePatterns": {
+          "label": "Allowed window titles",
+          "description": "Regular expressions evaluated against the target window's title.",
+          "placeholder": "^Visual Studio Code"
+        },
+        "allowedUrlPatterns": {
+          "label": "Allowed URLs",
+          "description": "Regular expressions evaluated against the target browser tab's URL.",
+          "placeholder": "^https://"
+        },
+        "forbiddenScreenRegions": {
+          "label": "Forbidden screen regions",
+          "description": "Pixel rectangles where clicks and drags are denied (password manager popups, system tray secrets, etc.).",
+          "x": "X",
+          "y": "Y",
+          "width": "Width",
+          "height": "Height"
+        }
+      }
+    },
+    "diagnostics": {
+      "sandboxAudit": {
+        "title": "Sandbox event log",
+        "description": "Recent sandbox_exec calls — allow / deny / error, command, duration. Mirrors the in-memory audit ring.",
+        "refresh": "Refresh",
+        "empty": "No sandbox events recorded yet."
+      },
+      "sidecarRestart": {
+        "title": "Sidecar restarts",
+        "description": "How many times the Node sidecar has spawned since the app booted. A growing count usually means SDK errors are causing automatic restarts.",
+        "count": "Count",
+        "lastRestart": "Last restart",
+        "noRestart": "Not yet observed",
+        "lastChecked": "Last polled"
       }
     },
     "title": "Settings",
@@ -3073,6 +3169,26 @@
           "enableStyleFewShot": "Style few-shot",
           "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
           "styleSamplesK": "Samples per send"
+        },
+        "sandbox": {
+          "enable": {
+            "label": "Sandbox Bash / Edit / Write",
+            "description": "Replace SDK builtins with sandbox_* equivalents for this character.",
+            "aria": "Enable sandbox"
+          },
+          "tier": {
+            "label": "Sandbox tier",
+            "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
+            "inherit": "Inherit app default",
+            "os": "OS sandbox",
+            "microvm": "microVM (e2b)"
+          }
+        },
+        "account": {
+          "label": "Account override",
+          "description": "Pin sends from this character to a specific provider account. Inherit uses the session / settings default.",
+          "inherit": "Inherit",
+          "optionLabel": "{provider}: {label}"
         }
       },
       "multiselect": {
@@ -4532,7 +4648,16 @@
       "doneReorder": "Done",
       "reset": "Reset to built-ins",
       "export": "Export presets…",
-      "import": "Import presets…"
+      "import": "Import presets…",
+      "toggleSelection": "Toggle selection"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search presets…",
+      "searchAriaLabel": "Search presets",
+      "filterGroupAriaLabel": "Filter presets",
+      "bulkAriaLabel": "Bulk preset actions",
+      "selected": "{count} selected",
+      "clearSelection": "Clear selection"
     },
     "filter": {
       "all": "All",
@@ -4594,7 +4719,35 @@
       "setDefaultHelp": "Auto-applied to new sessions without a character.",
       "favorite": "Favorite",
       "favoriteHelp": "Pinned to the top of your library.",
-      "saving": "Saving…"
+      "saving": "Saving…",
+      "sections": {
+        "identity": {
+          "title": "Identity",
+          "description": "Name, category, and visual treatment shown in the picker."
+        },
+        "capability": {
+          "title": "Capability",
+          "description": "System prompt and the model / permission / effort overrides applied to sessions using this preset."
+        },
+        "tools": {
+          "title": "Tools",
+          "description": "Tool whitelists, ordered skill stack, and MCP server subset."
+        },
+        "advanced": {
+          "title": "Advanced",
+          "description": "Working directory, agent-mode override, and library flags."
+        }
+      }
+    },
+    "bulk": {
+      "selectMode": "Select",
+      "exitSelectMode": "Done",
+      "favoriteAll": "Favorite",
+      "unfavoriteAll": "Unfavorite",
+      "deleteAll": "Delete",
+      "deleteConfirmTitle": "Delete {count} presets?",
+      "deleteConfirmDescription": "The selected presets will be removed from your library. Built-in presets in the selection are skipped automatically. This can't be undone.",
+      "builtInsSkipped": "Built-in presets in your selection will be skipped."
     },
     "validation": {
       "nameRequired": "Preset name is required.",
@@ -4976,6 +5129,46 @@
       "analytics": "Analytics",
       "devtools": "Devtools"
     },
+    "sections": {
+      "library": "Library",
+      "discover": "Discover",
+      "governance": "Governance",
+      "devtools": "Devtools",
+      "librarySub": {
+        "all": "All",
+        "enabled": "Enabled",
+        "updates": "Updates available",
+        "configurable": "Configurable",
+        "errored": "Errored"
+      },
+      "governanceSub": {
+        "permissions": "Permissions",
+        "scheduled": "Scheduled",
+        "analytics": "Analytics",
+        "audit": "Audit log"
+      }
+    },
+    "view": {
+      "list": "List",
+      "card": "Cards",
+      "toggleAria": "Toggle list/card view"
+    },
+    "audit": {
+      "title": "Audit log",
+      "description": "Recent grant/deny/revoke decisions across all plugins. The buffer holds the last 200 entries — older events are dropped.",
+      "filterPluginAll": "All plugins",
+      "filterPermissionAll": "All permissions",
+      "filterPluginLabel": "Plugin",
+      "filterPermissionLabel": "Permission",
+      "empty": "No audit events yet.",
+      "exportCsv": "Export CSV",
+      "exportFilename": "plugin-audit-log.csv",
+      "colTime": "Time",
+      "colPlugin": "Plugin",
+      "colAction": "Action",
+      "colPermission": "Permission",
+      "colReason": "Reason"
+    },
     "installed": {
       "loading": "Loading installed plugins…",
       "empty": "No plugins installed yet.",
@@ -5089,6 +5282,7 @@
       "disable": "Disable",
       "enable": "Enable",
       "uninstall": "Uninstall",
+      "actionsMenuAria": "Plugin actions for {name}",
       "permissionCount": "{count, plural, =0 {no permissions} =1 {1 permission} other {# permissions}}",
       "updateBadge": "Update available",
       "status": {
@@ -5121,6 +5315,34 @@
       "tabOperations": "Operations",
       "tabAnalytics": "Analytics",
       "tabTriggers": "Triggers",
+      "subtab": {
+        "overview": "Overview",
+        "capabilities": "Capabilities",
+        "configure": "Configure",
+        "permissions": "Permissions",
+        "data": "Data"
+      },
+      "subtabAria": "Plugin detail sections",
+      "rawManifest": "View raw manifest",
+      "rawManifestTitle": "Raw manifest",
+      "emptyTitle": "Select a plugin",
+      "emptyDescription": "Pick a plugin from the list to inspect, configure, and govern it.",
+      "summaryTotal": "{count} installed",
+      "summaryEnabled": "{count} enabled",
+      "summaryUpdates": "{count} updates",
+      "summaryErrored": "{count} errored",
+      "noConfigSchema": "This plugin has no configurable settings.",
+      "noPermissions": "This plugin doesn't declare any permissions.",
+      "noCapabilities": "This plugin doesn't contribute any capabilities.",
+      "capabilitiesTitle": "Capabilities",
+      "runtimeContributions": "Runtime contributions",
+      "workflowTriggers": "Workflow triggers",
+      "sectionTables": "Plugin data tables",
+      "sectionSchedules": "Scheduled jobs",
+      "sectionAnalytics": "Analytics",
+      "sectionBackup": "Backup",
+      "sectionResources": "Rate limits",
+      "sectionDependencies": "Dependency graph",
       "metaId": "ID",
       "metaVersion": "Version",
       "metaSource": "Source",
@@ -5759,7 +5981,9 @@
         "cancel": "Cancel",
         "confirm": "Save",
         "removeConfirm": "Remove",
-        "secretsHidden": "Token is hidden — view the OS keychain to inspect."
+        "secretsHidden": "Token is hidden — view the OS keychain to inspect.",
+        "inUseByCharacter": "Char: {name}",
+        "inUseBySession": "Session: {name}"
       },
       "preset": {
         "title": "Third-party endpoint",
@@ -5780,7 +6004,9 @@
         "validationInvalidUrl": "Base URL must be a valid URL.",
         "validationEmptyKey": "Header keys must not be blank.",
         "presetActive": "Preset active",
-        "presetInactive": "Direct endpoint"
+        "presetInactive": "Direct endpoint",
+        "removeConfirmTitle": "Remove this preset?",
+        "removeConfirmDescription": "\"{label}\" will be cleared and the provider will use its built-in endpoint. You can re-add it any time."
       },
       "importExport": {
         "title": "Backup",
@@ -5804,7 +6030,17 @@
         "importFailed": "Import failed: {error}",
         "passphraseWrong": "The passphrase didn't decrypt this file.",
         "confirmImport": "Import",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "preview": {
+          "title": "Preview the backup",
+          "description": "Review what this file will write back before applying. Existing accounts with the same id are upserted; presets and active-account pointers are restored from the file.",
+          "decrypting": "Decrypting (PBKDF2 600 000 iterations)…",
+          "unlock": "Decrypt & preview",
+          "apply": "Apply import",
+          "empty": "This backup is empty — no accounts or presets to import.",
+          "hasPreset": "Preset",
+          "noAccounts": "No accounts (preset / pointer only)."
+        }
       },
       "switchToast": {
         "switched": "Active account switched to {label}.",
@@ -5886,6 +6122,8 @@
         "revokeOnSignOutHint": "Also tells auth.openai.com to invalidate this token. Off by default — local-only sign out is reversible."
       },
       "settings": {
+        "cardTitle": "Connection settings",
+        "cardDescription": "Auto-refresh behavior and codex-cli reuse for this provider.",
         "preferDiscovered": {
           "title": "Reuse codex-cli when our vault is empty",
           "description": "When no Codex account is registered in cognia, read `~/.codex/auth.json` on each agent spawn. Kept as a UX hint — the runtime no longer auto-adopts; the Account tab still surfaces the discovered credential.",
@@ -6373,7 +6611,10 @@
         "expandEntry": "Expand entry",
         "openDetails": "Open details",
         "closeOrClear": "Close / clear",
-        "showShortcuts": "Show shortcuts"
+        "showShortcuts": "Show shortcuts",
+        "focusSearch": "Focus search",
+        "bookmarkEntry": "Bookmark focused entry",
+        "openPresets": "Open presets"
       },
       "filterChip": {
         "sourceLabel": "Source:",
@@ -6388,7 +6629,33 @@
         "transportLabel": "Transport:",
         "clearTransport": "Clear transport filter",
         "transportPrefix": "Transport: {name}"
-      }
+      },
+      "customTimeRange": "Custom...",
+      "customTimeRangePickerLabel": "Pick a date range",
+      "customTimeRangeChipPrefix": "time",
+      "customTimeRangeApply": "Apply",
+      "customTimeRangeClear": "Clear",
+      "newLogsToast": "{count, plural, =0 {} one {1 new log} other {# new logs}}",
+      "jumpToLatest": "Jump to latest",
+      "noTraceEventsHint": "Logs without traceId are excluded",
+      "traceTotal": "events",
+      "traceDurationLabel": "Duration",
+      "traceOverflow": "+{count} more traces hidden",
+      "pageHeader": {
+        "breadcrumbHome": "Home",
+        "breadcrumbLogs": "Logs",
+        "livePill": "{filtered} / {total}",
+        "help": "Shortcuts"
+      },
+      "densityMenuLabel": "Row density",
+      "density": {
+        "compact": "Compact",
+        "comfortable": "Comfortable",
+        "spacious": "Spacious"
+      },
+      "copyShareUrl": "Copy share URL",
+      "shareUrlCopied": "Share URL copied to clipboard",
+      "shareUrlFailed": "Could not copy share URL"
     },
     "dashboard": {
       "noData": "No log data available for visualization",
@@ -6427,7 +6694,8 @@
       "total": "Total",
       "errors": "Errors",
       "warnings": "Warnings",
-      "clear": "Clear"
+      "clear": "Clear",
+      "empty": "No data yet"
     },
     "detail": {
       "title": "Log Detail",
@@ -8140,6 +8408,11 @@
         "done": "Done",
         "openSettings": "Open settings",
         "progress": "{current} of {total}",
+        "sandbox": {
+          "title": "Shell tools run inside a sandbox",
+          "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
+          "cta": "Open sandbox settings"
+        },
         "ocr": {
           "title": "Extract text from images and PDFs",
           "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
@@ -10678,6 +10951,8 @@
       "devicesRow": "Paired devices",
       "notificationsRow": "Notifications",
       "preferencesRow": "Font size & default model",
+      "presetsRow": "System prompt presets",
+      "presetsBackAria": "Back to Me",
       "connectorsRow": "Platform connectors",
       "ocrRow": "OCR providers",
       "computerUseRow": "Computer Use",
@@ -13617,6 +13892,29 @@
         "inputSimulation": "Input Simulation",
         "screenshot": "Screenshot",
         "events": "Events"
+      },
+      "initFailure": {
+        "title": "Backend initialization failed",
+        "body": "The platform automation backend ({platform}) failed to start: {error}. Computer Use calls will return UnsupportedPlatform until the underlying issue is resolved. Check the troubleshooting guide for your OS or restart the app after fixing permissions.",
+        "dismiss": "Dismiss"
+      },
+      "metrics": {
+        "title": "Last 24 hours",
+        "description": "Activity counters from the audit log. Updates on tab mount and every 60s.",
+        "total": "Total",
+        "allow": "Allowed",
+        "deny": "Denied",
+        "consent": "Consent",
+        "topFailingTitle": "Top failing commands",
+        "topFailingDescription": "Commands with the most deny / consent-decline outcomes in the last 24h. Investigate when a single command dominates.",
+        "topFailingEmpty": "No denied calls in the last 24h.",
+        "lastScreenshotTitle": "Last screenshot",
+        "lastScreenshotDescription": "Time the most recent successful screenshot was captured.",
+        "lastScreenshotNever": "No screenshot in the last 24h.",
+        "lastScreenshotRelative": "{seconds}s ago",
+        "lastScreenshotMinutes": "{minutes}m ago",
+        "lastScreenshotHours": "{hours}h ago",
+        "loadFailed": "Failed to read audit log."
       }
     },
     "permissions": {
@@ -13701,6 +13999,9 @@
       "pickStartAria": "Start point-and-pick countdown",
       "pickCountdown": "Cancel ({seconds}s)",
       "pickStart": "Pick element",
+      "pickCaptureNow": "Capture now",
+      "pickCaptureNowTooltip": "Skip the countdown and pick the element under the cursor immediately",
+      "pickCaptureNowAria": "Capture cursor target immediately",
       "elementRef": "Element Ref",
       "elementRefPlaceholder": "e.g. windows/1234/5678",
       "maxDepth": "Max Depth",

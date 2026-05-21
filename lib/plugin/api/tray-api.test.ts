@@ -4,11 +4,19 @@ import { __resetTrayRegistryForTesting, listTrayItems } from "@/lib/tray/registr
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+}))
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { recordSilentFailure } = require("../contracts/diagnostics-store") as {
+  recordSilentFailure: jest.Mock
+}
 
 afterEach(() => {
   invoke.mockReset()
+  recordSilentFailure.mockReset()
   __resetTrayRegistryForTesting()
 })
 
@@ -85,5 +93,38 @@ describe("createTrayAPI", () => {
     expect(listTrayItems()).toHaveLength(2)
     dispose()
     expect(listTrayItems()).toHaveLength(0)
+  })
+
+  it("routes register failures through recordSilentFailure (handler registered → expected:false)", async () => {
+    invoke.mockImplementationOnce(() => Promise.reject(new Error("backend down")))
+    const api = createTrayAPI({ pluginId: "shot", capabilities: ["tray"] })
+    api.register({ id: "capture", label: "Capture", onClick: () => {} })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(recordSilentFailure).toHaveBeenCalledWith(
+      "shot",
+      expect.objectContaining({
+        site: "tray.register",
+        message: expect.stringContaining("shot:capture"),
+        expected: false,
+      }),
+      expect.any(Error)
+    )
+  })
+
+  it("routes unregister failures through recordSilentFailure", async () => {
+    invoke.mockResolvedValue(undefined)
+    const api = createTrayAPI({ pluginId: "shot", capabilities: ["tray"] })
+    const dispose = api.register({ id: "capture", label: "Capture", onClick: () => {} })
+    invoke.mockClear()
+    invoke.mockImplementationOnce(() => Promise.reject(new Error("nope")))
+    dispose()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(recordSilentFailure).toHaveBeenCalledWith(
+      "shot",
+      expect.objectContaining({ site: "tray.unregister", expected: false }),
+      expect.any(Error)
+    )
   })
 })

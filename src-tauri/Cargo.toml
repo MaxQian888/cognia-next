@@ -28,6 +28,24 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "cognia-server"
 path = "src/bin/cognia-server.rs"
 
+# ADR-0028 Phase 4.2 / Phase 13 — Windows sandbox setup binary.
+# UAC-elevated. Creates the two synthetic users and installs per-SID
+# Firewall rules. `--uninstall` cleans up; called by the WiX/NSIS
+# uninstall hook.
+[[bin]]
+name = "cognia-sandbox-setup"
+path = "src/bin/cognia-sandbox-setup.rs"
+required-features = []
+
+# ADR-0028 Phase 4.2 / Phase 13 — Windows sandbox runner binary.
+# Non-elevated. Re-launches the requested argv under the synthetic
+# user via `runas /trustlevel:0x20000`. The sandbox backend's
+# `run()` shells into this binary.
+[[bin]]
+name = "cognia-sandbox-runner"
+path = "src/bin/cognia-sandbox-runner.rs"
+required-features = []
+
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 

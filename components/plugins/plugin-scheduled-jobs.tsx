@@ -86,15 +86,26 @@ function SortableHeader({
 interface PluginScheduledJobsProps {
   /** Override the live data — used by tests to avoid wiring Dexie. */
   jobsOverride?: PluginScheduledJobRow[]
+  /**
+   * When set, only jobs belonging to this plugin are rendered. Used by the
+   * per-plugin detail pane (`PluginDetailData`) to filter the shared Dexie
+   * live-query to one plugin without forking the component.
+   */
+  pluginId?: string
 }
 
-export function PluginScheduledJobs({ jobsOverride }: PluginScheduledJobsProps = {}) {
+export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJobsProps = {}) {
   const t = useTranslations("plugins.scheduledJobs")
   const live = useLiveQuery(
     () => (jobsOverride ? jobsOverride : listScheduledJobs()),
     [jobsOverride]
   )
-  const jobs = jobsOverride ?? live
+  const sourceJobs = jobsOverride ?? live
+  const jobs = useMemo(() => {
+    if (!sourceJobs) return sourceJobs
+    if (!pluginId) return sourceJobs
+    return sourceJobs.filter((job) => job.pluginId === pluginId)
+  }, [sourceJobs, pluginId])
 
   const [sortKey, setSortKey] = useState<SortKey>("nextRunAt")
   const [sortDir, setSortDir] = useState<SortDir>("asc")

@@ -24,8 +24,13 @@
  * verbatim — no silent fallback to unsandboxed execution.
  */
 
-import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginTool, PluginToolContext } from "@/types/plugin"
 import { transport } from "@/lib/tauri"
+import {
+  getActiveSandboxTier,
+  getMicrovmExec,
+  type MicrovmExecPayload,
+} from "@/lib/sandbox/microvm-bridge"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
 
@@ -140,33 +145,68 @@ interface SandboxResultShape {
   timed_out: boolean
 }
 
-async function execBash(args: BashCallInputs): Promise<SandboxResultShape> {
+/**
+ * Dispatch a `sandbox_exec` payload either through the OS sandbox
+ * (`sandbox_exec` Tauri command) or through the e2b microVM bridge,
+ * based on the active tier for this session.
+ *
+ * Strict mode: when the active tier is `"microvm"` but no microvm
+ * exec is registered (the e2b plugin is disabled or
+ * `@e2b/sdk` isn't installed), throw — no silent fallback to the OS
+ * tier, in line with ADR-0028 §Strict mode.
+ */
+async function dispatchSandbox(
+  payload: MicrovmExecPayload,
+  ctx: PluginToolContext
+): Promise<SandboxResultShape> {
+  const tier = getActiveSandboxTier(ctx.sessionId)
+  if (tier === "microvm") {
+    const impl = getMicrovmExec()
+    if (!impl) {
+      throw new Error(
+        "sandbox tier resolved to 'microvm' but no microVM exec is registered. " +
+          "Enable the cognia-e2b-sandbox plugin or set the character / app tier to 'os'."
+      )
+    }
+    return impl(payload)
+  }
+  return transport.call<SandboxResultShape>(
+    "sandbox_exec",
+    payload as unknown as Record<string, unknown>
+  )
+}
+
+async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
   const cwd = args.cwd
   const writable = args.writable && args.writable.length > 0 ? args.writable : [cwd]
-  return transport.call<SandboxResultShape>("sandbox_exec", {
-    tool: TOOL_SANDBOX_BASH,
-    command: {
-      argv: ["bash", "-c", args.command],
-      cwd,
-      env: args.env ?? {},
-      stdin: null,
-      timeout: args.timeoutSeconds ?? 300,
+  return dispatchSandbox(
+    {
+      tool: TOOL_SANDBOX_BASH,
+      command: {
+        argv: ["bash", "-c", args.command],
+        cwd,
+        env: args.env ?? {},
+        stdin: null,
+        timeout: args.timeoutSeconds ?? 300,
+      },
+      request: {
+        writable,
+        readable: args.readable ?? [],
+        targetFiles: [],
+        maxCpuSeconds: args.maxCpuSeconds ?? 0,
+        maxMemoryMb: args.maxMemoryMb ?? 0,
+        network: args.network ?? "off",
+        networkHosts: args.networkHosts ?? [],
+      },
     },
-    request: {
-      writable,
-      readable: args.readable ?? [],
-      targetFiles: [],
-      maxCpuSeconds: args.maxCpuSeconds ?? 0,
-      maxMemoryMb: args.maxMemoryMb ?? 0,
-      network: args.network ?? "off",
-      networkHosts: args.networkHosts ?? [],
-    },
-  })
+    ctx
+  )
 }
 
 async function execFileTool(
   tool: typeof TOOL_SANDBOX_EDIT | typeof TOOL_SANDBOX_WRITE | typeof TOOL_SANDBOX_TEXT_EDITOR,
-  args: FileToolInputs
+  args: FileToolInputs,
+  ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
   // Edit / Write / text_editor are renderer-side operations that the
   // Rust sandbox supervises by exec'ing a small helper inside the
@@ -174,25 +214,28 @@ async function execFileTool(
   // renderer-side caller is responsible for emitting the actual edit
   // through the tool (V1 just verifies the policy gate before letting
   // the renderer execute its own apply-edit logic).
-  return transport.call<SandboxResultShape>("sandbox_exec", {
-    tool,
-    command: {
-      argv: ["true"],
-      cwd: args.cwd ?? (args.targetFiles[0] ? parentDir(args.targetFiles[0]) : "/"),
-      env: args.env ?? {},
-      stdin: null,
-      timeout: args.timeoutSeconds ?? 60,
+  return dispatchSandbox(
+    {
+      tool,
+      command: {
+        argv: ["true"],
+        cwd: args.cwd ?? (args.targetFiles[0] ? parentDir(args.targetFiles[0]) : "/"),
+        env: args.env ?? {},
+        stdin: null,
+        timeout: args.timeoutSeconds ?? 60,
+      },
+      request: {
+        writable: [],
+        readable: args.readable ?? [],
+        targetFiles: args.targetFiles,
+        maxCpuSeconds: 0,
+        maxMemoryMb: 0,
+        network: "off",
+        networkHosts: [],
+      },
     },
-    request: {
-      writable: [],
-      readable: args.readable ?? [],
-      targetFiles: args.targetFiles,
-      maxCpuSeconds: 0,
-      maxMemoryMb: 0,
-      network: "off",
-      networkHosts: [],
-    },
-  })
+    ctx
+  )
 }
 
 function parentDir(p: string): string {
@@ -213,7 +256,7 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_BASH_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => execBash(args as unknown as BashCallInputs),
+      execute: async (args, ctx) => execBash(args as unknown as BashCallInputs, ctx),
     },
     {
       name: TOOL_SANDBOX_EDIT,
@@ -225,7 +268,8 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_EDIT_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => execFileTool(TOOL_SANDBOX_EDIT, args as unknown as FileToolInputs),
+      execute: async (args, ctx) =>
+        execFileTool(TOOL_SANDBOX_EDIT, args as unknown as FileToolInputs, ctx),
     },
     {
       name: TOOL_SANDBOX_WRITE,
@@ -237,7 +281,8 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_WRITE_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => execFileTool(TOOL_SANDBOX_WRITE, args as unknown as FileToolInputs),
+      execute: async (args, ctx) =>
+        execFileTool(TOOL_SANDBOX_WRITE, args as unknown as FileToolInputs, ctx),
     },
     {
       name: TOOL_SANDBOX_TEXT_EDITOR,
@@ -249,8 +294,8 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_TEXT_EDITOR_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) =>
-        execFileTool(TOOL_SANDBOX_TEXT_EDITOR, args as unknown as FileToolInputs),
+      execute: async (args, ctx) =>
+        execFileTool(TOOL_SANDBOX_TEXT_EDITOR, args as unknown as FileToolInputs, ctx),
     },
   ]
 }

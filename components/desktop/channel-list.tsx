@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { useIsNarrow } from "@/hooks/ui"
+import { useIsNarrow, useRangeSelection } from "@/hooks/ui"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
@@ -15,8 +15,17 @@ import { useUIStore } from "@/stores/ui"
 import type { Character, ChatSession, Team } from "@/lib/claude/types"
 import { MailIcon, MenuIcon, PlusIcon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react"
 import { AvatarBadge } from "./avatar-badge"
+import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 import { SessionRow } from "./session-row"
 
 const log = loggers.ui
@@ -29,6 +38,9 @@ interface Props {
   onNewTeamConversation: (teamId: string) => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
+  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
+  onBulkDelete?: (ids: string[]) => void | Promise<void>
+  onBulkSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
 }
 
 /**
@@ -85,6 +97,17 @@ export function ChannelList(props: Props) {
   )
 }
 
+function sortByPinThenRecent(list: ChatSession[]): ChatSession[] {
+  // Stable: Array.prototype.sort is stable since ES2019. Pinned bubbles up,
+  // ties broken by `updatedAt` newest-first (matching the Dexie ordering).
+  return [...list].sort((a, b) => {
+    const pa = a.pinned ? 1 : 0
+    const pb = b.pinned ? 1 : 0
+    if (pa !== pb) return pb - pa
+    return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+  })
+}
+
 function ChannelListBody({
   sessions,
   activeSessionId,
@@ -93,6 +116,9 @@ function ChannelListBody({
   onNewTeamConversation,
   onDelete,
   onRename,
+  onTogglePinned,
+  onBulkDelete,
+  onBulkSetPinned,
 }: Props) {
   const t = useTranslations("desktop.channelList")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
@@ -139,6 +165,8 @@ function ChannelListBody({
   }, [sessions, chatGuild])
 
   // For DMs, group by character; legacy sessions land under "Other".
+  // Apply pinned-on-top sort inside each character group so the pinned
+  // marker is observable to the user immediately after a bulk action.
   const dmGroups = useMemo(() => {
     if (chatGuild.kind !== "dm") return null
     const groups = new Map<string | null, ChatSession[]>()
@@ -148,8 +176,46 @@ function ChannelListBody({
       arr.push(s)
       groups.set(key, arr)
     }
+    for (const [k, list] of groups) groups.set(k, sortByPinThenRecent(list))
     return groups
   }, [filtered, chatGuild])
+
+  // Team branch lays sessions out in pin-then-recent order too.
+  const sortedTeamSessions = useMemo(
+    () => (chatGuild.kind === "team" ? sortByPinThenRecent(filtered) : []),
+    [filtered, chatGuild]
+  )
+
+  // Ordered list of visible ids — required for Shift-range to walk the
+  // same order as the rendered rows. DM groups are concatenated in the
+  // same order `DmGroupedList` iterates (character name asc, then "Other").
+  const orderedIds = useMemo<string[]>(() => {
+    if (chatGuild.kind === "team") return sortedTeamSessions.map((s) => s.id)
+    if (!dmGroups) return []
+    const entries = [...dmGroups.entries()].sort((a, b) => {
+      if (a[0] === null) return 1
+      if (b[0] === null) return -1
+      const ca = characterById.get(a[0])?.name ?? ""
+      const cb = characterById.get(b[0])?.name ?? ""
+      return ca.localeCompare(cb)
+    })
+    const ids: string[] = []
+    for (const [, list] of entries) for (const s of list) ids.push(s.id)
+    return ids
+  }, [chatGuild, dmGroups, characterById, sortedTeamSessions])
+
+  const selection = useRangeSelection(orderedIds)
+  const { selected, handleClick, selectAll, clear, isSelected, lastInteractionWasModified } =
+    selection
+
+  // Clear the multi-selection whenever the user pivots to a different
+  // guild — the visual context changes and stale "selected" rows would
+  // confuse the bulk-toolbar count. `clear` is a stable callback (it's
+  // `useCallback(..., [])` inside the hook) so its identity never trips
+  // this effect.
+  useEffect(() => {
+    clear()
+  }, [chatGuild, clear])
 
   const handleNewDirect = () => {
     log.info("channel-list new-direct")
@@ -160,19 +226,89 @@ function ChannelListBody({
     onNewTeamConversation(teamId)
   }
 
+  const handleSessionSelect = useCallback(
+    (id: string, e: ReactMouseEvent) => {
+      const modified = e.ctrlKey || e.metaKey || e.shiftKey
+      handleClick(id, e)
+      // Plain click activates the session in the chat panel; modifier-bearing
+      // clicks only mutate the selection. This mirrors Explorer / Finder.
+      if (!modified) {
+        onSelect(id)
+      }
+    },
+    [handleClick, onSelect]
+  )
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const handleContainerKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Escape") {
+        if (selected.size > 0) {
+          e.preventDefault()
+          clear()
+        }
+        return
+      }
+      const isCtrlA = (e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")
+      if (isCtrlA && orderedIds.length > 0) {
+        e.preventDefault()
+        selectAll()
+      }
+    },
+    [clear, orderedIds.length, selectAll, selected.size]
+  )
+
+  // Toolbar visibility: show when ≥2 are selected OR when a single row was
+  // selected via a modifier (so the user can still pin/unpin/delete just
+  // that one row without round-tripping through the per-row menu). Plain
+  // single click — the normal "open this conversation" gesture — never
+  // pops the toolbar so it stays out of the way.
+  const toolbarVisible = selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
+
+  const handleBulkDeleteClick = useCallback(async () => {
+    if (!onBulkDelete || selected.size === 0) return
+    const ids = [...selected]
+    await onBulkDelete(ids)
+    clear()
+  }, [onBulkDelete, selected, clear])
+
+  const handleBulkSetPinnedClick = useCallback(
+    async (pinned: boolean) => {
+      if (!onBulkSetPinned || selected.size === 0) return
+      const ids = [...selected]
+      await onBulkSetPinned(ids, pinned)
+      clear()
+    },
+    [onBulkSetPinned, selected, clear]
+  )
+
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
   if (selectedGuild.kind === "canvas") {
     return null
   }
   return (
-    <div className="flex h-full flex-col">
+    <div
+      ref={containerRef}
+      className="flex h-full flex-col outline-none"
+      tabIndex={0}
+      onKeyDown={handleContainerKeyDown}
+    >
       <Header
         selectedGuild={chatGuild}
         team={team ?? null}
         onNewDirect={handleNewDirect}
         onNewTeamConversation={handleNewTeamConversation}
       />
+      {toolbarVisible ? (
+        <ChannelListBulkToolbar
+          count={selected.size}
+          onDelete={handleBulkDeleteClick}
+          onPin={() => handleBulkSetPinnedClick(true)}
+          onUnpin={() => handleBulkSetPinnedClick(false)}
+          onClear={clear}
+        />
+      ) : null}
       <Separator />
       <ScrollArea className="flex-1">
         {filtered.length === 0 ? (
@@ -181,16 +317,18 @@ function ChannelListBody({
           </p>
         ) : chatGuild.kind === "team" ? (
           <ul className="flex flex-col gap-0.5 p-2">
-            {filtered.map((s) => (
+            {sortedTeamSessions.map((s) => (
               <SessionRow
                 key={s.id}
                 session={s}
                 active={s.id === activeSessionId}
+                selected={isSelected(s.id)}
                 accentColor={team ? avatarColor(team) : undefined}
                 unread={unreadById.get(s.id)}
-                onSelect={onSelect}
+                onSelect={handleSessionSelect}
                 onDelete={onDelete}
                 onRename={onRename}
+                onTogglePinned={onTogglePinned}
               />
             ))}
           </ul>
@@ -200,9 +338,11 @@ function ChannelListBody({
             characterById={characterById}
             activeSessionId={activeSessionId}
             unreadById={unreadById}
-            onSelect={onSelect}
+            isSelected={isSelected}
+            onSelect={handleSessionSelect}
             onDelete={onDelete}
             onRename={onRename}
+            onTogglePinned={onTogglePinned}
           />
         )}
       </ScrollArea>
@@ -266,17 +406,21 @@ function DmGroupedList({
   characterById,
   activeSessionId,
   unreadById,
+  isSelected,
   onSelect,
   onDelete,
   onRename,
+  onTogglePinned,
 }: {
   groups: Map<string | null, ChatSession[]>
   characterById: Map<string, Character>
   activeSessionId: string | null
   unreadById: Map<string, number>
-  onSelect: (id: string) => void
+  isSelected: (id: string) => boolean
+  onSelect: (id: string, e: ReactMouseEvent) => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
+  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
 }) {
   const t = useTranslations("desktop.channelList")
   // Sort: characters with sessions first (alphabetical by name), then "Other".
@@ -311,11 +455,13 @@ function DmGroupedList({
                   key={s.id}
                   session={s}
                   active={s.id === activeSessionId}
+                  selected={isSelected(s.id)}
                   accentColor={character ? avatarColor(character) : undefined}
                   unread={unreadById.get(s.id)}
                   onSelect={onSelect}
                   onDelete={onDelete}
                   onRename={onRename}
+                  onTogglePinned={onTogglePinned}
                 />
               ))}
             </ul>

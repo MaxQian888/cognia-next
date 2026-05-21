@@ -29,6 +29,7 @@ import {
 import { UnifiedTaskDetailView } from "@/components/scheduler/unified-task-detail-view"
 import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
 import { SchedulerBulkToolbar } from "@/components/scheduler/scheduler-bulk-toolbar"
+import { SchedulerUpcomingRail } from "@/components/scheduler/scheduler-upcoming-rail"
 import { QuickWorkflowTriggerDialog } from "@/components/scheduler/dialogs/quick-workflow-trigger-dialog"
 import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
 import { toUnifiedFromTaskExecution } from "@/hooks/scheduler/use-unified-recent-runs"
@@ -593,6 +594,15 @@ export default function SchedulerPage() {
             )}
           </div>
         </SidebarInset>
+
+        {/* xl: right-side quick-look rail — visible only at ≥1280px (hidden at
+            lg and below to preserve the existing two-pane layout). */}
+        <SchedulerUpcomingRail
+          upcomingTasks={upcomingTasks}
+          recentExecutions={recentExecutions}
+          onSelectTask={handleSelectTask}
+          onSelectRun={setSelectedRun}
+        />
       </div>
 
       <SystemTaskInspectSheet

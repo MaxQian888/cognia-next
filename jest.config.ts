@@ -47,6 +47,7 @@ const config: Config = {
     "!lib/data-hooks/types.ts",
     "!lib/db/a2ui-types.ts",
     "!lib/db/plugin-types.ts",
+    "!lib/db/connector-types.ts",
     "!lib/claude/subagent-importers/types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC
     // of stdio + JSON-RPC + Tauri-IPC plumbing that only runs against a real

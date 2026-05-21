@@ -17,7 +17,7 @@
  * the OS keyring.
  */
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
@@ -41,6 +42,8 @@ import { refreshSelfBotOpenId } from "@/lib/connectors/adapter-registry"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import { LarkAtStrategy } from "./lark/lark-at-strategy"
+import { LarkWhitelistEditor } from "./lark/lark-whitelist-editor"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -273,6 +276,14 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
         await connectorsKeyringSet(adapterId, "verificationToken", verificationToken.trim())
       }
 
+      // Hot-reload: tell the lifecycle layer the credentials rotated so
+      // the running adapter is requeued without an app restart. Only
+      // emit on updates — new rows are picked up by the bus provider on
+      // its next mount cycle through `listEnabledAdapterInstances`.
+      if (!isNew) {
+        emitCredentialsRotated(adapterId)
+      }
+
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
@@ -348,31 +359,46 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     label: t("sectionAdvanced"),
     description: t("sectionAdvancedDesc"),
     children: (
-      <QuietHoursAndMute
-        muted={muted}
-        onMutedChange={setMuted}
-        quietHours={quietHours}
-        onQuietHoursChange={setQuietHours}
-        disabled={saving}
-      />
+      <div className="space-y-4">
+        <QuietHoursAndMute
+          muted={muted}
+          onMutedChange={setMuted}
+          quietHours={quietHours}
+          onQuietHoursChange={setQuietHours}
+          disabled={saving}
+        />
+        {/* v45 — adapter-level at-response strategy + chat allow/blocklist.
+         * Both components self-manage their state via useLiveQuery so they
+         * only render once the row has an id (i.e. after Save on first
+         * creation). Hidden for unsaved rows; the operator must finish
+         * the initial Save → reopen to surface them. */}
+        {row && (
+          <>
+            <LarkAtStrategy adapterId={row.id} />
+            <LarkWhitelistEditor adapterId={row.id} />
+          </>
+        )}
+      </div>
     ),
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
-        <AdapterFormSections
-          sections={[identitySection, deliverySection, advancedSection]}
-          onSubmit={handleSave}
-          onCancel={() => onOpenChange(false)}
-          submitting={saving}
-          dirty={dirty}
-          submitLabel={isNew ? t("create") : t("save")}
-        />
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <AdapterFormSections
+            sections={[identitySection, deliverySection, advancedSection]}
+            onSubmit={handleSave}
+            onCancel={() => onOpenChange(false)}
+            submitting={saving}
+            dirty={dirty}
+            submitLabel={isNew ? t("create") : t("save")}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   )
@@ -409,9 +435,8 @@ function IdentityFields(p: IdentityFieldsProps) {
 
   return (
     <div className="space-y-4">
-      {/* Display name */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-display-name">{t("displayNameLabel")}</Label>
+      {/* Display name — full width */}
+      <FieldRow id="lk-display-name" label={t("displayNameLabel")}>
         <Input
           id="lk-display-name"
           value={p.displayName}
@@ -419,118 +444,118 @@ function IdentityFields(p: IdentityFieldsProps) {
           placeholder={t("displayNamePlaceholder")}
           disabled={p.saving}
         />
+      </FieldRow>
+
+      {/* Credentials grid — 1 col on narrow, 2 cols ≥ sm.
+          Help text sits BELOW the input so inputs across columns align even
+          when the help copy varies in length. `items-start` keeps each cell
+          independent. */}
+      <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 sm:items-start">
+        {/* App ID + Test connection */}
+        <FieldRow id="lk-app-id" label={t("appIdLabel")} required help={t("appIdHelp")}>
+          <div className="flex gap-2">
+            <Input
+              id="lk-app-id"
+              value={p.appId}
+              onChange={(e) => p.setAppId(e.target.value)}
+              placeholder={t("appIdPlaceholder")}
+              disabled={p.saving}
+              className="min-w-0 flex-1"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={p.onTest}
+              disabled={p.testing || p.saving || !p.desktop}
+              aria-label={t("testConnectionAria")}
+              className="shrink-0"
+            >
+              {p.testing ? (
+                <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                t("testButtonLabel")
+              )}
+            </Button>
+          </div>
+        </FieldRow>
+
+        {/* App Secret */}
+        <FieldRow id="lk-app-secret" label={t("appSecretLabel")} required help={t("appSecretHelp")}>
+          <Input
+            id="lk-app-secret"
+            type="password"
+            autoComplete="new-password"
+            value={p.appSecret}
+            onChange={(e) => p.setAppSecret(e.target.value)}
+            placeholder={t("appSecretPlaceholder")}
+            disabled={p.saving}
+          />
+        </FieldRow>
+
+        {/* Verification Token */}
+        <FieldRow
+          id="lk-verification-token"
+          label={t("verificationTokenLabel")}
+          required
+          help={t("verificationTokenHelp")}
+        >
+          <Input
+            id="lk-verification-token"
+            type="password"
+            autoComplete="new-password"
+            value={p.verificationToken}
+            onChange={(e) => p.setVerificationToken(e.target.value)}
+            placeholder={t("verificationTokenPlaceholder")}
+            disabled={p.saving}
+          />
+        </FieldRow>
+
+        {/* Encrypt Key (optional) */}
+        <FieldRow id="lk-encrypt-key" label={t("encryptKeyLabel")} help={t("encryptKeyHelp")}>
+          <Input
+            id="lk-encrypt-key"
+            type="password"
+            autoComplete="new-password"
+            value={p.encryptKey}
+            onChange={(e) => p.setEncryptKey(e.target.value)}
+            placeholder={t("encryptKeyPlaceholder")}
+            disabled={p.saving}
+          />
+        </FieldRow>
       </div>
 
-      {/* App ID + Test connection */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-app-id">
-          {t("appIdLabel")}
-          <span className="ml-1 text-destructive">*</span>
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("appIdHelp")}</p>
-        <div className="flex gap-2">
-          <Input
-            id="lk-app-id"
-            value={p.appId}
-            onChange={(e) => p.setAppId(e.target.value)}
-            placeholder={t("appIdPlaceholder")}
-            disabled={p.saving}
-            className="flex-1"
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={p.onTest}
-            disabled={p.testing || p.saving || !p.desktop}
-            aria-label={t("testConnectionAria")}
-          >
-            {p.testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : t("testButtonLabel")}
-          </Button>
-        </div>
-
-        {p.testResult !== null && (
-          <div
-            className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-              p.testResult.ok
-                ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                : "bg-destructive/10 text-destructive"
-            }`}
-            role="status"
-            aria-label={
-              p.testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
-            }
-          >
-            {p.testResult.ok ? (
-              <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
-            )}
+      {/* Test connection status block — full width below the grid so a long
+          error message can wrap without distorting the App ID column. */}
+      {p.testResult !== null && (
+        <div
+          className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${
+            p.testResult.ok
+              ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+              : "bg-destructive/10 text-destructive"
+          }`}
+          role="status"
+          aria-label={p.testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")}
+        >
+          {p.testResult.ok ? (
+            <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="min-w-0 break-words">
             {p.testResult.ok
               ? t("connectedAs", { appId: p.testResult.appId ?? t("unknownAppShort") })
               : p.testResult.error}
-          </div>
-        )}
+          </span>
+        </div>
+      )}
 
-        {!p.desktop && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-        )}
-      </div>
+      {!p.desktop && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+      )}
 
-      {/* App Secret */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-app-secret">
-          {t("appSecretLabel")}
-          <span className="ml-1 text-destructive">*</span>
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("appSecretHelp")}</p>
-        <Input
-          id="lk-app-secret"
-          type="password"
-          autoComplete="new-password"
-          value={p.appSecret}
-          onChange={(e) => p.setAppSecret(e.target.value)}
-          placeholder={t("appSecretPlaceholder")}
-          disabled={p.saving}
-        />
-      </div>
-
-      {/* Verification Token */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-verification-token">
-          {t("verificationTokenLabel")}
-          <span className="ml-1 text-destructive">*</span>
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("verificationTokenHelp")}</p>
-        <Input
-          id="lk-verification-token"
-          type="password"
-          autoComplete="new-password"
-          value={p.verificationToken}
-          onChange={(e) => p.setVerificationToken(e.target.value)}
-          placeholder={t("verificationTokenPlaceholder")}
-          disabled={p.saving}
-        />
-      </div>
-
-      {/* Encrypt Key (optional) — fill only when the Lark app has an Encrypt
-          Key configured. Help text below makes the conditional nature explicit. */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-encrypt-key">{t("encryptKeyLabel")}</Label>
-        <p className="text-xs text-muted-foreground">{t("encryptKeyHelp")}</p>
-        <Input
-          id="lk-encrypt-key"
-          type="password"
-          autoComplete="new-password"
-          value={p.encryptKey}
-          onChange={(e) => p.setEncryptKey(e.target.value)}
-          placeholder={t("encryptKeyPlaceholder")}
-          disabled={p.saving}
-        />
-      </div>
-
-      {/* selfBotOpenId — read-only display + Refresh */}
-      <div className="space-y-1.5 rounded border bg-muted/30 px-3 py-2">
+      {/* selfBotOpenId — read-only display + Refresh, spans full width */}
+      <div className="space-y-1.5 rounded-md border bg-muted/30 px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <Label className="text-xs font-medium">{t("selfBotOpenIdLabel")}</Label>
           <Button
@@ -556,6 +581,32 @@ function IdentityFields(p: IdentityFieldsProps) {
           {p.canRefreshOpenId ? t("selfBotOpenIdHelp") : t("selfBotOpenIdHelpAfterSave")}
         </p>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Field row — label on top, control in the middle, help text on the bottom.
+// Keeps inputs aligned across columns in the credentials grid.
+// ---------------------------------------------------------------------------
+
+interface FieldRowProps {
+  id: string
+  label: string
+  required?: boolean
+  help?: string
+  children: ReactNode
+}
+
+function FieldRow({ id, label, required, help, children }: FieldRowProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>
+        {label}
+        {required && <span className="ml-1 text-destructive">*</span>}
+      </Label>
+      {children}
+      {help && <p className="text-xs leading-relaxed text-muted-foreground">{help}</p>}
     </div>
   )
 }
@@ -590,23 +641,25 @@ function DeliveryFields(p: DeliveryFieldsProps) {
 
   return (
     <div className="space-y-4">
-      {/* Transport */}
-      <div className="space-y-1.5">
-        <Label htmlFor="lk-transport">{t("transportLabel")}</Label>
-        <Select
-          value={p.transport}
-          onValueChange={(v) => p.setTransport(v as TransportMode)}
-          disabled={p.saving}
-        >
-          <SelectTrigger id="lk-transport">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="long-connection">{t("transportLongConnection")}</SelectItem>
-            <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
+      {/* Transport — selector + inline description, side-by-side on ≥ sm */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,12rem)_1fr] sm:items-start sm:gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="lk-transport">{t("transportLabel")}</Label>
+          <Select
+            value={p.transport}
+            onValueChange={(v) => p.setTransport(v as TransportMode)}
+            disabled={p.saving}
+          >
+            <SelectTrigger id="lk-transport" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="long-connection">{t("transportLongConnection")}</SelectItem>
+              <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-muted-foreground sm:pt-7">
           {p.transport === "webhook" ? t("transportWebhookDesc") : t("transportLongConnectionDesc")}
         </p>
       </div>

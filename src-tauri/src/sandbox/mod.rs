@@ -74,23 +74,88 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
 ///
 /// Flow: derive a `SandboxPolicy` from `(tool, request)` via
 /// `policy::policy_for`, then dispatch to `current_backend().run(...)`.
+/// Each call is also recorded in the shared `AuditRing` with
+/// `Surface::Sandbox` (ADR-0028 Phase 14) so the Diagnostics tab can
+/// surface allow/deny/error counts alongside the desktop-automation
+/// surfaces.
+///
 /// Errors come back as `String` (Tauri can't serialize the rich
 /// `SandboxError` enum directly without a custom impl); the plugin uses
 /// `error.message` verbatim as the ToolResult error so the model sees the
 /// same stderr-style failure a native shell command would emit.
 #[tauri::command]
 pub async fn sandbox_exec(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::automation::commands::AutomationState>,
     tool: String,
     command: crate::sandbox::types::SandboxCommand,
     request: crate::sandbox::policy::PolicyRequest,
 ) -> Result<crate::sandbox::types::SandboxResult, String> {
+    use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
+    use crate::automation::permission::Surface;
+    use std::time::Instant;
+    use tauri::Emitter;
+
+    let started = Instant::now();
     let stripped = tool.strip_prefix("sandbox_").unwrap_or(&tool).to_string();
-    let policy = crate::sandbox::policy::policy_for(&stripped, request)
-        .map_err(|e| e.to_string())?;
-    current_backend()
-        .run(command, policy)
-        .await
-        .map_err(|e| e.to_string())
+    let cwd_label = command.cwd.to_string_lossy().into_owned();
+    let policy = match crate::sandbox::policy::policy_for(&stripped, request) {
+        Ok(p) => p,
+        Err(err) => {
+            let msg = err.to_string();
+            let entry = state.audit.record(AuditEntry {
+                id: String::new(),
+                ts: chrono::Utc::now().timestamp_millis(),
+                surface: Surface::Sandbox,
+                plugin_id: None,
+                command: tool.clone(),
+                process_name: None,
+                window_title: Some(cwd_label.clone()),
+                decision: AuditDecision::Deny,
+                reason: Some("invalid_policy".into()),
+                duration_ms: started.elapsed().as_millis() as u64,
+                error: Some(msg.clone()),
+            });
+            let _ = app.emit("automation:event", &entry);
+            return Err(msg);
+        }
+    };
+    let outcome = current_backend().run(command, policy).await;
+    let entry = match &outcome {
+        Ok(result) => AuditEntry {
+            id: String::new(),
+            ts: chrono::Utc::now().timestamp_millis(),
+            surface: Surface::Sandbox,
+            plugin_id: None,
+            command: tool.clone(),
+            process_name: None,
+            window_title: Some(cwd_label),
+            decision: AuditDecision::Allow,
+            reason: None,
+            duration_ms: result.duration.as_millis() as u64,
+            error: if result.exit_code == 0 {
+                None
+            } else {
+                Some(format!("exit_code={}", result.exit_code))
+            },
+        },
+        Err(err) => AuditEntry {
+            id: String::new(),
+            ts: chrono::Utc::now().timestamp_millis(),
+            surface: Surface::Sandbox,
+            plugin_id: None,
+            command: tool.clone(),
+            process_name: None,
+            window_title: Some(cwd_label),
+            decision: AuditDecision::Deny,
+            reason: Some("backend_error".into()),
+            duration_ms: started.elapsed().as_millis() as u64,
+            error: Some(err.to_string()),
+        },
+    };
+    let recorded = state.audit.record(entry);
+    let _ = app.emit("automation:event", &recorded);
+    outcome.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

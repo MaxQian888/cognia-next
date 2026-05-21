@@ -6,6 +6,28 @@
 import { PluginLoader } from "./loader"
 import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
 
+jest.mock("./wasm-loader", () => ({
+  __esModule: true,
+  loadWasmDefinition: jest.fn(),
+  unloadWasmPlugin: jest.fn().mockResolvedValue(undefined),
+}))
+jest.mock("./vscode-loader", () => ({
+  __esModule: true,
+  loadVscodeDefinition: jest.fn(),
+  unloadVscodeExtension: jest.fn().mockResolvedValue(undefined),
+}))
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const wasmLoader = require("./wasm-loader") as { unloadWasmPlugin: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const vscodeLoader = require("./vscode-loader") as { unloadVscodeExtension: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const diagModule = require("../contracts/diagnostics-store") as {
+  recordSilentFailure: jest.Mock
+}
+
 // Mock document for script loading tests
 const mockCreateElement = jest.fn()
 const mockAppendChild = jest.fn()
@@ -291,6 +313,59 @@ describe("PluginLoader", () => {
           loader as unknown as { loadingPromises: Map<string, Promise<unknown>> }
         ).loadingPromises.has(pluginId)
       ).toBe(false)
+    })
+
+    describe("with real timers for dynamic imports", () => {
+      beforeEach(() => {
+        jest.useRealTimers()
+        diagModule.recordSilentFailure.mockReset()
+        wasmLoader.unloadWasmPlugin.mockReset().mockResolvedValue(undefined)
+        vscodeLoader.unloadVscodeExtension.mockReset().mockResolvedValue(undefined)
+      })
+
+      it("routes wasm unload failure through recordSilentFailure", async () => {
+        wasmLoader.unloadWasmPlugin.mockImplementationOnce(() =>
+          Promise.reject(new Error("wasm boom"))
+        )
+        const pluginId = "wasm-broken"
+        ;(loader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
+          pluginId,
+          {
+            definition: { manifest: { type: "wasm" } },
+            exports: {},
+          }
+        )
+        loader.unload(pluginId)
+        await new Promise((r) => setTimeout(r, 100))
+        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
+        expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
+          pluginId,
+          expect.objectContaining({ site: "loader.unloadWasmPlugin", expected: false }),
+          expect.any(Error)
+        )
+      })
+
+      it("routes vscode unload failure through recordSilentFailure", async () => {
+        vscodeLoader.unloadVscodeExtension.mockImplementationOnce(() =>
+          Promise.reject(new Error("vscode boom"))
+        )
+        const pluginId = "vscode-broken"
+        ;(loader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
+          pluginId,
+          {
+            definition: { manifest: { type: "vscode-extension" } },
+            exports: {},
+          }
+        )
+        loader.unload(pluginId)
+        await new Promise((r) => setTimeout(r, 100))
+        expect(vscodeLoader.unloadVscodeExtension).toHaveBeenCalledWith(pluginId)
+        expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
+          pluginId,
+          expect.objectContaining({ site: "loader.unloadVscodeExtension", expected: false }),
+          expect.any(Error)
+        )
+      })
     })
   })
 

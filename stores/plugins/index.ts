@@ -1,6 +1,7 @@
 export {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
+  deriveSectionFromTab,
   type PluginPanelTab,
   type PluginSortMode,
   type PluginFilters,
@@ -10,4 +11,9 @@ export {
   type PluginPermissionFilter,
   type PluginSourceFilter,
   type PluginStatusFilter,
+  type PluginNavSection,
+  type PluginLibrarySubFilter,
+  type PluginGovernanceView,
+  type PluginDetailSubTab,
+  type PluginListViewMode,
 } from "./plugins-store"

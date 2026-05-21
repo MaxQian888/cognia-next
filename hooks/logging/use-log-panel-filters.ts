@@ -18,8 +18,11 @@ import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
 
 export type ViewMode = "list" | "dashboard" | "trace"
 export type PanelSource = "frontend" | "tauri" | "mcp" | "plugin" | "internal"
+export type Density = "compact" | "comfortable" | "spacious"
 
 const BOOKMARKS_STORAGE_KEY = "cognia-log-bookmarks"
+const DENSITY_STORAGE_KEY = "cognia-log-density"
+const VALID_DENSITIES: Density[] = ["compact", "comfortable", "spacious"]
 const EMPTY_PRESET_VALUE = "__none__"
 
 export interface LogPanelFilterState {
@@ -33,6 +36,7 @@ export interface LogPanelFilterState {
   useRegex: boolean
   highSeverityOnly: boolean
   timeRange: PresetTimeRange
+  customTimeRange: { start: Date; end: Date } | null
   traceFocusId: string | null
   autoScroll: boolean
   viewMode: ViewMode
@@ -43,6 +47,9 @@ export interface LogPanelFilterState {
   diagnosticTransportFilter: string | null
   expandedIds: Set<string>
   focusedIndex: number
+  currentPage: number
+  pageSize: number
+  density: Density
 
   // Presets
   presets: LogFilterPreset[]
@@ -73,6 +80,7 @@ export interface LogPanelFilterState {
   setUseRegex: (v: boolean) => void
   setHighSeverityOnly: (v: boolean | ((prev: boolean) => boolean)) => void
   setTimeRange: (v: PresetTimeRange) => void
+  setCustomTimeRange: (v: { start: Date; end: Date } | null) => void
   setTraceFocusId: (v: string | null) => void
   setAutoScroll: (v: boolean) => void
   setViewMode: (v: ViewMode | ((prev: ViewMode) => ViewMode)) => void
@@ -82,6 +90,9 @@ export interface LogPanelFilterState {
   setSelectedNativeLogging: (v: boolean) => void
   setDiagnosticTransportFilter: (v: string | null) => void
   setFocusedIndex: (v: number | ((prev: number) => number)) => void
+  setCurrentPage: (v: number | ((prev: number) => number)) => void
+  setPageSize: (v: number) => void
+  setDensity: (v: Density) => void
 
   // Expansion
   toggleExpanded: (id: string) => void
@@ -123,6 +134,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
   const [useRegex, setUseRegex] = useState(false)
   const [highSeverityOnly, setHighSeverityOnly] = useState(false)
   const [timeRange, setTimeRange] = useState<PresetTimeRange>("all")
+  const [customTimeRange, setCustomTimeRange] = useState<{ start: Date; end: Date } | null>(null)
   const [traceFocusId, setTraceFocusId] = useState<string | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>("list")
@@ -135,6 +147,27 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
   const [diagnosticTransportFilter, setDiagnosticTransportFilter] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [focusedIndex, setFocusedIndex] = useState(-1)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(50)
+  const [density, setDensityState] = useState<Density>(() => {
+    if (typeof window === "undefined") return "comfortable"
+    try {
+      const stored = window.localStorage.getItem(DENSITY_STORAGE_KEY)
+      return stored && (VALID_DENSITIES as string[]).includes(stored)
+        ? (stored as Density)
+        : "comfortable"
+    } catch {
+      return "comfortable"
+    }
+  })
+  const setDensity = useCallback((next: Density) => {
+    setDensityState(next)
+    try {
+      window.localStorage.setItem(DENSITY_STORAGE_KEY, next)
+    } catch {
+      // ignore storage quota / private-mode errors
+    }
+  }, [])
 
   const [bookmarkFilterActive, setBookmarkFilterActive] = useState(false)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
@@ -338,6 +371,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       useRegex,
       highSeverityOnly,
       timeRange,
+      customTimeRange,
       traceFocusId,
       autoScroll,
       viewMode,
@@ -348,6 +382,9 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       diagnosticTransportFilter,
       expandedIds,
       focusedIndex,
+      currentPage,
+      pageSize,
+      density,
       presets,
       activePresetId,
       bookmarkedIds,
@@ -365,6 +402,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       setUseRegex,
       setHighSeverityOnly,
       setTimeRange,
+      setCustomTimeRange,
       setTraceFocusId,
       setAutoScroll,
       setViewMode,
@@ -374,6 +412,9 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       setSelectedNativeLogging,
       setDiagnosticTransportFilter,
       setFocusedIndex,
+      setCurrentPage,
+      setPageSize,
+      setDensity,
       setBookmarkFilterActive,
       setShowAdvancedFilters,
       setShowShortcutsDialog,
@@ -403,6 +444,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       useRegex,
       highSeverityOnly,
       timeRange,
+      customTimeRange,
       traceFocusId,
       autoScroll,
       viewMode,
@@ -413,6 +455,10 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       diagnosticTransportFilter,
       expandedIds,
       focusedIndex,
+      currentPage,
+      pageSize,
+      density,
+      setDensity,
       presets,
       activePresetId,
       bookmarkedIds,

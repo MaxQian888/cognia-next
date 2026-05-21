@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +36,13 @@ interface Props {
   reorderable?: boolean
   /** Drag handle props from `useSortable`. Wired through when present. */
   dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>
+  /**
+   * Multi-select mode flags. When `onSelectToggle` is provided, the row
+   * renders a leading checkbox bound to `selected`. Mutually exclusive with
+   * `reorderable` — the parent enforces this by toggling modes on/off.
+   */
+  selected?: boolean
+  onSelectToggle?: () => void
   onEdit: () => void
   onDuplicate: () => void
   onDelete: () => void
@@ -57,12 +65,15 @@ export function PresetCard({
   preset,
   reorderable = false,
   dragHandleProps,
+  selected,
+  onSelectToggle,
   onEdit,
   onDuplicate,
   onDelete,
   onToggleDefault,
   onToggleFavorite,
 }: Props) {
+  const selectionMode = onSelectToggle !== undefined
   const t = useTranslations("presets")
   const tCard = useTranslations("presets.card")
   const tCategory = useTranslations("presets.category")
@@ -83,9 +94,18 @@ export function PresetCard({
   }
 
   return (
-    <Card className="p-3">
+    <Card
+      className={cn("p-3", selectionMode && selected === true && "border-primary bg-primary/5")}
+    >
       <div className="flex items-start gap-3">
-        {reorderable && (
+        {selectionMode ? (
+          <Checkbox
+            checked={selected === true}
+            onCheckedChange={() => onSelectToggle?.()}
+            aria-label={safeT("actions.toggleSelection", `Toggle selection for ${preset.name}`)}
+            className="mt-1"
+          />
+        ) : reorderable ? (
           <button
             type="button"
             className="touch-none cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
@@ -94,7 +114,7 @@ export function PresetCard({
           >
             <GripVerticalIcon className="size-4" />
           </button>
-        )}
+        ) : null}
         <span
           className="flex size-10 shrink-0 items-center justify-center rounded-full text-base"
           style={{ backgroundColor: presetColor(preset), color: "white" }}

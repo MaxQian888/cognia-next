@@ -16,6 +16,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
+import { AutomationPolicyCard } from "./automation-policy-card"
+import { SandboxTierCard } from "./sandbox-tier-card"
+
 export function SandboxSection() {
   const t = useTranslations("settings.sandbox")
   const { health, refresh, error } = useSandboxHealth()
@@ -80,6 +83,8 @@ export function SandboxSection() {
           </div>
         </CardContent>
       </Card>
+      <SandboxTierCard />
+      <AutomationPolicyCard />
     </div>
   )
 }

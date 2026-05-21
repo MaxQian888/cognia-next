@@ -139,4 +139,21 @@ describe("PluginScheduledJobs", () => {
     expect(handlerCell?.className).toContain("hidden")
     expect(handlerCell?.className).toContain("sm:table-cell")
   })
+
+  it("filters to a single plugin when pluginId is set", () => {
+    mockJobs = [
+      makeJob({ id: "1", pluginId: "alpha", cron: "0 * * * *" }),
+      makeJob({ id: "2", pluginId: "beta", cron: "*/5 * * * *" }),
+      makeJob({ id: "3", pluginId: "alpha", cron: "@daily" }),
+    ]
+    render(<PluginScheduledJobs pluginId="alpha" />)
+    expect(screen.getAllByText("alpha")).toHaveLength(2)
+    expect(screen.queryByText("beta")).not.toBeInTheDocument()
+  })
+
+  it("renders the empty state when pluginId has no jobs", () => {
+    mockJobs = [makeJob({ pluginId: "other", cron: "0 * * * *" })]
+    render(<PluginScheduledJobs pluginId="alpha" />)
+    expect(screen.getByText("empty")).toBeInTheDocument()
+  })
 })

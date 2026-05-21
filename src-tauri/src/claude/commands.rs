@@ -317,6 +317,16 @@ pub async fn claude_sidecar_status(
     })
 }
 
+/// ADR-0028 Phase 14 — sidecar restart counter for the Diagnostics
+/// → Sidecar card. Returns the number of times `spawn_sidecar` has
+/// completed since the app booted. Read-only, no side effects.
+#[tauri::command]
+pub async fn sidecar_restart_count(
+    state: State<'_, SidecarState>,
+) -> Result<u64, String> {
+    Ok(state.restart_count())
+}
+
 // =============================================================================
 // Tests
 // =============================================================================

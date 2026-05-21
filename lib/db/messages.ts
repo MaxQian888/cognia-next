@@ -17,9 +17,12 @@ export async function listMessages(sessionId: string): Promise<UIMessage[]> {
       // Hoist top-level senderId/senderKind into metadata so the UI layer can
       // read them off the in-memory UIMessage. (The store itself uses
       // ai.UIMessage which has no senderId field.)
+      // We also surface `sessionId` so per-message components like the
+      // trigger badge can read it without threading new props.
       const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
       if (r.senderId !== undefined) metadata.senderId = r.senderId
       if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
+      metadata.sessionId = r.sessionId
       return {
         id: r.id,
         role: r.role,
@@ -149,9 +152,10 @@ async function dispatchChatMessageTriggers(
   // from db-only callers. Eager static imports here pull the orchestrator,
   // hooks system and trigger registries into every test that touches the
   // Dexie schema and previously caused 1+ GB worker memory spikes.
-  const [{ dispatchTrigger }, { findMatchingWorkflows }] = await Promise.all([
+  const [{ dispatchTrigger }, { findMatchingWorkflows }, audit] = await Promise.all([
     import("@/lib/workflow/runtime/trigger-bridge"),
     import("@/lib/workflow/runtime/trigger-subscriptions"),
+    import("@/lib/chat/trigger-audit-ring"),
   ])
 
   const session = await getDb().sessions.get(sessionId)
@@ -172,10 +176,32 @@ async function dispatchChatMessageTriggers(
           payload: { messageId, sessionId, characterId },
           originAt,
           binding: { sessionId, characterId },
-        }).catch(() => {
-          // Per-match failures are isolated so one bad workflow can't
-          // block other subscribers from running.
         })
+          .then(() => {
+            audit.recordTriggerAuditEntry({
+              sessionId,
+              messageId,
+              kind: "trigger.chat.message",
+              pluginId: null,
+              workflowId: match.workflowId,
+              status: "dispatched",
+              timestamp: originAt,
+            })
+          })
+          .catch((error: unknown) => {
+            // Per-match failures are isolated so one bad workflow can't
+            // block other subscribers from running.
+            audit.recordTriggerAuditEntry({
+              sessionId,
+              messageId,
+              kind: "trigger.chat.message",
+              pluginId: null,
+              workflowId: match.workflowId,
+              status: "error",
+              timestamp: Date.now(),
+              errorMessage: error instanceof Error ? error.message : String(error),
+            })
+          })
       )
     )
   )

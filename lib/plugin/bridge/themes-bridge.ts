@@ -27,6 +27,7 @@ import {
   unregisterThemesByPlugin,
   type PluginTheme,
 } from "@/lib/theme/theme-registry"
+import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
 import { readTextFile } from "@/lib/file/file-operations"
 import {
   stripJsonComments,
@@ -278,6 +279,50 @@ export class PluginThemesBridge {
    */
   unregisterPluginThemes(pluginId: string): number {
     return unregisterThemesByPlugin(pluginId)
+  }
+
+  /**
+   * Register every entry under `manifest.themePacks` with the theme-pack
+   * registry. Unlike `registerPluginThemes`, this is purely metadata — no
+   * file IO, no settings writes. The bridge does not validate inter-pack
+   * references (theme/font/wallpaper ids); that is the theme-pack-applier's
+   * job at apply time, where it can surface a useful UI error.
+   *
+   * v47 (ADR-0029).
+   */
+  registerPluginThemePacks(
+    pluginId: string,
+    pluginName: string,
+    manifest: PluginManifest
+  ): { registered: number } {
+    const packs = manifest.themePacks ?? []
+    let registered = 0
+    for (const pack of packs) {
+      if (!pack || typeof pack !== "object" || typeof pack.id !== "string") {
+        loggers.manager.warn(
+          `[themes-bridge] plugin ${pluginId}: skipping theme pack without a string id`
+        )
+        continue
+      }
+      try {
+        registerThemePack({ pluginId, pluginName, pack })
+        registered += 1
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        loggers.manager.warn(
+          `[themes-bridge] plugin ${pluginId}: theme pack "${pack.id}" failed — ${message}`
+        )
+      }
+    }
+    return { registered }
+  }
+
+  /**
+   * Remove every theme pack registered for `pluginId`. Idempotent.
+   * v47 (ADR-0029).
+   */
+  unregisterPluginThemePacks(pluginId: string): number {
+    return unregisterThemePacksByPlugin(pluginId)
   }
 }
 

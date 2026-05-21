@@ -59,6 +59,17 @@ export interface MarketplaceClient {
     manifest: import("@/types/plugin").PluginManifest
     name?: string
   } | null>
+  /**
+   * Lists every available version for `pluginId` from the marketplace
+   * registry. Used by the detail sheet to render a version dropdown so
+   * the user can downgrade / pin to a specific release rather than
+   * always taking `latest`. Returns `[]` if the call is unsupported.
+   *
+   * The full marketplace client returns `PluginVersionInfo[]` with
+   * extra fields (changelog, publishedAt, downloadUrl, checksum) — we
+   * only need `version` here, so the looser shape is intentional.
+   */
+  getVersions?: (pluginId: string) => Promise<Array<{ version: string } & Record<string, unknown>>>
   installPlugin: (id: string, version?: string) => Promise<unknown>
   uninstallPlugin: (id: string) => Promise<unknown>
 }

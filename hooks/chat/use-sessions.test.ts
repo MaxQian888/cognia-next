@@ -15,11 +15,13 @@ jest.mock("@/lib/db/messages", () => ({
 
 const createSessionMock = jest.fn()
 const deleteSessionMock = jest.fn()
+const bulkDeleteSessionsMock = jest.fn()
 const listSessionsMock = jest.fn()
 const updateSessionMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
+  bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
   listSessions: () => listSessionsMock(),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
 }))
@@ -60,6 +62,7 @@ beforeEach(() => {
   listMessagesMock.mockReset().mockResolvedValue([])
   createSessionMock.mockReset()
   deleteSessionMock.mockReset().mockResolvedValue(undefined)
+  bulkDeleteSessionsMock.mockReset().mockResolvedValue(undefined)
   listSessionsMock.mockReset().mockResolvedValue([])
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
@@ -141,5 +144,61 @@ describe("useSessions", () => {
       await result.current.rename("s1", "Hi")
     })
     expect(updateSessionMock).toHaveBeenCalledWith("s1", { title: "Hi" })
+  })
+
+  it("bulkRemove tears down every session via IPC then deletes them in one Dexie tx", async () => {
+    chatStoreState.activeSessionId = "s2"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove(["s1", "s2", "s3"])
+    })
+    expect(closeSessionIpcMock).toHaveBeenCalledTimes(3)
+    expect(bulkDeleteSessionsMock).toHaveBeenCalledWith(["s1", "s2", "s3"])
+    expect(chatStoreState.setActiveSession).toHaveBeenCalledWith(null)
+  })
+
+  it("bulkRemove leaves the active session pointer alone when it is not in the ids list", async () => {
+    chatStoreState.activeSessionId = "untouched"
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove(["s1", "s2"])
+    })
+    expect(chatStoreState.setActiveSession).not.toHaveBeenCalledWith(null)
+  })
+
+  it("bulkRemove skips closeSession outside Tauri", async () => {
+    isTauriMock.mockReturnValue(false)
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove(["s1"])
+    })
+    expect(closeSessionIpcMock).not.toHaveBeenCalled()
+    expect(bulkDeleteSessionsMock).toHaveBeenCalledWith(["s1"])
+  })
+
+  it("bulkRemove on an empty array is a no-op (no Dexie call, no IPC call)", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkRemove([])
+    })
+    expect(bulkDeleteSessionsMock).not.toHaveBeenCalled()
+    expect(closeSessionIpcMock).not.toHaveBeenCalled()
+  })
+
+  it("bulkSetPinned fans out updateSession({pinned}) across every id", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkSetPinned(["s1", "s2"], true)
+    })
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", { pinned: true })
+    expect(updateSessionMock).toHaveBeenCalledWith("s2", { pinned: true })
+  })
+
+  it("bulkSetPinned on an empty array does not touch Dexie", async () => {
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkSetPinned([], false)
+    })
+    expect(updateSessionMock).not.toHaveBeenCalled()
   })
 })

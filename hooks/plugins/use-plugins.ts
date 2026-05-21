@@ -107,6 +107,10 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       const hasUpdate = !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
       if (!hasUpdate) return false
     }
+    if (filters.configurable) {
+      const hasSchema = !!(row.manifest as { configSchema?: unknown })?.configSchema
+      if (!hasSchema) return false
+    }
     if (q) {
       const description = (
         (row.manifest as { description?: string })?.description ?? ""

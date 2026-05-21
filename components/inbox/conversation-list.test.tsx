@@ -223,4 +223,67 @@ describe("ConversationList", () => {
     expect(row).toHaveClass("min-h-11")
     expect(row).toHaveClass("md:min-h-9")
   })
+
+  it("filters rows by title via the search input", () => {
+    const alpha = makeSession("sA", "ck-alpha", 1000)
+    alpha.title = "Alpha conversation"
+    const bravo = makeSession("sB", "ck-bravo", 2000)
+    bravo.title = "Bravo conversation"
+    mockEnriched = [
+      { session: alpha, override: undefined, unreadCount: 0 },
+      { session: bravo, override: undefined, unreadCount: 0 },
+    ]
+    render(<ConversationList />)
+    const input = screen.getByTestId<HTMLInputElement>("conversation-search-input")
+    fireEvent.change(input, { target: { value: "alpha" } })
+    // Bypass the 200 ms debounce by waiting for the commit; React Testing
+    // Library's fireEvent + microtask flush will let the controlled value
+    // propagate once the timer fires. Use a microtask boundary.
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        expect(screen.queryByTestId("conversation-row-ck-alpha")).toBeInTheDocument()
+        expect(screen.queryByTestId("conversation-row-ck-bravo")).not.toBeInTheDocument()
+        resolve()
+      }, 250)
+    })
+  })
+
+  it("unread filter chip hides read conversations", () => {
+    mockEnriched = [
+      { session: makeSession("s1", "ck-read", 1000), override: undefined, unreadCount: 0 },
+      { session: makeSession("s2", "ck-unread", 2000), override: undefined, unreadCount: 1 },
+    ]
+    render(<ConversationList />)
+    const chip = screen.getByTestId("conversation-filter-unread")
+    fireEvent.click(chip)
+    expect(screen.queryByTestId("conversation-row-ck-read")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-row-ck-unread")).toBeInTheDocument()
+  })
+
+  it("pinned filter chip hides unpinned conversations", () => {
+    mockEnriched = [
+      { session: makeSession("s1", "ck-plain", 1000), override: undefined, unreadCount: 0 },
+      {
+        session: makeSession("s2", "ck-pin", 2000),
+        override: makeOverride("ck-pin", { pinned: true }),
+        unreadCount: 0,
+      },
+    ]
+    render(<ConversationList />)
+    fireEvent.click(screen.getByTestId("conversation-filter-pinned"))
+    expect(screen.queryByTestId("conversation-row-ck-plain")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-row-ck-pin")).toBeInTheDocument()
+  })
+
+  it("emptyFiltered state offers a reset action", () => {
+    mockEnriched = [
+      { session: makeSession("s1", "ck-x", 1000), override: undefined, unreadCount: 0 },
+    ]
+    render(<ConversationList />)
+    fireEvent.click(screen.getByTestId("conversation-filter-unread"))
+    expect(screen.getByTestId("conversation-list-empty")).toBeInTheDocument()
+    const resetBtn = screen.getByTestId("conversation-filter-reset")
+    fireEvent.click(resetBtn)
+    expect(screen.getByTestId("conversation-row-ck-x")).toBeInTheDocument()
+  })
 })

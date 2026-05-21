@@ -14,6 +14,8 @@
 
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { HeartbeatHandle } from "@/lib/connectors/health/heartbeat"
+import { onCredentialsRotated } from "@/lib/connectors/credentials-events"
+import { appendAudit } from "@/lib/connectors/audit"
 
 export interface AdapterRuntimeEntry {
   adapter: PlatformAdapter
@@ -70,6 +72,43 @@ export async function requeueAdapter(adapterId: string): Promise<boolean> {
   unregisterRunningAdapter(adapterId)
   await restart()
   return true
+}
+
+/**
+ * Subscribe lifecycle to `credentials:rotated` so a Settings save
+ * automatically re-queues the affected adapter against the new keyring
+ * material. The handler is idempotent: if the adapter is not currently
+ * registered (disabled / not yet started), the event is a no-op.
+ *
+ * The audit row distinguishes credential-driven requeues from manual
+ * "Reconnect now" clicks so operators in the Audit tab can tell the
+ * source apart.
+ *
+ * Call once from the bus runtime bootstrap (`initConnectorBusRuntime`).
+ * Returns an unsubscribe handle for tests.
+ */
+export function subscribeCredentialsRotatedToLifecycle(): () => void {
+  return onCredentialsRotated(({ adapterId, rotatedAt }) => {
+    void (async () => {
+      const present = entries.has(adapterId)
+      if (!present) return
+      try {
+        await requeueAdapter(adapterId)
+        await appendAudit({
+          id: crypto.randomUUID(),
+          adapterId,
+          kind: "adapter.credentials_rotated",
+          at: rotatedAt,
+          fields: { via: "settings_save" },
+        })
+      } catch (err) {
+        console.error(
+          `[lifecycle] credentials_rotated requeue failed for ${adapterId}:`,
+          err instanceof Error ? err.message : String(err)
+        )
+      }
+    })()
+  })
 }
 
 /** Test helper — clears all entries (production code must not call this). */

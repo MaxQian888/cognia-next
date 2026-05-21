@@ -26,6 +26,7 @@ import {
   CheckIcon,
   KeyRoundIcon,
   ScanTextIcon,
+  ShieldCheckIcon,
   TerminalIcon,
   CableIcon,
   SmartphoneIcon,
@@ -50,12 +51,15 @@ interface Props {
 }
 
 interface TourSlide {
-  id: "ocr" | "computerUse" | "connectors" | "mobile" | "twin"
+  id: "ocr" | "computerUse" | "sandbox" | "connectors" | "mobile" | "twin"
   icon: LucideIcon
   href: string
 }
 
 const TOUR_SLIDES: TourSlide[] = [
+  // ADR-0028 §UI surfaces — sandbox sits up-front so users see the strict-
+  // mode invariant before they touch shell tools.
+  { id: "sandbox", icon: ShieldCheckIcon, href: "/settings?section=sandbox" },
   { id: "ocr", icon: ScanTextIcon, href: "/settings?section=ocr" },
   { id: "computerUse", icon: TerminalIcon, href: "/settings?section=automation" },
   { id: "connectors", icon: CableIcon, href: "/settings?section=connections" },

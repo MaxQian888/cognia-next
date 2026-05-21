@@ -40,6 +40,8 @@ const select = jest.fn()
 const create = jest.fn()
 const remove = jest.fn()
 const rename = jest.fn()
+const bulkRemove = jest.fn().mockResolvedValue(undefined)
+const bulkSetPinned = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({
@@ -49,6 +51,8 @@ jest.mock("@/hooks/chat", () => ({
     create,
     remove,
     rename,
+    bulkRemove,
+    bulkSetPinned,
   }),
   useClaudeChat: () => ({
     send: jest.fn(),
@@ -158,6 +162,8 @@ beforeEach(() => {
   create.mockReset()
   remove.mockReset()
   rename.mockReset()
+  bulkRemove.mockReset().mockResolvedValue(undefined)
+  bulkSetPinned.mockReset().mockResolvedValue(undefined)
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
     selectedGuild = g
   })
@@ -247,4 +253,56 @@ test("ChannelList callback props stay referentially stable across re-renders", (
   expect(secondProps.onNewTeamConversation).toBe(firstProps.onNewTeamConversation)
   expect(secondProps.onDelete).toBe(firstProps.onDelete)
   expect(secondProps.onRename).toBe(firstProps.onRename)
+  expect(secondProps.onBulkDelete).toBe(firstProps.onBulkDelete)
+  expect(secondProps.onBulkSetPinned).toBe(firstProps.onBulkSetPinned)
+  expect(secondProps.onTogglePinned).toBe(firstProps.onTogglePinned)
+})
+
+test("onBulkDelete delegates to bulkRemove and surfaces the i18n'd success toast", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBulkDelete = props.onBulkDelete as (ids: string[]) => Promise<void>
+  await act(async () => {
+    await onBulkDelete(["s-1", "s-2"])
+  })
+  expect(bulkRemove).toHaveBeenCalledWith(["s-1", "s-2"])
+  const { toast } = await import("sonner")
+  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("deleteSuccess")
+})
+
+test("onBulkSetPinned(true) delegates to bulkSetPinned and toasts pinSuccess", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBulkSetPinned = props.onBulkSetPinned as (ids: string[], pinned: boolean) => Promise<void>
+  await act(async () => {
+    await onBulkSetPinned(["s-1"], true)
+  })
+  expect(bulkSetPinned).toHaveBeenCalledWith(["s-1"], true)
+  const { toast } = await import("sonner")
+  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("pinSuccess")
+})
+
+test("onBulkSetPinned(false) routes to unpinSuccess toast", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onBulkSetPinned = props.onBulkSetPinned as (ids: string[], pinned: boolean) => Promise<void>
+  await act(async () => {
+    await onBulkSetPinned(["s-1", "s-2", "s-3"], false)
+  })
+  expect(bulkSetPinned).toHaveBeenCalledWith(["s-1", "s-2", "s-3"], false)
+  const { toast } = await import("sonner")
+  expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("unpinSuccess")
+})
+
+test("per-row onTogglePinned routes through bulkSetPinned with a single-id list", async () => {
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  const onTogglePinned = props.onTogglePinned as (id: string, pinned: boolean) => void
+  await act(async () => {
+    onTogglePinned("s-1", true)
+    // Let the promise chain finish for the toast assertion below.
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  expect(bulkSetPinned).toHaveBeenCalledWith(["s-1"], true)
 })

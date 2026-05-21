@@ -16,7 +16,7 @@
  * not through this UI) still surfaces to the user.
  */
 
-import { useEffect, useRef } from "react"
+import { startTransition, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { CheckIcon, XIcon, ZapIcon } from "lucide-react"
@@ -125,7 +125,7 @@ export function StickyProposalBanner({
         type="button"
         size="sm"
         className="h-6 gap-1 px-2 text-[11px]"
-        onClick={() => void applyOpen(workflowId, open)}
+        onClick={() => applyOpen(workflowId, open)}
         data-testid="workflow-proposal-banner-apply"
       >
         <CheckIcon className="size-3" aria-hidden="true" />
@@ -136,19 +136,35 @@ export function StickyProposalBanner({
 }
 
 function discardOpen(workflowId: string): void {
-  useProposalStore.getState().discardProposal(workflowId)
+  startTransition(() => {
+    useProposalStore.getState().discardProposal(workflowId)
+  })
 }
 
-async function applyOpen(workflowId: string, open: ProposalPayload): Promise<void> {
+function applyOpen(workflowId: string, open: ProposalPayload): void {
+  // Capture the editor-store handle OUTSIDE the transition so a mid-
+  // transition editor unmount can't leave a stale reference inside the
+  // deferred work.
   const store = getEditorStore(workflowId)
   if (!store) {
     toast.error("Editor is not open — cannot apply proposal.")
     return
   }
-  const result = store.getState().applyProposalOps(open.ops)
-  if (result.firstError) {
-    toast.error(result.firstError)
-    return
+  // Pre-flight: catch dangling-reference errors before scheduling the
+  // transition (so the user-facing toast fires immediately rather than
+  // landing at transition priority). The actual store mutation is still
+  // wrapped — applyProposalOps runs inside startTransition so the canvas
+  // re-render lands at transition priority and stays interruptible.
+  let firstError: string | undefined
+  startTransition(() => {
+    const result = store.getState().applyProposalOps(open.ops)
+    if (result.firstError) {
+      firstError = result.firstError
+      return
+    }
+    useProposalStore.getState().markApplied(workflowId)
+  })
+  if (firstError) {
+    toast.error(firstError)
   }
-  useProposalStore.getState().markApplied(workflowId)
 }

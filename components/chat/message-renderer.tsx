@@ -5,14 +5,15 @@ import {
   MessageAction,
   MessageActions,
   MessageContent,
-  MessageResponse,
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
 import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
+import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentPart } from "@/components/chat/message-parts/subagent-part"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
@@ -21,6 +22,7 @@ import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-
 import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
+import { TriggerBadge } from "@/components/chat/trigger-badge"
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
@@ -61,6 +63,7 @@ import {
   getMessagePartRenderersRevision,
 } from "@/lib/plugin/api/message-part-renderers"
 import { useSyncExternalStore } from "react"
+import { PerfBoundary } from "@/lib/perf"
 
 interface Props {
   message: UIMessage
@@ -221,156 +224,181 @@ function MessageRendererInner({
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
-    <Message from={message.role}>
-      {speaker &&
-        message.role === "assistant" &&
-        (() => {
-          const speakerColor = avatarColor(speaker)
-          return (
-            <div className="mb-1 flex items-center gap-2 self-start text-xs">
-              <Avatar className="size-5">
-                <AvatarFallback
-                  className="text-[10px] text-white"
-                  style={{ backgroundColor: speakerColor }}
-                  aria-hidden
-                >
-                  {avatarGlyph(speaker)}
-                </AvatarFallback>
-              </Avatar>
-              <span className="font-medium" style={{ color: speakerColor }}>
-                {speaker.name}
-              </span>
+    <PerfBoundary id="chat:message">
+      <Message from={message.role}>
+        {speaker &&
+          message.role === "assistant" &&
+          (() => {
+            const speakerColor = avatarColor(speaker)
+            return (
+              <div className="mb-1 flex items-center gap-2 self-start text-xs">
+                <Avatar className="size-5">
+                  <AvatarFallback
+                    className="text-[10px] text-white"
+                    style={{ backgroundColor: speakerColor }}
+                    aria-hidden
+                  >
+                    {avatarGlyph(speaker)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="font-medium" style={{ color: speakerColor }}>
+                  {speaker.name}
+                </span>
+              </div>
+            )
+          })()}
+
+        <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
+
+        {editing ? (
+          <div
+            className={cn(
+              "flex w-full max-w-full flex-col gap-2",
+              message.role === "user" && "items-end"
+            )}
+          >
+            <Textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKey}
+              autoFocus
+              rows={Math.min(10, draft.split("\n").length + 1)}
+              className="min-h-[60px] resize-none"
+            />
+            <div className="flex justify-end gap-2 text-xs">
+              <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                {t("editingCancel")}
+              </Button>
+              <Button size="sm" onClick={submitEdit}>
+                {t("editingSubmit")}
+              </Button>
             </div>
-          )
+          </div>
+        ) : (
+          <MessageContent>
+            {(() => {
+              const inboundA2UI = (
+                message as {
+                  metadata?: {
+                    inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+                  }
+                }
+              ).metadata?.inboundA2UI
+              if (!inboundA2UI) return null
+              return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
+            })()}
+            {message.parts.map((part, i) =>
+              renderPart(
+                part,
+                `${message.id}-${i}`,
+                isStreaming,
+                message.role === "user" ? mentionPattern : null,
+                characterById,
+                message.id,
+                t
+              )
+            )}
+          </MessageContent>
+        )}
+
+        <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
+
+        {/* Trigger audit badge — surfaces workflows fired by this message via */}
+        {/* `lib/chat/trigger-audit-ring`. Only renders when ≥1 trigger fired. */}
+        {(() => {
+          const sessionId =
+            typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
+            "string"
+              ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
+              : null
+          if (!sessionId) return null
+          return <TriggerBadge sessionId={sessionId} messageId={message.id} />
         })()}
 
-      <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
-
-      {editing ? (
-        <div
+        {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
+        {/* footer below: this slot is visible above the message body on hover, */}
+        {/* the footer holds host copy/regenerate controls. */}
+        <PluginExtensionSlot
+          point="chat.message.actions"
           className={cn(
-            "flex w-full max-w-full flex-col gap-2",
-            message.role === "user" && "items-end"
-          )}
-        >
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKey}
-            autoFocus
-            rows={Math.min(10, draft.split("\n").length + 1)}
-            className="min-h-[60px] resize-none"
-          />
-          <div className="flex justify-end gap-2 text-xs">
-            <Button variant="ghost" size="sm" onClick={cancelEdit}>
-              {t("editingCancel")}
-            </Button>
-            <Button size="sm" onClick={submitEdit}>
-              {t("editingSubmit")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <MessageContent>
-          {message.parts.map((part, i) =>
-            renderPart(
-              part,
-              `${message.id}-${i}`,
-              isStreaming,
-              message.role === "user" ? mentionPattern : null,
-              characterById,
-              message.id,
-              t
-            )
-          )}
-        </MessageContent>
-      )}
-
-      <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
-
-      {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
-      {/* footer below: this slot is visible above the message body on hover, */}
-      {/* the footer holds host copy/regenerate controls. */}
-      <PluginExtensionSlot
-        point="chat.message.actions"
-        className={cn(
-          "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
-          message.role === "user" ? "ml-auto" : ""
-        )}
-      />
-
-      {!editing && (
-        <MessageActions
-          className={cn(
-            "text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100",
+            "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
             message.role === "user" ? "ml-auto" : ""
           )}
-        >
-          {usage && message.role === "assistant" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="font-mono">
-                  ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
-                  {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <UsageBreakdown usage={usage} />
-              </TooltipContent>
-            </Tooltip>
-          )}
+        />
 
-          <MessageAction
-            tooltip={copied ? t("copyDone") : t("copyTooltip")}
-            label={t("copyLabel")}
-            onClick={handleCopy}
+        {!editing && (
+          <MessageActions
+            className={cn(
+              "text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100",
+              message.role === "user" ? "ml-auto" : ""
+            )}
           >
-            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-          </MessageAction>
+            {usage && message.role === "assistant" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-mono">
+                    ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
+                    {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <UsageBreakdown usage={usage} />
+                </TooltipContent>
+              </Tooltip>
+            )}
 
-          <MessageAction
-            tooltip={shared ? t("shareDone") : t("shareTooltip")}
-            label={t("shareLabel")}
-            onClick={handleShare}
-          >
-            <Share2Icon className="size-3.5" />
-          </MessageAction>
-
-          <MessageAction
-            tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
-            label={t("bookmarkLabel")}
-            onClick={() => toggleBookmark(message.id)}
-            className={cn(isBookmarked && "text-yellow-500")}
-          >
-            <BookmarkIcon className={cn("size-3.5", isBookmarked && "fill-current")} />
-          </MessageAction>
-
-          {message.role === "user" && onEditResend && (
-            <MessageAction tooltip={t("editTooltip")} label={t("editLabel")} onClick={startEdit}>
-              <PencilIcon className="size-3.5" />
-            </MessageAction>
-          )}
-
-          {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
-
-          {message.role === "assistant" && isLastAssistant && onRegenerate && (
             <MessageAction
-              tooltip={t("regenerateTooltip")}
-              label={t("regenerateLabel")}
-              onClick={() => void onRegenerate()}
-              disabled={isStreaming}
+              tooltip={copied ? t("copyDone") : t("copyTooltip")}
+              label={t("copyLabel")}
+              onClick={handleCopy}
             >
-              <RefreshCcwIcon className="size-3.5" />
+              {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
             </MessageAction>
-          )}
 
-          <PluginExtensionSlot
-            point="chat.message.footer"
-            className="flex items-center gap-1 empty:hidden"
-          />
-        </MessageActions>
-      )}
-    </Message>
+            <MessageAction
+              tooltip={shared ? t("shareDone") : t("shareTooltip")}
+              label={t("shareLabel")}
+              onClick={handleShare}
+            >
+              <Share2Icon className="size-3.5" />
+            </MessageAction>
+
+            <MessageAction
+              tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
+              label={t("bookmarkLabel")}
+              onClick={() => toggleBookmark(message.id)}
+              className={cn(isBookmarked && "text-yellow-500")}
+            >
+              <BookmarkIcon className={cn("size-3.5", isBookmarked && "fill-current")} />
+            </MessageAction>
+
+            {message.role === "user" && onEditResend && (
+              <MessageAction tooltip={t("editTooltip")} label={t("editLabel")} onClick={startEdit}>
+                <PencilIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
+            {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
+
+            {message.role === "assistant" && isLastAssistant && onRegenerate && (
+              <MessageAction
+                tooltip={t("regenerateTooltip")}
+                label={t("regenerateLabel")}
+                onClick={() => void onRegenerate()}
+                disabled={isStreaming}
+              >
+                <RefreshCcwIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
+            <PluginExtensionSlot
+              point="chat.message.footer"
+              className="flex items-center gap-1 empty:hidden"
+            />
+          </MessageActions>
+        )}
+      </Message>
+    </PerfBoundary>
   )
 }
 
@@ -535,7 +563,7 @@ function renderPart(
     }
 
     if (isStreaming) {
-      return <MessageResponse key={key}>{text}</MessageResponse>
+      return <StreamingTextPart key={key} text={text} isStreaming={isStreaming} />
     }
 
     return (
@@ -543,6 +571,7 @@ function renderPart(
         key={key}
         content={text}
         messageId={messageId}
+        isStreaming={isStreaming}
         className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       />
     )

@@ -143,6 +143,99 @@ export function subscribePluginTriggerRegistry(fn: TriggerRegistryListener): () 
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-(pluginId, kind, workflowId) mute flag. Surfaced in the plugin
+// detail Triggers sub-tab; consulted by `dispatchPluginTrigger` before
+// fanning out. Persisted to localStorage on every mutation so the
+// preference survives reloads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MUTE_STORAGE_KEY = "cognia.plugin.trigger.mute"
+const muted = new Set<string>()
+const muteListeners = new Set<() => void>()
+let muteHydrated = false
+
+function muteKey(pluginId: string, kind: string, workflowId: string): string {
+  return `${pluginId}::${kind}::${workflowId}`
+}
+
+function hydrateMutesIfNeeded(): void {
+  if (muteHydrated) return
+  muteHydrated = true
+  if (typeof window === "undefined") return
+  try {
+    const raw = window.localStorage.getItem(MUTE_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      for (const key of parsed) if (typeof key === "string") muted.add(key)
+    }
+  } catch {
+    // corrupt storage — ignore
+  }
+}
+
+function persistMutes(): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(MUTE_STORAGE_KEY, JSON.stringify([...muted]))
+  } catch {
+    // quota / disabled — silently skip
+  }
+}
+
+function notifyMutes(): void {
+  for (const fn of muteListeners) {
+    try {
+      fn()
+    } catch {
+      // listener crashed — keep going
+    }
+  }
+}
+
+export function setTriggerMuted(
+  pluginId: string,
+  kind: string,
+  workflowId: string,
+  isMuted: boolean
+): void {
+  hydrateMutesIfNeeded()
+  const key = muteKey(pluginId, kind, workflowId)
+  const before = muted.has(key)
+  if (isMuted) muted.add(key)
+  else muted.delete(key)
+  if (muted.has(key) !== before) {
+    persistMutes()
+    notifyMutes()
+  }
+}
+
+export function isTriggerMuted(pluginId: string, kind: string, workflowId: string): boolean {
+  hydrateMutesIfNeeded()
+  return muted.has(muteKey(pluginId, kind, workflowId))
+}
+
+export function subscribeTriggerMuteChanges(fn: () => void): () => void {
+  muteListeners.add(fn)
+  return () => {
+    muteListeners.delete(fn)
+  }
+}
+
+/** Test-only — wipe the mute set + storage. */
+export function __resetTriggerMutesForTesting(): void {
+  muted.clear()
+  muteHydrated = true // skip hydration after reset
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(MUTE_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /** Test-only. Production code should never call this. */
 export function __resetTriggerRegistryForTesting(): void {
   registry.clear()

@@ -36,9 +36,12 @@ import {
 } from "@/lib/data-hooks/context"
 import {
   buildPresetApplicationPlan,
+  detectPresetConflicts,
   type ApplyPresetStrategy,
 } from "@/lib/presets/apply-to-session"
-import { PRESET_CATEGORIES } from "@/lib/presets/categories"
+import { groupPresets } from "@/lib/presets/group-presets"
+import { ChatHeaderPresetPill } from "@/components/chat/chat-header-preset-pill"
+import { usePlatform } from "@/hooks/use-platform"
 import type { AppSettings, ChatSession, SystemPromptPreset } from "@/lib/claude/types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { UIMessage } from "ai"
@@ -53,6 +56,7 @@ import {
 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { HeaderAccountSwitcher } from "./header-account-switcher"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -99,6 +103,13 @@ interface PendingPresetApply {
   preset: SystemPromptPreset
   /** Fields the preset would overwrite. Always non-empty when this is set. */
   conflicts: Array<keyof FormState>
+  /**
+   * Where the apply lands. `"form"` writes to the settings-popover form
+   * (user still has to hit Save). `"session"` skips the form and patches
+   * the ChatSession directly — used by the active-preset pill, which
+   * lives outside the settings popover.
+   */
+  mode: "form" | "session"
 }
 
 interface FormState {
@@ -161,8 +172,19 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
       debugMode: Boolean(session.debugMode),
       briefMode: Boolean(session.briefMode),
     })
-    const matched = presets.find((p) => p.content === session.systemPrompt)
-    setPresetId(matched?.id ?? "")
+    // Prefer `session.activePresetId` (the canonical pointer written by the
+    // pill / config Popover); fall back to a content-equality match so
+    // legacy sessions still surface the right active preset in the picker.
+    let resolvedId: string | null = null
+    if (session.activePresetId) {
+      const byId = presets.find((p) => p.id === session.activePresetId)
+      if (byId) resolvedId = byId.id
+    }
+    if (!resolvedId) {
+      const matched = presets.find((p) => p.content === session.systemPrompt)
+      resolvedId = matched?.id ?? null
+    }
+    setPresetId(resolvedId ?? "")
   }, [open, session, presets])
 
   // Periodically check API key status (useful for the badge).
@@ -225,6 +247,7 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
         bareMode: form.bareMode || undefined,
         debugMode: form.debugMode || undefined,
         briefMode: form.briefMode || undefined,
+        activePresetId: presetId || undefined,
       })
     } catch (err) {
       loggers.chat.error("session settings save failed", err, { sessionId: session.id })
@@ -277,17 +300,74 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
     }
     const preset = presets.find((p) => p.id === id)
     if (!preset) return
-    const conflicts: Array<keyof FormState> = []
-    if (form.systemPrompt.trim() && preset.content) conflicts.push("systemPrompt")
-    if (form.model.trim() && preset.model) conflicts.push("model")
-    if (form.permissionMode && preset.permissionMode) conflicts.push("permissionMode")
-    if (form.workingDir.trim() && preset.workingDir) conflicts.push("workingDir")
+    const conflicts = detectPresetConflicts(preset, {
+      systemPrompt: form.systemPrompt,
+      model: form.model,
+      permissionMode: form.permissionMode,
+      workingDir: form.workingDir,
+    })
     if (conflicts.length > 0) {
-      setPendingApply({ preset, conflicts })
+      setPendingApply({ preset, conflicts, mode: "form" })
       return
     }
     applyPresetWithStrategy(preset, "fill-empty")
   }
+
+  /**
+   * Apply a preset's payload directly to the ChatSession, bypassing the
+   * settings-popover form. Invoked by the active-preset pill — the pill
+   * lives outside the popover so there's no in-progress form to write to.
+   */
+  const applyPresetDirectlyToSession = async (
+    preset: SystemPromptPreset,
+    strategy: ApplyPresetStrategy
+  ) => {
+    const plan = buildPresetApplicationPlan(
+      preset,
+      {
+        systemPrompt: session.systemPrompt,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        workingDir: session.workingDir,
+      },
+      strategy
+    )
+    try {
+      await updateSession(session.id, {
+        ...plan.sessionPatch,
+        activePresetId: preset.id,
+      })
+      void recordPresetUsage(preset.id).catch((err) => {
+        loggers.chat.warn("recordPresetUsage failed", {
+          presetId: preset.id,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      })
+    } catch (err) {
+      loggers.chat.error("applyPresetDirectlyToSession failed", err, {
+        sessionId: session.id,
+        presetId: preset.id,
+      })
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handlePillPresetSelect = (preset: SystemPromptPreset) => {
+    const conflicts = detectPresetConflicts(preset, {
+      systemPrompt: session.systemPrompt,
+      model: session.model,
+      permissionMode: session.permissionMode,
+      workingDir: session.workingDir,
+    })
+    if (conflicts.length > 0) {
+      setPendingApply({ preset, conflicts, mode: "session" })
+      return
+    }
+    void applyPresetDirectlyToSession(preset, "fill-empty")
+  }
+
+  const platform = usePlatform()
+  const manageHref = platform === "mobile" ? "/me/presets" : "/settings?section=presets"
 
   // Group presets for the Select: favorites first, then by category.
   const presetGroups = useMemo(() => groupPresets(presets), [presets])
@@ -331,6 +411,19 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
             {session.model || character?.model}
           </Badge>
         )}
+        {presets.length > 0 && (
+          <ChatHeaderPresetPill
+            session={session}
+            presets={presets}
+            onSelectPreset={handlePillPresetSelect}
+            manageHref={manageHref}
+          />
+        )}
+        <HeaderAccountSwitcher
+          session={session}
+          characterProviderId={character?.providerId}
+          characterAccountIdOverride={character?.accountIdOverride}
+        />
         {character?.twinId && (
           <TwinHeaderBadge twinId={character.twinId} twinSettings={character.twinSettings} />
         )}
@@ -598,7 +691,11 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
           conflicts={pendingApply.conflicts}
           onCancel={() => setPendingApply(null)}
           onConfirm={(strategy) => {
-            applyPresetWithStrategy(pendingApply.preset, strategy)
+            if (pendingApply.mode === "session") {
+              void applyPresetDirectlyToSession(pendingApply.preset, strategy)
+            } else {
+              applyPresetWithStrategy(pendingApply.preset, strategy)
+            }
             setPendingApply(null)
           }}
         />
@@ -626,49 +723,6 @@ function SessionModeToggle({
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
     </div>
   )
-}
-
-interface PresetGroup {
-  /** Either a translation sub-key (when `translateLabel` is true) or a verbatim category id. */
-  label: string
-  /** When true, `label` is a key inside the `chat.header.groups.*` namespace. */
-  translateLabel?: boolean
-  presets: SystemPromptPreset[]
-}
-
-/**
- * Group presets for the chat-header dropdown: favorites first, then default
- * (if not already in favorites), then by category, then everything else.
- */
-function groupPresets(presets: SystemPromptPreset[]): PresetGroup[] {
-  const groups: PresetGroup[] = []
-  const seen = new Set<string>()
-
-  const favorites = presets.filter((p) => p.isFavorite && !seen.has(p.id))
-  if (favorites.length > 0) {
-    groups.push({ label: "favorites", translateLabel: true, presets: favorites })
-    favorites.forEach((p) => seen.add(p.id))
-  }
-
-  const defaults = presets.filter((p) => p.isDefault && !seen.has(p.id))
-  if (defaults.length > 0) {
-    groups.push({ label: "default", translateLabel: true, presets: defaults })
-    defaults.forEach((p) => seen.add(p.id))
-  }
-
-  for (const cat of PRESET_CATEGORIES) {
-    const inCat = presets.filter((p) => p.category === cat.id && !seen.has(p.id))
-    if (inCat.length > 0) {
-      groups.push({ label: cat.id, presets: inCat })
-      inCat.forEach((p) => seen.add(p.id))
-    }
-  }
-
-  const rest = presets.filter((p) => !seen.has(p.id))
-  if (rest.length > 0) {
-    groups.push({ label: "other", translateLabel: true, presets: rest })
-  }
-  return groups
 }
 
 interface ConflictDialogProps {

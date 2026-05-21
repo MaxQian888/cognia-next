@@ -101,12 +101,39 @@ export function InspectorTab() {
     }
   }, [resolveRoot, maxDepth])
 
-  // Pick affordance — uses a 3-second countdown so the user can move the
-  // cursor onto the target before capture. No transparent overlay window;
-  // the cursor stays free-roaming because the Cognia window does not
-  // capture mouse. Cancel via the same button.
+  // Pick affordance — ADR-0020 W1 rewrite.
+  //
+  // The old flow was a bare 3-second countdown: the user had to
+  // position the cursor on the target before T-0 expired, then
+  // `pick_at_point` resolved an `ElementInfo`. Two problems closed in
+  // W1:
+  //
+  //   1. The pick session itself wasn't audited — only the resulting
+  //      `pick_at_point` showed up, indistinguishable from a workflow
+  //      pick. `desktop.pickSessionStart` / `pickSessionCancel` now
+  //      record the lifecycle through `command_body!`.
+  //   2. The 3-second wait raced the user. We keep the countdown as a
+  //      fallback (helpful for "I need a second to drag a window into
+  //      place") but add an "Instant Capture" button that fires
+  //      immediately. Both paths share the same `pick_at_point` call.
+  //
+  // The full `WH_MOUSE_LL` overlay (click anywhere to pick without any
+  // countdown) is tracked separately — it requires a transparent
+  // webview with cross-process click handling that warrants its own
+  // architecture pass.
   const PICK_COUNTDOWN_SECONDS = 3
   const pickCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const performPick = useCallback(async () => {
+    try {
+      const point = await desktop.cursorPosition()
+      const info = await desktop.pickAtPoint(point)
+      setSelected(info)
+      toast.success(t("pickOk"))
+    } catch (err) {
+      toast.error(t("pickFailed", { error: String(err) }))
+    }
+  }, [t])
 
   const cancelPick = useCallback(() => {
     if (pickCountdownRef.current != null) {
@@ -114,6 +141,7 @@ export function InspectorTab() {
       pickCountdownRef.current = null
     }
     setPickCountdown(null)
+    void desktop.pickSessionCancel({ surface: "workflow" }).catch(() => {})
   }, [])
 
   const startPick = useCallback(() => {
@@ -121,6 +149,7 @@ export function InspectorTab() {
       cancelPick()
       return
     }
+    void desktop.pickSessionStart({ surface: "workflow" }).catch(() => {})
     setPickCountdown(PICK_COUNTDOWN_SECONDS)
     pickCountdownRef.current = setInterval(() => {
       setPickCountdown((prev) => {
@@ -132,12 +161,7 @@ export function InspectorTab() {
           }
           void (async () => {
             try {
-              const point = await desktop.cursorPosition()
-              const info = await desktop.pickAtPoint(point)
-              setSelected(info)
-              toast.success(t("pickOk"))
-            } catch (err) {
-              toast.error(t("pickFailed", { error: String(err) }))
+              await performPick()
             } finally {
               setPickCountdown(null)
             }
@@ -147,7 +171,20 @@ export function InspectorTab() {
         return prev - 1
       })
     }, 1000)
-  }, [pickCountdown, cancelPick, t])
+  }, [pickCountdown, cancelPick, performPick])
+
+  const captureNow = useCallback(() => {
+    // Cancel the running countdown (if any) so the audit log shows the
+    // session being explicitly resolved rather than auto-firing. The
+    // `pickSessionStart` row from `startPick` already opened the
+    // session — `performPick` closes it via the `pick_at_point` row.
+    if (pickCountdownRef.current != null) {
+      clearInterval(pickCountdownRef.current)
+      pickCountdownRef.current = null
+    }
+    setPickCountdown(null)
+    void performPick()
+  }, [performPick])
 
   useEffect(() => {
     return () => {
@@ -253,6 +290,17 @@ export function InspectorTab() {
                 ? t("pickCountdown", { seconds: pickCountdown })
                 : t("pickStart")}
             </Button>
+            {pickCountdown !== null && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={captureNow}
+                title={t("pickCaptureNowTooltip")}
+                aria-label={t("pickCaptureNowAria")}
+              >
+                {t("pickCaptureNow")}
+              </Button>
+            )}
           </div>
           {rootMode === "manual" && (
             <div className="space-y-1">

@@ -364,7 +364,7 @@ function TwinDraftInspector({ draft }: { draft: TwinDraft }) {
 
 function displayName(
   item: DiscoverItem,
-  t: (k: string, params?: Record<string, unknown>) => string,
+  t: (k: string, params?: Record<string, string | number | Date>) => string,
   locale: string
 ): string {
   switch (item.kind) {

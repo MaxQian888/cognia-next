@@ -19,7 +19,7 @@ export default function WorkflowsLibraryPage() {
     return <WorkflowList />
   }
   return (
-    <div className="h-full">
+    <div className="h-full w-full">
       <WorkflowLibrary />
     </div>
   )

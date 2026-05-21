@@ -1,0 +1,61 @@
+/**
+ * @jest-environment jsdom
+ */
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
+const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
+const settingsRef: { current: Record<string, unknown> | undefined } = {
+  current: { mobileComputerUseEnabled: false },
+}
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (
+    selector: (s: {
+      settings: Record<string, unknown> | undefined
+      save: (patch: Record<string, unknown>) => Promise<void>
+    }) => unknown
+  ) =>
+    selector({
+      settings: settingsRef.current,
+      save: async (patch: Record<string, unknown>) => {
+        if (settingsRef.current) {
+          settingsRef.current = { ...settingsRef.current, ...patch }
+        }
+        await saveMock(patch)
+      },
+    }),
+}))
+
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueue: (arg: unknown) => enqueueMock(arg),
+}))
+
+jest.mock("@/components/settings/automation/automation-section", () => ({
+  AutomationSection: () => <div data-testid="stub-automation-section" />,
+}))
+
+import Page from "./page"
+
+beforeEach(() => {
+  saveMock.mockReset()
+  enqueueMock.mockReset()
+  settingsRef.current = { mobileComputerUseEnabled: false }
+})
+
+describe("MobileComputerUsePage", () => {
+  it("renders the master toggle and the embedded automation section", () => {
+    render(<Page />)
+    expect(screen.getByTestId("mobile-computer-use-page")).toBeInTheDocument()
+    expect(screen.getByTestId("computer-use-master-switch")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-automation-section")).toBeInTheDocument()
+  })
+
+  it("flipping the master switch writes mobileComputerUseEnabled + enqueues an RPC", async () => {
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("computer-use-master-switch"))
+    await waitFor(() => expect(saveMock).toHaveBeenCalled())
+    expect(saveMock).toHaveBeenCalledWith({ mobileComputerUseEnabled: true })
+    expect(enqueueMock).toHaveBeenCalled()
+  })
+})

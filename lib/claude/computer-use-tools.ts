@@ -79,6 +79,14 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
     return { opts, attachedCount: 0 }
   }
 
+  // ADR-0020 W1 — pull the per-character consent knobs (laid down on
+  // SendOptions so Wave 3 dedup logic can read them after the registry
+  // walk). `requireConsent` forces every tool's `forceTier` to perCall
+  // so the Rust gate upgrades the next dispatch to RequireConsent.
+  const settings = character.computerUseSettings
+  const forceTier: "perCall" | undefined = settings?.requireConsent === true ? "perCall" : undefined
+  opts.computerUseConsentMode = settings?.chatConsentMode ?? "always-ask"
+
   // Map registry entries → wire shape. The renderer-only `executeIpc.invoke`
   // string travels with each tool so the sidecar can route `tool_use`
   // messages back without re-reading the registry.
@@ -94,6 +102,7 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
       enableZoom: def.enableZoom,
       executeIpc: def.executeIpc,
       permissionPolicy: def.permissionPolicy,
+      ...(forceTier ? { forceTier } : {}),
     }
   })
 

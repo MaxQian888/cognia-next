@@ -140,4 +140,181 @@ describe("PluginConfigForm", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
   })
+
+  it("renders nested object fields recursively", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            db: {
+              type: "object",
+              description: "Database settings",
+              properties: {
+                host: { type: "string", default: "localhost" },
+                port: { type: "number", default: 5432 },
+              },
+            },
+          },
+        },
+      },
+      config: { db: { host: "prod.db", port: 5433 } },
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getByText("host")).toBeInTheDocument()
+    expect(screen.getByText("port")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("prod.db")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("5433")).toBeInTheDocument()
+  })
+
+  it("renders an objectArray with Add/Remove controls", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            servers: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  url: { type: "string", default: "" },
+                  weight: { type: "number", default: 1 },
+                },
+              },
+              default: [{ url: "https://a", weight: 1 }],
+            },
+          },
+        },
+      },
+      config: {
+        servers: [
+          { url: "https://a", weight: 1 },
+          { url: "https://b", weight: 2 },
+        ],
+      },
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getAllByText("url")).toHaveLength(2)
+    expect(screen.getByDisplayValue("https://a")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("https://b")).toBeInTheDocument()
+    expect(screen.getAllByText("arrayRemove")).toHaveLength(2)
+    expect(screen.getByText("arrayAdd")).toBeInTheDocument()
+  })
+
+  it("disables Save while a validation error is present", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email", default: "" },
+          },
+        },
+      },
+      config: { email: "not-an-email" },
+    }
+    render(<PluginConfigForm />)
+    const save = screen.getByText("save").closest("button") as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+  })
+
+  it("min/max bounds on a number reject out-of-range values", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            port: { type: "number", min: 1, max: 65535, default: 8080 },
+          },
+        },
+      },
+      config: { port: 70000 },
+    }
+    render(<PluginConfigForm />)
+    const save = screen.getByText("save").closest("button") as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+  })
+
+  it("oneOf renders a variant selector + the chosen variant's fields", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            auth: {
+              description: "Authentication settings",
+              oneOf: [
+                {
+                  type: "object",
+                  title: "apiKey",
+                  properties: { key: { type: "string", default: "" } },
+                },
+                {
+                  type: "object",
+                  title: "oauth",
+                  properties: {
+                    clientId: { type: "string", default: "" },
+                    secret: { type: "string", default: "" },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+      config: { auth: { __variant: "oauth", clientId: "abc", secret: "xyz" } },
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getByText("oneOfVariant")).toBeInTheDocument()
+    expect(screen.getByText("clientId")).toBeInTheDocument()
+    expect(screen.getByText("secret")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("abc")).toBeInTheDocument()
+  })
+
+  it("save submits nested + array values to setPluginConfig", async () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            db: {
+              type: "object",
+              properties: { host: { type: "string", default: "localhost" } },
+            },
+            servers: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { url: { type: "string", default: "" } },
+              },
+            },
+          },
+        },
+      },
+      config: { db: { host: "x" }, servers: [{ url: "a" }] },
+    }
+    render(<PluginConfigForm />)
+    fireEvent.click(screen.getByText("save"))
+    await Promise.resolve()
+    expect(setPluginConfigMock).toHaveBeenCalledWith(
+      "p_conf",
+      expect.objectContaining({
+        db: expect.objectContaining({ host: "x" }),
+        servers: expect.arrayContaining([expect.objectContaining({ url: "a" })]),
+      })
+    )
+  })
 })

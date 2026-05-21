@@ -53,7 +53,7 @@ describe("flagsForTier", () => {
       liveQueryWhileDragging: true,
       inspectorLiveValidation: true,
       nodeCardTransitions: true,
-      cullingThreshold: 25,
+      cullingThreshold: 8,
     })
   })
 

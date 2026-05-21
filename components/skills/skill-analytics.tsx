@@ -68,7 +68,7 @@ export function SkillAnalytics() {
 
         <SkillUsageTrend />
 
-        <Card className="p-4">
+        <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
           <p className="mb-2 text-xs font-medium">{t("categoryUsageTitle")}</p>
           {categoryRows.length > 0 ? (
             <div className="h-56">
@@ -100,7 +100,7 @@ export function SkillAnalytics() {
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <Card className="p-4">
+          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
             <p className="mb-2 text-xs font-medium">{t("mostUsedTitle")}</p>
             {data.mostUsed.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("neverUsedEmpty")}</p>
@@ -133,7 +133,7 @@ export function SkillAnalytics() {
             )}
           </Card>
 
-          <Card className="p-4">
+          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
             <p className="mb-2 text-xs font-medium">{t("recentUsageTitle")}</p>
             {data.recentlyUsed.length === 0 ? (
               <p className="text-xs text-muted-foreground">—</p>
@@ -159,7 +159,7 @@ export function SkillAnalytics() {
         </div>
 
         {data.neverUsed.length > 0 && (
-          <Card className="p-4">
+          <Card className="border-border/50 bg-card/80 p-4 backdrop-blur">
             <p className="mb-2 text-xs font-medium">{t("neverUsedTitle")}</p>
             <ul className="grid gap-1 sm:grid-cols-2">
               {data.neverUsed.map((skill) => {
@@ -189,7 +189,7 @@ export function SkillAnalytics() {
 
 function SummaryCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <Card className="p-3">
+    <Card className="border-border/50 bg-card/80 p-3 backdrop-blur">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
     </Card>

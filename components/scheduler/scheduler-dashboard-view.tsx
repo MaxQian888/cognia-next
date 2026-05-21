@@ -25,6 +25,7 @@ import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { TaskExecutionChart } from "./task-execution-chart"
 import { UnifiedRecentRuns } from "./unified-recent-runs"
+import { StatCard } from "./stat-card"
 
 export interface SchedulerDashboardViewProps {
   statistics: TaskStatistics | null
@@ -44,58 +45,6 @@ export interface SchedulerDashboardViewProps {
    * page can open `RunDetailSheet`.
    */
   onSelectRun?: (run: UnifiedExecutionRun) => void
-}
-
-// ---------------------------------------------------------------------------
-// Stat card subcomponent
-// ---------------------------------------------------------------------------
-
-interface StatCardProps {
-  label: string
-  value: string | number
-  icon: React.ReactNode
-  valueClassName?: string
-  accentGradient: string
-  iconBgClassName: string
-}
-
-function StatCard({
-  label,
-  value,
-  icon,
-  valueClassName,
-  accentGradient,
-  iconBgClassName,
-}: StatCardProps) {
-  return (
-    <Card
-      className={cn(
-        "relative overflow-hidden border-border/50 bg-card/80",
-        "transition-all hover:-translate-y-0.5 hover:shadow-lg"
-      )}
-    >
-      <CardContent className="p-4 pb-5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-            <p className={cn("mt-1 text-2xl font-bold tabular-nums", valueClassName)}>{value}</p>
-          </div>
-          <div
-            className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-              iconBgClassName
-            )}
-          >
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-      {/* Colored bottom accent line */}
-      <div
-        className={cn("absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r", accentGradient)}
-      />
-    </Card>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +128,7 @@ function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStrip
   return (
     <div
       data-testid="kind-summary-strip"
-      className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+      className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6"
     >
       {KIND_ORDER.map((kind) => {
         const total = countsByKind[kind] ?? 0

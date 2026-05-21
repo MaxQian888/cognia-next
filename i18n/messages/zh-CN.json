@@ -496,6 +496,12 @@
       "untitledSession": "（未命名）",
       "noApiKey": "未配置 API Key",
       "ariaSettings": "会话设置",
+      "accountSwitcher": {
+        "aria": "切换本会话使用的账号",
+        "noOverride": "继承",
+        "active": "当前",
+        "toast": "下一条消息将使用账号 {label}"
+      },
       "title": "会话设置",
       "description": "为本会话覆盖默认值，留空则继承全局设置。",
       "modelLabel": "模型",
@@ -536,6 +542,15 @@
         "default": "默认",
         "other": "其他"
       },
+      "presetPill": {
+        "ariaLabel": "当前预设——点击切换",
+        "none": "未使用预设",
+        "searchPlaceholder": "搜索预设…",
+        "searchAriaLabel": "搜索预设",
+        "empty": "没有匹配的预设。",
+        "defaultBadge": "默认",
+        "manageAll": "管理所有预设…"
+      },
       "skills": {
         "aria": "本会话已激活的技能",
         "counter": "{active}/{total} 个技能",
@@ -561,6 +576,18 @@
       "placeholderDisabled": "请选择一个会话开始聊天…",
       "placeholder": "输入消息 — 试试 /、@、!、#",
       "ariaMessage": "消息",
+      "sandboxShield": {
+        "label": {
+          "os": "沙盒已开启 — OS 层",
+          "microvm": "沙盒已开启 — microVM 层",
+          "off": "沙盒未开启"
+        },
+        "tooltip": {
+          "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。",
+          "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
+          "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。"
+        }
+      },
       "ariaUploadImage": "上传图片",
       "ariaAttachImage": "添加图片",
       "attachImageTooltip": "添加图片",
@@ -1492,14 +1519,83 @@
       "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
       "retryButton": "运行健康探测",
       "strictModeNote": "严格模式: 沙盒不可用时,沙盒化工具调用一律被拒 —— 没有 bypass 选项。",
-      "backend": { "label": "后端" },
-      "version": { "label": "版本" },
-      "lastError": { "label": "最近错误" },
-      "ipcError": { "label": "IPC 错误" },
+      "backend": {
+        "label": "后端"
+      },
+      "version": {
+        "label": "版本"
+      },
+      "lastError": {
+        "label": "最近错误"
+      },
+      "ipcError": {
+        "label": "IPC 错误"
+      },
       "status": {
         "ok": "已激活",
         "setup": "需要配置",
         "down": "不可用"
+      },
+      "tier": {
+        "title": "默认沙盒层级",
+        "description": "当会话启用沙盒时，决定由哪一层执行 Bash / Edit / Write。角色可以覆盖。",
+        "os": {
+          "label": "OS 沙盒（默认）",
+          "description": "macOS 上是 sandbox-exec，Linux 上是 bwrap，Windows 上是 codex-windows-sandbox。延迟最低。"
+        },
+        "microvm": {
+          "label": "microVM（e2b Firecracker）",
+          "description": "通过 cognia-e2b-sandbox 插件，将调用路由到临时 Firecracker microVM。需要安装 @e2b/sdk 并配置 E2B_API_KEY。"
+        }
+      },
+      "automationPolicy": {
+        "title": "动作级策略",
+        "description": "Computer Use 在权限闸门 + 用户同意之后还会过这一层。空列表表示不附加约束；任一非空白名单都会硬性拒绝事实不匹配的动作。",
+        "emptyNote": "未配置任何约束 —— Computer Use 动作仅经过权限闸门和同意代理。",
+        "add": "添加一行",
+        "remove": "删除该行",
+        "rowAriaLabel": "{label} 第 {index} 项",
+        "regexInvalid": "正则无效",
+        "saveError": "无法保存策略：{error}",
+        "allowedProcessNames": {
+          "label": "允许的进程",
+          "description": "目标必须匹配的进程名（大小写不敏感）。",
+          "placeholder": "Chrome"
+        },
+        "allowedWindowTitlePatterns": {
+          "label": "允许的窗口标题",
+          "description": "对目标窗口标题做正则匹配。",
+          "placeholder": "^Visual Studio Code"
+        },
+        "allowedUrlPatterns": {
+          "label": "允许的 URL",
+          "description": "对目标浏览器标签页的 URL 做正则匹配。",
+          "placeholder": "^https://"
+        },
+        "forbiddenScreenRegions": {
+          "label": "禁止的屏幕区域",
+          "description": "落入这些像素矩形内的点击/拖拽会被拒绝（密码管理器弹窗、系统托盘机密等）。",
+          "x": "X",
+          "y": "Y",
+          "width": "宽",
+          "height": "高"
+        }
+      }
+    },
+    "diagnostics": {
+      "sandboxAudit": {
+        "title": "沙盒事件日志",
+        "description": "最近的 sandbox_exec 调用：allow / deny / error、命令、耗时。镜像自内存审计环。",
+        "refresh": "刷新",
+        "empty": "暂无沙盒事件。"
+      },
+      "sidecarRestart": {
+        "title": "Sidecar 重启",
+        "description": "应用启动以来 Node sidecar 已经 spawn 过的次数。数字持续增长通常意味着 SDK 在自动重启。",
+        "count": "次数",
+        "lastRestart": "最近一次重启",
+        "noRestart": "尚未发生",
+        "lastChecked": "最近探测"
       }
     },
     "title": "设置",
@@ -3073,6 +3169,26 @@
           "enableStyleFewShot": "风格少样本",
           "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
           "styleSamplesK": "每次发送的样本数"
+        },
+        "sandbox": {
+          "enable": {
+            "label": "沙盒化 Bash / Edit / Write",
+            "description": "为该角色用 sandbox_* 替换 SDK 内建工具。",
+            "aria": "启用沙盒"
+          },
+          "tier": {
+            "label": "沙盒层级",
+            "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
+            "inherit": "继承应用默认",
+            "os": "OS 沙盒",
+            "microvm": "microVM（e2b）"
+          }
+        },
+        "account": {
+          "label": "账号覆盖",
+          "description": "为该角色固定使用某个具体账号。选择继承时使用会话 / 设置中的默认账号。",
+          "inherit": "继承",
+          "optionLabel": "{provider}：{label}"
         }
       },
       "multiselect": {
@@ -4532,7 +4648,16 @@
       "doneReorder": "完成",
       "reset": "重置为内置预设",
       "export": "导出预设…",
-      "import": "导入预设…"
+      "import": "导入预设…",
+      "toggleSelection": "切换选择"
+    },
+    "toolbar": {
+      "searchPlaceholder": "搜索预设…",
+      "searchAriaLabel": "搜索预设",
+      "filterGroupAriaLabel": "筛选预设",
+      "bulkAriaLabel": "批量预设操作",
+      "selected": "已选 {count} 项",
+      "clearSelection": "清除选择"
     },
     "filter": {
       "all": "全部",
@@ -4594,7 +4719,35 @@
       "setDefaultHelp": "未指定角色的新会话将自动应用此预设。",
       "favorite": "收藏",
       "favoriteHelp": "置顶到预设库顶部。",
-      "saving": "保存中…"
+      "saving": "保存中…",
+      "sections": {
+        "identity": {
+          "title": "身份",
+          "description": "在选择器中展示的名称、分类与视觉样式。"
+        },
+        "capability": {
+          "title": "能力",
+          "description": "系统提示词，以及应用此预设的会话所采用的模型 / 权限 / 推理强度覆盖。"
+        },
+        "tools": {
+          "title": "工具",
+          "description": "工具白名单、有序的技能栈与 MCP 服务器子集。"
+        },
+        "advanced": {
+          "title": "高级",
+          "description": "工作目录、代理模式覆盖与预设库标记。"
+        }
+      }
+    },
+    "bulk": {
+      "selectMode": "选择",
+      "exitSelectMode": "完成",
+      "favoriteAll": "批量收藏",
+      "unfavoriteAll": "取消收藏",
+      "deleteAll": "批量删除",
+      "deleteConfirmTitle": "删除 {count} 条预设？",
+      "deleteConfirmDescription": "所选预设将从你的预设库中移除。选择项中的内置预设会被自动跳过。此操作不可撤销。",
+      "builtInsSkipped": "选择项中的内置预设将被跳过。"
     },
     "validation": {
       "nameRequired": "预设名称不能为空。",
@@ -4976,6 +5129,46 @@
       "analytics": "使用统计",
       "devtools": "开发工具"
     },
+    "sections": {
+      "library": "已安装",
+      "discover": "发现",
+      "governance": "治理",
+      "devtools": "开发工具",
+      "librarySub": {
+        "all": "全部",
+        "enabled": "已启用",
+        "updates": "可更新",
+        "configurable": "可配置",
+        "errored": "出错"
+      },
+      "governanceSub": {
+        "permissions": "权限",
+        "scheduled": "定时任务",
+        "analytics": "使用统计",
+        "audit": "审计日志"
+      }
+    },
+    "view": {
+      "list": "列表",
+      "card": "卡片",
+      "toggleAria": "切换列表/卡片视图"
+    },
+    "audit": {
+      "title": "审计日志",
+      "description": "近期所有插件的授权/拒绝/撤销决策。缓冲区只保留最近 200 条记录，更早的事件会被丢弃。",
+      "filterPluginAll": "全部插件",
+      "filterPermissionAll": "全部权限",
+      "filterPluginLabel": "插件",
+      "filterPermissionLabel": "权限",
+      "empty": "暂无审计记录。",
+      "exportCsv": "导出 CSV",
+      "exportFilename": "plugin-audit-log.csv",
+      "colTime": "时间",
+      "colPlugin": "插件",
+      "colAction": "动作",
+      "colPermission": "权限",
+      "colReason": "原因"
+    },
     "installed": {
       "loading": "正在加载已安装的插件…",
       "empty": "尚未安装任何插件。",
@@ -5089,6 +5282,7 @@
       "disable": "停用",
       "enable": "启用",
       "uninstall": "卸载",
+      "actionsMenuAria": "{name} 的操作菜单",
       "permissionCount": "{count, plural, =0 {无权限} other {# 项权限}}",
       "updateBadge": "有更新",
       "status": {
@@ -5121,6 +5315,34 @@
       "tabOperations": "运维",
       "tabAnalytics": "使用统计",
       "tabTriggers": "触发",
+      "subtab": {
+        "overview": "概览",
+        "capabilities": "能力",
+        "configure": "配置",
+        "permissions": "权限",
+        "data": "数据"
+      },
+      "subtabAria": "插件详情分节",
+      "rawManifest": "查看原始 manifest",
+      "rawManifestTitle": "原始 manifest",
+      "emptyTitle": "选择一个插件",
+      "emptyDescription": "从列表中选择插件即可查看、配置并治理它。",
+      "summaryTotal": "共 {count}",
+      "summaryEnabled": "{count} 已启用",
+      "summaryUpdates": "{count} 个更新",
+      "summaryErrored": "{count} 出错",
+      "noConfigSchema": "此插件没有可配置项。",
+      "noPermissions": "此插件未声明任何权限。",
+      "noCapabilities": "此插件未贡献任何能力。",
+      "capabilitiesTitle": "能力",
+      "runtimeContributions": "运行时贡献",
+      "workflowTriggers": "工作流触发",
+      "sectionTables": "插件数据表",
+      "sectionSchedules": "定时任务",
+      "sectionAnalytics": "使用统计",
+      "sectionBackup": "备份",
+      "sectionResources": "限流",
+      "sectionDependencies": "依赖图",
       "metaId": "ID",
       "metaVersion": "版本",
       "metaSource": "来源",
@@ -5759,7 +5981,9 @@
         "cancel": "取消",
         "confirm": "保存",
         "removeConfirm": "删除",
-        "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。"
+        "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。",
+        "inUseByCharacter": "角色：{name}",
+        "inUseBySession": "会话：{name}"
       },
       "preset": {
         "title": "第三方端点",
@@ -5780,7 +6004,9 @@
         "validationInvalidUrl": "Base URL 必须是合法的 URL。",
         "validationEmptyKey": "请求头 Key 不能为空。",
         "presetActive": "预设已生效",
-        "presetInactive": "使用默认端点"
+        "presetInactive": "使用默认端点",
+        "removeConfirmTitle": "删除该预设？",
+        "removeConfirmDescription": "“{label}”将被清除，服务商会回到内置端点。你可以随时重新添加。"
       },
       "importExport": {
         "title": "备份与还原",
@@ -5804,7 +6030,17 @@
         "importFailed": "导入失败：{error}",
         "passphraseWrong": "口令无法解密这份备份。",
         "confirmImport": "导入",
-        "cancel": "取消"
+        "cancel": "取消",
+        "preview": {
+          "title": "预览备份内容",
+          "description": "应用之前查看一下这份文件会写回哪些数据。已存在的同 id 账号会被更新；预设和激活账号指针都将从文件中恢复。",
+          "decrypting": "正在解密（PBKDF2 60 万次迭代）…",
+          "unlock": "解密并预览",
+          "apply": "应用导入",
+          "empty": "这份备份是空的——没有账号或预设可以导入。",
+          "hasPreset": "预设",
+          "noAccounts": "无账号（仅预设 / 指针）。"
+        }
       },
       "switchToast": {
         "switched": "已切换激活账号到 {label}。",
@@ -5886,6 +6122,8 @@
         "revokeOnSignOutHint": "同时告诉 auth.openai.com 让该 token 失效。默认关闭——仅本地登出可恢复。"
       },
       "settings": {
+        "cardTitle": "连接设置",
+        "cardDescription": "服务商相关的自动刷新与 codex-cli 复用偏好。",
         "preferDiscovered": {
           "title": "本地无激活账号时显示 codex-cli 凭证",
           "description": "我们不再在运行时自动复用——若需要使用 codex-cli 凭证，请在「账号」标签里手动复用一次。",
@@ -6373,7 +6611,10 @@
         "expandEntry": "展开条目",
         "openDetails": "打开详情",
         "closeOrClear": "关闭 / 清除",
-        "showShortcuts": "显示快捷键"
+        "showShortcuts": "显示快捷键",
+        "focusSearch": "聚焦搜索",
+        "bookmarkEntry": "收藏当前条目",
+        "openPresets": "打开预设"
       },
       "filterChip": {
         "sourceLabel": "来源：",
@@ -6388,7 +6629,33 @@
         "transportLabel": "传输：",
         "clearTransport": "清除传输筛选",
         "transportPrefix": "传输：{name}"
-      }
+      },
+      "customTimeRange": "自定义...",
+      "customTimeRangePickerLabel": "选择时间范围",
+      "customTimeRangeChipPrefix": "时间",
+      "customTimeRangeApply": "应用",
+      "customTimeRangeClear": "清除",
+      "newLogsToast": "{count, plural, =0 {} other {新增 # 条日志}}",
+      "jumpToLatest": "跳到最新",
+      "noTraceEventsHint": "不包含 traceId 的日志已过滤",
+      "traceTotal": "条事件",
+      "traceDurationLabel": "持续时间",
+      "traceOverflow": "+{count} 条更早的 trace 已隐藏",
+      "pageHeader": {
+        "breadcrumbHome": "主页",
+        "breadcrumbLogs": "日志",
+        "livePill": "{filtered} / {total}",
+        "help": "快捷键"
+      },
+      "densityMenuLabel": "行密度",
+      "density": {
+        "compact": "紧凑",
+        "comfortable": "舒适",
+        "spacious": "宽松"
+      },
+      "copyShareUrl": "复制分享链接",
+      "shareUrlCopied": "分享链接已复制",
+      "shareUrlFailed": "复制分享链接失败"
     },
     "dashboard": {
       "noData": "暂无可视化日志数据",
@@ -6427,7 +6694,8 @@
       "total": "总计",
       "errors": "错误",
       "warnings": "警告",
-      "clear": "清除"
+      "clear": "清除",
+      "empty": "暂无数据"
     },
     "detail": {
       "title": "日志详情",
@@ -8140,6 +8408,11 @@
         "done": "完成",
         "openSettings": "打开设置",
         "progress": "第 {current} / {total} 个",
+        "sandbox": {
+          "title": "Shell 工具在沙盒中运行",
+          "description": "Bash / Edit / Write 可以经由 OS 沙盒（sandbox-exec / bwrap / Windows 合成用户）或可选的 e2b microVM 执行。任何后端不健康时严格模式直接拒绝调用，没有 bypass。",
+          "cta": "打开沙盒设置"
+        },
         "ocr": {
           "title": "从图片和 PDF 中提取文字",
           "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
@@ -10678,6 +10951,8 @@
       "devicesRow": "已配对设备",
       "notificationsRow": "通知",
       "preferencesRow": "字号与默认模型",
+      "presetsRow": "系统提示词预设",
+      "presetsBackAria": "返回我的",
       "connectorsRow": "平台连接器",
       "ocrRow": "OCR 提供方",
       "computerUseRow": "Computer Use",
@@ -13617,6 +13892,29 @@
         "inputSimulation": "输入模拟",
         "screenshot": "截屏",
         "events": "事件"
+      },
+      "initFailure": {
+        "title": "后端初始化失败",
+        "body": "平台自动化后端（{platform}）启动失败：{error}。在底层问题修复前，Computer Use 调用都会返回 UnsupportedPlatform。请查阅你操作系统的故障排查文档，或在调整权限后重启应用。",
+        "dismiss": "知道了"
+      },
+      "metrics": {
+        "title": "最近 24 小时",
+        "description": "来自审计日志的活动计数。打开该标签页时刷新，并每 60 秒自动更新。",
+        "total": "总数",
+        "allow": "允许",
+        "deny": "拒绝",
+        "consent": "同意",
+        "topFailingTitle": "失败率最高的命令",
+        "topFailingDescription": "最近 24 小时拒绝 / 同意被否决最多的命令。若集中在某条命令，应当排查原因。",
+        "topFailingEmpty": "最近 24 小时无被拒绝的调用。",
+        "lastScreenshotTitle": "最近一次截屏",
+        "lastScreenshotDescription": "最近一次成功截屏的时间。",
+        "lastScreenshotNever": "最近 24 小时未截屏。",
+        "lastScreenshotRelative": "{seconds} 秒前",
+        "lastScreenshotMinutes": "{minutes} 分钟前",
+        "lastScreenshotHours": "{hours} 小时前",
+        "loadFailed": "读取审计日志失败。"
       }
     },
     "permissions": {
@@ -13701,6 +13999,9 @@
       "pickStartAria": "开始点选倒计时",
       "pickCountdown": "取消（{seconds} 秒）",
       "pickStart": "拾取元素",
+      "pickCaptureNow": "立即捕获",
+      "pickCaptureNowTooltip": "跳过倒计时，立即拾取当前鼠标位置下的元素",
+      "pickCaptureNowAria": "立即捕获鼠标位置的目标",
       "elementRef": "元素引用",
       "elementRefPlaceholder": "如 windows/1234/5678",
       "maxDepth": "最大深度",

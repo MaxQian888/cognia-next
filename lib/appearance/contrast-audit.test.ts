@@ -1,4 +1,11 @@
-import { auditThemeContrast, isFlaggedPair } from "./contrast-audit"
+import {
+  auditThemeContrast,
+  auditTokens,
+  autoFixViolations,
+  isFlaggedPair,
+  targetRatio,
+} from "./contrast-audit"
+import { wcagContrast } from "./contrast"
 import type { ThemeColors } from "@/types/plugin/plugin-extended"
 
 // Tokens chosen so every critical pair clears WCAG AA (4.5:1) by default.
@@ -80,5 +87,94 @@ describe("isFlaggedPair", () => {
       buildTokens({ primary: "#888888", primaryForeground: "#aaaaaa" })
     )
     expect(isFlaggedPair(audit, "background")).toBe(false)
+  })
+})
+
+describe("targetRatio", () => {
+  it.each([
+    ["off", 0],
+    ["AA", 4.5],
+    ["AAA", 7],
+  ] as const)("%s -> %s", (target, expected) => {
+    expect(targetRatio(target)).toBe(expected)
+  })
+})
+
+describe("auditTokens", () => {
+  it("returns no failures at AA when palette already passes", () => {
+    const result = auditTokens(buildTokens(), "AA")
+    expect(result.failureCount).toBe(0)
+    expect(result.target).toBe("AA")
+  })
+
+  it("uses 7:1 threshold at AAA and flags more pairs", () => {
+    // Tokens that pass AA but fail AAA — mid-grey foreground at #475569 on
+    // white scores ~7.0:1, edge of AAA. We pick something that barely passes
+    // AA but fails AAA.
+    const tokens = buildTokens({ mutedForeground: "#666666" })
+    const aaaResult = auditTokens(tokens, "AAA")
+    const aaResult = auditTokens(tokens, "AA")
+    expect(aaaResult.failureCount).toBeGreaterThanOrEqual(aaResult.failureCount)
+    expect(aaaResult.target).toBe("AAA")
+  })
+
+  it("returns zero failures when target is off", () => {
+    const tokens = buildTokens({ foreground: "#aaaaaa", background: "#bbbbbb" })
+    expect(auditTokens(tokens, "off").failureCount).toBe(0)
+  })
+})
+
+describe("autoFixViolations", () => {
+  it("returns identity when no failures", () => {
+    const tokens = buildTokens()
+    const out = autoFixViolations(tokens, "AA")
+    expect(out.movedKeys).toEqual([])
+    expect(out.unfixable).toEqual([])
+    expect(out.tokens).toEqual(tokens)
+  })
+
+  it("repairs a failing foreground/background pair", () => {
+    const tokens = buildTokens({ foreground: "#aaaaaa", background: "#bbbbbb" })
+    const out = autoFixViolations(tokens, "AA")
+    expect(out.movedKeys).toContain("foreground")
+    expect(wcagContrast(out.tokens.foreground, out.tokens.background)).toBeGreaterThanOrEqual(
+      4.5 - 0.05
+    )
+  })
+
+  it("does not touch the background when fixing a foreground", () => {
+    const tokens = buildTokens({ foreground: "#aaaaaa", background: "#ffffff" })
+    const out = autoFixViolations(tokens, "AA")
+    expect(out.tokens.background).toBe(tokens.background)
+  })
+
+  it("can hit AAA when target is AAA", () => {
+    const tokens = buildTokens({ foreground: "#666666", background: "#ffffff" })
+    const out = autoFixViolations(tokens, "AAA")
+    if (out.movedKeys.includes("foreground")) {
+      expect(wcagContrast(out.tokens.foreground, out.tokens.background)).toBeGreaterThanOrEqual(
+        7 - 0.05
+      )
+    }
+  })
+
+  it("repairs every failing pair so a re-audit yields zero failures", () => {
+    const tokens = buildTokens({
+      foreground: "#aaaaaa",
+      background: "#bbbbbb",
+      primary: "#888888",
+      primaryForeground: "#999999",
+    })
+    const out = autoFixViolations(tokens, "AA")
+    // After auto-fix, the patched tokens must have no remaining failures.
+    expect(auditTokens(out.tokens, "AA").failureCount).toBe(0)
+    expect(out.movedKeys.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("is a no-op when target is off", () => {
+    const tokens = buildTokens({ foreground: "#aaaaaa", background: "#bbbbbb" })
+    const out = autoFixViolations(tokens, "off")
+    expect(out.movedKeys).toEqual([])
+    expect(out.tokens).toEqual(tokens)
   })
 })

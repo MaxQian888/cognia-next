@@ -41,6 +41,8 @@ import {
   type DerivedJobBadge,
   type DerivedJobBadgeKind,
 } from "@/lib/connectors/derive-job-badge"
+import { buildDlqDownload } from "@/lib/connectors/dlq-export"
+import { DownloadIcon, FileTextIcon, FileJsonIcon, Trash2Icon } from "lucide-react"
 
 const ALL_STATUSES: OutboundJobStatus[] = ["pending", "sending", "sent", "failed", "deadlettered"]
 
@@ -94,6 +96,30 @@ async function retryAllDeadlettered(ids: string[]) {
     .outboundQueue.where("id")
     .anyOf(ids)
     .modify({ status: "pending", nextAttemptAt: now })
+}
+
+/** Drop every dead-letter row from the active filter scope. */
+async function clearAllDeadlettered(ids: string[]) {
+  if (ids.length === 0) return
+  await getDb().outboundQueue.bulkDelete(ids)
+}
+
+/**
+ * Hand the operator a CSV / JSON download of the rows in the current
+ * filter scope. Uses `buildDlqDownload` so the column set stays stable
+ * with the unit tests in `dlq-export.test.ts`.
+ */
+function downloadDlq(rows: OutboundJobRow[], format: "csv" | "json"): void {
+  if (typeof window === "undefined") return
+  const dl = buildDlqDownload(rows, format)
+  const url = URL.createObjectURL(dl.blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = dl.filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 const BADGE_STYLE: Record<DerivedJobBadgeKind, string | null> = {
@@ -247,36 +273,81 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
           </Toggle>
         ))}
         {showBulkRetry && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                data-testid="outbound-bulk-retry-trigger"
-              >
-                <RefreshCwIcon className="mr-1.5 h-3.5 w-3.5" />
-                {t("bulkRetryDeadlettered", { count: deadletteredIds.length })}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("bulkRetryConfirmTitle")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t("bulkRetryConfirmDescription", { count: deadletteredIds.length })}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t("bulkRetryCancel")}</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => retryAllDeadlettered(deadletteredIds)}
-                  data-testid="outbound-bulk-retry-confirm"
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => downloadDlq(jobs, "csv")}
+              data-testid="outbound-export-csv"
+            >
+              <FileTextIcon className="mr-1.5 h-3.5 w-3.5" />
+              {t("exportCsv")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => downloadDlq(jobs, "json")}
+              data-testid="outbound-export-json"
+            >
+              <FileJsonIcon className="mr-1.5 h-3.5 w-3.5" />
+              {t("exportJson")}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive"
+                  data-testid="outbound-clear-trigger"
                 >
-                  {t("bulkRetryConfirm")}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  <Trash2Icon className="mr-1.5 h-3.5 w-3.5" />
+                  {t("clearAll", { count: deadletteredIds.length })}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("clearAllConfirmTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t("clearAllConfirmDescription", { count: deadletteredIds.length })}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("bulkRetryCancel")}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => clearAllDeadlettered(deadletteredIds)}
+                    data-testid="outbound-clear-confirm"
+                  >
+                    {t("clearAllConfirm")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="outline" data-testid="outbound-bulk-retry-trigger">
+                  <RefreshCwIcon className="mr-1.5 h-3.5 w-3.5" />
+                  {t("bulkRetryDeadlettered", { count: deadletteredIds.length })}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("bulkRetryConfirmTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t("bulkRetryConfirmDescription", { count: deadletteredIds.length })}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("bulkRetryCancel")}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => retryAllDeadlettered(deadletteredIds)}
+                    data-testid="outbound-bulk-retry-confirm"
+                  >
+                    {t("bulkRetryConfirm")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         )}
       </div>
 

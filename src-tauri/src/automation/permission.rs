@@ -45,6 +45,12 @@ pub enum Surface {
     ComputerUse,
     Mcp,
     Plugin,
+    /// ADR-0028 §Audit + observability. Sandbox calls go through
+    /// `sandbox::sandbox_exec`, NOT through `command_body!` — but their
+    /// audit rows share the same ring + Dexie mirror. This variant lets
+    /// those rows serialize as `"sandbox"` and filter cleanly in the
+    /// Diagnostics tab.
+    Sandbox,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -311,6 +317,12 @@ impl PermissionGate {
                     (effective_tier(&s, p.tier), p.whitelist.as_ref())
                 }
             }
+            // Sandbox calls don't ride this gate; sandbox::sandbox_exec
+            // owns its own strict-mode policy. Returning Allow here means
+            // any code that *does* route a Sandbox-tagged call through
+            // `command_body!` (e.g., future test scaffolding) will pass
+            // the gate and rely on the sandbox subsystem's own checks.
+            Surface::Sandbox => return Decision::Allow,
         };
 
         if tier == Tier::Off {
@@ -347,14 +359,49 @@ impl PermissionGate {
 }
 
 fn effective_tier(s: &AutomationSettings, surface_tier: Tier) -> Tier {
-    // A surface-level Off explicitly overrides the default upward. A
-    // surface-level default (the serde default is also Off) means "use the
-    // top-level default_tier". We distinguish by treating the unset (Off)
-    // case as "inherit" iff the global default is stricter — but that gets
-    // confusing fast. The simplest stable rule: surface tier always wins.
-    // The defaults serialize as Off, which is the conservative choice.
-    let _ = s.default_tier;
-    surface_tier
+    // ADR-0020 W1 — surface tier `Off` means "inherit from the global
+    // `default_tier`". Anything else wins (so an explicit per-surface
+    // PerCall is still respected even when the default is Whitelist).
+    //
+    // Pre-W1 semantics ("surface tier always wins") made the Settings UI
+    // global "Default tier" control a no-op since the default serde
+    // value for a surface is Off. We honour the operator's intent now.
+    match surface_tier {
+        Tier::Off => s.default_tier,
+        other => other,
+    }
+}
+
+/// ADR-0020 W1 — per-character / per-tool override that strengthens the
+/// effective tier for a single call. Today only `force_tier ==
+/// Some(PerCall)` has meaning: when the gate would have returned `Allow`
+/// for a `Driving` call, upgrade to `RequireConsent`. Read-only calls and
+/// other `force_tier` values pass through unchanged so the helper only
+/// ever moves the safety dial *up*.
+pub fn maybe_upgrade_to_consent(
+    decision: Decision,
+    force_tier: Option<Tier>,
+    call: &Call<'_>,
+) -> Decision {
+    if force_tier != Some(Tier::PerCall) {
+        return decision;
+    }
+    if call.kind() != CallKind::Driving {
+        return decision;
+    }
+    match decision {
+        Decision::Allow => Decision::RequireConsent {
+            prompt: ConsentPrompt {
+                command: call.command.to_string(),
+                surface: call.surface,
+                plugin_id: call.plugin_id.map(|s| s.to_string()),
+                process_name: call.target.process_name.clone(),
+                window_title: call.target.window_title.clone(),
+            },
+        },
+        // Already RequireConsent / Deny — no movement needed.
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn off_tier_denies() {
+    fn surface_off_inherits_default_off() {
+        // Default settings have default_tier = Off, so a surface that
+        // serializes as Off still denies (inherit-from-default lands back
+        // on Off). Pre-W1 this passed for the same reason, but the
+        // reasoning shifts: surface-Off is now an inherit-marker, not a
+        // hard deny override.
         let g = PermissionGate::new(AutomationSettings {
             enabled: true,
             ..Default::default()
@@ -407,6 +459,39 @@ mod tests {
             d,
             Decision::Deny(AutomationError::PermissionDenied { .. })
         ));
+    }
+
+    #[test]
+    fn surface_off_inherits_default_whitelist() {
+        // ADR-0020 W1 — when a surface tier is left at the default Off,
+        // the operator's global `default_tier` finally has meaning. A
+        // global Whitelist with an untargeted read-only call should now
+        // resolve Allow (was Deny pre-W1 because "surface always won").
+        let s = AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let d = g.evaluate(&read_call(Surface::Workflow));
+        assert!(matches!(d, Decision::Allow));
+    }
+
+    #[test]
+    fn surface_per_call_still_wins_over_default_whitelist() {
+        // Per-W1 contract: surface tier wins when it is anything other than
+        // Off. An explicit PerCall on `workflow` must keep requiring
+        // consent on driving calls even when the global default is the
+        // less-strict Whitelist.
+        let mut s = AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        };
+        s.per_surface.workflow.tier = Tier::PerCall;
+        let g = PermissionGate::new(s);
+        let d = g.evaluate(&click_call(Surface::Workflow));
+        assert!(matches!(d, Decision::RequireConsent { .. }));
     }
 
     #[test]
@@ -558,5 +643,108 @@ mod tests {
             let d = g.evaluate(&read_call(surf));
             assert!(matches!(d, Decision::Allow), "surface {:?} should allow", surf);
         }
+    }
+
+    #[test]
+    fn sandbox_surface_bypasses_permission_gate() {
+        // Sandbox calls own their own strict-mode policy in
+        // `sandbox::sandbox_exec`; if any caller routes a Sandbox-tagged
+        // call through `command_body!`, the gate must let it through so
+        // the sandbox subsystem can apply its own checks.
+        let s = AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let call = Call {
+            command: "bash",
+            surface: Surface::Sandbox,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(g.evaluate(&call), Decision::Allow));
+    }
+
+    #[test]
+    fn maybe_upgrade_to_consent_upgrades_allow_on_driving() {
+        let s = AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let call = click_call(Surface::ComputerUse);
+        let allowed = g.evaluate(&call);
+        assert!(matches!(allowed, Decision::Allow));
+        let upgraded = maybe_upgrade_to_consent(allowed, Some(Tier::PerCall), &call);
+        assert!(matches!(upgraded, Decision::RequireConsent { .. }));
+    }
+
+    #[test]
+    fn maybe_upgrade_to_consent_skips_read_only_calls() {
+        let s = AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let call = read_call(Surface::ComputerUse);
+        let allowed = g.evaluate(&call);
+        let upgraded = maybe_upgrade_to_consent(allowed, Some(Tier::PerCall), &call);
+        assert!(matches!(upgraded, Decision::Allow));
+    }
+
+    #[test]
+    fn maybe_upgrade_to_consent_passes_through_when_force_tier_unset() {
+        let s = AutomationSettings {
+            enabled: true,
+            default_tier: Tier::Whitelist,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let call = click_call(Surface::ComputerUse);
+        let allowed = g.evaluate(&call);
+        let unchanged = maybe_upgrade_to_consent(allowed, None, &call);
+        assert!(matches!(unchanged, Decision::Allow));
+    }
+
+    #[test]
+    fn maybe_upgrade_to_consent_never_weakens_a_deny() {
+        let s = AutomationSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        // ComputerUse surface stays at default Off; default_tier Off too,
+        // so the call denies. force_tier=PerCall must not reverse this.
+        let call = click_call(Surface::ComputerUse);
+        let denied = g.evaluate(&call);
+        assert!(matches!(denied, Decision::Deny(_)));
+        let still_denied = maybe_upgrade_to_consent(denied, Some(Tier::PerCall), &call);
+        assert!(matches!(still_denied, Decision::Deny(_)));
+    }
+
+    #[test]
+    fn sandbox_surface_passes_even_when_disabled() {
+        // Kill switch (`enabled: false`) still blocks even sandbox-tagged
+        // calls — the safety invariant is "automation engine off → all
+        // automation calls deny". Sandbox calls don't go through the
+        // automation engine in practice, so this branch is mostly
+        // defence-in-depth.
+        let s = AutomationSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        let g = PermissionGate::new(s);
+        let call = Call {
+            command: "bash",
+            surface: Surface::Sandbox,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(
+            g.evaluate(&call),
+            Decision::Deny(AutomationError::KillSwitchActive)
+        ));
     }
 }

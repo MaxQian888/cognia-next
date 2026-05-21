@@ -20,10 +20,10 @@
 // can edit it through the renderer's "Settings → Sandbox → Per-action
 // policy" card. Empty policy = no extra constraints (today's behaviour).
 
-#![allow(dead_code)]
-
+use parking_lot::RwLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// One per-action constraint set. All fields optional — empty = no
 /// additional constraint beyond what the 3-tier permission gate already
@@ -83,75 +83,210 @@ pub enum Decision {
     Deny { reason: String },
 }
 
-/// Evaluate the policy against the action's facts. Pure: no I/O. All
-/// allowlists are AND-combined (a fact must pass every non-empty
-/// allowlist that has a matching field on the action).
-pub fn evaluate(policy: &Policy, facts: &ActionFacts<'_>) -> Decision {
-    // Process name check — case-insensitive equality.
-    if !policy.allowed_process_names.is_empty() {
-        let proc_name = facts.process_name.unwrap_or("");
-        let ok = policy
-            .allowed_process_names
-            .iter()
-            .any(|p| p.eq_ignore_ascii_case(proc_name));
-        if !ok {
-            return Decision::Deny {
-                reason: format!(
-                    "process name {:?} not in allowed_process_names",
-                    proc_name
-                ),
-            };
+/// Internal — what `PolicyState` actually holds. Pre-compiled regex
+/// instances eliminate the per-action allocator hit that the W1 plan
+/// flagged on `policy.rs::evaluate`. `from_raw` returns an error if any
+/// pattern fails to parse so the renderer can surface validation feedback
+/// at `set()` time instead of silently denying every subsequent action.
+#[derive(Clone, Debug, Default)]
+pub struct CompiledPolicy {
+    pub allowed_process_names: Vec<String>,
+    pub allowed_window_title_patterns: Vec<Regex>,
+    pub allowed_url_patterns: Vec<Regex>,
+    pub forbidden_screen_regions: Vec<ScreenRect>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PolicyCompileError {
+    pub field: &'static str,
+    pub pattern: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for PolicyCompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "policy field `{}` rejected pattern {:?}: {}",
+            self.field, self.pattern, self.message
+        )
+    }
+}
+
+impl std::error::Error for PolicyCompileError {}
+
+impl CompiledPolicy {
+    pub fn from_raw(raw: &Policy) -> Result<Self, PolicyCompileError> {
+        let allowed_window_title_patterns =
+            compile_all("allowedWindowTitlePatterns", &raw.allowed_window_title_patterns)?;
+        let allowed_url_patterns =
+            compile_all("allowedUrlPatterns", &raw.allowed_url_patterns)?;
+        Ok(Self {
+            allowed_process_names: raw.allowed_process_names.clone(),
+            allowed_window_title_patterns,
+            allowed_url_patterns,
+            forbidden_screen_regions: raw.forbidden_screen_regions.clone(),
+        })
+    }
+
+    pub fn to_raw(&self) -> Policy {
+        Policy {
+            allowed_process_names: self.allowed_process_names.clone(),
+            allowed_window_title_patterns: self
+                .allowed_window_title_patterns
+                .iter()
+                .map(|r| r.as_str().to_string())
+                .collect(),
+            allowed_url_patterns: self
+                .allowed_url_patterns
+                .iter()
+                .map(|r| r.as_str().to_string())
+                .collect(),
+            forbidden_screen_regions: self.forbidden_screen_regions.clone(),
         }
     }
 
-    // Window-title regex allowlist.
-    if !policy.allowed_window_title_patterns.is_empty() {
-        let title = facts.window_title.unwrap_or("");
-        let ok = policy
-            .allowed_window_title_patterns
-            .iter()
-            .any(|p| Regex::new(p).map(|re| re.is_match(title)).unwrap_or(false));
-        if !ok {
-            return Decision::Deny {
-                reason: format!(
-                    "window title {:?} did not match any allowed_window_title_patterns",
-                    title
-                ),
-            };
-        }
+    pub fn is_empty(&self) -> bool {
+        self.allowed_process_names.is_empty()
+            && self.allowed_window_title_patterns.is_empty()
+            && self.allowed_url_patterns.is_empty()
+            && self.forbidden_screen_regions.is_empty()
     }
 
-    // Target-URL regex allowlist.
-    if !policy.allowed_url_patterns.is_empty() {
-        let url = facts.target_url.unwrap_or("");
-        let ok = policy
-            .allowed_url_patterns
-            .iter()
-            .any(|p| Regex::new(p).map(|re| re.is_match(url)).unwrap_or(false));
-        if !ok {
-            return Decision::Deny {
-                reason: format!("URL {:?} did not match any allowed_url_patterns", url),
-            };
-        }
-    }
-
-    // Forbidden screen regions — only applies when the action carries
-    // coordinates (clicks, drags). Mouse-move / scroll without a fixed
-    // target skip this check.
-    if let (Some(x), Some(y)) = (facts.click_x, facts.click_y) {
-        for rect in &policy.forbidden_screen_regions {
-            if rect.contains(x, y) {
+    pub fn evaluate(&self, facts: &ActionFacts<'_>) -> Decision {
+        if !self.allowed_process_names.is_empty() {
+            let proc_name = facts.process_name.unwrap_or("");
+            let ok = self
+                .allowed_process_names
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(proc_name));
+            if !ok {
                 return Decision::Deny {
                     reason: format!(
-                        "click target ({x},{y}) falls inside forbidden region {:?}",
-                        rect
+                        "process name {:?} not in allowed_process_names",
+                        proc_name
                     ),
                 };
             }
         }
+
+        if !self.allowed_window_title_patterns.is_empty() {
+            let title = facts.window_title.unwrap_or("");
+            let ok = self
+                .allowed_window_title_patterns
+                .iter()
+                .any(|re| re.is_match(title));
+            if !ok {
+                return Decision::Deny {
+                    reason: format!(
+                        "window title {:?} did not match any allowed_window_title_patterns",
+                        title
+                    ),
+                };
+            }
+        }
+
+        if !self.allowed_url_patterns.is_empty() {
+            let url = facts.target_url.unwrap_or("");
+            let ok = self.allowed_url_patterns.iter().any(|re| re.is_match(url));
+            if !ok {
+                return Decision::Deny {
+                    reason: format!("URL {:?} did not match any allowed_url_patterns", url),
+                };
+            }
+        }
+
+        if let (Some(x), Some(y)) = (facts.click_x, facts.click_y) {
+            for rect in &self.forbidden_screen_regions {
+                if rect.contains(x, y) {
+                    return Decision::Deny {
+                        reason: format!(
+                            "click target ({x},{y}) falls inside forbidden region {:?}",
+                            rect
+                        ),
+                    };
+                }
+            }
+        }
+
+        Decision::Allow
+    }
+}
+
+fn compile_all(field: &'static str, patterns: &[String]) -> Result<Vec<Regex>, PolicyCompileError> {
+    patterns
+        .iter()
+        .map(|p| {
+            Regex::new(p).map_err(|e| PolicyCompileError {
+                field,
+                pattern: p.clone(),
+                message: e.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Thread-safe holder for the per-action policy. One instance lives in
+/// `AutomationState`; the renderer reads/writes via the
+/// `automation_policy_get` / `automation_policy_set` Tauri commands.
+///
+/// ADR-0020 W1 — the held value is a `CompiledPolicy` so each
+/// `dispatcher → evaluate` chain avoids re-parsing regex patterns. `set`
+/// compiles on the way in; invalid regex surfaces as a
+/// `PolicyCompileError` so the renderer can show per-row validation
+/// feedback instead of "every subsequent action denies silently".
+#[derive(Clone, Default)]
+pub struct PolicyState {
+    inner: Arc<RwLock<CompiledPolicy>>,
+}
+
+impl PolicyState {
+    pub fn new(policy: Policy) -> Self {
+        // `CompiledPolicy::from_raw` may fail on invalid patterns; the
+        // production caller (`lib.rs` boot) only ever passes
+        // `Policy::default()` so the unwrap is sound, and any custom
+        // caller that constructs from a non-default policy should use
+        // `try_new` instead.
+        let compiled = CompiledPolicy::from_raw(&policy)
+            .expect("PolicyState::new called with an unparseable policy; use try_new instead");
+        Self {
+            inner: Arc::new(RwLock::new(compiled)),
+        }
     }
 
-    Decision::Allow
+    /// Fallible constructor — use when the policy may carry user-provided
+    /// regex (e.g., when hydrating from `AppSettings` on boot).
+    pub fn try_new(policy: Policy) -> Result<Self, PolicyCompileError> {
+        let compiled = CompiledPolicy::from_raw(&policy)?;
+        Ok(Self {
+            inner: Arc::new(RwLock::new(compiled)),
+        })
+    }
+
+    pub fn get(&self) -> Policy {
+        self.inner.read().to_raw()
+    }
+
+    /// Replace the held policy. Returns `Err` (without modifying state)
+    /// when a regex fails to compile; the renderer should surface the
+    /// `PolicyCompileError` to the operator.
+    pub fn set(&self, policy: Policy) -> Result<(), PolicyCompileError> {
+        let compiled = CompiledPolicy::from_raw(&policy)?;
+        *self.inner.write() = compiled;
+        Ok(())
+    }
+
+    /// Evaluate the held policy without cloning into the caller.
+    pub fn evaluate(&self, facts: &ActionFacts<'_>) -> Decision {
+        let guard = self.inner.read();
+        guard.evaluate(facts)
+    }
+
+    /// True when the held policy has no active constraints — used by the
+    /// dispatcher to fast-path the common "no policy configured" case.
+    pub fn is_empty(&self) -> bool {
+        self.inner.read().is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +295,21 @@ mod tests {
 
     fn facts<'a>() -> ActionFacts<'a> {
         ActionFacts::default()
+    }
+
+    /// Test-only mirror of the pre-W1 free `evaluate` entry point. We keep
+    /// the existing call shape (`evaluate(&policy, &facts)`) in the test
+    /// suite so the unit-test asserts didn't need to learn about the
+    /// `CompiledPolicy` API — but production code now always goes
+    /// through `PolicyState`'s held compiled view. Invalid regex maps to
+    /// Deny to match the pre-W1 "unparseable rule denies" semantics.
+    fn evaluate(policy: &Policy, facts: &ActionFacts<'_>) -> Decision {
+        match CompiledPolicy::from_raw(policy) {
+            Ok(c) => c.evaluate(facts),
+            Err(_) => Decision::Deny {
+                reason: "test helper: policy contains an unparseable regex".into(),
+            },
+        }
     }
 
     #[test]
@@ -302,5 +452,127 @@ mod tests {
         // rule).
         let decision = evaluate(&policy, &f);
         assert!(matches!(decision, Decision::Deny { .. }));
+    }
+
+    #[test]
+    fn policy_state_get_returns_clone() {
+        let state = PolicyState::new(Policy {
+            allowed_process_names: vec!["Chrome".into()],
+            ..Default::default()
+        });
+        let cloned = state.get();
+        assert_eq!(cloned.allowed_process_names, vec!["Chrome".to_string()]);
+    }
+
+    #[test]
+    fn policy_state_set_swaps_policy() {
+        let state = PolicyState::default();
+        assert!(state.is_empty());
+        state
+            .set(Policy {
+                allowed_process_names: vec!["Firefox".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(!state.is_empty());
+        assert_eq!(
+            state.get().allowed_process_names,
+            vec!["Firefox".to_string()]
+        );
+    }
+
+    #[test]
+    fn policy_state_set_rejects_invalid_regex_without_corrupting_state() {
+        // The pre-W1 evaluator silently treated unparseable regex as
+        // "no match" → Deny on every subsequent action. W1 surfaces the
+        // failure at `set` time so the renderer can correct the row.
+        let state = PolicyState::default();
+        // Seed a valid policy so we can prove `set` leaves it untouched
+        // when the next call fails.
+        state
+            .set(Policy {
+                allowed_process_names: vec!["Chrome".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        let err = state
+            .set(Policy {
+                allowed_window_title_patterns: vec!["[invalid".into()],
+                ..Default::default()
+            })
+            .unwrap_err();
+        assert_eq!(err.field, "allowedWindowTitlePatterns");
+        assert!(err.message.contains("regex parse error") || !err.message.is_empty());
+        // State preserved — `allowed_process_names` still holds Chrome.
+        assert_eq!(
+            state.get().allowed_process_names,
+            vec!["Chrome".to_string()]
+        );
+    }
+
+    #[test]
+    fn policy_state_get_reconstructs_raw_patterns_from_compiled_regex() {
+        let state = PolicyState::default();
+        state
+            .set(Policy {
+                allowed_url_patterns: vec![r"^https://example\.com/".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        let raw = state.get();
+        assert_eq!(raw.allowed_url_patterns.len(), 1);
+        assert_eq!(raw.allowed_url_patterns[0], r"^https://example\.com/");
+    }
+
+    #[test]
+    fn compiled_policy_evaluate_matches_test_helper_on_valid_policy() {
+        // Sanity check that pre-compilation didn't change semantics for
+        // valid inputs. The test-helper path (compile + evaluate) and a
+        // direct CompiledPolicy::evaluate must agree on well-formed
+        // policies — both go through `CompiledPolicy::from_raw` now, so
+        // this is really a smoke test that nothing in `from_raw` drops
+        // state.
+        let raw = Policy {
+            allowed_process_names: vec!["Chrome".into()],
+            allowed_window_title_patterns: vec![r"^Inbox".into()],
+            allowed_url_patterns: vec![r"^https://mail\.".into()],
+            forbidden_screen_regions: vec![],
+        };
+        let facts = ActionFacts {
+            process_name: Some("Chrome"),
+            window_title: Some("Inbox — 3 unread"),
+            target_url: Some("https://mail.example/"),
+            click_x: None,
+            click_y: None,
+        };
+        let from_helper = evaluate(&raw, &facts);
+        let compiled = CompiledPolicy::from_raw(&raw).unwrap();
+        let from_compiled = compiled.evaluate(&facts);
+        assert_eq!(from_helper, from_compiled);
+        assert_eq!(from_helper, Decision::Allow);
+    }
+
+    #[test]
+    fn policy_state_evaluate_uses_held_policy() {
+        let state = PolicyState::new(Policy {
+            allowed_process_names: vec!["Chrome".into()],
+            ..Default::default()
+        });
+        let allow = ActionFacts {
+            process_name: Some("Chrome"),
+            ..Default::default()
+        };
+        let deny = ActionFacts {
+            process_name: Some("Notepad"),
+            ..Default::default()
+        };
+        assert_eq!(state.evaluate(&allow), Decision::Allow);
+        assert!(matches!(state.evaluate(&deny), Decision::Deny { .. }));
+    }
+
+    #[test]
+    fn empty_policy_state_is_empty() {
+        assert!(PolicyState::default().is_empty());
+        assert!(PolicyState::new(Policy::default()).is_empty());
     }
 }

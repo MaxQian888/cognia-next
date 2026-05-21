@@ -132,17 +132,19 @@ function SectionBlock({ section }: { section: FormSection }) {
           )}
         </span>
         <ChevronDownIcon
-          className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")}
+          className={cn("h-4 w-4 shrink-0 transition-transform duration-200", open && "rotate-180")}
         />
       </CollapsibleTrigger>
       <CollapsibleContent
         id={`adapter-form-section-body-${section.id}`}
-        className="space-y-3 px-4 pb-4"
+        className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down"
       >
-        {section.description && (
-          <p className="text-xs text-muted-foreground">{section.description}</p>
-        )}
-        {section.children}
+        <div className="space-y-3 px-4 pb-4">
+          {section.description && (
+            <p className="text-xs text-muted-foreground">{section.description}</p>
+          )}
+          {section.children}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   )

@@ -2,36 +2,44 @@
 
 // /plugins panel — main user-facing surface for plugin management.
 //
-// Tab composition: every one of the 7 tabs mounts a full-fidelity surface
-// backed by a dedicated component under components/plugins/. Dialog hosts
-// stack at the panel root and listen to the shared zustand store, so a
-// single panel instance handles delete / detail / permission-review /
-// configure / import / conflict / update / rollback / install-from-url
-// flows without prop drilling.
+// 3-pane shell powered by `FeaturePageShell`:
+//   - **Left**  PluginNavSidebar (Library / Discover / Governance /
+//               Devtools — Devtools gated by `useDevtoolsGate`)
+//   - **Center** Switches on `activeSection`: Library / Discover /
+//               Governance / Devtools panes
+//   - **Right** Persistent `PluginDetailPane` showing the selected plugin's
+//               5-tab detail (Overview / Capabilities / Configure /
+//               Permissions / Data). On narrow viewports the right pane
+//               collapses into FeaturePageShellMobile's Sheet trigger.
 //
-// Responsive composition:
-//   * `md:` flips the header into a horizontal layout
-//   * `< lg:` swaps the desktop category rail for a Sheet trigger
-//   * tab strip is horizontally scrollable at every viewport
-//   * detail Sheet widens through `lg:` and `xl:` breakpoints
+// Dialog hosts (delete, permission review, configure form, import,
+// conflict, update, rollback) are mounted once at the root.
+//
+// URL deep links: `?section=` / `?sub=` / `?gov=` / `?subtab=` drive the
+// new layout. Legacy `?tab=` deep links are still accepted as a
+// back-compat shim — `setActiveTab` mirrors the value into
+// `activeSection`, so external surfaces that have not yet migrated their
+// links keep working.
 
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { usePluginsStore, type PluginPanelTab } from "@/stores/plugins"
+import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import {
+  usePluginsStore,
+  type PluginDetailSubTab,
+  type PluginGovernanceView,
+  type PluginLibrarySubFilter,
+  type PluginNavSection,
+  type PluginPanelTab,
+} from "@/stores/plugins"
 import { deletePlugin, listPlugins, updatePlugin } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
 import { usePluginMarketplace } from "@/hooks/plugins"
-import { PluginPanelTabs } from "./plugin-panel-tabs"
-import { PluginPanelToolbar } from "./plugin-panel-toolbar"
-import { PluginPanelGrid } from "./plugin-panel-grid"
-import { PluginPanelHeader } from "./plugin-panel-header"
-import { PluginCategorySidebar } from "./plugin-category-sidebar"
-import { PluginCategorySheet } from "./plugin-category-sheet"
+import { useTranslations } from "next-intl"
+
+// Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { PluginFilterSheet } from "./plugin-filter-sheet"
-import { PluginDetailPanel } from "./plugin-detail-panel"
 import { PluginDeleteDialog } from "./plugin-delete-dialog"
 import { PluginPermissionReview } from "./plugin-permission-review"
 import { PluginConfigForm } from "./plugin-config-form"
@@ -39,13 +47,16 @@ import { PluginImportDialog } from "./plugin-import-dialog"
 import { PluginConflictDialog } from "./plugin-conflict-dialog"
 import { PluginUpdateDialog } from "./plugin-update-dialog"
 import { PluginRollbackDialog } from "./plugin-rollback-dialog"
-import { PluginMarketplace } from "./plugin-marketplace"
-import { PluginScheduledJobs } from "./plugin-scheduled-jobs"
-import { PluginAnalytics } from "./plugin-analytics"
-import { PluginDevtoolsPanel } from "./plugin-devtools-panel"
 import { PluginExtensionSlot } from "./plugin-extension-slot"
-import { PluginConfigureTab } from "./plugin-configure-tab"
-import { PluginPermissionsTab } from "./plugin-permissions-tab"
+
+// 3-pane shell pieces.
+import { PluginNavSidebar } from "./plugin-nav-sidebar"
+import { PluginLibraryPane } from "./library/plugin-library-pane"
+import { PluginLibraryHeader } from "./library/plugin-library-header"
+import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
+import { PluginGovernancePane } from "./governance/plugin-governance-pane"
+import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
+import { PluginDetailPane } from "./detail/plugin-detail-pane"
 
 const VALID_TABS: ReadonlySet<PluginPanelTab> = new Set([
   "installed",
@@ -56,31 +67,94 @@ const VALID_TABS: ReadonlySet<PluginPanelTab> = new Set([
   "analytics",
   "devtools",
 ])
+const VALID_SECTIONS: ReadonlySet<PluginNavSection> = new Set([
+  "library",
+  "discover",
+  "governance",
+  "devtools",
+])
+const VALID_LIBRARY_SUB: ReadonlySet<PluginLibrarySubFilter> = new Set([
+  "all",
+  "enabled",
+  "updates",
+  "configurable",
+  "errored",
+])
+const VALID_GOVERNANCE: ReadonlySet<PluginGovernanceView> = new Set([
+  "permissions",
+  "scheduled",
+  "analytics",
+  "audit",
+])
+const VALID_DETAIL_SUBTAB: ReadonlySet<PluginDetailSubTab> = new Set([
+  "overview",
+  "capabilities",
+  "configure",
+  "permissions",
+  "data",
+])
 
 function isValidTab(value: string | null): value is PluginPanelTab {
   return value !== null && VALID_TABS.has(value as PluginPanelTab)
 }
 
+function isValidSection(value: string | null): value is PluginNavSection {
+  return value !== null && VALID_SECTIONS.has(value as PluginNavSection)
+}
+
 export function PluginPanel() {
   const activeTab = usePluginsStore((s) => s.activeTab)
   const setActiveTab = usePluginsStore((s) => s.setActiveTab)
+  const setActiveSection = usePluginsStore((s) => s.setActiveSection)
+  const setLibrarySubFilter = usePluginsStore((s) => s.setLibrarySubFilter)
+  const setGovernanceView = usePluginsStore((s) => s.setGovernanceView)
+  const setDetailSubTab = usePluginsStore((s) => s.setDetailSubTab)
 
-  // Honor ?tab= deep links coming from settings or external surfaces.
-  // We adopt the URL value on mount AND whenever the URL changes —
-  // e.g. when the user clicks "Open marketplace" in Settings while
-  // /plugins is already open in the same window. Local tab clicks
-  // don't touch the URL, so re-syncing here doesn't fight the user:
-  // the guard `requested !== activeTab` makes the effect a no-op when
-  // the store and URL already agree, and tab clicks only flip the
-  // store (`searchParams` stays stable so this effect doesn't fire).
+  // URL sync — extend the legacy `?tab=` deep-link with `?section=`,
+  // `?sub=`, `?gov=`, `?subtab=` so external surfaces can choose either
+  // vocabulary. We adopt the URL value on mount AND whenever the URL
+  // changes; local clicks don't touch the URL, so this effect stays a
+  // no-op for in-app navigation.
   const searchParams = useSearchParams()
   const requestedTabParam = searchParams?.get("tab") ?? null
+  const requestedSectionParam = searchParams?.get("section") ?? null
+  const requestedSubParam = searchParams?.get("sub") ?? null
+  const requestedGovParam = searchParams?.get("gov") ?? null
+  const requestedSubtabParam = searchParams?.get("subtab") ?? null
+
   useEffect(() => {
     if (isValidTab(requestedTabParam) && requestedTabParam !== activeTab) {
+      // setActiveTab also mirrors into activeSection / governanceView via
+      // deriveSectionFromTab, so legacy deep links land both layouts.
       setActiveTab(requestedTabParam)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedTabParam])
+
+  useEffect(() => {
+    if (isValidSection(requestedSectionParam)) {
+      setActiveSection(requestedSectionParam)
+    }
+    if (
+      requestedSubParam !== null &&
+      VALID_LIBRARY_SUB.has(requestedSubParam as PluginLibrarySubFilter)
+    ) {
+      setLibrarySubFilter(requestedSubParam as PluginLibrarySubFilter)
+    }
+    if (
+      requestedGovParam !== null &&
+      VALID_GOVERNANCE.has(requestedGovParam as PluginGovernanceView)
+    ) {
+      setGovernanceView(requestedGovParam as PluginGovernanceView)
+    }
+    if (
+      requestedSubtabParam !== null &&
+      VALID_DETAIL_SUBTAB.has(requestedSubtabParam as PluginDetailSubTab)
+    ) {
+      setDetailSubTab(requestedSubtabParam as PluginDetailSubTab)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedSectionParam, requestedSubParam, requestedGovParam, requestedSubtabParam])
 
   const [updateOpen, setUpdateOpen] = useState(false)
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)
@@ -123,23 +197,8 @@ export function PluginPanel() {
     }
   }, [market])
 
-  return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 flex-col gap-3 border-b p-4 lg:p-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex-1 min-w-0">
-            <PluginPanelHeader />
-          </div>
-          <PluginPanelToolbar
-            onCheckUpdates={() => setUpdateOpen(true)}
-            onSyncRegistry={handleSync}
-            syncing={syncing}
-          />
-        </div>
-      </header>
-
-      {/* Dialog hosts — driven by store targets, mounted once. */}
-      <PluginDetailPanel />
+  const dialogHosts = (
+    <>
       <PluginPermissionReview />
       <PluginConfigForm />
       <PluginDeleteDialogHost />
@@ -153,58 +212,84 @@ export function PluginPanel() {
       />
       <PluginFilterSheet />
       <PluginBatchActionsBar />
+    </>
+  )
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as PluginPanelTab)}
-        className="flex-1 min-h-0 flex flex-col"
-      >
-        <PluginPanelTabs className="mt-4 mx-4 lg:mx-6" />
-
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-4 lg:p-6">
-            <TabsContent value="installed" className="mt-0">
-              <div className="space-y-3">
-                <PluginCategorySheet className="lg:hidden" />
-                <div className="grid gap-4 lg:grid-cols-[14rem_1fr] xl:grid-cols-[16rem_1fr]">
-                  <div className="hidden lg:block">
-                    <PluginCategorySidebar />
-                  </div>
-                  <div className="space-y-3 min-w-0">
-                    <PluginPanelGrid />
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-            <TabsContent value="browse" className="mt-0">
-              <PluginMarketplace />
-            </TabsContent>
-            <TabsContent value="configure" className="mt-0">
-              <PluginConfigureTab />
-            </TabsContent>
-            <TabsContent value="permissions" className="mt-0">
-              <PluginPermissionsTab />
-            </TabsContent>
-            <TabsContent value="scheduled" className="mt-0">
-              <PluginScheduledJobs />
-            </TabsContent>
-            <TabsContent value="analytics" className="mt-0">
-              <PluginAnalytics />
-            </TabsContent>
-            <TabsContent value="devtools" className="mt-0">
-              <PluginDevtoolsPanel />
-            </TabsContent>
-          </div>
-        </ScrollArea>
-      </Tabs>
-
-      {/* Plugin-contributed extensions for the plugin settings surface.
-          Mounted once outside the Tabs so the contribution stays visible
-          across all tabs and never visually attaches to a single one. */}
-      <PluginExtensionSlot
-        point="settings.plugins"
-        className="border-t px-4 lg:px-6 py-3 empty:hidden"
+  return (
+    <>
+      {dialogHosts}
+      <NewShellLayout
+        onCheckUpdates={() => setUpdateOpen(true)}
+        onSyncRegistry={handleSync}
+        syncing={syncing}
       />
+    </>
+  )
+}
+
+interface NewShellLayoutProps {
+  onCheckUpdates: () => void
+  onSyncRegistry: () => Promise<void>
+  syncing: boolean
+}
+
+function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLayoutProps) {
+  const t = useTranslations("plugins.sections")
+  const activeSection = usePluginsStore((s) => s.activeSection)
+
+  const toolbar =
+    activeSection === "library" ? (
+      <PluginLibraryHeader
+        onCheckUpdates={onCheckUpdates}
+        onSyncRegistry={onSyncRegistry}
+        syncing={syncing}
+      />
+    ) : (
+      <SectionHeader />
+    )
+
+  const center =
+    activeSection === "library" ? (
+      <PluginLibraryPane />
+    ) : activeSection === "discover" ? (
+      <PluginDiscoverPane />
+    ) : activeSection === "governance" ? (
+      <PluginGovernancePane />
+    ) : (
+      <PluginDevtoolsPane />
+    )
+
+  return (
+    <FeaturePageShell
+      storageId="plugins"
+      toolbar={toolbar}
+      leftPane={{
+        label: t("library"),
+        content: <PluginNavSidebar />,
+        defaultSize: 18,
+        minSize: 14,
+        maxSize: 26,
+      }}
+      rightPane={{
+        label: "Plugin detail",
+        content: <PluginDetailPane />,
+        defaultSize: 38,
+        minSize: 28,
+        maxSize: 50,
+      }}
+    >
+      {center}
+      <PluginExtensionSlot point="settings.plugins" className="border-t px-4 py-3 empty:hidden" />
+    </FeaturePageShell>
+  )
+}
+
+function SectionHeader() {
+  const t = useTranslations("plugins.sections")
+  const activeSection = usePluginsStore((s) => s.activeSection)
+  return (
+    <div className="flex w-full items-center px-2 py-1.5 text-sm font-medium">
+      {t(activeSection)}
     </div>
   )
 }

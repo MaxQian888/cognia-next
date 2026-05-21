@@ -111,6 +111,50 @@ jest.mock("@/hooks/discover/use-discover-query", () => ({
           items: [{ kind: "mcpServer", id: "mcp-1", data: mcpItemFixture }],
           loading: false,
         }
+      case "connectors":
+        return {
+          items: [
+            {
+              kind: "connector",
+              id: "telegram",
+              data: { type: "telegram", status: "stable" },
+            },
+          ],
+          loading: false,
+        }
+      case "ocrProviders":
+        return {
+          items: [
+            {
+              kind: "ocrProvider",
+              id: "openai-vision",
+              data: {
+                id: "openai-vision",
+                label: "OpenAI Vision",
+                category: "llm-vision",
+                credentialKeys: [],
+                shells: { tauri: true, capacitor: true, browser: true },
+              },
+            },
+          ],
+          loading: false,
+        }
+      case "workflowTemplates":
+        return {
+          items: [
+            {
+              kind: "workflowTemplate",
+              id: "demo",
+              data: {
+                id: "demo",
+                label: { en: "Demo template", "zh-CN": "示例模板" },
+                description: { en: "", "zh-CN": "" },
+                tags: [],
+              },
+            },
+          ],
+          loading: false,
+        }
       default:
         return { items: [], loading: false }
     }

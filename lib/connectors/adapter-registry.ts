@@ -174,11 +174,16 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
  * If the API call fails the adapter still starts — mention detection falls back to
  * checking the app_id in event headers.
  *
- * TODO Phase 2: cache selfBotOpenId in the row settings so startup is faster on
- * subsequent launches.
+ * Caches a successful probe back to `row.settings.selfBotOpenId` so the
+ * next cold start can skip the API call. The cache is invalidated by the
+ * UI affordance `refreshSelfBotOpenId(adapterId)` (Settings → Lark form).
  */
 export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
-  const settings = (row.settings ?? {}) as { transport?: "long-connection" | "webhook" }
+  const settings = (row.settings ?? {}) as {
+    transport?: "long-connection" | "webhook"
+    selfBotOpenId?: string
+    [key: string]: unknown
+  }
   const transport: "long-connection" | "webhook" =
     settings.transport === "webhook" ? "webhook" : "long-connection"
 
@@ -188,25 +193,44 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
   const appSecret = appSecretRaw ?? ""
 
   // Resolve the bot's own open_id to enable accurate self-mention detection.
-  let selfBotOpenId = ""
-  try {
-    const tat = await getTenantAccessToken({ appId, appSecret })
-    const resp = await connectorsHttpRequest({
-      url: "https://open.feishu.cn/open-apis/bot/v3/info",
-      method: "GET",
-      headers: { Authorization: `Bearer ${tat}` },
-    })
-    const parsed = JSON.parse(resp.body) as {
-      code?: number
-      data?: { open_id?: string }
+  let selfBotOpenId = settings.selfBotOpenId ?? ""
+
+  // Skip the probe when we already have a cached open_id; the
+  // `refreshSelfBotOpenId` affordance is the canonical way to flush a
+  // stale cache.
+  if (!selfBotOpenId) {
+    try {
+      const tat = await getTenantAccessToken({ appId, appSecret })
+      const resp = await connectorsHttpRequest({
+        url: "https://open.feishu.cn/open-apis/bot/v3/info",
+        method: "GET",
+        headers: { Authorization: `Bearer ${tat}` },
+      })
+      const parsed = JSON.parse(resp.body) as {
+        code?: number
+        bot?: { open_id?: string }
+      }
+      if (parsed.code === 0 && parsed.bot?.open_id) {
+        selfBotOpenId = parsed.bot.open_id
+        // Persist the resolved open_id back to the row so subsequent
+        // cold starts skip this probe. Best-effort — a Dexie write
+        // failure must not break adapter startup.
+        try {
+          await updateAdapterInstance(row.id, {
+            settings: { ...settings, selfBotOpenId },
+          })
+        } catch (err) {
+          console.warn(
+            `[adapter-registry] failed to persist selfBotOpenId for ${row.id}:`,
+            err instanceof Error ? err.message : String(err)
+          )
+        }
+      }
+    } catch {
+      // Non-fatal: selfBotOpenId will be empty; adapter still starts but mention
+      // detection may miss cases where the bot is addressed without an explicit @.
+      console.warn(`[adapter-registry] bot/v3/info failed for Lark adapter ${row.id}`)
     }
-    if (parsed.code === 0 && parsed.data?.open_id) {
-      selfBotOpenId = parsed.data.open_id
-    }
-  } catch {
-    // Non-fatal: selfBotOpenId will be empty; adapter still starts but mention
-    // detection may miss cases where the bot is addressed without an explicit @.
-    console.warn(`[adapter-registry] bot/v3/info failed for Lark adapter ${row.id}`)
   }
 
   return createLarkAdapter({

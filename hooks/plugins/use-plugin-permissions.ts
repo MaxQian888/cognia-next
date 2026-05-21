@@ -10,13 +10,14 @@
 // be cached" infinite loop. We instead key a `useMemo` on a revision counter
 // that's bumped whenever the wrapper performs a grant/revoke/request.
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   getPermissionGuard,
   PERMISSION_GROUPS,
   DANGEROUS_PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
   type PermissionAuditEntry,
+  type PluginPermissionTier,
 } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 
@@ -42,6 +43,14 @@ export interface UsePluginPermissions {
   revokeAll: (pluginId: string) => void
   request: (pluginId: string, permission: PluginPermission, reason?: string) => Promise<boolean>
   isDangerous: (permission: PluginPermission) => boolean
+  /** Per-(plugin, permission) tier (silent | confirm | forbid). */
+  getTier: (pluginId: string, permission: PluginPermission) => PluginPermissionTier
+  /** Update the tier for one (plugin, permission). */
+  setTier: (pluginId: string, permission: PluginPermission, tier: PluginPermissionTier) => void
+  /** Every non-default tier row for a plugin. */
+  getTiersForPlugin: (
+    pluginId: string
+  ) => Array<{ permission: PluginPermission; tier: PluginPermissionTier }>
 }
 
 export function usePluginPermissions(): UsePluginPermissions {
@@ -106,6 +115,28 @@ export function usePluginPermissions(): UsePluginPermissions {
     [guard]
   )
 
+  // Tier changes happen outside React; subscribe so any consumer that
+  // reads getTier re-renders when the guard mutates.
+  useEffect(() => guard.subscribeTierChanges(bump), [guard, bump])
+
+  const getTier = useCallback(
+    (pluginId: string, permission: PluginPermission) => guard.getTier(pluginId, permission),
+    [guard]
+  )
+  const setTier = useCallback(
+    (pluginId: string, permission: PluginPermission, tier: PluginPermissionTier) => {
+      guard.setTier(pluginId, permission, tier)
+      // bump() happens via subscribeTierChanges; explicit call avoids a
+      // one-render lag for the caller that just wrote.
+      bump()
+    },
+    [guard, bump]
+  )
+  const getTiersForPlugin = useCallback(
+    (pluginId: string) => guard.getTiersForPlugin(pluginId),
+    [guard]
+  )
+
   return useMemo(
     () => ({
       groups: PERMISSION_GROUPS,
@@ -119,7 +150,22 @@ export function usePluginPermissions(): UsePluginPermissions {
       revokeAll,
       request,
       isDangerous,
+      getTier,
+      setTier,
+      getTiersForPlugin,
     }),
-    [auditLog, getGranted, getHolders, grant, revoke, revokeAll, request, isDangerous]
+    [
+      auditLog,
+      getGranted,
+      getHolders,
+      grant,
+      revoke,
+      revokeAll,
+      request,
+      isDangerous,
+      getTier,
+      setTier,
+      getTiersForPlugin,
+    ]
   )
 }

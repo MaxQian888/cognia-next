@@ -4,9 +4,10 @@
 
 import { loggers } from "@/lib/logger"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
-import { loadWasmDefinition } from "./wasm-loader"
-import { loadVscodeDefinition } from "./vscode-loader"
+import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
+import { loadVscodeDefinition, unloadVscodeExtension } from "./vscode-loader"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -545,12 +546,28 @@ export class PluginLoader {
     const entry = this.loadedModules.get(pluginId)
     const manifestType = entry?.definition?.manifest?.type
     if (manifestType === "wasm") {
-      void import("./wasm-loader").then(({ unloadWasmPlugin }) =>
-        unloadWasmPlugin(pluginId).catch(() => {})
+      void unloadWasmPlugin(pluginId).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "loader.unloadWasmPlugin",
+            message: "Failed to unload WASM plugin during teardown",
+            expected: false,
+          },
+          error
+        )
       )
     } else if (manifestType === "vscode-extension") {
-      void import("./vscode-loader").then(({ unloadVscodeExtension }) =>
-        unloadVscodeExtension(pluginId).catch(() => {})
+      void unloadVscodeExtension(pluginId).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "loader.unloadVscodeExtension",
+            message: "Failed to unload VS Code extension during teardown",
+            expected: false,
+          },
+          error
+        )
       )
     }
     this.loadedModules.delete(pluginId)

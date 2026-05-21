@@ -10,7 +10,7 @@
  *  4. Archived — hidden by default; toggle at bottom to show.
  */
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -19,14 +19,18 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Toggle } from "@/components/ui/toggle"
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@/lib/claude/types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { PlatformBadge } from "./platform-badge"
 import { UnreadPill } from "./unread-pill"
+import { ConversationSearchInput } from "./search/conversation-search-input"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+
+type FilterChip = "unread" | "pinned"
 
 interface ConversationListProps {
   adapterId?: string
@@ -38,6 +42,53 @@ interface EnrichedSession {
   session: ChatSession
   override: ConversationOverrideRow | undefined
   unreadCount: number
+  /** Lazy plaintext snippet of the latest message; populated only when
+   *  the operator is searching. */
+  lastMessagePreview?: string
+}
+
+/**
+ * Extract a plaintext fragment from a UIMessage `parts` array. Walks
+ * text-typed parts and concatenates their `text` fields, leaving room
+ * for the caller's downstream length cap (default ~240 chars).
+ */
+function extractPlainText(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  const buf: string[] = []
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue
+    const p = part as { type?: unknown; text?: unknown }
+    if (p.type === "text" && typeof p.text === "string") {
+      buf.push(p.text)
+    }
+  }
+  return buf.join(" ").replace(/\s+/g, " ").trim()
+}
+
+/**
+ * Predicate factory used by the live-query → render-time filter. Combines:
+ *   - text query (case-insensitive substring over title, conversationKey
+ *     segments, and last-message preview);
+ *   - active filter chips (unread / pinned), AND-combined when both set.
+ */
+function buildFilterPredicate(
+  query: string,
+  chips: Set<FilterChip>
+): (item: EnrichedSession) => boolean {
+  const needle = query.trim().toLowerCase()
+  const wantUnread = chips.has("unread")
+  const wantPinned = chips.has("pinned")
+  return (item) => {
+    if (wantUnread && item.unreadCount <= 0) return false
+    if (wantPinned && !item.override?.pinned) return false
+    if (!needle) return true
+    const ck = item.session.platformBinding?.conversationKey ?? ""
+    const hay = [item.session.title, ck, item.lastMessagePreview ?? ""]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+    return hay.includes(needle)
+  }
 }
 
 export function ConversationList({
@@ -48,8 +99,15 @@ export function ConversationList({
   const router = useRouter()
   const t = useTranslations("inbox.conversationList")
   const [showArchived, setShowArchived] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeChips, setActiveChips] = useState<Set<FilterChip>>(() => new Set())
 
   // Load all platform-bound sessions + their overrides.
+  // When `searchQuery` is non-empty we additionally hydrate a plaintext
+  // snippet of each session's most recent message so the search can hit
+  // message content, not just metadata. The cost is paid only when the
+  // operator is actively searching — the no-search default path stays
+  // metadata-only to keep the live query cheap.
   const enriched = useLiveQuery<EnrichedSession[]>(async () => {
     if (typeof window === "undefined") return []
     const db = getDb()
@@ -67,14 +125,40 @@ export function ConversationList({
     const overrides = await db.conversationOverrides.toArray()
     const overrideMap = new Map(overrides.map((o) => [o.conversationKey, o]))
 
+    // Resolve a per-session last-message preview only when the operator
+    // is actively searching. Walks `messages` ordered by `createdAt`
+    // descending and stops at the first hit per session so the index
+    // does the heavy lifting.
+    const previewBySession = new Map<string, string>()
+    if (searchQuery.trim()) {
+      const seen = new Set<string>()
+      const sessionIds = new Set(sessions.map((s) => s.id))
+      await db.messages
+        .orderBy("createdAt")
+        .reverse()
+        .until(() => seen.size >= sessions.length, true)
+        .each((msg) => {
+          if (seen.has(msg.sessionId)) return
+          if (!sessionIds.has(msg.sessionId)) return
+          const text = extractPlainText(msg.parts).slice(0, 240)
+          previewBySession.set(msg.sessionId, text)
+          seen.add(msg.sessionId)
+        })
+    }
+
     return sessions.map((session) => {
       const ck = session.platformBinding!.conversationKey
       const override = overrideMap.get(ck)
       const lastReadAt = override?.lastReadAt ?? 0
       const unreadCount = lastReadAt < session.updatedAt ? 1 : 0
-      return { session, override, unreadCount }
+      return {
+        session,
+        override,
+        unreadCount,
+        lastMessagePreview: previewBySession.get(session.id),
+      }
     })
-  }, [adapterId, platformKind])
+  }, [adapterId, platformKind, searchQuery])
 
   if (!enriched) {
     return (
@@ -86,13 +170,16 @@ export function ConversationList({
     )
   }
 
+  const predicate = buildFilterPredicate(searchQuery, activeChips)
+  const filtered = enriched.filter(predicate)
+
   // Separate by bucket
   const pinned: EnrichedSession[] = []
   const unread: EnrichedSession[] = []
   const read: EnrichedSession[] = []
   const archived: EnrichedSession[] = []
 
-  for (const item of enriched) {
+  for (const item of filtered) {
     if (item.override?.archived) {
       archived.push(item)
     } else if (item.override?.pinned) {
@@ -114,27 +201,97 @@ export function ConversationList({
 
   const visibleRows = [...pinned, ...unread, ...read, ...(showArchived ? archived : [])]
 
+  const isFiltering = Boolean(searchQuery.trim()) || activeChips.size > 0
+  const emptyState =
+    visibleRows.length === 0
+      ? isFiltering
+        ? {
+            primary: t("emptyFiltered.title"),
+            secondary: t("emptyFiltered.description"),
+            reset: () => {
+              setSearchQuery("")
+              setActiveChips(new Set())
+            },
+          }
+        : { primary: t("empty"), secondary: null, reset: null }
+      : null
+
+  const toggleChip = (chip: FilterChip) => {
+    setActiveChips((prev) => {
+      const next = new Set(prev)
+      if (next.has(chip)) next.delete(chip)
+      else next.add(chip)
+      return next
+    })
+  }
+
   const handleSelect = (ck: string) => {
     router.push(`/inbox/c/${encodeURIComponent(ck)}`)
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 flex items-center gap-1 border-b px-3 py-2">
-        <SidebarTrigger
-          className="-ml-1 size-9 md:hidden"
-          aria-label={t("openSidebar")}
-          data-testid="conversation-list-open-sidebar"
-        />
-        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {t("header")}
-        </h3>
+      <div className="shrink-0 flex flex-col gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-1">
+          <SidebarTrigger
+            className="-ml-1 size-9 md:hidden"
+            aria-label={t("openSidebar")}
+            data-testid="conversation-list-open-sidebar"
+          />
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {t("header")}
+          </h3>
+        </div>
+        <ConversationSearchInput value={searchQuery} onDebouncedChange={setSearchQuery} />
+        <div
+          className="flex flex-wrap items-center gap-1"
+          role="group"
+          aria-label={t("filter.aria")}
+          data-testid="conversation-filter-chips"
+        >
+          <Toggle
+            size="sm"
+            pressed={activeChips.has("unread")}
+            onPressedChange={() => toggleChip("unread")}
+            aria-label={t("filter.tooltip.unread")}
+            data-testid="conversation-filter-unread"
+            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
+          >
+            {t("filter.unread")}
+          </Toggle>
+          <Toggle
+            size="sm"
+            pressed={activeChips.has("pinned")}
+            onPressedChange={() => toggleChip("pinned")}
+            aria-label={t("filter.tooltip.pinned")}
+            data-testid="conversation-filter-pinned"
+            className="h-6 px-2 text-xs data-[state=on]:bg-primary/15"
+          >
+            {t("filter.pinned")}
+          </Toggle>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="py-1">
-          {visibleRows.length === 0 ? (
-            <p className="px-3 py-4 text-xs text-muted-foreground text-center">{t("empty")}</p>
+          {emptyState ? (
+            <div className="px-3 py-4 text-center" data-testid="conversation-list-empty">
+              <p className="text-xs text-muted-foreground">{emptyState.primary}</p>
+              {emptyState.secondary && (
+                <p className="mt-1 text-[11px] text-muted-foreground/80">{emptyState.secondary}</p>
+              )}
+              {emptyState.reset && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-2 h-6 px-1 text-xs"
+                  onClick={emptyState.reset}
+                  data-testid="conversation-filter-reset"
+                >
+                  {t("emptyFiltered.reset")}
+                </Button>
+              )}
+            </div>
           ) : (
             visibleRows.map((item) => (
               <ConversationRow

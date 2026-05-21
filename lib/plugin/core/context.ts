@@ -116,6 +116,8 @@ import { invokePluginApi, PluginGatewayError } from "./transport"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
+import { prefixPluginKind } from "../bridge/kind-prefix"
+import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
 
 /**
  * Full plugin context combining base and extended APIs.
@@ -590,7 +592,17 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
             loggers.agent.warn(`No active background agent to cancel: ${agentId}`)
           }
         })
-        .catch((e) => loggers.agent.error("Failed to cancel agent:", e))
+        .catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "agent.cancelAgent",
+              message: `Failed to cancel agent ${agentId}`,
+              expected: false,
+            },
+            error
+          )
+        )
     },
 
     // M1·T5 — Plugin-first Computer Use capability registration.
@@ -1376,7 +1388,16 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
     title,
     setTitle: (newTitle: string) => {
       invokePluginApi<void>(pluginId, "window:setTitle", { windowId: id, title: newTitle }).catch(
-        (e) => loggers.manager.error("Failed to set window title:", e)
+        (error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "window.setTitle",
+              message: `Failed to set window title (windowId=${id})`,
+              expected: false,
+            },
+            error
+          )
       )
     },
     close: () => invokePluginApi<void>(pluginId, "window:close", { windowId: id }),
@@ -1413,8 +1434,16 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
     getMain: () => createPluginWindow("main", "Cognia"),
     getAll: () => Array.from(windows.values()),
     focus: (windowId: string) => {
-      invokePluginApi<void>(pluginId, "window:focus", { windowId }).catch((e) =>
-        loggers.manager.error("Failed to focus window:", e)
+      invokePluginApi<void>(pluginId, "window:focus", { windowId }).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "window.focus",
+            message: `Failed to focus window (windowId=${windowId})`,
+            expected: false,
+          },
+          error
+        )
       )
     },
   }
@@ -1680,9 +1709,29 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
         .then(({ getTaskScheduler }) => {
           getTaskScheduler()
             .runTaskNow(taskId)
-            .catch((e: Error) => loggers.manager.error("Failed to execute task:", e))
+            .catch((error: Error) =>
+              recordSilentFailure(
+                pluginId,
+                {
+                  site: "scheduler.runTaskNow",
+                  message: `Failed to execute task ${taskId}`,
+                  expected: false,
+                },
+                error
+              )
+            )
         })
-        .catch((e: Error) => loggers.manager.error("Failed to load task-scheduler module:", e))
+        .catch((error: Error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "scheduler.loadTaskScheduler",
+              message: "Failed to load task-scheduler module",
+              expected: false,
+            },
+            error
+          )
+        )
 
       return executionId
     },
@@ -1879,16 +1928,9 @@ function getOrCreatePluginRegistry(pluginId: string) {
   return row
 }
 
-function prefixKind(pluginId: string, raw: string): string {
-  // `trigger.foo` → `trigger.<pluginId>.foo`; everything else → `<pluginId>.<raw>`
-  // The trigger prefix preserves the leading `trigger.` segment so the
-  // orchestrator can still pattern-match by the namespace.
-  if (raw.startsWith("trigger.")) {
-    const rest = raw.slice("trigger.".length)
-    return `trigger.${pluginId}.${rest}`
-  }
-  return `${pluginId}.${raw}`
-}
+// Re-export under the legacy local name so the surrounding callsites stay
+// readable. Single source of truth lives in `lib/plugin/bridge/kind-prefix.ts`.
+const prefixKind = prefixPluginKind
 
 function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
   return {
@@ -1963,15 +2005,33 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       }
     },
 
-    emitTriggerEvent(_workflowId: string, _kind: string, _payload: unknown): void {
-      // Routing into the orchestrator's trigger queue is the host's job.
-      // For Phase 1 we record the call so plugin authors can verify the
-      // wiring without crashing — actual delivery lands in Phase 2 when
-      // the trigger-bridge gets a `dispatchPluginTrigger` entry point.
-      loggers.manager.debug("plugin emitted trigger event (Phase 1 stub)", {
+    emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void {
+      // Phase 2: route into the orchestrator via `dispatchPluginTrigger`,
+      // which prefixes the kind, verifies registration, and hands off to
+      // `lib/workflow/runtime/trigger-bridge.dispatchTrigger`. Fire-and-
+      // forget — failures land in the audit panel through
+      // `recordSilentFailure`, not in the plugin's call stack.
+      void dispatchPluginTrigger({
         pluginId,
-        workflowId: _workflowId,
-        kind: _kind,
+        workflowId,
+        kind,
+        payload,
+      }).then((result) => {
+        if (!result.ok) {
+          loggers.manager.debug("plugin emitTriggerEvent rejected", {
+            pluginId,
+            workflowId,
+            kind,
+            prefixedKind: result.prefixedKind,
+            reason: result.rejectedReason,
+          })
+        } else {
+          loggers.manager.debug("plugin emitTriggerEvent dispatched", {
+            pluginId,
+            workflowId,
+            prefixedKind: result.prefixedKind,
+          })
+        }
       })
     },
   }

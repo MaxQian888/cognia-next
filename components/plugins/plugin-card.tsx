@@ -7,29 +7,14 @@
 // (drag/drop, multi-select) port cleanly.
 
 import { useTranslations } from "next-intl"
-import {
-  MoreHorizontalIcon,
-  PowerIcon,
-  Trash2Icon,
-  SettingsIcon,
-  ShieldCheckIcon,
-  AlertTriangleIcon,
-  CircleAlertIcon,
-  RotateCcwIcon,
-} from "lucide-react"
+import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 
@@ -120,41 +105,15 @@ export function PluginCard({
           </button>
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-7 shrink-0">
-              <MoreHorizontalIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onOpen(plugin.id)}>
-              {t("openDetails")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onConfigure(plugin.id)}>
-              <SettingsIcon className="mr-2 size-3.5" />
-              {t("configure")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onReviewPermissions(plugin.id)}>
-              <ShieldCheckIcon className="mr-2 size-3.5" />
-              {t("reviewPermissions")}
-            </DropdownMenuItem>
-            {onRollback && (
-              <DropdownMenuItem onClick={() => onRollback(plugin.id)}>
-                <RotateCcwIcon className="mr-2 size-3.5" />
-                {t("rollback")}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onToggleEnabled(plugin)}>
-              <PowerIcon className="mr-2 size-3.5" />
-              {plugin.enabled ? t("disable") : t("enable")}
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={() => onUninstall(plugin)}>
-              <Trash2Icon className="mr-2 size-3.5" />
-              {t("uninstall")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <PluginRowActionsMenu
+          plugin={plugin}
+          onOpen={onOpen}
+          onConfigure={onConfigure}
+          onReviewPermissions={onReviewPermissions}
+          onToggleEnabled={onToggleEnabled}
+          onUninstall={onUninstall}
+          onRollback={onRollback}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-1">

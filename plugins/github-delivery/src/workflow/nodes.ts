@@ -1,5 +1,5 @@
 /**
- * The 12 `action.github.*` workflow node executors.
+ * The 13 `action.github.*` workflow node executors.
  *
  * Each executor is a thin Octokit call wrapped in {@link guardedExecutor},
  * which handles repo resolution / policy / audit logging uniformly.
@@ -8,14 +8,66 @@
  *   - Successful API call: return an object with the API fields we care about.
  *   - Policy denied:       guardedExecutor returns `{ skipped: true, reason }`.
  *   - Hard failure:        throw; orchestrator records the error & retries.
+ *
+ * Registration model (post-ADR-0026 migration): the executor descriptors
+ * collect into `GITHUB_NODE_DEFINITIONS` at module load via `defineNode`,
+ * but they are NOT registered against the global node registry until the
+ * plugin's `activate()` calls `registerGithubNodes()`. Deactivate calls
+ * `unregisterGithubNodes()` so disabling the plugin actually removes the
+ * node kinds from the editor, instead of leaking them across reloads as
+ * the pre-migration import-time `registerNodeExecutor(...)` did.
  */
 
-import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
+import {
+  registerNodeExecutor,
+  unregisterNodeExecutor,
+  type NodeExecutorRegistration,
+} from "@/lib/workflow/nodes/registry"
 import type { GhAction } from "@/lib/github/types"
 import { computeBump, parseCommitMessage, applyBump, renderChangelog } from "@/lib/github/changelog"
 import { guardedExecutor, splitRepo } from "./shared"
 import { runIssueLoop, type RunIssueLoopResult } from "./issue-loop"
 import { runPRReviewAgent, type RunPRReviewAgentResult } from "./review-pr-inline"
+
+/**
+ * Collected executor descriptors. Populated by every `defineNode(...)`
+ * call below at module-load time. Consumed exclusively by
+ * `registerGithubNodes` / `unregisterGithubNodes`.
+ */
+const GITHUB_NODE_DEFINITIONS: NodeExecutorRegistration[] = []
+
+function defineNode(reg: NodeExecutorRegistration): void {
+  GITHUB_NODE_DEFINITIONS.push(reg)
+}
+
+/**
+ * Idempotent — registering twice is a harmless no-op the registry
+ * tolerates (the second call overwrites the first with an identical
+ * descriptor). Returns the number of nodes registered for diagnostics.
+ */
+export function registerGithubNodes(): number {
+  for (const reg of GITHUB_NODE_DEFINITIONS) {
+    registerNodeExecutor(reg)
+  }
+  return GITHUB_NODE_DEFINITIONS.length
+}
+
+/**
+ * Symmetric tear-down. Idempotent — `unregisterNodeExecutor` silently
+ * no-ops when the kind isn't registered.
+ */
+export function unregisterGithubNodes(): void {
+  for (const reg of GITHUB_NODE_DEFINITIONS) {
+    unregisterNodeExecutor(reg.kind, reg.typeVersion)
+  }
+}
+
+/**
+ * Exposed for tests + the future ADR-0026 manifest bridge.
+ */
+export function getGithubNodeDefinitions(): readonly NodeExecutorRegistration[] {
+  return GITHUB_NODE_DEFINITIONS
+}
 
 // ── Type definitions for params (mirrors what the inspector form will write) ──
 
@@ -103,7 +155,7 @@ function policyOverrideOf<T extends Common>(params: T): Record<string, unknown> 
 
 // ── openPr ────────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.openPr",
   typeVersion: 1,
   execute: guardedExecutor<OpenPrParams, { number: number; htmlUrl: string }>({
@@ -128,7 +180,7 @@ registerNodeExecutor({
 
 // ── closePr ────────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.closePr",
   typeVersion: 1,
   execute: guardedExecutor<ClosePrParams, { number: number; state: string }>({
@@ -153,7 +205,7 @@ registerNodeExecutor({
 
 // ── mergePr ────────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.mergePr",
   typeVersion: 1,
   execute: guardedExecutor<MergePrParams, { merged: boolean; sha: string }>({
@@ -181,7 +233,7 @@ registerNodeExecutor({
 
 // ── reviewPr ──────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.reviewPr",
   typeVersion: 1,
   execute: guardedExecutor<ReviewPrParams, { id: number; state: string }>({
@@ -212,7 +264,7 @@ registerNodeExecutor({
 
 // ── commentPr ─────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.commentPr",
   typeVersion: 1,
   execute: guardedExecutor<CommentPrParams, { id: number; htmlUrl: string }>({
@@ -242,7 +294,7 @@ registerNodeExecutor({
 
 // ── commentIssue ─────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.commentIssue",
   typeVersion: 1,
   execute: guardedExecutor<CommentIssueParams, { id: number; htmlUrl: string }>({
@@ -271,7 +323,7 @@ registerNodeExecutor({
 
 // ── labelIssue ────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.labelIssue",
   typeVersion: 1,
   execute: guardedExecutor<LabelIssueParams, { added: string[]; removed: string[] }>({
@@ -309,7 +361,7 @@ registerNodeExecutor({
 
 // ── closeIssue ────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.closeIssue",
   typeVersion: 1,
   execute: guardedExecutor<CloseIssueParams, { number: number; state: string }>({
@@ -335,7 +387,7 @@ registerNodeExecutor({
 
 // ── createRelease ─────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.createRelease",
   typeVersion: 1,
   execute: guardedExecutor<CreateReleaseParams, { id: number; htmlUrl: string; tag: string }>({
@@ -373,7 +425,7 @@ interface ChangelogOutput {
   commitCount: number
 }
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.generateChangelog",
   typeVersion: 1,
   execute: guardedExecutor<GenerateChangelogParams, ChangelogOutput>({
@@ -417,7 +469,7 @@ registerNodeExecutor({
 
 // ── pushTag ───────────────────────────────────────────────────────────────
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.pushTag",
   typeVersion: 1,
   execute: guardedExecutor<PushTagParams, { tag: string; sha: string }>({
@@ -448,7 +500,7 @@ registerNodeExecutor({
 // runtime recognizes the kind. The execute body throws a friendly "not yet
 // wired" error until the Claude Code integration lands in M5.
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.runIssueLoop",
   typeVersion: 1,
   execute: guardedExecutor<RunIssueLoopParams, RunIssueLoopResult>({
@@ -476,7 +528,7 @@ registerNodeExecutor({
 // Octokit's POST /pulls/{n}/reviews so reviewers see comments anchored to
 // real diff lines.
 
-registerNodeExecutor({
+defineNode({
   kind: "action.github.reviewPrInline",
   typeVersion: 1,
   execute: guardedExecutor<ReviewPrInlineParams, RunPRReviewAgentResult>({

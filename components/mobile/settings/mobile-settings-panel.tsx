@@ -13,22 +13,16 @@
  * `companion_api/rpc.rs`) rejects keys outside the safe list, so any
  * field added here that isn't in that allowlist will receive a 400.
  *
- * ADR-0021 follow-up — also renders a read-only transport-tier row that
- * subscribes to `CompanionTransport.onTierChange` so the user can see
- * whether they're reaching the desktop over WebRTC, LAN HTTPS, or a
- * tunnel. The row is hidden outside of Capacitor (the web/dev runtime
- * uses a stub transport that doesn't have a meaningful tier).
+ * Pieces previously inlined here are now re-exported from
+ * `components/mobile/me/` so the `/me` profile screen can reuse them
+ * without pulling in the whole panel.
  */
 
-import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { BellIcon, CircleIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
-import { toast } from "sonner"
 
-import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
-import { NotificationsQueueSheet } from "@/components/mobile/notifications/notifications-queue-sheet"
-import { Button } from "@/components/ui/button"
-import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
+import { BiometricRow } from "@/components/mobile/me/biometric-row"
+import { NotificationsSection } from "@/components/mobile/me/notifications-section"
+import { TransportTierIndicator } from "@/components/mobile/me/transport-tier-indicator"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -38,10 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
-import { isCapacitor, transport } from "@/lib/tauri"
-import type { TransportTier } from "@/lib/tauri/transport-companion"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@/lib/claude/types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
@@ -156,52 +146,6 @@ export function MobileSettingsPanel() {
   )
 }
 
-/**
- * Notifications block on the mobile settings panel. Pairs the permission
- * CTA (which auto-hides when granted) with an entry that opens the
- * queue sheet so users can audit / cancel scheduled reminders. The
- * sheet itself handles the unsupported / loaded / error states.
- */
-function NotificationsSection() {
-  const t = useTranslations("mobile.notifications.section")
-  const [queueOpen, setQueueOpen] = useState(false)
-  return (
-    <section className="space-y-3 pt-2" data-testid="mobile-settings-notifications">
-      <div className="space-y-0.5">
-        <h3 className="text-xs font-semibold">{t("title")}</h3>
-        <p className="text-[11px] text-muted-foreground">{t("description")}</p>
-      </div>
-      <NotificationPermissionCta />
-      <Item
-        size="sm"
-        className="px-0"
-        data-testid="mobile-settings-notifications-queue-entry"
-        onClick={() => setQueueOpen(true)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            setQueueOpen(true)
-          }
-        }}
-      >
-        <ItemContent>
-          <ItemTitle className="flex items-center gap-1.5 text-xs">
-            <BellIcon className="size-3.5" aria-hidden="true" />
-            {t("queueRowTitle")}
-          </ItemTitle>
-          <ItemDescription className="text-[11px]">{t("queueRowDescription")}</ItemDescription>
-        </ItemContent>
-        <ItemActions>
-          <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-        </ItemActions>
-      </Item>
-      <NotificationsQueueSheet open={queueOpen} onOpenChange={setQueueOpen} />
-    </section>
-  )
-}
-
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <Label className="flex flex-col gap-1 text-xs font-medium">
@@ -211,173 +155,4 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function BiometricRow({
-  label,
-  help,
-  checked,
-  onChange,
-  testid,
-}: {
-  label: string
-  help: string
-  checked: boolean
-  onChange: (next: boolean) => void
-  testid: string
-}) {
-  return (
-    <Item size="sm" className="px-0">
-      <ItemContent>
-        <ItemTitle className="text-xs">{label}</ItemTitle>
-        <ItemDescription className="text-[11px]">{help}</ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <Switch
-          checked={checked}
-          onCheckedChange={onChange}
-          data-testid={testid}
-          aria-label={label}
-        />
-      </ItemActions>
-    </Item>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Transport tier indicator — ADR-0021 follow-up
-// ---------------------------------------------------------------------------
-
-/** Maps `TransportTier` → a Tailwind color class for the colored dot. */
-const TIER_COLOR: Record<TransportTier, string> = {
-  "rtc-direct": "fill-emerald-500 text-emerald-500",
-  "rtc-relay": "fill-emerald-500 text-emerald-500",
-  "ws-lan": "fill-sky-500 text-sky-500",
-  "ws-tunnel": "fill-amber-500 text-amber-500",
-  offline: "fill-muted-foreground text-muted-foreground",
-}
-
-/** Maps `TransportTier` → the i18n key suffix under `mobile.transportTier`. */
-const TIER_KEY: Record<TransportTier, string> = {
-  "rtc-direct": "rtcDirect",
-  "rtc-relay": "rtcRelay",
-  "ws-lan": "wsLan",
-  "ws-tunnel": "wsTunnel",
-  offline: "offline",
-}
-
-/**
- * Read-only row showing how the mobile client is currently reaching the
- * desktop. Subscribes to `CompanionTransport.onTierChange` so the value
- * stays live without polling. Hidden outside Capacitor — the web stub
- * doesn't have a meaningful tier.
- */
-export function TransportTierIndicator(): React.JSX.Element | null {
-  const t = useTranslations("mobile.settingsPanel")
-  const tt = useTranslations("mobile.transportTier")
-  // Default to "offline" for the SSR / first-paint case; the effect below
-  // will overwrite immediately on Capacitor.
-  const [tier, setTier] = useState<TransportTier>("offline")
-  const [active, setActive] = useState<boolean>(false)
-  const [reconnecting, setReconnecting] = useState(false)
-
-  useEffect(() => {
-    // The CompanionTransport singleton exposes `getActiveTier` /
-    // `onTierChange`; the Tauri + web stubs do not. Duck-type so a
-    // mocked transport in tests also lights up the row.
-    if (!isCapacitor()) return
-    const candidate = transport as unknown as {
-      getActiveTier?: () => TransportTier
-      onTierChange?: (h: (t: TransportTier) => void) => () => void
-    }
-    if (
-      typeof candidate.getActiveTier !== "function" ||
-      typeof candidate.onTierChange !== "function"
-    ) {
-      return
-    }
-    // SSR-safe init: the transport singleton isn't accessible during the
-    // server / first paint, so we must seed `tier` + `active` once on mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setActive(true)
-
-    setTier(candidate.getActiveTier())
-    return candidate.onTierChange((next) => setTier(next))
-  }, [])
-
-  const onReconnect = useCallback(() => {
-    const candidate = transport as unknown as {
-      reconnectRtc?: () => "ok" | "no-tier" | "throttled"
-    }
-    if (typeof candidate.reconnectRtc !== "function") {
-      // Not on Capacitor build, or the singleton hasn't been upgraded —
-      // refuse silently. The button only renders when `active`, which is
-      // already a Capacitor-only flag, so this branch is defensive only.
-      return
-    }
-    setReconnecting(true)
-    try {
-      const result = candidate.reconnectRtc()
-      if (result === "ok") {
-        toast.success(t("reconnectSuccess"))
-      } else if (result === "throttled") {
-        toast.warning(t("reconnectThrottled"))
-      } else {
-        toast.warning(t("reconnectInactive"))
-      }
-    } catch (err) {
-      toast.error(
-        t("reconnectFailed", {
-          reason: err instanceof Error ? err.message : String(err),
-        })
-      )
-    } finally {
-      // `reconnectRtc` is fire-and-forget — the actual handshake runs
-      // asynchronously inside `TransportRtc`. We surface a short busy
-      // window so the button doesn't flicker, then fall back to the live
-      // tier indicator for visibility.
-      setTimeout(() => setReconnecting(false), 800)
-    }
-  }, [t])
-
-  if (!active) return null
-
-  const key = TIER_KEY[tier]
-  // Show the reconnect affordance only when an RTC tier is involved.
-  // For ws-* / offline the button would be a no-op (`reconnectRtc()`
-  // returns false), so we hide it instead of confusing the user.
-  const canReconnect = tier === "rtc-direct" || tier === "rtc-relay"
-
-  return (
-    <section
-      className="flex flex-col gap-1 rounded border bg-card px-3 py-2 text-xs"
-      data-testid="mobile-transport-tier"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">{t("transportTier")}</span>
-        <span className="flex items-center gap-1.5">
-          <CircleIcon aria-hidden="true" className={cn("size-2 shrink-0", TIER_COLOR[tier])} />
-          <span className="text-xs">{tt(key)}</span>
-        </span>
-      </div>
-      <p className="text-[11px] text-muted-foreground">{tt(`${key}Description`)}</p>
-      {canReconnect ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="self-end h-7 px-2 text-[11px]"
-          disabled={reconnecting}
-          onClick={onReconnect}
-          data-testid="mobile-transport-tier-reconnect"
-        >
-          <RefreshCwIcon
-            aria-hidden="true"
-            className={cn("size-3 mr-1", reconnecting && "animate-spin")}
-          />
-          {t("reconnectButton")}
-        </Button>
-      ) : null}
-    </section>
-  )
-}
+export { TransportTierIndicator } from "@/components/mobile/me/transport-tier-indicator"

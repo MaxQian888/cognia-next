@@ -12,6 +12,7 @@ import {
   listPluginPermissions as listHostPermissions,
   revokePluginPermission as revokeHostPermission,
 } from "@/lib/plugin/core/transport"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 // Permission grants by plugin
 const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
@@ -117,7 +118,17 @@ export function createPermissionAPI(
   }
 
   // Prime host-side grants list (best effort).
-  void listHostPermissions(pluginId).catch(() => undefined)
+  void listHostPermissions(pluginId).catch((error) =>
+    recordSilentFailure(
+      pluginId,
+      {
+        site: "permission.listHost",
+        message: "Failed to prime host-side permission grants",
+        expected: false,
+      },
+      error
+    )
+  )
 
   const getPermissions = () => grantedPermissions.get(pluginId) || new Set()
 
@@ -144,7 +155,17 @@ export function createPermissionAPI(
 
       if (granted) {
         existing.add(permission)
-        void grantHostPermission(pluginId, permission).catch(() => undefined)
+        void grantHostPermission(pluginId, permission).catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "permission.grantHost",
+              message: `Failed to persist grant for ${permission}`,
+              expected: false,
+            },
+            error
+          )
+        )
         logger.info(`Granted permission: ${permission}`)
       } else {
         logger.info(`Denied permission: ${permission}`)
@@ -182,7 +203,17 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
   const permissions = grantedPermissions.get(pluginId) || new Set()
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
-  void grantHostPermission(pluginId, permission).catch(() => undefined)
+  void grantHostPermission(pluginId, permission).catch((error) =>
+    recordSilentFailure(
+      pluginId,
+      {
+        site: "permission.grantHost",
+        message: `Failed to persist grant for ${permission}`,
+        expected: false,
+      },
+      error
+    )
+  )
 }
 
 /**
@@ -193,5 +224,15 @@ export function revokePermission(pluginId: string, permission: PluginAPIPermissi
   if (permissions) {
     permissions.delete(permission)
   }
-  void revokeHostPermission(pluginId, permission).catch(() => undefined)
+  void revokeHostPermission(pluginId, permission).catch((error) =>
+    recordSilentFailure(
+      pluginId,
+      {
+        site: "permission.revokeHost",
+        message: `Failed to persist revocation for ${permission}`,
+        expected: false,
+      },
+      error
+    )
+  )
 }

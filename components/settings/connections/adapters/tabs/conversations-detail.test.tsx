@@ -199,10 +199,10 @@ describe("ConversationsDetail — list rendering", () => {
 
 describe("ConversationsDetail — badges", () => {
   it("shows the mode badge when row.mode is set", () => {
-    const overrides = [makeTgOverride("ov1", "100", { mode: "brief" })]
+    const overrides = [makeTgOverride("ov1", "100", { mode: "auto" })]
     mockUseLiveQuery.mockReturnValue(overrides as unknown as ReturnType<typeof useLiveQuery>)
     render(withIntl(<ConversationsDetail adapterId={ADAPTER_ID} />))
-    expect(screen.getByText("brief")).toBeInTheDocument()
+    expect(screen.getByText("auto")).toBeInTheDocument()
   })
 
   it("shows the Computer Use badge when allowComputerUse is true", () => {

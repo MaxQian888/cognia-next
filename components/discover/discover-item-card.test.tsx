@@ -13,7 +13,15 @@ import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import { DiscoverItemCard } from "./discover-item-card"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  // Most assertions read on the raw i18n key — keep that behavior, but
+  // resolve the handful of templates that the test cases interpolate
+  // (twinDraftFallbackName uses `{kind}` to render "character draft").
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    if (key === "card.twinDraftFallbackName" && params && typeof params.kind === "string") {
+      return `${params.kind as string} draft`
+    }
+    return key
+  },
   useLocale: () => "en",
 }))
 

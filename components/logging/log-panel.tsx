@@ -15,23 +15,39 @@
  * - LogTimeline — density timeline
  */
 
-import { useRef, useState, useEffect, useCallback, useMemo, useDeferredValue } from "react"
+import {
+  type ReactNode,
+  createContext,
+  useContext,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useDeferredValue,
+} from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Empty, EmptyTitle } from "@/components/ui/empty"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import {
   useLogStream,
   useLogModules,
   useAgentTraceAsLogs,
   useTransportHealth,
 } from "@/hooks/logging"
-import { useLogPanelFilters, type PanelSource } from "@/hooks/logging/use-log-panel-filters"
+import {
+  useLogPanelFilters,
+  type LogPanelFilterState,
+  type PanelSource,
+} from "@/hooks/logging/use-log-panel-filters"
+import { useLogPanelUrlSync } from "@/hooks/logging/use-log-panel-url-sync"
 import { LogPanelToolbar, type ExportFormat } from "./log-panel-toolbar"
 import { LogPanelStatsBar, TransportHealthDetail, NativeLoggingDetail } from "./log-panel-stats-bar"
 import { VirtualizedLogList } from "./log-virtualized-list"
 import { LogStatsDashboard } from "./log-stats-dashboard"
 import { LogTimeline } from "./log-timeline"
+import { LogTraceView } from "./log-trace-view"
 import { LogDetailPanel } from "./log-detail-panel"
 import {
   Sheet,
@@ -40,8 +56,9 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
-import { useMediaQuery } from "@/hooks/ui"
+import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import type { LogFilterPreset } from "./log-filter-presets"
 import type { StructuredLogEntry } from "@/lib/logger"
 
 // Time range options in milliseconds
@@ -56,6 +73,32 @@ const TIME_RANGES = {
 
 const ALL_PANEL_SOURCES: PanelSource[] = ["frontend", "tauri", "mcp", "plugin", "internal"]
 const LOG_PAGE_SIZE_OPTIONS = [25, 50, 100] as const
+const NEW_LOG_TOAST_THROTTLE_MS = 5000
+
+export interface LogPanelHeaderApi {
+  totalCount: number
+  filteredCount: number
+  activePresetId: string
+  presets: LogFilterPreset[]
+  handlePresetChange: (id: string) => void
+  onOpenShortcuts: () => void
+  EMPTY_PRESET_VALUE: string
+}
+
+const LogPanelHeaderContext = createContext<LogPanelHeaderApi | null>(null)
+
+/**
+ * Read the LogPanel's header API from inside a component supplied as
+ * `headerSlot`. Throws when used outside the panel — that signals the host
+ * forgot to nest the consumer under `<LogPanel headerSlot={...} />`.
+ */
+export function useLogPanelHeader(): LogPanelHeaderApi {
+  const ctx = useContext(LogPanelHeaderContext)
+  if (!ctx) {
+    throw new Error("useLogPanelHeader must be used inside a LogPanel headerSlot")
+  }
+  return ctx
+}
 
 export interface LogPanelProps {
   className?: string
@@ -67,6 +110,17 @@ export interface LogPanelProps {
   showTimeline?: boolean
   sources?: ("frontend" | "tauri" | "mcp" | "plugin")[]
   includeAgentTrace?: boolean
+  /**
+   * Optional header content rendered above the toolbar. The host page may
+   * read panel state via `useLogPanelHeader()`, which surfaces totals,
+   * presets, and a few light callbacks without forking the filter machine.
+   */
+  headerSlot?: ReactNode
+  /**
+   * When `true`, the inner toolbar's preset dropdown is hidden so the host
+   * page can own preset selection from `headerSlot`. Defaults to `false`.
+   */
+  hideToolbarPresets?: boolean
 }
 
 function getLogSource(log: StructuredLogEntry): PanelSource {
@@ -92,15 +146,18 @@ export function LogPanel({
   showTimeline = true,
   sources,
   includeAgentTrace = true,
+  headerSlot,
+  hideToolbarPresets = false,
 }: LogPanelProps) {
   const t = useTranslations("logging")
   const filters = useLogPanelFilters({ defaultAutoRefresh, sources })
+  useLogPanelUrlSync(filters)
   // Above `lg` (1024px) use the side panel; below it, fall back to the bottom sheet.
   const isDesktopViewport = useMediaQuery("(min-width: 1024px)")
   const deferredSearchQuery = useDeferredValue(filters.searchQuery)
-  const [customTimeRange, setCustomTimeRange] = useState<{ start: Date; end: Date } | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(50)
+  // customTimeRange + currentPage + pageSize now live in useLogPanelFilters so
+  // the URL-sync hook above has a single state container to mirror.
+  const { customTimeRange, currentPage, pageSize } = filters
 
   const allowedSources = useMemo<PanelSource[]>(
     () =>
@@ -381,7 +438,7 @@ export function LogPanel({
   }, [logs, filters.selectedLog])
 
   const resetPagination = useCallback(() => {
-    setCurrentPage(1)
+    filters.setCurrentPage(1)
     filters.setFocusedIndex(-1)
     if (scrollRef.current) {
       scrollRef.current.scrollTop = 0
@@ -391,7 +448,7 @@ export function LogPanel({
   const handlePageChange = useCallback(
     (page: number) => {
       const nextPage = Math.max(1, Math.min(page, totalPages))
-      setCurrentPage(nextPage)
+      filters.setCurrentPage(nextPage)
       filters.setFocusedIndex(-1)
       if (scrollRef.current) {
         scrollRef.current.scrollTop = 0
@@ -402,10 +459,10 @@ export function LogPanel({
 
   const handlePageSizeChange = useCallback(
     (nextPageSize: number) => {
-      setPageSize(nextPageSize)
+      filters.setPageSize(nextPageSize)
       resetPagination()
     },
-    [resetPagination]
+    [filters, resetPagination]
   )
 
   const handleSearchQueryChange = useCallback(
@@ -559,9 +616,9 @@ export function LogPanel({
   const handleCustomTimeRangeChange = useCallback(
     (range: { start: Date; end: Date } | null) => {
       resetPagination()
-      setCustomTimeRange(range)
+      filters.setCustomTimeRange(range)
     },
-    [resetPagination]
+    [filters, resetPagination]
   )
 
   // Scroll controls
@@ -576,307 +633,503 @@ export function LogPanel({
     }
   }, [])
 
-  // Keyboard shortcuts — read latest filter state / paginated logs via a ref
-  // so polling-driven re-renders don't detach + reattach the listener every
-  // 2 seconds. The effect itself only re-runs when view mode flips or the
-  // list transitions between empty and non-empty (the virtualizer host div
-  // only mounts when there's data).
-  const keyboardLatestRef = useRef({
-    filters,
-    refresh,
-    handleSearchQueryChange,
-    paginatedLogs,
-  })
+  // Keyboard shortcuts — attached to `window` so the panel listens regardless
+  // of where focus currently sits (previously bound to the virtualizer host
+  // div, which silently broke shortcuts when focus was elsewhere). The effect
+  // re-attaches whenever the captured values change; since the listener target
+  // is `window`, attach/detach is O(1) and harmless during polling.
   useEffect(() => {
-    keyboardLatestRef.current = { filters, refresh, handleSearchQueryChange, paginatedLogs }
-  })
-
-  const hasPaginatedLogs = paginatedLogs.length > 0
-  useEffect(() => {
+    if (typeof window === "undefined") return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const {
-        filters: latestFilters,
-        refresh: latestRefresh,
-        handleSearchQueryChange: latestHandleSearch,
-        paginatedLogs: latestPaginatedLogs,
-      } = keyboardLatestRef.current
+      // Ignore shortcuts while the user is typing in any text input.
+      const target = e.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return
+      }
+      // Ignore shortcuts while a modal dialog is open so its keyboard
+      // semantics aren't shadowed (e.g. the shortcuts dialog itself).
+      if (typeof document !== "undefined") {
+        const openDialog = document.querySelector('div[role="dialog"][data-state="open"]')
+        if (openDialog) return
+      }
 
       if (e.key === "r" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        latestRefresh()
+        refresh()
       } else if (e.key === "Escape") {
-        if (latestFilters.showDetailPanel) latestFilters.setShowDetailPanel(false)
-        else latestHandleSearch("")
+        if (filters.showDetailPanel) filters.setShowDetailPanel(false)
+        else handleSearchQueryChange("")
       } else if (e.key === "d" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        latestFilters.setViewMode((prev) => (prev === "list" ? "dashboard" : "list"))
+        filters.setViewMode((prev) => (prev === "list" ? "dashboard" : "list"))
+      } else if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault()
+        const searchInput = document.querySelector<HTMLInputElement>(
+          '[data-testid="log-panel-toolbar"] input[role="combobox"]'
+        )
+        searchInput?.focus()
+      } else if (e.key === "b" && !e.ctrlKey && !e.metaKey) {
+        const focused = filters.focusedIndex
+        if (focused >= 0 && focused < paginatedLogs.length) {
+          e.preventDefault()
+          filters.toggleBookmark(paginatedLogs[focused].id)
+        }
+      } else if (e.key === "g" && !e.ctrlKey && !e.metaKey) {
+        if (filters.presets.length === 0) return
+        e.preventDefault()
+        filters.setShowAdvancedFilters(true)
+        // Defer to next frame so the preset trigger has time to mount before
+        // we click it open.
+        requestAnimationFrame(() => {
+          const trigger =
+            document.querySelector<HTMLButtonElement>('[data-testid="log-panel-preset-trigger"]') ??
+            document.querySelector<HTMLButtonElement>(
+              '[data-testid="log-page-header-preset-trigger"]'
+            )
+          if (trigger) {
+            trigger.focus()
+            trigger.click()
+          }
+        })
       } else if (e.key === "ArrowDown" || e.key === "j") {
         e.preventDefault()
-        latestFilters.setFocusedIndex((prev) => Math.min(prev + 1, latestPaginatedLogs.length - 1))
+        filters.setFocusedIndex((prev) => Math.min(prev + 1, paginatedLogs.length - 1))
       } else if (e.key === "ArrowUp" || e.key === "k") {
         e.preventDefault()
-        latestFilters.setFocusedIndex((prev) => Math.max(prev - 1, 0))
+        filters.setFocusedIndex((prev) => Math.max(prev - 1, 0))
       } else if (
         e.key === "Enter" &&
-        latestFilters.focusedIndex >= 0 &&
-        latestFilters.focusedIndex < latestPaginatedLogs.length
+        filters.focusedIndex >= 0 &&
+        filters.focusedIndex < paginatedLogs.length
       ) {
         e.preventDefault()
-        latestFilters.toggleExpanded(latestPaginatedLogs[latestFilters.focusedIndex].id)
+        filters.toggleExpanded(paginatedLogs[filters.focusedIndex].id)
       } else if (
         e.key === "o" &&
-        latestFilters.focusedIndex >= 0 &&
-        latestFilters.focusedIndex < latestPaginatedLogs.length
+        filters.focusedIndex >= 0 &&
+        filters.focusedIndex < paginatedLogs.length
       ) {
         e.preventDefault()
-        latestFilters.handleSelectLog(latestPaginatedLogs[latestFilters.focusedIndex])
+        filters.handleSelectLog(paginatedLogs[filters.focusedIndex])
       } else if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        latestFilters.setShowShortcutsDialog(true)
+        filters.setShowShortcutsDialog(true)
       }
     }
 
-    const container = containerRef.current
-    if (container) {
-      container.addEventListener("keydown", handleKeyDown)
-      return () => container.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [filters.viewMode, hasPaginatedLogs])
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [filters, refresh, handleSearchQueryChange, paginatedLogs])
 
-  // Auto-scroll to bottom on new logs
+  // Auto-scroll / new-logs toast.
+  //
+  // When `autoRefresh` is on and the user is on the first page, scroll the
+  // virtualizer to the latest entry as before. When the user is paged away
+  // from the latest entries, surface a throttled Sonner toast with a
+  // "Jump to latest" action instead — preserves their browsing position but
+  // gives them a one-click way to come back. Without this branch the user
+  // silently misses every new entry on pages > 1.
+  const lastSeenLogCountRef = useRef(logs.length)
+  const lastToastAtRef = useRef(0)
   useEffect(() => {
-    if (scrollRef.current && safeCurrentPage === 1 && filters.autoScroll && filters.autoRefresh) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const previous = lastSeenLogCountRef.current
+    const delta = logs.length - previous
+    lastSeenLogCountRef.current = logs.length
+
+    if (!filters.autoRefresh || delta <= 0) return
+
+    if (safeCurrentPage === 1) {
+      if (scrollRef.current && filters.autoScroll) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+      return
     }
-  }, [logs.length, safeCurrentPage, filters.autoScroll, filters.autoRefresh])
+
+    const now = Date.now()
+    if (now - lastToastAtRef.current < NEW_LOG_TOAST_THROTTLE_MS) return
+    lastToastAtRef.current = now
+
+    toast(t("panel.newLogsToast", { count: delta }), {
+      id: "log-panel-new-logs",
+      action: {
+        label: t("panel.jumpToLatest"),
+        onClick: () => {
+          filters.setCurrentPage(1)
+          requestAnimationFrame(() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+            }
+          })
+        },
+      },
+    })
+  }, [logs.length, safeCurrentPage, filters, t])
+
+  const onOpenShortcuts = useCallback(() => {
+    filters.setShowShortcutsDialog(true)
+  }, [filters])
+  const resizableLayout = useResizableLayout("cognia-logs-panel-split")
+  const headerContextValue = useMemo<LogPanelHeaderApi>(
+    () => ({
+      totalCount: stats.total,
+      filteredCount: filteredLogs.length,
+      activePresetId: filters.activePresetId,
+      presets: filters.presets,
+      handlePresetChange,
+      onOpenShortcuts,
+      EMPTY_PRESET_VALUE: filters.EMPTY_PRESET_VALUE,
+    }),
+    [
+      stats.total,
+      filteredLogs.length,
+      filters.activePresetId,
+      filters.presets,
+      handlePresetChange,
+      onOpenShortcuts,
+      filters.EMPTY_PRESET_VALUE,
+    ]
+  )
 
   return (
-    <div
-      className={cn("flex flex-col border rounded-lg bg-background h-full", className)}
-      style={maxHeight ? { maxHeight } : undefined}
-    >
-      {/* Toolbar */}
-      <LogPanelToolbar
-        viewMode={filters.viewMode}
-        setViewMode={filters.setViewMode}
-        includeAgentTrace={includeAgentTrace}
-        searchQuery={filters.searchQuery}
-        setSearchQuery={handleSearchQueryChange}
-        useRegex={filters.useRegex}
-        setUseRegex={handleUseRegexChange}
-        levelFilter={filters.levelFilter}
-        setLevelFilter={handleLevelFilterChange}
-        moduleFilter={filters.moduleFilter}
-        setModuleFilter={handleModuleFilterChange}
-        augmentedModules={augmentedModules}
-        sourceFilter={effectiveSourceFilter}
-        setSourceFilter={handleSourceFilterChange}
-        allowedSources={allowedSources}
-        sessionFilter={filters.sessionFilter}
-        setSessionFilter={handleSessionFilterChange}
-        timeRange={filters.timeRange}
-        setTimeRange={handleTimeRangeChange}
-        stats={stats}
-        presets={filters.presets}
-        activePresetId={filters.activePresetId}
-        handlePresetChange={handlePresetChange}
-        saveCurrentPreset={filters.saveCurrentPreset}
-        removeActivePreset={filters.removeActivePreset}
-        EMPTY_PRESET_VALUE={filters.EMPTY_PRESET_VALUE}
-        highSeverityOnly={filters.highSeverityOnly}
-        setHighSeverityOnly={handleHighSeverityOnlyChange}
-        traceFocusId={filters.traceFocusId}
-        setTraceFocusId={handleTraceFocusChange}
-        autoRefresh={filters.autoRefresh}
-        setAutoRefresh={filters.setAutoRefresh}
-        refresh={refresh}
-        onExport={handleExport}
-        clearLogs={clearLogs}
-        showDetailPanel={filters.showDetailPanel}
-        setShowDetailPanel={filters.setShowDetailPanel}
-        autoScroll={filters.autoScroll}
-        setAutoScroll={filters.setAutoScroll}
-        scrollToTop={scrollToTop}
-        scrollToBottom={scrollToBottom}
-        clearSessionFocus={handleClearSessionFocus}
-        hasSessionFocus={!!filters.sessionFilter.trim()}
-        bookmarkFilterActive={filters.bookmarkFilterActive}
-        setBookmarkFilterActive={filters.setBookmarkFilterActive}
-        bookmarkedCount={filters.bookmarkedIds.size}
-        showAdvancedFilters={filters.showAdvancedFilters}
-        setShowAdvancedFilters={filters.setShowAdvancedFilters}
-        showShortcutsDialog={filters.showShortcutsDialog}
-        setShowShortcutsDialog={filters.setShowShortcutsDialog}
-        searchHistory={filters.searchHistory}
-        addSearchHistory={filters.addSearchHistory}
-        removeSearchHistoryItem={filters.removeSearchHistoryItem}
-        clearSearchHistory={filters.clearSearchHistory}
-        diagnosticTransportFilter={filters.diagnosticTransportFilter}
-        setDiagnosticTransportFilter={handleDiagnosticTransportFilterChange}
-      />
-
-      {/* Stats bar */}
-      {showStats && (
-        <LogPanelStatsBar
-          filteredCount={filteredLogs.length}
-          totalCount={stats.total}
+    <LogPanelHeaderContext.Provider value={headerContextValue}>
+      <div
+        className={cn("flex flex-col border rounded-lg bg-background h-full", className)}
+        style={maxHeight ? { maxHeight } : undefined}
+      >
+        {headerSlot}
+        {/* Toolbar */}
+        <LogPanelToolbar
+          viewMode={filters.viewMode}
+          setViewMode={filters.setViewMode}
+          includeAgentTrace={includeAgentTrace}
+          searchQuery={filters.searchQuery}
+          setSearchQuery={handleSearchQueryChange}
+          useRegex={filters.useRegex}
+          setUseRegex={handleUseRegexChange}
+          levelFilter={filters.levelFilter}
+          setLevelFilter={handleLevelFilterChange}
+          moduleFilter={filters.moduleFilter}
+          setModuleFilter={handleModuleFilterChange}
+          augmentedModules={augmentedModules}
+          sourceFilter={effectiveSourceFilter}
+          setSourceFilter={handleSourceFilterChange}
+          allowedSources={allowedSources}
+          sessionFilter={filters.sessionFilter}
+          setSessionFilter={handleSessionFilterChange}
+          timeRange={filters.timeRange}
+          setTimeRange={handleTimeRangeChange}
           stats={stats}
-          logRate={logRate}
+          presets={filters.presets}
+          activePresetId={filters.activePresetId}
+          handlePresetChange={handlePresetChange}
+          saveCurrentPreset={filters.saveCurrentPreset}
+          removeActivePreset={filters.removeActivePreset}
+          EMPTY_PRESET_VALUE={filters.EMPTY_PRESET_VALUE}
+          highSeverityOnly={filters.highSeverityOnly}
+          setHighSeverityOnly={handleHighSeverityOnlyChange}
+          traceFocusId={filters.traceFocusId}
+          setTraceFocusId={handleTraceFocusChange}
           autoRefresh={filters.autoRefresh}
-          healthByTransport={healthByTransport}
-          nativeLogging={nativeLogging}
-          onTransportClick={filters.setSelectedTransportHealthName}
-          onNativeLoggingClick={() => filters.setSelectedNativeLogging(true)}
-          currentPage={safeCurrentPage}
-          totalPages={totalPages}
-          pageSize={pageSize}
-          pageSizeOptions={LOG_PAGE_SIZE_OPTIONS}
-          onPageChange={handlePageChange}
-          onPageSizeChange={handlePageSizeChange}
+          setAutoRefresh={filters.setAutoRefresh}
+          refresh={refresh}
+          onExport={handleExport}
+          clearLogs={clearLogs}
+          showDetailPanel={filters.showDetailPanel}
+          setShowDetailPanel={filters.setShowDetailPanel}
+          autoScroll={filters.autoScroll}
+          setAutoScroll={filters.setAutoScroll}
+          scrollToTop={scrollToTop}
+          scrollToBottom={scrollToBottom}
+          clearSessionFocus={handleClearSessionFocus}
+          hasSessionFocus={!!filters.sessionFilter.trim()}
+          bookmarkFilterActive={filters.bookmarkFilterActive}
+          setBookmarkFilterActive={filters.setBookmarkFilterActive}
+          bookmarkedCount={filters.bookmarkedIds.size}
+          showAdvancedFilters={filters.showAdvancedFilters}
+          setShowAdvancedFilters={filters.setShowAdvancedFilters}
+          showShortcutsDialog={filters.showShortcutsDialog}
+          setShowShortcutsDialog={filters.setShowShortcutsDialog}
+          searchHistory={filters.searchHistory}
+          addSearchHistory={filters.addSearchHistory}
+          removeSearchHistoryItem={filters.removeSearchHistoryItem}
+          clearSearchHistory={filters.clearSearchHistory}
+          diagnosticTransportFilter={filters.diagnosticTransportFilter}
+          setDiagnosticTransportFilter={handleDiagnosticTransportFilterChange}
+          customTimeRange={customTimeRange}
+          setCustomTimeRange={handleCustomTimeRangeChange}
+          hideToolbarPresets={hideToolbarPresets}
+          density={filters.density}
+          setDensity={filters.setDensity}
         />
-      )}
 
-      {/* Transport health detail */}
-      {selectedTransportHealth && (
-        <TransportHealthDetail
-          health={selectedTransportHealth}
-          history={selectedTransportHistory}
-          onClose={() => {
-            filters.setSelectedTransportHealthName(null)
-            handleDiagnosticTransportFilterChange(null)
-          }}
-          onViewDiagnostics={() => {
-            handleDiagnosticTransportFilterChange(selectedTransportHealth.transport)
-            handleSourceFilterChange("internal")
-          }}
-        />
-      )}
-
-      {/* Native logging detail */}
-      {filters.selectedNativeLogging && (
-        <NativeLoggingDetail
-          nativeLogging={nativeLogging}
-          onClose={() => filters.setSelectedNativeLogging(false)}
-          onViewDiagnostics={() => {
-            resetPagination()
-            filters.setSourceFilter("tauri")
-            filters.setSearchQuery("native_logging")
-            filters.setDiagnosticTransportFilter(null)
-          }}
-        />
-      )}
-
-      {/* Main content area with optional detail panel */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {showTimeline && filters.viewMode === "list" && filteredLogs.length > 0 && (
-            <LogTimeline
-              logs={filteredLogs}
-              selectedRange={customTimeRange}
-              onTimeRangeClick={(start, end) => {
-                // If clearing (start is epoch 0), remove custom filter
-                if (start.getTime() === 0) {
-                  handleCustomTimeRangeChange(null)
-                } else {
-                  handleCustomTimeRangeChange({ start, end })
-                }
-              }}
-            />
-          )}
-
-          {filters.viewMode === "dashboard" ? (
-            <ScrollArea className="flex-1">
-              <LogStatsDashboard
-                logs={filteredLogs}
-                logRate={logRate}
-                nativeLogging={nativeLogging}
-                onSearchFilter={handleSearchQueryChange}
-              />
-            </ScrollArea>
-          ) : filters.viewMode === "trace" ? (
-            <ScrollArea className="flex-1">
-              <Empty className="py-12">
-                <EmptyTitle>{t("panel.noTraceEvents")}</EmptyTitle>
-              </Empty>
-            </ScrollArea>
-          ) : (
-            <VirtualizedLogList
-              scrollRef={scrollRef}
-              containerRef={containerRef}
-              isLoading={isLoading}
-              error={error}
-              filteredLogs={paginatedLogs}
-              groupByTraceId={groupByTraceId}
-              groupedLogs={displayedGroupedLogs}
-              expandedIds={filters.expandedIds}
-              toggleExpanded={filters.toggleExpanded}
-              searchQuery={filters.searchQuery}
-              useRegex={filters.useRegex}
-              bookmarkedIds={filters.bookmarkedIds}
-              toggleBookmark={filters.toggleBookmark}
-              handleSelectLog={filters.handleSelectLog}
-              handleFocusTrace={handleFocusTrace}
-              handleFocusSession={handleFocusSession}
-              t={t}
-              onRetry={refresh}
-              emptyStateContext={{
-                activeFilterLabels: emptyStateActiveFilterLabels,
-                onClearFilters:
-                  emptyStateActiveFilterLabels.length > 0 ? handleClearAllFilters : undefined,
-                onOpenPresets:
-                  filters.presets.length > 0
-                    ? () => filters.setShowAdvancedFilters(true)
-                    : undefined,
-              }}
-            />
-          )}
-        </div>
-
-        {filters.showDetailPanel && filters.selectedLog && isDesktopViewport && (
-          <LogDetailPanel
-            log={filters.selectedLog}
-            relatedLogs={relatedLogs}
-            isBookmarked={filters.bookmarkedIds.has(filters.selectedLog.id)}
-            onClose={() => filters.setShowDetailPanel(false)}
-            onToggleBookmark={filters.toggleBookmark}
-            onSelectRelated={(log) => filters.setSelectedLog(log)}
-            className="w-[350px] lg:w-[400px] xl:w-[440px] shrink-0"
+        {/* Stats bar */}
+        {showStats && (
+          <LogPanelStatsBar
+            filteredCount={filteredLogs.length}
+            totalCount={stats.total}
+            stats={stats}
+            logRate={logRate}
+            autoRefresh={filters.autoRefresh}
+            healthByTransport={healthByTransport}
+            nativeLogging={nativeLogging}
+            onTransportClick={filters.setSelectedTransportHealthName}
+            onNativeLoggingClick={() => filters.setSelectedNativeLogging(true)}
+            currentPage={safeCurrentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            pageSizeOptions={LOG_PAGE_SIZE_OPTIONS}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
           />
         )}
 
-        {/* Responsive sheet for narrow viewports */}
-        {!isDesktopViewport && (
-          <Sheet
-            open={filters.showDetailPanel && Boolean(filters.selectedLog)}
-            onOpenChange={(open) => {
-              if (!open) filters.setShowDetailPanel(false)
+        {/* Transport health detail */}
+        {selectedTransportHealth && (
+          <TransportHealthDetail
+            health={selectedTransportHealth}
+            history={selectedTransportHistory}
+            onClose={() => {
+              filters.setSelectedTransportHealthName(null)
+              handleDiagnosticTransportFilterChange(null)
             }}
-          >
-            <SheetContent
-              side="bottom"
-              className="h-[85vh] md:h-[75vh] lg:h-[80vh] p-0 flex flex-col"
-              data-testid="log-detail-sheet"
-            >
-              <SheetHeader className="sr-only">
-                <SheetTitle>{t("panel.logDetails")}</SheetTitle>
-                <SheetDescription>{t("panel.logDetails")}</SheetDescription>
-              </SheetHeader>
-              {filters.selectedLog && (
-                <LogDetailPanel
-                  log={filters.selectedLog}
-                  relatedLogs={relatedLogs}
-                  isBookmarked={filters.bookmarkedIds.has(filters.selectedLog.id)}
-                  onClose={() => filters.setShowDetailPanel(false)}
-                  onToggleBookmark={filters.toggleBookmark}
-                  onSelectRelated={(log) => filters.setSelectedLog(log)}
-                  className="flex-1 border-0"
-                />
-              )}
-            </SheetContent>
-          </Sheet>
+            onViewDiagnostics={() => {
+              handleDiagnosticTransportFilterChange(selectedTransportHealth.transport)
+              handleSourceFilterChange("internal")
+            }}
+          />
         )}
+
+        {/* Native logging detail */}
+        {filters.selectedNativeLogging && (
+          <NativeLoggingDetail
+            nativeLogging={nativeLogging}
+            onClose={() => filters.setSelectedNativeLogging(false)}
+            onViewDiagnostics={() => {
+              resetPagination()
+              filters.setSourceFilter("tauri")
+              filters.setSearchQuery("native_logging")
+              filters.setDiagnosticTransportFilter(null)
+            }}
+          />
+        )}
+
+        {/* Main content area with optional detail panel */}
+        <MainContent
+          showTimeline={showTimeline}
+          viewMode={filters.viewMode}
+          filteredLogs={filteredLogs}
+          paginatedLogs={paginatedLogs}
+          customTimeRange={customTimeRange}
+          handleCustomTimeRangeChange={handleCustomTimeRangeChange}
+          logRate={logRate}
+          nativeLogging={nativeLogging}
+          handleSearchQueryChange={handleSearchQueryChange}
+          groupByTraceId={groupByTraceId}
+          displayedGroupedLogs={displayedGroupedLogs}
+          filters={filters}
+          handleFocusTrace={handleFocusTrace}
+          handleFocusSession={handleFocusSession}
+          handleTraceFocusChange={handleTraceFocusChange}
+          emptyStateActiveFilterLabels={emptyStateActiveFilterLabels}
+          handleClearAllFilters={handleClearAllFilters}
+          isLoading={isLoading}
+          error={error}
+          refresh={refresh}
+          scrollRef={scrollRef}
+          containerRef={containerRef}
+          isDesktopViewport={isDesktopViewport}
+          relatedLogs={relatedLogs}
+          resizableLayout={resizableLayout}
+          density={filters.density}
+          t={t}
+        />
       </div>
+    </LogPanelHeaderContext.Provider>
+  )
+}
+
+interface MainContentProps {
+  showTimeline: boolean
+  viewMode: LogPanelFilterState["viewMode"]
+  filteredLogs: StructuredLogEntry[]
+  paginatedLogs: StructuredLogEntry[]
+  customTimeRange: { start: Date; end: Date } | null
+  handleCustomTimeRangeChange: (range: { start: Date; end: Date } | null) => void
+  logRate: number
+  nativeLogging: ReturnType<typeof useTransportHealth>["nativeLogging"]
+  handleSearchQueryChange: (value: string) => void
+  groupByTraceId: boolean
+  displayedGroupedLogs: Map<string, StructuredLogEntry[]>
+  filters: LogPanelFilterState
+  handleFocusTrace: (traceId: string, log: StructuredLogEntry) => void
+  handleFocusSession: (sessionId: string, log: StructuredLogEntry) => void
+  handleTraceFocusChange: (value: string | null) => void
+  emptyStateActiveFilterLabels: string[]
+  handleClearAllFilters: () => void
+  isLoading: boolean
+  error: Error | null
+  refresh: () => void
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  containerRef: React.RefObject<HTMLDivElement | null>
+  isDesktopViewport: boolean
+  relatedLogs: StructuredLogEntry[]
+  resizableLayout: UseResizableLayoutResult
+  density: LogPanelFilterState["density"]
+  t: ReturnType<typeof useTranslations>
+}
+
+function MainContent({
+  showTimeline,
+  viewMode,
+  filteredLogs,
+  paginatedLogs,
+  customTimeRange,
+  handleCustomTimeRangeChange,
+  logRate,
+  nativeLogging,
+  handleSearchQueryChange,
+  groupByTraceId,
+  displayedGroupedLogs,
+  filters,
+  handleFocusTrace,
+  handleFocusSession,
+  handleTraceFocusChange,
+  emptyStateActiveFilterLabels,
+  handleClearAllFilters,
+  isLoading,
+  error,
+  refresh,
+  scrollRef,
+  containerRef,
+  isDesktopViewport,
+  relatedLogs,
+  resizableLayout,
+  density,
+  t,
+}: MainContentProps) {
+  const detailOpen = filters.showDetailPanel && Boolean(filters.selectedLog) && isDesktopViewport
+
+  const renderMain = () => (
+    <div className="flex flex-1 flex-col overflow-hidden" data-testid="log-panel-main-pane">
+      {showTimeline && viewMode === "list" && (
+        <LogTimeline
+          logs={filteredLogs}
+          selectedRange={customTimeRange}
+          onTimeRangeClick={(start, end) => handleCustomTimeRangeChange({ start, end })}
+          onClearRange={() => handleCustomTimeRangeChange(null)}
+        />
+      )}
+
+      {viewMode === "dashboard" ? (
+        <ScrollArea className="flex-1">
+          <LogStatsDashboard
+            logs={filteredLogs}
+            logRate={logRate}
+            nativeLogging={nativeLogging}
+            onSearchFilter={handleSearchQueryChange}
+          />
+        </ScrollArea>
+      ) : viewMode === "trace" ? (
+        <ScrollArea className="flex-1">
+          <LogTraceView
+            filteredLogs={filteredLogs}
+            onSelectTrace={(id) => handleTraceFocusChange(id)}
+          />
+        </ScrollArea>
+      ) : (
+        <VirtualizedLogList
+          scrollRef={scrollRef}
+          containerRef={containerRef}
+          isLoading={isLoading}
+          error={error}
+          filteredLogs={paginatedLogs}
+          groupByTraceId={groupByTraceId}
+          groupedLogs={displayedGroupedLogs}
+          expandedIds={filters.expandedIds}
+          toggleExpanded={filters.toggleExpanded}
+          searchQuery={filters.searchQuery}
+          useRegex={filters.useRegex}
+          bookmarkedIds={filters.bookmarkedIds}
+          toggleBookmark={filters.toggleBookmark}
+          handleSelectLog={filters.handleSelectLog}
+          handleFocusTrace={handleFocusTrace}
+          handleFocusSession={handleFocusSession}
+          density={density}
+          t={t}
+          onRetry={refresh}
+          emptyStateContext={{
+            activeFilterLabels: emptyStateActiveFilterLabels,
+            onClearFilters:
+              emptyStateActiveFilterLabels.length > 0 ? handleClearAllFilters : undefined,
+            onOpenPresets:
+              filters.presets.length > 0 ? () => filters.setShowAdvancedFilters(true) : undefined,
+          }}
+        />
+      )}
+    </div>
+  )
+
+  const renderDetailPanel = (className?: string) =>
+    filters.selectedLog ? (
+      <LogDetailPanel
+        log={filters.selectedLog}
+        relatedLogs={relatedLogs}
+        isBookmarked={filters.bookmarkedIds.has(filters.selectedLog.id)}
+        onClose={() => filters.setShowDetailPanel(false)}
+        onToggleBookmark={filters.toggleBookmark}
+        onSelectRelated={(log) => filters.setSelectedLog(log)}
+        className={className}
+      />
+    ) : null
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {detailOpen ? (
+        <div className="flex-1" data-testid="log-panel-resizable-group">
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="flex-1"
+            defaultLayout={resizableLayout.defaultLayout}
+            onLayoutChanged={resizableLayout.onLayoutChanged}
+          >
+            <ResizablePanel id="log-panel-main" defaultSize={70} minSize={50}>
+              {renderMain()}
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel id="log-panel-detail" defaultSize={30} minSize={20} maxSize={50}>
+              {renderDetailPanel("h-full border-0")}
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+      ) : (
+        renderMain()
+      )}
+
+      {/* Responsive sheet for narrow viewports */}
+      {!isDesktopViewport && (
+        <Sheet
+          open={filters.showDetailPanel && Boolean(filters.selectedLog)}
+          onOpenChange={(open) => {
+            if (!open) filters.setShowDetailPanel(false)
+          }}
+        >
+          <SheetContent
+            side="bottom"
+            className="h-[85vh] md:h-[75vh] lg:h-[80vh] p-0 flex flex-col"
+            data-testid="log-detail-sheet"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("panel.logDetails")}</SheetTitle>
+              <SheetDescription>{t("panel.logDetails")}</SheetDescription>
+            </SheetHeader>
+            {renderDetailPanel("flex-1 border-0")}
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   )
 }

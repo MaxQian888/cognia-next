@@ -82,12 +82,65 @@ export function ConversationsTab() {
     }
   })()
 
+  // Cross-cutting safety overview — count of conversations with
+  // Computer-Use opt-ins, HITL off, or custom skill allowlists. Surfaced
+  // above the list so operators see the blast-radius footprint without
+  // scrolling row by row.
+  const safetyCounts = {
+    computerUse: (overrides ?? []).filter((r) => r.allowComputerUse === true).length,
+    hitlOff: (overrides ?? []).filter((r) => r.requireHitlForWrites === false).length,
+    skillAllowlist: (overrides ?? []).filter(
+      (r) => Array.isArray(r.allowedBuiltInSkillIds) || r.allowedBuiltInSkillIds === "all"
+    ).length,
+  }
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">{t("heading")}</CardTitle>
       </CardHeader>
       <CardContent>
+        {overrides && overrides.length > 0 && (
+          <div
+            className="mb-3 flex flex-wrap gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs"
+            data-testid="conversations-safety-summary"
+          >
+            <span className="inline-flex items-center gap-1" data-testid="conversations-summary-cu">
+              <Badge
+                variant="outline"
+                className={
+                  safetyCounts.computerUse > 0 ? "border-destructive/40 text-destructive" : ""
+                }
+              >
+                <MousePointerClickIcon className="mr-1 h-3 w-3" aria-hidden />
+                {t("summary.computerUse", { count: safetyCounts.computerUse })}
+              </Badge>
+            </span>
+            <span
+              className="inline-flex items-center gap-1"
+              data-testid="conversations-summary-hitl"
+            >
+              <Badge
+                variant="outline"
+                className={
+                  safetyCounts.hitlOff > 0
+                    ? "border-amber-400 text-amber-700 dark:text-amber-300"
+                    : ""
+                }
+              >
+                {t("summary.hitlOff", { count: safetyCounts.hitlOff })}
+              </Badge>
+            </span>
+            <span
+              className="inline-flex items-center gap-1"
+              data-testid="conversations-summary-skills"
+            >
+              <Badge variant="outline">
+                {t("summary.customSkillAllowlist", { count: safetyCounts.skillAllowlist })}
+              </Badge>
+            </span>
+          </div>
+        )}
         {!overrides || overrides.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (

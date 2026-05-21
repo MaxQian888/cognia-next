@@ -79,6 +79,7 @@ export async function createSession(
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,
     permissionMode: partial?.permissionMode ?? autoApplied.permissionMode,
+    activePresetId: partial?.activePresetId ?? autoAppliedPresetId,
     bareMode: partial?.bareMode,
     debugMode: partial?.debugMode,
     briefMode: partial?.briefMode,
@@ -162,6 +163,24 @@ export async function deleteSession(id: string): Promise<void> {
     await db.messages.where("sessionId").equals(id).delete()
     await db.sessionUsage.where("sessionId").equals(id).delete()
     await db.sessions.delete(id)
+  })
+}
+
+/**
+ * Bulk variant of `deleteSession` for the channel-list batch toolbar.
+ * Runs every per-id removal inside a single Dexie `rw` transaction so a
+ * mid-loop failure rolls back atomically. Missing ids are silently skipped
+ * (matches the per-id contract — `dexie.delete()` is a no-op on a stale id).
+ */
+export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return
+  const db = getDb()
+  await db.transaction("rw", db.sessions, db.messages, db.sessionUsage, async () => {
+    for (const id of ids) {
+      await db.messages.where("sessionId").equals(id).delete()
+      await db.sessionUsage.where("sessionId").equals(id).delete()
+      await db.sessions.delete(id)
+    }
   })
 }
 

@@ -29,14 +29,29 @@ import { PluginPreInstallDialog } from "./plugin-pre-install-dialog"
 import { ScrollShadowRow } from "./scroll-shadow-row"
 import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
 import { PluginComparisonSheet, PluginComparisonTrigger } from "./plugin-comparison-sheet"
+import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
 
 type Section = "all" | "featured" | "popular" | "recent"
+
+const PAGE_SIZE = 12
 
 export function PluginMarketplace() {
   const t = useTranslations("plugins.marketplace")
   const market = usePluginMarketplace()
   const [section, setSection] = useState<Section>("all")
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE)
   const [selectedEntry, setSelectedEntry] = useState<PluginMarketplaceEntry | null>(null)
+
+  // Reset the visible window whenever the section or query changes so we
+  // don't stay zoomed into page 5 of "popular" after the user switches.
+  // React 19: the documented prev-value compare pattern keeps the reset
+  // out of `useEffect` (rule `react-hooks/set-state-in-effect`).
+  const viewKey = `${section}|${market.query}`
+  const [trackedView, setTrackedView] = useState(viewKey)
+  if (trackedView !== viewKey) {
+    setTrackedView(viewKey)
+    setVisibleCount(PAGE_SIZE)
+  }
 
   const installedRows = useLiveQuery(() => listPlugins(), [])
   const installedIds = useMemo(
@@ -70,7 +85,12 @@ export function PluginMarketplace() {
   }
 
   if (market.state.kind === "loading") {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
+        <PluginMarketplaceSkeleton />
+      </div>
+    )
   }
   if (market.state.kind === "error") {
     return (
@@ -150,19 +170,36 @@ export function PluginMarketplace() {
       {sectionEntries.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">{t("emptySection")}</Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {sectionEntries.map((entry) => (
-            <PluginMarketplaceCard
-              key={entry.id}
-              entry={entry}
-              installed={installedIds.has(entry.id)}
-              installing={market.installingId === entry.id || preInstall.busy}
-              onView={() => setSelectedEntry(entry)}
-              onInstall={(id, version) => onInstallById(id, version)}
-              onUninstall={(id) => void market.uninstall(id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {sectionEntries.slice(0, visibleCount).map((entry) => (
+              <PluginMarketplaceCard
+                key={entry.id}
+                entry={entry}
+                installed={installedIds.has(entry.id)}
+                installing={market.installingId === entry.id || preInstall.busy}
+                onView={() => setSelectedEntry(entry)}
+                onInstall={(id, version) => onInstallById(id, version)}
+                onUninstall={(id) => void market.uninstall(id)}
+              />
+            ))}
+          </div>
+          {visibleCount < sectionEntries.length && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                data-testid="plugin-marketplace-load-more"
+              >
+                {t("loadMore", {
+                  shown: Math.min(sectionEntries.length, visibleCount),
+                  total: sectionEntries.length,
+                })}
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       <PluginMarketplaceDetail

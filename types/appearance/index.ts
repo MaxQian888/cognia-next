@@ -128,7 +128,126 @@ export interface AppearanceSettingsSlice {
   customCss?: string
   customCssEnabled?: boolean
   importedVscodeThemes?: ImportedThemeRecord[]
+  // v47 additions (appearance optimization plan)
+  density?: DensitySettings
+  radius?: RadiusSettings
+  motion?: MotionSettings
+  typographyExt?: TypographyExtSettings
+  a11y?: A11ySettings
+  autoMode?: AutoModeSettings
+  monacoLink?: MonacoLinkSettings
+  /** Active theme-pack id (from plugin manifest.themePacks). null when nothing applied. */
+  activeThemePackId?: string | null
+  /** Whether `customCss` is wrapped in `@scope (#app) { ... }` (default) or applied globally. */
+  customCssScope?: "app" | "global"
 }
+
+// ----------------------------------------------------------------------------
+// v47 — Density / Radius / Motion / Typography / A11y / AutoMode / MonacoLink
+// ----------------------------------------------------------------------------
+
+export type DensityLevel = "compact" | "comfortable" | "spacious"
+
+export interface DensitySettings {
+  /** Applies to every `[data-surface]` unless an override below is set. */
+  global: DensityLevel
+  chat?: DensityLevel
+  table?: DensityLevel
+  sidebar?: DensityLevel
+}
+
+export const DEFAULT_DENSITY: DensitySettings = { global: "comfortable" }
+
+export interface RadiusSettings {
+  /** Base radius in rem, mapped to `--radius` at runtime. Clamped to 0..1.5. */
+  base: number
+}
+
+export const DEFAULT_RADIUS: RadiusSettings = { base: 0.625 }
+
+export type MotionSpeed = 0.5 | 1 | 1.5
+
+export interface MotionSettings {
+  /** Multiplier on `--motion-duration-scale`. 1 = unchanged. */
+  speed: MotionSpeed
+  /** When true, all transitions/animations collapse to ~0.01ms. */
+  reduce: boolean
+}
+
+export const DEFAULT_MOTION: MotionSettings = { speed: 1, reduce: false }
+
+export interface TypographyExtSettings {
+  /** Family resolved against `fontRegistry`; falls back to `--font-geist-sans`. */
+  fontFamily?: string
+  monoFamily?: string
+  serifFamily?: string
+  /** 0.875..1.25 — multiplier on `line-height`. */
+  lineHeightScale: number
+  /** -0.02..0.02 em — added to `letter-spacing`. */
+  letterSpacingEm: number
+}
+
+export const DEFAULT_TYPOGRAPHY_EXT: TypographyExtSettings = {
+  lineHeightScale: 1,
+  letterSpacingEm: 0,
+}
+
+export type WcagTarget = "off" | "AA" | "AAA"
+export type WcagEnforcement = "warn" | "warn+fix"
+export type HighContrastMode = "off" | "light" | "dark"
+export type ColorblindMode = "off" | "deuter" | "protan" | "tritan"
+
+export interface A11ySettings {
+  wcagTarget: WcagTarget
+  enforcement: WcagEnforcement
+  highContrast: HighContrastMode
+  colorblindMode: ColorblindMode
+}
+
+export const DEFAULT_A11Y: A11ySettings = {
+  wcagTarget: "AA",
+  enforcement: "warn+fix",
+  highContrast: "off",
+  colorblindMode: "off",
+}
+
+export type AutoModeTrigger = "system" | "schedule" | "sunset"
+
+export interface AutoModeLocation {
+  latitude: number
+  longitude: number
+  source: "manual" | "os"
+}
+
+export interface AutoModeSettings {
+  enabled: boolean
+  trigger: AutoModeTrigger
+  /** Active custom-theme id (or color preset key) chosen for light phase. */
+  lightThemeId?: string
+  darkThemeId?: string
+  /** Schedule mode thresholds in 24h `HH:mm` form. */
+  schedule?: { lightAt: string; darkAt: string }
+  location?: AutoModeLocation
+  /** Skip auto-switches for this many ms after a manual change. Default 30 min. */
+  snoozeMs?: number
+  /** Epoch-ms of the most recent manual mode change, set by the runner. */
+  lastManualAt?: number
+}
+
+export const DEFAULT_AUTOMODE: AutoModeSettings = {
+  enabled: false,
+  trigger: "system",
+  snoozeMs: 30 * 60 * 1000,
+}
+
+export interface MonacoLinkSettings {
+  /** When true, app-theme drives Monaco/Canvas; false keeps Canvas standalone. */
+  enabled: boolean
+  /** Override id pinning Monaco to a specific theme regardless of app theme. */
+  lockedThemeId?: string
+}
+
+export const DEFAULT_MONACO_LINK: MonacoLinkSettings = { enabled: true }
 
 /** Defaults filled in by `getSettings()` for back-compat with older rows. */
 export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
@@ -137,4 +256,13 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   customCss: "",
   customCssEnabled: false,
   importedVscodeThemes: [],
+  density: DEFAULT_DENSITY,
+  radius: DEFAULT_RADIUS,
+  motion: DEFAULT_MOTION,
+  typographyExt: DEFAULT_TYPOGRAPHY_EXT,
+  a11y: DEFAULT_A11Y,
+  autoMode: DEFAULT_AUTOMODE,
+  monacoLink: DEFAULT_MONACO_LINK,
+  activeThemePackId: null,
+  customCssScope: "app",
 }

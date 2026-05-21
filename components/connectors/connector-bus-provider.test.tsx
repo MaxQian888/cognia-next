@@ -119,6 +119,7 @@ jest.mock("@/lib/connectors/lifecycle", () => ({
   registerRunningAdapter: (...args: [string, unknown]) => mockRegisterRunning(...args),
   unregisterRunningAdapter: (...args: [string]) => mockUnregisterRunning(...args),
   listRunningAdapters: () => mockListRunning(),
+  subscribeCredentialsRotatedToLifecycle: () => () => {},
 }))
 
 // ── Mock the dynamic import of `@/lib/db/schema` used by the G6 capability

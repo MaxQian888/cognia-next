@@ -36,7 +36,7 @@ import type {
   WindowOp,
 } from "./types"
 
-export type Surface = "workflow" | "computerUse" | "mcp" | "plugin"
+export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox"
 
 export interface CallContext {
   surface?: Surface
@@ -45,6 +45,15 @@ export interface CallContext {
   processName?: string
   /** Target window title — used for whitelist gating. */
   windowTitle?: string
+  /**
+   * ADR-0028 / T5 — best-effort URL when the target is a browser tab.
+   * Lets the per-action policy's `allowedUrlPatterns` fire.
+   */
+  targetUrl?: string
+  /** ADR-0028 / T5 — pixel x of the action's target (click / drag / move). */
+  clickX?: number
+  /** ADR-0028 / T5 — pixel y of the action's target. */
+  clickY?: number
 }
 
 export const desktop = {
@@ -171,6 +180,28 @@ export const desktop = {
     return transport.call<ElementInfo>("desktop_pick_at_point", {
       args: { point, ctx },
     })
+  },
+
+  /**
+   * ADR-0020 W1 — start a pick session. Records an audit row so the
+   * operator can see "user initiated pick at <ts>" alongside the
+   * resulting `pick_at_point` call that follows when the cursor lands
+   * on the target. The renderer-side affordance uses this in place of
+   * the prior bare 3-second countdown so audit captures the pick
+   * lifecycle. macOS / Linux land at the same audit row but the
+   * follow-up `pickAtPoint` returns UnsupportedPlatform until Wave 2.
+   */
+  pickSessionStart(ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_pick_session_start", { args: { ctx } })
+  },
+
+  /**
+   * ADR-0020 W1 — companion of `pickSessionStart`. Records an audit row
+   * tagging the session as cancelled. Safe to call without a matching
+   * `start` — the audit row stands on its own.
+   */
+  pickSessionCancel(ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_pick_session_cancel", { args: { ctx } })
   },
 
   /**

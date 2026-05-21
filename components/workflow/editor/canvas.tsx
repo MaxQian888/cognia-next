@@ -75,6 +75,7 @@ import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
+import { PerfBoundary } from "@/lib/perf"
 import * as ResizablePrimitive from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
@@ -932,59 +933,61 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               enabled={true}
             />
             <ConnectionPointerListener store={useStore} />
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              viewport={viewport}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              isValidConnection={isValidConnection}
-              onMoveStart={handleMoveStart}
-              onMoveEnd={onMoveEnd}
-              onNodeDragStart={handleNodeDragStart}
-              onNodeDrag={handleNodeDrag}
-              onNodeDragStop={handleNodeDragStop}
-              onPaneContextMenu={handlePaneContextMenu}
-              onNodeContextMenu={handleNodeContextMenu}
-              onEdgeContextMenu={handleEdgeContextMenu}
-              onInit={setReactFlowInstance}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              connectionLineComponent={connectionLineGhost}
-              onConnectStart={handleConnectStart}
-              onConnectEnd={handleConnectEnd}
-              fitView={FIT_VIEW_PROPS}
-              minZoom={0.2}
-              maxZoom={2}
-              snapToGrid={snapToGrid}
-              snapGrid={SNAP_GRID}
-              deleteKeyCode={DELETE_KEY_CODE}
-              multiSelectionKeyCode={MULTI_SELECTION_KEY_CODE}
-              panOnScroll
-              selectionOnDrag
-              proOptions={PRO_OPTIONS}
-              // (A1) Tier-aware viewport culling: enable when graphs grow
-              // past `perfTier.flags.cullingThreshold` OR when the user/
-              // system chose a non-`high` tier. Below the threshold on
-              // `high`, the per-render measure+filter cost outweighs the
-              // savings; the threshold itself is tier-driven so balanced/
-              // reduced can opt into culling unconditionally.
-              onlyRenderVisibleElements={
-                nodes.length >= perfTier.flags.cullingThreshold || perfTier.effective !== "high"
-              }
-            >
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-              <Controls position="bottom-left" />
-              {perfTier.flags.showMinimap ? (
-                <PerfMiniMap
-                  degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
-                  nodeColor={minimapNodeColor}
-                  className="!rounded-md !border !bg-background"
-                />
-              ) : null}
-              <AlignmentOverlay guides={alignmentGuides} />
-            </ReactFlow>
+            <PerfBoundary id="workflow:canvas">
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                viewport={viewport}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                isValidConnection={isValidConnection}
+                onMoveStart={handleMoveStart}
+                onMoveEnd={onMoveEnd}
+                onNodeDragStart={handleNodeDragStart}
+                onNodeDrag={handleNodeDrag}
+                onNodeDragStop={handleNodeDragStop}
+                onPaneContextMenu={handlePaneContextMenu}
+                onNodeContextMenu={handleNodeContextMenu}
+                onEdgeContextMenu={handleEdgeContextMenu}
+                onInit={setReactFlowInstance}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                connectionLineComponent={connectionLineGhost}
+                onConnectStart={handleConnectStart}
+                onConnectEnd={handleConnectEnd}
+                fitView={FIT_VIEW_PROPS}
+                minZoom={0.2}
+                maxZoom={2}
+                snapToGrid={snapToGrid}
+                snapGrid={SNAP_GRID}
+                deleteKeyCode={DELETE_KEY_CODE}
+                multiSelectionKeyCode={MULTI_SELECTION_KEY_CODE}
+                panOnScroll
+                selectionOnDrag
+                proOptions={PRO_OPTIONS}
+                // (A1) Tier-aware viewport culling: enable when graphs grow
+                // past `perfTier.flags.cullingThreshold` OR when the user/
+                // system chose a non-`high` tier. Below the threshold on
+                // `high`, the per-render measure+filter cost outweighs the
+                // savings; the threshold itself is tier-driven so balanced/
+                // reduced can opt into culling unconditionally.
+                onlyRenderVisibleElements={
+                  nodes.length >= perfTier.flags.cullingThreshold || perfTier.effective !== "high"
+                }
+              >
+                <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+                <Controls position="bottom-left" />
+                {perfTier.flags.showMinimap ? (
+                  <PerfMiniMap
+                    degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
+                    nodeColor={minimapNodeColor}
+                    className="!rounded-md !border !bg-background"
+                  />
+                ) : null}
+                <AlignmentOverlay guides={alignmentGuides} />
+              </ReactFlow>
+            </PerfBoundary>
             {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
           </div>
         </ResizablePrimitive.Panel>

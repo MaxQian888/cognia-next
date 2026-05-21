@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@/lib/logger"
 import type { PluginCapability, PluginTrayAPI, PluginTrayItemInput } from "@/types/plugin/plugin"
 import { registerTrayItem, unregisterTrayItem } from "@/lib/tray/registry"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 interface CreateTrayAPIArgs {
   pluginId: string
@@ -50,6 +51,15 @@ export function createTrayAPI({ pluginId, capabilities }: CreateTrayAPIArgs): Pl
         itemId: fullId,
         error: String(error),
       })
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "tray.register",
+          message: `Failed to register tray item ${fullId}`,
+          expected: false,
+        },
+        error
+      )
     })
 
     // Mirror into the renderer-side registry so `all-commands.ts` picks it
@@ -87,6 +97,15 @@ export function createTrayAPI({ pluginId, capabilities }: CreateTrayAPIArgs): Pl
           itemId: fullId,
           error: String(error),
         })
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "tray.unregister",
+            message: `Failed to unregister tray item ${fullId}`,
+            expected: false,
+          },
+          error
+        )
       })
     }
   }

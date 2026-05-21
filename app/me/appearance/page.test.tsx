@@ -13,24 +13,22 @@ jest.mock("@/components/settings/appearance", () => ({
 import MobileAppearancePage from "./page"
 
 describe("MobileAppearancePage", () => {
-  it("renders the back-to-me header and embeds the shared section", () => {
+  it("renders the SubPageShell + embeds the shared section", () => {
     render(<MobileAppearancePage />)
     expect(screen.getByTestId("mobile-appearance-page")).toBeInTheDocument()
-    expect(screen.getByTestId("mobile-appearance-back")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-sub-page-back")).toBeInTheDocument()
     expect(screen.getByTestId("stub-appearance-section")).toBeInTheDocument()
   })
 
   it("links the back button to /me", () => {
     render(<MobileAppearancePage />)
-    const back = screen.getByTestId("mobile-appearance-back")
-    // `asChild` lifts the Link's href onto the rendered Button anchor.
-    expect(back.querySelector("a")?.getAttribute("href") ?? back.getAttribute("href")).toBe("/me")
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/me")
   })
 
   it("renders the localized section heading", () => {
     render(<MobileAppearancePage />)
-    // The mock next-intl loader resolves keys against the real en.json,
-    // so the heading reflects `mobile.me.sectionAppearance`.
+    // next-intl is globally mocked to resolve real en.json keys, so the
+    // heading reflects `mobile.me.sectionAppearance`.
     expect(screen.getByRole("heading", { level: 1, name: /appearance/i })).toBeInTheDocument()
   })
 })

@@ -21,7 +21,7 @@
  * out so the session never leaks into the main DM/team rail.
  */
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { Activity, lazy, memo, Suspense, useEffect, useRef, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { Loader2Icon } from "lucide-react"
@@ -49,7 +49,7 @@ const ChangelogTab = lazy(() =>
 
 type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog"
 
-export function RightSidebar({
+function RightSidebarInner({
   useStore,
   className,
   onOpenWorkflowSettings,
@@ -63,6 +63,10 @@ export function RightSidebar({
   // Pin the user's explicit choice so selecting a node after a manual
   // "Chat" click doesn't yank them back to the inspector.
   const userPinnedTab = useRef<RightSidebarTab | null>(null)
+  // Track the previous selectionCount so the auto-switch only fires on
+  // the 0 → ≥1 transition, not every time the count shifts within an
+  // already-non-empty selection (e.g. 1 → 2 via shift-click).
+  const prevSelectionCountRef = useRef(0)
 
   const { selectionCount, workflowId, workflowName } = useStore(
     useShallow((s: EditorState) => ({
@@ -73,12 +77,17 @@ export function RightSidebar({
   )
 
   // Auto-switch to Inspector when the user picks a node — unless they
-  // explicitly pinned Chat. The opposite direction (selection emptied
-  // → switch to Chat) is intentionally not auto: users often clear
+  // explicitly pinned Chat. Only fires on the 0 → ≥1 edge: subsequent
+  // selection-size changes (1 → 2, 2 → 3) don't re-set the tab and
+  // don't yank the user away if they manually moved to chat after the
+  // first selection. The opposite direction (selection emptied →
+  // switch to Chat) is intentionally not auto: users often clear
   // selection by clicking empty canvas without wanting to leave the
   // inspector mid-edit.
   useEffect(() => {
-    if (selectionCount > 0 && userPinnedTab.current !== "chat") {
+    const prev = prevSelectionCountRef.current
+    prevSelectionCountRef.current = selectionCount
+    if (prev === 0 && selectionCount > 0 && userPinnedTab.current !== "chat") {
       setTab("inspector")
     }
   }, [selectionCount])
@@ -120,25 +129,32 @@ export function RightSidebar({
           {t("tabs.changelog")}
         </TabsTrigger>
       </TabsList>
-      <TabsContent value="chat" className="flex-1 m-0 overflow-hidden">
-        <Suspense
-          fallback={
-            <div
-              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
-              data-testid="workflow-chat-tab-suspense"
-            >
-              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-              {t("chatLoading")}
-            </div>
-          }
-        >
-          <WorkflowEditorChatTab
-            useStore={useStore}
-            workflowId={workflowId}
-            workflowName={workflowName}
-            onOpenWorkflowSettings={onOpenWorkflowSettings}
-          />
-        </Suspense>
+      {/* `forceMount` keeps the chat tab in the DOM across tab switches; */}
+      {/* `<Activity>` then pauses its effects + renders while hidden. */}
+      {/* Together they (a) cache the heavy Suspense fallback so the user */}
+      {/* doesn't see the loading spinner on every tab switch and (b) */}
+      {/* preserve scroll position + composer draft state. */}
+      <TabsContent value="chat" className="flex-1 m-0 overflow-hidden" forceMount>
+        <Activity mode={tab === "chat" ? "visible" : "hidden"}>
+          <Suspense
+            fallback={
+              <div
+                className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+                data-testid="workflow-chat-tab-suspense"
+              >
+                <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+                {t("chatLoading")}
+              </div>
+            }
+          >
+            <WorkflowEditorChatTab
+              useStore={useStore}
+              workflowId={workflowId}
+              workflowName={workflowName}
+              onOpenWorkflowSettings={onOpenWorkflowSettings}
+            />
+          </Suspense>
+        </Activity>
       </TabsContent>
       <TabsContent value="inspector" className="flex-1 m-0 overflow-hidden">
         <InspectorPanel useStore={useStore} className="border-l-0" />
@@ -176,3 +192,13 @@ export function RightSidebar({
     </Tabs>
   )
 }
+
+/**
+ * Memoized so unrelated editor store mutations (drag positions, runStatus
+ * flips, viewport changes) don't re-render the entire 4-tab container.
+ * The component already subscribes to a narrow slice via `useShallow`,
+ * so the only valid re-render triggers are: the slice itself changes,
+ * the parent passes a new `useStore` reference (per-workflow store
+ * lifecycle), or `onOpenWorkflowSettings` identity changes.
+ */
+export const RightSidebar = memo(RightSidebarInner)

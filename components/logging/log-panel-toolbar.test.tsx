@@ -82,6 +82,11 @@ function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolb
     clearSearchHistory: jest.fn(),
     diagnosticTransportFilter: null,
     setDiagnosticTransportFilter: jest.fn(),
+    customTimeRange: null,
+    setCustomTimeRange: jest.fn(),
+    hideToolbarPresets: false,
+    density: "comfortable",
+    setDensity: jest.fn(),
     ...overrides,
   }
 }

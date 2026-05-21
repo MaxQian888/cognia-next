@@ -65,7 +65,13 @@ export async function runOcrTool(
 ): Promise<{ ok: true; result: OcrResult } | { ok: false; error: string; code?: string }> {
   const deps = (config.buildDeps ?? defaultDepsBuilder)()
   if (!deps) {
-    return { ok: false, error: "OCR runtime is not ready. Call installOcrRuntime() first." }
+    return {
+      ok: false,
+      error:
+        "OCR runtime is not ready — no providers registered yet. " +
+        "Providers contributed via ADR-0026 §2 §A `ctx.ocr.registerProvider(...)` " +
+        "or `manifest.ocrProviders[]` populate the shared registry at activate time.",
+    }
   }
   const source = mapToolSource(input.source)
   if (!source) {

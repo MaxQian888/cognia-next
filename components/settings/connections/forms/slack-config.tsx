@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -229,6 +230,13 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       }
       if (appToken.trim()) {
         await connectorsKeyringSet(adapterId, "appToken", appToken.trim())
+      }
+
+      // Hot-reload the running adapter so the new keyring material is
+      // picked up without an app restart. New rows boot from the next
+      // bus-provider mount; only emit for updates.
+      if (!isNew) {
+        emitCredentialsRotated(adapterId)
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))

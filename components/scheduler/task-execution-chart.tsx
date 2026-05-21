@@ -94,16 +94,16 @@ export function TaskExecutionChart({ executions, taskId, className }: TaskExecut
       </h3>
 
       {/* Legend */}
-      <div className="mb-2 flex items-center gap-4 text-[11px]">
-        <span className="flex items-center gap-1">
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] sm:gap-x-4">
+        <span className="flex items-center gap-1 whitespace-nowrap">
           <span className="h-2 w-2 rounded-full bg-green-500" aria-hidden="true" />
           {t("dashboard.completed") || "Completed"}
         </span>
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 whitespace-nowrap">
           <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
           {t("dashboard.failed") || "Failed"}
         </span>
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 whitespace-nowrap">
           <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true" />
           {t("dashboard.running") || "Running"}
         </span>

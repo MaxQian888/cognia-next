@@ -4,7 +4,14 @@
 // exercise it directly here so the auto-apply branch can't regress.
 
 import "fake-indexeddb/auto"
-import { createSession, getSession, updateSession, listSessions } from "./sessions"
+import {
+  createSession,
+  getSession,
+  updateSession,
+  listSessions,
+  deleteSession,
+  bulkDeleteSessions,
+} from "./sessions"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
 
@@ -92,5 +99,39 @@ describe("updateSession + listSessions", () => {
     const list = await listSessions()
     expect(list[0].id).toBe(b.id)
     expect(list[1].id).toBe(a.id)
+  })
+
+  it("round-trips the pinned flag for batch pin/unpin", async () => {
+    const session = await createSession({ title: "Pinnable" })
+    await updateSession(session.id, { pinned: true })
+    expect((await getSession(session.id))?.pinned).toBe(true)
+    await updateSession(session.id, { pinned: false })
+    expect((await getSession(session.id))?.pinned).toBe(false)
+  })
+})
+
+describe("bulkDeleteSessions", () => {
+  it("removes every session in the list and leaves the rest untouched", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    const c = await createSession({ title: "C" })
+
+    await bulkDeleteSessions([a.id, c.id])
+
+    expect(await getSession(a.id)).toBeUndefined()
+    expect(await getSession(c.id)).toBeUndefined()
+    expect(await getSession(b.id)).toBeDefined()
+  })
+
+  it("silently skips ids that are already gone", async () => {
+    const a = await createSession({ title: "A" })
+    await deleteSession(a.id)
+    await expect(bulkDeleteSessions([a.id, "s_missing"])).resolves.toBeUndefined()
+  })
+
+  it("is a no-op on an empty array (does not open a transaction)", async () => {
+    const a = await createSession({ title: "A" })
+    await bulkDeleteSessions([])
+    expect(await getSession(a.id)).toBeDefined()
   })
 })

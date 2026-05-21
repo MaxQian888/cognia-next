@@ -18,7 +18,9 @@ use tokio::process::Command as TokioCommand;
 
 use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
 use crate::automation::commands::AutomationState;
-use crate::automation::permission::{Call, Decision, Surface, TargetMeta};
+use crate::automation::permission::{
+    maybe_upgrade_to_consent, Call, Decision, Surface, TargetMeta, Tier,
+};
 use crate::automation::types::*;
 
 use super::translator::{build_computer_result, translate_computer_action};
@@ -135,6 +137,12 @@ pub struct CallContext {
     process_name: Option<String>,
     #[serde(default)]
     window_title: Option<String>,
+    /// ADR-0020 W1 — per-call tier upgrade originating from
+    /// `Character.computerUseSettings.requireConsent`. Forwarded from the
+    /// sidecar in `ctx.forceTier`; `maybe_upgrade_to_consent` swaps a
+    /// gate `Allow` into `RequireConsent` for driving calls.
+    #[serde(default)]
+    force_tier: Option<Tier>,
 }
 
 impl CallContext {
@@ -179,7 +187,9 @@ where
         target: target.clone(),
     };
 
-    let allow = match state.gate.evaluate(&call) {
+    let initial_decision = state.gate.evaluate(&call);
+    let decision = maybe_upgrade_to_consent(initial_decision, ctx.force_tier, &call);
+    let allow = match decision {
         Decision::Allow => true,
         Decision::Deny(err) => {
             let entry = AuditEntry {

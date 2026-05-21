@@ -15,6 +15,8 @@ import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
+import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
+import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
@@ -29,12 +31,20 @@ import { ConnectorBusProvider } from "@/components/connectors/connector-bus-prov
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { ConsentOverlay } from "@/components/automation/consent-overlay"
 import { PluginModalRoot } from "@/components/plugins/plugin-modal-root"
+import { PluginConsentOverlay } from "@/components/plugins/plugin-consent-overlay"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
-import { BackgroundApplier } from "@/lib/appearance"
+import {
+  BackgroundApplier,
+  DensityApplier,
+  MotionApplier,
+  RadiusApplier,
+  TypographyApplier,
+} from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
+import { PerfHud } from "@/lib/perf"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -86,6 +96,8 @@ export default async function RootLayout({
                 <TooltipProvider>
                   <LoggerProvider>
                     <SubscriptionInitializer />
+                    <AutomationPolicyInitializer />
+                    <AuditRetentionInitializer />
                     <ExternalAgentInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
@@ -94,6 +106,14 @@ export default async function RootLayout({
                         <CanvasBridgeProvider>
                           <A2UIDispatchProvider>
                             <DataAdapterProvider adapter={dexieAdapter}>
+                              {/* Appearance v47 — Typography / density / radius
+                                  / motion run before color appliers so the
+                                  colorblind & high-contrast transforms in
+                                  CustomThemeApplier see stable base values. */}
+                              <TypographyApplier />
+                              <DensityApplier />
+                              <RadiusApplier />
+                              <MotionApplier />
                               {/* Keeps body[data-bg-*] + the cognia user-css */}
                               {/* style tag in sync with the appearance store. */}
                               <BackgroundApplier />
@@ -124,7 +144,13 @@ export default async function RootLayout({
                     {/* Renders any modal a plugin opens via ctx.modal.openModal(). */}
                     {/* See ADR-0026 §3 §A. */}
                     <PluginModalRoot />
+                    {/* Per-call consent overlay for tier-"confirm" plugin permissions. */}
+                    {/* Listens for `plugin:consent-request` CustomEvents from the broker. */}
+                    <PluginConsentOverlay />
                     <ExposeTestGlobals />
+                    {/* Dev-only perf HUD. In production it returns null
+                     * unless `localStorage.cogniaPerfHud === "1"`. */}
+                    <PerfHud />
                     <Toaster />
                   </LoggerProvider>
                 </TooltipProvider>

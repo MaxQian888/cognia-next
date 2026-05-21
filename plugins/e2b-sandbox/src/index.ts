@@ -25,7 +25,9 @@ import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/sla
 // legacy singleton path. The legacy path is now itself a shim over the
 // same registry (see `lib/github/workspace.ts`).
 import { setE2BBackend } from "@/lib/github/workspace"
+import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { E2BWorkspaceBackend } from "./workspace-backend"
+import { buildMicrovmExec } from "./microvm-exec"
 
 const E2B_PRESET = defineMcpServerPreset({
   id: "e2b-sandbox",
@@ -113,12 +115,20 @@ const definition: PluginDefinition = {
       source: "plugin",
       pluginId: ctx.pluginId,
     })
+
+    // ADR-0028 / T4 — register the microvm exec adapter so any session
+    // with `sandboxTier: "microvm"` routes `sandbox_*` tool calls through
+    // an ephemeral Firecracker microVM instead of the OS sandbox. When
+    // `@e2b/sdk` isn't installed the factory throws a clean install hint
+    // at first call — strict-mode compliant (no silent fallback).
+    setMicrovmExec(buildMicrovmExec())
   },
   deactivate: async (ctx?: PluginContext) => {
     if (workspaceRegistrationDispose) {
       workspaceRegistrationDispose()
       workspaceRegistrationDispose = undefined
     }
+    setMicrovmExec(null)
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
     }

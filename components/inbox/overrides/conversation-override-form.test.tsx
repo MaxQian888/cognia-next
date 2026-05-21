@@ -14,6 +14,115 @@ beforeEach(async () => {
 })
 
 describe("ConversationOverrideForm", () => {
+  it("toggles quiet hours into the persisted row", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_quiet"
+        sessionId="s_quiet"
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-quiet-enabled"))
+    fireEvent.change(screen.getByTestId("conv-override-quiet-from"), {
+      target: { value: "23:00" },
+    })
+    fireEvent.change(screen.getByTestId("conv-override-quiet-to"), {
+      target: { value: "07:00" },
+    })
+    fireEvent.change(screen.getByTestId("conv-override-quiet-tz"), {
+      target: { value: "Asia/Shanghai" },
+    })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_quiet")
+      .first()
+    expect(persisted?.quietHours).toEqual({
+      from: "23:00",
+      to: "07:00",
+      tz: "Asia/Shanghai",
+    })
+  })
+
+  it("clears quiet hours when toggle is off on save", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-existing",
+      conversationKey: "lark:lark-1:oc_quiet_clear",
+      sessionId: "s_quiet_clear",
+      quietHours: { from: "22:00", to: "08:00", tz: "UTC" },
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.add(initial)
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_quiet_clear"
+        sessionId="s_quiet_clear"
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-quiet-enabled"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_quiet_clear")
+      .first()
+    expect(persisted?.quietHours).toBeUndefined()
+  })
+
+  it("persists whitelisted skill ids and clears them when toggling back to inherit", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_skills"
+        sessionId="s_skills"
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-skills-whitelist"))
+    fireEvent.change(screen.getByTestId("conv-override-skills-input"), {
+      target: { value: "lark.calendar.list_events" },
+    })
+    fireEvent.keyDown(screen.getByTestId("conv-override-skills-input"), { key: "Enter" })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_skills")
+      .first()
+    expect(persisted?.allowedBuiltInSkillIds).toEqual(["lark.calendar.list_events"])
+  })
+
+  it("HITL switch defaults on and persists false when turned off", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_hitl"
+        sessionId="s_hitl"
+        onDone={onDone}
+      />
+    )
+    // The switch starts in the on (checked) state.
+    expect(screen.getByTestId("conv-override-hitl")).toHaveAttribute("data-state", "checked")
+    fireEvent.click(screen.getByTestId("conv-override-hitl"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_hitl")
+      .first()
+    expect(persisted?.requireHitlForWrites).toBe(false)
+  })
+
   it("renders empty form when no initialRow is supplied", () => {
     render(
       <ConversationOverrideForm

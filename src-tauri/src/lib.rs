@@ -250,28 +250,18 @@ pub fn run() {
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
         .manage(plugin_api::wasm::WasmPluginState::default())
+        // ADR-0028 Phase 14 — OAuth refresh watchers per Anthropic account.
+        .manage(subscription::anthropic::credential::WatcherRegistry::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("vscode-extensions"))
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
-        .manage({
-            // Automation subsystem state — spawn the worker thread once, build
-            // the permission gate with disabled defaults (renderer enables via
-            // Settings → Automation), and a fresh in-memory audit ring. The
-            // back-end is constructed *on* the worker thread so Windows UIA
-            // can initialize COM there. The ConsentBroker fields are empty —
-            // the renderer-side overlay populates `pending` requests via the
-            // `automation:consent-request` event, and the user's responses
-            // come back via `automation_consent_respond`.
-            let handle = automation::Worker::spawn(automation::make_default_backend);
-            let gate = automation::PermissionGate::new(
-                automation::permission::AutomationSettings::default(),
-            );
-            let audit = automation::AuditRing::new();
-            let consent = automation::ConsentBroker::new();
-            automation::commands::AutomationState::new(handle, gate, audit, consent)
-        })
+        // Automation subsystem state — registered via `app.manage` from
+        // setup() below so the worker thread can hold a Tauri `AppHandle`
+        // and emit `automation:worker-restart` / `automation:worker-dead`
+        // events on backend panic (ADR-0020 W1). See the matching setup
+        // block in `.setup(|app| { ... })`.
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::menu_action_ids,
@@ -280,6 +270,7 @@ pub fn run() {
             claude::commands::claude_approve,
             claude::commands::claude_close_session,
             claude::commands::claude_sidecar_status,
+            claude::commands::sidecar_restart_count,
             claude::mcp_test::test_mcp_server,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
@@ -560,6 +551,7 @@ pub fn run() {
             plugin_api::context_menu::plugin_context_menu_unregister,
             plugin_api::notification::plugin_show_notification,
             plugin_api::process_ops::plugin_process_kill,
+            plugin_api::node_permission::plugin_node_permission_argv,
             plugin_api::signature::plugin_generate_keypair,
             plugin_api::signature::plugin_create_signature,
             plugin_api::signature::plugin_verify_signature,
@@ -613,10 +605,15 @@ pub fn run() {
             automation::commands::desktop_cursor_position,
             automation::commands::desktop_pick_at_point,
             automation::commands::automation_audit_snapshot,
+            automation::commands::automation_policy_get,
+            automation::commands::automation_policy_set,
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
+            automation::commands::automation_drain_init_failure,
+            automation::commands::desktop_pick_session_start,
+            automation::commands::desktop_pick_session_cancel,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
@@ -632,6 +629,36 @@ pub fn run() {
             ocr::msix::ocr_msix_status,
         ])
         .setup(|app| {
+            // ADR-0020 W1 — automation subsystem. We construct the
+            // worker thread with an `AppHandle` so it can emit
+            // `automation:worker-restart` / `automation:worker-dead`
+            // events when the backend panics. Built here (instead of
+            // `.manage({...})`) because the handle is only available
+            // after `App` is built.
+            {
+                let app_handle = app.handle().clone();
+                // The closure captures `app_handle` by clone on each
+                // invocation so the worker thread (which may rebuild the
+                // backend several times after a panic) can keep emitting
+                // `automation:backend-init-failed` if reinit fails too.
+                let app_handle_for_builder = app_handle.clone();
+                let worker = automation::Worker::spawn_with_app(
+                    Some(app_handle),
+                    move || automation::make_default_backend_with_app(
+                        Some(app_handle_for_builder.clone()),
+                    ),
+                );
+                let gate = automation::PermissionGate::new(
+                    automation::permission::AutomationSettings::default(),
+                );
+                let audit = automation::AuditRing::new();
+                let consent = automation::ConsentBroker::new();
+                let policy = automation::policy::PolicyState::default();
+                app.manage(automation::commands::AutomationState::new(
+                    worker, gate, audit, consent, policy,
+                ));
+            }
+
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
             // with stdout / file / webview targets and mirrors records into the
             // OS-native platform logger (EventLog / OSLog / journald). The

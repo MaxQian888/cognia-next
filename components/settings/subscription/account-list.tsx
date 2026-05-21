@@ -31,6 +31,8 @@ import {
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import type { AccountSummary, ProviderId } from "@/lib/subscription/core/types"
 
+import { AccountUsageChips } from "./account-usage-chips"
+
 interface AccountListProps {
   provider: ProviderId
   onAdd?: () => void
@@ -96,6 +98,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                   <div className="truncate text-[11px] text-muted-foreground">
                     {[account.email, account.plan].filter(Boolean).join(" · ")}
                   </div>
+                  <AccountUsageChips accountId={account.id} />
                 </div>
                 {account.id === activeAccountId && (
                   <Badge variant="default" className="text-[10px]">

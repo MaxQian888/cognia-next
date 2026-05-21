@@ -49,11 +49,33 @@ jest.mock("./log-detail-panel", () => ({
     </button>
   ),
 }))
+jest.mock("./log-trace-view", () => ({
+  LogTraceView: ({ onSelectTrace }: { onSelectTrace?: (id: string) => void }) => (
+    <button data-testid="stub-trace-view" onClick={() => onSelectTrace?.("trace-x")}>
+      trace
+    </button>
+  ),
+}))
+
+const mockToast = jest.fn() as jest.Mock & { dismiss?: jest.Mock }
+jest.mock("sonner", () => ({
+  toast: (...args: unknown[]) => mockToast(...args),
+}))
+
+const mockUseLogPanelUrlSync = jest.fn()
+jest.mock("@/hooks/logging/use-log-panel-url-sync", () => ({
+  useLogPanelUrlSync: (...args: unknown[]) => mockUseLogPanelUrlSync(...args),
+}))
 
 // ── Mock hooks the panel depends on.
 const mockUseMediaQuery = jest.fn()
+const mockUseResizableLayout = jest.fn(() => ({
+  defaultLayout: undefined,
+  onLayoutChanged: jest.fn(),
+}))
 jest.mock("@/hooks/ui", () => ({
   useMediaQuery: (...args: unknown[]) => mockUseMediaQuery(...args),
+  useResizableLayout: (...args: unknown[]) => mockUseResizableLayout(...args),
 }))
 
 const mockUseLogStream = jest.fn()
@@ -99,6 +121,10 @@ function defaultFilterState(overrides: Record<string, unknown> = {}) {
     diagnosticTransportFilter: null,
     expandedIds: new Set<string>(),
     focusedIndex: 0,
+    customTimeRange: null,
+    currentPage: 1,
+    pageSize: 50,
+    density: "comfortable",
     presets: [],
     activePresetId: "__EMPTY__",
     bookmarkedIds: new Set<string>(),
@@ -121,7 +147,11 @@ function defaultFilterState(overrides: Record<string, unknown> = {}) {
     setUseRegex: jest.fn(),
     setHighSeverityOnly: jest.fn(),
     setTimeRange: jest.fn(),
+    setCustomTimeRange: jest.fn(),
     setTraceFocusId: jest.fn(),
+    setCurrentPage: jest.fn(),
+    setPageSize: jest.fn(),
+    setDensity: jest.fn(),
     setAutoScroll: jest.fn(),
     setViewMode: jest.fn(),
     setSelectedLog: jest.fn(),
@@ -406,5 +436,163 @@ describe("LogPanel — viewport adaptation", () => {
     // The desktop class w-[350px] should NOT appear on a side panel
     const sidePanels = container.querySelectorAll(".w-\\[350px\\]")
     expect(sidePanels.length).toBe(0)
+  })
+})
+
+describe("LogPanel — resizable detail panel", () => {
+  it("wraps the desktop layout in a ResizablePanelGroup when detail open", () => {
+    const selected = { id: "l-1", message: "x", level: "info", module: "m", timestamp: "" } as never
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({ selectedLog: selected, showDetailPanel: true })
+    )
+    const { container } = render(<LogPanel />)
+    expect(screen.getByTestId("log-panel-resizable-group")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="resizable-handle"]')).toBeInTheDocument()
+    expect(screen.getByTestId("stub-detail-panel")).toBeInTheDocument()
+  })
+
+  it("renders main pane alone (no resizable group) when detail closed", () => {
+    render(<LogPanel />)
+    expect(screen.queryByTestId("log-panel-resizable-group")).not.toBeInTheDocument()
+    expect(screen.getByTestId("log-panel-main-pane")).toBeInTheDocument()
+  })
+})
+
+describe("LogPanel — trace view", () => {
+  it("renders LogTraceView when viewMode=trace", () => {
+    mockUseLogPanelFilters.mockReturnValue(defaultFilterState({ viewMode: "trace" }))
+    render(<LogPanel />)
+    expect(screen.getByTestId("stub-trace-view")).toBeInTheDocument()
+    expect(screen.queryByTestId("stub-virtualized-list")).not.toBeInTheDocument()
+  })
+
+  it("clicking a trace forwards the id to setTraceFocusId via filters", () => {
+    const setTraceFocusId = jest.fn()
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({ viewMode: "trace", setTraceFocusId })
+    )
+    render(<LogPanel />)
+    fireEvent.click(screen.getByTestId("stub-trace-view"))
+    expect(setTraceFocusId).toHaveBeenCalledWith("trace-x")
+  })
+})
+
+describe("LogPanel — window-scope keyboard shortcuts", () => {
+  it("fires refresh on `r`", () => {
+    const refresh = jest.fn()
+    mockUseLogStream.mockReturnValueOnce({
+      logs: [],
+      isLoading: false,
+      error: null,
+      refresh,
+      clearLogs: jest.fn(),
+      logRate: 0,
+      stats: { total: 0, byLevel: { trace: 0, debug: 0, info: 0, warn: 0, error: 0, fatal: 0 } },
+    })
+    render(<LogPanel />)
+    fireEvent.keyDown(window, { key: "r" })
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it("opens shortcuts dialog on `?`", () => {
+    const setShowShortcutsDialog = jest.fn()
+    mockUseLogPanelFilters.mockReturnValue(defaultFilterState({ setShowShortcutsDialog }))
+    render(<LogPanel />)
+    fireEvent.keyDown(window, { key: "?" })
+    expect(setShowShortcutsDialog).toHaveBeenCalledWith(true)
+  })
+
+  it("bookmarks the focused entry on `b`", () => {
+    const toggleBookmark = jest.fn()
+    mockUseLogPanelFilters.mockReturnValue(defaultFilterState({ toggleBookmark, focusedIndex: 0 }))
+    render(<LogPanel />)
+    fireEvent.keyDown(window, { key: "b" })
+    expect(toggleBookmark).toHaveBeenCalled()
+  })
+
+  it("ignores shortcuts while typing in an input", () => {
+    const refresh = jest.fn()
+    mockUseLogStream.mockReturnValueOnce({
+      logs: [],
+      isLoading: false,
+      error: null,
+      refresh,
+      clearLogs: jest.fn(),
+      logRate: 0,
+      stats: { total: 0, byLevel: { trace: 0, debug: 0, info: 0, warn: 0, error: 0, fatal: 0 } },
+    })
+    render(<LogPanel />)
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    input.focus()
+    fireEvent.keyDown(input, { key: "r", bubbles: true })
+    expect(refresh).not.toHaveBeenCalled()
+    document.body.removeChild(input)
+  })
+})
+
+describe("LogPanel — autoScroll toast on pages > 1", () => {
+  beforeEach(() => {
+    mockToast.mockClear()
+  })
+
+  it("shows a 'jump to latest' toast when new logs arrive on a non-first page", () => {
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({ autoRefresh: true, autoScroll: true })
+    )
+    mockUseLogStream.mockReturnValue({
+      logs: Array.from({ length: 60 }, (_, i) => ({
+        id: `l-${i}`,
+        timestamp: new Date(Date.now() - i * 1000).toISOString(),
+        level: "info",
+        module: "m",
+        message: `m-${i}`,
+      })),
+      isLoading: false,
+      error: null,
+      refresh: jest.fn(),
+      clearLogs: jest.fn(),
+      logRate: 5,
+      stats: {
+        total: 60,
+        byLevel: { trace: 0, debug: 0, info: 60, warn: 0, error: 0, fatal: 0 },
+      },
+    })
+    const setCurrentPage = jest.fn()
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({
+        autoRefresh: true,
+        autoScroll: true,
+        currentPage: 2,
+        setCurrentPage,
+      })
+    )
+    const { rerender } = render(<LogPanel />)
+    // Bump the log count to trigger the toast path.
+    mockUseLogStream.mockReturnValueOnce({
+      logs: Array.from({ length: 65 }, (_, i) => ({
+        id: `l-${i}`,
+        timestamp: new Date(Date.now() - i * 1000).toISOString(),
+        level: "info",
+        module: "m",
+        message: `m-${i}`,
+      })),
+      isLoading: false,
+      error: null,
+      refresh: jest.fn(),
+      clearLogs: jest.fn(),
+      logRate: 5,
+      stats: {
+        total: 65,
+        byLevel: { trace: 0, debug: 0, info: 65, warn: 0, error: 0, fatal: 0 },
+      },
+    })
+    rerender(<LogPanel />)
+    expect(mockToast).toHaveBeenCalled()
+    const toastArgs = mockToast.mock.calls[0]
+    const opts = toastArgs[1] as { action?: { onClick?: () => void } }
+    expect(opts.action).toBeDefined()
+    opts.action?.onClick?.()
+    expect(setCurrentPage).toHaveBeenCalledWith(1)
   })
 })

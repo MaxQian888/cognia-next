@@ -81,11 +81,12 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
 
   return (
     <div className="space-y-3" data-testid={testId}>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         {SDK_BUILTIN_TOOLS.map((name) => (
           <label
             key={name}
-            className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm hover:bg-muted/40"
+            className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-sm hover:bg-muted/40"
+            title={name}
           >
             <Checkbox
               checked={selected.has(name)}
@@ -93,7 +94,7 @@ export function ToolPicker({ value, onChange, disabled, testId }: ToolPickerProp
               disabled={disabled}
               data-testid={`${testId}-builtin-${name}`}
             />
-            <span className="font-mono text-xs">{name}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">{name}</span>
           </label>
         ))}
       </div>

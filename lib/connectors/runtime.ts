@@ -22,6 +22,7 @@
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
+import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import type { SendContent, ChatSession, StoredMessage, AppSettings } from "@/lib/claude/types"
@@ -221,6 +222,13 @@ async function insertInboundMessage(
   const finalParts: StoredMessage["parts"] =
     parts.length > 0 ? parts : [{ type: "text", text: event.plainText }]
 
+  // Reverse-project the platform-native rich content (Block Kit, Lark
+  // card, Discord embeds, Telegram inline keyboard, OneBot CQ segments)
+  // into an InboundA2UIBlock so the Inbox renderer can show native UI
+  // structure rather than the plaintext fallback. Best-effort — the
+  // mapper returns null when the payload has nothing structured.
+  const inboundA2UI = projectInboundToA2UI(event.platform, event.raw)
+
   const row: StoredMessage = {
     id: crypto.randomUUID(),
     sessionId,
@@ -232,6 +240,7 @@ async function insertInboundMessage(
         platform: event.platform,
         sender: event.sender,
       },
+      ...(inboundA2UI ? { inboundA2UI } : {}),
     },
     createdAt: now,
   }

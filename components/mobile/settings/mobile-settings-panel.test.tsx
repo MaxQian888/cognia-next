@@ -199,6 +199,7 @@ describe("<MobileSettingsPanel />", () => {
         deletePairing: true,
         exportBackup: true,
         revealSecrets: false,
+        signOut: true,
       },
     })
     const lastEnqueue = enqueueMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
@@ -210,6 +211,7 @@ describe("<MobileSettingsPanel />", () => {
       deletePairing: true,
       exportBackup: true,
       revealSecrets: false,
+      signOut: true,
     })
   })
 })

@@ -49,6 +49,7 @@ import {
   expandWorkflowMentions,
   snapshotFromEditorState,
 } from "@/lib/workflow/editor/mention-expand"
+import { PerfBoundary } from "@/lib/perf"
 
 export function WorkflowEditorChatTab({
   useStore,
@@ -159,34 +160,36 @@ export function WorkflowEditorChatTab({
 
   return (
     <WorkflowEditorProvider value={ctxValue}>
-      <div
-        className="flex h-full w-full flex-col bg-card/40"
-        aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
-        data-testid="workflow-chat-tab"
-      >
-        <WorkflowSessionBar
-          workflowId={workflowId}
-          workflowName={workflowName}
-          activeSessionId={session.id}
-        />
-        <ChatPane
-          activeSession={session}
-          onSend={handleSend}
-          onStop={handleStop}
-          onRegenerate={handleRegenerate}
-          onEditResend={handleEditResend}
-          onCreate={() => {
-            /* New-session button is a no-op here — the workflow-editor session
-             * is fixed per workflow. The button is still visible (so muscle
-             * memory works) but the click is benign. */
-          }}
-          onUseSample={(text) => {
-            void handleSend({ type: "text", text } as never)
-          }}
-          onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
-          showHeader={false}
-        />
-      </div>
+      <PerfBoundary id="workflow:chat-tab">
+        <div
+          className="flex h-full w-full flex-col bg-card/40"
+          aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
+          data-testid="workflow-chat-tab"
+        >
+          <WorkflowSessionBar
+            workflowId={workflowId}
+            workflowName={workflowName}
+            activeSessionId={session.id}
+          />
+          <ChatPane
+            activeSession={session}
+            onSend={handleSend}
+            onStop={handleStop}
+            onRegenerate={handleRegenerate}
+            onEditResend={handleEditResend}
+            onCreate={() => {
+              /* New-session button is a no-op here — the workflow-editor session
+               * is fixed per workflow. The button is still visible (so muscle
+               * memory works) but the click is benign. */
+            }}
+            onUseSample={(text) => {
+              void handleSend({ type: "text", text } as never)
+            }}
+            onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
+            showHeader={false}
+          />
+        </div>
+      </PerfBoundary>
     </WorkflowEditorProvider>
   )
 }

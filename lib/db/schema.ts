@@ -1307,6 +1307,16 @@ export class CogniaDB extends Dexie {
     //   the persistence layer's record of "why" it's in the deny-list, so
     //   no new index is needed. Pure additive; no upgrade hook.
     this.version(46).stores({})
+
+    // v47 — Appearance optimization (ADR-0029). Adds optional fields to the
+    //   `settings` singleton row: `density`, `radius`, `motion`,
+    //   `typographyExt`, `a11y`, `autoMode`, `monacoLink`, `activeThemePackId`,
+    //   `customCssScope`. All fields are optional in `AppSettings`; the
+    //   appliers consume the defaults from `@/types/appearance` when missing.
+    //   Pure additive — no upgrade hook needed; lazy backfill happens in the
+    //   appliers / settings selectors rather than during DB upgrade so the
+    //   Dexie callback stays non-blocking.
+    this.version(47).stores({})
   }
 
   sessionState!: Table<SessionStateRow, string>

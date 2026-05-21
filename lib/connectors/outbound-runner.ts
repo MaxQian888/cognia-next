@@ -31,6 +31,7 @@ import {
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { readForResolution } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
 import {
   createCircuitBreaker,
@@ -329,8 +330,14 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         return
       }
 
-      if (adapterRow.quietHours) {
-        const { from, to, tz } = adapterRow.quietHours
+      // Per-conversation override beats adapter default (im-refactored-crayon
+      // Phase 1.4). When the operator sets a quiet window on the override
+      // row, the runner consults that instead of the adapter-level one so
+      // a single Telegram bot can have different on-call windows per chat.
+      const convOverride = await readForResolution(conversationKey).catch(() => null)
+      const effectiveQuietHours = convOverride?.quietHours ?? adapterRow.quietHours
+      if (effectiveQuietHours) {
+        const { from, to, tz } = effectiveQuietHours
         if (isInQuietHours(now, from, to, tz)) {
           const deferMs = msUntilQuietEnd(now, to, tz)
           await markFailed(job.id, "quiet_hours", "Within quiet hours window", now + deferMs)

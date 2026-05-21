@@ -71,6 +71,10 @@ export async function capacitorHttpGet(
   }
 ): Promise<{ status: number; data: unknown } | null> {
   const { signal, timeoutMs, serverTrustMode = "self-signed" } = opts
+  // Bail out before issuing the request when the signal is already
+  // aborted — `addEventListener('abort')` below would never fire in that
+  // case and the race would deadlock against a never-resolving request.
+  if (signal.aborted) return null
   const abortTimer = new Promise<never>((_, reject) => {
     const t = setTimeout(() => reject(new Error("timeout")), timeoutMs)
     signal.addEventListener(

@@ -1,16 +1,17 @@
 "use client"
 
 // Codex provider tab — flat (no inner tabs). Account list + preset picker +
-// add-account dialog. Codex doesn't surface usage metrics; users with
-// preferences can flip the auto-refresh / preferDiscovered toggles via the
-// settings card below.
+// connection-settings card + add-account dialog. Codex doesn't surface
+// usage metrics, so we don't force the Anthropic inner-tab structure here
+// (that would ship placeholder panes); instead we polish the standalone
+// settings card with `SettingsCard` + `SettingsToggle` chrome for visual
+// parity with the rest of the settings UI.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 
-import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -58,36 +59,27 @@ export function ProviderTabCodex() {
       <AccountList provider="codex" onAdd={() => setAddOpen(true)} />
       <PresetPicker provider="codex" />
 
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <Label className="text-sm">{tSettings("preferDiscovered.title")}</Label>
-              <p className="text-xs text-muted-foreground">
-                {tSettings("preferDiscovered.description")}
-              </p>
-            </div>
-            <Switch
-              checked={codexSettings.preferDiscovered}
-              onCheckedChange={(v) => void togglePreferDiscovered(v)}
-              aria-label={tSettings("preferDiscovered.label")}
-            />
-          </div>
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <Label className="text-sm">{tSettings("autoRefresh.title")}</Label>
-              <p className="text-xs text-muted-foreground">
-                {tSettings("autoRefresh.description")}
-              </p>
-            </div>
-            <Switch
-              checked={codexSettings.autoRefreshNearExpiry}
-              onCheckedChange={(v) => void toggleAutoRefresh(v)}
-              aria-label={tSettings("autoRefresh.label")}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <SettingsCard
+        title={tSettings("cardTitle")}
+        description={tSettings("cardDescription")}
+        collapsible
+        defaultOpen={false}
+      >
+        <SettingsToggle
+          id="codex-prefer-discovered"
+          label={tSettings("preferDiscovered.title")}
+          description={tSettings("preferDiscovered.description")}
+          checked={codexSettings.preferDiscovered}
+          onCheckedChange={(v) => void togglePreferDiscovered(v)}
+        />
+        <SettingsToggle
+          id="codex-auto-refresh"
+          label={tSettings("autoRefresh.title")}
+          description={tSettings("autoRefresh.description")}
+          checked={codexSettings.autoRefreshNearExpiry}
+          onCheckedChange={(v) => void toggleAutoRefresh(v)}
+        />
+      </SettingsCard>
 
       <CodexAddAccountDialog open={addOpen} onOpenChange={setAddOpen} />
     </div>

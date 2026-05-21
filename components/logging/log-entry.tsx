@@ -92,6 +92,8 @@ export function HighlightedText({
   )
 }
 
+export type LogEntryDensity = "compact" | "comfortable" | "spacious"
+
 export interface LogEntryProps {
   log: StructuredLogEntry
   isExpanded: boolean
@@ -104,7 +106,15 @@ export interface LogEntryProps {
   useRegex: boolean
   isBookmarked: boolean
   onToggleBookmark?: (id: string) => void
+  /** Visual density — controls row padding. Default `"comfortable"`. */
+  density?: LogEntryDensity
   t: ReturnType<typeof useTranslations>
+}
+
+const DENSITY_ROW_PADDING: Record<LogEntryDensity, string> = {
+  compact: "py-0.5",
+  comfortable: "py-2",
+  spacious: "py-3",
 }
 
 export function LogEntry({
@@ -118,6 +128,7 @@ export function LogEntry({
   useRegex,
   isBookmarked,
   onToggleBookmark,
+  density = "comfortable",
   t,
 }: LogEntryProps) {
   const [copied, setCopied] = useState(false)
@@ -187,7 +198,14 @@ export function LogEntry({
             theme.gutterClass
           )}
         >
-          <div className="flex items-start gap-2 px-3 py-2 cursor-pointer" onClick={handleToggle}>
+          <div
+            className={cn(
+              "flex items-start gap-2 px-3 cursor-pointer",
+              DENSITY_ROW_PADDING[density]
+            )}
+            data-density={density}
+            onClick={handleToggle}
+          >
             {hasDetails ? (
               isExpanded ? (
                 <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
@@ -419,6 +437,7 @@ export interface TraceGroupProps {
   useRegex: boolean
   bookmarkedIds: Set<string>
   onToggleBookmark?: (id: string) => void
+  density?: LogEntryDensity
   t: ReturnType<typeof useTranslations>
 }
 
@@ -433,6 +452,7 @@ export function TraceGroup({
   useRegex,
   bookmarkedIds,
   onToggleBookmark,
+  density = "comfortable",
   t,
 }: TraceGroupProps) {
   const [isOpen, setIsOpen] = useState(true)
@@ -470,6 +490,7 @@ export function TraceGroup({
             useRegex={useRegex}
             isBookmarked={bookmarkedIds.has(log.id)}
             onToggleBookmark={onToggleBookmark}
+            density={density}
             t={t}
           />
         ))}

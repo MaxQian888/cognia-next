@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { startTransition, useCallback, useEffect, useRef } from "react"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
   applySdkEvent,
@@ -44,6 +44,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { isTauri } from "@/lib/tauri"
+import { mark as perfMark } from "@/lib/perf"
 import type { UIMessage } from "ai"
 
 /**
@@ -252,6 +253,7 @@ export function useClaudeChat() {
         store.getState().replaceMessages(next)
       }
       store.getState().setStatus("streaming")
+      perfMark("stream-start")
       store.getState().setError(null)
       lastUserContentRef.current.set(sessionId, effectiveContent)
 
@@ -785,7 +787,15 @@ async function handleEvent(
         // store helper handles the precedence.
         const { pendingApprovals } = useChatStore.getState()
         if (pendingApprovals.length === 0) {
-          useChatStore.getState().setStatus("idle")
+          perfMark("stream-end")
+          // Wrap the streaming→idle flip in `startTransition` so the heavy
+          // commit it triggers — unmounting Streamdown, mounting react-markdown
+          // + sanitize, and lazy-loading any Mermaid/Math/Diff blocks via
+          // next/dynamic — lands at transition priority. The user's scroll
+          // and keyboard input remain interruptible during the swap.
+          startTransition(() => {
+            useChatStore.getState().setStatus("idle")
+          })
         }
 
         // Auto-detect artifacts in the assistant turn that just sealed.

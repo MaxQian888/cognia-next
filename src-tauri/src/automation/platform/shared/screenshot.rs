@@ -77,3 +77,59 @@ fn encode(img: &RgbaImage, format: ImageFormat, out: &mut Vec<u8>) -> Result<()>
             message: format!("png encode failed: {e}"),
         })
 }
+
+/// Return a new `Screenshot` with identical dimensions / format /
+/// timestamp metadata but whose pixel bytes are a uniform black image.
+/// The dispatcher calls this when `AutomationSettings.redact_screenshots`
+/// is on AND the foreground window is a credential prompt — the model
+/// still sees a tool_result of the expected shape, but no sensitive
+/// pixels leak.
+pub fn redact_screenshot(original: Screenshot) -> Result<Screenshot> {
+    let blank = RgbaImage::new(original.width, original.height);
+    let mut out: Vec<u8> = Vec::with_capacity((original.width * original.height * 4) as usize);
+    encode(&blank, original.format, &mut out)?;
+    Ok(Screenshot {
+        bytes: general_purpose::STANDARD.encode(&out),
+        width: original.width,
+        height: original.height,
+        captured_at: original.captured_at,
+        format: original.format,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shot(w: u32, h: u32) -> Screenshot {
+        Screenshot {
+            bytes: "anything".into(),
+            width: w,
+            height: h,
+            captured_at: 1_700_000_000,
+            format: ImageFormat::Png,
+        }
+    }
+
+    #[test]
+    fn redact_preserves_dimensions_and_timestamp() {
+        let r = redact_screenshot(shot(640, 480)).unwrap();
+        assert_eq!(r.width, 640);
+        assert_eq!(r.height, 480);
+        assert_eq!(r.captured_at, 1_700_000_000);
+        assert_eq!(r.format, ImageFormat::Png);
+    }
+
+    #[test]
+    fn redact_replaces_payload_bytes() {
+        let original = shot(8, 8);
+        let original_bytes = original.bytes.clone();
+        let r = redact_screenshot(original).unwrap();
+        // Same nominal shape, but the encoded payload swaps out (a black
+        // 8×8 PNG decodes to base64 differently than the placeholder string).
+        assert_ne!(r.bytes, original_bytes);
+        // Base64-decoded PNG must begin with the PNG magic bytes.
+        let raw = general_purpose::STANDARD.decode(&r.bytes).unwrap();
+        assert_eq!(&raw[..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    }
+}

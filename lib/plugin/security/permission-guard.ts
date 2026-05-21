@@ -11,6 +11,21 @@ import type { PluginPermission } from "@/types/plugin"
 // Types
 // =============================================================================
 
+/**
+ * Per-(plugin, permission) enforcement tier. Adopted from ADR-0020's
+ * Computer Use 3-tier model.
+ *
+ *   - `silent`  — allow as long as the manifest declared the permission.
+ *                 Backward-compat default for every existing grant.
+ *   - `confirm` — require an interactive consent overlay each call,
+ *                 unless the user has chosen "Always allow this session"
+ *                 in the ConsentBroker.
+ *   - `forbid`  — always deny, regardless of manifest declaration. Lets
+ *                 the user keep a plugin installed but lock out a single
+ *                 risky scope (e.g. clipboard:read).
+ */
+export type PluginPermissionTier = "silent" | "confirm" | "forbid"
+
 export interface PermissionRequest {
   pluginId: string
   permission: PluginPermission
@@ -120,6 +135,14 @@ export class PermissionGuard {
   private auditLog: PermissionAuditEntry[] = []
   private requestHandler: PermissionRequestHandler | null = null
   private pendingRequests: Map<string, Promise<boolean>> = new Map()
+  /**
+   * Tier overlay (ADR-0020 model). Missing rows default to "silent"
+   * (the historic behavior). Keyed by `pluginId → permission → tier`.
+   */
+  private tiers: Map<string, Map<PluginPermission, PluginPermissionTier>> = new Map()
+  private tierListeners: Set<
+    (pluginId: string, permission: PluginPermission, tier: PluginPermissionTier) => void
+  > = new Set()
 
   constructor(config: Partial<PermissionGuardConfig> = {}) {
     this.config = {
@@ -155,6 +178,108 @@ export class PermissionGuard {
   unregisterPlugin(pluginId: string): void {
     this.grants.delete(pluginId)
     this.denials.delete(pluginId)
+    this.tiers.delete(pluginId)
+  }
+
+  // ===========================================================================
+  // Permission Tier (ADR-0020 3-tier model)
+  // ===========================================================================
+
+  /**
+   * Read the tier configured for (pluginId, permission). Returns "silent"
+   * for any (plugin, permission) that has not been explicitly tiered —
+   * the historical implicit-grant behavior.
+   */
+  getTier(pluginId: string, permission: PluginPermission): PluginPermissionTier {
+    return this.tiers.get(pluginId)?.get(permission) ?? "silent"
+  }
+
+  /**
+   * Set the tier for one (pluginId, permission). Notifies subscribers so
+   * the permission-review UI can react.
+   */
+  setTier(pluginId: string, permission: PluginPermission, tier: PluginPermissionTier): void {
+    let row = this.tiers.get(pluginId)
+    if (!row) {
+      row = new Map()
+      this.tiers.set(pluginId, row)
+    }
+    row.set(permission, tier)
+    for (const listener of this.tierListeners) {
+      try {
+        listener(pluginId, permission, tier)
+      } catch {
+        // Never let a listener crash the guard.
+      }
+    }
+  }
+
+  /**
+   * Return every non-default tier row for `pluginId`. Empty array if the
+   * plugin has no overrides (everything defaults to "silent").
+   */
+  getTiersForPlugin(pluginId: string): Array<{
+    permission: PluginPermission
+    tier: PluginPermissionTier
+  }> {
+    const row = this.tiers.get(pluginId)
+    if (!row) return []
+    return Array.from(row.entries()).map(([permission, tier]) => ({ permission, tier }))
+  }
+
+  /**
+   * Subscribe to tier changes — returns a disposer.
+   */
+  subscribeTierChanges(
+    listener: (pluginId: string, permission: PluginPermission, tier: PluginPermissionTier) => void
+  ): () => void {
+    this.tierListeners.add(listener)
+    return () => {
+      this.tierListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Tier-aware async permission check. Use this from API call sites
+   * that should respect the user's per-permission tier override.
+   *
+   *   - `forbid`  → resolves `false` immediately, audits as deny.
+   *   - `silent`  → resolves the existing sync `check()` result.
+   *   - `confirm` → goes through the per-call consent overlay via the
+   *                 supplied broker. The user's response is honored
+   *                 once; a "Always allow this session" response is
+   *                 cached by the broker so repeated calls skip the UI.
+   *
+   * The broker is injected so tests can stub it. Production callers
+   * pass `getPluginConsentBroker()` from
+   * `lib/plugin/security/consent-broker.ts`.
+   */
+  async checkWithConsent(
+    pluginId: string,
+    permission: PluginPermission,
+    broker: {
+      request: (req: {
+        pluginId: string
+        permission: PluginPermission
+        reason?: string
+      }) => Promise<boolean>
+    },
+    options: { reason?: string; context?: string } = {}
+  ): Promise<boolean> {
+    const tier = this.getTier(pluginId, permission)
+    if (tier === "forbid") {
+      this.audit(pluginId, permission, "deny", false, options.context)
+      return false
+    }
+    if (tier === "silent") {
+      return this.check(pluginId, permission, options.context)
+    }
+    // tier === "confirm" — defer to the broker. Audit the request so
+    // the plugin author + user can see what's being asked.
+    this.audit(pluginId, permission, "request", false, options.context)
+    const allowed = await broker.request({ pluginId, permission, reason: options.reason })
+    this.audit(pluginId, permission, allowed ? "grant" : "deny", allowed, options.context)
+    return allowed
   }
 
   // ===========================================================================
@@ -466,6 +591,8 @@ export class PermissionGuard {
     this.denials.clear()
     this.auditLog = []
     this.pendingRequests.clear()
+    this.tiers.clear()
+    this.tierListeners.clear()
   }
 }
 

@@ -132,6 +132,44 @@ describe("useLogPanelFilters", () => {
     expect(result.current.searchHistory).toEqual(["foo"])
   })
 
+  it("exposes customTimeRange, currentPage, pageSize, and density with sensible defaults", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    expect(result.current.customTimeRange).toBeNull()
+    expect(result.current.currentPage).toBe(1)
+    expect(result.current.pageSize).toBe(50)
+    expect(result.current.density).toBe("comfortable")
+  })
+
+  it("loads density from localStorage on mount and persists changes", () => {
+    localStorage.setItem("cognia-log-density", "compact")
+    const { result } = renderHook(() => useLogPanelFilters())
+    expect(result.current.density).toBe("compact")
+    act(() => result.current.setDensity("spacious"))
+    expect(result.current.density).toBe("spacious")
+    expect(localStorage.getItem("cognia-log-density")).toBe("spacious")
+  })
+
+  it("ignores stored density values that are not in the valid set", () => {
+    localStorage.setItem("cognia-log-density", "wat")
+    const { result } = renderHook(() => useLogPanelFilters())
+    expect(result.current.density).toBe("comfortable")
+  })
+
+  it("setCustomTimeRange / setCurrentPage / setPageSize update their slots", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    const range = { start: new Date("2026-01-01T00:00:00Z"), end: new Date("2026-01-02T00:00:00Z") }
+    act(() => {
+      result.current.setCustomTimeRange(range)
+      result.current.setCurrentPage(4)
+      result.current.setPageSize(100)
+    })
+    expect(result.current.customTimeRange).toEqual(range)
+    expect(result.current.currentPage).toBe(4)
+    expect(result.current.pageSize).toBe(100)
+    act(() => result.current.setCustomTimeRange(null))
+    expect(result.current.customTimeRange).toBeNull()
+  })
+
   it("misc setters flip their respective slots", () => {
     const { result } = renderHook(() => useLogPanelFilters())
     act(() => {

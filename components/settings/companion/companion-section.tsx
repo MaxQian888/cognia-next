@@ -20,18 +20,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
   CircleIcon,
   CopyIcon,
   CheckIcon,
-  PauseIcon,
-  PlayIcon,
   QrCodeIcon,
-  RefreshCwIcon,
   ShieldAlertIcon,
   SmartphoneIcon,
-  TrashIcon,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
@@ -42,26 +37,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { isTauri, transport } from "@/lib/tauri"
-import {
-  listPairedDevices,
-  pausePairedDevice,
-  resumePairedDevice,
-  revokePairedDevice,
-} from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
-import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import { formatRelative } from "@/lib/time/relative"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
+import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
 
@@ -119,11 +99,6 @@ async function stopServer(): Promise<void> {
 
 async function issuePairJwt(): Promise<PairJwtIssue> {
   return transport.call<PairJwtIssue>("companion_issue_pair_jwt")
-}
-
-async function revokeDeviceRustSide(deviceId: string): Promise<void> {
-  if (!isTauri()) return
-  await transport.call<void>("companion_revoke_device", { deviceId })
 }
 
 async function startMdnsBroadcast(args: {
@@ -704,217 +679,6 @@ function formatRemaining(secs: number): string {
     .padStart(2, "0")
   const ss = (secs % 60).toString().padStart(2, "0")
   return `${mm}:${ss}`
-}
-
-// ---------------------------------------------------------------------------
-// Card 3 — paired devices table
-// ---------------------------------------------------------------------------
-
-async function unrevokeDeviceRustSide(deviceId: string): Promise<void> {
-  if (!isTauri()) return
-  await transport.call<void>("companion_unrevoke_device", { deviceId })
-}
-
-function PairedDevicesCard() {
-  const rows = useLiveQuery(() => listPairedDevices(), [], [])
-  const guard = useBiometricGuard()
-  const t = useTranslations("mobile.companion.paired")
-  const tRev = useTranslations("mobile.companion.revoke")
-  const tPause = useTranslations("mobile.companion.pause")
-  const tResume = useTranslations("mobile.companion.resume")
-  const onRevoke = useCallback(
-    async (deviceId: string, label: string) => {
-      const result = await guard(
-        {
-          reason: tRev("reason", { label }),
-          title: tRev("title"),
-          description: tRev("description"),
-        },
-        async () => {
-          await revokePairedDevice(deviceId)
-          await revokeDeviceRustSide(deviceId)
-        }
-      )
-      if (result.kind === "blocked") {
-        if (result.reason === "cancelled") {
-          // Silent — user backed out.
-          return
-        }
-        toast.error(tRev("blocked", { reason: result.reason }))
-        return
-      }
-      toast.success(tRev("successToast"))
-    },
-    [guard, tRev]
-  )
-
-  const onPause = useCallback(
-    async (deviceId: string, label: string) => {
-      // Same biometric gate as revoke: Rust treats pause as a deny-list
-      // entry (companion_revoke_device) — without the gate an attacker at
-      // a momentarily-unlocked desktop could silently disable every
-      // paired phone.
-      const result = await guard(
-        {
-          reason: tPause("reason", { label }),
-          title: tPause("title"),
-          description: tPause("description"),
-        },
-        async () => {
-          await pausePairedDevice(deviceId)
-          await revokeDeviceRustSide(deviceId)
-        }
-      )
-      if (result.kind === "blocked") {
-        if (result.reason === "cancelled") return
-        toast.error(tPause("blocked", { reason: result.reason }))
-        return
-      }
-      toast.success(t("toastPaused", { label }))
-    },
-    [guard, t, tPause]
-  )
-
-  const onResume = useCallback(
-    async (deviceId: string, label: string) => {
-      // Resume undoes the deny-list entry pause put in place — gate it on
-      // the same biometric so a paused row can only be revived by the
-      // person physically holding the desktop.
-      const result = await guard(
-        {
-          reason: tResume("reason", { label }),
-          title: tResume("title"),
-          description: tResume("description"),
-        },
-        async () => {
-          await resumePairedDevice(deviceId)
-          await unrevokeDeviceRustSide(deviceId)
-        }
-      )
-      if (result.kind === "blocked") {
-        if (result.reason === "cancelled") return
-        toast.error(tResume("blocked", { reason: result.reason }))
-        return
-      }
-      toast.success(t("toastResumed", { label }))
-    },
-    [guard, t, tResume]
-  )
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-        <CardDescription className="text-xs">{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {!rows || rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("empty")}</p>
-        ) : (
-          <div className="max-h-[360px] overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("colLabel")}</TableHead>
-                  <TableHead>{t("colPlatform")}</TableHead>
-                  <TableHead>{t("colFingerprint")}</TableHead>
-                  <TableHead>{t("colPaired")}</TableHead>
-                  <TableHead>{t("colLastSeen")}</TableHead>
-                  <TableHead className="w-[80px] text-right">{t("colActions")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.deviceId}>
-                    <TableCell className="text-sm">
-                      <div className="flex items-center gap-2">
-                        <span>{row.label}</span>
-                        {row.revokedAt !== undefined && (
-                          <Badge variant="outline" className="text-[10px]">
-                            {t("revoked")}
-                          </Badge>
-                        )}
-                        {row.revokedAt === undefined && row.pausedAt !== undefined && (
-                          <Badge variant="outline" className="text-[10px]">
-                            {t("paused")}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-[10px] font-mono text-muted-foreground">
-                        v{row.appVersion}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs uppercase">{row.platform}</TableCell>
-                    <TableCell className="font-mono text-[10px] text-muted-foreground">
-                      {row.serverFingerprint ? (
-                        <span
-                          title={row.serverFingerprint}
-                          className="cursor-help"
-                          aria-label={t("fingerprintAria", {
-                            fingerprint: row.serverFingerprint,
-                          })}
-                        >
-                          {row.serverFingerprint.slice(0, 12)}…
-                        </span>
-                      ) : (
-                        <span className="italic text-muted-foreground/60">{t("unpinned")}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(row.pairedAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(row.lastSeenAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {row.revokedAt === undefined &&
-                          (row.pausedAt !== undefined ? (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onResume(row.deviceId, row.label)}
-                              aria-label={t("resumeAria", { label: row.label })}
-                              data-testid={`paired-device-resume-${row.deviceId}`}
-                            >
-                              <PlayIcon className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onPause(row.deviceId, row.label)}
-                              aria-label={t("pauseAria", { label: row.label })}
-                              data-testid={`paired-device-pause-${row.deviceId}`}
-                            >
-                              <PauseIcon className="h-3.5 w-3.5" />
-                            </Button>
-                          ))}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => onRevoke(row.deviceId, row.label)}
-                          disabled={row.revokedAt !== undefined}
-                          aria-label={t("revokeAria", { label: row.label })}
-                          data-testid={`paired-device-revoke-${row.deviceId}`}
-                        >
-                          {row.revokedAt !== undefined ? (
-                            <RefreshCwIcon className="h-3.5 w-3.5" />
-                          ) : (
-                            <TrashIcon className="h-3.5 w-3.5" />
-                          )}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
 }
 
 // ---------------------------------------------------------------------------

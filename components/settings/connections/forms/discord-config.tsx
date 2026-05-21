@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
@@ -162,6 +163,11 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
 
       if (botToken.trim()) {
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
+      }
+      // Hot-reload the running adapter so the new bot token is picked up
+      // without an app restart.
+      if (!isNew) {
+        emitCredentialsRotated(adapterId)
       }
       // Phase 1 ships gateway transport only — the Interactions webhook
       // path is not consumed yet. We intentionally do NOT write the

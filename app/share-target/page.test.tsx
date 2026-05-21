@@ -7,7 +7,16 @@ import { render, screen, fireEvent, act, within } from "@testing-library/react"
 // ---- Module mocks ----
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  // Tests below assert on resolved strings (e.g. "Share from example.com")
+  // produced by next-intl interpolation. Keep the mock dumb (returns the
+  // key path) but resolve a couple of known templates so the params test
+  // can verify the hostname substitution path is reached.
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    if (key === "derivedTitle.fromUrl" && params && typeof params.hostname === "string") {
+      return `Share from ${params.hostname as string}`
+    }
+    return key
+  },
 }))
 
 const routerBackMock = jest.fn()

@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringSet, connectorsHealth } from "@/lib/connectors/tauri/commands"
+import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
@@ -155,6 +156,12 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
 
       if (bearerToken.trim()) {
         await connectorsKeyringSet(adapterId, "onebotBearer", bearerToken.trim())
+      }
+
+      // Hot-reload the running adapter so the new bearer token is picked
+      // up without an app restart.
+      if (!isNew) {
+        emitCredentialsRotated(adapterId)
       }
 
       setSavedAdapterId(adapterId)

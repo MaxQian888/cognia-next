@@ -229,6 +229,9 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://192.168.1.42:7890" },
     })
+    // The pair step defaults to the 6-digit code tab; switch to the JWT
+    // tab before populating the textarea (whose testid is gated on it).
+    await user.click(screen.getByTestId("pair-tab-jwt"))
     fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: VALID_JWT } })
     await user.click(screen.getByTestId("pair-submit"))
     await waitFor(() => expect(screen.getByTestId("pair-paired-step")).toBeInTheDocument())

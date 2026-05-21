@@ -10,6 +10,12 @@ jest.mock("@/lib/tauri", () => ({
   transport: { call: jest.fn() },
 }))
 
+// AutomationPolicyCard is exercised in its own test file; stubbing it here
+// keeps the SandboxSection test focused on the health card and its IPC.
+jest.mock("./automation-policy-card", () => ({
+  AutomationPolicyCard: () => <div data-testid="automation-policy-card-stub" />,
+}))
+
 import { transport } from "@/lib/tauri"
 
 const mockCall = transport.call as jest.MockedFunction<typeof transport.call>

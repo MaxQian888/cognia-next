@@ -10,7 +10,7 @@
  * downstream effects without the inspector dismissing.
  */
 
-import { useCallback, useMemo } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { Trash2Icon, XIcon, AlertCircleIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -25,7 +25,9 @@ import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { getNodeIndex } from "@/lib/workflow/editor/node-index"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
 import {
@@ -37,21 +39,42 @@ import {
 // registry. Built-in nodes hit a dedicated component; plugin nodes with a
 // `paramsSchema` go through SchemaForm; everything else falls back to
 // the raw-JSON editor.
-function NodeConfigForm({
-  entry,
+//
+// Memoized so unrelated InspectorPanel re-renders (header text, error
+// badge count flipping) don't reach the per-kind config component, which
+// can host expensive controls (code editor, schema form, etc.).
+const NodeConfigFormSection = memo(function NodeConfigFormSection({
+  kind,
+  paramsSchema,
   params,
   onChange,
 }: {
-  entry: { kind: WorkflowNodeKind; paramsSchema?: Record<string, unknown> }
+  kind: WorkflowNodeKind
+  paramsSchema?: Record<string, unknown>
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
 }) {
-  const Component = getNodeConfigComponentForEntry(entry)
+  const Component = getNodeConfigComponentForEntry({ kind, paramsSchema })
   return (
     // eslint-disable-next-line react-hooks/static-components
     <Component params={params} onChange={onChange} />
   )
-}
+})
+
+/**
+ * How long to wait after the last keystroke before re-running the zod
+ * schema validation for the inspector form. Matches the perceived
+ * "instant feedback" budget on a typing cadence (~6 chars/sec) and is
+ * always force-flushed when the user switches to another node so no
+ * pending validation is left dangling.
+ */
+const REVALIDATE_DEBOUNCE_MS = 150
+
+/**
+ * Shared empty-params reference so nodes with no `data.params` set don't
+ * hand a fresh `{}` to the memoized config form on every render.
+ */
+const EMPTY_PARAMS: Record<string, unknown> = Object.freeze({})
 
 const CATEGORY_BADGE = {
   trigger: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -63,7 +86,7 @@ const CATEGORY_BADGE = {
   annotation: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
 } as const
 
-export function InspectorPanel({
+function InspectorPanelInner({
   useStore,
   className,
 }: {
@@ -72,37 +95,79 @@ export function InspectorPanel({
 }) {
   const t = useTranslations("workflows.inspector")
   const tNodes = useTranslations("workflows.nodes")
-  const { node, validation, updateNodeData, removeNodes, clearSelection, revalidateNode } =
-    useStore(
-      useShallow((s: EditorState) => {
-        const id = s.selectedNodeIds[0]
-        const node = id ? s.nodes.find((n) => n.id === id) : null
-        return {
-          node,
-          validation: id ? (s.validationByStepId[id] ?? null) : null,
-          updateNodeData: s.updateNodeData,
-          removeNodes: s.removeNodes,
-          clearSelection: s.clearSelection,
-          revalidateNode: s.revalidateNode,
-        }
-      })
-    )
+
+  // Selector split (perf A4-style): subscribe in three narrow slices so a
+  // mutation that doesn't change *the selected node* never reaches the
+  // inspector. Each `useStore` runs its selector on every set() but each
+  // returns a primitive / shallow-equal object that React then bails on.
+  //
+  //   1. selectedId — primitive; unchanged for any non-selection mutation.
+  //   2. node + validation — looked up via `getNodeIndex` (WeakMap-cached
+  //      by nodes-array identity, O(1) byId). Returns the same node
+  //      reference whenever the selected node's own data didn't change,
+  //      so unrelated node drags don't bust the shallow equality.
+  //   3. action handlers — stable function identities on the store; this
+  //      shallow selector returns the same object after the first read.
+  const selectedId = useStore((s: EditorState) => s.selectedNodeIds[0] ?? null)
+
+  const { node, validation } = useStore(
+    useShallow((s: EditorState) => ({
+      node: selectedId ? (getNodeIndex(s.nodes).byId.get(selectedId) ?? null) : null,
+      validation: selectedId ? (s.validationByStepId[selectedId] ?? null) : null,
+    }))
+  )
+
+  const { updateNodeData, removeNodes, clearSelection, revalidateNode } = useStore(
+    useShallow((s: EditorState) => ({
+      updateNodeData: s.updateNodeData,
+      removeNodes: s.removeNodes,
+      clearSelection: s.clearSelection,
+      revalidateNode: s.revalidateNode,
+    }))
+  )
 
   const entry = useMemo(
     () => (node ? nodeCatalogEntry(node.data.kind as WorkflowNodeKind) : null),
     [node]
   )
 
+  // Debounce the zod re-validation so keystroke storms don't reparse the
+  // whole schema on every character. `shallowEqualValidation` in the
+  // store already swallows no-op writes, but the parse work itself is the
+  // dominant cost on complex node configs. The trailing edge fires
+  // ~150 ms after the user pauses; selection changes flush the pending
+  // call so we never lose a validation for the node the user just left.
+  const debouncedRevalidate = useDebouncedCallback<[string]>(
+    (id: string) => revalidateNode(id),
+    REVALIDATE_DEBOUNCE_MS
+  )
+  const prevSelectedIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevSelectedIdRef.current && prevSelectedIdRef.current !== selectedId) {
+      // Flush any in-flight validation for the *previous* selected node
+      // before the form unmounts that node's context — otherwise an error
+      // from the schema would land too late to be surfaced anywhere.
+      debouncedRevalidate.flush()
+    }
+    prevSelectedIdRef.current = selectedId
+  }, [selectedId, debouncedRevalidate])
+
   const handleParamsChange = useCallback(
     (next: Record<string, unknown>) => {
       if (!node) return
       updateNodeData(node.id, { params: next })
-      // Re-validate immediately so the per-field error context updates in
-      // the same render. revalidateNode skips the store write when nothing
-      // changed (see store.ts), so this is safe to call on every keystroke.
-      revalidateNode(node.id)
+      debouncedRevalidate.call(node.id)
     },
-    [node, updateNodeData, revalidateNode]
+    [node, updateNodeData, debouncedRevalidate]
+  )
+
+  // Stabilise the params reference so the memoized NodeConfigFormSection
+  // can bail when `node.data.params` happens to be undefined on adjacent
+  // renders (we hand it the shared frozen `EMPTY_PARAMS` instead of a
+  // fresh `{}` literal).
+  const configFormParams = useMemo(
+    () => (node ? ((node.data.params as Record<string, unknown>) ?? EMPTY_PARAMS) : EMPTY_PARAMS),
+    [node]
   )
 
   if (!node || !entry) {
@@ -194,12 +259,10 @@ export function InspectorPanel({
           <Separator />
           <FieldErrorProvider errors={validation?.fields ?? null}>
             <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
-              <NodeConfigForm
-                entry={{
-                  kind: node.data.kind as WorkflowNodeKind,
-                  paramsSchema: entry.paramsSchema,
-                }}
-                params={(node.data.params as Record<string, unknown>) ?? {}}
+              <NodeConfigFormSection
+                kind={node.data.kind as WorkflowNodeKind}
+                paramsSchema={entry.paramsSchema}
+                params={configFormParams}
                 onChange={handleParamsChange}
               />
             </InspectorExpressionProvider>
@@ -227,3 +290,13 @@ export function InspectorPanel({
     </aside>
   )
 }
+
+/**
+ * Memoized export. The inner component already uses three narrow
+ * `useShallow` selectors so that unrelated store mutations (drag
+ * positions, run-status flips on other nodes, viewport changes) don't
+ * cause a re-render. `React.memo` is the second line of defence for the
+ * case where the parent (RightSidebar) re-renders with the same
+ * `useStore` / `className` props.
+ */
+export const InspectorPanel = memo(InspectorPanelInner)

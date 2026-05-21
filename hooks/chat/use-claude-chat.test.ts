@@ -474,6 +474,96 @@ describe("useClaudeChat — actions", () => {
     await flush()
     expect(onClaudeMessageMock).not.toHaveBeenCalled()
   })
+
+  // ── handleEvent paths (driven through the sidecar message subscription) ──
+
+  it("incoming sdk_session_id event persists the SDK conversation id", async () => {
+    renderHook(() => useClaudeChat())
+    await flush()
+    expect(_messageCallback).toBeTruthy()
+    await act(async () => {
+      _messageCallback?.({
+        type: "sdk_session_id",
+        sessionId: "sess-1",
+        sdkSessionId: "sdk-abc",
+      })
+    })
+    expect(setSdkSessionIdMock).toHaveBeenCalledWith("sess-1", "sdk-abc")
+  })
+
+  it("incoming session_ended (no error) flips status to idle", async () => {
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({ type: "session_ended", sessionId: "sess-1" })
+    })
+    expect(chatState.setStatus).toHaveBeenCalledWith("idle")
+  })
+
+  it("incoming permission_request for an already-allowed tool auto-approves", async () => {
+    settingsState.settings.alwaysAllowTools = ["read"]
+    renderHook(() => useClaudeChat())
+    await flush()
+    // Mirror the subscriber-driven allow-list refresh that happens on mount.
+    settingsSubscribers.forEach((sub) => sub(settingsState))
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-1",
+        toolUseID: "tu-1",
+        toolName: "read",
+        input: {},
+      })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "req-1", "allow")
+    settingsState.settings.alwaysAllowTools = []
+  })
+
+  it("incoming permission_request for a non-active session is auto-denied", async () => {
+    chatState.activeSessionId = "sess-other"
+    renderHook(() => useClaudeChat())
+    await flush()
+    // Push the active-session change through the subscriber callback so
+    // the hook's `activeRef` reflects it without re-rendering.
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-2",
+        toolUseID: "tu-2",
+        toolName: "write",
+        input: {},
+      })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-2",
+      "deny",
+      expect.stringContaining("auto-denied")
+    )
+    chatState.activeSessionId = "sess-1"
+  })
+
+  it("incoming permission_request for the active session pushes an approval", async () => {
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-3",
+        toolUseID: "tu-3",
+        toolName: "edit",
+        input: { path: "x.ts" },
+      })
+    })
+    expect(chatState.pushApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1", requestId: "req-3", toolName: "edit" })
+    )
+  })
 })
 
 describe("useClaudeChat — native vector backend branch", () => {

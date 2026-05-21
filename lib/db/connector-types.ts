@@ -353,6 +353,15 @@ export interface ConversationOverrideRow {
    * regardless of this flag.
    */
   requireHitlForWrites?: boolean
+  /**
+   * Per-conversation quiet hours window (im-refactored-crayon Phase 1.4).
+   * When set, takes precedence over `AdapterInstanceRow.quietHours` for
+   * outbound traffic on this conversation. Same shape as the adapter
+   * field so the outbound-runner can swap them transparently. Times are
+   * `HH:mm` 24-hour strings; `tz` is an IANA zone id ("Asia/Shanghai",
+   * "UTC", etc.). Cleared by leaving the form's quiet-hours toggle off.
+   */
+  quietHours?: { from: string; to: string; tz: string }
   createdAt: number
   updatedAt: number
 }

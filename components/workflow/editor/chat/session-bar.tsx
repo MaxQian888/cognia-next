@@ -23,7 +23,7 @@
  * remounts; that hook is NOT modified by this component.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useDeferredValue, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -90,7 +90,7 @@ export function WorkflowSessionBar({
   // Live list of every session whose id starts with the workflow prefix.
   // Sorted by updatedAt desc; the default session is pinned at the top
   // even if it happens to be the oldest row.
-  const sessions = useLiveQuery<ChatSession[]>(
+  const rawSessions = useLiveQuery<ChatSession[]>(
     () =>
       getDb()
         .sessions.where("id")
@@ -105,6 +105,10 @@ export function WorkflowSessionBar({
         ),
     [defaultSessionId]
   )
+  // Defer the live-query result so rapid Dexie writes (e.g., proposal-
+  // history append fan-out, session updatedAt bumps from active typing)
+  // don't cascade re-renders of the bar's dropdown + active-row lookup.
+  const sessions = useDeferredValue(rawSessions)
 
   const active = useMemo(
     () => sessions?.find((s) => s.id === activeSessionId) ?? null,

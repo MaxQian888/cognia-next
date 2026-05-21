@@ -11,18 +11,14 @@
  */
 
 import { memo, useMemo, isValidElement, Children } from "react"
+import dynamic from "next/dynamic"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import { cn } from "@/lib/utils"
-import { MathBlock } from "@/components/chat/renderers/math-block"
-import { MathInline } from "@/components/chat/renderers/math-inline"
-import { MermaidBlock } from "@/components/chat/renderers/mermaid-block"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
-import { DiffBlock } from "@/components/chat/renderers/diff-block"
-import { A2UIBlock } from "@/components/chat/renderers/a2ui-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { VideoBlock } from "@/components/chat/renderers/video-block"
 import { AudioBlock } from "@/components/chat/renderers/audio-block"
@@ -30,6 +26,57 @@ import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderer
 import { DetailsBlock } from "@/components/chat/renderers/details-block"
 import { KbdInline } from "@/components/chat/renderers/kbd-inline"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
+
+// Heavy block renderers are code-split via next/dynamic so the initial
+// chat-tab bundle drops their parse cost. Mermaid is ~200KB minified,
+// MathBlock/MathInline pull in KaTeX (~250KB), and Diff/A2UI follow the
+// same lazy contract for consistency. Loading placeholders match the
+// eventual block's visual footprint so the page doesn't shift when the
+// chunk resolves. The local jest.mock for `next/dynamic` in the test file
+// resolves these synchronously so existing `document.querySelector`
+// assertions still work.
+const MathBlock = dynamic(
+  () => import("@/components/chat/renderers/math-block").then((m) => ({ default: m.MathBlock })),
+  {
+    ssr: false,
+    loading: () => <div className="my-3 h-12 animate-pulse rounded bg-muted" aria-hidden="true" />,
+  }
+)
+
+const MathInline = dynamic(
+  () => import("@/components/chat/renderers/math-inline").then((m) => ({ default: m.MathInline })),
+  {
+    ssr: false,
+    loading: () => (
+      <span className="inline-block h-4 w-12 animate-pulse rounded bg-muted" aria-hidden="true" />
+    ),
+  }
+)
+
+const MermaidBlock = dynamic(
+  () =>
+    import("@/components/chat/renderers/mermaid-block").then((m) => ({ default: m.MermaidBlock })),
+  {
+    ssr: false,
+    loading: () => <div className="my-3 h-32 animate-pulse rounded bg-muted" aria-hidden="true" />,
+  }
+)
+
+const DiffBlock = dynamic(
+  () => import("@/components/chat/renderers/diff-block").then((m) => ({ default: m.DiffBlock })),
+  {
+    ssr: false,
+    loading: () => <div className="my-3 h-16 animate-pulse rounded bg-muted" aria-hidden="true" />,
+  }
+)
+
+const A2UIBlock = dynamic(
+  () => import("@/components/chat/renderers/a2ui-block").then((m) => ({ default: m.A2UIBlock })),
+  {
+    ssr: false,
+    loading: () => <div className="my-3 h-24 animate-pulse rounded bg-muted" aria-hidden="true" />,
+  }
+)
 
 /**
  * Sanitization schema extended with KaTeX MathML and a small set of safe
@@ -136,6 +183,13 @@ interface MarkdownRendererProps {
    * `ArtifactCreateButton`.
    */
   messageId?: string
+  /**
+   * When the host message is mid-stream, code blocks short-circuit the
+   * async Shiki highlight path and render plain `<pre>`. The full Shiki
+   * pass kicks in once streaming finalises and `MessageRenderer` flips
+   * the branch from `<StreamingTextPart>` to `<MarkdownRenderer>`.
+   */
+  isStreaming?: boolean
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -153,6 +207,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   mathDisplayAlignment = "center",
   mathShowCopyButton = true,
   messageId,
+  isStreaming = false,
 }: MarkdownRendererProps) {
   const remarkPlugins = useMemo(() => {
     const plugins: NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]> = [remarkGfm]
@@ -190,6 +245,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         mathDisplayAlignment,
         mathShowCopyButton,
         messageId,
+        isStreaming,
       }),
     [
       enableMermaid,
@@ -204,6 +260,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       mathDisplayAlignment,
       mathShowCopyButton,
       messageId,
+      isStreaming,
     ]
   )
 
@@ -235,6 +292,7 @@ interface BuildComponentsOptions {
   mathDisplayAlignment: "center" | "left"
   mathShowCopyButton: boolean
   messageId?: string
+  isStreaming: boolean
 }
 
 function buildComponents(
@@ -253,6 +311,7 @@ function buildComponents(
     mathDisplayAlignment,
     mathShowCopyButton,
     messageId,
+    isStreaming,
   } = opts
 
   return {
@@ -307,7 +366,12 @@ function buildComponents(
       const showArtifactButton = codeContent.split("\n").length > 1
       return (
         <div className="relative group/code">
-          <CodeBlock code={codeContent} language={language} showLineNumbers={showLineNumbers} />
+          <CodeBlock
+            code={codeContent}
+            language={language}
+            showLineNumbers={showLineNumbers}
+            isStreaming={isStreaming}
+          />
           {showArtifactButton && (
             <div className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity">
               <ArtifactCreateButton

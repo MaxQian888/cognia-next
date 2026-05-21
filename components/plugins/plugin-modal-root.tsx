@@ -20,6 +20,7 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from "react"
+import { useTranslations } from "next-intl"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { selectAllModals, usePluginModalStore } from "@/stores/plugin/plugin-modal-store"
 import type { PluginModalEntry } from "@/types/plugin/plugin-modal"
@@ -32,6 +33,11 @@ interface ModalBoundaryProps {
 
 interface ModalBoundaryState {
   hasError: boolean
+}
+
+function ModalErrorFallback(): ReactNode {
+  const t = useTranslations("plugins.modalRoot")
+  return <div className="p-6 text-sm text-destructive">{t("errorFallback")}</div>
 }
 
 class PluginModalErrorBoundary extends Component<ModalBoundaryProps, ModalBoundaryState> {
@@ -53,11 +59,7 @@ class PluginModalErrorBoundary extends Component<ModalBoundaryProps, ModalBounda
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return (
-        <div className="p-6 text-sm text-destructive">
-          Plugin modal failed to render. Check the console for details.
-        </div>
-      )
+      return <ModalErrorFallback />
     }
     return this.props.children
   }

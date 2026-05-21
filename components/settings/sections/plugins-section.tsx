@@ -162,10 +162,19 @@ function OverviewTab({ onClose }: { onClose?: () => void }) {
     href: string
     show: boolean
   }> = [
-    { key: "installed", icon: ListChecksIcon, href: "/plugins?tab=installed", show: true },
-    { key: "marketplace", icon: StoreIcon, href: "/plugins?tab=browse", show: true },
-    { key: "permissions", icon: ShieldCheckIcon, href: "/plugins?tab=permissions", show: true },
-    { key: "devtools", icon: BugIcon, href: "/plugins?tab=devtools", show: isDev },
+    // Use the new `?section=` deep-link vocabulary. `?tab=` still works as
+    // a back-compat shim in the panel (it auto-translates via
+    // `deriveSectionFromTab`), but new links should point at the
+    // section model so the 3-pane shell lands directly on the right view.
+    { key: "installed", icon: ListChecksIcon, href: "/plugins?section=library", show: true },
+    { key: "marketplace", icon: StoreIcon, href: "/plugins?section=discover", show: true },
+    {
+      key: "permissions",
+      icon: ShieldCheckIcon,
+      href: "/plugins?section=governance&gov=permissions",
+      show: true,
+    },
+    { key: "devtools", icon: BugIcon, href: "/plugins?section=devtools", show: isDev },
   ]
 
   return (

@@ -46,7 +46,8 @@ const log = loggers.shell
 export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const router = useRouter()
-  const { sessions, activeSessionId, select, create, remove, rename } = useSessions()
+  const { sessions, activeSessionId, select, create, remove, rename, bulkRemove, bulkSetPinned } =
+    useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -219,6 +220,44 @@ export function DesktopChatWorkspace() {
     [rename]
   )
 
+  // `useTranslations` returns a fresh function reference on each render. Hold
+  // it in a ref so the bulk callbacks (consumed by ChannelList) stay
+  // referentially stable across renders and don't churn React Memo / effects.
+  const bulkT = useTranslations("desktop.channelList.bulk")
+  const bulkTRef = useRef(bulkT)
+  useEffect(() => {
+    bulkTRef.current = bulkT
+  }, [bulkT])
+
+  const handleChannelTogglePinned = useCallback(
+    (id: string, pinned: boolean) => {
+      void bulkSetPinned([id], pinned).then(() => {
+        toast.success(bulkTRef.current(pinned ? "pinSuccess" : "unpinSuccess", { count: 1 }))
+      })
+    },
+    [bulkSetPinned]
+  )
+
+  const handleChannelBulkDelete = useCallback(
+    async (ids: string[]) => {
+      const count = ids.length
+      log.info("channel bulk-delete", { count })
+      await bulkRemove(ids)
+      toast.success(bulkTRef.current("deleteSuccess", { count }))
+    },
+    [bulkRemove]
+  )
+
+  const handleChannelBulkSetPinned = useCallback(
+    async (ids: string[], pinned: boolean) => {
+      const count = ids.length
+      log.info("channel bulk-set-pinned", { count, pinned })
+      await bulkSetPinned(ids, pinned)
+      toast.success(bulkTRef.current(pinned ? "pinSuccess" : "unpinSuccess", { count }))
+    },
+    [bulkSetPinned]
+  )
+
   const handleUseSample = useCallback(
     (text: string) => {
       void send(text)
@@ -292,6 +331,9 @@ export function DesktopChatWorkspace() {
               onNewTeamConversation={handleChannelNewTeam}
               onDelete={handleChannelDelete}
               onRename={handleChannelRename}
+              onTogglePinned={handleChannelTogglePinned}
+              onBulkDelete={handleChannelBulkDelete}
+              onBulkSetPinned={handleChannelBulkSetPinned}
             />
           )}
 

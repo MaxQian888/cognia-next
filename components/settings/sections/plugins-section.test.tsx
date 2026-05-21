@@ -140,22 +140,22 @@ describe("PluginsSection (governance panel)", () => {
     expect(screen.queryByText("devtoolsCard.title")).not.toBeInTheDocument()
   })
 
-  it("overview tab installed card links to /plugins?tab=installed", () => {
+  it("overview tab installed card links to the new ?section=library deep-link", () => {
     render(<PluginsSection />)
     const link = screen.getByText("installedCard.cta").closest("a")
-    expect(link).toHaveAttribute("href", "/plugins?tab=installed")
+    expect(link).toHaveAttribute("href", "/plugins?section=library")
   })
 
-  it("overview tab marketplace card links to /plugins?tab=browse", () => {
+  it("overview tab marketplace card links to the new ?section=discover deep-link", () => {
     render(<PluginsSection />)
     const link = screen.getByText("marketplaceCard.cta").closest("a")
-    expect(link).toHaveAttribute("href", "/plugins?tab=browse")
+    expect(link).toHaveAttribute("href", "/plugins?section=discover")
   })
 
-  it("overview tab permissions card links to /plugins?tab=permissions", () => {
+  it("overview tab permissions card links to the new ?section=governance&gov=permissions deep-link", () => {
     render(<PluginsSection />)
     const link = screen.getByText("permissionsCard.cta").closest("a")
-    expect(link).toHaveAttribute("href", "/plugins?tab=permissions")
+    expect(link).toHaveAttribute("href", "/plugins?section=governance&gov=permissions")
   })
 
   it("overview tab manage button links to /plugins", () => {

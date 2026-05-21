@@ -1,6 +1,35 @@
 // Tests for MarkdownRenderer: rendering features, component routing,
 // and that the components object is stabilized (not recreated unnecessarily).
 
+// Synchronously resolve `next/dynamic(() => import("/path").then(...))` by
+// parsing the import path out of the loader's source, then `require()`ing it
+// via jest's module resolver (which honours `moduleNameMapper` + the
+// `jest.mock` calls below). Without this, the dynamic chunks register on a
+// microtask and the synchronous `document.querySelector(...)` assertions
+// below fire before the component lands in the DOM.
+jest.mock("next/dynamic", () => {
+  return (loader: () => Promise<unknown>) => {
+    // SWC compiles `() => import("@/path").then((m) => ({ default: m.X }))`
+    // to something like:
+    //   () => Promise.resolve().then(() => require("./renderers/x")).then(...)
+    // We extract the inner `require("...")` path and resolve it synchronously
+    // so the dynamic component is mounted during the test's first render.
+    const source = loader.toString()
+    const requireMatch = source.match(/require\(['"](.+?)['"]\)/)
+    if (!requireMatch) {
+      return () => null
+    }
+    const modulePath = requireMatch[1]
+    // Capture the named export from the loader's `.then((m) => ({ default: m.Name }))`.
+    const namedMatch = source.match(/m\.(\w+)/)
+    const exportName = namedMatch ? namedMatch[1] : null
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require(modulePath) as Record<string, unknown> & { default?: unknown }
+    const Component = (exportName ? mod[exportName] : undefined) ?? mod.default ?? mod
+    return Component
+  }
+})
+
 jest.mock("@/components/chat/renderers/code-block", () => ({
   CodeBlock: ({ code, language }: { code: string; language?: string }) => (
     <div data-test="code-block" data-lang={language}>

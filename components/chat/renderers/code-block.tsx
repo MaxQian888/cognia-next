@@ -18,6 +18,14 @@ interface CodeBlockProps {
   showLineNumbers?: boolean
   highlightLines?: number[]
   filename?: string
+  /**
+   * When true, skip async Shiki highlighting and fall back to plain
+   * `<pre>` rendering. Set by the parent MarkdownRenderer when the host
+   * message is actively streaming — without this gate, each token append
+   * triggers a fresh `codeToHtml()` call that re-parses the entire block.
+   * Once streaming finalises, the parent flips the flag and Shiki kicks in.
+   */
+  isStreaming?: boolean
 }
 
 export const CodeBlock = memo(function CodeBlock({
@@ -27,6 +35,7 @@ export const CodeBlock = memo(function CodeBlock({
   showLineNumbers = true,
   highlightLines = [],
   filename,
+  isStreaming = false,
 }: CodeBlockProps) {
   const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -39,7 +48,12 @@ export const CodeBlock = memo(function CodeBlock({
   const [darkHighlightedHtml, setDarkHighlightedHtml] = useState<string>("")
 
   useEffect(() => {
-    if (!language || !code) {
+    // During streaming, skip Shiki entirely — the block's content is still
+    // growing and a fresh `codeToHtml` per token is the most expensive part
+    // of the streaming render path. The plain-pre fallback below still
+    // renders the code with line numbers and copy/download affordances, so
+    // there is no visual gap; only the syntax colours are deferred.
+    if (!language || !code || isStreaming) {
       setHighlightedHtml("")
       setDarkHighlightedHtml("")
       return
@@ -77,7 +91,7 @@ export const CodeBlock = memo(function CodeBlock({
     return () => {
       cancelled = true
     }
-  }, [code, language])
+  }, [code, language, isStreaming])
 
   const lines = code.split("\n")
 

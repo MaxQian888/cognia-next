@@ -5,6 +5,7 @@
 // (highlighting dangerous permissions), the dependency list, and a single
 // install / uninstall CTA.
 
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, ExternalLinkIcon } from "lucide-react"
 import {
@@ -25,7 +26,18 @@ import {
 } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
-import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
+import type {
+  MarketplaceClient,
+  PluginMarketplaceEntry,
+} from "@/hooks/plugins/use-plugin-marketplace"
+import { loadPluginMarketplaceClient } from "@/hooks/plugins/use-plugin-marketplace"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 interface DetailEntry extends PluginMarketplaceEntry {
   capabilities?: string[]
@@ -116,21 +128,113 @@ export function PluginMarketplaceDetail({
               )}
             </div>
 
-            <SheetFooter className="mt-4">
-              {installed ? (
-                <Button variant="ghost" onClick={() => onUninstall(entry.id)} disabled={installing}>
-                  {installing ? t("uninstalling") : t("uninstall")}
-                </Button>
-              ) : (
-                <Button onClick={() => onInstall(entry.id, entry.version)} disabled={installing}>
-                  {installing ? t("installing") : t("install")}
-                </Button>
-              )}
+            <SheetFooter className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <InstallSection
+                entry={entry}
+                installed={installed}
+                installing={installing}
+                onInstall={onInstall}
+                onUninstall={onUninstall}
+              />
             </SheetFooter>
           </>
         ) : null}
       </SheetContent>
     </Sheet>
+  )
+}
+
+/**
+ * Renders the version dropdown (when the registry exposes versions)
+ * alongside the install / uninstall button so the user can downgrade
+ * or pin a specific release. Falls back to the entry's `version` field
+ * when the registry doesn't return a list (web / degraded mode).
+ */
+function InstallSection({
+  entry,
+  installed,
+  installing,
+  onInstall,
+  onUninstall,
+}: {
+  entry: DetailEntry
+  installed: boolean
+  installing: boolean
+  onInstall: (id: string, version?: string) => void
+  onUninstall: (id: string) => void
+}) {
+  const t = useTranslations("plugins.marketplaceDetail")
+  const [versions, setVersions] = useState<string[]>([entry.version])
+  const [selected, setSelected] = useState<string>(entry.version)
+
+  // Reset internal version state when the entry changes via the React 19
+  // "compare prev during render" pattern (so we don't trip
+  // `react-hooks/set-state-in-effect`). The async fetch still lives in
+  // an effect because that's I/O.
+  const entryKey = `${entry.id}@${entry.version}`
+  const [trackedEntry, setTrackedEntry] = useState(entryKey)
+  if (trackedEntry !== entryKey) {
+    setTrackedEntry(entryKey)
+    setVersions([entry.version])
+    setSelected(entry.version)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const client: MarketplaceClient = await loadPluginMarketplaceClient()
+        if (!client.getVersions) return
+        const list = await client.getVersions(entry.id)
+        if (cancelled) return
+        const names = list.map((v) => v.version).filter((v): v is string => typeof v === "string")
+        if (names.length === 0) return
+        // Surface the entry's `version` field at the top if the registry
+        // omitted it (latest is usually first in the response).
+        const merged = names.includes(entry.version) ? names : [entry.version, ...names]
+        setVersions(merged)
+        setSelected(entry.version)
+      } catch {
+        // best-effort — fall back to the entry's own version field
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [entry.id, entry.version])
+
+  if (installed) {
+    return (
+      <Button variant="ghost" onClick={() => onUninstall(entry.id)} disabled={installing}>
+        {installing ? t("uninstalling") : t("uninstall")}
+      </Button>
+    )
+  }
+
+  return (
+    <>
+      {versions.length > 1 && (
+        <Select value={selected} onValueChange={setSelected} disabled={installing}>
+          <SelectTrigger
+            className="h-9 w-36"
+            aria-label={t("versionLabel")}
+            data-testid="plugin-marketplace-version-picker"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {versions.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <Button onClick={() => onInstall(entry.id, selected)} disabled={installing}>
+        {installing ? t("installing") : t("install")}
+      </Button>
+    </>
   )
 }
 

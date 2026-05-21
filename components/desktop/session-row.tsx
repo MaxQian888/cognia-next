@@ -17,11 +17,20 @@ import {
   MessageSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   Trash2Icon,
   UsersIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react"
 
 const log = loggers.ui
 
@@ -32,9 +41,23 @@ export interface SessionRowProps {
   accentColor?: string
   /** Optional unread count → shows a badge. */
   unread?: number
-  onSelect: (id: string) => void
+  /**
+   * Whether this row participates in the channel-list multi-selection.
+   * Renders a distinct ring + accent background separate from the single
+   * `active` highlight so the user can tell "the session in the chat
+   * panel" from "rows about to be acted on by the bulk toolbar".
+   */
+  selected?: boolean
+  /**
+   * Modifier-aware select. The parent decides — based on
+   * `e.ctrlKey/metaKey/shiftKey` — whether to additionally activate the
+   * session in the chat panel.
+   */
+  onSelect: (id: string, e: ReactMouseEvent) => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
+  /** Toggle the pinned state for this row. */
+  onTogglePinned?: (id: string, pinned: boolean) => void | Promise<void>
 }
 
 /**
@@ -42,15 +65,22 @@ export interface SessionRowProps {
  * so the new Discord shell and any other surface can share rename/delete UX.
  *
  * Double-click the title to rename inline. Enter commits, Escape cancels.
+ *
+ * Wrapped in React.memo so that toggling the multi-selection on row B
+ * does not force every other row in the list to re-render — the upstream
+ * callbacks are all `useCallback`'d and the data props are primitives,
+ * so a shallow compare is sufficient.
  */
-export function SessionRow({
+function SessionRowImpl({
   session,
   active,
   accentColor,
   unread,
+  selected = false,
   onSelect,
   onDelete,
   onRename,
+  onTogglePinned,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
@@ -96,14 +126,25 @@ export function SessionRow({
     }
   }
 
-  const handleSelect = () => {
-    log.info("session select", { sessionId: session.id, kind: session.kind })
-    onSelect(session.id)
+  const handleSelect = (e: ReactMouseEvent) => {
+    log.info("session select", {
+      sessionId: session.id,
+      kind: session.kind,
+      ctrl: e.ctrlKey || e.metaKey,
+      shift: e.shiftKey,
+    })
+    onSelect(session.id, e)
   }
 
   const handleDelete = () => {
     log.info("session delete", { sessionId: session.id, kind: session.kind })
     void onDelete(session.id)
+  }
+
+  const handleTogglePinned = () => {
+    const next = !session.pinned
+    log.info("session toggle-pinned", { sessionId: session.id, pinned: next })
+    void onTogglePinned?.(session.id, next)
   }
 
   const Icon =
@@ -113,8 +154,10 @@ export function SessionRow({
     <li
       className={cn(
         "group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent",
-        active && "bg-accent"
+        active && "bg-accent",
+        selected && "bg-accent/60 ring-1 ring-primary/50"
       )}
+      data-selected={selected || undefined}
     >
       {editing ? (
         <div className="flex flex-1 items-center gap-2">
@@ -145,6 +188,9 @@ export function SessionRow({
           ) : (
             <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           )}
+          {session.pinned ? (
+            <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("pinned")} />
+          ) : null}
           <span className="truncate">{session.title || t("untitled")}</span>
           {unread && unread > 0 ? (
             <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
@@ -170,6 +216,16 @@ export function SessionRow({
               <PencilIcon className="mr-2 size-4" />
               {t("rename")}
             </DropdownMenuItem>
+            {onTogglePinned ? (
+              <DropdownMenuItem onSelect={handleTogglePinned}>
+                {session.pinned ? (
+                  <PinOffIcon className="mr-2 size-4" />
+                ) : (
+                  <PinIcon className="mr-2 size-4" />
+                )}
+                {session.pinned ? t("unpin") : t("pin")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={handleDelete}
@@ -184,3 +240,6 @@ export function SessionRow({
     </li>
   )
 }
+
+export const SessionRow = memo(SessionRowImpl)
+SessionRow.displayName = "SessionRow"

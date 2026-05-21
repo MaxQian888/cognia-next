@@ -15,6 +15,24 @@ import { requestPluginPermission } from "@/lib/plugin/security/permission-reques
 jest.mock("@/lib/plugin/security/permission-requests", () => ({
   requestPluginPermission: jest.fn(),
 }))
+jest.mock("@/lib/plugin/core/transport", () => ({
+  grantPluginPermission: jest.fn().mockResolvedValue(undefined),
+  listPluginPermissions: jest.fn().mockResolvedValue([]),
+  revokePluginPermission: jest.fn().mockResolvedValue(undefined),
+}))
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const transport = require("@/lib/plugin/core/transport") as {
+  grantPluginPermission: jest.Mock
+  listPluginPermissions: jest.Mock
+  revokePluginPermission: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const diag = require("../contracts/diagnostics-store") as {
+  recordSilentFailure: jest.Mock
+}
 
 describe("Permission API", () => {
   const testPluginId = "test-plugin"
@@ -23,6 +41,10 @@ describe("Permission API", () => {
     // Revoke all permissions before each test
     revokePluginPermissions(testPluginId)
     ;(requestPluginPermission as jest.Mock).mockReset()
+    transport.grantPluginPermission.mockReset().mockResolvedValue(undefined)
+    transport.listPluginPermissions.mockReset().mockResolvedValue([])
+    transport.revokePluginPermission.mockReset().mockResolvedValue(undefined)
+    diag.recordSilentFailure.mockReset()
   })
 
   describe("createPermissionAPI", () => {
@@ -230,6 +252,62 @@ describe("Permission API", () => {
       // Cleanup
       revokePluginPermissions("plugin-1")
       revokePluginPermissions("plugin-2")
+    })
+  })
+
+  describe("Silent-failure routing (ADR-0016 T1)", () => {
+    it("routes listPluginPermissions failure through recordSilentFailure", async () => {
+      transport.listPluginPermissions.mockRejectedValueOnce(new Error("transport down"))
+      createPermissionAPI("p-list", [])
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+        "p-list",
+        expect.objectContaining({ site: "permission.listHost", expected: false }),
+        expect.any(Error)
+      )
+    })
+
+    it("routes requestPermission host-grant failure through recordSilentFailure", async () => {
+      transport.grantPluginPermission.mockRejectedValueOnce(new Error("persist failed"))
+      ;(requestPluginPermission as jest.Mock).mockResolvedValue(true)
+      const api = createPermissionAPI("p-req", [])
+      const granted = await api.requestPermission("canvas:write", "test")
+      expect(granted).toBe(true)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+        "p-req",
+        expect.objectContaining({
+          site: "permission.grantHost",
+          message: expect.stringContaining("canvas:write"),
+        }),
+        expect.any(Error)
+      )
+    })
+
+    it("routes grantPermission failure through recordSilentFailure", async () => {
+      transport.grantPluginPermission.mockRejectedValueOnce(new Error("grant failed"))
+      grantPermission("p-grant", "vector:write")
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+        "p-grant",
+        expect.objectContaining({ site: "permission.grantHost" }),
+        expect.any(Error)
+      )
+    })
+
+    it("routes revokePermission failure through recordSilentFailure", async () => {
+      transport.revokePluginPermission.mockRejectedValueOnce(new Error("revoke failed"))
+      revokePermission("p-rev", "ai:chat")
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+        "p-rev",
+        expect.objectContaining({ site: "permission.revokeHost" }),
+        expect.any(Error)
+      )
     })
   })
 

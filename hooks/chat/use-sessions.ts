@@ -3,7 +3,13 @@
 import { useCallback, useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages } from "@/lib/db/messages"
-import { createSession, deleteSession, listSessions, updateSession } from "@/lib/db/sessions"
+import {
+  bulkDeleteSessions,
+  createSession,
+  deleteSession,
+  listSessions,
+  updateSession,
+} from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
@@ -83,6 +89,36 @@ export function useSessions() {
     await updateSession(id, { title })
   }, [])
 
+  const bulkRemove = useCallback(
+    async (ids: readonly string[]) => {
+      if (ids.length === 0) return
+      // Tear down each live sidecar session first; tolerate per-id failures
+      // (the sidecar may not be tracking some of these ids).
+      if (isTauri()) {
+        await Promise.all(
+          ids.map(async (id) => {
+            try {
+              await closeSession(id)
+            } catch (err) {
+              console.warn("closeSession failed", err)
+            }
+          })
+        )
+      }
+      await bulkDeleteSessions(ids)
+      const current = useChatStore.getState().activeSessionId
+      if (current && ids.includes(current)) {
+        setActiveSession(null)
+      }
+    },
+    [setActiveSession]
+  )
+
+  const bulkSetPinned = useCallback(async (ids: readonly string[], pinned: boolean) => {
+    if (ids.length === 0) return
+    await Promise.all(ids.map((id) => updateSession(id, { pinned })))
+  }, [])
+
   return {
     sessions: sessions ?? [],
     activeSessionId,
@@ -90,6 +126,8 @@ export function useSessions() {
     create,
     remove,
     rename,
+    bulkRemove,
+    bulkSetPinned,
     db: typeof window === "undefined" ? null : getDb(),
   }
 }

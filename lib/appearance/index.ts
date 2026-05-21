@@ -2,6 +2,10 @@
 // `@/lib/appearance` rather than reaching into individual files.
 
 export { BackgroundApplier } from "./background-applier"
+export { TypographyApplier, resolveTypographyVars } from "./typography-applier"
+export { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./density-applier"
+export { RadiusApplier, resolveRadiusVar } from "./radius-applier"
+export { MotionApplier, resolveMotionState } from "./motion-applier"
 export {
   BUILTIN_COLOR_PRESETS,
   BUILTIN_GRADIENT_PRESETS,

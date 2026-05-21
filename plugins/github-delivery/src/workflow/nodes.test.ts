@@ -7,18 +7,25 @@
  */
 
 import type { StepExecutionContext } from "@/types/workflow/visual"
-import type {
-  GhAction,
-  GhAuditEntry,
-  GhPolicy,
-  PolicyDecision,
-} from "@/lib/github/types"
+import type { GhAction, GhAuditEntry, GhPolicy, PolicyDecision } from "@/lib/github/types"
 import { DEFAULT_GH_POLICY } from "@/lib/github/types"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import { setGithubRuntime } from "./runtime"
 
-// Import for side-effect: registers all 12 executors with the registry.
-import "./nodes"
+// Post-ADR-0026 migration: nodes are no longer registered at import
+// time. We pull in the explicit register helper and call it from a
+// top-level `beforeAll` so every describe block sees a populated
+// registry. `afterAll` matches with the unregister helper to keep the
+// suite hermetic against other tests that also touch the registry.
+import { registerGithubNodes, unregisterGithubNodes } from "./nodes"
+
+beforeAll(() => {
+  registerGithubNodes()
+})
+
+afterAll(() => {
+  unregisterGithubNodes()
+})
 
 interface FakeOctokit {
   request: jest.Mock
@@ -337,7 +344,7 @@ describe("action.github.runIssueLoop", () => {
     setGithubRuntime({
       getRepo: async () => null,
       getOctokit: async () =>
-        ({ request: jest.fn(), auth: jest.fn() } as unknown as import("@octokit/core").Octokit),
+        ({ request: jest.fn(), auth: jest.fn() }) as unknown as import("@octokit/core").Octokit,
       recordAudit: async (row) => {
         captured = row.action
       },

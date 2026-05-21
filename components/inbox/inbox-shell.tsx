@@ -27,6 +27,7 @@ import { useIsMobile } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
 import { InboxSidebar } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
+import { ConnectionLossBanner } from "./connection-loss-banner"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
 
@@ -114,6 +115,14 @@ export function InboxShell({
           !showDetail && "hidden md:flex"
         )}
       >
+        {/* Cross-cutting degradation notice: surfaces adapters whose
+         * latest heartbeat is degraded/down so operators see it without
+         * opening Settings. Hidden on mobile to preserve the single-pane
+         * stack — the per-conversation `AdapterDegradationBadge` still
+         * surfaces the same signal there. */}
+        <div className="hidden md:block">
+          <ConnectionLossBanner />
+        </div>
         {children ?? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             {t("selectPrompt")}

@@ -22,3 +22,4 @@ export {
   type PluginMarketplaceEntry,
   __resetPluginMarketplaceClientForTests,
 } from "./use-plugin-marketplace"
+export { useDevtoolsGate, DEVTOOLS_GATE_STORAGE_KEY } from "./use-devtools-gate"

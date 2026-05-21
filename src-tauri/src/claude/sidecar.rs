@@ -25,6 +25,12 @@ pub const A2UI_EVENT: &str = "a2ui://dispatch";
 #[derive(Clone, Default)]
 pub struct SidecarState {
     inner: Arc<Mutex<Inner>>,
+    /// ADR-0028 Phase 14 — incremented every time `spawn` succeeds after
+    /// boot. Surfaced through `sidecar_restart_count` for the Diagnostics
+    /// → Sidecar card so users can see how often the sidecar has
+    /// recovered without restarting the app. `AtomicU64` keeps the
+    /// counter lock-free.
+    restart_count: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[derive(Default)]
@@ -37,6 +43,20 @@ struct Inner {
 impl SidecarState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Number of times the sidecar has been spawned (re-spawned counts).
+    /// The first boot returns 1; each `kill_sidecar` + subsequent `spawn`
+    /// increments the counter.
+    pub fn restart_count(&self) -> u64 {
+        self.restart_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Increment the restart counter — called by `spawn` after the child
+    /// process is in the map.
+    pub(crate) fn bump_restart_count(&self) {
+        self.restart_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Send one JSON-line command to the running sidecar.
@@ -211,6 +231,9 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         guard.stdin = Some(stdin);
         guard.ready = false;
     }
+    // ADR-0028 Phase 14 — surface the spawn so Diagnostics can show
+    // "Sidecar restarted N times this session".
+    state.bump_restart_count();
 
     // Pipe stdout: each line is one JSON event we forward to the frontend.
     {

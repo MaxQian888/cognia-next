@@ -12,8 +12,17 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +39,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useProviderPreset } from "@/lib/subscription/core/hooks"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import type { ProviderId, ProviderPreset } from "@/lib/subscription/core/types"
+import { SelectablePresetCard } from "@/components/settings/presets/selectable-preset-card"
 
 interface PresetPickerProps {
   provider: Extract<ProviderId, "anthropic" | "codex">
@@ -39,54 +49,64 @@ export function PresetPicker({ provider }: PresetPickerProps) {
   const t = useTranslations("subscription.common.preset")
   const { preset, loading, save } = useProviderPreset(provider)
   const [open, setOpen] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [removeBusy, setRemoveBusy] = useState(false)
+
+  const handleConfirmRemove = async () => {
+    setRemoveBusy(true)
+    try {
+      await save(null)
+      setRemoveOpen(false)
+    } finally {
+      setRemoveBusy(false)
+    }
+  }
+
+  const details =
+    preset !== null && preset !== undefined ? (
+      <div className="space-y-1.5">
+        <div>
+          <span className="text-muted-foreground">{t("baseUrlField")}: </span>
+          <span className="font-mono break-all">{preset.baseUrl}</span>
+        </div>
+        {preset.extraHeaders && Object.keys(preset.extraHeaders).length > 0 && (
+          <div>
+            <span className="text-muted-foreground">{t("headersField")}: </span>
+            <ul className="mt-1 space-y-0.5">
+              {Object.entries(preset.extraHeaders).map(([k, v]) => (
+                <li key={k} className="font-mono break-all">
+                  {k}: {v}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    ) : null
 
   return (
     <Card>
       <CardContent className="space-y-3 p-4">
         <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <Label className="text-sm">{t("title")}</Label>
-            {!loading &&
-              (preset ? (
-                <Badge variant="default" className="text-[10px]">
-                  {t("presetActive")}
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-[10px]">
-                  {t("presetInactive")}
-                </Badge>
-              ))}
-          </div>
+          <Label className="text-sm">{t("title")}</Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
 
         {loading ? (
           <p className="text-xs text-muted-foreground">…</p>
         ) : preset ? (
-          <div className="space-y-2 rounded border bg-muted/30 px-3 py-2 text-xs">
-            <div>
-              <span className="text-muted-foreground">{t("labelField")}: </span>
-              <span className="font-medium">{preset.label}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t("baseUrlField")}: </span>
-              <span className="font-mono break-all">{preset.baseUrl}</span>
-            </div>
-            {preset.extraHeaders && Object.keys(preset.extraHeaders).length > 0 && (
-              <div>
-                <span className="text-muted-foreground">{t("headersField")}: </span>
-                <ul className="mt-1 space-y-0.5">
-                  {Object.entries(preset.extraHeaders).map(([k, v]) => (
-                    <li key={k} className="font-mono break-all">
-                      {k}: {v}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+          <SelectablePresetCard
+            title={preset.label}
+            badge="active"
+            badgeLabel={t("presetActive")}
+            details={details}
+          />
         ) : (
-          <p className="text-xs text-muted-foreground">{t("noPreset")}</p>
+          <SelectablePresetCard
+            title={t("noPreset")}
+            badge="inactive"
+            badgeLabel={t("presetInactive")}
+          />
         )}
 
         <div className="flex items-center gap-2">
@@ -97,7 +117,7 @@ export function PresetPicker({ provider }: PresetPickerProps) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void save(null)}
+              onClick={() => setRemoveOpen(true)}
               className="text-destructive"
             >
               {t("removePreset")}
@@ -116,6 +136,31 @@ export function PresetPicker({ provider }: PresetPickerProps) {
           }}
         />
       )}
+
+      <AlertDialog open={removeOpen} onOpenChange={(o) => !o && setRemoveOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("removeConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("removeConfirmDescription", { label: preset?.label ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeBusy}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                // Manually intercept so we can await save before closing.
+                e.preventDefault()
+                void handleConfirmRemove()
+              }}
+              disabled={removeBusy}
+            >
+              {removeBusy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+              {t("removePreset")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

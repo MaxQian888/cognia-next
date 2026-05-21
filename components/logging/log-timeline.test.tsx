@@ -45,9 +45,14 @@ function renderTimeline(props: Parameters<typeof LogTimeline>[0]) {
 }
 
 describe("LogTimeline", () => {
-  it("returns null when there are no logs", () => {
-    const { container } = renderTimeline({ logs: [] })
-    expect(container).toBeEmptyDOMElement()
+  it("stays mounted with a placeholder bar when there are no logs", () => {
+    renderTimeline({ logs: [] })
+    // Container stays mounted to prevent layout flicker when filters
+    // momentarily produce zero matches.
+    expect(screen.getByTestId("log-timeline-container")).toBeInTheDocument()
+    expect(screen.getByTestId("log-timeline-placeholder")).toBeInTheDocument()
+    // No clickable bucket buttons (the empty-state placeholder is decorative).
+    expect(screen.queryAllByLabelText(/logs$/i)).toHaveLength(0)
   })
 
   it("renders the timeline title and 60 bucket buttons by default", () => {
@@ -91,14 +96,16 @@ describe("LogTimeline", () => {
             end: new Date("2026-01-01T13:00:00Z"),
           }}
           onTimeRangeClick={jest.fn()}
+          onClearRange={jest.fn()}
         />
       </TooltipProvider>
     )
     expect(screen.getByRole("button", { name: /Clear/ })).toBeInTheDocument()
   })
 
-  it("Clear button resets the time range via onTimeRangeClick(0, now)", () => {
+  it("Clear button invokes onClearRange (not onTimeRangeClick) when supplied", () => {
     const onTimeRangeClick = jest.fn()
+    const onClearRange = jest.fn()
     renderTimeline({
       logs: buildHourlyLogs(),
       selectedRange: {
@@ -106,12 +113,11 @@ describe("LogTimeline", () => {
         end: new Date("2026-01-01T13:00:00Z"),
       },
       onTimeRangeClick,
+      onClearRange,
     })
     fireEvent.click(screen.getByRole("button", { name: /Clear/ }))
-    expect(onTimeRangeClick).toHaveBeenCalledTimes(1)
-    const [start, end] = onTimeRangeClick.mock.calls[0]
-    expect(start.getTime()).toBe(0)
-    expect(end).toBeInstanceOf(Date)
+    expect(onClearRange).toHaveBeenCalledTimes(1)
+    expect(onTimeRangeClick).not.toHaveBeenCalled()
   })
 
   it("clicking a single bucket (mouseDown→mouseUp same idx) fires onTimeRangeClick with that bucket range", () => {

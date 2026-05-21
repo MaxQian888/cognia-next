@@ -20,7 +20,12 @@ use tauri::{Emitter, State};
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::consent::ConsentBroker;
-use super::permission::{Call, Decision, PermissionGate, Surface, TargetMeta};
+use super::permission::{
+    maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
+};
+use super::policy::{
+    ActionFacts, Decision as PolicyDecision, Policy, PolicyState,
+};
 use super::types::*;
 use super::worker::AutomationHandle;
 
@@ -35,6 +40,11 @@ pub struct AutomationState {
     /// pending `oneshot::Receiver` via the `automation_consent_respond`
     /// command.
     pub consent: ConsentBroker,
+    /// ADR-0028 / T5 — per-action policy applied AFTER the permission
+    /// gate resolves Allow for a `ComputerUse` surface call. Empty policy
+    /// (the default) is a fast-path no-op so installs that never edit
+    /// the policy pay zero overhead.
+    pub policy: PolicyState,
 }
 
 impl AutomationState {
@@ -43,12 +53,14 @@ impl AutomationState {
         gate: PermissionGate,
         audit: AuditRing,
         consent: ConsentBroker,
+        policy: PolicyState,
     ) -> Self {
         Self {
             handle,
             gate,
             audit,
             consent,
+            policy,
         }
     }
 }
@@ -141,6 +153,27 @@ pub struct CallContext {
     pub process_name: Option<String>,
     #[serde(default)]
     pub window_title: Option<String>,
+    /// ADR-0028 / T5 — best-effort URL for browser-driving actions. The
+    /// renderer supplies this when the active target is a browser tab so
+    /// the per-action policy's `allowed_url_patterns` can fire.
+    #[serde(default)]
+    pub target_url: Option<String>,
+    /// ADR-0028 / T5 — pixel x for coordinate-based actions (click /
+    /// drag / mouse_move). Used to evaluate `forbidden_screen_regions`.
+    #[serde(default)]
+    pub click_x: Option<i32>,
+    /// ADR-0028 / T5 — pixel y for coordinate-based actions.
+    #[serde(default)]
+    pub click_y: Option<i32>,
+    /// ADR-0020 W1 — per-call tier upgrade originating from
+    /// `Character.computerUseSettings.requireConsent`. When `Some(PerCall)`,
+    /// the dispatcher upgrades a gate `Allow` for a driving call to
+    /// `RequireConsent` so the operator is prompted on every action
+    /// regardless of the persisted surface tier. Other variants are
+    /// honoured by `permission::maybe_upgrade_to_consent` (today only
+    /// `PerCall` actually moves the dial; `None` / others pass through).
+    #[serde(default)]
+    pub force_tier: Option<Tier>,
 }
 
 impl CallContext {
@@ -153,8 +186,49 @@ impl CallContext {
             window_title: self.window_title.clone(),
         }
     }
+    /// Build the T5 ActionFacts from this context. Borrows the context's
+    /// owned strings so the resulting facts live as long as the context.
+    fn facts(&self) -> ActionFacts<'_> {
+        ActionFacts {
+            process_name: self.process_name.as_deref(),
+            window_title: self.window_title.as_deref(),
+            target_url: self.target_url.as_deref(),
+            click_x: self.click_x,
+            click_y: self.click_y,
+        }
+    }
 }
 
+
+/// Record a T5 policy-deny audit row and emit it. Returns the typed
+/// `AutomationError` so the caller can stringify for the Tauri Result.
+fn record_policy_deny(
+    audit: &AuditRing,
+    command: &str,
+    surface: Surface,
+    plugin_id: Option<&str>,
+    target: &TargetMeta,
+    reason: &str,
+    started: Instant,
+) -> (AuditEntry, AutomationError) {
+    let err = AutomationError::PermissionDenied {
+        reason: format!("policy_deny: {reason}"),
+    };
+    let entry = audit.record(AuditEntry {
+        id: String::new(),
+        ts: now_ms(),
+        surface,
+        plugin_id: plugin_id.map(|s| s.to_string()),
+        command: command.to_string(),
+        process_name: target.process_name.clone(),
+        window_title: target.window_title.clone(),
+        decision: AuditDecision::Deny,
+        reason: Some(format!("policy_deny: {reason}")),
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: Some(err_to_string(&err)),
+    });
+    (entry, err)
+}
 
 macro_rules! command_body {
     (
@@ -171,7 +245,28 @@ macro_rules! command_body {
             plugin_id: plugin_id.as_deref(),
             target: target.clone(),
         };
-        match $state.gate.evaluate(&call) {
+        // T5 closure — runs after the permission gate (and consent, if
+        // any) clears, but ONLY for the ComputerUse surface. Empty
+        // policies fast-path through `PolicyState::is_empty`. Returns
+        // `Some(reason)` on Deny so the caller records a uniform
+        // `policy_deny` audit row.
+        let policy_check = || -> Option<String> {
+            if surface != Surface::ComputerUse || $state.policy.is_empty() {
+                return None;
+            }
+            match $state.policy.evaluate(&$ctx.facts()) {
+                PolicyDecision::Allow => None,
+                PolicyDecision::Deny { reason } => Some(reason),
+            }
+        };
+        // ADR-0020 W1 — apply per-call tier upgrade *before* dispatching
+        // the decision. Today only `force_tier == Some(PerCall)` has a
+        // real effect (Allow → RequireConsent for driving calls);
+        // `maybe_upgrade_to_consent` is the single defence point so we
+        // can never silently weaken a Deny here.
+        let initial_decision = $state.gate.evaluate(&call);
+        let decision = maybe_upgrade_to_consent(initial_decision, $ctx.force_tier, &call);
+        match decision {
             Decision::Deny(err) => {
                 let entry = record_deny(
                     &$state.audit,
@@ -195,6 +290,21 @@ macro_rules! command_body {
                 let app_clone = $app.clone();
                 let allow = $state.consent.request(app_clone, prompt.clone()).await;
                 if allow {
+                    // T5 policy still applies after consent — explicit
+                    // consent does not bypass the per-action allowlist.
+                    if let Some(reason) = policy_check() {
+                        let (entry, typed) = record_policy_deny(
+                            &$state.audit,
+                            $cmd_name,
+                            surface,
+                            plugin_id.as_deref(),
+                            &target,
+                            &reason,
+                            started,
+                        );
+                        emit_audit(&$app, &entry);
+                        return Err(err_to_string(&typed));
+                    }
                     let result = $do_call;
                     let entry = AuditEntry {
                         id: String::new(),
@@ -236,6 +346,19 @@ macro_rules! command_body {
                 }
             }
             Decision::Allow => {
+                if let Some(reason) = policy_check() {
+                    let (entry, typed) = record_policy_deny(
+                        &$state.audit,
+                        $cmd_name,
+                        surface,
+                        plugin_id.as_deref(),
+                        &target,
+                        &reason,
+                        started,
+                    );
+                    emit_audit(&$app, &entry);
+                    return Err(err_to_string(&typed));
+                }
                 let result = $do_call;
                 let entry = record_allow(
                     &$state.audit,
@@ -341,13 +464,22 @@ pub async fn desktop_screenshot(
 ) -> std::result::Result<Screenshot, String> {
     let ctx = args.ctx;
     let opts = args.opts;
-    command_body!(
-        app,
-        state,
-        ctx,
-        "screenshot",
-        state.handle.screenshot(opts.clone()).await
-    )
+    // ADR-0020 W1 — redact when the operator opted in AND a credential
+    // window is on screen. We post-process inside the same command body
+    // so the audit row still records a successful screenshot (with a
+    // separate `error: None`, `decision: "allow"`), but the bytes the
+    // model sees are a black image of identical dimensions.
+    let redact_enabled = state.gate.settings().redact_screenshots;
+    command_body!(app, state, ctx, "screenshot", async {
+        let shot = state.handle.screenshot(opts.clone()).await?;
+        if redact_enabled
+            && super::platform::shared::credential_window::is_credential_window_focused()
+        {
+            super::platform::shared::screenshot::redact_screenshot(shot)
+        } else {
+            Ok(shot)
+        }
+    }.await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -729,4 +861,232 @@ pub async fn automation_consent_respond(
         .consent
         .resolve(&args.id, args.allow, args.persist, args.prompt.as_ref());
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0028 / T5 — per-action policy persistence. The renderer writes the
+// policy via `automation_policy_set` whenever the user edits the editor
+// card; reads via `automation_policy_get` on mount + after writes for
+// round-trip confidence. The dispatcher consults `PolicyState` directly,
+// so writes take effect on the very next call without a restart.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn automation_policy_get(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<Policy, String> {
+    Ok(state.policy.get())
+}
+
+#[tauri::command]
+pub async fn automation_policy_set(
+    state: State<'_, AutomationState>,
+    policy: Policy,
+) -> std::result::Result<(), String> {
+    // ADR-0020 W1 — `PolicyState::set` now compiles regex up-front; map
+    // a compile failure to the same JSON-error shape used elsewhere
+    // (the renderer's policy editor displays it inline so the operator
+    // can correct the offending row instead of every action silently
+    // failing later).
+    state.policy.set(policy).map_err(|e| e.to_string())
+}
+
+/// ADR-0020 W1 — pick-session lifecycle commands.
+///
+/// The Inspector's "Pick" affordance used to race a 3-second countdown:
+/// the user had to position the cursor on the target before T-0 expired,
+/// then `pick_at_point` resolved an `ElementInfo` from the cursor's
+/// position. Two issues:
+///
+///   1. **No audit trail.** Operators couldn't tell from the audit log
+///      that a pick was attempted; only the resulting `pick_at_point`
+///      call showed up, indistinguishable from a workflow-driven pick.
+///   2. **Countdown race.** A 3-second wait was awkward when the user
+///      was already ready, and panic-inducing when the cursor needed
+///      careful placement.
+///
+/// W1 ships `desktop_pick_session_start` (records intent, the renderer
+/// then enables an "Instant Capture" button + still runs the countdown
+/// as a fallback) and `desktop_pick_session_cancel` (clears the
+/// in-progress flag, records the cancel). Both go through `command_body!`
+/// so audit captures the pick lifecycle. The full WH_MOUSE_LL overlay
+/// rewrite (where the user clicks anywhere to capture without racing a
+/// timer) is tracked separately in the Wave 3 follow-up — it requires a
+/// transparent webview window with cross-process click handling that
+/// outweighs W1's "state-honest" scope.
+///
+/// macOS / Linux land at the same audit row but the underlying
+/// `pick_at_point` returns `UnsupportedPlatform` until the Wave 2
+/// shell-out backend ships (osascript / xdotool).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickSessionStartArgs {
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_pick_session_start(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: PickSessionStartArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    command_body!(app, state, ctx, "pick_session_start", async {
+        // No backend dispatch — this is an audit-only marker so the
+        // operator can see that a pick was initiated. The actual
+        // `pick_at_point` call follows once the renderer captures the
+        // cursor coordinate.
+        Ok::<(), AutomationError>(())
+    }.await)
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PickSessionCancelArgs {
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_pick_session_cancel(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: Option<PickSessionCancelArgs>,
+) -> std::result::Result<(), String> {
+    let ctx = args.unwrap_or_default().ctx;
+    command_body!(app, state, ctx, "pick_session_cancel", async {
+        Ok::<(), AutomationError>(())
+    }.await)
+}
+
+/// ADR-0020 W1 — pull (and clear) the most recent backend init failure.
+/// The Overview tab calls this once on mount so a failure that happened
+/// before any renderer attached an event listener for
+/// `automation:backend-init-failed` is still rendered as a destructive
+/// `<Alert>`. Returns `None` when no failure is pending — the common
+/// case on healthy installs.
+#[tauri::command]
+pub async fn automation_drain_init_failure(
+) -> std::result::Result<Option<super::InitFailure>, String> {
+    Ok(super::drain_init_failure())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ring() -> AuditRing {
+        AuditRing::new()
+    }
+
+    fn target(proc: &str) -> TargetMeta {
+        TargetMeta {
+            process_name: Some(proc.into()),
+            window_title: Some("test window".into()),
+        }
+    }
+
+    #[test]
+    fn record_policy_deny_writes_policy_deny_reason() {
+        let ring = ring();
+        let started = Instant::now();
+        let (entry, err) = record_policy_deny(
+            &ring,
+            "click",
+            Surface::ComputerUse,
+            None,
+            &target("Notepad"),
+            "process name not in allowlist",
+            started,
+        );
+        assert_eq!(entry.decision, AuditDecision::Deny);
+        assert_eq!(entry.surface, Surface::ComputerUse);
+        assert_eq!(
+            entry.reason.as_deref(),
+            Some("policy_deny: process name not in allowlist")
+        );
+        // The error string the renderer sees is a JSON-serialized
+        // PermissionDenied with the policy_deny prefix.
+        let err_json = err_to_string(&err);
+        assert!(
+            err_json.contains("policy_deny"),
+            "expected policy_deny tag in: {err_json}"
+        );
+        // The audit ring grew by one row.
+        assert_eq!(ring.len(), 1);
+    }
+
+    #[test]
+    fn record_policy_deny_emits_into_audit_ring() {
+        let ring = ring();
+        let started = Instant::now();
+        record_policy_deny(
+            &ring,
+            "type",
+            Surface::ComputerUse,
+            Some("plugin-x"),
+            &target("Chrome"),
+            "url did not match allowlist",
+            started,
+        );
+        let snap = ring.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].plugin_id.as_deref(), Some("plugin-x"));
+        assert_eq!(snap[0].command, "type");
+        assert!(snap[0].error.is_some());
+    }
+
+    #[test]
+    fn call_context_builds_facts_from_optional_fields() {
+        let ctx = CallContext {
+            surface: Some(Surface::ComputerUse),
+            plugin_id: None,
+            process_name: Some("Chrome".into()),
+            window_title: Some("Inbox".into()),
+            target_url: Some("https://mail.example/".into()),
+            click_x: Some(123),
+            click_y: Some(456),
+            force_tier: None,
+        };
+        let facts = ctx.facts();
+        assert_eq!(facts.process_name, Some("Chrome"));
+        assert_eq!(facts.window_title, Some("Inbox"));
+        assert_eq!(facts.target_url, Some("https://mail.example/"));
+        assert_eq!(facts.click_x, Some(123));
+        assert_eq!(facts.click_y, Some(456));
+    }
+
+    #[test]
+    fn call_context_force_tier_round_trips_through_deserialization() {
+        // Wire-shape sanity: the sidecar forwards `forceTier` as a
+        // camelCase string ("perCall"); our serde rename must accept it
+        // and the typed value must thread through `maybe_upgrade_to_consent`.
+        let raw = serde_json::json!({
+            "surface": "computerUse",
+            "forceTier": "perCall",
+        });
+        let ctx: CallContext = serde_json::from_value(raw).unwrap();
+        assert_eq!(ctx.force_tier, Some(Tier::PerCall));
+        assert_eq!(ctx.surface(), Surface::ComputerUse);
+    }
+
+    #[test]
+    fn call_context_force_tier_absent_deserializes_as_none() {
+        let raw = serde_json::json!({ "surface": "computerUse" });
+        let ctx: CallContext = serde_json::from_value(raw).unwrap();
+        assert!(ctx.force_tier.is_none());
+    }
+
+    #[test]
+    fn call_context_defaults_surface_to_workflow() {
+        let ctx = CallContext::default();
+        assert_eq!(ctx.surface(), Surface::Workflow);
+        let facts = ctx.facts();
+        assert!(facts.process_name.is_none());
+        assert!(facts.window_title.is_none());
+        assert!(facts.target_url.is_none());
+        assert!(facts.click_x.is_none());
+        assert!(facts.click_y.is_none());
+    }
 }

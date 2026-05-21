@@ -57,7 +57,7 @@ export default function ShareTargetPage() {
 function deriveTitle(
   text: string,
   url: string,
-  t: (key: string, params?: Record<string, unknown>) => string
+  t: (key: string, params?: Record<string, string | number | Date>) => string
 ): string {
   const trimmed = text.trim()
   if (trimmed) {

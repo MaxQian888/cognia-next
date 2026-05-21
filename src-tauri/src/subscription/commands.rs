@@ -262,6 +262,7 @@ pub async fn subscription_set_preset(
 #[tauri::command]
 pub async fn claude_env_for_account(
     app: AppHandle,
+    state: tauri::State<'_, super::anthropic::credential::WatcherRegistry>,
     provider: String,
     account_id: String,
 ) -> Result<Option<Vec<(String, String)>>, String> {
@@ -270,6 +271,17 @@ pub async fn claude_env_for_account(
         .path()
         .app_data_dir()
         .map_err(|e| format!("no app_data_dir: {e}"))?;
+    // ADR-0028 Phase 14 — start the OAuth-refresh watcher on first use
+    // for this account. Idempotent: subsequent calls are a no-op.
+    if matches!(id, ProviderId::Anthropic) {
+        let configdir = app_data_dir
+            .join("cognia")
+            .join("claude-configs")
+            .join(&account_id);
+        if let Err(err) = state.ensure_watching(&account_id, configdir) {
+            log::warn!("anthropic credential watcher start failed: {err}");
+        }
+    }
     active::env_for_account(&app_data_dir, id, &account_id)
 }
 

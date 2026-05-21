@@ -58,11 +58,47 @@ test("renders title and clicking the row selects the session", async () => {
   const user = userEvent.setup()
   const { onSelect } = setup()
   await user.click(screen.getByRole("button", { name: /Hello/ }))
-  expect(onSelect).toHaveBeenCalledWith("s-1")
+  expect(onSelect).toHaveBeenCalledWith("s-1", expect.any(Object))
+  const event = onSelect.mock.calls[0][1] as { ctrlKey: boolean; shiftKey: boolean }
+  expect(event.ctrlKey).toBe(false)
+  expect(event.shiftKey).toBe(false)
   expect(logInfo).toHaveBeenCalledWith(
     "session select",
-    expect.objectContaining({ sessionId: "s-1" })
+    expect.objectContaining({ sessionId: "s-1", ctrl: false, shift: false })
   )
+})
+
+test("Ctrl-click forwards the modifier flag through onSelect", async () => {
+  const user = userEvent.setup()
+  const { onSelect } = setup()
+  await user.keyboard("{Control>}")
+  await user.click(screen.getByRole("button", { name: /Hello/ }))
+  await user.keyboard("{/Control}")
+  const event = onSelect.mock.calls[0][1] as { ctrlKey: boolean; shiftKey: boolean }
+  expect(event.ctrlKey).toBe(true)
+  expect(logInfo).toHaveBeenCalledWith("session select", expect.objectContaining({ ctrl: true }))
+})
+
+test("Shift-click forwards the modifier flag through onSelect", async () => {
+  const user = userEvent.setup()
+  const { onSelect } = setup()
+  await user.keyboard("{Shift>}")
+  await user.click(screen.getByRole("button", { name: /Hello/ }))
+  await user.keyboard("{/Shift}")
+  const event = onSelect.mock.calls[0][1] as { ctrlKey: boolean; shiftKey: boolean }
+  expect(event.shiftKey).toBe(true)
+})
+
+test("applies the multi-select visual when `selected` is true", () => {
+  const { container } = setup({ selected: true })
+  const li = container.querySelector("li")
+  expect(li?.getAttribute("data-selected")).toBe("true")
+  expect(li?.className).toMatch(/ring-/)
+})
+
+test("pinned sessions render a pin glyph next to the title", () => {
+  setup({ session: { ...baseSession, pinned: true } })
+  expect(screen.getByLabelText("pinned")).toBeInTheDocument()
 })
 
 test("renders the untitled fallback when title is blank", () => {
@@ -135,4 +171,34 @@ test("renders an accent dot when accentColor is provided", () => {
 test("renders different icons by session kind", () => {
   setup({ session: { ...baseSession, kind: "team", teamId: "t-1" } })
   expect(screen.getByRole("button", { name: /Hello/ })).toBeInTheDocument()
+})
+
+test("dropdown Pin menu item invokes onTogglePinned with the inverted value", async () => {
+  const user = userEvent.setup()
+  const onTogglePinned = jest.fn()
+  setup({ onTogglePinned })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("pin"))
+  expect(onTogglePinned).toHaveBeenCalledWith("s-1", true)
+  expect(logInfo).toHaveBeenCalledWith(
+    "session toggle-pinned",
+    expect.objectContaining({ sessionId: "s-1", pinned: true })
+  )
+})
+
+test("dropdown shows Unpin for an already-pinned session and toggles off", async () => {
+  const user = userEvent.setup()
+  const onTogglePinned = jest.fn()
+  setup({ session: { ...baseSession, pinned: true }, onTogglePinned })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("unpin"))
+  expect(onTogglePinned).toHaveBeenCalledWith("s-1", false)
+})
+
+test("Pin menu item is hidden when no onTogglePinned callback is provided", async () => {
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(screen.queryByText("pin")).toBeNull()
+  expect(screen.queryByText("unpin")).toBeNull()
 })

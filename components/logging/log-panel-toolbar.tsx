@@ -9,14 +9,18 @@
  *   Layer 3: Advanced filters — collapsible (module, source, session, time, presets, focus chips)
  */
 
-import { Fragment, memo, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
+import { format } from "date-fns"
+import type { DateRange } from "react-day-picker"
 import {
   Search,
   Filter,
   Trash2,
   RefreshCw,
-  Calendar,
+  Calendar as CalendarIcon,
+  CalendarRange,
   FileJson,
   FileText,
   FileSpreadsheet,
@@ -37,10 +41,15 @@ import {
   X,
   Keyboard,
   BookmarkCheck,
+  Check,
+  Link as LinkIcon,
+  Rows3,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -69,7 +78,7 @@ import {
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
 import type { LogLevel } from "@/lib/logger"
 import type { LogFilterPreset, PresetTimeRange } from "./log-filter-presets"
-import type { ViewMode, PanelSource } from "@/hooks/logging/use-log-panel-filters"
+import type { Density, ViewMode, PanelSource } from "@/hooks/logging/use-log-panel-filters"
 
 export type ExportFormat = "json" | "csv" | "text"
 
@@ -147,6 +156,16 @@ export interface LogPanelToolbarProps {
   clearSearchHistory: () => void
   diagnosticTransportFilter: string | null
   setDiagnosticTransportFilter: (v: string | null) => void
+
+  // Custom time range (opens a Calendar popover when "Custom..." picked).
+  customTimeRange: { start: Date; end: Date } | null
+  setCustomTimeRange: (v: { start: Date; end: Date } | null) => void
+  /** When true, the toolbar hides the preset Select so the host page can own it. */
+  hideToolbarPresets?: boolean
+
+  // Row density controls
+  density: Density
+  setDensity: (v: Density) => void
 }
 
 // Levels to show as tabs (fatal is merged into error)
@@ -209,9 +228,41 @@ function LogPanelToolbarImpl({
   clearSearchHistory,
   diagnosticTransportFilter,
   setDiagnosticTransportFilter,
+  customTimeRange,
+  setCustomTimeRange,
+  hideToolbarPresets = false,
+  density,
+  setDensity,
 }: LogPanelToolbarProps) {
   const t = useTranslations("logging")
   const [showSearchHistory, setShowSearchHistory] = useState(false)
+  const [customRangeOpen, setCustomRangeOpen] = useState(false)
+  const handleCopyShareUrl = useCallback(async () => {
+    if (typeof window === "undefined") return
+    const url = window.location.href
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+      } else {
+        // Fallback for environments without async clipboard (older browsers / JSDOM).
+        const ta = document.createElement("textarea")
+        ta.value = url
+        ta.setAttribute("readonly", "")
+        ta.style.position = "absolute"
+        ta.style.left = "-9999px"
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand("copy")
+        document.body.removeChild(ta)
+      }
+      toast.success(t("panel.shareUrlCopied"))
+    } catch {
+      toast.error(t("panel.shareUrlFailed"))
+    }
+  }, [t])
+  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() =>
+    customTimeRange ? { from: customTimeRange.start, to: customTimeRange.end } : undefined
+  )
 
   // Determine if any advanced filter is active
   const hasActiveAdvancedFilters =
@@ -219,10 +270,15 @@ function LogPanelToolbarImpl({
     sourceFilter !== "all" ||
     sessionFilter.trim() !== "" ||
     timeRange !== "all" ||
+    customTimeRange !== null ||
     activePresetId !== EMPTY_PRESET_VALUE ||
     traceFocusId !== null ||
     hasSessionFocus ||
     diagnosticTransportFilter !== null
+
+  const customRangeLabel = customTimeRange
+    ? `${format(customTimeRange.start, "MMM d HH:mm")} → ${format(customTimeRange.end, "MMM d HH:mm")}`
+    : null
 
   const errorFatalCount = (stats.byLevel["error"] || 0) + (stats.byLevel["fatal" as LogLevel] || 0)
 
@@ -409,6 +465,10 @@ function LogPanelToolbarImpl({
               <FileText className="h-4 w-4 mr-2" />
               {t("panel.exportText")}
             </DropdownMenuItem>
+            <DropdownMenuItem data-testid="log-panel-copy-share-url" onClick={handleCopyShareUrl}>
+              <LinkIcon className="h-4 w-4 mr-2" />
+              {t("panel.copyShareUrl")}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => clearLogs()}>
               <Trash2 className="h-4 w-4 mr-2" />
@@ -442,6 +502,20 @@ function LogPanelToolbarImpl({
               {t("panel.scrollToBottom")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("panel.densityMenuLabel")}</DropdownMenuLabel>
+            {(["compact", "comfortable", "spacious"] as Density[]).map((d) => (
+              <DropdownMenuItem
+                key={d}
+                data-testid={`log-panel-density-${d}`}
+                onClick={() => setDensity(d)}
+                className={cn(density === d && "bg-accent/40 font-medium")}
+              >
+                <Rows3 className="h-4 w-4 mr-2" />
+                <span className="flex-1">{t(`panel.density.${d}`)}</span>
+                {density === d && <Check className="h-3.5 w-3.5" />}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setShowShortcutsDialog(true)}>
               <Keyboard className="h-4 w-4 mr-2" />
               {t("panel.keyboardShortcuts")}
@@ -457,7 +531,8 @@ function LogPanelToolbarImpl({
         hasSessionFocus ||
         diagnosticTransportFilter ||
         moduleFilter !== "all" ||
-        timeRange !== "all") && (
+        timeRange !== "all" ||
+        customTimeRange !== null) && (
         <div
           data-testid="log-panel-facet-chip-row"
           className="flex flex-wrap items-center gap-1.5 px-2 pb-2 border-t border-border/40"
@@ -524,13 +599,35 @@ function LogPanelToolbarImpl({
               data-testid="facet-chip-time"
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
-              <Calendar className="h-3 w-3" />
+              <CalendarIcon className="h-3 w-3" />
               <span>{timeRange}</span>
               <button
                 type="button"
                 onClick={() => setTimeRange("all")}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 aria-label={t("panel.filterChip.clearTimeRange")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          {customRangeLabel && (
+            <Badge
+              variant="secondary"
+              data-testid="facet-chip-custom-time"
+              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
+            >
+              <CalendarRange className="h-3 w-3" />
+              <span className="text-muted-foreground">{t("panel.customTimeRangeChipPrefix")}</span>
+              <span>{customRangeLabel}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomTimeRange(null)
+                  setPendingRange(undefined)
+                }}
+                className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label={t("panel.customTimeRangeClear")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -701,10 +798,28 @@ function LogPanelToolbarImpl({
             />
           </InputGroup>
 
-          {/* Time range selector */}
-          <Select value={timeRange} onValueChange={(v) => setTimeRange(v as PresetTimeRange)}>
-            <SelectTrigger className="h-8 w-full sm:w-[100px]">
-              <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+          {/* Time range selector — picking "custom" opens the calendar popover */}
+          <Select
+            value={customTimeRange ? "custom" : timeRange}
+            onValueChange={(v) => {
+              if (v === "custom") {
+                setPendingRange(
+                  customTimeRange
+                    ? { from: customTimeRange.start, to: customTimeRange.end }
+                    : undefined
+                )
+                setCustomRangeOpen(true)
+                return
+              }
+              setCustomTimeRange(null)
+              setTimeRange(v as PresetTimeRange)
+            }}
+          >
+            <SelectTrigger
+              className="h-8 w-full sm:w-[120px]"
+              data-testid="log-panel-time-range-trigger"
+            >
+              <CalendarIcon className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               <SelectValue placeholder={t("panel.timePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
@@ -714,50 +829,124 @@ function LogPanelToolbarImpl({
               <SelectItem value="6h">{t("panel.timeRange6h")}</SelectItem>
               <SelectItem value="24h">{t("panel.timeRange24h")}</SelectItem>
               <SelectItem value="7d">{t("panel.timeRange7d")}</SelectItem>
+              <SelectItem value="custom" data-testid="log-panel-time-range-custom">
+                {t("panel.customTimeRange")}
+              </SelectItem>
             </SelectContent>
           </Select>
 
-          {/* Preset selector */}
-          <Select value={activePresetId} onValueChange={handlePresetChange}>
-            <SelectTrigger className="h-8 w-full sm:w-[150px]">
-              <Bookmark className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              <SelectValue placeholder={t("panel.presets")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
-              {presets.map((preset) => (
-                <SelectItem key={preset.id} value={preset.id}>
-                  {preset.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Save preset */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 px-2" onClick={saveCurrentPreset}>
-                <BookmarkPlus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("panel.savePreset")}</TooltipContent>
-          </Tooltip>
-
-          {/* Delete preset */}
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* Custom range popover — also reachable directly via this trigger */}
+          <Popover open={customRangeOpen} onOpenChange={setCustomRangeOpen}>
+            <PopoverTrigger asChild>
               <Button
-                variant="outline"
+                variant={customTimeRange ? "default" : "outline"}
                 size="sm"
                 className="h-8 px-2"
-                onClick={removeActivePreset}
-                disabled={activePresetId === EMPTY_PRESET_VALUE}
+                data-testid="log-panel-custom-range-trigger"
+                aria-label={t("panel.customTimeRangePickerLabel")}
               >
-                <BookmarkX className="h-4 w-4" />
+                <CalendarRange className="h-4 w-4" />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("panel.deletePreset")}</TooltipContent>
-          </Tooltip>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="w-auto p-0"
+              data-testid="log-panel-custom-range-popover"
+            >
+              <Calendar
+                mode="range"
+                numberOfMonths={2}
+                selected={pendingRange}
+                onSelect={setPendingRange}
+                defaultMonth={pendingRange?.from ?? customTimeRange?.start ?? new Date()}
+              />
+              <div className="flex items-center justify-end gap-2 border-t p-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-testid="log-panel-custom-range-clear"
+                  onClick={() => {
+                    setPendingRange(undefined)
+                    setCustomTimeRange(null)
+                    setCustomRangeOpen(false)
+                  }}
+                >
+                  {t("panel.customTimeRangeClear")}
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  data-testid="log-panel-custom-range-apply"
+                  disabled={!pendingRange?.from || !pendingRange?.to}
+                  onClick={() => {
+                    if (pendingRange?.from && pendingRange?.to) {
+                      setCustomTimeRange({ start: pendingRange.from, end: pendingRange.to })
+                      setTimeRange("all")
+                      setCustomRangeOpen(false)
+                    }
+                  }}
+                >
+                  {t("panel.customTimeRangeApply")}
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Preset selector — hidden when host page owns presets */}
+          {!hideToolbarPresets && (
+            <Select value={activePresetId} onValueChange={handlePresetChange}>
+              <SelectTrigger
+                className="h-8 w-full sm:w-[150px]"
+                data-testid="log-panel-preset-trigger"
+              >
+                <Bookmark className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                <SelectValue placeholder={t("panel.presets")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
+                {presets.map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Save preset */}
+          {!hideToolbarPresets && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  onClick={saveCurrentPreset}
+                >
+                  <BookmarkPlus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("panel.savePreset")}</TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Delete preset */}
+          {!hideToolbarPresets && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2"
+                  onClick={removeActivePreset}
+                  disabled={activePresetId === EMPTY_PRESET_VALUE}
+                >
+                  <BookmarkX className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("panel.deletePreset")}</TooltipContent>
+            </Tooltip>
+          )}
 
           {/* Active focus chips */}
           {traceFocusId && (
@@ -811,6 +1000,9 @@ function LogPanelToolbarImpl({
               [
                 ["r", t("panel.shortcuts.refresh")],
                 ["d", t("panel.shortcuts.dashboardView")],
+                ["/", t("panel.shortcuts.focusSearch")],
+                ["b", t("panel.shortcuts.bookmarkEntry")],
+                ["g", t("panel.shortcuts.openPresets")],
                 ["j / ↓", t("panel.shortcuts.nextEntry")],
                 ["k / ↑", t("panel.shortcuts.previousEntry")],
                 ["Enter", t("panel.shortcuts.expandEntry")],

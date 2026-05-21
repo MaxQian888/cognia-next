@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
@@ -182,6 +183,12 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
       }
       if (webhookSecret.trim()) {
         await connectorsKeyringSet(adapterId, "webhookSecret", webhookSecret.trim())
+      }
+
+      // Hot-reload the running adapter so the new bot token + webhook
+      // secret are picked up without an app restart.
+      if (!isNew) {
+        emitCredentialsRotated(adapterId)
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))

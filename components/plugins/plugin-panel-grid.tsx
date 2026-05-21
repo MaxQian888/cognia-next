@@ -24,7 +24,7 @@ export function PluginPanelGrid() {
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
-  const setActiveTab = usePluginsStore((s) => s.setActiveTab)
+  const setActiveSection = usePluginsStore((s) => s.setActiveSection)
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">{t("loading")}</p>
@@ -35,7 +35,7 @@ export function PluginPanelGrid() {
       <Card className="p-6 md:p-8 text-center space-y-3">
         <BoxesIcon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("emptyAll")}</p>
-        <Button size="sm" onClick={() => setActiveTab("browse")}>
+        <Button size="sm" onClick={() => setActiveSection("discover")}>
           {t("browseMarketplace")}
         </Button>
       </Card>

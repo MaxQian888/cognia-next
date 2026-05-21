@@ -29,10 +29,19 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { getPlugin } from "@/lib/db/plugins"
-import type { PluginPermission } from "@/types/plugin"
+import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
 import { usePluginPermissions } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
+import { AuditLogEntry } from "./audit-log-entry"
 
 export function PluginPermissionReview() {
   const target = usePluginsStore((s) => s.permissionReviewTarget)
@@ -53,15 +62,10 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
   const perms = usePluginPermissions()
 
-  const declared = useMemo(
-    () => (plugin?.manifest as { permissions?: PluginPermission[] })?.permissions ?? [],
-    [plugin]
-  )
-  const optional = useMemo(
-    () =>
-      (plugin?.manifest as { optionalPermissions?: PluginPermission[] })?.optionalPermissions ?? [],
-    [plugin]
-  )
+  const manifest = plugin?.manifest as PluginManifest | undefined
+  const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
+  const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
+  const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])
   const granted = useMemo(() => new Set(perms.getGranted(pluginId)), [perms, pluginId])
   const allListed = useMemo(() => {
     const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
@@ -101,13 +105,14 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
                     {t("colOptional")}
                   </TableHead>
                   <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
+                  <TableHead className="min-w-[9rem]">{t("colTier")}</TableHead>
                   <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {allListed.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                       {t("empty")}
                     </TableCell>
                   </TableRow>
@@ -122,7 +127,9 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
                       dangerous={perms.isDangerous(perm)}
                       onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
                       onRevoke={() => perms.revoke(pluginId, perm)}
-                      description={perms.descriptions[perm] ?? perm}
+                      tier={perms.getTier(pluginId, perm)}
+                      onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
                     />
                   ))
                 )}
@@ -141,24 +148,7 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
             ) : (
               <ul className="divide-y">
                 {auditLog.map((entry, idx) => (
-                  <li key={idx} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                    <Badge
-                      variant={
-                        entry.action === "grant"
-                          ? "secondary"
-                          : entry.action === "deny" || entry.action === "revoke"
-                            ? "destructive"
-                            : "outline"
-                      }
-                      className="text-xs"
-                    >
-                      {entry.action}
-                    </Badge>
-                    <code className="font-mono flex-1 truncate">{entry.permission}</code>
-                    <span className="text-muted-foreground shrink-0">
-                      {new Date(entry.timestamp).toISOString().split("T")[1]?.slice(0, 8)}
-                    </span>
-                  </li>
+                  <AuditLogEntry key={idx} entry={entry} />
                 ))}
               </ul>
             )}
@@ -176,7 +166,7 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
   )
 }
 
-function PermissionRow({
+export function PermissionRow({
   perm,
   declared,
   optional,
@@ -185,6 +175,8 @@ function PermissionRow({
   description,
   onGrant,
   onRevoke,
+  tier,
+  onTierChange,
 }: {
   perm: PluginPermission
   declared: boolean
@@ -194,6 +186,8 @@ function PermissionRow({
   description: string
   onGrant: () => void
   onRevoke: () => void
+  tier: PluginPermissionTier
+  onTierChange: (tier: PluginPermissionTier) => void
 }) {
   const t = useTranslations("plugins.permissionReview")
   return (
@@ -213,6 +207,19 @@ function PermissionRow({
       </TableCell>
       <TableCell className="text-center">
         {granted && <CheckCircle2Icon className="size-3.5 inline text-secondary-foreground" />}
+      </TableCell>
+      <TableCell>
+        <Select value={tier} onValueChange={(v) => onTierChange(v as PluginPermissionTier)}>
+          <SelectTrigger className="h-7 text-xs" aria-label={t("colTier")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="silent">{t("tierLabel.silent")}</SelectItem>
+            <SelectItem value="confirm">{t("tierLabel.confirm")}</SelectItem>
+            <SelectItem value="forbid">{t("tierLabel.forbid")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{t(`tierHint.${tier}`)}</p>
       </TableCell>
       <TableCell className="text-right">
         {granted ? (

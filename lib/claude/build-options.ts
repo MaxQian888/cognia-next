@@ -8,6 +8,7 @@
 // hook and the team-chat hook, and unit-tested in Phase 6 without React.
 
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
+import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
 import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
@@ -894,6 +895,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         (t) => t.name !== "text_editor" && t.name !== "str_replace_based_edit_tool"
       )
     }
+    // ADR-0028 / T4 — sandboxTier precedence: character override beats
+    // the app default. Stamped onto the microvm-bridge so the
+    // `cognia-sandboxed-tools` plugin can route this session's exec
+    // calls to e2b when the user opts into microVM isolation.
+    const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
+    setActiveSandboxTier(session?.id, sandboxTier)
     const sandboxHint =
       "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
       "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
@@ -902,6 +909,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       "Edit / Write are not available in this session."
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
+  } else {
+    // Sandbox disabled — make sure stale tier state from a previous send
+    // on the same session id doesn't leak into the next call.
+    setActiveSandboxTier(session?.id, "os")
   }
 
   // --- Per-session account / proxy env (ADR-0028) --------------------------

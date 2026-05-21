@@ -29,6 +29,7 @@ import {
   type RFWorkflowEdge,
   type RFWorkflowNode,
 } from "./react-flow-converter"
+import { mark as perfMark } from "@/lib/perf"
 import {
   validateAllNodes,
   validateNodeParams,
@@ -586,6 +587,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
 
         applyProposalOps: (ops) => {
           if (!ops || ops.length === 0) return { applied: 0 }
+          perfMark("apply-start")
           // Compute terminal nodes/edges + validation map locally so the
           // whole batch lands in a single set() call — that's what makes
           // zundo collapse the batch into one undo entry.
@@ -740,6 +742,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             validationByStepId: nextValidation,
             dirty: true,
           })
+          perfMark("apply-end")
           return firstError ? { applied, firstError } : { applied }
         },
 

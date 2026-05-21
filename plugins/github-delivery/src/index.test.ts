@@ -11,11 +11,11 @@ function makeCtx(opts: { withDexie?: boolean } = { withDexie: true }): PluginCon
   const tables = new Map<string, ReturnType<typeof makeFakeTable>>()
   const dexie = opts.withDexie
     ? {
-        table: <T,>(name: string) => {
+        table: <T>(name: string) => {
           if (!tables.has(name)) tables.set(name, makeFakeTable())
           return tables.get(name) as unknown as import("dexie").Table<T, unknown>
         },
-        rawDb: () => ({} as unknown as import("dexie").Dexie),
+        rawDb: () => ({}) as unknown as import("dexie").Dexie,
       }
     : undefined
 
@@ -40,7 +40,9 @@ describe("github-delivery plugin entry", () => {
     // The fake table re-creates count() per call to toCollection(), so we
     // verify by confirming activation succeeded without throwing.
     expect(_peekState()?.activatedAt).toBeGreaterThan(0)
-    expect(ctx.logger?.info).toHaveBeenCalledWith("github-delivery: activated")
+    expect(ctx.logger?.info).toHaveBeenCalledWith(
+      expect.stringMatching(/^github-delivery: activated/)
+    )
   })
 
   it("throws when ctx.dexie is missing", async () => {

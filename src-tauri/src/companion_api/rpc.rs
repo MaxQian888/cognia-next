@@ -277,6 +277,10 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "defaultModel",
     "defaultCharacterId",
     "biometricRequiredFor",
+    // Mobile `/me/computer-use` master toggle (ADR-0020 follow-up). When
+    // false, mobile-initiated turns refuse computer-use regardless of the
+    // per-character flag.
+    "mobileComputerUseEnabled",
     // Appearance — mobile `/me/appearance` route writes these through the
     // same allowlist. The matching field types live in
     // `lib/claude/types.ts` (`colorTheme`, `customThemes`,

@@ -33,6 +33,7 @@ pub mod error;
 pub mod fs_watcher;
 pub mod lifecycle;
 pub mod marketplace;
+pub mod node_permission;
 pub mod notification;
 pub mod permissions;
 pub mod process_ops;

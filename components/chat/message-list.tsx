@@ -29,6 +29,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
+import { PerfBoundary } from "@/lib/perf"
 
 interface Props {
   messages: UIMessage[]
@@ -90,17 +91,47 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const showThinking = shouldShowThinking(messages, status)
   const totalCount = messages.length + (showThinking ? 1 : 0)
 
+  // The currently-streaming row, if any: the last message must be the
+  // assistant message we're appending tokens to and the status must be
+  // active streaming (not awaiting_approval — that's paused, so the row's
+  // height is stable and the normal measure path is fine).
+  const streamingRowIndex = useMemo(() => {
+    if (status !== "streaming") return -1
+    const idx = messages.length - 1
+    if (idx < 0) return -1
+    if (messages[idx]?.role !== "assistant") return -1
+    return idx
+  }, [messages, status])
+
   const rowVirtualizer = useVirtualizer({
     count: totalCount,
     getScrollElement: () => scrollParentRef.current,
-    estimateSize: () => 200,
+    estimateSize: (index) => estimateRowSize(index, streamingRowIndex, messages),
     overscan: 5,
-    // Without dynamic measurement every row sits at offset + estimateSize,
-    // so any row taller than the estimate (expanded tools, code blocks,
-    // images, long markdown) overlaps the next row. measureElement attaches
-    // a ResizeObserver to each row, so collapsible toggles also re-measure.
+    // For every row except the actively-streaming one, we attach
+    // measureElement (via the ref below). The streaming row gets no ref so
+    // its height is driven by estimateSize, which grows monotonically with
+    // text length. Without this skip, every token would trigger a
+    // getBoundingClientRect on the streaming row → ResizeObserver pump →
+    // virtualizer re-publish → jitter.
     measureElement: (el) => el?.getBoundingClientRect().height ?? 0,
   })
+
+  // Re-measure every row when the streaming row finalises. Stage 4 will
+  // also wrap the streaming→idle setStatus in startTransition so this
+  // re-measure lands at transition priority.
+  useEffect(() => {
+    if (status === "idle") {
+      rowVirtualizer.measure()
+    }
+  }, [status, rowVirtualizer])
+
+  // Switching sessions invalidates every cached row height — left over
+  // measurements from the prior session leave gaps / overlaps in the
+  // virtual list.
+  useEffect(() => {
+    rowVirtualizer.measure()
+  }, [sessionId, rowVirtualizer])
 
   const virtualItems = rowVirtualizer.getVirtualItems()
   const totalSize = rowVirtualizer.getTotalSize()
@@ -126,55 +157,89 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   }, [])
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden">
-      {messages.length > 0 && (
-        <div className="flex items-center justify-end gap-1 border-b bg-background/40 px-3 py-1.5">
-          <Button variant="ghost" size="sm" onClick={handleExport} className="h-7 gap-1.5 text-xs">
-            <DownloadIcon className="size-3.5" />
-            {t("export")}
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
-              >
-                <Trash2Icon className="size-3.5" />
-                {t("clear")}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("clearTitle")}</AlertDialogTitle>
-                <AlertDialogDescription>{t("clearDescription")}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t("clearCancel")}</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void handleClear()}>
-                  {t("clearAction")}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      )}
+    <PerfBoundary id="chat:list">
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+        {messages.length > 0 && (
+          <div className="flex items-center justify-end gap-1 border-b bg-background/40 px-3 py-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleExport}
+              className="h-7 gap-1.5 text-xs"
+            >
+              <DownloadIcon className="size-3.5" />
+              {t("export")}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
+                >
+                  <Trash2Icon className="size-3.5" />
+                  {t("clear")}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("clearTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>{t("clearDescription")}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("clearCancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleClear()}>
+                    {t("clearAction")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
 
-      <div
-        ref={scrollParentRef}
-        className="relative flex-1 overflow-y-auto"
-        role="log"
-        onScroll={handleScroll}
-      >
-        <div style={{ height: totalSize, position: "relative" }}>
-          {virtualItems.map((virtualItem) => {
-            const isThinkingRow = virtualItem.index === messages.length
-            if (isThinkingRow) {
+        <div
+          ref={scrollParentRef}
+          className="relative flex-1 overflow-y-auto"
+          role="log"
+          onScroll={handleScroll}
+        >
+          <div style={{ height: totalSize, position: "relative" }}>
+            {virtualItems.map((virtualItem) => {
+              const isThinkingRow = virtualItem.index === messages.length
+              if (isThinkingRow) {
+                return (
+                  <div
+                    key="thinking"
+                    data-index={virtualItem.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualItem.start}px)`,
+                      padding: "0 1rem",
+                    }}
+                  >
+                    <Shimmer as="p" className="px-1 py-2 text-sm">
+                      {t("thinking")}
+                    </Shimmer>
+                  </div>
+                )
+              }
+
+              const m = messages[virtualItem.index]!
+              const isStreaming =
+                virtualItem.index === lastIndex &&
+                m.role === "assistant" &&
+                (status === "streaming" || status === "awaiting_approval")
+              const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
+
               return (
                 <div
-                  key="thinking"
+                  key={m.id}
                   data-index={virtualItem.index}
-                  ref={rowVirtualizer.measureElement}
+                  ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                   style={{
                     position: "absolute",
                     top: 0,
@@ -184,35 +249,19 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
                     padding: "0 1rem",
                   }}
                 >
-                  <Shimmer as="p" className="px-1 py-2 text-sm">
-                    {t("thinking")}
-                  </Shimmer>
-                </div>
-              )
-            }
-
-            const m = messages[virtualItem.index]!
-            const isStreaming =
-              virtualItem.index === lastIndex &&
-              m.role === "assistant" &&
-              (status === "streaming" || status === "awaiting_approval")
-
-            return (
-              <div
-                key={m.id}
-                data-index={virtualItem.index}
-                ref={rowVirtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualItem.start}px)`,
-                  padding: "0 1rem",
-                }}
-              >
-                {isMobile ? (
-                  <LongPress onLongPress={() => setActionMessage(m)}>
+                  {isMobile ? (
+                    <LongPress onLongPress={() => setActionMessage(m)}>
+                      <MessageRenderer
+                        message={m}
+                        characterById={characterById}
+                        isStreaming={isStreaming}
+                        isLastAssistant={m.id === lastAssistantId}
+                        onCopy={onCopy}
+                        onRegenerate={onRegenerate}
+                        onEditResend={onEditResend}
+                      />
+                    </LongPress>
+                  ) : (
                     <MessageRenderer
                       message={m}
                       characterById={characterById}
@@ -222,46 +271,62 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
                       onRegenerate={onRegenerate}
                       onEditResend={onEditResend}
                     />
-                  </LongPress>
-                ) : (
-                  <MessageRenderer
-                    message={m}
-                    characterById={characterById}
-                    isStreaming={isStreaming}
-                    isLastAssistant={m.id === lastAssistantId}
-                    onCopy={onCopy}
-                    onRegenerate={onRegenerate}
-                    onEditResend={onEditResend}
-                  />
-                )}
-              </div>
-            )
-          })}
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {!isAtBottom && (
+            <Button
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
+              onClick={scrollToBottom}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <ArrowDownIcon className="size-4" />
+            </Button>
+          )}
         </div>
 
-        {!isAtBottom && (
-          <Button
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
-            onClick={scrollToBottom}
-            size="icon"
-            type="button"
-            variant="outline"
-          >
-            <ArrowDownIcon className="size-4" />
-          </Button>
-        )}
+        {isMobile ? (
+          <MessageActionSheet
+            message={actionMessage}
+            onOpenChange={(next) => {
+              if (!next) setActionMessage(null)
+            }}
+          />
+        ) : null}
       </div>
-
-      {isMobile ? (
-        <MessageActionSheet
-          message={actionMessage}
-          onOpenChange={(next) => {
-            if (!next) setActionMessage(null)
-          }}
-        />
-      ) : null}
-    </div>
+    </PerfBoundary>
   )
+}
+
+/**
+ * Estimate a row's height for the TanStack virtualizer. Non-streaming rows
+ * fall back to the default 200px until their ref-attached measureElement
+ * runs; the streaming row uses a monotonically-growing projection so the
+ * scroll position stays stable while tokens append (which is why we skip
+ * the measureElement ref on that row — re-measuring per token causes a
+ * jitter loop).
+ *
+ * Coefficient: 0.55px per character ≈ one line per 80 characters at the
+ * chat column's typical mono+text mix. Adjust if the chat column width
+ * changes materially.
+ */
+function estimateRowSize(index: number, streamingRowIndex: number, messages: UIMessage[]): number {
+  if (index !== streamingRowIndex) return 200
+  const m = messages[index]
+  if (!m) return 200
+  let textLen = 0
+  for (const part of m.parts) {
+    const p = part as { type?: string; text?: string }
+    if (p.type === "text" && typeof p.text === "string") textLen += p.text.length
+    else if (p.type === "reasoning" && typeof p.text === "string") textLen += p.text.length
+  }
+  // Monotonically non-decreasing: 200px floor + ~0.55px per char.
+  return Math.max(220, 220 + textLen * 0.55)
 }
 
 /**

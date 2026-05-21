@@ -73,7 +73,7 @@ const FLAGS_BY_TIER: Record<ResolvedPerformanceTier, EffectivePerfFlags> = {
     liveQueryWhileDragging: true,
     inspectorLiveValidation: true,
     nodeCardTransitions: true,
-    cullingThreshold: 25,
+    cullingThreshold: 8,
   },
   balanced: {
     showMinimap: true,

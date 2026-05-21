@@ -24,6 +24,8 @@ export interface LogTimelineProps {
   bucketCount?: number
   /** Callback when a time range is selected (click or brush) */
   onTimeRangeClick?: (start: Date, end: Date) => void
+  /** Callback when the active range is explicitly cleared (X chip click). */
+  onClearRange?: () => void
   /** Currently selected bucket range (for highlighting) */
   selectedRange?: { start: Date; end: Date } | null
 }
@@ -153,6 +155,7 @@ export function LogTimeline({
   className,
   bucketCount = 60,
   onTimeRangeClick,
+  onClearRange,
   selectedRange = null,
 }: LogTimelineProps) {
   const t = useTranslations("logging")
@@ -304,25 +307,37 @@ export function LogTimeline({
     [t]
   )
 
-  if (logs.length === 0) return null
+  // The timeline stays mounted whenever it is enabled, even when there are no
+  // logs yet — that avoids a layout-shift flicker when filters momentarily
+  // produce zero matches. The body below renders a quiet placeholder bar in
+  // that case.
+  const isEmpty = logs.length === 0
 
   const firstTime = buckets[0]?.start
   const lastTime = buckets[buckets.length - 1]?.end
-  const hasErrors = buckets.some((b) => b.error > 0)
-  const hasWarns = buckets.some((b) => b.warn > 0)
+  const hasErrors = !isEmpty && buckets.some((b) => b.error > 0)
+  const hasWarns = !isEmpty && buckets.some((b) => b.warn > 0)
 
   return (
-    <div className={cn("px-3 py-2 sm:px-3 border-b bg-muted/10", className)}>
+    <div
+      data-testid="log-timeline-container"
+      className={cn("px-3 py-2 sm:px-3 border-b bg-muted/10", className)}
+    >
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs sm:text-[10px] text-muted-foreground font-medium">
           {t("timeline.title")}
         </span>
+        {isEmpty && (
+          <span className="text-xs sm:text-[10px] text-muted-foreground/70">
+            {t("timeline.empty")}
+          </span>
+        )}
         {selectedRange && (
           <Button
             variant="ghost"
             size="sm"
             className="h-4 px-1 text-xs sm:text-[10px]"
-            onClick={() => onTimeRangeClick?.(new Date(0), new Date())}
+            onClick={onClearRange}
           >
             <X className="h-2.5 w-2.5 mr-0.5" />
             {t("timeline.clear")}
@@ -353,28 +368,36 @@ export function LogTimeline({
         onMouseUp={handleMouseUp}
       >
         <div className="flex gap-px h-6 w-full rounded overflow-hidden select-none motion-safe:transition-all">
-          {buckets.map((bucket, i) => (
-            <TimelineBucketTile
-              key={i}
-              index={i}
-              total={bucket.total}
-              error={bucket.error}
-              warn={bucket.warn}
-              startMs={bucket.start.getTime()}
-              colorClass={getBucketColor(bucket)}
-              opacity={getBucketOpacity(bucket, maxCount)}
-              isSelected={isInRange(bucket, selectedRange)}
-              isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
-              clickable={Boolean(onTimeRangeClick)}
-              onMouseDown={handleMouseDown}
-              onMouseEnter={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              totalLabel={timelineLabels.total}
-              errorsLabel={timelineLabels.errors}
-              warningsLabel={timelineLabels.warnings}
-              locale={locale}
+          {isEmpty ? (
+            <div
+              data-testid="log-timeline-placeholder"
+              className="flex-1 min-w-0 bg-muted/30"
+              aria-hidden
             />
-          ))}
+          ) : (
+            buckets.map((bucket, i) => (
+              <TimelineBucketTile
+                key={i}
+                index={i}
+                total={bucket.total}
+                error={bucket.error}
+                warn={bucket.warn}
+                startMs={bucket.start.getTime()}
+                colorClass={getBucketColor(bucket)}
+                opacity={getBucketOpacity(bucket, maxCount)}
+                isSelected={isInRange(bucket, selectedRange)}
+                isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
+                clickable={Boolean(onTimeRangeClick)}
+                onMouseDown={handleMouseDown}
+                onMouseEnter={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                totalLabel={timelineLabels.total}
+                errorsLabel={timelineLabels.errors}
+                warningsLabel={timelineLabels.warnings}
+                locale={locale}
+              />
+            ))
+          )}
         </div>
       </div>
 

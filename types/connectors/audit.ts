@@ -25,6 +25,16 @@ export type AuditKind =
   | "adapter.started"
   | "adapter.stopped"
   | "adapter.error"
+  // Settings rotated the adapter's credentials and lifecycle re-queued
+  // the running entry without a full app restart. Carries `fields.via`
+  // ("settings_save" | "manual_requeue") so operators can tell the two
+  // apart in the Audit tab.
+  | "adapter.credentials_rotated"
+  // Per-conversation Computer Use opt-in toggled from Inbox header
+  // (ADR-0020). Fields carry `{ allowComputerUse: boolean, bioVerified:
+  // boolean, via: string }` so the audit log shows whether the flip went
+  // through a hardened confirmation step or a plain checkbox.
+  | "override.computer_use_changed"
   // Periodic heartbeat probe (v45) so the per-adapter Health view can
   // colour 24h dot grids on intervals where nothing else fired. Pruned
   // by the heartbeat writer itself — see

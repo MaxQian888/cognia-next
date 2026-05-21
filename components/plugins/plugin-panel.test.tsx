@@ -8,6 +8,7 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
+    if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
   },
 }))
@@ -17,9 +18,8 @@ jest.mock("next/link", () => ({
   default: ({ children, ...props }: { children: React.ReactNode }) => <a {...props}>{children}</a>,
 }))
 
-// Stateful next/navigation mock so the ?tab= re-sync tests can swap the URL
-// between renders without using jest.isolateModules (which breaks React
-// hook identity in this test environment).
+// Stateful next/navigation mock so the URL re-sync tests can swap the URL
+// between renders.
 let mockSearchString = ""
 let mockSearchCacheKey = ""
 let mockSearchCacheValue = new URLSearchParams("")
@@ -60,6 +60,7 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockRows)),
   setPluginEnabled: jest.fn(),
   deletePlugin: jest.fn(),
+  getPlugin: jest.fn(() => Promise.resolve(mockRows[0])),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
@@ -77,6 +78,30 @@ jest.mock("@/lib/db/schema", () => ({
   }),
 }))
 
+// FeaturePageShell already has its own tests — stub it to a transparent
+// composition wrapper so this test focuses on PluginPanel's wiring (which
+// section / which detail content is mounted).
+jest.mock("@/components/feature-shell/feature-page-shell", () => ({
+  FeaturePageShell: ({
+    toolbar,
+    leftPane,
+    rightPane,
+    children,
+  }: {
+    toolbar?: React.ReactNode
+    leftPane?: { content: React.ReactNode }
+    rightPane?: { content: React.ReactNode }
+    children: React.ReactNode
+  }) => (
+    <div data-testid="feature-page-shell">
+      <div data-testid="shell-toolbar">{toolbar}</div>
+      <div data-testid="shell-left">{leftPane?.content}</div>
+      <div data-testid="shell-center">{children}</div>
+      <div data-testid="shell-right">{rightPane?.content}</div>
+    </div>
+  ),
+}))
+
 import { PluginPanel } from "./plugin-panel"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
@@ -86,6 +111,11 @@ beforeEach(() => {
   mockSearchCacheValue = new URLSearchParams("")
   usePluginsStore.setState({
     activeTab: "installed",
+    activeSection: "library",
+    librarySubFilter: "all",
+    governanceView: "permissions",
+    detailSubTab: "overview",
+    listViewMode: "list",
     filters: DEFAULT_PLUGIN_FILTERS,
     selection: new Set(),
     detailPluginId: null,
@@ -99,78 +129,64 @@ beforeEach(() => {
   })
 })
 
-describe("PluginPanel", () => {
-  it("renders all 7 tab triggers", () => {
+describe("PluginPanel (3-pane shell)", () => {
+  it("mounts the FeaturePageShell with left nav, library center, and detail right", () => {
     render(<PluginPanel />)
-    // PluginPanelTabs uses `useTranslations("plugins.tabs")` so the mocked
-    // translator returns the bare tab id as the rendered label.
-    for (const id of [
-      "installed",
-      "browse",
-      "configure",
-      "permissions",
-      "scheduled",
-      "analytics",
-      "devtools",
-    ]) {
-      expect(screen.getAllByRole("tab", { name: new RegExp(id) }).length).toBeGreaterThan(0)
-    }
+    expect(screen.getByTestId("feature-page-shell")).toBeInTheDocument()
+    // Left nav: PluginNavSidebar renders top-level section buttons.
+    expect(screen.getByTestId("plugin-nav-library")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-nav-discover")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-nav-governance")).toBeInTheDocument()
+    // Center: Library pane.
+    expect(screen.getByTestId("plugin-library-pane")).toBeInTheDocument()
   })
 
-  it("installed tab renders plugin row from mocked data", () => {
+  it("renders the active plugin row inside the library list center", () => {
     render(<PluginPanel />)
     expect(screen.getByText("Test Plugin")).toBeInTheDocument()
     expect(screen.getByText("v1.2.3")).toBeInTheDocument()
   })
 
-  it("default activeTab is installed (from store)", () => {
+  it("swaps the center pane to Discover when activeSection=discover", () => {
+    usePluginsStore.setState({ activeSection: "discover" })
     render(<PluginPanel />)
-    const installedTrigger = screen
-      .getAllByRole("tab", { name: /installed/ })
-      .find((el) => el.getAttribute("data-state") === "active")
-    expect(installedTrigger).toBeDefined()
+    expect(screen.getByTestId("plugin-discover-pane")).toBeInTheDocument()
   })
 
-  it("scheduled tab links to settings scheduled-tasks section", () => {
-    usePluginsStore.setState({ activeTab: "scheduled" })
+  it("swaps the center pane to Governance when activeSection=governance", () => {
+    usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginPanel />)
-    // PluginScheduledJobs renders an "openScheduler" link in its empty state.
-    const link = screen.getByText("openScheduler").closest("a")
-    expect(link).toHaveAttribute("href", "/settings?section=scheduled-tasks")
-  })
-
-  it("devtools tab shows the gate hint outside development", () => {
-    usePluginsStore.setState({ activeTab: "devtools" })
-    render(<PluginPanel />)
-    // PluginDevtoolsPanel renders the gate hint when isDeveloperMode is false.
-    expect(screen.getByText(/gateHint/)).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-governance-pane")).toBeInTheDocument()
   })
 
   it("opens the rollback dialog when the store target is set", () => {
     usePluginsStore.setState({ rollbackTarget: "plugin_x" })
     render(<PluginPanel />)
-    // PluginRollbackDialog renders its Dialog title via `plugins.rollback.title`.
     expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
   })
 
-  it("hydrates active tab from ?tab= on initial mount", () => {
+  it("hydrates legacy ?tab=browse into both activeTab and activeSection=discover", () => {
     mockSearchString = "tab=browse"
     render(<PluginPanel />)
     expect(usePluginsStore.getState().activeTab).toBe("browse")
+    expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  it("re-syncs active tab when ?tab= changes after mount (deep-link from settings)", () => {
-    mockSearchString = "tab=installed"
-    const { rerender } = render(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("installed")
+  it("hydrates new ?section=governance&gov=audit into the store on mount", () => {
+    mockSearchString = "section=governance&gov=audit"
+    render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeSection).toBe("governance")
+    expect(usePluginsStore.getState().governanceView).toBe("audit")
+  })
 
-    // Simulate Settings → "Open marketplace" deep-link pushing ?tab=browse
-    // while /plugins is already open. The stateful mock gives the
-    // component a new URLSearchParams; the effect should re-fire and
-    // adopt it because the `requestedTabParam` string value changed.
-    mockSearchString = "tab=browse"
+  it("re-syncs section when ?section= changes after mount", () => {
+    mockSearchString = "section=library"
+    const { rerender } = render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
+
+    mockSearchString = "section=discover"
     rerender(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("browse")
+    expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
   it("ignores unknown ?tab= values without overriding the current active tab", () => {
@@ -181,5 +197,15 @@ describe("PluginPanel", () => {
     mockSearchString = "tab=garbage"
     rerender(<PluginPanel />)
     expect(usePluginsStore.getState().activeTab).toBe("installed")
+  })
+
+  it("ignores unknown ?section= values without overriding the current section", () => {
+    mockSearchString = "section=library"
+    const { rerender } = render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
+
+    mockSearchString = "section=garbage"
+    rerender(<PluginPanel />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
   })
 })

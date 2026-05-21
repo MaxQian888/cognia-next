@@ -1,4 +1,4 @@
-import { evaluateReadability, wcagContrast } from "./contrast"
+import { adjustForegroundLightnessToTarget, evaluateReadability, wcagContrast } from "./contrast"
 
 describe("wcagContrast", () => {
   it("returns ~21 for black on white", () => {
@@ -34,5 +34,36 @@ describe("evaluateReadability", () => {
     expect(r.level).toBe("fail")
     expect(r.ratio).toBeLessThan(3)
     expect(r.recommendation).toBeDefined()
+  })
+})
+
+describe("adjustForegroundLightnessToTarget", () => {
+  it("returns the same color when it already meets the target", () => {
+    const fixed = adjustForegroundLightnessToTarget("#000000", "#ffffff", 4.5)
+    expect(fixed).not.toBeNull()
+    expect(wcagContrast(fixed ?? "#000000", "#ffffff")).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("darkens a too-light foreground on a light background", () => {
+    // Light gray on white fails AA — adjuster should darken until it passes.
+    const fixed = adjustForegroundLightnessToTarget("#aaaaaa", "#ffffff", 4.5)
+    expect(fixed).not.toBeNull()
+    expect(wcagContrast(fixed ?? "#aaaaaa", "#ffffff")).toBeGreaterThanOrEqual(4.5 - 0.05)
+  })
+
+  it("lightens a too-dark foreground on a dark background", () => {
+    const fixed = adjustForegroundLightnessToTarget("#444444", "#222222", 4.5)
+    expect(fixed).not.toBeNull()
+    expect(wcagContrast(fixed ?? "#444444", "#222222")).toBeGreaterThanOrEqual(4.5 - 0.05)
+  })
+
+  it("hits AAA when asked", () => {
+    const fixed = adjustForegroundLightnessToTarget("#666666", "#ffffff", 7)
+    expect(fixed).not.toBeNull()
+    expect(wcagContrast(fixed ?? "#666666", "#ffffff")).toBeGreaterThanOrEqual(7 - 0.05)
+  })
+
+  it("returns null for unparseable inputs", () => {
+    expect(adjustForegroundLightnessToTarget("not-a-color", "#ffffff", 4.5)).toBeNull()
   })
 })

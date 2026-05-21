@@ -58,6 +58,19 @@ import { usePluginHotReload } from "@/lib/plugin/devtools/hot-reload.client"
 import { listPlugins } from "@/lib/db/plugins"
 import { isTauri } from "@/lib/tauri"
 import { ScrollShadowRow } from "./scroll-shadow-row"
+import {
+  clearAllTriggerAudit,
+  getTriggerAuditRevision,
+  listAllTriggerAuditEntries,
+  subscribeTriggerAuditChanges,
+  type TriggerAuditEntry,
+} from "@/lib/chat/trigger-audit-ring"
+import { useSyncExternalStore } from "react"
+import {
+  installConsoleTap,
+  isConsoleTapInstalled,
+  uninstallConsoleTap,
+} from "@/lib/plugin/devtools/console-tap"
 
 const DEVELOPER_MODE_KEY = "cognia.plugins.developerMode"
 
@@ -114,6 +127,7 @@ export function PluginDevtoolsPanel() {
           <TabsTrigger value="profiler">{t("tabs.profiler")}</TabsTrigger>
           <TabsTrigger value="hotReload">{t("tabs.hotReload")}</TabsTrigger>
           <TabsTrigger value="inspect">{t("tabs.inspect")}</TabsTrigger>
+          <TabsTrigger value="triggers">{t("tabs.triggers")}</TabsTrigger>
         </TabsList>
       </ScrollShadowRow>
 
@@ -134,6 +148,9 @@ export function PluginDevtoolsPanel() {
       </TabsContent>
       <TabsContent value="inspect" className="mt-0">
         <InspectPane />
+      </TabsContent>
+      <TabsContent value="triggers" className="mt-0">
+        <TriggersPane />
       </TabsContent>
     </Tabs>
   )
@@ -241,12 +258,11 @@ export function BusPane() {
   }, [])
 
   if (!tauri) {
-    return (
-      <Card className="p-6 text-center space-y-2">
-        <BugIcon className="size-8 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("desktopOnly")}</p>
-      </Card>
-    )
+    // Browser fallback — install the console-tap once so the host's
+    // `console.{log,warn,error}` flow into the Logs ring buffer. The
+    // Bus tab itself stays empty here (no native dev-server), but the
+    // Logs tab now actually contains data instead of being blank.
+    return <BrowserConsoleTapNotice />
   }
 
   return (
@@ -715,6 +731,171 @@ function SummaryCard({
         {label}
       </div>
       <div className="text-xl md:text-2xl font-semibold tabular-nums">{value}</div>
+    </Card>
+  )
+}
+
+/**
+ * Browser fallback for the Bus tab — the real PluginDevServer only
+ * exists under Tauri. In dev mode we still want plugin authors to see
+ * console output, so this panel offers a toggle that installs the
+ * `console-tap` (wraps `console.{log,info,warn,error,debug}` and
+ * forwards each call into the Logs ring buffer).
+ */
+function BrowserConsoleTapNotice() {
+  const t = useTranslations("plugins.devtoolsPanel.bus")
+  const [tapOn, setTapOn] = useState<boolean>(() => isConsoleTapInstalled())
+  return (
+    <Card className="p-6 text-center space-y-3">
+      <BugIcon className="size-8 mx-auto text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">{t("desktopOnly")}</p>
+      <p className="text-xs text-muted-foreground">{t("consoleTapHint")}</p>
+      <Button
+        size="sm"
+        variant={tapOn ? "secondary" : "outline"}
+        onClick={() => {
+          if (tapOn) {
+            uninstallConsoleTap()
+            setTapOn(false)
+          } else {
+            installConsoleTap({ pluginId: "browser" })
+            setTapOn(true)
+          }
+        }}
+      >
+        {tapOn ? t("consoleTapOff") : t("consoleTapOn")}
+      </Button>
+    </Card>
+  )
+}
+
+/**
+ * Cross-session, cross-plugin view of the trigger audit ring. Plugin
+ * authors use this to confirm their `emitTriggerEvent` actually
+ * reaches the orchestrator and to spot rejected / errored dispatches.
+ */
+export function TriggersPane() {
+  const t = useTranslations("plugins.triggers.devtools")
+  const tStatus = useTranslations("plugins.triggers.status")
+  useSyncExternalStore(subscribeTriggerAuditChanges, getTriggerAuditRevision, () => 0)
+  const [pluginFilter, setPluginFilter] = useState<string>("all")
+  const [kindFilter, setKindFilter] = useState<string>("all")
+  const all = listAllTriggerAuditEntries()
+
+  const pluginIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of all) {
+      if (e.pluginId) set.add(e.pluginId)
+    }
+    return Array.from(set).sort()
+  }, [all])
+
+  const kinds = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of all) set.add(e.kind)
+    return Array.from(set).sort()
+  }, [all])
+
+  const filtered = useMemo(() => {
+    return all.filter((e) => {
+      if (pluginFilter !== "all" && (e.pluginId ?? "__builtin__") !== pluginFilter) return false
+      if (kindFilter !== "all" && e.kind !== kindFilter) return false
+      return true
+    })
+  }, [all, pluginFilter, kindFilter])
+
+  return (
+    <Card className="p-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={pluginFilter} onValueChange={setPluginFilter}>
+          <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("filterPlugin")}>
+            <SelectValue placeholder={t("filterPlugin")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filterPluginAll")}</SelectItem>
+            <SelectItem value="__builtin__">{t("filterPluginBuiltin")}</SelectItem>
+            {pluginIds.map((id) => (
+              <SelectItem key={id} value={id}>
+                {id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={kindFilter} onValueChange={setKindFilter}>
+          <SelectTrigger className="h-8 w-56 text-xs" aria-label={t("filterKind")}>
+            <SelectValue placeholder={t("filterKind")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filterKindAll")}</SelectItem>
+            {kinds.map((k) => (
+              <SelectItem key={k} value={k}>
+                {k}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => clearAllTriggerAudit()}
+          className="ml-auto"
+        >
+          <Trash2Icon className="size-3.5 mr-1" />
+          {t("clear")}
+        </Button>
+      </div>
+
+      <ScrollArea className="max-h-[55vh]">
+        {filtered.length === 0 ? (
+          <p className="p-4 text-center text-xs text-muted-foreground">{t("empty")}</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-20">{t("colTime")}</TableHead>
+                <TableHead>{t("colPlugin")}</TableHead>
+                <TableHead>{t("colKind")}</TableHead>
+                <TableHead>{t("colWorkflow")}</TableHead>
+                <TableHead className="w-24">{t("colStatus")}</TableHead>
+                <TableHead>{t("colError")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((e: TriggerAuditEntry) => (
+                <TableRow key={e.id}>
+                  <TableCell className="text-[10px] font-mono">
+                    {new Date(e.timestamp).toISOString().split("T")[1]?.slice(0, 8)}
+                  </TableCell>
+                  <TableCell className="text-xs">{e.pluginId ?? "—"}</TableCell>
+                  <TableCell className="text-xs">
+                    <code className="font-mono text-[11px]">{e.kind}</code>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <code className="font-mono text-[11px]">{e.workflowId}</code>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        e.status === "dispatched"
+                          ? "secondary"
+                          : e.status === "rejected"
+                            ? "outline"
+                            : "destructive"
+                      }
+                      className="text-[10px]"
+                    >
+                      {tStatus(e.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-[10px] text-destructive truncate max-w-xs">
+                    {e.errorMessage ?? ""}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </ScrollArea>
     </Card>
   )
 }

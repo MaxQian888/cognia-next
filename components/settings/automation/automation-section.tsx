@@ -10,12 +10,21 @@
  *     Rust-side gate in <1s.
  *   - Audit rows live in Dexie (table `automationAuditLog`); the in-memory
  *     Rust ring is a debug-only fallback.
+ *   - ADR-0020 W1 — Overview now also surfaces `automation:backend-init-failed`
+ *     (drained + live-listened on mount) plus three audit-derived counter
+ *     cards (24h totals, top failing commands, last screenshot).
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { CameraIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  AlertOctagonIcon,
+  CameraIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,11 +32,11 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 
-import { isTauri } from "@/lib/tauri"
+import { transport, isTauri } from "@/lib/tauri"
 import {
   desktop,
   defaultAutomationSettings,
@@ -36,10 +45,32 @@ import {
   type Tier,
 } from "@/lib/automation/client"
 import type { Capabilities } from "@/lib/automation/types"
+import { listAuditRows } from "@/lib/automation/audit"
 
 import { AutomationAuditTable } from "./automation-audit-table"
 import { WhitelistTab } from "./whitelist-tab"
 import { InspectorTab } from "./inspector-tab"
+
+interface BackendInitFailure {
+  platform: string
+  error: string
+}
+
+interface OverviewMetrics {
+  total: number
+  allow: number
+  deny: number
+  consent: number
+  topFailing: Array<{ command: string; count: number }>
+  lastScreenshotTs: number | null
+  // Wall-clock timestamp at the moment this snapshot was computed. Captured
+  // here (not at render) so the "last screenshot" label can stay a pure
+  // derivation — `Date.now()` during render trips React Compiler's purity rule.
+  loadedAt: number
+}
+
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
+const METRICS_REFRESH_MS = 60_000
 
 type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector"
 
@@ -107,6 +138,7 @@ function OverviewTab() {
   )
   const [loading, setLoading] = useState(() => isTauri())
   const [savingEnabled, setSavingEnabled] = useState(false)
+  const [initFailure, setInitFailure] = useState<BackendInitFailure | null>(null)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -121,6 +153,40 @@ function OverviewTab() {
         })
       })
       .finally(() => setLoading(false))
+  }, [])
+
+  // ADR-0020 W1 — surface backend init failures the operator might
+  // otherwise miss. Two paths converge here:
+  //   1. `automation_drain_init_failure` pulls a pending failure that
+  //      was stashed before the renderer attached an event listener
+  //      (the common case for failures during app boot).
+  //   2. `automation:backend-init-failed` listener catches any new
+  //      failure (e.g. after a worker-restart that tried to reinit).
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    transport
+      .call<BackendInitFailure | null>("automation_drain_init_failure", {})
+      .then((failure) => {
+        if (!cancelled && failure) setInitFailure(failure)
+      })
+      .catch(() => {})
+    void import("@tauri-apps/api/event").then(({ listen }) => {
+      void listen<BackendInitFailure>("automation:backend-init-failed", (event) => {
+        setInitFailure(event.payload)
+      }).then((u) => {
+        if (cancelled) {
+          u()
+        } else {
+          unlisten = u
+        }
+      })
+    })
+    return () => {
+      cancelled = true
+      if (unlisten) unlisten()
+    }
   }, [])
 
   async function toggleEnabled(next: boolean) {
@@ -181,6 +247,26 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      {initFailure && (
+        <Alert variant="destructive">
+          <AlertOctagonIcon className="size-4" />
+          <AlertTitle>{t("initFailure.title")}</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>
+              {t("initFailure.body", {
+                platform: initFailure.platform,
+                error: initFailure.error,
+              })}
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setInitFailure(null)}>
+              {t("initFailure.dismiss")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <OverviewMetricsCard />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -286,7 +372,15 @@ function PermissionsTab() {
     return <Skeleton className="h-64 w-full" />
   }
 
-  const surfaces: Array<{ id: Surface; label: string; description: string }> = [
+  // Sandbox is an audit-only tag (calls go through `sandbox_exec`, never
+  // through `command_body!`); exclude it from the per-surface picker so
+  // the index into `PerSurfacePolicies` stays exhaustive.
+  type AutomationConfigurableSurface = Exclude<Surface, "sandbox">
+  const surfaces: Array<{
+    id: AutomationConfigurableSurface
+    label: string
+    description: string
+  }> = [
     {
       id: "workflow",
       label: t("tier.off") /* placeholder; overridden below */,
@@ -398,6 +492,171 @@ function TierSelect({
           {labelFor(tier)}
         </Button>
       ))}
+    </div>
+  )
+}
+
+// ADR-0020 W1 — Last-24h activity counters + top failing commands +
+// last screenshot timestamp. Reads from the existing Dexie
+// `automationAuditLog` table (no new schema); refreshes on tab mount
+// and every 60s while mounted.
+function OverviewMetricsCard() {
+  const t = useTranslations("automation.overview.metrics")
+  const [metrics, setMetrics] = useState<OverviewMetrics | null>(null)
+  const [loadError, setLoadError] = useState(false)
+
+  const reload = useCallback(async () => {
+    try {
+      // listAuditRows is newest-first; pulling 5000 (the LRU cap) gives
+      // us the full window the Dexie store retains. The 24h cutoff is
+      // applied client-side because Dexie's `where("ts").above(cutoff)`
+      // can't be chained with `reverse()` cleanly across our index set.
+      const rows = await listAuditRows({ limit: 5000 })
+      const cutoff = Date.now() - TWENTY_FOUR_HOURS_MS
+      const recent = rows.filter((r) => r.ts >= cutoff)
+      const total = recent.length
+      let allow = 0
+      let deny = 0
+      let consent = 0
+      const denyByCommand = new Map<string, number>()
+      let lastScreenshotTs: number | null = null
+      for (const r of recent) {
+        if (r.decision === "allow") {
+          allow++
+          if (r.command === "screenshot" && (lastScreenshotTs == null || r.ts > lastScreenshotTs)) {
+            lastScreenshotTs = r.ts
+          }
+        } else if (r.decision === "deny") {
+          deny++
+          denyByCommand.set(r.command, (denyByCommand.get(r.command) ?? 0) + 1)
+        } else {
+          consent++
+        }
+      }
+      const topFailing = [...denyByCommand.entries()]
+        .map(([command, count]) => ({ command, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+      setMetrics({
+        total,
+        allow,
+        deny,
+        consent,
+        topFailing,
+        lastScreenshotTs,
+        loadedAt: Date.now(),
+      })
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    // The eager fetch is deferred via setTimeout(0) so React Compiler treats
+    // it the same as the interval callback — calling reload() synchronously
+    // in the effect body trips react-hooks/set-state-in-effect.
+    const initialId = window.setTimeout(() => {
+      void reload()
+    }, 0)
+    const intervalId = window.setInterval(() => {
+      void reload()
+    }, METRICS_REFRESH_MS)
+    return () => {
+      window.clearTimeout(initialId)
+      window.clearInterval(intervalId)
+    }
+  }, [reload])
+
+  // Derived at render. React Compiler memoizes automatically; an explicit
+  // useMemo here tripped preserve-manual-memoization on `metrics?.lastScreenshotTs`.
+  let lastScreenshotLabel: string
+  if (!metrics?.lastScreenshotTs) {
+    lastScreenshotLabel = t("lastScreenshotNever")
+  } else {
+    const seconds = Math.max(0, Math.round((metrics.loadedAt - metrics.lastScreenshotTs) / 1000))
+    if (seconds < 60) {
+      lastScreenshotLabel = t("lastScreenshotRelative", { seconds })
+    } else if (seconds < 3600) {
+      lastScreenshotLabel = t("lastScreenshotMinutes", { minutes: Math.floor(seconds / 60) })
+    } else {
+      lastScreenshotLabel = t("lastScreenshotHours", { hours: Math.floor(seconds / 3600) })
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ActivityIcon className="size-4" />
+          {t("title")}
+        </CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loadError ? (
+          <p className="text-xs text-destructive">{t("loadFailed")}</p>
+        ) : metrics ? (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <CounterCell label={t("total")} value={metrics.total} />
+              <CounterCell label={t("allow")} value={metrics.allow} accent="success" />
+              <CounterCell label={t("deny")} value={metrics.deny} accent="destructive" />
+              <CounterCell label={t("consent")} value={metrics.consent} accent="warning" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">{t("topFailingTitle")}</Label>
+              <p className="text-[10px] text-muted-foreground">{t("topFailingDescription")}</p>
+              {metrics.topFailing.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("topFailingEmpty")}</p>
+              ) : (
+                <ul className="space-y-1 text-xs">
+                  {metrics.topFailing.map((entry) => (
+                    <li key={entry.command} className="flex items-center justify-between">
+                      <code className="font-mono">{entry.command}</code>
+                      <Badge variant="destructive" className="text-[10px]">
+                        {entry.count}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">{t("lastScreenshotTitle")}</Label>
+              <p className="text-[10px] text-muted-foreground">{t("lastScreenshotDescription")}</p>
+              <p className="text-xs">{lastScreenshotLabel}</p>
+            </div>
+          </>
+        ) : (
+          <Skeleton className="h-24 w-full" />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function CounterCell({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: number
+  accent?: "success" | "destructive" | "warning"
+}) {
+  const accentClass =
+    accent === "success"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : accent === "destructive"
+        ? "text-destructive"
+        : accent === "warning"
+          ? "text-amber-600 dark:text-amber-400"
+          : ""
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2">
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className={`text-lg font-semibold ${accentClass}`}>{value}</p>
     </div>
   )
 }

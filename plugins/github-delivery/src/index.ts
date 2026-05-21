@@ -34,9 +34,11 @@ import { setIssueLoopDriver } from "./workflow/issue-loop"
 import { SidecarIssueLoopDriver } from "./drivers/sidecar-driver"
 import { GithubAdapter } from "./adapter/github-adapter"
 import type { PluginAdapterContext } from "@/lib/plugin/connectors-bridge"
-
-// Side-effect import — registers all 12 action.github.* executors.
-import "./workflow/nodes"
+// Post-ADR-0026 migration: nodes are no longer registered via top-level
+// side effects. The module collects descriptors at load time; we call
+// `registerGithubNodes()` in activate / `unregisterGithubNodes()` in
+// deactivate so the kinds disappear cleanly when the plugin is disabled.
+import { registerGithubNodes, unregisterGithubNodes } from "./workflow/nodes"
 
 interface ActivationState {
   activatedAt: number
@@ -237,10 +239,16 @@ const definition: PluginDefinition = {
     // SDK inside the cloned workspace. Without this, the executor returns
     // the friendly "No issue-loop AI driver" failure result.
     setIssueLoopDriver(new SidecarIssueLoopDriver())
+    // Register the 13 action.github.* executors against the workflow
+    // registry. Pre-ADR-0026 this happened at import-time; the new path
+    // lets us tear down cleanly in `deactivate()` so disabling the
+    // plugin actually removes the kinds from the editor.
+    const registered = registerGithubNodes()
     state = { activatedAt: Date.now(), ctx }
-    ctx.logger?.info("github-delivery: activated")
+    ctx.logger?.info(`github-delivery: activated (registered ${registered} workflow nodes)`)
   },
   deactivate: async (ctx?: PluginContext) => {
+    unregisterGithubNodes()
     setIssueLoopDriver(null)
     setGithubRuntime(null)
     state = null

@@ -16,9 +16,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { MemoizedLogEntry, TraceGroup } from "./log-entry"
+import type { Density } from "@/hooks/logging/use-log-panel-filters"
 import type { StructuredLogEntry } from "@/lib/logger"
 
 export const ESTIMATED_LOG_HEIGHT = 44
+
+const DENSITY_ROW_HEIGHTS: Record<Density, number> = {
+  compact: 28,
+  comfortable: 44,
+  spacious: 60,
+}
 const SKELETON_ROW_COUNT = 8
 
 export interface VirtualizedLogListEmptyContext {
@@ -49,6 +56,8 @@ export interface VirtualizedLogListProps {
   onRetry?: () => void
   /** Describes the active filters so the empty state can reference them. */
   emptyStateContext?: VirtualizedLogListEmptyContext
+  /** Visual density — controls row height and entry padding. */
+  density?: Density
 }
 
 export function VirtualizedLogList({
@@ -71,12 +80,14 @@ export function VirtualizedLogList({
   t,
   onRetry,
   emptyStateContext,
+  density = "comfortable",
 }: VirtualizedLogListProps) {
+  const rowHeight = DENSITY_ROW_HEIGHTS[density]
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: filteredLogs.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ESTIMATED_LOG_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 10,
   })
 
@@ -95,7 +106,7 @@ export function VirtualizedLogList({
               key={index}
               data-testid="log-virtualized-list-skeleton-row"
               className="flex items-center gap-3 border-b border-border/30 px-3"
-              style={{ height: ESTIMATED_LOG_HEIGHT }}
+              style={{ height: rowHeight }}
             >
               <div className="h-3 w-12 rounded bg-muted motion-safe:animate-pulse" />
               <div className="h-3 w-16 rounded bg-muted motion-safe:animate-pulse" />
@@ -205,6 +216,7 @@ export function VirtualizedLogList({
               useRegex={useRegex}
               bookmarkedIds={bookmarkedIds}
               onToggleBookmark={toggleBookmark}
+              density={density}
               t={t}
             />
           ))}
@@ -242,6 +254,7 @@ export function VirtualizedLogList({
                 useRegex={useRegex}
                 isBookmarked={bookmarkedIds.has(log.id)}
                 onToggleBookmark={toggleBookmark}
+                density={density}
                 t={t}
               />
             </div>

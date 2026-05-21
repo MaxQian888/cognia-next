@@ -73,3 +73,45 @@ describe("applyComputerUseTools — G6 IM blacklist", () => {
     expect(result.attachedCount).toBe(0)
   })
 })
+
+describe("applyComputerUseTools — W1 forceTier / consentMode plumbing", () => {
+  it("requireConsent=true stamps forceTier:perCall on every attached tool", () => {
+    const char = {
+      ...baseChar,
+      computerUseSettings: { requireConsent: true },
+    } as Character
+    const result = applyComputerUseTools({ character: char, opts: emptyOpts() })
+    expect(result.attachedCount).toBe(1)
+    const tools = result.opts.anthropicTools
+    expect(tools).toBeDefined()
+    expect(tools![0].forceTier).toBe("perCall")
+  })
+
+  it("requireConsent unset omits forceTier so the wire shape stays tight", () => {
+    const result = applyComputerUseTools({ character: baseChar, opts: emptyOpts() })
+    const tools = result.opts.anthropicTools
+    expect(tools).toBeDefined()
+    expect(tools![0]).not.toHaveProperty("forceTier")
+  })
+
+  it("propagates chatConsentMode onto SendOptions.computerUseConsentMode", () => {
+    const char = {
+      ...baseChar,
+      computerUseSettings: { chatConsentMode: "session-grant" as const },
+    } as Character
+    const result = applyComputerUseTools({ character: char, opts: emptyOpts() })
+    expect(result.opts.computerUseConsentMode).toBe("session-grant")
+  })
+
+  it("defaults chatConsentMode to always-ask when the character has no setting", () => {
+    const result = applyComputerUseTools({ character: baseChar, opts: emptyOpts() })
+    expect(result.opts.computerUseConsentMode).toBe("always-ask")
+  })
+
+  it("does not stamp consentMode when enableComputerUse is false (short-circuit case)", () => {
+    const char = { ...baseChar, enableComputerUse: false }
+    const result = applyComputerUseTools({ character: char, opts: emptyOpts() })
+    expect(result.attachedCount).toBe(0)
+    expect(result.opts.computerUseConsentMode).toBeUndefined()
+  })
+})

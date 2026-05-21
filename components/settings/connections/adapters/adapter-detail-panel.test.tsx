@@ -7,19 +7,47 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
 // ---------------------------------------------------------------------------
 // Navigation mocks (useSelectedAdapter uses useRouter + useSearchParams)
 // ---------------------------------------------------------------------------
 
-const mockRouterReplace = jest.fn()
+// useSelectedAdapter drives the inner-tab state via router.replace +
+// useSearchParams. To let `fireEvent.click(tab)` actually switch the
+// rendered tab we wire the two together via a shared `currentSearch`
+// string plus a React `useSyncExternalStore` subscription so a
+// `replace()` call notifies every consumer and triggers re-render.
+let currentSearch = ""
+const navSubscribers = new Set<() => void>()
+const mockRouterReplace = jest.fn((href: string) => {
+  const qIdx = href.indexOf("?")
+  currentSearch = qIdx >= 0 ? href.slice(qIdx + 1) : ""
+  navSubscribers.forEach((cb) => cb())
+})
 
-jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mockRouterReplace }),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/settings",
-}))
+jest.mock("next/navigation", () => {
+  // Require lazily so jest's mock hoisting doesn't bite us — by the time
+  // this factory is called the React runtime is fully initialised.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { useSyncExternalStore } = require("react") as typeof import("react")
+  return {
+    useRouter: () => ({ replace: mockRouterReplace }),
+    useSearchParams: () => {
+      useSyncExternalStore(
+        (cb: () => void) => {
+          navSubscribers.add(cb)
+          return () => navSubscribers.delete(cb)
+        },
+        () => currentSearch,
+        () => currentSearch
+      )
+      return new URLSearchParams(currentSearch)
+    },
+    usePathname: () => "/settings",
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Dexie / DB mocks
@@ -144,6 +172,7 @@ const baseRow: AdapterInstanceRow = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  currentSearch = ""
 })
 
 describe("AdapterDetailPanel — missing row", () => {
@@ -222,31 +251,43 @@ describe("AdapterDetailPanel — inner tabs", () => {
     expect(screen.getByTestId("mock-config-detail")).toHaveAttribute("data-adapter-id", "tg-1")
   })
 
-  it("switches to the Health tab and passes adapterId", () => {
+  it("switches to the Health tab and passes adapterId", async () => {
+    const user = userEvent.setup()
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
-    fireEvent.click(screen.getByRole("tab", { name: /health/i }))
-    expect(screen.getByTestId("mock-health-detail")).toHaveAttribute("data-adapter-id", "tg-1")
-  })
-
-  it("switches to the Conversations tab and passes adapterId", () => {
-    render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
-    fireEvent.click(screen.getByRole("tab", { name: /conversations/i }))
-    expect(screen.getByTestId("mock-conversations-detail")).toHaveAttribute(
-      "data-adapter-id",
-      "tg-1"
+    await user.click(screen.getByRole("tab", { name: /health/i }))
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-health-detail")).toHaveAttribute("data-adapter-id", "tg-1")
     )
   })
 
-  it("switches to the Audit tab and passes adapterId", () => {
+  it("switches to the Conversations tab and passes adapterId", async () => {
+    const user = userEvent.setup()
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
-    fireEvent.click(screen.getByRole("tab", { name: /^audit$/i }))
-    expect(screen.getByTestId("mock-audit-tab")).toHaveAttribute("data-adapter-id", "tg-1")
+    await user.click(screen.getByRole("tab", { name: /conversations/i }))
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-conversations-detail")).toHaveAttribute(
+        "data-adapter-id",
+        "tg-1"
+      )
+    )
   })
 
-  it("switches to the Outbound tab and passes adapterId", () => {
+  it("switches to the Audit tab and passes adapterId", async () => {
+    const user = userEvent.setup()
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
-    fireEvent.click(screen.getByRole("tab", { name: /outbound/i }))
-    expect(screen.getByTestId("mock-outbound-tab")).toHaveAttribute("data-adapter-id", "tg-1")
+    await user.click(screen.getByRole("tab", { name: /^audit$/i }))
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-audit-tab")).toHaveAttribute("data-adapter-id", "tg-1")
+    )
+  })
+
+  it("switches to the Outbound tab and passes adapterId", async () => {
+    const user = userEvent.setup()
+    render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
+    await user.click(screen.getByRole("tab", { name: /outbound/i }))
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-outbound-tab")).toHaveAttribute("data-adapter-id", "tg-1")
+    )
   })
 
   it("renders all five tab triggers", () => {
@@ -259,15 +300,9 @@ describe("AdapterDetailPanel — inner tabs", () => {
   })
 
   it("uses the URL-backed tab when adapterTab param is pre-set", () => {
-    // Simulate ?adapterTab=health already in the URL
-    const { useSearchParams } = jest.requireMock("next/navigation") as {
-      useSearchParams: jest.Mock
-    }
-    useSearchParams.mockReturnValue(new URLSearchParams("adapterTab=health"))
+    currentSearch = "adapterTab=health"
     render(withIntl(<AdapterDetailPanel adapterId="tg-1" />))
     expect(screen.getByTestId("mock-health-detail")).toBeInTheDocument()
-    // Restore default
-    useSearchParams.mockReturnValue(new URLSearchParams())
   })
 })
 

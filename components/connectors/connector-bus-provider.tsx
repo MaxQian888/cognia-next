@@ -35,10 +35,17 @@ import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { defaultConnectorCallbackHandler } from "@/lib/a2ui/connector-callback-handler"
 import { startAdapterHeartbeat } from "@/lib/connectors/health/heartbeat"
 import {
+  isPassiveTransport,
+  startPassiveHeartbeat,
+  type PassiveHeartbeatHandle,
+} from "@/lib/connectors/health/passive-heartbeat"
+import {
   listRunningAdapters,
   registerRunningAdapter,
+  subscribeCredentialsRotatedToLifecycle,
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import {
   startCallbackBindingCleanupSchedule,
   type CallbackBindingCleanupHandle,
@@ -52,6 +59,7 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     let cancelled = false
     const startedAdapters: PlatformAdapter[] = []
     let cleanupHandle: CallbackBindingCleanupHandle | null = null
+    const passiveProbes = new Map<string, PassiveHeartbeatHandle>()
 
     /**
      * Boot a single adapter through the full lifecycle: build its
@@ -88,16 +96,45 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         return false
       }
       const heartbeat = startAdapterHeartbeat({ adapter })
+      // Passive transports (Lark webhook, OneBot reverse-WS) get an
+      // additional 60s probe so the Health view sees derived
+      // idle/degraded states based on inbound recency + external ping.
+      const previousProbe = passiveProbes.get(row.id)
+      if (previousProbe) {
+        previousProbe.dispose()
+        passiveProbes.delete(row.id)
+      }
+      if (isPassiveTransport(row)) {
+        passiveProbes.set(row.id, startPassiveHeartbeat({ row }))
+      }
       registerRunningAdapter(row.id, {
         adapter,
         heartbeat,
         abortController: perAdapterAc,
         restart: async () => {
-          // Same row + same adapter handle — the registry stays consistent
-          // across reconnects because the adapter factory closures still
-          // hold the credentials. If credentials rotated, the operator must
-          // toggle the adapter off and on instead.
-          await bootAdapter(adapter, row, bus)
+          // Rebuild the adapter from the persisted row so a credential
+          // rotation (Settings → Save) takes effect without requiring an
+          // app restart. `buildAdapterFromRow` re-reads keyring material
+          // through the same getter closures, but it also re-runs any
+          // startup probes (Lark `bot/v3/info`, Slack `auth.test`, etc.)
+          // that captured the old credentials at build time.
+          //
+          // Falls back to restarting the existing handle if the row is
+          // gone (race with deletion) or `buildAdapterFromRow` returns
+          // null (e.g. plugin-contributed adapter is no longer loaded).
+          const freshRow = await getAdapterInstance(row.id)
+          if (!freshRow) {
+            await bootAdapter(adapter, row, bus)
+            return
+          }
+          const rebuilt = await buildAdapterFromRow(freshRow)
+          if (!rebuilt) {
+            await bootAdapter(adapter, freshRow, bus)
+            return
+          }
+          bus.unregisterAdapter(row.id)
+          bus.registerAdapter(rebuilt)
+          await bootAdapter(rebuilt, freshRow, bus)
         },
       })
       startedAdapters.push(adapter)
@@ -188,6 +225,18 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       if (!cancelled) {
         cleanupHandle = startCallbackBindingCleanupSchedule()
       }
+
+      // Credentials hot-reload: when Settings/Connections saves a form,
+      // re-queue the matching running adapter so the keyring rotation
+      // takes effect without restarting the app. The handler audits each
+      // requeue with `adapter.credentials_rotated` so operators can
+      // distinguish settings-driven rebuilds from manual reconnects.
+      if (!cancelled) {
+        const unsubscribe = subscribeCredentialsRotatedToLifecycle()
+        // Wire to the same AbortController so the React teardown
+        // releases the listener too.
+        ac.signal.addEventListener("abort", unsubscribe, { once: true })
+      }
     })()
 
     return () => {
@@ -195,6 +244,10 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       ac.abort()
       cleanupHandle?.dispose()
       cleanupHandle = null
+      for (const probe of passiveProbes.values()) {
+        probe.dispose()
+      }
+      passiveProbes.clear()
       // Tear down every running adapter through the lifecycle registry so
       // the heartbeat handles + per-adapter abort signals get cleaned up
       // too. Swallow per-adapter errors so a bad stop() can't crash the

@@ -66,6 +66,18 @@
 
 :root {
   --radius: 0.625rem;
+  /* v47 — Density, motion, and typography runtime knobs. Each is written by
+     a dedicated applier under `lib/appearance/`; defaults below match the
+     "comfortable" + 1x preset so the page looks unchanged when no preferences
+     are stored. shadcn components consume these incrementally. */
+  --density-spacing: 1;
+  --density-input-height: 2.25rem;
+  --density-row-padding: 0.5rem;
+  --density-gap: 0.75rem;
+  --density-line-height: 1.5;
+  --motion-duration-scale: 1;
+  --line-height-scale: 1;
+  --letter-spacing-em: 0em;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -174,6 +186,84 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ---------------------------------------------------------------------------
+   v47 — Appearance optimization (ADR-0029)
+
+   Density presets, per-surface density overrides, motion-speed scope, and the
+   reduce-motion guard. The appliers in `lib/appearance/` write `data-density`,
+   `data-density-{chat,table,sidebar}`, and the `reduce-motion` class on
+   `<html>` — these blocks turn those attributes into concrete CSS variable
+   values that shadcn components and surface-aware layouts consume.
+--------------------------------------------------------------------------- */
+
+:root[data-density="compact"] {
+  --density-spacing: 0.75;
+  --density-input-height: 1.875rem;
+  --density-row-padding: 0.25rem;
+  --density-gap: 0.5rem;
+  --density-line-height: 1.35;
+}
+:root[data-density="spacious"] {
+  --density-spacing: 1.25;
+  --density-input-height: 2.625rem;
+  --density-row-padding: 0.75rem;
+  --density-gap: 1rem;
+  --density-line-height: 1.65;
+}
+
+/* Per-surface overrides. The density applier sets these attrs only when the
+   user has a non-default surface override; otherwise the global value above
+   already covers the surface via plain cascade. Each `[data-surface]`
+   container reads `--density-*` via the cascade so child shadcn components
+   automatically pick up the surface-local values. */
+[data-surface][data-density-surface="compact"] {
+  --density-spacing: 0.75;
+  --density-input-height: 1.875rem;
+  --density-row-padding: 0.25rem;
+  --density-gap: 0.5rem;
+  --density-line-height: 1.35;
+}
+[data-surface][data-density-surface="comfortable"] {
+  --density-spacing: 1;
+  --density-input-height: 2.25rem;
+  --density-row-padding: 0.5rem;
+  --density-gap: 0.75rem;
+  --density-line-height: 1.5;
+}
+[data-surface][data-density-surface="spacious"] {
+  --density-spacing: 1.25;
+  --density-input-height: 2.625rem;
+  --density-row-padding: 0.75rem;
+  --density-gap: 1rem;
+  --density-line-height: 1.65;
+}
+
+/* Reduce-motion guard. The motion applier toggles this class on <html> when
+   the user enables "Reduce motion" in Settings → Appearance → A11y, OR when
+   the OS reports `prefers-reduced-motion: reduce` and the user has not
+   explicitly opted into full motion. Collapses all transitions and
+   animations to ~0.01ms — same approach the W3C accessibility guideline
+   recommends. */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"]) *,
+  html:not([data-motion-respect="off"]) *::before,
+  html:not([data-motion-respect="off"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer base {
@@ -377,6 +467,538 @@ html[data-bg-preview="all"] [data-bg-target] {
   outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
   outline-offset: -2px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Wallpaper-aware UI surfaces (extends the sidebar-inner rule above).
+ *
+ * Lifts the proven sidebar-inner frosted-glass pattern (lines 317-330) to
+ * every other shadcn primitive that ships an opaque surface — overlays,
+ * cards, modal scrims, form controls. All rules gated on
+ * body[data-bg-enabled="true"]; users without a wallpaper see zero change.
+ *
+ * Targets shadcn's data-slot convention so re-installing a primitive from
+ * the registry never breaks the integration. Scope-narrowing (chat /
+ * canvas / sidebar / all / global) mirrors the existing sidebar rule.
+ * Portaled overlays (Dialog, Sheet, Popover, etc.) bypass [data-bg-target]
+ * because Radix portals to document.body, so they only apply when scope
+ * is "all" or "global".
+ *
+ * Plan: .claude/plans/components-ui-polymorphic-comet.md
+ * ──────────────────────────────────────────────────────────────────────────*/
+
+/* Section 1 — Tonality / blur tokens (one knob per tier). */
+:root {
+  --surface-tonality-translucent: 70%;
+  --surface-tonality-glass: 55%;
+  --surface-tonality-frosted: 40%;
+  --surface-blur-subtle: 6px;
+  --surface-blur-regular: 10px;
+  --surface-blur-strong: 14px;
+  --surface-overlay-opacity: 30%;
+}
+.dark {
+  /* Dark mode loses contrast over wallpapers faster — bump opacity ~5pp. */
+  --surface-tonality-translucent: 75%;
+  --surface-tonality-glass: 60%;
+  --surface-tonality-frosted: 45%;
+}
+
+/* Fallback: when backdrop-filter isn't supported, push opacity up since we
+ * lose the blur that masks edges. Token-driven so every rule downstream
+ * picks up the new values without re-listing selectors. */
+@supports not ((backdrop-filter: blur(0)) or (-webkit-backdrop-filter: blur(0))) {
+  :root {
+    --surface-tonality-translucent: 85%;
+    --surface-tonality-glass: 80%;
+    --surface-tonality-frosted: 70%;
+  }
+  .dark {
+    --surface-tonality-translucent: 88%;
+    --surface-tonality-glass: 83%;
+    --surface-tonality-frosted: 73%;
+  }
+}
+
+/* Accessibility: prefers-reduced-transparency disables translucency
+ * entirely. Tokens push to 100% / 0px so every downstream rule falls back
+ * to solid without re-listing selectors or sprinkling !important. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  .dark {
+    --surface-tonality-translucent: 100%;
+    --surface-tonality-glass: 100%;
+    --surface-tonality-frosted: 100%;
+    --surface-blur-subtle: 0px;
+    --surface-blur-regular: 0px;
+    --surface-blur-strong: 0px;
+    --surface-overlay-opacity: 60%;
+  }
+}
+
+/* Section 2 — Non-portaled inline surfaces (scope-aware, 5-selector
+ * compound that mirrors the sidebar-inner rule above). */
+
+/* card + alert — translucent --card, subtle blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="card"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-slot="card"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"] [data-slot="card"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="card"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="card"],
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="alert"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-slot="alert"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="alert"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="alert"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="alert"] {
+  background-color: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* tabs-list — glass on --muted. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="tabs-list"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="tabs-list"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="tabs-list"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="tabs-list"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="tabs-list"] {
+  background-color: color-mix(in oklch, var(--muted) var(--surface-tonality-glass), transparent);
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* kbd + table-footer — translucent --muted, no blur (small chrome accents,
+ * blur would be visually noisy). NB: button-group's ButtonGroupText
+ * (button-group.tsx:40) has bg-muted but no data-slot attribute, so it
+ * is intentionally not covered here — consumers can wrap it in
+ * [data-tonality="translucent"] when they want wallpaper-aware behaviour. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="kbd"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] [data-slot="kbd"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"] [data-slot="kbd"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="kbd"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="kbd"],
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="table-footer"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="table-footer"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="table-footer"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="table-footer"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="table-footer"] {
+  background-color: color-mix(
+    in oklch,
+    var(--muted) var(--surface-tonality-translucent),
+    transparent
+  );
+}
+
+/* thinking-indicator — loading-states.tsx:87 emits this slot with
+ * bg-muted + border-border/50. Same treatment as tabs-list (glass on
+ * --muted, subtle blur) so the in-flight reasoning UI stays legible
+ * while the wallpaper bleeds through. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="thinking-indicator"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="thinking-indicator"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="thinking-indicator"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="thinking-indicator"],
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  [data-slot="thinking-indicator"] {
+  background-color: color-mix(in oklch, var(--muted) var(--surface-tonality-glass), transparent);
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* loading-overlay — frosted --background, strong blur (it's an overlay). */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="loading-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="loading-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="loading-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="loading-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  [data-slot="loading-overlay"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-frosted),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-strong));
+  -webkit-backdrop-filter: blur(var(--surface-blur-strong));
+}
+
+/* menubar root toolbar — translucent --background. Always-visible toolbar
+ * (the menubar content dropdowns are portaled separately, handled below). */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="menubar"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="menubar"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="menubar"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="menubar"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="menubar"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* Section 3 — Portaled overlays.
+ *
+ * Radix portals render at document.body, outside any [data-bg-target].
+ * They sit over the wallpaper only when scope is "all" or "global";
+ * other scopes confine the wallpaper to a subtree, so portaled content
+ * paints against the plain page background and needs no treatment. */
+
+/* Popover-class — glass on --popover, regular blur. */
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="popover-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="popover-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="dropdown-menu-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="dropdown-menu-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="dropdown-menu-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="dropdown-menu-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="context-menu-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="context-menu-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="context-menu-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="context-menu-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="hover-card-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="hover-card-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="combobox-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="combobox-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="select-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="select-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="menubar-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="menubar-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="menubar-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="menubar-sub-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="navigation-menu-viewport"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="navigation-menu-viewport"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="command"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="command"] {
+  background-color: color-mix(in oklch, var(--popover) var(--surface-tonality-glass), transparent);
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
+}
+
+/* Modal content — frosted --background, strong blur. */
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="dialog-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="dialog-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="alert-dialog-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="alert-dialog-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="sheet-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="sheet-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="drawer-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="drawer-content"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-frosted),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-strong));
+  -webkit-backdrop-filter: blur(var(--surface-blur-strong));
+}
+
+/* Modal overlay scrim — make the dim layer itself frosted (lets the
+ * wallpaper bleed through with a glass effect rather than blacking it
+ * out). Wins on specificity over the default bg-black/50 utility. */
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="dialog-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="dialog-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="alert-dialog-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="alert-dialog-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="sheet-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="sheet-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="drawer-overlay"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="drawer-overlay"] {
+  background-color: color-mix(in oklch, black var(--surface-overlay-opacity), transparent);
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
+}
+
+/* Tooltip — translucent --foreground, subtle blur. Tooltip colors are
+ * inverted (dark bg, light text) so we mix into --foreground not --popover. */
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="tooltip-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="tooltip-content"] {
+  background-color: color-mix(
+    in oklch,
+    var(--foreground) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* Sonner toast — no data-slot; consumes --normal-bg from sonner.tsx:29.
+ * Override the var on body so Sonner picks it up; attach the blur via
+ * Sonner's own emitted [data-sonner-toast] element. */
+body[data-bg-enabled="true"][data-bg-scope="all"],
+body[data-bg-enabled="true"][data-bg-scope="global"] {
+  --normal-bg: color-mix(in oklch, var(--popover) var(--surface-tonality-glass), transparent);
+}
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-sonner-toast],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-sonner-toast] {
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
+}
+
+/* Section 4 — Wallpaper-aware form controls.
+ *
+ * Inputs default to bg-transparent which destroys their affordance over a
+ * busy wallpaper. Add a faint translucent backdrop and strengthen the
+ * border so they remain readable. Same scope-aware compound as Section 2. */
+
+/* Text fields + trigger surfaces. input-group wraps Input/Textarea with
+ * bg-transparent so the wrapper is the visible surface (dark mode has
+ * dark:bg-input/30); treat it on equal footing with plain input. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="native-select"],
+    [data-slot="native-select-wrapper"],
+    [data-slot="select-trigger"],
+    [data-slot="combobox-trigger"],
+    [data-slot="input-group"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="native-select"],
+    [data-slot="native-select-wrapper"],
+    [data-slot="select-trigger"],
+    [data-slot="combobox-trigger"],
+    [data-slot="input-group"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="native-select"],
+    [data-slot="native-select-wrapper"],
+    [data-slot="select-trigger"],
+    [data-slot="combobox-trigger"],
+    [data-slot="input-group"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="native-select"],
+    [data-slot="native-select-wrapper"],
+    [data-slot="select-trigger"],
+    [data-slot="combobox-trigger"],
+    [data-slot="input-group"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is(
+    [data-slot="input"],
+    [data-slot="textarea"],
+    [data-slot="native-select"],
+    [data-slot="native-select-wrapper"],
+    [data-slot="select-trigger"],
+    [data-slot="combobox-trigger"],
+    [data-slot="input-group"]
+  ) {
+  background-color: color-mix(in oklch, var(--background) 50%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border-color: color-mix(in oklch, var(--border) 40%, var(--foreground));
+}
+
+/* Unchecked/off toggle surfaces — give them a faint backdrop so they
+ * don't disappear into the wallpaper. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is(
+    [data-slot="checkbox"][data-state="unchecked"],
+    [data-slot="radio-group-item"][data-state="unchecked"],
+    [data-slot="switch"][data-state="unchecked"],
+    [data-slot="toggle"][data-state="off"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is(
+    [data-slot="checkbox"][data-state="unchecked"],
+    [data-slot="radio-group-item"][data-state="unchecked"],
+    [data-slot="switch"][data-state="unchecked"],
+    [data-slot="toggle"][data-state="off"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is(
+    [data-slot="checkbox"][data-state="unchecked"],
+    [data-slot="radio-group-item"][data-state="unchecked"],
+    [data-slot="switch"][data-state="unchecked"],
+    [data-slot="toggle"][data-state="off"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is(
+    [data-slot="checkbox"][data-state="unchecked"],
+    [data-slot="radio-group-item"][data-state="unchecked"],
+    [data-slot="switch"][data-state="unchecked"],
+    [data-slot="toggle"][data-state="off"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is(
+    [data-slot="checkbox"][data-state="unchecked"],
+    [data-slot="radio-group-item"][data-state="unchecked"],
+    [data-slot="switch"][data-state="unchecked"],
+    [data-slot="toggle"][data-state="off"]
+  ) {
+  background-color: color-mix(in oklch, var(--background) 50%, transparent);
+  border-color: color-mix(in oklch, var(--border) 40%, var(--foreground));
+}
+
+/* Track-like controls — translucent --muted, slim blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is([data-slot="slider-track"], [data-slot="progress"]),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is([data-slot="slider-track"], [data-slot="progress"]),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is([data-slot="slider-track"], [data-slot="progress"]),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is([data-slot="slider-track"], [data-slot="progress"]),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is([data-slot="slider-track"], [data-slot="progress"]) {
+  background-color: color-mix(in oklch, var(--muted) 65%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Section 5 — data-tonality / data-elevation semantic opt-in/opt-out.
+ *
+ * Run after the auto-rules above so they win on specificity tie. Only
+ * data-tonality="solid" uses !important to also beat inline Tailwind
+ * utility classes (the consumer's explicit force-opaque request). */
+
+body[data-bg-enabled="true"] [data-tonality="solid"] {
+  background-color: var(--background) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body[data-bg-enabled="true"] [data-tonality="translucent"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+body[data-bg-enabled="true"] [data-tonality="glass"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-glass),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
+}
+body[data-bg-enabled="true"] [data-tonality="frosted"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-frosted),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-strong));
+  -webkit-backdrop-filter: blur(var(--surface-blur-strong));
+}
+
+[data-elevation="0"] {
+  box-shadow: none;
+}
+[data-elevation="1"] {
+  box-shadow: 0 1px 2px 0 oklch(0 0 0 / 0.08);
+}
+[data-elevation="2"] {
+  box-shadow:
+    0 4px 12px -2px oklch(0 0 0 / 0.12),
+    0 2px 4px -2px oklch(0 0 0 / 0.08);
+}
+[data-elevation="3"] {
+  box-shadow:
+    0 12px 32px -4px oklch(0 0 0 / 0.18),
+    0 4px 12px -4px oklch(0 0 0 / 0.1);
+}
+
+/* Section 6 — Inline readability helpers.
+ *
+ * data-readability-scrim: per-surface scrim opt-in (the body-level scrim
+ * at lines 343-361 only covers body / [data-bg-target]).
+ * data-readability="enhanced": text-shadow for headings rendered
+ * directly over a wallpaper. */
+
+[data-readability-scrim="true"] {
+  position: relative;
+  isolation: isolate;
+}
+[data-readability-scrim="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklch, var(--background) 40%, transparent) 100%
+  );
+  z-index: 0;
+}
+[data-readability-scrim="true"] > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-readability="enhanced"] {
+  text-shadow: 0 1px 2px color-mix(in oklch, var(--background) 60%, transparent);
+}
+
+/* prefers-reduced-transparency also strips the text-shadow (the token
+ * approach above doesn't reach text-shadow values, so handled here). */
+@media (prefers-reduced-transparency: reduce) {
+  [data-readability="enhanced"] {
+    text-shadow: none;
+  }
+}
+
+/* End wallpaper-aware UI surfaces. */
 
 /* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).
    Monaco creates a fixed-size internal div that prevents its flex parent

@@ -30,6 +30,7 @@ import type { LanguageModelUsage } from "ai"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
 import { ModelPicker } from "./model-picker"
+import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/agent-runtime-selector"
 import { AgentModeSelector } from "@/components/agent/agent-mode-selector"
 import { ExternalAgentSelector } from "@/components/agent/external-agent-selector"
@@ -125,6 +126,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
           onCycle={(next) => setPermissionMode(next)}
           disabled={isStreaming}
         />
+        <SandboxShield session={session} />
         <div className="hidden items-center gap-2 @sm/composer:flex">
           <WebSearchToggle disabled={isStreaming} />
           <Button

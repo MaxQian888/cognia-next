@@ -77,6 +77,9 @@ export type PluginCapability =
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
   | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
   | "lsp-server" // Contributes a Language Server (Phase B of LSP reuse)
+  | "theme-pack" // Bundles colors + fonts + wallpapers + density into a single applyable pack
+  | "fonts" // Contributes font families bundled in plugin assets (@font-face injection)
+  | "wallpapers" // Contributes built-in wallpaper entries (bundled images/gradients/colors)
 
 /**
  * Plugin status in the lifecycle
@@ -424,6 +427,15 @@ export interface PluginManifest {
   /** Optional permissions (requested at runtime) */
   optionalPermissions?: PluginPermission[]
 
+  /**
+   * Per-permission justification strings — surfaced verbatim in the
+   * permission-review dialog so the user understands why the plugin needs
+   * each scope. Keyed by permission id. Optional; missing entries fall back
+   * to the canonical `PERMISSION_DESCRIPTIONS` text from
+   * `lib/plugin/security/permission-guard.ts`.
+   */
+  permissionJustifications?: Partial<Record<PluginPermission, string>>
+
   // A2UI Integration
   /** Custom A2UI components provided */
   a2uiComponents?: A2UIPluginComponentDef[]
@@ -521,6 +533,39 @@ export interface PluginManifest {
    * resolves them on plugin enable and unregisters them on disable.
    */
   themes?: PluginThemeContribution[]
+
+  /**
+   * Theme packs — a single applyable bundle of (theme + font + wallpaper +
+   * density + radius + motion-speed + monaco theme). Each entry references
+   * other contributions by id, so packs do not duplicate the underlying
+   * assets. See `lib/plugin/bridge/themes-bridge.ts` for the apply path.
+   *
+   * v47 (ADR-0029).
+   */
+  themePacks?: PluginThemePackContribution[]
+
+  /**
+   * Font families bundled inside the plugin's `assets/` directory. The host
+   * font-bridge generates `@font-face` declarations on enable and removes
+   * them on disable. File bytes are validated against woff2/ttf/otf magic
+   * before injection. v47 (ADR-0029).
+   */
+  fonts?: PluginFontContribution[]
+
+  /**
+   * Bundled wallpapers (built-in entries that appear in the wallpaper
+   * gallery while the plugin is enabled). User-uploaded wallpapers are
+   * never touched by enable/disable. v47 (ADR-0029).
+   */
+  wallpapers?: PluginWallpaperContribution[]
+
+  /**
+   * Named density tuples that callers can refer to from `themePacks[i].applies.density`.
+   * Plugins may also override the host defaults with the canonical names
+   * (`compact` / `comfortable` / `spacious`) — the bridge logs a warning but
+   * does not reject. v47 (ADR-0029).
+   */
+  densityPresets?: PluginDensityPresetContribution[]
 
   /**
    * Optional localized strings shipped by the plugin. Keys are merged into
@@ -652,6 +697,93 @@ export type PluginThemeContribution =
       isDark?: boolean
       cssVariables: Record<string, string>
     }
+
+// ----------------------------------------------------------------------------
+// v47 — Theme Packs / Fonts / Wallpapers / Density Presets (ADR-0029)
+// ----------------------------------------------------------------------------
+
+/**
+ * A single applyable bundle. References sibling contributions in the same
+ * manifest by id (`themeId` → one of `manifest.themes[i].id`,
+ * `fontFamily` → `manifest.fonts[i].family`, `wallpaperId` → `manifest.wallpapers[i].id`,
+ * `densityPresetName` → `manifest.densityPresets[i].name`). All `applies`
+ * fields are optional — a pack may e.g. ship only fonts + wallpaper.
+ */
+export interface PluginThemePackContribution {
+  id: string
+  name: string
+  description?: string
+  /** Optional preview images (data-url or relative asset path). */
+  preview?: { light?: string; dark?: string }
+  applies: {
+    /** References `manifest.themes[i].id` or a host preset key. */
+    themeId?: string
+    fontFamily?: string
+    monoFamily?: string
+    serifFamily?: string
+    wallpaperId?: string
+    /** Either a canonical density level or a name from `manifest.densityPresets`. */
+    density?: "compact" | "comfortable" | "spacious" | string
+    /** Base radius in rem; clamped to 0..1.5 by the applier. */
+    radius?: number
+    motionSpeed?: 0.5 | 1 | 1.5
+    /**
+     * Monaco theme id (defaults to the same as `themeId` when both are
+     * VSCode-imported); set explicitly to decouple Monaco from the app theme.
+     */
+    monacoTheme?: string
+  }
+}
+
+/**
+ * Plugin-bundled font family. `files[]` lists per-weight/style faces; each
+ * `src` is a path under the plugin's install root. The font-bridge resolves
+ * to `file://` or `asset://` at runtime depending on host capability.
+ */
+export interface PluginFontContribution {
+  /** CSS family name. Must be unique within the plugin's contributions. */
+  family: string
+  files: PluginFontFile[]
+  display?: "swap" | "block" | "fallback" | "optional" | "auto"
+  unicodeRange?: string
+}
+
+export interface PluginFontFile {
+  weight: number
+  style?: "normal" | "italic"
+  /** Relative path under the plugin install root, e.g. `assets/Inter-Regular.woff2`. */
+  src: string
+}
+
+export interface PluginWallpaperContribution {
+  id: string
+  name: string
+  /** Bundled source — image:disk (relative path) or color/gradient inline. */
+  source:
+    | {
+        kind: "image"
+        /** Relative path under the plugin install root, e.g. `assets/wp.jpg`. */
+        relPath: string
+        mime: string
+        width: number
+        height: number
+      }
+    | { kind: "gradient"; css: string }
+    | { kind: "color"; value: string }
+}
+
+export interface PluginDensityPresetContribution {
+  /** Bare name — referenced by `PluginThemePackContribution.applies.density`. */
+  name: string
+  /** Override of host CSS custom properties; values are passed through verbatim. */
+  vars: {
+    "--density-spacing"?: string
+    "--density-input-height"?: string
+    "--density-row-padding"?: string
+    "--density-gap"?: string
+    "--density-line-height"?: string
+  }
+}
 
 /**
  * One connector adapter definition inside `PluginManifest.connectors`.

@@ -156,7 +156,26 @@ export interface SendOptions {
     /** Tauri command name the sidecar invokes for each tool_use. */
     executeIpc: { invoke: string }
     permissionPolicy?: "always-ask" | "session-allow" | "preauth"
+    /**
+     * ADR-0020 W1 — when set, the Rust permission gate treats this turn's
+     * dispatch for this tool as if the effective `Tier` were `forceTier`,
+     * regardless of the persisted `AutomationSettings.perSurface.computerUse.tier`.
+     * Populated by `applyComputerUseTools` from
+     * `Character.computerUseSettings.requireConsent === true` (sets
+     * `forceTier: "perCall"`). The sidecar forwards this as
+     * `ctx.forceTier` on every dispatch invoke; the Rust `command_body!`
+     * upgrades an `Allow` decision to `RequireConsent` when this is set.
+     */
+    forceTier?: "off" | "whitelist" | "perCall"
   }>
+
+  /**
+   * ADR-0020 W1 — propagates `Character.computerUseSettings.chatConsentMode`
+   * to the dispatcher so Wave 3's session-grant store and the
+   * `auto` mode dedup logic can read it. `undefined` is treated as
+   * `"always-ask"` (the safe default that preserves today's behaviour).
+   */
+  computerUseConsentMode?: "always-ask" | "session-grant" | "auto"
 
   /**
    * Extra HTTP headers the sidecar should merge into the Anthropic
@@ -554,6 +573,16 @@ export interface ChatSession {
    */
   sandboxEnabled?: boolean
   systemPrompt?: string
+  /**
+   * Identity of the system-prompt preset this session was last configured
+   * from. Written by the chat-header preset switcher (and the new active-
+   * preset pill) and by `createSession`'s default-preset auto-apply path.
+   * The pill uses it as the source of truth for "which preset is active",
+   * falling back to a `preset.content === systemPrompt` heuristic when
+   * unset (legacy sessions). Not indexed — adding optional non-indexed
+   * fields doesn't require a Dexie store version bump.
+   */
+  activePresetId?: string
   workingDir?: string
   /**
    * Per-session override for the SDK permission mode. Toggled live via the
@@ -963,6 +992,16 @@ export interface AppSettings {
    */
   sandboxDefaultEnabled?: boolean
   /**
+   * App-wide default for the ADR-0028 / T4 sandbox tier. `"os"` (default)
+   * routes Bash / Edit / Write through the per-platform OS sandbox
+   * (sandbox-exec / bwrap / windows-codex). `"microvm"` routes them
+   * through the existing `plugins/e2b-sandbox/` Firecracker workspace
+   * backend for the strongest isolation. Beaten by `Character.sandboxTier`
+   * when both are set. Only consulted when `sandboxDefaultEnabled` /
+   * `sandboxEnabled` resolves true.
+   */
+  sandboxTier?: "os" | "microvm"
+  /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
    * health metrics) used by the providers settings UI. The lean
@@ -1027,6 +1066,18 @@ export interface AppSettings {
   customCss?: string
   customCssEnabled?: boolean
   importedVscodeThemes?: import("@/types/appearance").ImportedThemeRecord[]
+  // ---- Appearance v47 (density / radius / motion / typography / a11y / auto-mode / monaco link) ----
+  density?: import("@/types/appearance").DensitySettings
+  radius?: import("@/types/appearance").RadiusSettings
+  motion?: import("@/types/appearance").MotionSettings
+  typographyExt?: import("@/types/appearance").TypographyExtSettings
+  a11y?: import("@/types/appearance").A11ySettings
+  autoMode?: import("@/types/appearance").AutoModeSettings
+  monacoLink?: import("@/types/appearance").MonacoLinkSettings
+  /** Active theme-pack id (from plugin manifest.themePacks). null when nothing applied. */
+  activeThemePackId?: string | null
+  /** Wraps user CSS in `@scope (#app) { ... }` when "app" (default), or applies globally. */
+  customCssScope?: "app" | "global"
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**
@@ -1104,12 +1155,54 @@ export interface AppSettings {
   mobileComputerUseEnabled?: boolean
 
   /**
+   * ADR-0028 / T5 — per-action policy applied AFTER the automation
+   * permission gate resolves Allow for a Computer Use action. Empty
+   * arrays (the default) impose no extra constraint; any non-empty
+   * allowlist hard-fails the call when the action's facts don't satisfy
+   * it. Backed by `src-tauri/src/automation/policy.rs:Policy`; the TS
+   * shape mirrors the Rust serde-camelCase exactly.
+   */
+  automationPolicy?: AutomationPolicy
+
+  /**
    * Developer-only knobs. Surfaced under Settings → Developer in dev
    * builds; hidden in production builds (gate via `NODE_ENV`). Each
    * toggle relaxes a safety check that exists for a reason — never
    * enable them by default.
    */
   developer?: DeveloperSettings
+}
+
+/**
+ * ADR-0028 / T5 — per-action policy shape, mirrored from
+ * `src-tauri/src/automation/policy.rs::Policy` (serde camelCase).
+ *
+ * Empty arrays = no constraint (the default for fresh installs).
+ * Any non-empty allowlist hard-fails Computer Use calls whose facts
+ * don't satisfy it. Regex patterns are evaluated against the target's
+ * window title and URL; forbidden screen regions are absolute pixels
+ * and apply only to coordinate-based actions.
+ */
+export interface AutomationPolicy {
+  allowedProcessNames: string[]
+  allowedWindowTitlePatterns: string[]
+  allowedUrlPatterns: string[]
+  forbiddenScreenRegions: ScreenRect[]
+}
+
+export interface ScreenRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Default empty policy — no extra constraints. */
+export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
+  allowedProcessNames: [],
+  allowedWindowTitlePatterns: [],
+  allowedUrlPatterns: [],
+  forbiddenScreenRegions: [],
 }
 
 /**

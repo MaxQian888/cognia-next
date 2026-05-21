@@ -180,6 +180,9 @@ export function CharactersSection() {
             twinSettings: undefined,
             enableComputerUse: false,
             computerUseSettings: undefined,
+            sandboxEnabled: false,
+            sandboxTier: "inherit",
+            accountIdOverride: "inherit",
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
@@ -252,6 +255,9 @@ function CharacterRow({
           twinSettings: character.twinSettings,
           enableComputerUse: Boolean(character.enableComputerUse),
           computerUseSettings: character.computerUseSettings,
+          sandboxEnabled: Boolean(character.sandboxEnabled),
+          sandboxTier: character.sandboxTier ?? "inherit",
+          accountIdOverride: character.accountIdOverride ?? "inherit",
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
@@ -381,6 +387,12 @@ type EditorState = {
   twinSettings?: Character["twinSettings"]
   enableComputerUse: boolean
   computerUseSettings?: Character["computerUseSettings"]
+  /** ADR-0028 Phase 10 — per-character sandbox enablement override. */
+  sandboxEnabled: boolean
+  /** ADR-0028 Phase 10 — `"inherit"` writes back as `undefined`. */
+  sandboxTier: "os" | "microvm" | "inherit"
+  /** ADR-0028 Phase 10 — account UUID from `ProviderVault::accounts[]`. */
+  accountIdOverride: string | "inherit"
 }
 
 type EditorOutput = {
@@ -403,6 +415,9 @@ type EditorOutput = {
   twinSettings?: Character["twinSettings"]
   enableComputerUse?: boolean
   computerUseSettings?: Character["computerUseSettings"]
+  sandboxEnabled?: boolean
+  sandboxTier?: "os" | "microvm"
+  accountIdOverride?: string
 }
 
 interface EditorProps {
@@ -414,6 +429,33 @@ interface EditorProps {
   onSave: (data: EditorOutput) => Promise<void>
   /** Id of the character being edited. Omitted when creating. */
   editingId?: string
+}
+
+interface AccountOption {
+  accountId: string
+  provider: string
+  label: string
+}
+
+async function loadAccountOptions(): Promise<AccountOption[]> {
+  const { listAccounts } = await import("@/lib/subscription/core/transport")
+  const providers: Array<"anthropic" | "codex" | "opencode"> = ["anthropic", "codex", "opencode"]
+  const all: AccountOption[] = []
+  for (const provider of providers) {
+    try {
+      const list = await listAccounts(provider)
+      for (const acc of list) {
+        all.push({
+          accountId: acc.id,
+          provider,
+          label: acc.label ?? acc.id.slice(0, 8),
+        })
+      }
+    } catch {
+      // Provider not configured or transport unavailable — skip.
+    }
+  }
+  return all
 }
 
 function CharacterEditor({
@@ -428,10 +470,23 @@ function CharacterEditor({
   const t = useTranslations("settings.characters")
   const tEditor = useTranslations("settings.characters.editor")
   const tGeneral = useTranslations("settings.general")
+  const tSandbox = useTranslations("settings.characters.editor.sandbox")
+  const tAccount = useTranslations("settings.characters.editor.account")
   const [s, setS] = useState<EditorState>(initial)
   const [allowToolsText, setAllowToolsText] = useState(initial.allowedTools.join(", "))
   const [denyToolsText, setDenyToolsText] = useState(initial.disallowedTools.join(", "))
   const [saving, setSaving] = useState(false)
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadAccountOptions().then((opts) => {
+      if (!cancelled) setAccountOptions(opts)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Hydrate when `initial` changes (e.g. user clicks edit on a different row).
   useEffect(() => {
@@ -475,6 +530,9 @@ function CharacterEditor({
         twinSettings: s.twinSettings,
         enableComputerUse: s.enableComputerUse || undefined,
         computerUseSettings: s.computerUseSettings,
+        sandboxEnabled: s.sandboxEnabled || undefined,
+        sandboxTier: s.sandboxTier === "inherit" ? undefined : s.sandboxTier,
+        accountIdOverride: s.accountIdOverride === "inherit" ? undefined : s.accountIdOverride,
       })
     } finally {
       setSaving(false)
@@ -672,6 +730,68 @@ function CharacterEditor({
             onCheckedChange={(v) => setS({ ...s, enableComputerUse: v })}
             aria-label={t("computerUseToggle.aria")}
           />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <Label className="cursor-pointer text-xs">{tSandbox("enable.label")}</Label>
+            <p className="text-[10px] text-muted-foreground">{tSandbox("enable.description")}</p>
+          </div>
+          <Switch
+            checked={s.sandboxEnabled}
+            onCheckedChange={(v) => setS({ ...s, sandboxEnabled: v })}
+            aria-label={tSandbox("enable.aria")}
+            data-testid="character-sandbox-enabled"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{tSandbox("tier.label")}</Label>
+          <Select
+            value={s.sandboxTier}
+            onValueChange={(value) =>
+              setS({
+                ...s,
+                sandboxTier: value as EditorState["sandboxTier"],
+              })
+            }
+          >
+            <SelectTrigger data-testid="character-sandbox-tier">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">{tSandbox("tier.inherit")}</SelectItem>
+              <SelectItem value="os">{tSandbox("tier.os")}</SelectItem>
+              <SelectItem value="microvm">{tSandbox("tier.microvm")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground">{tSandbox("tier.description")}</p>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{tAccount("label")}</Label>
+          <Select
+            value={s.accountIdOverride}
+            onValueChange={(value) =>
+              setS({
+                ...s,
+                accountIdOverride: value as EditorState["accountIdOverride"],
+              })
+            }
+          >
+            <SelectTrigger data-testid="character-account-override">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">{tAccount("inherit")}</SelectItem>
+              {accountOptions.map((opt) => (
+                <SelectItem key={opt.accountId} value={opt.accountId}>
+                  {tAccount("optionLabel", {
+                    provider: opt.provider,
+                    label: opt.label,
+                  })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground">{tAccount("description")}</p>
         </div>
       </div>
 

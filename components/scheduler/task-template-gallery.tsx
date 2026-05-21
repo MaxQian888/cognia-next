@@ -112,7 +112,7 @@ export function TaskTemplateGallery({
                     <Button
                       variant="outline"
                       size="sm"
-                      className="mt-3 w-full h-8 text-xs opacity-0 transition-opacity group-hover:opacity-100"
+                      className="mt-3 h-8 w-full text-xs transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
                       onClick={() => handleSelect(template)}
                     >
                       {t("templateGallery.useTemplate") || "Use Template"}

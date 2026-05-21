@@ -24,6 +24,7 @@ import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
 import { ConversationOverrideDialog } from "./overrides/conversation-override-dialog"
+import { ComputerUseToggle } from "./overrides/computer-use-toggle"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
@@ -308,8 +309,19 @@ export function ConversationHeader({
         </Tooltip>
       )}
 
-      {/* Right: last-inbound chip + adapter degradation badge + policy + gear */}
+      {/* Right: last-inbound chip + Computer-Use toggle + adapter
+       * degradation badge + policy + gear. Computer-Use lives close to
+       * the degradation surface so the high-blast-radius opt-in is
+       * visible whenever the conversation is open. */}
       <LastInboundChip conversationKey={conversationKey} />
+      {parsedAdapterId && desktop && (
+        <ComputerUseToggle
+          conversationKey={conversationKey}
+          sessionId={sessionId}
+          adapterId={parsedAdapterId}
+          currentValue={overrideRow?.allowComputerUse === true}
+        />
+      )}
       {parsedAdapterId && <AdapterDegradationBadge adapterId={parsedAdapterId} />}
       <PolicyInfo policy={policy} />
 

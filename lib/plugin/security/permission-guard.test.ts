@@ -224,6 +224,130 @@ describe("PermissionGuard", () => {
       expect(typeof desc).toBe("string")
     })
   })
+
+  describe("Permission Tiers (ADR-0020 3-tier model)", () => {
+    it("returns 'silent' for any (plugin, permission) that has no override", () => {
+      expect(guard.getTier("p1", "network:fetch")).toBe("silent")
+      expect(guard.getTier("not-registered", "shell:execute")).toBe("silent")
+    })
+
+    it("setTier persists the chosen tier and notifies subscribers", () => {
+      const events: Array<{ pluginId: string; permission: string; tier: string }> = []
+      const dispose = guard.subscribeTierChanges((pluginId, permission, tier) => {
+        events.push({ pluginId, permission, tier })
+      })
+      guard.setTier("p1", "shell:execute", "forbid")
+      guard.setTier("p1", "clipboard:read", "confirm")
+      expect(guard.getTier("p1", "shell:execute")).toBe("forbid")
+      expect(guard.getTier("p1", "clipboard:read")).toBe("confirm")
+      expect(events).toEqual([
+        { pluginId: "p1", permission: "shell:execute", tier: "forbid" },
+        { pluginId: "p1", permission: "clipboard:read", tier: "confirm" },
+      ])
+      dispose()
+      guard.setTier("p1", "filesystem:read", "confirm")
+      expect(events).toHaveLength(2) // unsubscribed
+    })
+
+    it("getTiersForPlugin lists every non-default tier row", () => {
+      guard.setTier("p1", "shell:execute", "forbid")
+      guard.setTier("p1", "clipboard:read", "confirm")
+      const rows = guard.getTiersForPlugin("p1")
+      expect(rows).toHaveLength(2)
+      expect(rows).toEqual(
+        expect.arrayContaining([
+          { permission: "shell:execute", tier: "forbid" },
+          { permission: "clipboard:read", tier: "confirm" },
+        ])
+      )
+      expect(guard.getTiersForPlugin("never-set")).toEqual([])
+    })
+
+    it("unregisterPlugin clears the plugin's tier rows", () => {
+      guard.setTier("p1", "shell:execute", "forbid")
+      guard.unregisterPlugin("p1")
+      expect(guard.getTier("p1", "shell:execute")).toBe("silent")
+      expect(guard.getTiersForPlugin("p1")).toEqual([])
+    })
+
+    it("a listener that throws does not crash setTier", () => {
+      guard.subscribeTierChanges(() => {
+        throw new Error("listener boom")
+      })
+      // Should not throw.
+      expect(() => guard.setTier("p1", "network:fetch", "forbid")).not.toThrow()
+      expect(guard.getTier("p1", "network:fetch")).toBe("forbid")
+    })
+
+    it("clear() drops every tier row + listener", () => {
+      guard.setTier("p1", "shell:execute", "forbid")
+      guard.clear()
+      expect(guard.getTier("p1", "shell:execute")).toBe("silent")
+    })
+  })
+
+  describe("checkWithConsent (tier-aware enforcement)", () => {
+    const stubBroker = (response: boolean) => ({
+      request: jest.fn(async () => response),
+    })
+
+    it("returns true for silent tier when the permission is granted", async () => {
+      guard.registerPlugin("p1", ["network:fetch"])
+      const broker = stubBroker(true)
+      await expect(guard.checkWithConsent("p1", "network:fetch", broker)).resolves.toBe(true)
+      expect(broker.request).not.toHaveBeenCalled()
+    })
+
+    it("returns false for silent tier when the permission is not granted", async () => {
+      guard.registerPlugin("p1", [])
+      const broker = stubBroker(true)
+      await expect(guard.checkWithConsent("p1", "shell:execute", broker)).resolves.toBe(false)
+      expect(broker.request).not.toHaveBeenCalled()
+    })
+
+    it("returns false immediately when tier === forbid, never asking the broker", async () => {
+      guard.registerPlugin("p1", ["shell:execute"])
+      guard.setTier("p1", "shell:execute", "forbid")
+      const broker = stubBroker(true)
+      await expect(guard.checkWithConsent("p1", "shell:execute", broker)).resolves.toBe(false)
+      expect(broker.request).not.toHaveBeenCalled()
+    })
+
+    it("delegates to broker for confirm tier — respects allow", async () => {
+      guard.registerPlugin("p1", ["filesystem:write"])
+      guard.setTier("p1", "filesystem:write", "confirm")
+      const broker = stubBroker(true)
+      await expect(
+        guard.checkWithConsent("p1", "filesystem:write", broker, { reason: "save artifact" })
+      ).resolves.toBe(true)
+      expect(broker.request).toHaveBeenCalledWith({
+        pluginId: "p1",
+        permission: "filesystem:write",
+        reason: "save artifact",
+      })
+    })
+
+    it("delegates to broker for confirm tier — respects deny", async () => {
+      guard.registerPlugin("p1", ["filesystem:write"])
+      guard.setTier("p1", "filesystem:write", "confirm")
+      const broker = stubBroker(false)
+      await expect(guard.checkWithConsent("p1", "filesystem:write", broker)).resolves.toBe(false)
+    })
+
+    it("writes an audit entry per outcome (silent/forbid/confirm)", async () => {
+      guard.registerPlugin("p1", ["network:fetch"])
+      const broker = stubBroker(false)
+      await guard.checkWithConsent("p1", "network:fetch", broker) // silent → check
+      guard.setTier("p1", "network:fetch", "forbid")
+      await guard.checkWithConsent("p1", "network:fetch", broker) // forbid → deny
+      guard.setTier("p1", "network:fetch", "confirm")
+      await guard.checkWithConsent("p1", "network:fetch", broker) // confirm → request + deny
+      const entries = guard.getAuditLog({ pluginId: "p1", permission: "network:fetch" })
+      // silent path uses "check"; forbid uses "deny"; confirm uses "request" + "deny".
+      const actions = entries.map((e) => e.action)
+      expect(actions).toEqual(expect.arrayContaining(["check", "deny", "request"]))
+    })
+  })
 })
 
 describe("createGuardedAPI", () => {
