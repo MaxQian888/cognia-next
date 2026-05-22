@@ -3170,6 +3170,26 @@
           "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
           "styleSamplesK": "每次发送的样本数"
         },
+        "computerUseSubSettings": {
+          "requireConsent": {
+            "label": "每次调用前都征求同意",
+            "description": "无论「设置 → 自动化 → 权限」如何配置，本角色发出的每条 Computer Use 驱动调用都强制走同意浮层。对行为还不熟悉的新角色尤其有用。"
+          },
+          "chatConsentMode": {
+            "label": "聊天侧弹窗策略",
+            "description": "聊天内 canUseTool 弹窗的行为。与 Rust 网关相互独立，两端都可能弹。",
+            "options": {
+              "always-ask": "每次询问",
+              "session-grant": "本次会话记住",
+              "auto": "自动（交给 Rust 网关）"
+            }
+          },
+          "allowedToolIds": {
+            "label": "允许的原生工具",
+            "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
+            "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。"
+          }
+        },
         "sandbox": {
           "enable": {
             "label": "沙盒化 Bash / Edit / Write",
@@ -5545,6 +5565,12 @@
     },
     "modalRoot": {
       "errorFallback": "插件弹窗渲染失败，详细信息请查看控制台。"
+    },
+    "enableFailure": {
+      "title": "{pluginName} 启用失败",
+      "description": "{pluginName} 启用失败：{errorMessage}",
+      "manualReason": "启用插件时出错",
+      "retryHint": "打开插件设置查看错误并重试。"
     },
     "consent": {
       "title": "插件请求权限",
@@ -13922,6 +13948,14 @@
       "defaultTierDescription": "未设置界面级覆盖时使用的权限等级。",
       "perSurface": "按界面覆盖",
       "perSurfaceDescription": "每个自动化界面可单独覆盖默认等级。",
+      "perPlugin": {
+        "title": "按插件覆盖",
+        "description": "声明了 native:input 或 native:screen 权限的插件，可以单独设置一个与 Plugin 界面默认值不同的等级。适合只信任某个具体插件，但不想放宽全部插件策略的场景。",
+        "empty": "当前没有任何已启用的插件声明 native:input。安装或启用一个相关插件（例如 cognia-computer-use）后，即可在此为单个插件设定覆盖等级。",
+        "rowOverridden": "已覆盖：{tier}",
+        "rowInheriting": "继承上方 Plugin 界面的等级。",
+        "clearOverride": "清除"
+      },
       "surfaces": {
         "workflowDescription": "可视化工作流执行器运行。",
         "computerUseDescription": "Anthropic 原生 computer-use 工具调用。",

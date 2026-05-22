@@ -219,6 +219,26 @@ export class PluginEnableError extends Error {
   }
 }
 
+/**
+ * Window CustomEvent name fired when `enablePlugin` rolls back after a
+ * failure. The detail carries the pluginId + a short error string so a
+ * React component near the app root can translate + render a toast
+ * (decoupling the manager from i18n at the .ts boundary). Mirrors the
+ * established pattern used by `plugin:consent-request` /
+ * `plugin:updates-available` / `plugin:hot-reload-notification`.
+ */
+export const PLUGIN_ENABLE_FAILED_EVENT = "plugin:enable-failed"
+
+export interface PluginEnableFailedEventDetail {
+  pluginId: string
+  /** Best-effort plugin display name (falls back to pluginId). */
+  pluginName: string
+  /** Short error message — the toast UI may wrap or truncate. */
+  errorMessage: string
+  /** Reason string passed to enablePlugin (e.g. "manual" / "startup"). */
+  reason: string
+}
+
 // =============================================================================
 // Plugin Manager Singleton + Factory (PR-E)
 // =============================================================================
@@ -1187,6 +1207,21 @@ export class PluginManager {
         },
         error
       )
+      // Toast UX (PR-A backlog). The manager can't reach
+      // `useTranslations()` directly from .ts code; we emit a typed
+      // CustomEvent that `PluginEnableFailureToaster` (React) listens
+      // for, translates via next-intl, and renders via sonner. SSR
+      // and Tauri-isolated worker contexts where `window` is missing
+      // are safe no-ops.
+      if (typeof window !== "undefined") {
+        const detail: PluginEnableFailedEventDetail = {
+          pluginId,
+          pluginName: plugin.manifest.name || pluginId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          reason,
+        }
+        window.dispatchEvent(new CustomEvent(PLUGIN_ENABLE_FAILED_EVENT, { detail }))
+      }
       throw new PluginEnableError(pluginId, error)
     }
   }

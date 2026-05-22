@@ -3170,6 +3170,26 @@
           "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
           "styleSamplesK": "Samples per send"
         },
+        "computerUseSubSettings": {
+          "requireConsent": {
+            "label": "Always ask before each call",
+            "description": "Force every driving Computer Use call to the consent overlay for this character, regardless of Settings → Automation → Permissions. Useful for new characters whose behaviour you're still learning."
+          },
+          "chatConsentMode": {
+            "label": "Chat-side prompt behaviour",
+            "description": "How the in-chat canUseTool modal behaves. Independent of the Rust gate — both can prompt.",
+            "options": {
+              "always-ask": "Always ask",
+              "session-grant": "Remember for session",
+              "auto": "Auto (Rust gate decides)"
+            }
+          },
+          "allowedToolIds": {
+            "label": "Allowed native tools",
+            "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",
+            "empty": "No native Anthropic tools registered yet — install the Computer Use plugin to expose computer / bash / text_editor."
+          }
+        },
         "sandbox": {
           "enable": {
             "label": "Sandbox Bash / Edit / Write",
@@ -5545,6 +5565,12 @@
     },
     "modalRoot": {
       "errorFallback": "Plugin modal failed to render. Check the console for details."
+    },
+    "enableFailure": {
+      "title": "Couldn't enable {pluginName}",
+      "description": "{pluginName} failed to enable: {errorMessage}",
+      "manualReason": "Plugin enable failed",
+      "retryHint": "Open the plugin settings to inspect the error and retry."
     },
     "consent": {
       "title": "Plugin requesting permission",
@@ -13922,6 +13948,14 @@
       "defaultTierDescription": "The tier applied when no per-surface override is set.",
       "perSurface": "Per-Surface Overrides",
       "perSurfaceDescription": "Each automation surface can override the default tier.",
+      "perPlugin": {
+        "title": "Per-Plugin Overrides",
+        "description": "Plugins that declare native:input or native:screen permissions can be granted a different tier than the catch-all Plugin surface. Useful for trusting one specific automation plugin without loosening every plugin's policy.",
+        "empty": "No installed plugin currently declares native:input. Install or enable a plugin (e.g. cognia-computer-use) to manage per-plugin overrides here.",
+        "rowOverridden": "Override: {tier}",
+        "rowInheriting": "Inherits the Plugin surface tier above.",
+        "clearOverride": "Clear"
+      },
       "surfaces": {
         "workflowDescription": "Visual workflow executor runs.",
         "computerUseDescription": "Anthropic-native computer-use tool calls.",

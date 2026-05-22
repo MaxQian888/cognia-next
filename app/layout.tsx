@@ -3,8 +3,10 @@
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import Script from "next/script"
 import { getLocale } from "next-intl/server"
 import { ThemeProvider } from "next-themes"
+import { BOOT_SCRIPT } from "@/lib/appearance/boot-script"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LocaleGate } from "@/components/providers/locale-gate"
@@ -17,6 +19,7 @@ import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
+import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
@@ -32,6 +35,7 @@ import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-
 import { ConsentOverlay } from "@/components/automation/consent-overlay"
 import { PluginModalRoot } from "@/components/plugins/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/plugin-consent-overlay"
+import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {
   BackgroundApplier,
@@ -81,6 +85,17 @@ export default async function RootLayout({
   const locale = await getLocale()
   return (
     <html lang={locale} suppressHydrationWarning>
+      <head>
+        {/* FOUC mitigation — applies a mirrored CSS-var snapshot from
+            localStorage before React hydrates so custom themes don't
+            flash the default palette on first paint. Owns CSS vars
+            only; next-themes still owns the `dark` class. */}
+        <Script
+          id="cognia-boot"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }}
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
@@ -98,6 +113,7 @@ export default async function RootLayout({
                     <SubscriptionInitializer />
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />
+                    <ComputerUseKillSwitchInitializer />
                     <ExternalAgentInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
@@ -147,6 +163,11 @@ export default async function RootLayout({
                     {/* Per-call consent overlay for tier-"confirm" plugin permissions. */}
                     {/* Listens for `plugin:consent-request` CustomEvents from the broker. */}
                     <PluginConsentOverlay />
+                    {/* Toast surface for plugin enable failures fired by
+                     * `manager.enablePlugin` rollback path. Translates +
+                     * renders so `lib/plugin/core/manager.ts` can stay
+                     * decoupled from next-intl. */}
+                    <PluginEnableFailureToaster />
                     <ExposeTestGlobals />
                     {/* Dev-only perf HUD. In production it returns null
                      * unless `localStorage.cogniaPerfHud === "1"`. */}
