@@ -10,6 +10,7 @@ import {
   SystemEvents,
   type BusEvent,
 } from "./message-bus"
+import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 
 describe("MessageBus", () => {
   let bus: MessageBus
@@ -21,6 +22,22 @@ describe("MessageBus", () => {
 
   afterEach(() => {
     bus.clear()
+  })
+
+  describe("history cap defaults", () => {
+    it("uses PLUGIN_MESSAGE_HISTORY_MAX as the default cap (parity with PluginIPC)", () => {
+      const tinyBus = new MessageBus({ maxHistory: 3 })
+      try {
+        for (let i = 0; i < 5; i += 1) {
+          tinyBus.emit("test-event", { data: i }, { type: "plugin", id: "plugin-a" })
+        }
+        expect(tinyBus.getHistory().length).toBe(3)
+      } finally {
+        tinyBus.clear()
+      }
+      // The constant guarantees ≥500 — sourced from the shared module.
+      expect(PLUGIN_MESSAGE_HISTORY_MAX).toBeGreaterThanOrEqual(500)
+    })
   })
 
   describe("Event Emission", () => {

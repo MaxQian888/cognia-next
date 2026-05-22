@@ -6,6 +6,7 @@
  */
 
 import { loggers } from "../core/logger"
+import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 
 // =============================================================================
 // Types
@@ -88,7 +89,10 @@ export class MessageBus {
 
   constructor(config: Partial<MessageBusConfig> = {}) {
     this.config = {
-      maxHistory: 500,
+      // PR-C: source the default cap from `constants.ts` so PluginIPC
+      // and MessageBus stay in lockstep. Tests / multi-tenant tweaks
+      // can still override via `config.maxHistory`.
+      maxHistory: PLUGIN_MESSAGE_HISTORY_MAX,
       enableLogging: false,
       enableReplay: true,
       replayWindow: 60000, // 1 minute

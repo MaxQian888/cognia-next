@@ -2,7 +2,24 @@
  * Tests for Plugin IPC
  */
 
-import { PluginIPC, getPluginIPC, resetPluginIPC, createIPCAPI } from "./ipc"
+import {
+  PluginIPC,
+  getPluginIPC,
+  resetPluginIPC,
+  createIPCAPI,
+  CircuitOpenError,
+  IPCAbortError,
+} from "./ipc"
+import { TimeoutError } from "@/lib/utils/with-timeout"
+import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const diagModule = require("../contracts/diagnostics-store") as {
+  recordSilentFailure: jest.Mock
+}
 
 describe("PluginIPC", () => {
   let ipc: PluginIPC
@@ -104,7 +121,7 @@ describe("PluginIPC", () => {
         greet: (name: unknown) => `Hello, ${name}!`,
       })
 
-      const result = await ipc.call<string>("plugin-b", "plugin-a", "greet", "World")
+      const result = await ipc.call<string>("plugin-b", "plugin-a", "greet", ["World"])
       expect(result).toBe("Hello, World!")
     })
 
@@ -115,7 +132,7 @@ describe("PluginIPC", () => {
         },
       })
 
-      const result = await ipc.call<string>("plugin-b", "plugin-a", "asyncGreet", "World")
+      const result = await ipc.call<string>("plugin-b", "plugin-a", "asyncGreet", ["World"])
       expect(result).toBe("Hello, World!")
     })
 
@@ -185,6 +202,171 @@ describe("PluginIPC", () => {
       expect(stats.totalExposedMethods).toBe(1)
     })
   })
+
+  describe("call timeout", () => {
+    it("rejects with TimeoutError when the handler outlasts the budget", async () => {
+      jest.useFakeTimers()
+      try {
+        ipc.expose("plugin-a", {
+          slow: async () => {
+            await new Promise((r) => setTimeout(r, 5000))
+            return "late"
+          },
+        })
+        const pending = ipc.call("plugin-b", "plugin-a", "slow", [], { timeoutMs: 100 })
+        jest.advanceTimersByTime(100)
+        await expect(pending).rejects.toBeInstanceOf(TimeoutError)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("resolves normally when the handler beats the budget", async () => {
+      ipc.expose("plugin-a", {
+        fast: async () => "ok",
+      })
+      await expect(ipc.call("plugin-b", "plugin-a", "fast", [], { timeoutMs: 1000 })).resolves.toBe(
+        "ok"
+      )
+    })
+
+    it("disables the timer when timeoutMs is non-positive", async () => {
+      ipc.expose("plugin-a", {
+        echo: (value: unknown) => value,
+      })
+      await expect(
+        ipc.call("plugin-b", "plugin-a", "echo", ["passthrough"], { timeoutMs: 0 })
+      ).resolves.toBe("passthrough")
+    })
+  })
+
+  describe("call AbortSignal", () => {
+    it("rejects with IPCAbortError when the signal is already aborted", async () => {
+      ipc.expose("plugin-a", { ping: async () => "pong" })
+      const controller = new AbortController()
+      controller.abort()
+      await expect(
+        ipc.call("plugin-b", "plugin-a", "ping", [], { signal: controller.signal })
+      ).rejects.toBeInstanceOf(IPCAbortError)
+    })
+
+    it("rejects mid-flight when the signal fires during the call", async () => {
+      ipc.expose("plugin-a", {
+        slow: async () => {
+          await new Promise((r) => setTimeout(r, 1000))
+          return "late"
+        },
+      })
+      const controller = new AbortController()
+      const pending = ipc.call("plugin-b", "plugin-a", "slow", [], { signal: controller.signal })
+      // Fire abort on the next tick so the listener is wired before we cancel.
+      setTimeout(() => controller.abort(), 0)
+      await expect(pending).rejects.toBeInstanceOf(IPCAbortError)
+    })
+
+    it("does not charge the breaker for caller-aborted calls", async () => {
+      ipc.expose("plugin-a", {
+        slow: async () => {
+          await new Promise((r) => setTimeout(r, 1000))
+          return "late"
+        },
+      })
+      const controller = new AbortController()
+      controller.abort()
+      for (let i = 0; i < 10; i += 1) {
+        await ipc
+          .call("plugin-b", "plugin-a", "slow", [], { signal: controller.signal })
+          .catch(() => {})
+      }
+      // Breaker should stay closed because aborts don't recordFailure.
+      expect(ipc.getBreakerState("plugin-a", "slow")).toBe("closed")
+    })
+  })
+
+  describe("circuit breaker", () => {
+    beforeEach(() => {
+      diagModule.recordSilentFailure.mockReset()
+    })
+
+    it("trips after enough consecutive failures and short-circuits subsequent calls", async () => {
+      // Tighten the breaker so the test stays fast.
+      ipc.expose("plugin-a", {
+        flaky: async () => {
+          throw new Error("provider error")
+        },
+      })
+      // Default config: needs ≥5 events within 30s and ≥50% failure rate.
+      // We push 5 failures to flip the breaker.
+      for (let i = 0; i < 5; i += 1) {
+        await ipc.call("plugin-b", "plugin-a", "flaky").catch(() => {})
+      }
+      expect(ipc.getBreakerState("plugin-a", "flaky")).toBe("open")
+      // Next call short-circuits without invoking the handler.
+      await expect(ipc.call("plugin-b", "plugin-a", "flaky")).rejects.toBeInstanceOf(
+        CircuitOpenError
+      )
+    })
+
+    it("emits one recordSilentFailure on the closed→open transition", async () => {
+      ipc.expose("plugin-a", {
+        flaky: async () => {
+          throw new Error("provider error")
+        },
+      })
+      for (let i = 0; i < 5; i += 1) {
+        await ipc.call("plugin-b", "plugin-a", "flaky").catch(() => {})
+      }
+      // The trip itself is one call; subsequent rejections shouldn't
+      // re-emit on the same `open` state.
+      await ipc.call("plugin-b", "plugin-a", "flaky").catch(() => {})
+      await ipc.call("plugin-b", "plugin-a", "flaky").catch(() => {})
+      expect(
+        diagModule.recordSilentFailure.mock.calls.filter(
+          ([, info]) => (info as { site: string }).site === "ipc.circuit-open"
+        )
+      ).toHaveLength(1)
+    })
+
+    it("isolates breakers per (pluginId, methodName)", async () => {
+      ipc.expose("plugin-a", {
+        flaky: async () => {
+          throw new Error("provider error")
+        },
+        healthy: async () => "ok",
+      })
+      for (let i = 0; i < 5; i += 1) {
+        await ipc.call("plugin-b", "plugin-a", "flaky").catch(() => {})
+      }
+      expect(ipc.getBreakerState("plugin-a", "flaky")).toBe("open")
+      // Healthy endpoint untouched.
+      await expect(ipc.call("plugin-b", "plugin-a", "healthy")).resolves.toBe("ok")
+      expect(ipc.getBreakerState("plugin-a", "healthy")).toBe("closed")
+    })
+  })
+
+  describe("Message History (unified cap)", () => {
+    it("defaults history cap to PLUGIN_MESSAGE_HISTORY_MAX", async () => {
+      // Push more than the legacy 100-item cap and confirm history retains 101.
+      for (let i = 0; i < 101; i += 1) {
+        await ipc.send("plugin-a", "plugin-b", "channel", { data: i })
+      }
+      const history = ipc.getMessageHistory()
+      expect(history.length).toBe(101)
+      expect(PLUGIN_MESSAGE_HISTORY_MAX).toBeGreaterThanOrEqual(500)
+    })
+
+    it("honours an explicit per-instance maxHistory override", async () => {
+      const tinyIpc = new PluginIPC({ maxHistory: 3 })
+      try {
+        for (let i = 0; i < 10; i += 1) {
+          await tinyIpc.send("plugin-a", "plugin-b", "channel", { data: i })
+        }
+        expect(tinyIpc.getMessageHistory().length).toBe(3)
+      } finally {
+        tinyIpc.clear()
+      }
+    })
+  })
 })
 
 describe("createIPCAPI", () => {
@@ -229,5 +411,35 @@ describe("Singleton", () => {
     resetPluginIPC()
     const instance2 = getPluginIPC()
     expect(instance1).not.toBe(instance2)
+  })
+})
+
+describe("createIPCAPI new options", () => {
+  beforeEach(() => {
+    resetPluginIPC()
+  })
+
+  it("forwards args + options to the underlying PluginIPC.call", async () => {
+    const api = createIPCAPI("plugin-a")
+    const ipc = getPluginIPC()
+    ipc.expose("plugin-b", { add: (a: unknown, b: unknown) => (a as number) + (b as number) })
+
+    const result = await api.call<number>("plugin-b", "add", [2, 3])
+    expect(result).toBe(5)
+  })
+
+  it("forwards AbortSignal through the API wrapper", async () => {
+    const api = createIPCAPI("plugin-a")
+    const ipc = getPluginIPC()
+    ipc.expose("plugin-b", {
+      slow: async () => {
+        await new Promise((r) => setTimeout(r, 1000))
+      },
+    })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(api.call("plugin-b", "slow", [], { signal: controller.signal })).rejects.toThrow(
+      /aborted/i
+    )
   })
 })
