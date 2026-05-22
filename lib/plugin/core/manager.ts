@@ -69,19 +69,21 @@ import {
   recordSilentFailure,
 } from "@/lib/plugin/contracts/diagnostics-store"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
+// PR-D — overlay-registry capabilities (skills / mcp-server-preset /
+// native-anthropic-tool / external-agent-preset) now flow through the
+// codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
+// commands, themes, lsp, custom-theme cleanup, message-part renderers,
+// extensions, slash commands, a2ui components/templates) stay on
+// their existing hand-rolled branches because their per-entry logic
+// doesn't fit the uniform register/unregister contract.
 import {
-  registerMcpServerPreset,
-  unregisterMcpServerPresetsByPlugin,
-} from "@/lib/plugin/registries/mcp-server-preset-registry"
-import {
-  registerNativeAnthropicTool,
-  unregisterNativeAnthropicToolsByPlugin,
-} from "@/lib/plugin/registries/native-anthropic-tool-registry"
-import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
-import {
-  registerPreset as registerExternalAgentPresetOverlay,
-  unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
-} from "@/lib/ai/agent/external/presets"
+  OVERLAY_REGISTRY_CAPABILITIES,
+  OVERLAY_REGISTRY_CAPABILITY_KEYS,
+} from "@/lib/plugin/contracts/capability-bridge-map"
+// Skill detach still calls unregisterSkillsByPlugin directly after the
+// per-character cleanup hook; the map's bulk unregister fires for the
+// other three capabilities via the disable loop.
+import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
 
@@ -1911,40 +1913,34 @@ export class PluginManager {
       }
     }
 
-    // M1·T5 — Plugin-first Computer Use capability contributions. Each
-    // declarative manifest array writes into the matching §A-3 overlay
-    // registry, tagged with `pluginId` so bulk cleanup in
-    // `unregisterPluginContributions` can drop everything in one call.
-    // Failures are isolated per-entry so a single malformed def can't block
-    // the rest of the plugin's contributions.
-    if (plugin.manifest.mcpServerPresets?.length) {
-      for (const def of plugin.manifest.mcpServerPresets) {
+    // M1·T5 — Plugin-first Computer Use capability contributions.
+    //
+    // PR-D consolidated the 4 overlay-registry capabilities
+    // (skills / mcp-server-preset / native-anthropic-tool /
+    // external-agent-preset) into `OVERLAY_REGISTRY_CAPABILITIES`.
+    // Each entry's per-entry register failures stay isolated so a
+    // single malformed def can't block the rest of the plugin's
+    // contributions — matching the original hand-rolled behaviour.
+    for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
+      const descriptor = OVERLAY_REGISTRY_CAPABILITIES[cap]
+      const entries = plugin.manifest[descriptor.manifestField] as
+        | ReadonlyArray<{ id: string }>
+        | undefined
+      if (!entries?.length) continue
+      for (const entry of entries) {
         try {
-          registerMcpServerPreset(def.id, def, { pluginId })
+          descriptor.registerEntry(entry, { pluginId })
         } catch (err) {
-          loggers.manager.warn(
-            `[plugin:${pluginId}] failed to register MCP server preset ${def.id}:`,
-            err
-          )
+          loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err)
         }
       }
     }
-    if (plugin.manifest.nativeAnthropicTools?.length) {
-      for (const def of plugin.manifest.nativeAnthropicTools) {
-        try {
-          registerNativeAnthropicTool(def.id, def, { pluginId })
-        } catch (err) {
-          loggers.manager.warn(
-            `[plugin:${pluginId}] failed to register native Anthropic tool ${def.id}:`,
-            err
-          )
-        }
-      }
-    }
-    // Phase B of the LSP reuse work — `manifest.lspServers[]`. The
-    // registry awaits the binary-policy gate per entry and spawns each
-    // server through the injected client adapter. Failures don't abort
-    // plugin enable; they surface in Settings → Language Servers.
+
+    // Phase B of the LSP reuse work — `manifest.lspServers[]`. Kept
+    // outside the map because the registry awaits the binary-policy
+    // gate per entry and spawns each server through an injected
+    // client adapter — bespoke wiring that doesn't fit the uniform
+    // overlay-registry shape.
     if (plugin.manifest.lspServers?.length) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1969,31 +1965,14 @@ export class PluginManager {
         )
       }
     }
+
+    // Skills carry an additional post-enable hook: attach skill ids
+    // to opted-in characters' `pluginSkillIds`. The map's
+    // `registerEntry` only handles the registry write; this hook
+    // mirrors the disable-side `detachPluginSkillsFromCharacters`
+    // call. Idempotent on duplicate enables.
     if (plugin.manifest.skills?.length) {
-      for (const def of plugin.manifest.skills) {
-        try {
-          registerSkill(def.id, def, { pluginId })
-        } catch (err) {
-          loggers.manager.warn(`[plugin:${pluginId}] failed to register skill ${def.id}:`, err)
-        }
-      }
-      // Pre-attach plugin skills to characters that opted in via
-      // `attachToCharacterIds`. Idempotent — duplicates are deduped per
-      // character row. Errors are warned but never block plugin enable.
       await this.attachPluginSkillsToCharacters(pluginId, plugin.manifest.skills)
-    }
-    if (plugin.manifest.externalAgentPresets?.length) {
-      for (const def of plugin.manifest.externalAgentPresets) {
-        try {
-          const { id, ...config } = def
-          registerExternalAgentPresetOverlay(id, config, { pluginId })
-        } catch (err) {
-          loggers.manager.warn(
-            `[plugin:${pluginId}] failed to register external-agent preset ${def.id}:`,
-            err
-          )
-        }
-      }
     }
   }
 
@@ -2122,11 +2101,14 @@ export class PluginManager {
     await this.unregisterPluginSlashCommands(pluginId)
 
     // M1·T5 — Bulk-drop Plugin-first Computer Use overlay contributions.
-    // Each registry's `unregister*ByPlugin` is idempotent and returns the
-    // count removed; we don't act on the count here, but a future
-    // diagnostic surface could surface it.
-    unregisterMcpServerPresetsByPlugin(pluginId)
-    unregisterNativeAnthropicToolsByPlugin(pluginId)
+    // PR-D — routed through `OVERLAY_REGISTRY_CAPABILITIES` so adding
+    // a new uniform-shape capability picks up disable cleanup for free.
+    // Skills are intentionally handled below the
+    // `detachPluginSkillsFromCharacters` hook to preserve ordering.
+    for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
+      if (cap === "skills") continue
+      OVERLAY_REGISTRY_CAPABILITIES[cap].unregisterAllByPlugin(pluginId)
+    }
     // Tear down any LSP servers this plugin contributed. The registry's
     // adapter handles the actual sidecar stop; failures are logged but
     // never block the disable flow.
@@ -2147,6 +2129,8 @@ export class PluginManager {
     if (plugin.manifest.skills?.length) {
       await this.detachPluginSkillsFromCharacters(plugin.manifest.skills)
     }
+    // Skill bulk-drop happens after the per-character detach hook so
+    // a re-enable starts from a fully clean slate (PR-D ordering).
     unregisterSkillsByPlugin(pluginId)
     // Bulk-drop telemetry rows for this plugin's skills so usage counters
     // don't outlive the plugin.
@@ -2156,7 +2140,8 @@ export class PluginManager {
     } catch (err) {
       loggers.manager.warn(`[plugin:${pluginId}] failed to purge skill usage rows:`, err)
     }
-    unregisterExternalAgentPresetsByPlugin(pluginId)
+    // External-agent presets get dropped via the
+    // OVERLAY_REGISTRY_CAPABILITIES loop above (PR-D).
 
     // System-tray cleanup — drops any items the plugin contributed via
     // `ctx.tray.register(...)`. Mirrors the slash-command teardown above so
