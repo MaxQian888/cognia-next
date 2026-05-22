@@ -82,6 +82,8 @@ export type PluginCapability =
   | "fonts" // Contributes font families bundled in plugin assets (@font-face injection)
   | "wallpapers" // Contributes built-in wallpaper entries (bundled images/gradients/colors)
   | "character-pack" // Bundles ready-to-use characters into a portable pack (ADR-0030)
+  | "subagent" // Contributes Claude SDK subagents callable by teams + workflow editor
+  | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
 
 /**
  * Plugin status in the lifecycle
@@ -494,6 +496,25 @@ export interface PluginManifest {
    * lifecycle. See `lib/plugin/registries/character-pack-registry.ts`.
    */
   characterPacks?: PluginCharacterPackDef[]
+  /**
+   * Subagents contributed by this plugin (`subagent` capability). Each entry
+   * mirrors the Claude Code SDK `AgentDefinition` shape and is registered
+   * into `subagent-registry` on enable. Teams and the workflow editor union
+   * the overlay with the host's 4 bundled subagents via
+   * `lib/claude/agents/subagents/index.ts:resolveAllSubagents`. Plugin
+   * subagent names are namespaced as `<pluginId>:<id>` at projection time so
+   * they never collide with built-in dispatcher names.
+   */
+  subagents?: import("./plugin-subagent").PluginSubagentDef[]
+  /**
+   * Agent team templates contributed by this plugin (`agent-team-template`
+   * capability). Each template carries a roster of teammates, optional
+   * pre-seeded tasks, default config overrides, and a `requires` block
+   * declaring cross-capability dependencies. Missing dependencies become
+   * non-blocking warnings surfaced as disabled badges in the team picker
+   * (mirrors the ADR-0030 character-pack `requires` pattern).
+   */
+  agentTeamTemplates?: import("./plugin-agent-team-template").PluginAgentTeamTemplateDef[]
 
   // Visual Workflows (ADR 0017)
   /**
@@ -1266,6 +1287,108 @@ export interface PluginHooks {
   ) => void
   /** Called when a scheduled task fails */
   onScheduledTaskError?: (taskId: string, executionId: string, error: Error) => void
+
+  // Agent-Team hooks — dispatched by lib/ai/agent/agent-team-runtime.ts and
+  // supporting modules. Complement the generic onAgent* family with team
+  // context (teamId / runId) plus governance + consensus + shared-memory +
+  // delegation lifecycle events.
+  onTeamStart?: (payload: PluginTeamStartPayload) => void
+  onTeamPlanReady?: (payload: PluginTeamPlanReadyPayload) => void
+  onTeammateClaim?: (payload: PluginTeammateClaimPayload) => void
+  onTeammateRelease?: (payload: PluginTeammateReleasePayload) => void
+  onTeamBudgetWarn?: (payload: PluginTeamBudgetWarnPayload) => void
+  onTeamComplete?: (payload: PluginTeamCompletePayload) => void
+  onConsensusOpened?: (payload: PluginConsensusOpenedPayload) => void
+  onConsensusVoted?: (payload: PluginConsensusVotedPayload) => void
+  onConsensusResolved?: (payload: PluginConsensusResolvedPayload) => void
+  onSharedMemoryWrite?: (payload: PluginSharedMemoryWritePayload) => void
+  onSharedMemoryDelete?: (payload: PluginSharedMemoryDeletePayload) => void
+  onTeamDelegationStart?: (payload: PluginTeamDelegationStartPayload) => void
+  onTeamDelegationComplete?: (payload: PluginTeamDelegationCompletePayload) => void
+}
+
+// =============================================================================
+// Agent-Team hook payloads
+// =============================================================================
+
+/** Common context every team hook carries. */
+export interface PluginTeamHookContext {
+  teamId: string
+  runId: string
+}
+
+export interface PluginTeamStartPayload extends PluginTeamHookContext {
+  /** Lightweight roster snapshot — full teammate objects stay host-side. */
+  workers: Array<{ id: string; name: string; role: "lead" | "teammate" }>
+  taskCount: number
+}
+
+export interface PluginTeamPlanReadyPayload extends PluginTeamHookContext {
+  /** The raw planning output the dispatcher will execute against. */
+  plan: string
+}
+
+export interface PluginTeammateClaimPayload extends PluginTeamHookContext {
+  teammateId: string
+  taskId: string
+}
+
+export interface PluginTeammateReleasePayload extends PluginTeamHookContext {
+  teammateId: string
+  taskId: string
+  result: "success" | "failure"
+  error?: string
+}
+
+export interface PluginTeamBudgetWarnPayload extends PluginTeamHookContext {
+  level: "warning" | "critical"
+  used: number
+  limit: number
+}
+
+export interface PluginTeamCompletePayload extends PluginTeamHookContext {
+  status: "completed" | "failed" | "cancelled"
+  reason?: string
+}
+
+export interface PluginConsensusOpenedPayload extends Omit<PluginTeamHookContext, "runId"> {
+  consensusId: string
+  question: string
+  options: string[]
+}
+
+export interface PluginConsensusVotedPayload extends Omit<PluginTeamHookContext, "runId"> {
+  consensusId: string
+  voterId: string
+  optionIndex: number
+}
+
+export interface PluginConsensusResolvedPayload extends Omit<PluginTeamHookContext, "runId"> {
+  consensusId: string
+  winningOption: number
+  summary?: string
+}
+
+export interface PluginSharedMemoryWritePayload extends Omit<PluginTeamHookContext, "runId"> {
+  key: string
+  writerId: string
+}
+
+export interface PluginSharedMemoryDeletePayload extends Omit<PluginTeamHookContext, "runId"> {
+  key: string
+}
+
+export interface PluginTeamDelegationStartPayload {
+  delegationId: string
+  sourceTeamId: string
+  sourceTaskId: string
+  targetType: "sub_agent" | "team" | "background"
+  targetId?: string
+}
+
+export interface PluginTeamDelegationCompletePayload {
+  delegationId: string
+  status: "completed" | "failed" | "cancelled" | "timeout"
 }
 
 export interface PluginA2UIAction {

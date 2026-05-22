@@ -9,6 +9,19 @@ import {
   isOverlayCharacterId,
   listAllPackCharacters,
 } from "@/lib/plugin/registries/character-pack-registry"
+import {
+  buildPristineSnapshot,
+  diffPackUpdate,
+  type PackUpdateDiff,
+} from "@/lib/plugin/character-pack/diff-pack-update"
+// ADR-0030 Amendment / v50 — built-in characters now live in a first-party
+// plugin. The Dexie seed reuses the same character defs to keep the
+// pre-plugin-boot first-launch rows in sync with the overlay.
+import {
+  BUILTIN_LEGACY_ID_TO_LOCAL_ID,
+  BUILTIN_PACK,
+  BUILTIN_PLUGIN_ID,
+} from "@/plugins/cognia-builtin-characters/src/index"
 import { getDb } from "./schema"
 
 function newId() {
@@ -63,6 +76,13 @@ export function projectOverlayCharacter(
     isBuiltIn: false,
     sourcePluginId: pluginId,
     sourcePackId: pack.id,
+    // v2 projection — transparent pass-through. UI consumers read these
+    // off the projected row instead of round-tripping back to the
+    // overlay registry.
+    avatarImage: ch.avatarImage,
+    persona: ch.persona,
+    voiceProfile: ch.voiceProfile,
+    availableOnPlatforms: ch.availableOnPlatforms,
     createdAt: 0,
     updatedAt: 0,
   }
@@ -73,13 +93,28 @@ export async function listCharacters(): Promise<Character[]> {
   const overlay = listAllPackCharacters().map(({ pack, character, pluginId }) =>
     projectOverlayCharacter(pack, character, pluginId)
   )
-  // Dexie wins by id collision (the `cognia-pack:` namespace makes this a
-  // defensive belt-and-braces — collisions are physically impossible under
-  // the design, but if a malicious manifest somehow registered under a
-  // `char_*` id, the persisted Dexie row would still take precedence).
+  // Two dedupe rules — both keep the persisted Dexie row in front of the
+  // overlay row when the two represent the same character:
+  //   1. id-collision (defensive belt-and-braces — physically impossible
+  //      under the `cognia-pack:` namespace, but cheap to enforce).
+  //   2. clone-hides-overlay (v49) — a Dexie row whose
+  //      `clonedFromPackCharacterId` points at an overlay synthetic id
+  //      means "this user already cloned that overlay into their library".
+  //      Showing both would duplicate the persona in the picker. The Dexie
+  //      row wins because it can carry user edits + Apply-Update history.
   const byId = new Map<string, Character>()
-  for (const row of dexie) byId.set(row.id, row)
-  for (const row of overlay) if (!byId.has(row.id)) byId.set(row.id, row)
+  const hiddenOverlayIds = new Set<string>()
+  for (const row of dexie) {
+    byId.set(row.id, row)
+    if (row.clonedFromPackCharacterId) {
+      hiddenOverlayIds.add(row.clonedFromPackCharacterId)
+    }
+  }
+  for (const row of overlay) {
+    if (byId.has(row.id)) continue
+    if (hiddenOverlayIds.has(row.id)) continue
+    byId.set(row.id, row)
+  }
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -157,6 +192,11 @@ export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
       | "sourcePackId"
       | "clonedFromPackCharacterId"
       | "packVersionAtClone"
+      | "pristineSnapshot"
+      | "avatarImage"
+      | "persona"
+      | "voiceProfile"
+      | "availableOnPlatforms"
     >
   >
 
@@ -185,6 +225,11 @@ export async function createCharacter(draft: CharacterDraft): Promise<Character>
     sourcePackId: draft.sourcePackId,
     clonedFromPackCharacterId: draft.clonedFromPackCharacterId,
     packVersionAtClone: draft.packVersionAtClone,
+    pristineSnapshot: draft.pristineSnapshot,
+    avatarImage: draft.avatarImage,
+    persona: draft.persona,
+    voiceProfile: draft.voiceProfile,
+    availableOnPlatforms: draft.availableOnPlatforms,
     createdAt: now,
     updatedAt: now,
   }
@@ -241,6 +286,24 @@ export async function duplicateCharacter(id: string): Promise<Character> {
     if (!source) throw new Error(`Character ${id} not found`)
   }
 
+  // Capture a pristineSnapshot of the pack-managed fields so a future
+  // Apply Update can tell user edits from outdated copies (ADR-0030 v49).
+  // Source resolution order:
+  //   1. Overlay source — snapshot the current overlay character verbatim.
+  //   2. Dexie source whose `clonedFromPackCharacterId` resolves — snapshot
+  //      the live overlay so the duplicate's baseline matches the latest
+  //      pack version (this is what makes "Apply Update" sensible for
+  //      copies-of-built-ins after a pack rev).
+  //   3. Otherwise — inherit the source's existing snapshot (chained
+  //      duplicates of user characters keep their original baseline).
+  let overlayChar: PluginCharacterDef | undefined
+  if (pack) {
+    overlayChar = getPackCharacterByRuntimeId(id)?.character
+  } else if (source.clonedFromPackCharacterId) {
+    overlayChar = getPackCharacterByRuntimeId(source.clonedFromPackCharacterId)?.character
+  }
+  const nextSnapshot = overlayChar ? buildPristineSnapshot(overlayChar) : source.pristineSnapshot
+
   const now = Date.now()
   const copy: Character = {
     ...source,
@@ -254,6 +317,7 @@ export async function duplicateCharacter(id: string): Promise<Character> {
     sourcePackId: pack ? pack.id : source.sourcePackId,
     clonedFromPackCharacterId: pack ? id : source.clonedFromPackCharacterId,
     packVersionAtClone: pack ? pack.version : source.packVersionAtClone,
+    pristineSnapshot: nextSnapshot,
     createdAt: now,
     updatedAt: now,
   }
@@ -287,91 +351,207 @@ export async function dismissPackUpdate(
 }
 
 /**
- * Idempotently insert built-in characters. Identified by stable ids so repeat
- * calls never duplicate or overwrite user edits to anything that doesn't match
- * a built-in id.
+ * Result returned by {@link applyPackUpdate}. `undefined` means the update
+ * could not run — either the row isn't a clone, the overlay pack is no
+ * longer registered, or the row's `clonedFromPackCharacterId` doesn't
+ * resolve. Callers should treat undefined as "no-op, surface a toast".
+ */
+export interface ApplyPackUpdateResult {
+  /** Field names that were overwritten on the row. */
+  overwrittenFields: string[]
+  /** Field names the user had edited and which were therefore preserved. */
+  preservedFields: string[]
+  /** New `packVersionAtClone` value persisted on the row. */
+  packVersion: string
+  /** True when the row lacked a pristineSnapshot and we overwrote-all. */
+  noBaseline: boolean
+}
+
+/**
+ * Apply an "Update available" update to a single cloned character row
+ * (ADR-0030 v49). Pulls the current overlay character, diffs against the
+ * row's pristineSnapshot, writes back only the fields the user hasn't
+ * touched, and snaps the row's `packVersionAtClone` + `pristineSnapshot`
+ * forward so the badge clears.
+ *
+ * Returns `undefined` when the row isn't a clone (no `sourcePluginId` /
+ * `sourcePackId` / `clonedFromPackCharacterId`) or when the overlay
+ * pack is no longer registered. Callers (the Settings UI) treat
+ * `undefined` as "nothing to do" and avoid showing a toast.
+ */
+export async function applyPackUpdate(
+  characterId: string
+): Promise<ApplyPackUpdateResult | undefined> {
+  const row = await getDb().characters.get(characterId)
+  if (!row) return undefined
+  if (!row.sourcePluginId || !row.sourcePackId || !row.clonedFromPackCharacterId) {
+    return undefined
+  }
+  const lookup = getPackCharacterByRuntimeId(row.clonedFromPackCharacterId)
+  if (!lookup) return undefined
+  const diff = diffPackUpdate(row, lookup.character)
+  await writeAppliedUpdate(row.id, diff, lookup.pack.version)
+  return {
+    overwrittenFields: diff.willOverwrite.map((c) => c.field),
+    preservedFields: diff.preserved.map((c) => c.field),
+    packVersion: lookup.pack.version,
+    noBaseline: diff.noBaseline,
+  }
+}
+
+/**
+ * Compute a single-row diff without touching Dexie — used by the dialog
+ * preview to render before/after columns. Returns undefined when the
+ * row isn't a clone or the overlay pack is gone, mirroring
+ * {@link applyPackUpdate}'s no-op semantics.
+ */
+export async function previewPackUpdate(
+  characterId: string
+): Promise<{ diff: PackUpdateDiff; packVersion: string } | undefined> {
+  const row = await getDb().characters.get(characterId)
+  if (!row || !row.sourcePluginId || !row.sourcePackId || !row.clonedFromPackCharacterId) {
+    return undefined
+  }
+  const lookup = getPackCharacterByRuntimeId(row.clonedFromPackCharacterId)
+  if (!lookup) return undefined
+  return { diff: diffPackUpdate(row, lookup.character), packVersion: lookup.pack.version }
+}
+
+/**
+ * Batch variant — apply updates to every row in Dexie that clones from
+ * the given pack. Skips rows already at the live pack version and rows
+ * whose overlay character has vanished from the pack.
+ */
+export async function applyPackUpdateForPack(
+  sourcePluginId: string,
+  sourcePackId: string
+): Promise<ApplyPackUpdateResult[]> {
+  const rows = await getDb().characters.toArray()
+  const clones = rows.filter(
+    (r) => r.sourcePluginId === sourcePluginId && r.sourcePackId === sourcePackId
+  )
+  const results: ApplyPackUpdateResult[] = []
+  for (const row of clones) {
+    const result = await applyPackUpdate(row.id)
+    if (result) results.push(result)
+  }
+  return results
+}
+
+/**
+ * Helper used by both single + batch apply paths. Builds the patch from a
+ * pre-computed diff and persists it with a fresh `packVersionAtClone` +
+ * snapshot. Kept private so the only externally callable forms are the
+ * id-driven {@link applyPackUpdate} / {@link applyPackUpdateForPack}.
+ */
+async function writeAppliedUpdate(
+  id: string,
+  diff: PackUpdateDiff,
+  packVersion: string
+): Promise<void> {
+  // Dexie's `update` ignores undefined-valued keys; we need to actually
+  // delete those keys for the "overlay dropped this field" case. Use
+  // `modify` (typed as Character) with a cast to a mutable record so the
+  // `delete row[field]` path satisfies TypeScript without losing the
+  // structural type at the call site.
+  await getDb()
+    .characters.where("id")
+    .equals(id)
+    .modify((obj) => {
+      const row = obj as unknown as Record<string, unknown>
+      for (const [field, value] of Object.entries(diff.overwrites)) {
+        if (value === undefined) {
+          delete row[field]
+        } else {
+          row[field] = value
+        }
+      }
+      row.pristineSnapshot = diff.nextSnapshot
+      row.packVersionAtClone = packVersion
+      row.updatedAt = Date.now()
+    })
+}
+
+/**
+ * Idempotently insert built-in characters (v50 + ADR-0030 Amendment).
+ *
+ * Pre-v50, this function hard-coded six character rows into Dexie. v50
+ * moves the canonical definitions into the
+ * `cognia-builtin-characters` first-party plugin and tags the legacy
+ * `char_builtin_*` rows with attribution to the new overlay character.
+ * Surviving callers (`lib/db/seed.ts:seedBuiltIns`) get the same
+ * guarantee: after this resolves, six built-in rows exist in Dexie
+ * with stable ids, `isBuiltIn: true`, and matching pack attribution.
+ *
+ * Why we still write to Dexie at all (rather than fully delegating to
+ * the overlay): on first launch the plugin manager has not booted yet,
+ * so the overlay registry is empty. Persisting the six rows means the
+ * picker is populated even before plugin activation completes. After
+ * the plugin enables, the dedupe rule in `listCharacters` hides the
+ * overlay copies because every row's `clonedFromPackCharacterId` points
+ * back at them.
  */
 export async function seedBuiltInCharacters(): Promise<void> {
   const db = getDb()
   const now = Date.now()
-  const builtIns: Character[] = [
-    {
-      id: "char_builtin_coding",
-      name: "Coding Assistant",
-      description: "Pragmatic engineer. Ships small, tested changes; explains tradeoffs.",
-      avatarColor: "oklch(0.65 0.18 245)",
-      avatarEmoji: "💻",
-      systemPrompt:
-        "You are a senior software engineer pairing with the user. Prefer minimal, tested changes over sweeping rewrites. When you're uncertain, say so. Always show the file path and a short rationale alongside any code you produce.",
+  const charsByLocalId = new Map<string, PluginCharacterDef>(
+    BUILTIN_PACK.characters.map((c) => [c.localId, c])
+  )
+  const legacyIds = Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID)
+  const existing = await db.characters.bulkGet(legacyIds)
+  const existingById = new Map<string, Character | undefined>(
+    legacyIds.map((id, i) => [id, existing[i]])
+  )
+
+  const toInsert: Character[] = []
+  for (const [legacyId, localId] of Object.entries(BUILTIN_LEGACY_ID_TO_LOCAL_ID)) {
+    if (existingById.get(legacyId)) continue
+    const def = charsByLocalId.get(localId)
+    if (!def) continue
+    const runtimeId = `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
+    // Prefer the live overlay snapshot when the plugin is already up;
+    // otherwise build the snapshot from the static pack definition so
+    // first-launch rows still have a baseline for Apply Update.
+    const overlayChar = getPackCharacterByRuntimeId(runtimeId)?.character ?? def
+    toInsert.push({
+      id: legacyId,
+      name: def.name,
+      description: def.description,
+      avatarColor: def.avatarColor,
+      avatarEmoji: def.avatarEmoji,
+      systemPrompt: def.systemPrompt,
+      permissionMode: def.permissionMode,
       isBuiltIn: true,
+      sourcePluginId: BUILTIN_PLUGIN_ID,
+      sourcePackId: BUILTIN_PACK.id,
+      clonedFromPackCharacterId: runtimeId,
+      packVersionAtClone: BUILTIN_PACK.version,
+      pristineSnapshot: buildPristineSnapshot(overlayChar),
       createdAt: now,
       updatedAt: now,
-    },
-    {
-      id: "char_builtin_writer",
-      name: "Writing Editor",
-      description: "Tightens prose without changing voice. Flags vague claims.",
-      avatarColor: "oklch(0.7 0.15 30)",
-      avatarEmoji: "✍️",
-      systemPrompt:
-        "You are a precise editor. Tighten the user's writing without changing its voice. Flag vague claims, hedging, and unsupported assertions. Offer two alternatives for any line you rewrite, and explain the difference.",
-      isBuiltIn: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: "char_builtin_research",
-      name: "Research Analyst",
-      description: "Structures questions, weighs evidence, surfaces unknowns.",
-      avatarColor: "oklch(0.7 0.13 150)",
-      avatarEmoji: "🔎",
-      systemPrompt:
-        "You are a research analyst. For every question, restate the underlying claim, list the evidence you'd want to see, and identify the strongest counter-argument. Distinguish what you know from what you're inferring.",
-      isBuiltIn: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: "char_builtin_brainstorm",
-      name: "Brainstorm Buddy",
-      description: "Generates wide-ranging options, then narrows.",
-      avatarColor: "oklch(0.78 0.16 90)",
-      avatarEmoji: "💡",
-      systemPrompt:
-        "You are a generative brainstorming partner. First produce a wide list of options without filtering. Then group them and identify the two or three most promising directions, with the tradeoff for each.",
-      isBuiltIn: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: "char_builtin_translator",
-      name: "Translator",
-      description: "Translates between languages while preserving register and intent.",
-      avatarColor: "oklch(0.7 0.14 320)",
-      avatarEmoji: "🌐",
-      systemPrompt:
-        "You are a careful translator. Preserve the source's register, idiom, and intent rather than rendering word-for-word. When a phrase has multiple plausible translations, list the alternatives and explain when each fits.",
-      isBuiltIn: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: "char_builtin_goal_tracker",
-      name: "Goal Tracker",
-      description:
-        "Outcome-driven agent. Pairs with `/goal` to break a fuzzy intent into concrete next steps and self-continues until done.",
-      avatarColor: "oklch(0.72 0.16 200)",
-      avatarEmoji: "🎯",
-      systemPrompt:
-        "You are an outcome-driven agent. When the user sets a goal via `/goal`, your default mode is to take concrete steps toward it without asking permission for every decision. Be proactive: pick a first step, do it, report what happened, and decide the next step. Never restate the goal — act on it. When you genuinely cannot proceed without the user, ask one specific question and stop. The judge will treat a clear blocked-with-ask as 'done', so you can pause the loop cleanly when you need input.",
-      // `acceptEdits` keeps the auto-continuation loop hands-free —
-      // a /goal session that asked for permission every turn would
-      // defeat the entire feature.
-      permissionMode: "acceptEdits",
-      isBuiltIn: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ]
-  await db.characters.bulkPut(builtIns)
+    })
+  }
+  if (toInsert.length > 0) {
+    await db.characters.bulkPut(toInsert)
+  }
+
+  // Backfill `pristineSnapshot` on existing tagged rows that never got
+  // one. Happens on the v50-upgrade path: the upgrade hook tags rows
+  // but can't snapshot because the plugin manager hasn't booted. By
+  // the time `seedBuiltInCharacters` runs, the plugin may be active
+  // (overlay registry populated). Idempotent — rows with an existing
+  // snapshot are left alone.
+  for (const [legacyId, localId] of Object.entries(BUILTIN_LEGACY_ID_TO_LOCAL_ID)) {
+    const row = existingById.get(legacyId)
+    if (!row) continue
+    if (row.pristineSnapshot) continue
+    if (row.sourcePluginId && row.sourcePluginId !== BUILTIN_PLUGIN_ID) continue
+    const def = charsByLocalId.get(localId)
+    if (!def) continue
+    const runtimeId = `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
+    const overlayChar = getPackCharacterByRuntimeId(runtimeId)?.character ?? def
+    await db.characters.update(legacyId, {
+      pristineSnapshot: buildPristineSnapshot(overlayChar),
+    })
+  }
 }

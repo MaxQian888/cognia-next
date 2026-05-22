@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use super::integration::{self, IntegrationSetup, ShellKind};
 use super::osc633::{IntegrationEvent, Osc633Parser};
+use super::replay::ReplayBuffer;
 
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
@@ -130,31 +131,42 @@ pub struct PtySession {
     pub(super) writer: StdMutex<Box<dyn Write + Send>>,
     pub(super) killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     pub(super) tempdir: Option<PathBuf>,
+    /// Wave 2 — timestamped + monotonic-seq replay buffer. Every event
+    /// the reader / waiter threads emit lands here before fan-out so
+    /// reconnecting WS clients can resume with `?resumeFrom=<seq>`. See
+    /// `super::replay::ReplayBuffer`.
+    pub(super) replay: Arc<ReplayBuffer>,
 }
 
 /// Generic event sink — the reader / waiter threads fan out
-/// `TerminalEvent`s through this closure. Two ready-made wrappers exist
-/// below:
+/// `(seq, TerminalEvent)` pairs through this closure. The `seq` is
+/// assigned by the session's [`ReplayBuffer`] before the sink fires so
+/// downstream wire formats (WS control envelopes, RTC datachannel)
+/// can include it for resume on reconnect. Consumers that don't need
+/// seq (e.g. the in-process Tauri Channel for the desktop dock) simply
+/// ignore the value. Two ready-made wrappers exist below:
+///
 ///   * [`spawn_session`] wraps a `tauri::ipc::Channel<TerminalEvent>` —
-///     the in-process desktop path.
+///     the in-process desktop path. Drops `seq`.
 ///   * [`spawn_session_with_sink`] is the general form — used by the
 ///     `companion_api::ws_terminal` proxy to pump events into a
-///     `tokio::sync::mpsc::UnboundedSender<TerminalEvent>` and on through
-///     a WebSocket frame.
+///     `tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>` and
+///     on through a WebSocket frame.
 ///
 /// `Arc` so the reader + waiter threads can each clone an owned handle
 /// without `'static + Copy` constraints leaking into the public API.
-pub type EventSink = Arc<dyn Fn(TerminalEvent) + Send + Sync + 'static>;
+pub type EventSink = Arc<dyn Fn(u64, TerminalEvent) + Send + Sync + 'static>;
 
 /// Channel-backed convenience wrapper — mirrors the original public
 /// signature so the existing Tauri command (`terminal_spawn`) keeps
-/// compiling unchanged.
+/// compiling unchanged. The Channel wire format doesn't carry seq, so
+/// the wrapper drops it.
 pub fn spawn_session(
     req: SpawnRequest,
     script_dir: &Path,
     event_channel: Channel<TerminalEvent>,
 ) -> Result<PtySession, String> {
-    let sink: EventSink = Arc::new(move |event| {
+    let sink: EventSink = Arc::new(move |_seq, event| {
         let _ = event_channel.send(event);
     });
     spawn_session_with_sink(req, script_dir, sink)
@@ -223,20 +235,23 @@ pub fn spawn_session_with_sink(
         .map_err(|e| format!("take_writer: {e}"))?;
     let killer = child.clone_killer();
     let id = Uuid::new_v4().to_string();
+    let replay = Arc::new(ReplayBuffer::new());
 
     let reader_sink = sink.clone();
+    let reader_replay = replay.clone();
     let nonce_for_reader = nonce.clone();
     let reader_id = id.clone();
     thread::Builder::new()
         .name(format!("pty-reader-{reader_id}"))
-        .spawn(move || pty_reader_loop(reader, reader_sink, nonce_for_reader))
+        .spawn(move || pty_reader_loop(reader, reader_sink, reader_replay, nonce_for_reader))
         .map_err(|e| format!("reader thread spawn: {e}"))?;
 
     let waiter_sink = sink.clone();
+    let waiter_replay = replay.clone();
     let waiter_id = id.clone();
     thread::Builder::new()
         .name(format!("pty-waiter-{waiter_id}"))
-        .spawn(move || pty_waiter_loop(child, waiter_sink))
+        .spawn(move || pty_waiter_loop(child, waiter_sink, waiter_replay))
         .map_err(|e| format!("waiter thread spawn: {e}"))?;
 
     Ok(PtySession {
@@ -249,10 +264,16 @@ pub fn spawn_session_with_sink(
         writer: StdMutex::new(writer),
         killer: StdMutex::new(killer),
         tempdir: setup.tempdir,
+        replay,
     })
 }
 
-fn pty_reader_loop(mut reader: Box<dyn Read + Send>, sink: EventSink, nonce: String) {
+fn pty_reader_loop(
+    mut reader: Box<dyn Read + Send>,
+    sink: EventSink,
+    replay: Arc<ReplayBuffer>,
+    nonce: String,
+) {
     let mut parser = Osc633Parser::new(nonce);
     let mut buf = [0u8; 64 * 1024];
     loop {
@@ -261,23 +282,29 @@ fn pty_reader_loop(mut reader: Box<dyn Read + Send>, sink: EventSink, nonce: Str
             Ok(n) => {
                 let chunk = &buf[..n];
                 for event in parser.feed(chunk) {
-                    sink(TerminalEvent::Integration { event });
+                    let integration = TerminalEvent::Integration { event };
+                    let seq = replay.push(integration.clone());
+                    sink(seq, integration);
                 }
-                sink(TerminalEvent::Data {
+                let data = TerminalEvent::Data {
                     bytes: chunk.to_vec(),
-                });
+                };
+                let seq = replay.push(data.clone());
+                sink(seq, data);
             }
             Err(_) => break,
         }
     }
 }
 
-fn pty_waiter_loop(mut child: Box<dyn Child + Send + Sync>, sink: EventSink) {
+fn pty_waiter_loop(mut child: Box<dyn Child + Send + Sync>, sink: EventSink, replay: Arc<ReplayBuffer>) {
     let code = match child.wait() {
         Ok(status) => Some(status.exit_code()),
         Err(_) => None,
     };
-    sink(TerminalEvent::Exit { code });
+    let exit = TerminalEvent::Exit { code };
+    let seq = replay.push(exit.clone());
+    sink(seq, exit);
 }
 
 impl PtySession {
@@ -321,6 +348,13 @@ impl PtySession {
             origin: self.origin,
             shell: self.shell.clone(),
         }
+    }
+
+    /// Wave 2 — expose the per-session replay buffer so reconnecting WS
+    /// consumers can drain `since(resume_from)` before resuming live
+    /// emission.
+    pub fn replay(&self) -> Arc<ReplayBuffer> {
+        self.replay.clone()
     }
 }
 

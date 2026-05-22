@@ -26,6 +26,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
+  applyPackUpdate,
+  applyPackUpdateForPack,
   createCharacter,
   deleteCharacter,
   dismissPackUpdate,
@@ -33,6 +35,7 @@ import {
   listCharacters,
   updateCharacter,
 } from "@/lib/db/characters"
+import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
 import type { AppSettings, Character, McpServer, Skill } from "@/lib/claude/types"
@@ -78,7 +81,7 @@ import {
   UploadIcon,
   UsersRoundIcon,
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -106,6 +109,26 @@ export function CharactersSection() {
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
   const [editing, setEditing] = useState<Character | null>(null)
   const [creating, setCreating] = useState(false)
+  const [applyUpdateTarget, setApplyUpdateTarget] = useState<Character | null>(null)
+
+  // Count clones-with-pending-update per pack so each row can decide
+  // whether to surface the "Apply to all" batch button (≥2). Recomputed
+  // whenever the character list changes; the overlay-registry side
+  // (`listCharacterPackEntries()`) is in-memory and effectively free.
+  const pendingUpdateByPack = useMemo(() => {
+    const map = new Map<string, number>()
+    const entries = listCharacterPackEntries()
+    for (const c of characters) {
+      if (!c.sourcePluginId || !c.sourcePackId || !c.packVersionAtClone) continue
+      const live = entries.find(
+        (e) => e.entry.id === c.sourcePackId && e.pluginId === c.sourcePluginId
+      )?.entry.version
+      if (!live || live === c.packVersionAtClone) continue
+      const key = `${c.sourcePluginId}:${c.sourcePackId}`
+      map.set(key, (map.get(key) ?? 0) + 1)
+    }
+    return map
+  }, [characters])
 
   // Honor the File → New Character menu item: when the ui-store flags a
   // character-create request, pop the creation form and clear the signal.
@@ -160,6 +183,11 @@ export function CharactersSection() {
               onEditCancel={() => setEditing(null)}
               skillsCatalog={skills}
               mcpCatalog={mcpServers}
+              siblingPendingCount={
+                c.sourcePluginId && c.sourcePackId
+                  ? (pendingUpdateByPack.get(`${c.sourcePluginId}:${c.sourcePackId}`) ?? 0)
+                  : 0
+              }
               onSave={async (patch) => {
                 try {
                   await updateCharacter(c.id, patch)
@@ -230,6 +258,28 @@ export function CharactersSection() {
                   toast.error(err instanceof Error ? err.message : String(err))
                 }
               }}
+              onApplyUpdate={() => setApplyUpdateTarget(c)}
+              onApplyUpdateForPack={async () => {
+                if (!c.sourcePluginId || !c.sourcePackId) return
+                try {
+                  const results = await applyPackUpdateForPack(c.sourcePluginId, c.sourcePackId)
+                  const packName =
+                    listCharacterPackEntries().find(
+                      (e) => e.entry.id === c.sourcePackId && e.pluginId === c.sourcePluginId
+                    )?.entry.name ?? c.sourcePackId
+                  log.info("character_pack_update_applied_batch", {
+                    sourcePluginId: c.sourcePluginId,
+                    sourcePackId: c.sourcePackId,
+                    count: results.length,
+                  })
+                  toast.success(
+                    t("applyUpdateToastBatch", { count: results.length, pack: packName })
+                  )
+                } catch (err) {
+                  log.error("character_pack_update_apply_batch_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
               onExportPack={async () => {
                 // Resolve the pack id from the row: overlay rows parse it
                 // from their synthetic id; cloned rows use sourcePackId.
@@ -283,6 +333,40 @@ export function CharactersSection() {
           ))}
         </div>
       )}
+
+      <CharacterPackUpdateDialog
+        open={applyUpdateTarget !== null}
+        characterId={applyUpdateTarget?.id ?? null}
+        characterName={applyUpdateTarget?.name ?? ""}
+        onCancel={() => setApplyUpdateTarget(null)}
+        onConfirm={async () => {
+          if (!applyUpdateTarget) return
+          try {
+            const result = await applyPackUpdate(applyUpdateTarget.id)
+            if (!result) {
+              toast.info(t("applyUpdateNoop", { name: applyUpdateTarget.name }))
+            } else {
+              log.info("character_pack_update_applied", {
+                id: applyUpdateTarget.id,
+                overwritten: result.overwrittenFields.length,
+                preserved: result.preservedFields.length,
+              })
+              toast.success(
+                t("applyUpdateToast", {
+                  name: applyUpdateTarget.name,
+                  updated: result.overwrittenFields.length,
+                  preserved: result.preservedFields.length,
+                })
+              )
+            }
+          } catch (err) {
+            log.error("character_pack_update_apply_failed", err, { id: applyUpdateTarget.id })
+            toast.error(err instanceof Error ? err.message : String(err))
+          } finally {
+            setApplyUpdateTarget(null)
+          }
+        }}
+      />
 
       {creating && (
         <CharacterEditor
@@ -348,6 +432,12 @@ interface RowProps {
   onDismissUpdate: () => Promise<void>
   /** Export the source pack (overlay or cloned) as a `.cognia-pack.json`. */
   onExportPack: () => Promise<void>
+  /** ADR-0030 v50 — open the selective-overwrite confirm dialog. */
+  onApplyUpdate: () => void
+  /** ADR-0030 v50 — apply to every clone of the same pack at once. */
+  onApplyUpdateForPack: () => Promise<void>
+  /** Number of *other* clones from the same pack pending an update. Drives the batch button. */
+  siblingPendingCount: number
 }
 
 function CharacterRow({
@@ -364,6 +454,9 @@ function CharacterRow({
   onRecloneFromPack,
   onDismissUpdate,
   onExportPack,
+  onApplyUpdate,
+  onApplyUpdateForPack,
+  siblingPendingCount,
 }: RowProps) {
   const t = useTranslations("settings.characters")
   // Hook calls must precede the editing-mode early return below to keep
@@ -506,6 +599,26 @@ function CharacterRow({
                 >
                   {t("badge.updateAvailable")}
                 </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-[10px] text-yellow-700 hover:text-yellow-800 dark:text-yellow-300"
+                  onClick={onApplyUpdate}
+                  title={t("actions.applyUpdateTitle")}
+                >
+                  {t("actions.applyUpdate")}
+                </Button>
+                {siblingPendingCount >= 2 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-[10px] text-yellow-700 hover:text-yellow-800 dark:text-yellow-300"
+                    onClick={() => void onApplyUpdateForPack()}
+                    title={t("actions.applyUpdateBatchTitle")}
+                  >
+                    {t("actions.applyUpdateBatch", { count: siblingPendingCount })}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

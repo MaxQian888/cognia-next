@@ -402,6 +402,27 @@ export const CANONICAL_HOOK_POINTS = [
   "onWorkflowNodeUnregister",
   "onWorkflowTriggerRegister",
   "onWorkflowTriggerUnregister",
+  // Agent-Team specific hooks. Dispatched by `lib/ai/agent/agent-team-runtime.ts`
+  // and its supporting modules (budget-guard / teammate-pool / consensus
+  // orchestrator) — see Phase 2 of the agent-team plugin-integration plan.
+  // These complement the generic `onAgent*` family with team-context
+  // payloads (teamId / runId / governance summary) that single-agent
+  // sessions do not carry.
+  "onTeamStart",
+  "onTeamPlanReady",
+  "onTeammateClaim",
+  "onTeammateRelease",
+  "onTeamBudgetWarn",
+  "onTeamComplete",
+  // Consensus / shared-memory / delegation orchestrator hook points. Fired
+  // by the matching orchestrator in `lib/ai/agent/team/`.
+  "onConsensusOpened",
+  "onConsensusVoted",
+  "onConsensusResolved",
+  "onSharedMemoryWrite",
+  "onSharedMemoryDelete",
+  "onTeamDelegationStart",
+  "onTeamDelegationComplete",
 ] as const
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]

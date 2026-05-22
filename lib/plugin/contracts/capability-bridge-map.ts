@@ -48,6 +48,15 @@ import {
   registerPreset as registerExternalAgentPresetOverlay,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
 } from "@/lib/ai/agent/external/presets"
+import {
+  registerSubagent,
+  unregisterSubagentsByPlugin,
+} from "@/lib/plugin/registries/subagent-registry"
+import {
+  refreshAllTemplateWarnings,
+  registerAgentTeamTemplate,
+  unregisterAgentTeamTemplatesByPlugin,
+} from "@/lib/plugin/registries/agent-team-template-registry"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -95,12 +104,15 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       // entire entry under its `id`. After registration we refresh any
       // character-pack `requires` warnings (ADR-0030): a pack that was
       // previously missing this skill id now has the dep available.
+      // Also refresh agent-team-template warnings for the same reason.
       registerSkill(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterSkillsByPlugin(pluginId)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
       return n
     },
   },
@@ -109,10 +121,12 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     registerEntry: (def, ctx) => {
       registerMcpServerPreset(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterMcpServerPresetsByPlugin(pluginId)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
       return n
     },
   },
@@ -121,10 +135,12 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     registerEntry: (def, ctx) => {
       registerNativeAnthropicTool(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterNativeAnthropicToolsByPlugin(pluginId)
       refreshAllPackWarnings()
+      refreshAllTemplateWarnings()
       return n
     },
   },
@@ -136,8 +152,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       // behaviour-preserving refactor.
       const { id, ...config } = def
       registerExternalAgentPresetOverlay(id, config as unknown as never, ctx)
+      refreshAllTemplateWarnings()
     },
-    unregisterAllByPlugin: unregisterExternalAgentPresetsByPlugin,
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterExternalAgentPresetsByPlugin(pluginId)
+      refreshAllTemplateWarnings()
+      return n
+    },
   },
   "character-pack": {
     // ADR-0030. Plugin contributes ready-to-use character bundles. Pack
@@ -149,8 +170,43 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     manifestField: "characterPacks",
     registerEntry: (def, ctx) => {
       registerCharacterPack(def.id, def as unknown as never, ctx)
+      refreshAllTemplateWarnings()
     },
-    unregisterAllByPlugin: unregisterCharacterPacksByPlugin,
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterCharacterPacksByPlugin(pluginId)
+      refreshAllTemplateWarnings()
+      return n
+    },
+  },
+  subagent: {
+    // Plugin contributes Claude SDK subagents callable by teams and the
+    // workflow editor. Each entry mirrors the AgentDefinition shape; the
+    // runtime resolution loop unions overlay entries with the 4 host-bundled
+    // subagents under `<pluginId>:<id>` so dispatcher-name collisions are
+    // impossible. Adding a subagent may unblock waiting agent-team-template
+    // `requires.subagentIds[]` dependencies, so we refresh those warnings.
+    manifestField: "subagents",
+    registerEntry: (def, ctx) => {
+      registerSubagent(def.id, def as unknown as never, ctx)
+      refreshAllTemplateWarnings()
+    },
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterSubagentsByPlugin(pluginId)
+      refreshAllTemplateWarnings()
+      return n
+    },
+  },
+  "agent-team-template": {
+    // Plugin contributes complete agent-team blueprints — roster, tasks,
+    // config overrides, plus a `requires` block declaring cross-capability
+    // dependencies. `registerAgentTeamTemplate` runs `validateTemplateRequires`
+    // internally and stamps non-blocking warnings on the registry entry.
+    // The team-templates settings UI reads them via `getTemplateWarnings`.
+    manifestField: "agentTeamTemplates",
+    registerEntry: (def, ctx) => {
+      registerAgentTeamTemplate(def.id, def as unknown as never, ctx)
+    },
+    unregisterAllByPlugin: unregisterAgentTeamTemplatesByPlugin,
   },
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

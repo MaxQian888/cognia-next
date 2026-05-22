@@ -31,6 +31,18 @@ export interface PresetEditorState {
   workingDir: string
   isDefault: boolean
   isFavorite: boolean
+  // ─── Agent-Team capability extensions ────────────────────────────────────
+  // These optional fields land on the same editor state so the same
+  // `<PresetEditor>` can host TeammateConfig editing. Each defaults to
+  // `undefined` so existing `SystemPromptPreset` flows ignore them.
+  /** Native Anthropic tool ids (e.g. `computer_20251124`). */
+  nativeAnthropicToolIds?: string[]
+  /** Character pack id to project into the subject's persona. */
+  characterPackId?: string
+  /** External-agent preset id (e.g. `claude-code`, `codex`). */
+  externalAgentPresetId?: string
+  /** Subagent ids the subject can dispatch (built-in name or `<plugin>:<id>`). */
+  subagentIds?: string[]
 }
 
 export type PresetEditorOutput = Omit<
@@ -40,6 +52,12 @@ export type PresetEditorOutput = Omit<
   /** Required on save. */
   name: string
   content: string
+  // Agent-Team capability extensions — preset consumers ignore these; the
+  // TeammateConfig adapter reads them back to populate `TeammateConfig`.
+  nativeAnthropicToolIds?: string[]
+  characterPackId?: string
+  externalAgentPresetId?: string
+  subagentIds?: string[]
 }
 
 export function emptyEditorState(): PresetEditorState {
@@ -61,6 +79,10 @@ export function emptyEditorState(): PresetEditorState {
     workingDir: "",
     isDefault: false,
     isFavorite: false,
+    nativeAnthropicToolIds: undefined,
+    characterPackId: undefined,
+    externalAgentPresetId: undefined,
+    subagentIds: undefined,
   }
 }
 

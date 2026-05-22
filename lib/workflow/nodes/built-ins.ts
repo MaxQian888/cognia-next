@@ -33,6 +33,10 @@ import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
 // cross-module wiring.
 import "./desktop"
 
+// Wave 3 — registers the `action.system.terminal` executor that drives
+// the integrated terminal dock from a workflow step.
+import "./terminal"
+
 // ── trigger.manual ────────────────────────────────────────────────────────
 registerNodeExecutor({
   kind: "trigger.manual",
@@ -1262,10 +1266,18 @@ registerNodeExecutor({
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
     }
-    const [{ getTeamRunContext }, { executeAgent }, { buildTeammatePrompt }] = await Promise.all([
+    const [
+      { getTeamRunContext },
+      { executeAgent },
+      { buildTeammatePrompt },
+      { getPluginLifecycleHooks },
+      { resolveTeammateCapabilities },
+    ] = await Promise.all([
       import("@/lib/ai/agent/team/team-run-context"),
       import("@/lib/ai/agent/agent-executor"),
       import("@/lib/ai/agent/agent-team-runtime-deps"),
+      import("@/lib/plugin/messaging/hooks-system"),
+      import("@/lib/ai/agent/team/capability-resolver"),
     ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
@@ -1278,6 +1290,35 @@ registerNodeExecutor({
       // Retryable — workflow runStep will back off; pool may free up.
       throw new Error("action.team.task.dispatch: no available teammate")
     }
+    // Resolve plugin capabilities for this teammate (cached per-run). The
+    // resolved bundle is currently passed via TeamRunContext so future
+    // upgrades to the Claude SDK path can consume it without changing the
+    // executor surface. The AI SDK path used by `executeAgent` cannot yet
+    // honour skills/mcp/native-tools — those need the sidecar route.
+    if (!teamCtx.resolvedCapabilities.has(teammate.id)) {
+      teamCtx.resolvedCapabilities.set(
+        teammate.id,
+        resolveTeammateCapabilities(teamCtx.team, teammate)
+      )
+    }
+
+    // Fire onTeammateClaim + onAgentStart now that we have a teammate; the
+    // matching onTeammateRelease + onAgentComplete / onAgentError fire on
+    // every exit path below.
+    const hooks = getPluginLifecycleHooks()
+    hooks.dispatchOnTeammateClaim({
+      teamId: teamCtx.teamId,
+      runId: ctx.runId,
+      teammateId: teammate.id,
+      taskId: params.taskId,
+    })
+    hooks.dispatchOnAgentStart(teammate.id, {
+      teamId: teamCtx.teamId,
+      runId: ctx.runId,
+      taskId: params.taskId,
+      role: teammate.role,
+      name: teammate.name,
+    })
 
     const perTaskTimeoutMs =
       typeof teamCtx.team.config?.defaultTimeout === "number" &&
@@ -1300,6 +1341,24 @@ registerNodeExecutor({
       teamCtx.team.config?.defaultSystemPrompt?.trim() ||
       "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
 
+    // Helper: fire the matching release + agent-end hooks on every exit
+    // path. Keeps the call sites below to one line each.
+    const dispatchTeammateRelease = (kind: "success" | "failure", error?: Error): void => {
+      hooks.dispatchOnTeammateRelease({
+        teamId: teamCtx.teamId,
+        runId: ctx.runId,
+        teammateId: teammate.id,
+        taskId: params.taskId!,
+        result: kind,
+        error: error?.message,
+      })
+      if (kind === "success") {
+        hooks.dispatchOnAgentComplete(teammate.id, undefined)
+      } else if (error) {
+        hooks.dispatchOnAgentError(teammate.id, error)
+      }
+    }
+
     // Phase 1: executeAgent — single try/catch records exactly one failure
     // on the breaker if the LLM call throws.
     let result: Awaited<ReturnType<typeof executeAgent>>
@@ -1317,6 +1376,7 @@ registerNodeExecutor({
         undefined,
         err instanceof Error ? err.message : String(err)
       )
+      dispatchTeammateRelease("failure", err instanceof Error ? err : new Error(String(err)))
       throw err
     }
 
@@ -1329,6 +1389,7 @@ registerNodeExecutor({
       const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
       teamCtx.pool.recordFailure(teammate.id, empty)
       teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, empty.message)
+      dispatchTeammateRelease("failure", empty)
       throw empty
     }
     const minChars = teamCtx.team.config.minOutputChars ?? 0
@@ -1338,6 +1399,7 @@ registerNodeExecutor({
       )
       teamCtx.pool.recordFailure(teammate.id, short)
       teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, short.message)
+      dispatchTeammateRelease("failure", short)
       throw short
     }
 
@@ -1357,6 +1419,7 @@ registerNodeExecutor({
       taskId: params.taskId,
     })
     teamCtx.storeWriter.setTaskStatus(params.taskId, "completed", text)
+    dispatchTeammateRelease("success")
     return {
       output: {
         text,

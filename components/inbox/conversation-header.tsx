@@ -11,34 +11,25 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import {
-  AlertTriangleIcon,
-  ChevronLeftIcon,
-  LoaderIcon,
-  RefreshCwIcon,
-  Settings2Icon,
-} from "lucide-react"
-import { toast } from "sonner"
+import { ChevronLeftIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
 import { ConversationOverrideDialog } from "./overrides/conversation-override-dialog"
 import { ComputerUseToggle } from "./overrides/computer-use-toggle"
+import { AdapterHealthBadge } from "./adapter-health-badge"
+import { ComputerUseChip } from "./computer-use-chip"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
-import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isTauri } from "@/lib/tauri"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { parseConversationKey } from "@/types/connectors/event"
-import { requeueAdapter } from "@/lib/connectors/lifecycle"
-import { cn } from "@/lib/utils"
 import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
@@ -87,89 +78,6 @@ function LastInboundChip({ conversationKey }: { conversationKey: string }) {
         {t("lastInboundTooltip", { time: new Date(lastAt).toLocaleString() })}
       </TooltipContent>
     </Tooltip>
-  )
-}
-
-/**
- * Compact degradation badge with a click-to-reconnect Popover.
- *
- * Reuses `useAdapterHealth` (Task 2.1) for the live state pull and
- * `requeueAdapter` (lib/connectors/lifecycle.ts) for the reconnect action,
- * so this stays purely a UI shell — no new live-query or transport plumbing.
- */
-function AdapterDegradationBadge({ adapterId }: { adapterId: string }) {
-  const t = useTranslations("inbox.conversationHeader")
-  const { current } = useAdapterHealth(adapterId)
-  const [reconnecting, setReconnecting] = useState(false)
-  const desktop = isTauri()
-
-  // Only render when something is actually wrong — running + starting are
-  // both healthy states the operator doesn't need to act on.
-  if (current.state === "running" || current.state === "starting") return null
-
-  const tint =
-    current.state === "down"
-      ? "text-destructive border-destructive/40 bg-destructive/10"
-      : "text-amber-700 border-amber-300 bg-amber-100 dark:text-amber-300 dark:border-amber-700 dark:bg-amber-900/30"
-
-  const onReconnect = async () => {
-    if (!desktop) {
-      toast.error(t("reconnectDesktopOnly"))
-      return
-    }
-    setReconnecting(true)
-    try {
-      const ok = await requeueAdapter(adapterId)
-      if (ok) {
-        toast.success(t("reconnectQueued"))
-      } else {
-        toast.error(t("reconnectUnavailable"))
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setReconnecting(false)
-    }
-  }
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn("h-7 gap-1 px-2 text-xs", tint)}
-          aria-label={t("degradedBadgeAria", { state: current.state })}
-          data-testid="conversation-header-degraded"
-        >
-          <AlertTriangleIcon className="h-3 w-3" aria-hidden />
-          {t(`degradedState.${current.state}`)}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 space-y-2 text-xs">
-        <p className="font-medium">{t("degradedTitle")}</p>
-        <p className="text-muted-foreground">
-          {t(`degradedHint.${current.state}`)}
-          {current.reason ? ` — ${current.reason}` : ""}
-        </p>
-        <Button
-          type="button"
-          size="sm"
-          className="w-full"
-          onClick={() => void onReconnect()}
-          disabled={reconnecting || !desktop}
-          data-testid="conversation-header-reconnect"
-        >
-          {reconnecting ? (
-            <LoaderIcon className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCwIcon className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          {t("reconnectButton")}
-        </Button>
-      </PopoverContent>
-    </Popover>
   )
 }
 
@@ -322,7 +230,14 @@ export function ConversationHeader({
           currentValue={overrideRow?.allowComputerUse === true}
         />
       )}
-      {parsedAdapterId && <AdapterDegradationBadge adapterId={parsedAdapterId} />}
+      {/* Web-mode mirror of the computer-use opt-in — read-only chip so
+       * the operator still sees the elevated-permission state even when
+       * the biometric toggle isn't available (web build / mobile shell). */}
+      {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
+      {/* v49 — replaces inline AdapterDegradationBadge with the wider
+       * health surface that picks up breaker / rate-bucket signals from
+       * the heartbeat snapshots, not just the current.state. */}
+      {parsedAdapterId && <AdapterHealthBadge adapterId={parsedAdapterId} />}
       <PolicyInfo policy={policy} />
 
       <Tooltip>

@@ -142,6 +142,97 @@ export interface TeamGovernancePolicy {
 }
 
 // ============================================================================
+// Plugin Capability Composition (ADR-pending — Agent Team plugin integration)
+// ============================================================================
+
+/**
+ * Default pool of plugin-contributed capabilities a team enables for all of
+ * its teammates. Each list is a flat array of overlay-registry ids; the
+ * runtime `capability-resolver` unions these with the per-teammate overlay
+ * to produce the final `ResolvedCapabilities` passed into the Claude SDK.
+ *
+ * All ids reference live overlay registries:
+ *   - `mcpServerIds` → `lib/db/mcp-servers.ts` rows (host) + plugin presets
+ *     promoted to mcp-servers; consumed by `SendOptions.mcpServers`.
+ *   - `skillIds` → host skills + `skill-registry` overlay (scope=team|global).
+ *   - `nativeAnthropicToolIds` → `native-anthropic-tool-registry`
+ *     (e.g. `computer_20251124` / `bash_20250124` / `text_editor_20250728`).
+ *   - `characterPackIds` → `character-pack-registry`. The team uses
+ *     `getPackCharacterByRuntimeId` to project a pack character into a
+ *     teammate's persona at run time.
+ *   - `externalAgentPresetIds` → `lib/ai/agent/external/presets.ts`.
+ *   - `subagentIds` → built-in name or `<pluginId>:<subagentId>`
+ *     resolved through `resolveAllSubagents`.
+ *   - `a2uiTemplateIds` → A2UI template registry (existing) consumed by
+ *     the IM ⇄ A2UI bridge.
+ */
+export interface TeamCapabilityBundle {
+  mcpServerIds?: string[]
+  skillIds?: string[]
+  nativeAnthropicToolIds?: string[]
+  characterPackIds?: string[]
+  externalAgentPresetIds?: string[]
+  subagentIds?: string[]
+  a2uiTemplateIds?: string[]
+}
+
+/**
+ * Per-key 3-state overlay: `replace` short-circuits (final = replace);
+ * otherwise final = (team default ∖ remove) ∪ add. Empty / undefined
+ * fields fall through to the team default unchanged.
+ */
+export interface CapabilityListOverlay {
+  /** Add these ids to the team default. */
+  add?: string[]
+  /** Subtract these ids from the team default. */
+  remove?: string[]
+  /** Replace the team default entirely with this list (wins over add/remove). */
+  replace?: string[]
+}
+
+/**
+ * Per-teammate overlay over `AgentTeamConfig.capabilities`. Each field is
+ * independently overlaid via `CapabilityListOverlay` semantics — leave a
+ * field undefined to inherit the team default unchanged.
+ */
+export interface TeammateCapabilityOverlay {
+  mcpServerIds?: CapabilityListOverlay
+  skillIds?: CapabilityListOverlay
+  nativeAnthropicToolIds?: CapabilityListOverlay
+  characterPackIds?: CapabilityListOverlay
+  externalAgentPresetIds?: CapabilityListOverlay
+  subagentIds?: CapabilityListOverlay
+  a2uiTemplateIds?: CapabilityListOverlay
+}
+
+/**
+ * Flattened capability set resolved from `team.config.capabilities`
+ * combined with `teammate.config.capabilities`. This is the shape
+ * `lib/claude/build-options.ts` consumes when assembling `SendOptions`
+ * for a teammate dispatch.
+ */
+export interface ResolvedCapabilities {
+  mcpServerIds: string[]
+  skillIds: string[]
+  nativeAnthropicToolIds: string[]
+  characterPackIds: string[]
+  externalAgentPresetIds: string[]
+  subagentIds: string[]
+  a2uiTemplateIds: string[]
+}
+
+/** Empty resolved bundle used by tests and the capability-resolver fast path. */
+export const EMPTY_RESOLVED_CAPABILITIES: ResolvedCapabilities = {
+  mcpServerIds: [],
+  skillIds: [],
+  nativeAnthropicToolIds: [],
+  characterPackIds: [],
+  externalAgentPresetIds: [],
+  subagentIds: [],
+  a2uiTemplateIds: [],
+}
+
+// ============================================================================
 // Team Configuration
 // ============================================================================
 
@@ -211,6 +302,13 @@ export interface AgentTeamConfig {
   detectRefusal?: boolean
   /** Patterns considered refusals when detectRefusal is true. */
   refusalPatterns?: string[]
+  /**
+   * Default pool of plugin capabilities every teammate inherits. Each
+   * teammate may further override the pool via
+   * `TeammateConfig.capabilities` (see `CapabilityListOverlay`).
+   * Undefined or empty fields produce empty resolved arrays.
+   */
+  capabilities?: TeamCapabilityBundle
 }
 
 /**
@@ -315,6 +413,12 @@ export interface TeammateConfig {
   runtime?: TeammateRuntime
   /** Custom metadata */
   metadata?: Record<string, unknown>
+  /**
+   * Per-teammate overlay on the team's default capability pool. Each entry
+   * is a `CapabilityListOverlay` (add / remove / replace). Leave undefined
+   * to inherit the team default unchanged. See `lib/ai/agent/team/capability-resolver.ts`.
+   */
+  capabilities?: TeammateCapabilityOverlay
 }
 
 /**

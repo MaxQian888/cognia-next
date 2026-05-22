@@ -26,6 +26,11 @@ export type SyncableTable =
   | "plugins"
   | "adapterInstances"
   | "settings"
+  // v49 — per-conversation overrides (pinned / archived / lastReadAt /
+  // allowComputerUse / allowGoalDriving / mode / character / quietHours).
+  // Mobile mirrors these so the Inbox can render pinned/unread state when
+  // the companion server is unreachable.
+  | "conversationOverrides"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

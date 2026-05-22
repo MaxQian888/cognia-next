@@ -83,6 +83,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   )
   const [characterId, setCharacterId] = useState(initialRow?.characterId ?? "")
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
+  const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
@@ -162,6 +163,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         mode: mode === "unset" ? undefined : mode,
         characterId: characterId.trim() || undefined,
         allowComputerUse: allowComputerUse ? true : undefined,
+        allowGoalDriving: allowGoalDriving ? true : undefined,
         providerOverride: providerOverride.trim() || undefined,
         modelOverride: modelOverride.trim() || undefined,
         pinned: pinned ? true : undefined,
@@ -188,10 +190,84 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     onDone?.()
   }
 
-  // Suppress lint warning about adapterId being unused — it's part of
-  // the public prop contract for parent components that mount the form
-  // by adapter scope, and the audit log on the bus side keys on this.
-  void adapterId
+  const [applyingToAdapter, setApplyingToAdapter] = useState(false)
+
+  /**
+   * v49 — Apply the in-form values (pinned / archived / allowComputerUse /
+   * allowGoalDriving / mode / quietHours / character / provider+model /
+   * skill allowlist) to every conversation that shares this adapter.
+   * Lets the operator say "make every Slack channel default to draft mode
+   * with goal-driving off" in one click instead of editing each override.
+   *
+   * Bulk path is transactional so a half-applied batch can't leak through
+   * if Dexie throws midway. The audit row is per-conversation already (via
+   * upsertByConversationKey), so no extra audit work is needed here.
+   */
+  const onApplyToAdapter = async () => {
+    if (!adapterId) return
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(t("fields.applyToAdapterConfirm"))
+      if (!ok) return
+    }
+    setApplyingToAdapter(true)
+    try {
+      let resolvedAllowed: ConversationOverrideRow["allowedBuiltInSkillIds"]
+      if (skillMode === "inherit") resolvedAllowed = undefined
+      else if (skillMode === "all") resolvedAllowed = "all"
+      else resolvedAllowed = skillIds
+      const resolvedQuietHours =
+        quietHours.enabled && quietHours.from && quietHours.to && quietHours.tz
+          ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
+          : undefined
+
+      const db = getDb()
+      // Identify the conversations belonging to this adapter via the
+      // adapter middle segment of the conversationKey. We also pull any
+      // sessions bound to the adapter that have NO override yet so the
+      // bulk apply creates fresh override rows for them.
+      const adapterPrefix = `:${adapterId}:`
+      const existing = await db.conversationOverrides
+        .filter((row) => row.conversationKey.includes(adapterPrefix))
+        .toArray()
+      const sessions = await db.sessions
+        .filter((s) => s.platformBinding?.adapterId === adapterId)
+        .toArray()
+      const knownKeys = new Set(existing.map((r) => r.conversationKey))
+      const targets: Array<{ conversationKey: string; sessionId: string }> = [
+        ...existing.map((r) => ({ conversationKey: r.conversationKey, sessionId: r.sessionId })),
+        ...sessions
+          .filter((s) => s.platformBinding && !knownKeys.has(s.platformBinding.conversationKey))
+          .map((s) => ({
+            conversationKey: s.platformBinding!.conversationKey,
+            sessionId: s.id,
+          })),
+      ]
+      for (const target of targets) {
+        // Re-apply the form values per-conversation. We deliberately call
+        // the existing upsert helper instead of `bulkPut` so the per-row
+        // audit + updatedAt bump path stays consistent with single-row
+        // saves.
+        await upsertByConversationKey({
+          conversationKey: target.conversationKey,
+          sessionId: target.sessionId,
+          mode: mode === "unset" ? undefined : mode,
+          characterId: characterId.trim() || undefined,
+          allowComputerUse: allowComputerUse ? true : undefined,
+          allowGoalDriving: allowGoalDriving ? true : undefined,
+          providerOverride: providerOverride.trim() || undefined,
+          modelOverride: modelOverride.trim() || undefined,
+          pinned: pinned ? true : undefined,
+          archived: archived ? true : undefined,
+          allowedBuiltInSkillIds: resolvedAllowed,
+          requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
+          quietHours: resolvedQuietHours,
+        })
+      }
+      onDone?.()
+    } finally {
+      setApplyingToAdapter(false)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -242,6 +318,26 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.allowComputerUseWarning")}</p>
+          </div>
+        </div>
+        {/* v49 — Per-conversation opt-in for self-driving `/goal` on
+         * IM channels. Off by default so a goal loop cannot auto-reply
+         * without operator review. */}
+        <div className="flex items-start gap-3 rounded-md border border-border bg-card p-3">
+          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="conv-override-goal" className="cursor-pointer">
+                {t("fields.allowGoalDriving")}
+              </Label>
+              <Switch
+                id="conv-override-goal"
+                checked={allowGoalDriving}
+                onCheckedChange={setAllowGoalDriving}
+                data-testid="conv-override-goal"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
           </div>
         </div>
       </div>
@@ -481,6 +577,15 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={onApplyToAdapter}
+            disabled={applyingToAdapter || saving || !adapterId}
+            data-testid="conv-override-apply-to-adapter"
+            title={t("fields.applyToAdapterTitle")}
+          >
+            {applyingToAdapter ? t("saving") : t("fields.applyToAdapter")}
+          </Button>
           <Button variant="ghost" onClick={onCancel} data-testid="conv-override-cancel">
             {t("reset")}
           </Button>

@@ -111,6 +111,15 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "AppSettings singleton row (mobile may patch a allowlisted subset)".to_string(),
             has_tombstones: false,
         },
+        // v49 — per-conversation overrides (pinned / archived / lastReadAt /
+        // allowComputerUse / allowGoalDriving / mode / character / quietHours).
+        // Mirrors the desktop view of the override row so the mobile Inbox
+        // renders pinned/unread/archived buckets correctly when offline.
+        SyncTableDescriptor {
+            name: "conversationOverrides".to_string(),
+            description: "Per-conversation Inbox overrides (pinned, archived, lastReadAt, allowComputerUse, allowGoalDriving, mode)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 

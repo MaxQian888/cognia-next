@@ -107,6 +107,95 @@ describe("GoalRuntime.createGoal", () => {
   })
 })
 
+// ── v49 — /goal × IM guardrail (inbox-optimization plan) ──────────────
+//
+// Goals targeting an IM-bound session must check the conversation
+// override for `allowGoalDriving`. Off → throw GoalImBlocked + audit
+// `goal.blocked.im`. On → audit `goal.started.im` and proceed.
+// Non-IM sessions ignore the field entirely.
+describe("GoalRuntime.createGoal — IM guardrail", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { GoalImBlocked } = require("./runtime") as {
+    GoalImBlocked: new (...a: unknown[]) => Error
+  }
+
+  async function seedImSession(overrides?: { allowGoalDriving?: boolean }): Promise<void> {
+    const db = getDb()
+    const now = Date.now()
+    await db.sessions.put({
+      id: "ses_im",
+      title: "TG chat",
+      modelId: "claude-sonnet-4-6",
+      providerId: "anthropic",
+      systemPrompt: "",
+      kind: "direct",
+      platformBinding: {
+        platform: "telegram",
+        adapterId: "tg-1",
+        conversationKey: "telegram:tg-1:42",
+      },
+      createdAt: now,
+      updatedAt: now,
+    } as unknown as Parameters<typeof db.sessions.put>[0])
+
+    if (overrides && typeof overrides.allowGoalDriving === "boolean") {
+      await db.conversationOverrides.put({
+        id: "co-im",
+        conversationKey: "telegram:tg-1:42",
+        sessionId: "ses_im",
+        allowGoalDriving: overrides.allowGoalDriving,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  }
+
+  it("throws GoalImBlocked + writes audit when IM session has no override", async () => {
+    await seedImSession()
+    const rt = getGoalRuntime()
+    await expect(
+      rt.createGoal({ sessionId: "ses_im", rawObjective: "auto-reply spam" })
+    ).rejects.toBeInstanceOf(GoalImBlocked)
+
+    const audit = await getDb().connectorAudit.where("kind").equals("goal.blocked.im").toArray()
+    expect(audit).toHaveLength(1)
+    expect(audit[0].adapterId).toBe("tg-1")
+    expect(audit[0].conversationKey).toBe("telegram:tg-1:42")
+    expect(audit[0].reason).toBe("allow_goal_driving_off")
+  })
+
+  it("throws when override exists but allowGoalDriving is false", async () => {
+    await seedImSession({ allowGoalDriving: false })
+    const rt = getGoalRuntime()
+    await expect(rt.createGoal({ sessionId: "ses_im", rawObjective: "x" })).rejects.toBeInstanceOf(
+      GoalImBlocked
+    )
+  })
+
+  it("allows the goal + writes audit when override opts in", async () => {
+    await seedImSession({ allowGoalDriving: true })
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_im", rawObjective: "summarise channel" })
+    expect(goal.status).toBe("active")
+
+    const audit = await getDb().connectorAudit.where("kind").equals("goal.started.im").toArray()
+    expect(audit).toHaveLength(1)
+    expect(audit[0].adapterId).toBe("tg-1")
+  })
+
+  it("non-IM sessions are not gated", async () => {
+    // No platformBinding — the guard short-circuits and the goal starts.
+    const rt = getGoalRuntime()
+    await expect(
+      rt.createGoal({ sessionId: "ses_direct", rawObjective: "fine" })
+    ).resolves.toMatchObject({ status: "active" })
+    // No audit rows for IM kinds.
+    const blocked = await getDb().connectorAudit.where("kind").equals("goal.blocked.im").count()
+    const started = await getDb().connectorAudit.where("kind").equals("goal.started.im").count()
+    expect(blocked + started).toBe(0)
+  })
+})
+
 describe("GoalRuntime — pause/resume/stop transitions", () => {
   it("pauseGoal: active → paused, rotates generationId, logs event", async () => {
     const rt = getGoalRuntime()

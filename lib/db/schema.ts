@@ -58,6 +58,7 @@ import type { Goal, GoalEvent } from "@/types/goal"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
+import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow } from "@/lib/sync/types"
 
 export class CogniaDB extends Dexie {
@@ -1326,6 +1327,87 @@ export class CogniaDB extends Dexie {
     //   four undefined → treated as "user-created" by the badge logic. Pure
     //   additive — no upgrade hook, no index change.
     this.version(48).stores({})
+
+    // v49 — Inbox optimization pass (plan: inbox-fluttering-tome).
+    //
+    //   1. `messages` gains a denormalized, indexed `platformMessageId`
+    //      column populated from `metadata.platformMessage.messageId`. The
+    //      column lets `ConnectorBus.applyMessageEdit` / `applyMessageDelete`
+    //      replace a full-table `.toArray().find()` scan with an indexed
+    //      `where("platformMessageId").equals(id).first()`. A platform
+    //      safety filter at call-site prevents cross-platform collisions
+    //      (Telegram messageId=12345 vs Discord messageId=12345).
+    //
+    //   2. New `inboxTelemetryEvents` ring-buffer table (cap 3000) backs
+    //      the `lib/telemetry/inbox-events.ts` breadcrumb layer. Decoupled
+    //      from `connectorAudit` so high-volume telemetry rotation does
+    //      not displace the operator-visible 5000-row audit window.
+    //
+    //   Upgrade hook backfills `platformMessageId` once per row from the
+    //   existing metadata. Streams via `toCollection().modify` so large
+    //   mailboxes don't load all rows at once.
+    this.version(49)
+      .stores({
+        messages: "id, sessionId, [sessionId+createdAt], senderId, platformMessageId",
+        inboxTelemetryEvents: "&id, kind, at, adapterId, conversationKey",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("messages")
+          .toCollection()
+          .modify((row) => {
+            const pmid = (row as { metadata?: { platformMessage?: { messageId?: unknown } } })
+              ?.metadata?.platformMessage?.messageId
+            if (typeof pmid === "string" && pmid.length > 0) {
+              ;(row as { platformMessageId?: string }).platformMessageId = pmid
+            }
+          })
+      })
+
+    // v50 — Built-in characters → first-party character pack (ADR-0030
+    //   Amendment, 2026-05-23). The six `char_builtin_*` rows pre-v50 were
+    //   app-seeded with no `sourcePluginId`. The `cognia-builtin-characters`
+    //   first-party plugin now ships those personas as overlay-registry
+    //   entries; this upgrade tags the legacy Dexie rows so the new
+    //   `clone-hides-overlay` dedupe rule in `listCharacters` treats them
+    //   as user clones of the overlay characters. User customisations are
+    //   preserved verbatim — only attribution fields are added.
+    //
+    //   `pristineSnapshot` is NOT backfilled here: the plugin manager
+    //   hasn't booted yet at upgrade time, so the overlay registry is
+    //   empty and we'd have nothing to compare against. The post-boot
+    //   `seedBuiltInCharacters` runs a second-pass backfill once the
+    //   plugin is active. Rows that fall through that window degrade
+    //   gracefully — `applyPackUpdate` uses the "no baseline" path and
+    //   surfaces a warning in the confirm dialog.
+    //
+    //   No store-shape change (every new field is optional non-indexed)
+    //   so the upgrade hook only mutates rows — Dexie still requires an
+    //   empty `.stores({})` to register the version number.
+    this.version(50)
+      .stores({})
+      .upgrade(async (tx) => {
+        const legacyMap: Record<string, string> = {
+          char_builtin_coding: "coding",
+          char_builtin_writer: "writer",
+          char_builtin_research: "research",
+          char_builtin_brainstorm: "brainstorm",
+          char_builtin_translator: "translator",
+          char_builtin_goal_tracker: "goal-tracker",
+        }
+        await tx
+          .table("characters")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            const localId = legacyMap[row.id as string]
+            if (!localId) return
+            if (row.sourcePluginId) return
+            row.sourcePluginId = "cognia-builtin-characters"
+            row.sourcePackId = "builtin"
+            row.clonedFromPackCharacterId = `cognia-pack:cognia-builtin-characters:builtin:${localId}`
+            row.packVersionAtClone = "1.0.0"
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1334,6 +1416,8 @@ export class CogniaDB extends Dexie {
   vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
   syncCursors!: Table<SyncCursorRow, string>
+  // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
+  inboxTelemetryEvents!: Table<InboxTelemetryEventRow, string>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */

@@ -25,6 +25,7 @@
 import { requestAgentTrust } from "./agent-trust"
 import { getLiveSession } from "./session-registry"
 import { spawnFromDock } from "./spawn-orchestrator"
+import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { SpawnRequest } from "./types"
 
@@ -47,6 +48,29 @@ export type RunInDockOutcome =
   | { kind: "error"; message: string }
 
 const DEFAULT_TIMEOUT_MS = 60_000
+
+/**
+ * Resolve the effective wait-for-exit timeout. Per-call `input.timeoutMs`
+ * wins; otherwise read the user setting `terminal.runInDockTimeoutSec`
+ * (clamped to [5, 600] seconds); otherwise fall back to 60 s.
+ *
+ * Reading at call time (not import time) means a settings change takes
+ * effect on the very next invocation without restarting the renderer.
+ */
+function resolveTimeoutMs(perCallMs: number | undefined): number {
+  if (typeof perCallMs === "number" && Number.isFinite(perCallMs) && perCallMs > 0) {
+    return perCallMs
+  }
+  try {
+    const sec = useSettingsStore.getState().settings?.terminal?.runInDockTimeoutSec
+    if (typeof sec === "number" && Number.isFinite(sec) && sec >= 5 && sec <= 600) {
+      return sec * 1000
+    }
+  } catch {
+    /* settings store not initialised — fall through */
+  }
+  return DEFAULT_TIMEOUT_MS
+}
 
 export async function runInDockTab(input: RunInDockInput): Promise<RunInDockOutcome> {
   const store = useTerminalStore.getState()
@@ -97,7 +121,7 @@ export async function runInDockTab(input: RunInDockInput): Promise<RunInDockOutc
   const session = getLiveSession(sessionId)
   if (!session) return { kind: "error", message: `session ${sessionId} is not live` }
 
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const timeoutMs = resolveTimeoutMs(input.timeoutMs)
   const result = await new Promise<RunInDockOutcome>((resolve) => {
     let off: (() => void) | null = null
     const timer = setTimeout(() => {

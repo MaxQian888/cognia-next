@@ -28,6 +28,7 @@ import {
   type TeamStoreWriter,
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /** Planning result kept compatible with the legacy LeadPlanResult shape. */
 export interface LeadPlanResult {
@@ -120,6 +121,16 @@ export async function runTeamLifecycle(
       return { runId: "", status: "failed", reason: "No tasks to dispatch" }
     }
 
+    // ── Allocate runId early so the onTeamStart hook can carry it ──
+    const runId = `run_team_${nanoid(12)}`
+    const hooks = getPluginLifecycleHooks()
+    hooks.dispatchOnTeamStart({
+      teamId,
+      runId,
+      workers: allMembers.map((m) => ({ id: m.id, name: m.name, role: m.role })),
+      taskCount: tasks.length,
+    })
+
     // ── Plan-approval gate (synthesizer-local; never enters workflow) ──
     if (team.config.requirePlanApproval) {
       const lead = allMembers.find((m) => m.id === team.leadId)
@@ -138,13 +149,23 @@ export async function runTeamLifecycle(
       let feedback: string | undefined
       for (let i = 0; i < maxRev; i++) {
         if (ac.signal.aborted) break
-        await deps.runLeadPlanning({ team, lead, feedback, signal: ac.signal })
+        const planResult = await deps.runLeadPlanning({
+          team,
+          lead,
+          feedback,
+          signal: ac.signal,
+        })
         const decision = await waitForDecision(
           { scope: "agent-team", id: teamId },
           ac.signal
         ).catch(() => ({ outcome: "reject" as const, feedback: "aborted" }))
         if (decision.outcome === "approve") {
           approved = true
+          hooks.dispatchOnTeamPlanReady({
+            teamId,
+            runId,
+            plan: planResult.planText,
+          })
           break
         }
         feedback = decision.feedback
@@ -161,7 +182,6 @@ export async function runTeamLifecycle(
     }
 
     // ── Build per-run shared state ──
-    const runId = `run_team_${nanoid(12)}`
     const concurrency = createConcurrencyController(team.config.maxConcurrentTeammates ?? 5)
     const modelPref = createModelPreferenceController()
     const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
@@ -250,6 +270,35 @@ export async function runTeamLifecycle(
       })
     )
 
+    // Wire budget threshold events to the plugin hooks pipeline. Plugins
+    // listening on onTeamBudgetWarn see both warning and critical crossings
+    // with `used` / `limit` snapshots so they can decide whether to nudge
+    // model preference, post a dashboard, or veto further dispatch.
+    subs.push(
+      budget.on("warning_crossed", () => {
+        const status = budget.status()
+        hooks.dispatchOnTeamBudgetWarn({
+          teamId,
+          runId,
+          level: "warning",
+          used: status.used,
+          limit: status.limit,
+        })
+      })
+    )
+    subs.push(
+      budget.on("critical_crossed", () => {
+        const status = budget.status()
+        hooks.dispatchOnTeamBudgetWarn({
+          teamId,
+          runId,
+          level: "critical",
+          used: status.used,
+          limit: status.limit,
+        })
+      })
+    )
+
     let budgetResolverActive = false
     subs.push(
       budget.on("pause_for_review", () => {
@@ -292,8 +341,15 @@ export async function runTeamLifecycle(
       concurrency,
       modelPref,
       storeWriter: deps.storeWriter,
+      // Lazily populated by the dispatch executor on first claim — see
+      // `lib/workflow/nodes/built-ins.ts:action.team.task.dispatch`.
+      resolvedCapabilities: new Map(),
     })
 
+    // Track final status so the finally block can fire onTeamComplete
+    // with a meaningful payload even when runWorkflow throws.
+    let finalStatus: RunTeamLifecycleResult["status"] = "failed"
+    let finalReason: string | undefined
     try {
       const result = await runWorkflow({
         workflow,
@@ -307,18 +363,28 @@ export async function runTeamLifecycle(
         signal: ac.signal,
         concurrency,
       })
-      const status: RunTeamLifecycleResult["status"] =
+      finalStatus =
         result.status === "succeeded"
           ? "completed"
           : result.status === "cancelled"
             ? "cancelled"
             : "failed"
+      finalReason = result.error?.message
       return {
         runId: result.runId,
-        status,
-        reason: result.error?.message,
+        status: finalStatus,
+        reason: finalReason,
       }
+    } catch (err) {
+      finalReason = err instanceof Error ? err.message : String(err)
+      throw err
     } finally {
+      hooks.dispatchOnTeamComplete({
+        teamId,
+        runId,
+        status: finalStatus,
+        reason: finalReason,
+      })
       for (const u of subs) {
         try {
           u()

@@ -57,6 +57,21 @@ export type BridgeScope =
    * Computer Use calls.
    */
   | "mcp:computer-use"
+  /**
+   * Read-only inbox introspection — list adapters, conversations, drafts,
+   * audit. Default OFF; mirrors the `rag:twin` sensitivity-split precedent
+   * because inbox metadata may include conversation handles, channel ids,
+   * and recent message snippets.
+   */
+  | "inbox:connectors:read"
+  /**
+   * Write-side inbox — `connectors_send_message` enqueues an AI reply via
+   * the same `runConnectorDigestTurn` pipeline used by the in-app chat (PII
+   * gate, policy eval, idempotency, outbound runner all stay in path).
+   * Split from `read` so an operator can grant introspection without
+   * accidentally enabling automated replies.
+   */
+  | "inbox:connectors:send"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -70,6 +85,8 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "runtime:plugins",
   "runtime:agent-teams",
   "mcp:computer-use",
+  "inbox:connectors:read",
+  "inbox:connectors:send",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */

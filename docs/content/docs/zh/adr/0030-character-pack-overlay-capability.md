@@ -114,3 +114,42 @@ packVersionAtClone?: string
 3. **session.characterId 悬挂**。由 `<CharacterMissingBanner>` 覆盖。重新启用后 banner 自动消失。
 4. **manifest 体积**。50 角色 × 10 KB systemPrompt = 500 KB / 插件；`createOverlayRegistry` 按引用存储，内存代价可控。SDK helper 强制软上限。
 5. **插件卸载时插件自有 Dexie 表未自动清理**（既有 gap，非本次引入）。`sourcePluginId` 指向已删插件的克隆变成 Dexie 孤儿 — 仍可用，只是没有 overlay 父级。
+
+## 修订 — 2026-05-23（v50）
+
+### 反转：D5 — 内建角色也走 overlay
+
+原 ADR（§D5、§备选方案）选择把 6 个内建角色排除在 overlay-registry 之外：它们留在 `seedBuiltInCharacters()` 里作为普通 Dexie 行。两点原因让这个选择不再最优：
+
+1. 新的 **Apply Update**（选择性覆盖 pack-managed 字段、保留用户改动）流程构建在 overlay + snapshot 模型之上。把内建排除在外意味着 Cognia 持续优化自家 persona prompt 时无法就地推送给用户。
+2. 概念一致性：其他所有角色来源 —— 第三方插件、本地 `.cognia-pack.json` —— 都走 overlay registry。把内建作为特例会在 `listCharacters` / `duplicateCharacter` / 设置 UI 里产生两条并行代码路径。
+
+**新布局：**
+
+- 6 个 persona 搬到 `plugins/cognia-builtin-characters/src/index.ts`，是一个真正的 first-party 插件。`BUILTIN_PACK.id = "builtin"`，pluginId `cognia-builtin-characters`，版本 `1.0.0`。每次启动通过标准插件管理器激活路径重新注册。
+- Dexie schema **v50** 增加一个 upgrade hook，给老的 `char_builtin_*` 行打上新的 `sourcePluginId` / `sourcePackId` / `clonedFromPackCharacterId` / `packVersionAtClone` 归属字段。用户自定义原样保留 —— 只追加归属字段。
+- `listCharacters` 新增 **clone-hides-overlay** 去重规则：当 Dexie 行的 `clonedFromPackCharacterId` 匹配某个 overlay 合成 id 时，picker 隐藏 overlay 那份。内建角色因此在 UI 中只出现一次（Dexie 行），并且归属徽章 + Apply Update 流程都和第三方包克隆一样工作。
+
+### 新增：v2 manifest 字段 + Apply Update 流程
+
+三个可选字段加到 `PluginCharacterDef`，由 `CHARACTER_PACK_FILE_SCHEMA_VERSION = 2` 控制：
+
+- `avatarImage?: { tauriPath?, webDataUrl? }` — 作者按 shell 自选；UI 找不到时回退到 `avatarEmoji + avatarColor`。
+- `persona?: { tone, personality, openingMessage, exemplarPrompts }` — 本轮仅供展示（build-options 流水线暂不消费）。
+- `voiceProfile?: { provider, voiceId, rate?, pitch?, volume? }` — 通过新的 `lib/plugin/character-pack/character-voice.ts:resolveCharacterVoice` 投射为 `Partial<SpeechSettings>` 叠加层送给 `TTSOrchestrator.speak()`。不修改 `AppSettings`。
+
+`SUPPORTED_SCHEMA_VERSIONS = {1, 2}` —— v1 包继续可读；新导出统一写 v2。
+
+**Apply Update**（选择性覆盖）：
+
+- `Character.pristineSnapshot?: PackPristineSnapshot` 记录克隆 / 上一次 apply 时 pack-managed 字段的值。
+- `lib/plugin/character-pack/diff-pack-update.ts` 是一个纯 diff：逐字段，若 `row[f]` 仍等于 `snapshot[f]`，则用户没动过 → 可以从最新 overlay 覆盖；否则保留。
+- 设置 UI 新增 **应用更新** 按钮（单行）和 **全部应用 (N)**（当同 pack 至少 2 个克隆有待更新时）。对话框先展示双列 diff，用户确认后才落库。
+- 没有 snapshot 的旧 v48 克隆走 confirm-before-overwrite-all 兜底 —— 对话框上挂出警告，提醒用户先复制一份做备份。
+
+### 不在本轮（后续工作）
+
+- 把 `resolveCharacterVoice` 实际接到 TTS dispatch 调用点。
+- `useTauriAssetUrl` hook，用于渲染 `avatarImage.tauriPath`。
+- `.cognia-pack.json` 文件的 Ed25519 签名校验。
+- 新的 `requires` 维度类型（theme-pack / connector / provider）。

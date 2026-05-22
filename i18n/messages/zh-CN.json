@@ -6,7 +6,8 @@
   "terminal": {
     "dock": {
       "newSession": "新建终端",
-      "closePanel": "关闭面板"
+      "closePanel": "关闭面板",
+      "resize": "拖动调整终端 dock 高度（方向键亦可）"
     },
     "tab": {
       "close": "关闭终端",
@@ -202,7 +203,40 @@
       }
     },
     "activity": {
-      "empty": "暂无事件。"
+      "empty": "暂无事件。",
+      "report": {
+        "title": "执行报告",
+        "status": "状态：{status}",
+        "emptyCheckpoints": "本次运行尚未记录任何检查点。"
+      }
+    },
+    "consensus": {
+      "title": "共识投票",
+      "description": "活跃和最近解决的成员投票。",
+      "empty": "该团队暂无共识投票。",
+      "type": "类型：{type}",
+      "vote": "投票",
+      "voteCount": "{count} 票",
+      "cancel": "取消",
+      "forceResolve": "领队裁决",
+      "status": {
+        "open": "进行中",
+        "resolved": "已解决",
+        "timeout": "超时",
+        "cancelled": "已取消"
+      }
+    },
+    "teammateConfig": {
+      "title": "配置 {name}",
+      "description": "编辑该队友的身份、提示词、工具与插件能力。",
+      "save": "保存",
+      "rosterSection": {
+        "title": "队员字段",
+        "description": "存在于队员行而非预设配置上的字段。",
+        "runtime": "运行时",
+        "specialization": "专长",
+        "temperature": "温度（{value}）"
+      }
     },
     "members": {
       "title": "团队成员",
@@ -234,8 +268,13 @@
     "settings": {
       "title": "团队设置",
       "saved": "设置已保存。",
+      "saving": "保存中…",
+      "save": "保存",
+      "cancel": "取消",
       "name": "团队名称",
       "description": "描述",
+      "sectionExecution": "执行",
+      "sectionControls": "控制项",
       "executionMode": "执行模式",
       "executionPattern": "执行策略",
       "maxConcurrent": "最大并发数",
@@ -247,7 +286,69 @@
       "dangerZone": "危险区域",
       "deleteWarning": "将永久删除该团队及其所有成员、任务和消息。",
       "typeToConfirm": "输入 \"{name}\" 确认",
-      "deleteAction": "永久删除"
+      "deleteAction": "永久删除",
+      "executionModeOption": {
+        "coordinated": "协同",
+        "autonomous": "自主",
+        "delegate": "委派"
+      },
+      "executionPatternOption": {
+        "managerWorker": "经理/工人",
+        "parallelSpecialists": "并行专家",
+        "backgroundHandoff": "后台转交",
+        "externalHandoff": "外部转交",
+        "singleAgent": "单一智能体（推荐）"
+      },
+      "accordion": {
+        "overview": "概览",
+        "plugins": "插件与能力",
+        "governance": "治理",
+        "memory": "共享内存"
+      },
+      "plugins": {
+        "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
+      },
+      "governance": {
+        "title": "治理策略",
+        "description": "审批门、预算阈值、升级行为以及拒答检测。",
+        "approval": {
+          "heading": "审批",
+          "requirePlanApproval": "运行前需要计划审批",
+          "requireDelegationApproval": "向外部智能体委派前需要审批"
+        },
+        "budget": {
+          "heading": "Token 预算",
+          "tokenBudget": "Token 预算（0 = 无限）",
+          "warningThreshold": "警告阈值（0–1）",
+          "criticalThreshold": "严重阈值（0–1）",
+          "onCritical": "触发严重时"
+        },
+        "escalationOption": {
+          "notify": "仅通知",
+          "pause_for_review": "暂停以待审核",
+          "reduce_concurrency": "并发降到 1",
+          "handoff_to_background": "切换到后台"
+        },
+        "escalation": {
+          "heading": "升级",
+          "allowOperatorPatternOverride": "允许操作员覆盖执行模式",
+          "pauseOnHighRisk": "路由评估标记高风险时自动暂停"
+        },
+        "refusal": {
+          "heading": "拒答检测",
+          "detect": "在队员输出中检测拒答模式",
+          "patterns": "拒答模式（每行一条）",
+          "patternsPlaceholder": "我无法协助\n我没办法"
+        }
+      },
+      "memory": {
+        "title": "共享内存",
+        "description": "由队员在运行期间写入的键值条目。写入受 PII 网关保护。",
+        "empty": "暂无共享内存条目。",
+        "clearAll": "清空",
+        "deleteEntry": "删除 \"{key}\"",
+        "writtenBy": "由 {name} 写入 · {when}"
+      }
     },
     "planApproval": {
       "title": "等待计划审批",
@@ -1686,6 +1787,17 @@
         "lastRestart": "最近一次重启",
         "noRestart": "尚未发生",
         "lastChecked": "最近探测"
+      },
+      "inboxTelemetry": {
+        "title": "Inbox 遥测",
+        "description": "最近 inbox 事件的面包屑日志（入站、出站、熔断、静默时段、A2UI 降级）。环形缓冲，最多 3000 条，先入先淘汰。",
+        "loadingCount": "正在统计事件…",
+        "rowCount": "{count, plural, =0 {暂无事件} =1 {1 条事件} other {# 条事件}}",
+        "refresh": "刷新",
+        "exportCsv": "导出 CSV",
+        "exportJson": "导出 JSON",
+        "exported": "已导出 {filename}",
+        "emptyExport": "无数据可导出 — 遥测缓冲为空。"
       }
     },
     "title": "设置",
@@ -3239,10 +3351,28 @@
         "recloneFromPackTitle": "用新版本的角色包覆盖当前克隆",
         "dismissUpdate": "忽略",
         "dismissUpdateTitle": "不再为此克隆显示更新提示",
-        "exportPack": "导出角色包"
+        "exportPack": "导出角色包",
+        "applyUpdate": "应用更新",
+        "applyUpdateTitle": "从新版角色包拉取受管字段，同时保留你的修改",
+        "applyUpdateBatch": "全部应用（{count}）",
+        "applyUpdateBatchTitle": "把更新应用到来自该角色包的每一个克隆"
       },
       "recloneFromPackToast": "已重新克隆为「{name}」。",
       "dismissUpdateToast": "已忽略更新提示。",
+      "applyUpdateToast": "{name}：覆盖 {updated} 个字段，保留 {preserved} 个。",
+      "applyUpdateToastBatch": "已更新「{pack}」的 {count} 个角色。",
+      "applyUpdateNoop": "「{name}」没有可更新的内容。",
+      "applyUpdateDialog": {
+        "title": "应用角色包更新 — {name}",
+        "description": "确认从新版本拉取的字段，以及因你手动修改而保留的字段。",
+        "willUpdate": "将覆盖",
+        "preserved": "保留（你已修改）",
+        "noChanges": "你的角色与新版本没有差异。",
+        "noBaselineWarning": "这个克隆没有可比对的基线（来自 v50 之前的旧版本）。应用更新会覆盖所有受角色包管理的字段。如需备份，请先复制一份。",
+        "fieldRow": "{field}",
+        "confirm": "应用更新",
+        "cancel": "取消"
+      },
       "exportPackUnavailable": "找不到可导出的角色包。",
       "exportPackAria": "导出 {name} 的源角色包",
       "validation": {
@@ -3365,6 +3495,10 @@
       "duplicate": "复制",
       "builtIn": "内置",
       "builtInReadOnly": "内置模板只读 — 请先复制。",
+      "pluginBadge": "插件 · {plugin}",
+      "pluginReadOnly": "插件模板只读 — 请先复制。",
+      "missingDependencies": "{count} 个依赖未满足",
+      "useDisabledMissingDeps": "请先安装缺失的依赖插件，再使用此模板。",
       "removeTitle": "删除模板？",
       "removeBody": "「{name}」将被删除。已经从该模板创建的团队不受影响。",
       "addedToast": "已添加「{name}」。",
@@ -3518,7 +3652,11 @@
         "noResults": "没有匹配的模板。",
         "filterAll": "全部",
         "noUserTemplates": "还没有用户创建的模板。",
-        "noUserTemplatesDescription": "新建模板或复制内置模板即可开始。"
+        "noUserTemplatesDescription": "新建模板或复制内置模板即可开始。",
+        "pluginSection": {
+          "title": "插件贡献的子代理",
+          "description": "通过插件 manifest 声明的子代理。源数据由插件维护，这里只读。"
+        }
       },
       "runtime": {
         "title": "运行时",
@@ -3730,7 +3868,11 @@
       },
       "exposeDockToAgents": {
         "label": "向智能体开放终端",
-        "helper": "允许聊天智能体通过 terminal-dock MCP 工具创建/读取/写入隔离的终端会话。智能体会话与可见 dock 隔离，仅创建它的智能体能访问。"
+        "helper": "允许聊天智能体通过合成的 terminal_dock_* MCP 工具驱动你可见的终端标签。智能体与你共用同一个 PTY —— 同一个 shell、同一个 cwd、同一份历史。每个标签按会话需要单独授权。默认关闭。"
+      },
+      "runInDockTimeout": {
+        "label": "Run-in-dock 超时（秒）",
+        "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。"
       },
       "projectOverride": {
         "title": "按项目覆盖",
@@ -4939,6 +5081,42 @@
         "advanced": {
           "title": "高级",
           "description": "工作目录、代理模式覆盖与预设库标记。"
+        },
+        "nativeTools": {
+          "title": "原生 Anthropic 工具",
+          "description": "由插件贡献的 computer use / bash / text editor 等原生工具。",
+          "empty": "尚未注册任何原生 Anthropic 工具。",
+          "requiresNativeInputPermission": "需要 native input/screen 权限。"
+        },
+        "subagent": {
+          "title": "子代理",
+          "description": "内置 workflow-* 子代理及由插件注册的子代理。",
+          "empty": "暂无可用子代理。",
+          "builtinBadge": "内置",
+          "pluginBadge": "插件"
+        },
+        "character": {
+          "title": "角色",
+          "description": "为此对象投射人物设定。插件角色包与本地角色一并展示。",
+          "pickerLabel": "角色",
+          "inherit": "继承（无）"
+        },
+        "externalPreset": {
+          "title": "外部代理预设",
+          "description": "可选的转交目标 — Claude Code / Codex / Gemini-CLI 等。",
+          "pickerLabel": "预设",
+          "inherit": "继承（无）"
+        },
+        "teamCapabilityOverlay": {
+          "title": "继承与覆盖",
+          "description": "显示哪些能力 id 来自团队默认池、哪些是该队员新增、哪些被移除。",
+          "mcpServers": "MCP 服务器",
+          "skills": "技能",
+          "nativeTools": "原生工具",
+          "subagents": "子代理",
+          "inheritedLabel": "继承",
+          "addedLabel": "新增",
+          "removedLabel": "移除"
         }
       }
     },
@@ -9138,6 +9316,8 @@
     "environmentManagementDesc": "读取环境变量和系统信息。形似密钥 (KEY / TOKEN / SECRET / PASSWORD) 的键默认会被脱敏，除非显式请求显示。",
     "shellExecution": "受限 Shell",
     "shellExecutionDesc": "带白名单 + 黑名单 + 危险模式守卫的 shell 执行。默认关闭 —— 与 SDK Bash 部分重叠且属于高风险。",
+    "terminalRepl": "交互式 REPL",
+    "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
     "alwaysAllowTitle": "始终允许的工具",
     "alwaysAllowDesc": "用户已对其全局放行的工具，后续调用将跳过审批对话框。",
     "alwaysAllowEmpty": "暂无工具被加入「始终允许」列表。",
@@ -9177,7 +9357,11 @@
       "listEnv": "列出进程环境变量，密钥默认会被脱敏。",
       "getEnv": "读取单个环境变量，密钥默认会被脱敏。",
       "systemInfo": "平台、架构、Node 版本、CPU、内存、运行时长、主机名。",
-      "shellExecuteAdvanced": "以 argv 形式运行单个程序，带白名单 + 黑名单 + 危险模式守卫；始终需要审批。"
+      "shellExecuteAdvanced": "以 argv 形式运行单个程序，带白名单 + 黑名单 + 危险模式守卫；始终需要审批。",
+      "terminalReplSpawn": "打开持久化交互式 PTY（例如 python / sql REPL），返回 sessionId 供后续写入 / 读取。",
+      "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
+      "terminalReplRead": "排空累积的 REPL 输出（默认销毁性读取）。返回 {data, truncated, exited, exitCode}。",
+      "terminalReplKill": "信号终止 REPL 会话，可重复调用。"
     }
   },
   "providers": {
@@ -11050,6 +11234,10 @@
       "title": "终端",
       "back": "返回",
       "newSession": "新建终端会话",
+      "search": "在终端中搜索",
+      "history": "命令历史",
+      "historyTitle": "最近命令",
+      "historySubtitle": "轻触命令即复制；长按可重新执行。",
       "empty": {
         "remoteReady": "暂无远程终端会话。新建一个以通过已配对的桌面服务器连接。",
         "notMobile": "这里的集成终端以桌面 dock 形式运行 — 请切换到桌面应用使用。",
@@ -13068,6 +13256,40 @@
           "placeholder": "skill_writing, skill_research"
         }
       },
+      "systemTerminal": {
+        "command": {
+          "label": "命令",
+          "hint": "将输入到当前活动 dock 标签页（或新建一个），shell 自行分词。",
+          "placeholder": "pnpm test --filter @cognia/twin"
+        },
+        "cwd": {
+          "label": "工作目录",
+          "hint": "可选；默认沿用 dock 标签的 cwd。",
+          "placeholder": "/repo"
+        },
+        "shell": {
+          "label": "Shell（覆盖）",
+          "hint": "留空时沿用 settings.terminal.defaultShell。",
+          "placeholder": "/bin/bash"
+        },
+        "tabId": {
+          "label": "复用已有标签 ID",
+          "hint": "填入后写入到该标签；留空则新建标签。",
+          "placeholder": "留空将新建标签"
+        },
+        "timeoutSec": {
+          "label": "超时（秒）",
+          "hint": "范围 5–600；默认沿用用户设置 runInDockTimeoutSec。"
+        },
+        "onFailure": {
+          "label": "退出码非零时的处理",
+          "hint": "当命令以非零码退出时如何响应。",
+          "options": {
+            "throw": "让工作流步骤失败",
+            "branch": "路由到 failure 出口"
+          }
+        }
+      },
       "twinRag": {
         "twinId": {
           "label": "数字分身 ID",
@@ -13692,6 +13914,24 @@
         "enabled": "Computer Use 已启用",
         "disabled": "Computer Use 已禁用",
         "cancelled": "未改动 — Computer Use 保持禁用"
+      },
+      "healthBadge": {
+        "aria": "适配器健康状态：{state}",
+        "breakerOpen": "熔断器已打开",
+        "rateLimited": "已限流",
+        "degraded": "降级中",
+        "down": "已离线",
+        "eta": "预计 {date} 恢复",
+        "reconnect": "重连",
+        "reconnectQueued": "重连已排队。",
+        "reconnectUnavailable": "运行时未注册该适配器。",
+        "reconnectDesktopOnly": "重连需要桌面端。",
+        "openHealth": "打开完整健康面板"
+      },
+      "computerUseChip": {
+        "label": "CU",
+        "aria": "本会话已启用 Computer Use",
+        "tooltip": "本会话已启用 Computer Use — 回复可能在主机执行截图/鼠标/键盘操作。"
       }
     },
     "conversationOverride": {
@@ -13715,6 +13955,11 @@
         "characterPlaceholder": "（无）",
         "allowComputerUse": "允许 Computer Use 工具",
         "allowComputerUseWarning": "开启后，该会话中的回复可能在本机触发截图、鼠标、键盘操作。IM 默认关闭。",
+        "allowGoalDriving": "允许在此会话上启动自驱 /goal",
+        "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
+        "applyToAdapter": "应用到此适配器全部会话",
+        "applyToAdapterTitle": "将以上设置复制到该适配器下的每个会话",
+        "applyToAdapterConfirm": "确定将以上设置应用到该适配器下的所有会话？这会覆盖已有的每会话设定。",
         "providerOverride": "Provider 覆盖",
         "providerOverridePlaceholder": "anthropic",
         "modelOverride": "Model 覆盖",
@@ -13777,6 +14022,30 @@
       "reconnectUnavailable": "无法重连",
       "reconnectDesktopOnly": "仅桌面端支持重连",
       "dismiss": "关闭"
+    },
+    "banner": {
+      "outboundSaturated": {
+        "headline": "{count, plural, =1 {1 个适配器的出站队列已饱和} other {# 个适配器的出站队列已饱和}}",
+        "count": "{count, plural, =1 {1 条消息被限流} other {# 条消息被限流}}",
+        "viewOutbound": "查看出站队列",
+        "dismiss": "关闭"
+      }
+    },
+    "state": {
+      "empty": {
+        "title": "暂无内容",
+        "description": "当 connector 接收到消息后会显示在这里。"
+      },
+      "error": {
+        "title": "出错了",
+        "description": "Inbox 渲染失败。可以重试，或复制堆栈贴到工单。",
+        "retry": "重试",
+        "copyStack": "复制堆栈",
+        "copiedToast": "已复制"
+      },
+      "syncing": {
+        "label": "正在加载缓存…"
+      }
     },
     "inboundA2UI": {
       "rawPayload": "原始负载"

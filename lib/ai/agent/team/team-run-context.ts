@@ -11,6 +11,7 @@ import type {
   AgentTeam,
   AgentTeammate,
   AgentTeamTask,
+  ResolvedCapabilities,
   SendMessageInput,
   TeamTaskStatus,
 } from "@/types/agent/agent-team"
@@ -40,6 +41,14 @@ export interface TeamRunContext {
   readonly concurrency: ConcurrencyController
   readonly modelPref: ModelPreferenceController
   readonly storeWriter: TeamStoreWriter
+  /**
+   * Per-teammate cache of capability resolution. Populated lazily by the
+   * dispatch executor on first claim so each teammate's plugin capability
+   * pool (skills / mcp / native-tools / character / subagents / a2ui)
+   * is computed exactly once per run. See
+   * `lib/ai/agent/team/capability-resolver.ts:resolveTeammateCapabilities`.
+   */
+  readonly resolvedCapabilities: Map<string, ResolvedCapabilities>
 }
 
 const registry = new Map<string, TeamRunContext>()

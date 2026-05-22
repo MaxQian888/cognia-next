@@ -234,6 +234,10 @@ async function insertInboundMessage(
     sessionId,
     role: "user",
     parts: finalParts,
+    // Denormalized copy of platformMessage.messageId so the v49 messages
+    // index resolves edit/delete events in O(log n). Kept in sync with the
+    // metadata blob below.
+    platformMessageId: event.messageId,
     metadata: {
       platformMessage: {
         messageId: event.messageId,

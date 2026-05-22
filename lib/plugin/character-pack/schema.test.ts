@@ -6,6 +6,7 @@ import {
   CHARACTER_PACK_FILE_SCHEMA_VERSION,
   parseLocalPackFile,
   serializeLocalPackFile,
+  SUPPORTED_SCHEMA_VERSIONS,
 } from "./schema"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 
@@ -27,7 +28,7 @@ function makePack(overrides: Partial<PluginCharacterPackDef> = {}): PluginCharac
 }
 
 describe("parseLocalPackFile", () => {
-  it("accepts a well-formed schema v1 file with no signature", () => {
+  it("accepts a well-formed current-version file with no signature", () => {
     const result = parseLocalPackFile({
       schemaVersion: CHARACTER_PACK_FILE_SCHEMA_VERSION,
       pack: makePack(),
@@ -36,7 +37,26 @@ describe("parseLocalPackFile", () => {
     if (result.ok) {
       expect(result.file.pack.id).toBe("workplace")
       expect(result.file.signature).toBeUndefined()
+      expect(result.file.schemaVersion).toBe(CHARACTER_PACK_FILE_SCHEMA_VERSION)
     }
+  })
+
+  // Backward compatibility — v1 files keep parsing even though the host now
+  // emits v2 by default. v1 packs carry no v2 fields, so the parser just
+  // accepts them as-is.
+  it("accepts a legacy schema v1 file verbatim", () => {
+    const result = parseLocalPackFile({ schemaVersion: 1, pack: makePack() })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.file.schemaVersion).toBe(1)
+      expect(result.file.pack.id).toBe("workplace")
+    }
+  })
+
+  it("exposes the set of supported schema versions", () => {
+    expect(SUPPORTED_SCHEMA_VERSIONS.has(1)).toBe(true)
+    expect(SUPPORTED_SCHEMA_VERSIONS.has(2)).toBe(true)
+    expect(SUPPORTED_SCHEMA_VERSIONS.has(3)).toBe(false)
   })
 
   it("accepts a well-formed schema v1 file with an ed25519 signature", () => {
@@ -141,6 +161,123 @@ describe("parseLocalPackFile", () => {
       signature: { algo: "ed25519", pubKey: "x", sig: "" },
     })
     expect(noSig.ok).toBe(false)
+  })
+
+  // ---- v2 field validation (schemaVersion: 2) -----------------------------
+
+  it("accepts v2 characters with full avatarImage / persona / voiceProfile", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            avatarImage: {
+              tauriPath: "./avatars/alice.png",
+              webDataUrl: "data:image/png;base64,X",
+            },
+            persona: {
+              tone: "warm",
+              personality: "Former teacher",
+              openingMessage: "Hi!",
+              exemplarPrompts: ["Tell me a story", "Why is the sky blue?"],
+            },
+            voiceProfile: {
+              provider: "openai",
+              voiceId: "alloy",
+              rate: 1.1,
+              pitch: 1.0,
+              volume: 0.8,
+            },
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it("rejects avatarImage with neither tauriPath nor webDataUrl", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            avatarImage: {},
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/avatarImage/)
+  })
+
+  it("rejects voiceProfile missing voiceId", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            voiceProfile: { provider: "openai", voiceId: "" },
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/voiceId/)
+  })
+
+  it("rejects voiceProfile with non-finite rate", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            voiceProfile: { provider: "openai", voiceId: "alloy", rate: Number.NaN },
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/rate/)
+  })
+
+  it("rejects persona.exemplarPrompts that is not a string array", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            persona: { exemplarPrompts: ["ok", ""] },
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/exemplarPrompts/)
   })
 
   it("rejects packs exceeding the soft character limit", () => {

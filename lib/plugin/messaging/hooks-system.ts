@@ -13,6 +13,19 @@ import type {
   PluginA2UIDataChange,
   PluginAgentStep,
   PluginMessage,
+  PluginTeamStartPayload,
+  PluginTeamPlanReadyPayload,
+  PluginTeammateClaimPayload,
+  PluginTeammateReleasePayload,
+  PluginTeamBudgetWarnPayload,
+  PluginTeamCompletePayload,
+  PluginConsensusOpenedPayload,
+  PluginConsensusVotedPayload,
+  PluginConsensusResolvedPayload,
+  PluginSharedMemoryWritePayload,
+  PluginSharedMemoryDeletePayload,
+  PluginTeamDelegationStartPayload,
+  PluginTeamDelegationCompletePayload,
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin"
@@ -739,6 +752,84 @@ export class PluginLifecycleHooks {
         }
       }
     }
+  }
+
+  // ===========================================================================
+  // Hook Dispatchers - Agent Team (lib/ai/agent/agent-team-runtime.ts)
+  // ===========================================================================
+
+  /**
+   * Generic helper used by all team-context hooks. Each dispatcher below
+   * narrows the hook handler signature to its specific payload type — this
+   * keeps the per-hook code one-liner-thin while preserving type safety.
+   */
+  private dispatchTeamHook<K extends keyof PluginHooks>(
+    name: K,
+    payload: Parameters<NonNullable<PluginHooks[K]>>[0]
+  ): void {
+    for (const pluginId of this.hookExecutionOrder) {
+      const registered = this.registeredHooks.get(pluginId)
+      const handler = registered?.hooks[name] as ((p: typeof payload) => void) | undefined
+      if (handler) {
+        try {
+          handler(payload)
+        } catch (error) {
+          loggers.hooks.error(`Error in plugin ${pluginId} ${name}:`, error)
+        }
+      }
+    }
+  }
+
+  dispatchOnTeamStart(payload: PluginTeamStartPayload): void {
+    this.dispatchTeamHook("onTeamStart", payload)
+  }
+
+  dispatchOnTeamPlanReady(payload: PluginTeamPlanReadyPayload): void {
+    this.dispatchTeamHook("onTeamPlanReady", payload)
+  }
+
+  dispatchOnTeammateClaim(payload: PluginTeammateClaimPayload): void {
+    this.dispatchTeamHook("onTeammateClaim", payload)
+  }
+
+  dispatchOnTeammateRelease(payload: PluginTeammateReleasePayload): void {
+    this.dispatchTeamHook("onTeammateRelease", payload)
+  }
+
+  dispatchOnTeamBudgetWarn(payload: PluginTeamBudgetWarnPayload): void {
+    this.dispatchTeamHook("onTeamBudgetWarn", payload)
+  }
+
+  dispatchOnTeamComplete(payload: PluginTeamCompletePayload): void {
+    this.dispatchTeamHook("onTeamComplete", payload)
+  }
+
+  dispatchOnConsensusOpened(payload: PluginConsensusOpenedPayload): void {
+    this.dispatchTeamHook("onConsensusOpened", payload)
+  }
+
+  dispatchOnConsensusVoted(payload: PluginConsensusVotedPayload): void {
+    this.dispatchTeamHook("onConsensusVoted", payload)
+  }
+
+  dispatchOnConsensusResolved(payload: PluginConsensusResolvedPayload): void {
+    this.dispatchTeamHook("onConsensusResolved", payload)
+  }
+
+  dispatchOnSharedMemoryWrite(payload: PluginSharedMemoryWritePayload): void {
+    this.dispatchTeamHook("onSharedMemoryWrite", payload)
+  }
+
+  dispatchOnSharedMemoryDelete(payload: PluginSharedMemoryDeletePayload): void {
+    this.dispatchTeamHook("onSharedMemoryDelete", payload)
+  }
+
+  dispatchOnTeamDelegationStart(payload: PluginTeamDelegationStartPayload): void {
+    this.dispatchTeamHook("onTeamDelegationStart", payload)
+  }
+
+  dispatchOnTeamDelegationComplete(payload: PluginTeamDelegationCompletePayload): void {
+    this.dispatchTeamHook("onTeamDelegationComplete", payload)
   }
 
   // ===========================================================================

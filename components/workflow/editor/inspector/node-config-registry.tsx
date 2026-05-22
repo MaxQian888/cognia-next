@@ -59,6 +59,7 @@ import {
   SplitConfig,
   SubworkflowConfig,
   SwitchConfig,
+  SystemTerminalConfig,
   TeamCreateConfig,
   TeamRunConfig,
   TeamUpdateConfig,
@@ -103,6 +104,8 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolConfig,
   "action.plugin.invoke": PluginInvokeConfig,
+  // Actions: system (Wave 3 — integrated terminal)
+  "action.system.terminal": SystemTerminalConfig,
   // AI
   "ai.prompt": AiPromptConfig,
   "ai.classify": AiClassifyConfig,

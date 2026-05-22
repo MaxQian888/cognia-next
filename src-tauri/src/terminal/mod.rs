@@ -22,6 +22,7 @@
 pub mod commands;
 pub mod integration;
 pub mod osc633;
+pub mod replay;
 pub mod session;
 
 use std::collections::HashMap;
@@ -34,6 +35,8 @@ use parking_lot::Mutex;
 // without reaching into a sub-module. The unused-import lint fires for
 // the types this crate itself doesn't reference today — they're still
 // part of the module's stable surface.
+#[allow(unused_imports)]
+pub use replay::ReplayBuffer;
 #[allow(unused_imports)]
 pub use session::{PtySession, SessionOrigin, SpawnRequest, TerminalEvent, TerminalSessionInfo};
 
@@ -120,6 +123,7 @@ mod tests {
             // alive for the store-only tests.
             killer: std::sync::Mutex::new(make_dummy_killer()),
             tempdir: None,
+            replay: Arc::new(ReplayBuffer::new()),
         };
         Arc::new(session)
     }

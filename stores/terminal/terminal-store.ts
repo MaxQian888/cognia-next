@@ -71,7 +71,7 @@ export interface TerminalSessionRow {
   createdAt: number
   /** Per-(chat, tab) trust grant cache key surface. UI only; the authoritative grant lives in `PluginConsentBroker`. */
   agentTrusted: boolean
-  /** Identity of the agent that spawned this tab (MCP `agentId`). `null` when user-spawned. Used by terminal-dock-tool for scoping. */
+  /** Identity of the agent (chat session) that spawned this tab. `null` when user-spawned. Set by `lib/terminal/dock-tool-handler.ts` when the agent calls `terminal_dock_spawn`; reads filter the agent-only dock view. */
   agentSpawner: string | null
   /** OSC 633 prompt boundaries — newest last, capped to last 32. */
   promptBoundaries: TerminalPromptBoundary[]
@@ -143,7 +143,7 @@ export interface TerminalStoreState {
   /** Tab list for `projectId`, sorted by createdAt asc. */
   sessionsForProject: (projectId: string | null) => TerminalSessionRow[]
 
-  /** Tabs spawned by `agentId` — terminal-dock-tool uses this to scope read/write. */
+  /** Tabs spawned by `agentId` — `dock-tool-handler` uses this to scope agent-side reads/writes via `runTerminalDockAction`. */
   sessionsForAgent: (agentId: string) => TerminalSessionRow[]
 
   reset: () => void

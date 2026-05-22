@@ -3,6 +3,7 @@ import type {
   AgentTeammate,
   AgentTeamTask,
   AgentTeamMessage,
+  ResolvedCapabilities,
   TeamGovernanceSummary,
   TeamTaskStatus,
   TeammateStatus,
@@ -11,6 +12,7 @@ import type {
   SharedMemoryEntry,
   TeamDelegationRecord,
 } from "@/types/agent/agent-team"
+import { resolveTeammateCapabilities } from "@/lib/ai/agent/team/capability-resolver"
 
 // ============================================================================
 // Base Selectors
@@ -215,6 +217,35 @@ export const selectActiveTeamSharedMemory = (state: AgentTeamState) => {
 
 export const selectActiveTeamSharedMemoryEntries = (state: AgentTeamState) =>
   Object.values(selectActiveTeamSharedMemory(state))
+
+// ============================================================================
+// Derived: Capabilities
+// ============================================================================
+
+/**
+ * Resolve the effective capability bundle for a specific teammate inside a
+ * team. Merges the team-level default with the teammate-level overlay using
+ * the same semantics as the runtime `capability-resolver`. Returns the
+ * empty bundle when the team or teammate is missing.
+ */
+export const selectResolvedCapabilities =
+  (teamId: string, teammateId: string) =>
+  (state: AgentTeamState): ResolvedCapabilities => {
+    const team = state.teams[teamId]
+    const teammate = state.teammates[teammateId]
+    if (!team || !teammate) {
+      return {
+        mcpServerIds: [],
+        skillIds: [],
+        nativeAnthropicToolIds: [],
+        characterPackIds: [],
+        externalAgentPresetIds: [],
+        subagentIds: [],
+        a2uiTemplateIds: [],
+      }
+    }
+    return resolveTeammateCapabilities(team, teammate)
+  }
 
 // ============================================================================
 // Derived: Delegations

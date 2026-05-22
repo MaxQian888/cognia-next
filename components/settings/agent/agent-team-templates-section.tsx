@@ -51,6 +51,12 @@ import { toast } from "@/components/ui/sonner"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeamTemplate } from "@/types/agent/agent-team"
 import { createLogger } from "@/lib/logger"
+import {
+  getTemplateWarnings,
+  listAgentTeamTemplateEntries,
+  type PluginAgentTeamTemplateWarning,
+} from "@/lib/plugin/registries/agent-team-template-registry"
+import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 
 const log = createLogger("settings.agent-teams")
 
@@ -80,11 +86,60 @@ export function AgentTeamTemplatesSection() {
   const [editing, setEditing] = useState<AgentTeamTemplate | null>(null)
   const [creating, setCreating] = useState(false)
 
-  // Built-ins first, then user templates by name. Within built-ins, group by
-  // category so related templates sit together.
+  /**
+   * Project a plugin-contributed `PluginAgentTeamTemplateDef` into the
+   * `AgentTeamTemplate` shape the row component consumes. The runtime id
+   * is `<pluginId>:<defId>` so plugin templates can never collide with
+   * store-resident ids.
+   */
+  const projectPluginTemplate = useCallback(
+    (entry: {
+      id: string
+      entry: PluginAgentTeamTemplateDef
+      pluginId?: string
+    }): AgentTeamTemplate => ({
+      id: entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id,
+      name: entry.entry.name,
+      description: entry.entry.description,
+      category: entry.entry.category,
+      teammates: entry.entry.teammates.map((tm) => ({
+        name: tm.name,
+        description: tm.description,
+        specialization: tm.specialization,
+        config: tm.config,
+      })),
+      taskTemplates: entry.entry.taskTemplates,
+      config: entry.entry.config,
+      icon: entry.entry.icon,
+      isBuiltIn: false,
+    }),
+    []
+  )
+
+  // Built-ins first, then user templates by name, then plugin overlay
+  // entries last. Within built-ins, group by category so related
+  // templates sit together. Plugin entries carry source metadata in
+  // `pluginIndex` so the row can render badges + dep warnings.
   const sortedTemplates = useMemo(() => {
-    const all = Object.values(templates)
-    return all.sort((a, b) => {
+    const local = Object.values(templates)
+    const pluginEntries = listAgentTeamTemplateEntries()
+    const pluginIndex = new Map<
+      string,
+      { pluginId?: string; warnings: readonly PluginAgentTeamTemplateWarning[] }
+    >()
+    const pluginProjected: AgentTeamTemplate[] = pluginEntries.map((entry) => {
+      const projected = projectPluginTemplate(entry)
+      pluginIndex.set(projected.id, {
+        pluginId: entry.pluginId,
+        warnings: getTemplateWarnings(entry.id),
+      })
+      return projected
+    })
+    const merged = [...local, ...pluginProjected]
+    merged.sort((a, b) => {
+      const aPlugin = pluginIndex.has(a.id)
+      const bPlugin = pluginIndex.has(b.id)
+      if (aPlugin !== bPlugin) return aPlugin ? 1 : -1
       const aBuiltIn = a.isBuiltIn ?? false
       const bBuiltIn = b.isBuiltIn ?? false
       if (aBuiltIn !== bBuiltIn) return aBuiltIn ? -1 : 1
@@ -93,7 +148,8 @@ export function AgentTeamTemplatesSection() {
       }
       return a.name.localeCompare(b.name)
     })
-  }, [templates])
+    return { merged, pluginIndex }
+  }, [templates, projectPluginTemplate])
 
   const handleUse = useCallback(
     (template: AgentTeamTemplate) => {
@@ -174,25 +230,30 @@ export function AgentTeamTemplatesSection() {
       </div>
 
       <div className="grid gap-2" data-testid="agent-team-templates-grid">
-        {sortedTemplates.map((tpl) => (
-          <TemplateRow
-            key={tpl.id}
-            template={tpl}
-            editing={editing?.id === tpl.id}
-            onEditStart={() => setEditing(tpl)}
-            onEditCancel={() => setEditing(null)}
-            onSave={(patch) => {
-              updateTemplate(tpl.id, patch)
-              setEditing(null)
-              toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
-            }}
-            onUse={() => handleUse(tpl)}
-            onDuplicate={() => handleDuplicate(tpl)}
-            onDelete={() => handleDelete(tpl)}
-            tCommon={tCommon}
-            t={t}
-          />
-        ))}
+        {sortedTemplates.merged.map((tpl) => {
+          const pluginMeta = sortedTemplates.pluginIndex.get(tpl.id)
+          return (
+            <TemplateRow
+              key={tpl.id}
+              template={tpl}
+              pluginSource={pluginMeta?.pluginId}
+              warnings={pluginMeta?.warnings}
+              editing={editing?.id === tpl.id}
+              onEditStart={() => setEditing(tpl)}
+              onEditCancel={() => setEditing(null)}
+              onSave={(patch) => {
+                updateTemplate(tpl.id, patch)
+                setEditing(null)
+                toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
+              }}
+              onUse={() => handleUse(tpl)}
+              onDuplicate={() => handleDuplicate(tpl)}
+              onDelete={() => handleDelete(tpl)}
+              tCommon={tCommon}
+              t={t}
+            />
+          )
+        })}
       </div>
 
       {creating && (
@@ -227,6 +288,10 @@ export function AgentTeamTemplatesSection() {
 
 interface RowProps {
   template: AgentTeamTemplate
+  /** Owning plugin id when this template came from `agent-team-template` overlay. */
+  pluginSource?: string
+  /** Non-blocking dependency warnings stamped by `validateTemplateRequires`. */
+  warnings?: readonly PluginAgentTeamTemplateWarning[]
   editing: boolean
   onEditStart: () => void
   onEditCancel: () => void
@@ -240,6 +305,8 @@ interface RowProps {
 
 function TemplateRow({
   template,
+  pluginSource,
+  warnings,
   editing,
   onEditStart,
   onEditCancel,
@@ -250,6 +317,13 @@ function TemplateRow({
   t,
   tCommon,
 }: RowProps) {
+  // Plugin-sourced templates are read-only (the source of truth lives in
+  // the overlay registry). They can still be "used" (instantiates a team)
+  // and "duplicated" (clones the projection into a user template) but not
+  // edited or deleted. Missing-deps warnings disable the "use" action with
+  // a tooltip so operators install the dependency plugin first.
+  const isPluginSource = !!pluginSource
+  const hasMissingDeps = (warnings?.length ?? 0) > 0
   if (editing) {
     return (
       <TemplateEditor
@@ -282,6 +356,25 @@ function TemplateRow({
                 {t("builtIn")}
               </Badge>
             )}
+            {isPluginSource ? (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid={`plugin-source-${template.id}`}
+              >
+                {t("pluginBadge", { plugin: pluginSource ?? "" })}
+              </Badge>
+            ) : null}
+            {hasMissingDeps ? (
+              <Badge
+                variant="destructive"
+                className="text-[10px]"
+                title={(warnings ?? []).map((w) => `${w.code}: ${w.missingId}`).join("\n")}
+                data-testid={`missing-deps-${template.id}`}
+              >
+                {t("missingDependencies", { count: warnings?.length ?? 0 })}
+              </Badge>
+            ) : null}
             <Badge variant="outline" className="text-[10px]">
               {template.category}
             </Badge>
@@ -301,8 +394,9 @@ function TemplateRow({
             size="icon"
             className="size-7"
             onClick={onUse}
+            disabled={hasMissingDeps}
             aria-label={t("useAria", { name: template.name })}
-            title={t("useTemplate")}
+            title={hasMissingDeps ? t("useDisabledMissingDeps") : t("useTemplate")}
             data-testid={`use-${template.id}`}
           >
             <PlayIcon className="size-3.5" />
@@ -312,8 +406,14 @@ function TemplateRow({
             size="icon"
             className="size-7"
             onClick={onEditStart}
-            disabled={template.isBuiltIn}
-            title={template.isBuiltIn ? t("builtInReadOnly") : t("edit")}
+            disabled={template.isBuiltIn || isPluginSource}
+            title={
+              isPluginSource
+                ? t("pluginReadOnly")
+                : template.isBuiltIn
+                  ? t("builtInReadOnly")
+                  : t("edit")
+            }
             aria-label={t("editAria", { name: template.name })}
             data-testid={`edit-${template.id}`}
           >
@@ -336,8 +436,14 @@ function TemplateRow({
                 variant="ghost"
                 size="icon"
                 className="size-7 text-destructive hover:text-destructive"
-                disabled={template.isBuiltIn}
-                title={template.isBuiltIn ? t("builtInReadOnly") : tCommon("delete")}
+                disabled={template.isBuiltIn || isPluginSource}
+                title={
+                  isPluginSource
+                    ? t("pluginReadOnly")
+                    : template.isBuiltIn
+                      ? t("builtInReadOnly")
+                      : tCommon("delete")
+                }
                 aria-label={t("deleteAria", { name: template.name })}
                 data-testid={`delete-${template.id}`}
               >

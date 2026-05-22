@@ -123,6 +123,22 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
+  updateTeamCapabilities: (teamId, bundle) => {
+    set((state) => {
+      const team = state.teams[teamId]
+      if (!team) return state
+      return {
+        teams: {
+          ...state.teams,
+          [teamId]: {
+            ...team,
+            config: { ...team.config, capabilities: bundle },
+          },
+        },
+      }
+    })
+  },
+
   updateTeamConfig: (teamId, config) => {
     set((state) => {
       const team = state.teams[teamId]
@@ -275,6 +291,25 @@ export const createAgentTeamActionsSlice = (
       return {
         teammates: { ...state.teammates, [teammate.id]: teammate },
         teams,
+      }
+    })
+  },
+
+  updateTeammateCapabilities: (teammateId, overlay) => {
+    set((state) => {
+      const teammate = state.teammates[teammateId]
+      if (!teammate) return state
+      const nextConfig = { ...teammate.config }
+      if (overlay === null || (overlay && Object.keys(overlay).length === 0)) {
+        delete nextConfig.capabilities
+      } else {
+        nextConfig.capabilities = overlay
+      }
+      return {
+        teammates: {
+          ...state.teammates,
+          [teammateId]: { ...teammate, config: nextConfig },
+        },
       }
     })
   },

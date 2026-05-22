@@ -62,6 +62,7 @@ import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent
 import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
 import { createLogger } from "@/lib/logger"
 import { SubagentImportDialog } from "./subagent-import-dialog"
+import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 
 const log = createLogger("settings.subagents.templates")
 
@@ -286,6 +287,62 @@ export function SubagentTemplatesTab() {
           }}
         />
       )}
+
+      <PluginSubagentList t={t} />
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  PluginSubagentList — read-only listing of plugin overlay subagents */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lists every subagent registered via the `subagent` plugin capability.
+ * Plugin entries cannot be edited or deleted here — the source of truth
+ * lives in the plugin manifest. Their runtime ids appear as
+ * `<pluginId>:<defId>` in the team / workflow-editor dispatch surfaces.
+ */
+function PluginSubagentList({ t }: { t: ReturnType<typeof useTranslations> }) {
+  const entries = useMemo(() => listSubagentEntries(), [])
+  if (entries.length === 0) return null
+  return (
+    <div className="space-y-2" data-testid="plugin-subagent-list">
+      <SettingsDivider />
+      <Label className="text-sm font-medium">{t("pluginSection.title")}</Label>
+      <p className="text-xs text-muted-foreground">{t("pluginSection.description")}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {entries.map((entry) => {
+          const runtimeId = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
+          return (
+            <Card key={runtimeId} className="p-3" data-testid={`plugin-subagent-row-${runtimeId}`}>
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium">{entry.entry.name}</p>
+                    {entry.pluginId ? (
+                      <Badge variant="secondary" className="text-[10px]">
+                        {entry.pluginId}
+                      </Badge>
+                    ) : null}
+                    {entry.entry.model ? (
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {entry.entry.model}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {entry.entry.description ? (
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                      {entry.entry.description}
+                    </p>
+                  ) : null}
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">{runtimeId}</p>
+                </div>
+              </div>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }

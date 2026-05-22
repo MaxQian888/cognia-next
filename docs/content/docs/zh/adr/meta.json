@@ -20,6 +20,8 @@
     "0017-workflow-plugin-extension-points",
     "0018-github-delivery",
     "0019-goal-command",
-    "0030-character-pack-overlay-capability"
+    "0030-character-pack-overlay-capability",
+    "0031-integrated-terminal",
+    "0032-agent-team-plugin-integration"
   ]
 }

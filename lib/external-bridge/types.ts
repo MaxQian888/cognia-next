@@ -37,6 +37,15 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   rag_search: "rag:cognia",
   computer_use: "mcp:computer-use",
   // runtime_query takes an entityType arg — handler resolves the scope per call.
+  // v49 — Inbox connectors. Read tools group under `:read`; the send tool
+  // is split off so an operator can grant observability without enabling
+  // automated replies.
+  connectors_list_adapters: "inbox:connectors:read",
+  connectors_list_conversations: "inbox:connectors:read",
+  connectors_get_audit: "inbox:connectors:read",
+  connectors_export_audit: "inbox:connectors:read",
+  connectors_list_drafts: "inbox:connectors:read",
+  connectors_send_message: "inbox:connectors:send",
 }
 
 /**

@@ -27,9 +27,17 @@ export interface CircuitBreakerOptions {
   closeOnSuccessCount: number
   /** Clock injection for tests. Defaults to `() => Date.now()`. */
   now?: () => number
+  /**
+   * Optional callback fired whenever the breaker transitions between
+   * states. Wired by the outbound runner (v49) so the breakdown layer can
+   * emit `breaker.open` / `breaker.close` telemetry breadcrumbs. Failures
+   * inside the callback are swallowed — the breaker must keep running
+   * even if the listener throws.
+   */
+  onStateChange?: (from: CircuitState, to: CircuitState, at: number) => void
 }
 
-const DEFAULTS: Required<Omit<CircuitBreakerOptions, "now">> = {
+const DEFAULTS: Required<Omit<CircuitBreakerOptions, "now" | "onStateChange">> = {
   windowMs: 30_000,
   minEvents: 5,
   failureThresholdPct: 50,
@@ -76,13 +84,30 @@ interface EventRecord {
 }
 
 export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): CircuitBreaker {
-  const cfg: Required<Omit<CircuitBreakerOptions, "now">> = { ...DEFAULTS, ...opts }
+  const cfg: Required<Omit<CircuitBreakerOptions, "now" | "onStateChange">> = {
+    ...DEFAULTS,
+    ...opts,
+  }
   const clock = opts?.now ?? (() => Date.now())
+  const onStateChange = opts?.onStateChange
 
   const events: EventRecord[] = []
   let _state: CircuitState = "closed"
   let openedAt: number | null = null
   let halfOpenSuccesses = 0
+
+  function transition(to: CircuitState, at: number): void {
+    if (_state === to) return
+    const from = _state
+    _state = to
+    if (onStateChange) {
+      try {
+        onStateChange(from, to, at)
+      } catch {
+        // Best-effort — listener failures must not break the breaker.
+      }
+    }
+  }
 
   function pruneWindow(now: number): void {
     const cutoff = now - cfg.windowMs
@@ -99,8 +124,8 @@ export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): Cir
     const failures = events.filter((e) => !e.success).length
     const rate = (failures / events.length) * 100
     if (rate >= cfg.failureThresholdPct) {
-      _state = "open"
       openedAt = now
+      transition("open", now)
     }
   }
 
@@ -111,10 +136,10 @@ export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): Cir
       if (_state === "half_open") {
         halfOpenSuccesses++
         if (halfOpenSuccesses >= cfg.closeOnSuccessCount) {
-          _state = "closed"
           halfOpenSuccesses = 0
           openedAt = null
           events.length = 0 // reset window after recovery
+          transition("closed", now)
         }
       } else {
         evaluateThreshold(now)
@@ -126,9 +151,9 @@ export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): Cir
       events.push({ at: now, success: false })
       if (_state === "half_open") {
         // Re-open immediately on half-open failure
-        _state = "open"
         openedAt = now
         halfOpenSuccesses = 0
+        transition("open", now)
       } else {
         evaluateThreshold(now)
       }
@@ -138,8 +163,8 @@ export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): Cir
       if (_state === "open") {
         const now = clock()
         if (openedAt !== null && now - openedAt >= cfg.cooldownMs) {
-          _state = "half_open"
           halfOpenSuccesses = 0
+          transition("half_open", now)
         }
       }
       return _state

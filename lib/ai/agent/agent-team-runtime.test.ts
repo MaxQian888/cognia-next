@@ -19,6 +19,24 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
     dispatchWorkflowComplete: jest.fn(),
     dispatchWorkflowError: jest.fn(),
   })),
+  getPluginLifecycleHooks: jest.fn(() => ({
+    dispatchOnTeamStart: jest.fn(),
+    dispatchOnTeamPlanReady: jest.fn(),
+    dispatchOnTeammateClaim: jest.fn(),
+    dispatchOnTeammateRelease: jest.fn(),
+    dispatchOnTeamBudgetWarn: jest.fn(),
+    dispatchOnTeamComplete: jest.fn(),
+    dispatchOnAgentStart: jest.fn(),
+    dispatchOnAgentComplete: jest.fn(),
+    dispatchOnAgentError: jest.fn(),
+    dispatchOnConsensusOpened: jest.fn(),
+    dispatchOnConsensusVoted: jest.fn(),
+    dispatchOnConsensusResolved: jest.fn(),
+    dispatchOnSharedMemoryWrite: jest.fn(),
+    dispatchOnSharedMemoryDelete: jest.fn(),
+    dispatchOnTeamDelegationStart: jest.fn(),
+    dispatchOnTeamDelegationComplete: jest.fn(),
+  })),
 }))
 
 jest.mock("@/lib/ai/agent/agent-executor", () => ({

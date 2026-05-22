@@ -33,6 +33,7 @@ import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
+import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import {
   createCircuitBreaker,
   type CircuitBreaker,
@@ -282,7 +283,27 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   function getAdapterState(adapterId: string): AdapterState {
     if (!adapterState.has(adapterId)) {
       adapterState.set(adapterId, {
-        breaker: createCircuitBreaker({ now: clock }),
+        breaker: createCircuitBreaker({
+          now: clock,
+          // v49 breadcrumb — emit on every state transition so the
+          // operator can see breaker history in the inbox telemetry
+          // export.
+          onStateChange: (from, to, at) => {
+            if (to === "open") {
+              void trackInboxEvent("breaker.open", {
+                adapterId,
+                fields: { from },
+                at,
+              })
+            } else if (to === "closed") {
+              void trackInboxEvent("breaker.close", {
+                adapterId,
+                fields: { from },
+                at,
+              })
+            }
+          },
+        }),
         bucket: createTokenBucket({ capacity: 20, refillPerSec: 5, now: clock }),
       })
     }
@@ -349,6 +370,13 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
             idempotencyKey,
             reason: "quiet_hours",
             message: `Within quiet hours [${from}–${to} ${tz}] — deferred ${Math.round(deferMs / 60_000)} min`,
+          })
+          // v49 breadcrumb
+          void trackInboxEvent("quiet.deferred", {
+            adapterId,
+            conversationKey,
+            fields: { from, to, tz, deferMs },
+            at: now,
           })
           return
         }
@@ -463,6 +491,13 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         conversationKey,
         idempotencyKey,
       })
+      // v49 breadcrumb
+      void trackInboxEvent("outbound.sent", {
+        adapterId,
+        conversationKey,
+        fields: { jobId: job.id, attempts: job.attempts + 1 },
+        at: now,
+      })
     } else {
       const err = result.error!
       if (err.retryable) {
@@ -480,6 +515,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
           reason: err.code,
           message: err.message,
         })
+        void trackInboxEvent("outbound.failed", {
+          adapterId,
+          conversationKey,
+          fields: { code: err.code, retryable: true, attempts: job.attempts + 1 },
+          at: now,
+        })
       } else {
         // Non-retryable — dead-letter immediately
         await markDeadlettered(job.id, err.code, err.message)
@@ -492,6 +533,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
           idempotencyKey,
           reason: err.code,
           message: err.message,
+        })
+        void trackInboxEvent("outbound.failed", {
+          adapterId,
+          conversationKey,
+          fields: { code: err.code, retryable: false, attempts: job.attempts + 1 },
+          at: now,
         })
       }
     }

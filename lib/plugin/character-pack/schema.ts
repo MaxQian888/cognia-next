@@ -19,7 +19,25 @@
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import { PLUGIN_CHARACTER_PACK_SOFT_LIMIT } from "@/lib/plugin/sdk/define-character-pack"
 
-export const CHARACTER_PACK_FILE_SCHEMA_VERSION = 1 as const
+/**
+ * Current file-format version emitted by `serializeLocalPackFile`. Bumped to
+ * `2` to admit the new optional fields on each character (`avatarImage`,
+ * `persona`, `voiceProfile`). v1 files remain readable — see
+ * {@link SUPPORTED_SCHEMA_VERSIONS}.
+ */
+export const CHARACTER_PACK_FILE_SCHEMA_VERSION = 2 as const
+
+/**
+ * Every file-format version this build can parse. We deliberately keep v1
+ * around so existing `.cognia-pack.json` files on disk and the user's
+ * round-trip workflow (export then re-import an older file) keep working
+ * without forcing the author to re-export. New writes always emit
+ * {@link CHARACTER_PACK_FILE_SCHEMA_VERSION}.
+ */
+export const SUPPORTED_SCHEMA_VERSIONS = new Set<number>([1, 2])
+
+/** Union of every parseable schema version. Mirrors {@link SUPPORTED_SCHEMA_VERSIONS}. */
+export type CharacterPackFileSchemaVersion = 1 | 2
 
 /**
  * Optional detached Ed25519 signature over the JSON-encoded pack payload.
@@ -37,7 +55,8 @@ export interface LocalCharacterPackSignature {
 }
 
 export interface LocalCharacterPackFile {
-  schemaVersion: typeof CHARACTER_PACK_FILE_SCHEMA_VERSION
+  /** Any version in {@link SUPPORTED_SCHEMA_VERSIONS}. New writes use {@link CHARACTER_PACK_FILE_SCHEMA_VERSION}. */
+  schemaVersion: CharacterPackFileSchemaVersion
   pack: PluginCharacterPackDef
   signature?: LocalCharacterPackSignature
 }
@@ -70,7 +89,7 @@ export function parseLocalPackFile(raw: unknown): ParseResult {
   if (typeof schemaVersion !== "number") {
     return { ok: false, error: "Missing or non-numeric schemaVersion" }
   }
-  if (schemaVersion !== CHARACTER_PACK_FILE_SCHEMA_VERSION) {
+  if (!SUPPORTED_SCHEMA_VERSIONS.has(schemaVersion)) {
     return {
       ok: false,
       error:
@@ -93,7 +112,7 @@ export function parseLocalPackFile(raw: unknown): ParseResult {
   return {
     ok: true,
     file: {
-      schemaVersion: CHARACTER_PACK_FILE_SCHEMA_VERSION,
+      schemaVersion: schemaVersion as CharacterPackFileSchemaVersion,
       pack: obj.pack as unknown as PluginCharacterPackDef,
       signature: obj.signature as LocalCharacterPackSignature | undefined,
     },
@@ -134,6 +153,75 @@ function validatePackShape(pack: Record<string, unknown>): string | null {
       return `Duplicate localId "${ch.localId}" within pack`
     }
     seen.add(ch.localId)
+
+    // v2 optional fields. All checks no-op on v1 packs because the fields
+    // are absent. We never reject for unknown TTS providers here — that
+    // belongs in `defineCharacterPack` (warn-not-block) so file imports
+    // from a slightly older host don't hard-fail.
+    const v2Err = validateV2CharacterFields(ch, i)
+    if (v2Err) return v2Err
+  }
+  return null
+}
+
+function validateV2CharacterFields(ch: Record<string, unknown>, i: number): string | null {
+  if (ch.avatarImage !== undefined) {
+    if (!ch.avatarImage || typeof ch.avatarImage !== "object") {
+      return `characters[${i}].avatarImage must be an object`
+    }
+    const ai = ch.avatarImage as Record<string, unknown>
+    const tp = ai.tauriPath
+    const wd = ai.webDataUrl
+    if (tp !== undefined && (typeof tp !== "string" || !tp.trim())) {
+      return `characters[${i}].avatarImage.tauriPath must be a non-empty string when set`
+    }
+    if (wd !== undefined && (typeof wd !== "string" || !wd.trim())) {
+      return `characters[${i}].avatarImage.webDataUrl must be a non-empty string when set`
+    }
+    if (tp === undefined && wd === undefined) {
+      return `characters[${i}].avatarImage must declare at least one of tauriPath / webDataUrl`
+    }
+  }
+  if (ch.persona !== undefined) {
+    if (!ch.persona || typeof ch.persona !== "object") {
+      return `characters[${i}].persona must be an object`
+    }
+    const persona = ch.persona as Record<string, unknown>
+    for (const key of ["tone", "personality", "openingMessage"] as const) {
+      const v = persona[key]
+      if (v !== undefined && (typeof v !== "string" || !v.trim())) {
+        return `characters[${i}].persona.${key} must be a non-empty string when set`
+      }
+    }
+    const ex = persona.exemplarPrompts
+    if (ex !== undefined) {
+      if (!Array.isArray(ex)) {
+        return `characters[${i}].persona.exemplarPrompts must be an array when set`
+      }
+      for (const [j, prompt] of ex.entries()) {
+        if (typeof prompt !== "string" || !prompt.trim()) {
+          return `characters[${i}].persona.exemplarPrompts[${j}] must be a non-empty string`
+        }
+      }
+    }
+  }
+  if (ch.voiceProfile !== undefined) {
+    if (!ch.voiceProfile || typeof ch.voiceProfile !== "object") {
+      return `characters[${i}].voiceProfile must be an object`
+    }
+    const vp = ch.voiceProfile as Record<string, unknown>
+    if (typeof vp.provider !== "string" || !vp.provider.trim()) {
+      return `characters[${i}].voiceProfile.provider must be a non-empty string`
+    }
+    if (typeof vp.voiceId !== "string" || !vp.voiceId.trim()) {
+      return `characters[${i}].voiceProfile.voiceId must be a non-empty string`
+    }
+    for (const key of ["rate", "pitch", "volume"] as const) {
+      const v = vp[key]
+      if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v))) {
+        return `characters[${i}].voiceProfile.${key} must be a finite number when set`
+      }
+    }
   }
   return null
 }

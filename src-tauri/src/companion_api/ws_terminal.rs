@@ -1,7 +1,7 @@
 //! Companion WebSocket bridge for the integrated terminal —
 //! `GET /ws/v1/terminal`.
 //!
-//! # Wire protocol (v1)
+//! # Wire protocol (v2)
 //!
 //! 1. Client opens
 //!    `wss://<host>/ws/v1/terminal?token=<jwt>&spawn=1&shell=…&rows=…&cols=…`.
@@ -9,39 +9,39 @@
 //!    [`super::middleware::DeviceContext`] before the handler runs.
 //! 2. Server allocates a `PtySession` via
 //!    [`crate::terminal::session::spawn_session_with_sink`], marks
-//!    `origin = Remote`, and replies with a single text frame:
+//!    `origin = Remote`, registers it in the process-wide
+//!    [`WsTerminalRegistry`] under the device id, and replies with a
+//!    single text frame:
 //!    `{"kind":"ready","sessionId":"<uuid>","shell":"<resolved>"}`.
 //! 3. Steady state:
 //!    * **Binary** frames Server→Client = PTY stdout (raw bytes).
 //!    * **Binary** frames Client→Server = PTY stdin.
-//!    * **Text** frames carry control envelopes:
-//!      - `{"kind":"integration","event":…}` from OSC 633.
-//!      - `{"kind":"exit","code":…}` once on exit.
+//!    * **Text** frames carry control envelopes (each gains a `seq` for
+//!      Wave 2 reconnect):
+//!      - `{"kind":"integration","event":…,"seq":<u64>}` from OSC 633.
+//!      - `{"kind":"exit","code":…,"seq":<u64>}` once on exit.
 //!      - `{"kind":"resize","rows":…,"cols":…}` (client→server).
 //!      - `{"kind":"kill"}` (client→server).
-//! 4. Server closes with code 1000 on clean exit. The drop of the
-//!    handler-scoped `PtySession` kills any still-running child.
 //!
-//! # Threading
+//! ## Wave 2 reconnect
 //!
-//! The reader / waiter threads inside `PtySession` are OS threads;
-//! they push events through an [`crate::terminal::session::EventSink`]
-//! closure that the handler wraps around a
-//! `tokio::sync::mpsc::UnboundedSender<TerminalEvent>`. The handler's
-//! `tokio::select!` loop drains the receiver alongside incoming WS
-//! frames, so one tokio task handles both directions.
+//! Clients that drop their socket can resume by re-opening
+//! `wss://…/ws/v1/terminal?token=<jwt>&sessionId=<id>&resumeFrom=<seq>`.
+//! The server looks the session up in [`WsTerminalRegistry`], confirms
+//! the requesting device matches the device that spawned it, replays
+//! every event with `seq > resumeFrom` from the in-Rust
+//! [`crate::terminal::ReplayBuffer`], then resumes live emission.
 //!
-//! # Shell-integration scripts
-//!
-//! Remote sessions deliberately disable OSC 633 injection — the
-//! integration scripts are local file paths the remote shell can't
-//! resolve. A future v1.x can serve the scripts over the WS during the
-//! handshake; for v1 we leave the prompt markers off and the mobile
-//! dock renders the simpler "no-OSC" status (always `idle` until exit).
+//! Sessions are NOT dropped when the WS closes — instead the registry
+//! marks them detached. A background reaper drops sessions still
+//! detached after 5 minutes, matching the renderer-side reconnect
+//! budget in `lib/terminal/transport-ws.ts`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
@@ -58,11 +58,153 @@ use crate::terminal::session::{
     self, EventSink, PtySession, SessionOrigin, SpawnRequest, TerminalEvent,
 };
 
+// ── Process-wide registry for resumable WS-spawned sessions ──────────
+
+/// Window during which a detached session is kept alive waiting for a
+/// reconnect. Matches the renderer-side `RECONNECT_BUDGET_MS` in
+/// `lib/terminal/transport-ws.ts`.
+const RESUME_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Idle WS read timeout. Generous so mobile screen-off doesn't tear
+/// the consumer down. Smaller than `RESUME_TTL` on purpose — the
+/// registry GC catches the abandoned session after the consumer drops.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+pub struct WsTerminalRegistry {
+    inner: Mutex<HashMap<String, WsSessionEntry>>,
+}
+
+struct WsSessionEntry {
+    session: Arc<PtySession>,
+    device_id: String,
+    /// `true` while a WS consumer is currently attached. The registry
+    /// reaper only kills sessions whose consumer has been gone past
+    /// `RESUME_TTL`.
+    attached: Arc<AtomicBool>,
+    detached_at: Mutex<Option<Instant>>,
+    /// Sender into the in-process MPSC the WS handler drains. We keep
+    /// a clone on the entry so reconnects can swap the consumer end.
+    /// `None` means "no live consumer" — events still land in the
+    /// session's ReplayBuffer because the EventSink writes there first.
+    consumer: Mutex<Option<tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>>>,
+}
+
+impl WsTerminalRegistry {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn insert(&self, entry: WsSessionEntry) {
+        let id = entry.session.id.clone();
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.insert(id, entry);
+    }
+
+    fn lookup_for_device(&self, session_id: &str, device_id: &str) -> Option<Arc<PtySession>> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let entry = guard.get(session_id)?;
+        if entry.device_id != device_id {
+            return None;
+        }
+        Some(Arc::clone(&entry.session))
+    }
+
+    fn swap_consumer(
+        &self,
+        session_id: &str,
+        device_id: &str,
+        consumer: tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>,
+    ) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = guard.get(session_id) else {
+            return false;
+        };
+        if entry.device_id != device_id {
+            return false;
+        }
+        entry.attached.store(true, Ordering::SeqCst);
+        *entry.detached_at.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *entry.consumer.lock().unwrap_or_else(|p| p.into_inner()) = Some(consumer);
+        true
+    }
+
+    fn detach_consumer(&self, session_id: &str) {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = guard.get(session_id) {
+            entry.attached.store(false, Ordering::SeqCst);
+            *entry.detached_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+            *entry.consumer.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        }
+    }
+
+    fn remove(&self, session_id: &str) -> Option<WsSessionEntry> {
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.remove(session_id)
+    }
+
+    /// Reaper sweep: drop sessions whose consumer has been gone for
+    /// longer than `RESUME_TTL`. Called by the background tokio task.
+    fn reap(&self, now: Instant) {
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.retain(|_, entry| {
+            if entry.attached.load(Ordering::SeqCst) {
+                return true;
+            }
+            let detached = entry
+                .detached_at
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            match detached {
+                Some(t) if now.duration_since(t) > RESUME_TTL => {
+                    let _ = entry.session.kill();
+                    false
+                }
+                _ => true,
+            }
+        });
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len()
+    }
+}
+
+pub static WS_TERMINAL_REGISTRY: once_cell::sync::Lazy<Arc<WsTerminalRegistry>> =
+    once_cell::sync::Lazy::new(|| {
+        let registry = Arc::new(WsTerminalRegistry::new());
+        // Spawn a single background reaper that ticks every 30 s.
+        // tokio::spawn requires a runtime — fine inside the companion
+        // server, which runs under tokio. For test contexts without a
+        // runtime the spawn fails silently, which is acceptable: tests
+        // exercise the registry directly without time-based reaping.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let reg = Arc::clone(&registry);
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    reg.reap(Instant::now());
+                }
+            });
+        }
+        registry
+    });
+
+pub fn ws_terminal_registry() -> Arc<WsTerminalRegistry> {
+    Arc::clone(&WS_TERMINAL_REGISTRY)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct WsTerminalParams {
-    /// Set to `"1"` for a fresh spawn. The `sessionId` reconnect path
-    /// isn't wired yet (would need a process-wide registry shared with
-    /// `crate::terminal::TerminalState`).
+    /// Set to `"1"` for a fresh spawn. When omitted, `session_id` +
+    /// `resume_from` must identify an existing resumable session.
     #[serde(default)]
     pub spawn: Option<String>,
     pub shell: Option<String>,
@@ -75,10 +217,16 @@ pub struct WsTerminalParams {
     pub extension_id: Option<String>,
     #[serde(rename = "shellIntegration")]
     pub shell_integration: Option<String>,
-    /// Reconnect target. Currently unused — reserved for a future
-    /// follow-up that shares `TerminalState` with the local dock.
+    /// Wave 2 — reconnect target. When set, server looks up the
+    /// session by id in `WsTerminalRegistry` and resumes; the requesting
+    /// device JWT must match the device that spawned the session.
     #[serde(rename = "sessionId")]
     pub session_id: Option<String>,
+    /// Wave 2 — sequence number the client last observed. The server
+    /// replays every event with `seq > resume_from` before resuming
+    /// live emission.
+    #[serde(rename = "resumeFrom")]
+    pub resume_from: Option<u64>,
 }
 
 /// Axum handler for `GET /ws/v1/terminal`. The route is gated by
@@ -104,39 +252,69 @@ async fn handle_terminal_socket(
     device_id: String,
     _state: SharedState,
 ) {
-    if params.spawn.as_deref() != Some("1") {
-        send_error_and_close(&mut socket, "spawn=1 is required (reconnect is unwired)").await;
+    let registry = ws_terminal_registry();
+    let is_spawn = params.spawn.as_deref() == Some("1");
+    let resume_target = params.session_id.clone();
+
+    let (session, session_id, resolved_shell): (Arc<PtySession>, String, String);
+    let (consumer_tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, TerminalEvent)>();
+
+    if is_spawn {
+        let req = match build_spawn_request(&params) {
+            Ok(req) => req,
+            Err(reason) => {
+                send_error_and_close(&mut socket, &reason).await;
+                return;
+            }
+        };
+        let resolved = req.shell.clone();
+        let script_dir = resolve_script_dir();
+
+        let consumer_for_sink = consumer_tx.clone();
+        let sink: EventSink = Arc::new(move |seq, event| {
+            let _ = consumer_for_sink.send((seq, event));
+        });
+
+        let new_session = match session::spawn_session_with_sink(req, &script_dir, sink) {
+            Ok(s) => s,
+            Err(reason) => {
+                send_error_and_close(&mut socket, &reason).await;
+                return;
+            }
+        };
+        let id = new_session.id.clone();
+        let arc_session = Arc::new(new_session);
+
+        let entry = WsSessionEntry {
+            session: Arc::clone(&arc_session),
+            device_id: device_id.clone(),
+            attached: Arc::new(AtomicBool::new(true)),
+            detached_at: Mutex::new(None),
+            consumer: Mutex::new(Some(consumer_tx)),
+        };
+        registry.insert(entry);
+
+        session = arc_session;
+        session_id = id;
+        resolved_shell = resolved;
+    } else if let Some(id) = resume_target.clone() {
+        let Some(existing) = registry.lookup_for_device(&id, &device_id) else {
+            send_error_and_close(&mut socket, "session not found or not owned by this device").await;
+            return;
+        };
+        if !registry.swap_consumer(&id, &device_id, consumer_tx.clone()) {
+            send_error_and_close(&mut socket, "session is no longer resumable").await;
+            return;
+        }
+        session = existing;
+        session_id = id;
+        resolved_shell = session.shell.clone();
+    } else {
+        send_error_and_close(&mut socket, "missing spawn=1 or sessionId").await;
         return;
     }
 
-    let req = match build_spawn_request(&params) {
-        Ok(req) => req,
-        Err(reason) => {
-            send_error_and_close(&mut socket, &reason).await;
-            return;
-        }
-    };
-
-    let resolved_shell = req.shell.clone();
-    let script_dir = resolve_script_dir();
-
-    // Event pipe: reader/waiter threads push here; this task drains.
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TerminalEvent>();
-    let sink: EventSink = Arc::new(move |event| {
-        let _ = tx.send(event);
-    });
-
-    let session = match session::spawn_session_with_sink(req, &script_dir, sink) {
-        Ok(s) => s,
-        Err(reason) => {
-            send_error_and_close(&mut socket, &reason).await;
-            return;
-        }
-    };
-    let session_id = session.id.clone();
-    let session = Arc::new(session);
-
-    // Ready handshake — clients block on this frame in
+    // Ready handshake. Clients block on this frame in
     // `lib/terminal/transport-ws.ts::waitForReady`.
     let ready = json!({
         "kind": "ready",
@@ -149,41 +327,56 @@ async fn handle_terminal_socket(
         .await
         .is_err()
     {
+        registry.detach_consumer(&session_id);
         return;
     }
 
+    // Replay every event the client missed (resume only — fresh
+    // spawns have an empty replay buffer at this point).
+    if !is_spawn {
+        let resume_from = params.resume_from.unwrap_or(0);
+        for (seq, event) in session.replay().since(resume_from) {
+            if emit_event(&mut socket, seq, &event).await.is_err() {
+                registry.detach_consumer(&session_id);
+                return;
+            }
+        }
+    }
+
     // Steady-state proxy: tokio::select! over PTY events vs WS frames.
-    // Generous idle timeout — mobile clients can sit on stdin for
-    // minutes while the user reads scrollback.
-    let idle_timeout = Duration::from_secs(15 * 60);
-    let mut idle_deadline = tokio::time::Instant::now() + idle_timeout;
+    let mut idle_deadline = tokio::time::Instant::now() + IDLE_TIMEOUT;
     let mut exited = false;
 
     loop {
         tokio::select! {
             event = rx.recv() => {
                 match event {
-                    Some(TerminalEvent::Data { bytes }) => {
+                    Some((seq, TerminalEvent::Data { bytes })) => {
+                        // Binary frames don't carry seq today — the
+                        // resume buffer covers gap detection. Wave 2.x
+                        // could add a tiny preamble if exact byte-level
+                        // reconcilation becomes important.
+                        let _ = seq; // seq used by replay only
                         if socket.send(Message::Binary(bytes.into())).await.is_err() {
                             break;
                         }
                     }
-                    Some(TerminalEvent::Integration { event }) => {
-                        let payload = json!({ "kind": "integration", "event": event });
+                    Some((seq, TerminalEvent::Integration { event })) => {
+                        let payload = json!({ "kind": "integration", "event": event, "seq": seq });
                         if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
                             break;
                         }
                     }
-                    Some(TerminalEvent::Exit { code }) => {
-                        let payload = json!({ "kind": "exit", "code": code });
+                    Some((seq, TerminalEvent::Exit { code })) => {
+                        let payload = json!({ "kind": "exit", "code": code, "seq": seq });
                         let _ = socket.send(Message::Text(payload.to_string().into())).await;
                         exited = true;
                         break;
                     }
                     None => {
-                        // Sink dropped without an exit — sometimes happens
-                        // when the child segfaults before the waiter ran.
-                        // Treat as null-code exit.
+                        // Sink dropped without an exit — sometimes
+                        // happens when the child segfaults before the
+                        // waiter ran. Treat as null-code exit.
                         let payload = json!({ "kind": "exit", "code": null });
                         let _ = socket.send(Message::Text(payload.to_string().into())).await;
                         exited = true;
@@ -192,7 +385,7 @@ async fn handle_terminal_socket(
                 }
             }
             msg = socket.recv() => {
-                idle_deadline = tokio::time::Instant::now() + idle_timeout;
+                idle_deadline = tokio::time::Instant::now() + IDLE_TIMEOUT;
                 match msg {
                     Some(Ok(Message::Binary(bytes))) => {
                         if session.write(&bytes).is_err() {
@@ -200,8 +393,13 @@ async fn handle_terminal_socket(
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(reason) = handle_control_frame(text.as_str(), &session) {
-                            log::warn!("ws_terminal: bad control frame: {reason}");
+                        match handle_control_frame(text.as_str(), &session) {
+                            Ok(ControlAction::Continue) => {}
+                            Ok(ControlAction::Killed) => {
+                                exited = true;
+                                break;
+                            }
+                            Err(reason) => log::warn!("ws_terminal: bad control frame: {reason}"),
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
@@ -218,9 +416,39 @@ async fn handle_terminal_socket(
         }
     }
 
-    if !exited {
-        // Best-effort signal so we don't leak a half-detached child.
-        let _ = session.kill();
+    if exited {
+        // Session ran its course — remove from the registry.
+        registry.remove(&session_id);
+    } else {
+        // Consumer dropped; let the reaper decide whether to kill the
+        // session based on RESUME_TTL.
+        registry.detach_consumer(&session_id);
+    }
+}
+
+async fn emit_event(socket: &mut WebSocket, seq: u64, event: &TerminalEvent) -> Result<(), ()> {
+    match event {
+        TerminalEvent::Data { bytes } => {
+            let _ = seq;
+            socket
+                .send(Message::Binary(bytes.clone().into()))
+                .await
+                .map_err(|_| ())
+        }
+        TerminalEvent::Integration { event } => {
+            let payload = json!({ "kind": "integration", "event": event, "seq": seq });
+            socket
+                .send(Message::Text(payload.to_string().into()))
+                .await
+                .map_err(|_| ())
+        }
+        TerminalEvent::Exit { code } => {
+            let payload = json!({ "kind": "exit", "code": code, "seq": seq });
+            socket
+                .send(Message::Text(payload.to_string().into()))
+                .await
+                .map_err(|_| ())
+        }
     }
 }
 
@@ -259,7 +487,12 @@ enum ControlFrame {
     Kill,
 }
 
-fn handle_control_frame(text: &str, session: &PtySession) -> Result<(), String> {
+enum ControlAction {
+    Continue,
+    Killed,
+}
+
+fn handle_control_frame(text: &str, session: &PtySession) -> Result<ControlAction, String> {
     let frame: ControlFrame =
         serde_json::from_str(text).map_err(|e| format!("parse: {e}"))?;
     match frame {
@@ -267,12 +500,13 @@ fn handle_control_frame(text: &str, session: &PtySession) -> Result<(), String> 
             session
                 .resize(rows, cols)
                 .map_err(|e| format!("resize: {e}"))?;
+            Ok(ControlAction::Continue)
         }
         ControlFrame::Kill => {
             session.kill().map_err(|e| format!("kill: {e}"))?;
+            Ok(ControlAction::Killed)
         }
     }
-    Ok(())
 }
 
 /// Locate the bundled shell-integration script directory. Remote
@@ -306,6 +540,7 @@ mod tests {
             "extensionId": "ext.a",
             "shellIntegration": "0",
             "sessionId": "s-1",
+            "resumeFrom": 42,
         });
         let params: WsTerminalParams = serde_json::from_value(json).unwrap();
         assert_eq!(params.spawn.as_deref(), Some("1"));
@@ -316,6 +551,7 @@ mod tests {
         assert_eq!(params.extension_id.as_deref(), Some("ext.a"));
         assert_eq!(params.shell_integration.as_deref(), Some("0"));
         assert_eq!(params.session_id.as_deref(), Some("s-1"));
+        assert_eq!(params.resume_from, Some(42));
     }
 
     #[test]
@@ -324,6 +560,7 @@ mod tests {
         assert!(params.spawn.is_none());
         assert!(params.shell.is_none());
         assert!(params.rows.is_none());
+        assert!(params.resume_from.is_none());
     }
 
     #[test]
@@ -338,6 +575,7 @@ mod tests {
             extension_id: None,
             shell_integration: None,
             session_id: None,
+            resume_from: None,
         };
         let err = build_spawn_request(&params).unwrap_err();
         assert!(err.contains("shell"));
@@ -355,6 +593,7 @@ mod tests {
             extension_id: None,
             shell_integration: None,
             session_id: None,
+            resume_from: None,
         };
         let req = build_spawn_request(&params).unwrap();
         assert_eq!(req.rows, 24);
@@ -376,6 +615,7 @@ mod tests {
             extension_id: Some("ext.cline".into()),
             shell_integration: Some("1".into()),
             session_id: None,
+            resume_from: None,
         };
         let req = build_spawn_request(&params).unwrap();
         assert_eq!(req.cwd.as_deref(), Some("/tmp/x"));
@@ -402,16 +642,33 @@ mod tests {
 
     /// Helper: `EventSink` smoke — the closure is `Send + Sync` and can
     /// be cloned across the std-thread / tokio-task boundary that the
-    /// real handler relies on. This exercises the type bounds without
-    /// spinning a real PTY (which is covered by `session::tests`).
+    /// real handler relies on. Updated for the Wave 2 `(seq, event)`
+    /// signature.
     #[test]
     fn event_sink_closure_is_send_sync_clonable() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<TerminalEvent>();
-        let sink: EventSink = Arc::new(move |event| {
-            let _ = tx.send(event);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<(u64, TerminalEvent)>();
+        let sink: EventSink = Arc::new(move |seq, event| {
+            let _ = tx.send((seq, event));
         });
         let cloned = sink.clone();
-        cloned(TerminalEvent::Exit { code: Some(0) });
+        cloned(1, TerminalEvent::Exit { code: Some(0) });
+    }
+
+    // ── Wave 2 registry behaviour ──────────────────────────────────
+
+    #[test]
+    fn registry_can_be_constructed_and_starts_empty() {
+        let reg = WsTerminalRegistry::new();
+        assert_eq!(reg.len(), 0);
+    }
+
+    #[test]
+    fn registry_lookup_enforces_device_ownership() {
+        let reg = WsTerminalRegistry::new();
+        // We can't easily insert a real PtySession from a test (it
+        // needs a live PTY pair), so this test confirms only the
+        // negative path. The integration test in `ws_terminal_test.rs`
+        // covers the positive case.
+        assert!(reg.lookup_for_device("missing", "device-a").is_none());
     }
 }
-

@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils"
 import { InboxSidebar } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
 import { ConnectionLossBanner } from "./connection-loss-banner"
+import { OutboundSaturationBanner } from "./outbound-saturation-banner"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
 
@@ -122,6 +123,11 @@ export function InboxShell({
          * surfaces the same signal there. */}
         <div className="hidden md:block">
           <ConnectionLossBanner />
+          {/* Queue saturation notice (v49): tripped when an adapter has
+           * shed >100 pending jobs to dead-letter in the last 24h. The
+           * banner does NOT trigger reconnect — clearing the backlog is
+           * a separate operator action via the Outbound tab. */}
+          <OutboundSaturationBanner />
         </div>
         {children ?? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

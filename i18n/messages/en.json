@@ -6,7 +6,8 @@
   "terminal": {
     "dock": {
       "newSession": "New terminal",
-      "closePanel": "Close panel"
+      "closePanel": "Close panel",
+      "resize": "Drag to resize the terminal dock (arrow keys also work)"
     },
     "tab": {
       "close": "Close terminal",
@@ -202,7 +203,40 @@
       }
     },
     "activity": {
-      "empty": "No events yet."
+      "empty": "No events yet.",
+      "report": {
+        "title": "Execution report",
+        "status": "Status: {status}",
+        "emptyCheckpoints": "No checkpoints recorded for this run yet."
+      }
+    },
+    "consensus": {
+      "title": "Consensus",
+      "description": "Active and recently resolved votes among teammates.",
+      "empty": "No consensus requests in this team.",
+      "type": "Type: {type}",
+      "vote": "Vote",
+      "voteCount": "{count} votes",
+      "cancel": "Cancel",
+      "forceResolve": "Resolve as lead",
+      "status": {
+        "open": "Open",
+        "resolved": "Resolved",
+        "timeout": "Timed out",
+        "cancelled": "Cancelled"
+      }
+    },
+    "teammateConfig": {
+      "title": "Configure {name}",
+      "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
+      "save": "Save",
+      "rosterSection": {
+        "title": "Roster fields",
+        "description": "Fields that live on the teammate row, not on its preset config.",
+        "runtime": "Runtime",
+        "specialization": "Specialization",
+        "temperature": "Temperature ({value})"
+      }
     },
     "members": {
       "title": "Team Members",
@@ -234,8 +268,13 @@
     "settings": {
       "title": "Team Settings",
       "saved": "Settings saved.",
+      "saving": "Saving…",
+      "save": "Save",
+      "cancel": "Cancel",
       "name": "Team name",
       "description": "Description",
+      "sectionExecution": "Execution",
+      "sectionControls": "Controls",
       "executionMode": "Execution mode",
       "executionPattern": "Execution pattern",
       "maxConcurrent": "Max concurrent",
@@ -247,7 +286,69 @@
       "dangerZone": "Danger zone",
       "deleteWarning": "This permanently removes the team, all members, tasks, and messages.",
       "typeToConfirm": "Type \"{name}\" to confirm",
-      "deleteAction": "Delete permanently"
+      "deleteAction": "Delete permanently",
+      "executionModeOption": {
+        "coordinated": "Coordinated",
+        "autonomous": "Autonomous",
+        "delegate": "Delegate"
+      },
+      "executionPatternOption": {
+        "managerWorker": "Manager / worker",
+        "parallelSpecialists": "Parallel specialists",
+        "backgroundHandoff": "Background handoff",
+        "externalHandoff": "External handoff",
+        "singleAgent": "Single agent (recommended)"
+      },
+      "accordion": {
+        "overview": "Overview",
+        "plugins": "Plugins & capabilities",
+        "governance": "Governance",
+        "memory": "Shared memory"
+      },
+      "plugins": {
+        "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
+      },
+      "governance": {
+        "title": "Governance policy",
+        "description": "Approval gates, budget thresholds, escalation behavior, and refusal detection.",
+        "approval": {
+          "heading": "Approvals",
+          "requirePlanApproval": "Require plan approval before run starts",
+          "requireDelegationApproval": "Require approval before delegating to an external agent"
+        },
+        "budget": {
+          "heading": "Token budget",
+          "tokenBudget": "Token budget (0 = unlimited)",
+          "warningThreshold": "Warning threshold (0–1)",
+          "criticalThreshold": "Critical threshold (0–1)",
+          "onCritical": "On critical"
+        },
+        "escalationOption": {
+          "notify": "Notify only",
+          "pause_for_review": "Pause for review",
+          "reduce_concurrency": "Reduce concurrency to 1",
+          "handoff_to_background": "Hand off to background"
+        },
+        "escalation": {
+          "heading": "Escalation",
+          "allowOperatorPatternOverride": "Allow operator to override the execution pattern",
+          "pauseOnHighRisk": "Pause automatically when the routing assessment flags high risk"
+        },
+        "refusal": {
+          "heading": "Refusal detection",
+          "detect": "Detect refusal patterns in teammate output",
+          "patterns": "Refusal patterns (one per line)",
+          "patternsPlaceholder": "I cannot help with that\nI'm not able to"
+        }
+      },
+      "memory": {
+        "title": "Shared memory",
+        "description": "Key/value entries written by teammates during a run. Writes are PII-gated.",
+        "empty": "No shared-memory entries yet.",
+        "clearAll": "Clear all",
+        "deleteEntry": "Delete \"{key}\"",
+        "writtenBy": "Written by {name} · {when}"
+      }
     },
     "planApproval": {
       "title": "Plan awaiting approval",
@@ -1686,6 +1787,17 @@
         "lastRestart": "Last restart",
         "noRestart": "Not yet observed",
         "lastChecked": "Last polled"
+      },
+      "inboxTelemetry": {
+        "title": "Inbox telemetry",
+        "description": "Breadcrumb log of recent inbox events (inbound, outbound, breaker, quiet hours, A2UI downgrade). Capped at 3000 rows; rotates fastest first.",
+        "loadingCount": "Counting events…",
+        "rowCount": "{count, plural, =0 {No events captured yet} =1 {1 event captured} other {# events captured}}",
+        "refresh": "Refresh",
+        "exportCsv": "Export CSV",
+        "exportJson": "Export JSON",
+        "exported": "Exported {filename}",
+        "emptyExport": "Nothing to export — the telemetry ring is empty."
       }
     },
     "title": "Settings",
@@ -3239,10 +3351,28 @@
         "recloneFromPackTitle": "Replace this clone with a fresh copy from the updated pack",
         "dismissUpdate": "Dismiss",
         "dismissUpdateTitle": "Stop showing the update-available indicator for this clone",
-        "exportPack": "Export pack"
+        "exportPack": "Export pack",
+        "applyUpdate": "Apply update",
+        "applyUpdateTitle": "Pull pack-managed fields from the new version while keeping your edits",
+        "applyUpdateBatch": "Apply to all ({count})",
+        "applyUpdateBatchTitle": "Apply the pack update to every clone you have from this pack"
       },
       "recloneFromPackToast": "Re-cloned as \"{name}\".",
       "dismissUpdateToast": "Update indicator dismissed.",
+      "applyUpdateToast": "{name}: updated {updated} field(s), preserved {preserved}.",
+      "applyUpdateToastBatch": "Updated {count} character(s) from \"{pack}\".",
+      "applyUpdateNoop": "Nothing to update for \"{name}\".",
+      "applyUpdateDialog": {
+        "title": "Apply pack update — {name}",
+        "description": "Review which fields will be pulled from the new pack version and which were left alone.",
+        "willUpdate": "Will overwrite",
+        "preserved": "Preserved (you edited it)",
+        "noChanges": "No pack-managed fields differ from your row.",
+        "noBaselineWarning": "This clone has no recorded baseline (it predates the v50 schema bump). Applying the update will overwrite every pack-managed field. Duplicate first if you want to keep a backup.",
+        "fieldRow": "{field}",
+        "confirm": "Apply update",
+        "cancel": "Cancel"
+      },
       "exportPackUnavailable": "Could not resolve a pack to export.",
       "exportPackAria": "Export source pack for {name}",
       "validation": {
@@ -3365,6 +3495,10 @@
       "duplicate": "Duplicate",
       "builtIn": "Built-in",
       "builtInReadOnly": "Built-in templates are read-only — duplicate first.",
+      "pluginBadge": "Plugin · {plugin}",
+      "pluginReadOnly": "Plugin templates are read-only — duplicate first.",
+      "missingDependencies": "{count} missing {count, plural, =1 {dependency} other {dependencies}}",
+      "useDisabledMissingDeps": "Install the missing plugin dependencies before using this template.",
       "removeTitle": "Remove template?",
       "removeBody": "\"{name}\" will be removed. Existing teams created from this template are unaffected.",
       "addedToast": "Added \"{name}\".",
@@ -3518,7 +3652,11 @@
         "noResults": "No templates match your search.",
         "filterAll": "All",
         "noUserTemplates": "No user-created templates yet.",
-        "noUserTemplatesDescription": "Create a new template or duplicate a built-in one to get started."
+        "noUserTemplatesDescription": "Create a new template or duplicate a built-in one to get started.",
+        "pluginSection": {
+          "title": "Plugin-contributed sub-agents",
+          "description": "Sub-agents declared via plugin manifests. The plugin owns the source of truth — these rows are read-only here."
+        }
       },
       "runtime": {
         "title": "Runtime",
@@ -3730,7 +3868,11 @@
       },
       "exposeDockToAgents": {
         "label": "Expose dock to agents",
-        "helper": "Lets the chat agent spawn / read / write isolated terminal sessions via the terminal-dock MCP tool. Agent sessions are sandboxed from the visual dock and only the spawning agent can address them."
+        "helper": "Lets the chat agent drive your visible terminal tabs via the synthetic terminal_dock_* MCP tools. The agent shares the same PTY you see — one shell, one cwd, one history. Each tab requires per-session consent. Off by default."
+      },
+      "runInDockTimeout": {
+        "label": "Run-in-dock timeout (seconds)",
+        "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60."
       },
       "projectOverride": {
         "title": "Per-project override",
@@ -4939,6 +5081,42 @@
         "advanced": {
           "title": "Advanced",
           "description": "Working directory, agent-mode override, and library flags."
+        },
+        "nativeTools": {
+          "title": "Native Anthropic tools",
+          "description": "Computer use / bash / text editor, contributed by plugins.",
+          "empty": "No native Anthropic tools are registered.",
+          "requiresNativeInputPermission": "Requires native input/screen permissions."
+        },
+        "subagent": {
+          "title": "Subagents",
+          "description": "Built-in workflow-* subagents plus any plugin-registered subagents.",
+          "empty": "No subagents are available.",
+          "builtinBadge": "Built-in",
+          "pluginBadge": "Plugin"
+        },
+        "character": {
+          "title": "Character",
+          "description": "Project a persona onto this subject. Plugin-pack characters are listed alongside the library.",
+          "pickerLabel": "Character",
+          "inherit": "Inherit (none)"
+        },
+        "externalPreset": {
+          "title": "External agent preset",
+          "description": "Optional handoff target — Claude Code / Codex / Gemini-CLI / etc.",
+          "pickerLabel": "Preset",
+          "inherit": "Inherit (none)"
+        },
+        "teamCapabilityOverlay": {
+          "title": "Inherited vs override",
+          "description": "Shows which capability ids come from the team default, which were added on this teammate, and which were removed.",
+          "mcpServers": "MCP servers",
+          "skills": "Skills",
+          "nativeTools": "Native tools",
+          "subagents": "Subagents",
+          "inheritedLabel": "Inherited",
+          "addedLabel": "Added",
+          "removedLabel": "Removed"
         }
       }
     },
@@ -9138,6 +9316,8 @@
     "environmentManagementDesc": "Read environment variables and system info. Secret-shaped keys (KEY/TOKEN/SECRET/PASSWORD) are redacted unless the agent explicitly opts in.",
     "shellExecution": "Guarded shell",
     "shellExecutionDesc": "Allowlist + blocklist + dangerous-pattern guard for shell commands. Off by default — overlaps SDK Bash and is high-risk.",
+    "terminalRepl": "Interactive REPL",
+    "terminalReplDesc": "Agent-private persistent PTY sessions backed by node-pty (lazy loaded). Use for stateful REPLs (python / sql / claude-code) where the agent needs to hold state across multiple writes. Orthogonal to the dock-relay path — REPL is invisible to the user.",
     "alwaysAllowTitle": "Always-allow tools",
     "alwaysAllowDesc": "Tools the user has approved across the board. Future calls skip the approval dialog.",
     "alwaysAllowEmpty": "No tools have been added to the always-allow list yet.",
@@ -9177,7 +9357,11 @@
       "listEnv": "List process env vars. Secrets are redacted unless revealed.",
       "getEnv": "Read a single env var. Secrets are redacted unless revealed.",
       "systemInfo": "Platform, arch, node version, cpu, memory, uptime, hostname.",
-      "shellExecuteAdvanced": "Run a single program with argv, gated by allowlist + blocklist + dangerous-pattern guard. Always requires approval."
+      "shellExecuteAdvanced": "Run a single program with argv, gated by allowlist + blocklist + dangerous-pattern guard. Always requires approval.",
+      "terminalReplSpawn": "Open a persistent interactive PTY (e.g. python / sql REPL). Returns sessionId for subsequent writes / reads.",
+      "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
+      "terminalReplRead": "Drain accumulated REPL output (default: destructive read). Returns {data, truncated, exited, exitCode}.",
+      "terminalReplKill": "Signal-terminate a REPL session. Idempotent."
     }
   },
   "providers": {
@@ -11047,6 +11231,10 @@
       "title": "Terminal",
       "back": "Back",
       "newSession": "New terminal session",
+      "search": "Search in terminal",
+      "history": "Command history",
+      "historyTitle": "Recent commands",
+      "historySubtitle": "Tap a command to copy it. Long-press to rerun.",
       "empty": {
         "remoteReady": "No remote terminal sessions yet. Spawn one to connect via the paired desktop server.",
         "notMobile": "The integrated terminal here runs as a desktop dock — switch to the desktop app to use it.",
@@ -13068,6 +13256,40 @@
           "placeholder": "skill_writing, skill_research"
         }
       },
+      "systemTerminal": {
+        "command": {
+          "label": "Command",
+          "hint": "Typed into the active dock tab (or a freshly spawned one). The shell tokenizes the line.",
+          "placeholder": "pnpm test --filter @cognia/twin"
+        },
+        "cwd": {
+          "label": "Working directory",
+          "hint": "Optional. Defaults to the dock tab's cwd.",
+          "placeholder": "/repo"
+        },
+        "shell": {
+          "label": "Shell (override)",
+          "hint": "Leave empty to inherit settings.terminal.defaultShell.",
+          "placeholder": "/bin/bash"
+        },
+        "tabId": {
+          "label": "Tab id (reuse existing)",
+          "hint": "When set, types into this tab. Empty spawns a fresh one.",
+          "placeholder": "Empty to spawn a new tab"
+        },
+        "timeoutSec": {
+          "label": "Timeout (seconds)",
+          "hint": "5–600. Defaults to the user's runInDockTimeoutSec setting."
+        },
+        "onFailure": {
+          "label": "On non-zero exit",
+          "hint": "How to react when the command exits with a non-zero code.",
+          "options": {
+            "throw": "Fail the workflow step",
+            "branch": "Route to the failure port"
+          }
+        }
+      },
       "twinRag": {
         "twinId": {
           "label": "Twin id",
@@ -13692,6 +13914,24 @@
         "enabled": "Computer Use enabled",
         "disabled": "Computer Use disabled",
         "cancelled": "No change — Computer Use stays off"
+      },
+      "healthBadge": {
+        "aria": "Adapter health: {state}",
+        "breakerOpen": "Circuit open",
+        "rateLimited": "Rate limited",
+        "degraded": "Degraded",
+        "down": "Offline",
+        "eta": "Should recover by {date}",
+        "reconnect": "Reconnect",
+        "reconnectQueued": "Reconnect queued.",
+        "reconnectUnavailable": "Adapter not currently registered with the runtime.",
+        "reconnectDesktopOnly": "Reconnect requires the desktop app.",
+        "openHealth": "Open full health"
+      },
+      "computerUseChip": {
+        "label": "CU",
+        "aria": "Computer Use is on for this conversation",
+        "tooltip": "Computer Use is enabled — replies may drive screenshot / mouse / keyboard actions on the host."
       }
     },
     "conversationOverride": {
@@ -13715,6 +13955,11 @@
         "characterPlaceholder": "(none)",
         "allowComputerUse": "Allow Computer Use tools",
         "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
+        "allowGoalDriving": "Allow self-driving /goal on this conversation",
+        "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
+        "applyToAdapter": "Apply to all on this adapter",
+        "applyToAdapterTitle": "Re-apply these settings to every conversation under this adapter",
+        "applyToAdapterConfirm": "Apply these settings to every conversation under this adapter? This overwrites existing per-conversation overrides for the matching fields.",
         "providerOverride": "Provider override",
         "providerOverridePlaceholder": "anthropic",
         "modelOverride": "Model override",
@@ -13777,6 +14022,30 @@
       "reconnectUnavailable": "Reconnect unavailable",
       "reconnectDesktopOnly": "Reconnect is only available in the desktop app",
       "dismiss": "Dismiss"
+    },
+    "banner": {
+      "outboundSaturated": {
+        "headline": "{count, plural, =1 {1 adapter's outbound queue is saturated} other {# adapters' outbound queues are saturated}}",
+        "count": "{count, plural, =1 {1 message capped} other {# messages capped}}",
+        "viewOutbound": "View outbound",
+        "dismiss": "Dismiss"
+      }
+    },
+    "state": {
+      "empty": {
+        "title": "Nothing here yet",
+        "description": "Conversations will appear here once a connector starts receiving messages."
+      },
+      "error": {
+        "title": "Something went wrong",
+        "description": "The Inbox surface failed to render. Try again, or copy the stack trace into an incident ticket.",
+        "retry": "Retry",
+        "copyStack": "Copy stack",
+        "copiedToast": "Copied"
+      },
+      "syncing": {
+        "label": "Loading from cache…"
+      }
     },
     "inboundA2UI": {
       "rawPayload": "Raw payload"

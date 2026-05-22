@@ -14,6 +14,11 @@
  * dock subscribes to bridge events via `subscribeTerminalEvents` and
  * the dock store directly).
  *
+ * Wave 1 — we also warm-import `dock-tool-handler` so the first
+ * `terminal_dock_*` MCP call from the agent doesn't pay a dynamic-import
+ * round-trip mid-tool. The module is pure (no top-level side effects);
+ * the cost is the bundle inclusion only.
+ *
  * Tauri-only — `TerminalSession.spawn` calls `invoke` which throws in
  * web/Capacitor mode. The bridge stays unconfigured outside Tauri, so
  * an extension calling `createTerminal` there throws the same
@@ -47,6 +52,12 @@ export function TerminalBridgeInitializer() {
       spawn: createPtyShellSpawn(),
       outputSink: noopSink,
     })
+    // Warm-import so the first agent-driven terminal_dock_* call does
+    // not pay a dynamic-import round-trip inside `handlePluginToolExec`.
+    // Best-effort: if the import fails (e.g. test environment without
+    // the settings store), the lazy import in plugin-tool-ipc.ts still
+    // works on the actual call.
+    void import("@/lib/terminal/dock-tool-handler").catch(() => undefined)
     return () => {
       // Drop the bridge state so a subsequent remount (e.g. after fast
       // refresh) installs a fresh spawn handle. In production this

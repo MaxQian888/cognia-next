@@ -35,6 +35,7 @@ import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
+import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -149,6 +150,15 @@ export class ConnectorBus {
       })
       return
     }
+    // v49 breadcrumb — fire after dedup passes so duplicate events do not
+    // inflate the inbound counter. Best-effort: trackInboxEvent swallows
+    // failures so a telemetry write never breaks the inbound pipeline.
+    void trackInboxEvent("inbound.received", {
+      adapterId: event.adapterId,
+      conversationKey: event.conversationKey,
+      fields: { platform: event.platform },
+      at: now,
+    })
 
     // ── Step 2: adapter instance lookup ──────────────────────────────────────
     const adapterRow = await getAdapterInstance(event.adapterId)
@@ -249,9 +259,16 @@ export class ConnectorBus {
       })
       return
     }
+    // Use the v49 `platformMessageId` index for O(log n) lookup. The
+    // platform safety filter scopes by adapter+platform so a Telegram
+    // `12345` edit cannot accidentally match a Discord row with the same
+    // numeric id. Legacy rows were backfilled by the v49 upgrade hook.
     const db = getDb()
-    const candidates = await db.messages.toArray()
-    const target = candidates.find((m) => m.metadata?.platformMessage?.messageId === replaces)
+    const target = await db.messages
+      .where("platformMessageId")
+      .equals(replaces)
+      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
+      .first()
     if (target) {
       // Map the new segments → parts the same way insertInboundMessage does.
       const parts: StoredMessage["parts"] = event.segments
@@ -313,9 +330,14 @@ export class ConnectorBus {
       })
       return
     }
+    // Indexed lookup via v49 `platformMessageId`. See `applyMessageEdit`
+    // for the rationale on the platform safety filter.
     const db = getDb()
-    const candidates = await db.messages.toArray()
-    const target = candidates.find((m) => m.metadata?.platformMessage?.messageId === replaces)
+    const target = await db.messages
+      .where("platformMessageId")
+      .equals(replaces)
+      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
+      .first()
     if (target) {
       const deletedMetadata: StoredMessage["metadata"] = {
         ...target.metadata,

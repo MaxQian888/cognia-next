@@ -6,6 +6,8 @@ import {
   type AgentTeamConfig,
   type AgentTeamTemplate,
   type AgentTeamEvent,
+  type TeamCapabilityBundle,
+  type TeammateCapabilityOverlay,
   type TeamStatus,
   type TeammateStatus,
   type TeamTaskStatus,
@@ -54,6 +56,12 @@ export interface AgentTeamState {
   upsertTeam: (team: AgentTeam) => void
   updateTeam: (teamId: string, updates: Partial<AgentTeam>) => void
   updateTeamConfig: (teamId: string, config: AgentTeamConfig) => void
+  /**
+   * Patch the team-level plugin-capability default pool. Pass an empty
+   * bundle (`{}`) to clear the team default. Capability fields not in
+   * the patch are preserved.
+   */
+  updateTeamCapabilities: (teamId: string, bundle: TeamCapabilityBundle) => void
   deleteTeam: (teamId: string) => void
   setTeamStatus: (teamId: string, status: TeamStatus) => void
 
@@ -61,6 +69,15 @@ export interface AgentTeamState {
   addTeammate: (input: AddTeammateInput) => AgentTeammate
   upsertTeammate: (teammate: AgentTeammate) => void
   updateTeammate: (teammateId: string, updates: Partial<AgentTeammate>) => void
+  /**
+   * Patch the per-teammate capability overlay (add/remove/replace lists).
+   * Pass `null` or `{}` to clear the overlay and revert to inheriting the
+   * team default unchanged.
+   */
+  updateTeammateCapabilities: (
+    teammateId: string,
+    overlay: TeammateCapabilityOverlay | null
+  ) => void
   removeTeammate: (teammateId: string) => void
   setTeammateStatus: (teammateId: string, status: TeammateStatus) => void
   setTeammateProgress: (teammateId: string, progress: number) => void

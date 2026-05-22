@@ -312,6 +312,18 @@ export interface ConversationOverrideRow {
    */
   allowComputerUse?: boolean
   /**
+   * Per-conversation opt-in for the self-driving `/goal` command (v49
+   * inbox optimization). Mirrors `allowComputerUse` exactly in shape and
+   * semantics: when this row is bound to an IM platform (the parent
+   * session carries `platformBinding`), `GoalRuntime.createGoal` MUST
+   * reject the goal unless this flag is `true`. The block fires a
+   * `goal.blocked.im` audit row; opt-in goals fire `goal.started.im` so
+   * the operator can audit self-driving goals running in inbox sessions.
+   * Direct (non-IM) sessions ignore this field — the goal subsystem
+   * gates only on the presence of an IM binding.
+   */
+  allowGoalDriving?: boolean
+  /**
    * Per-conversation provider override (added at schema v41 in support
    * of A6). When set, takes precedence over the character / app default
    * provider in `lib/claude/build-options.ts:resolveSendOptions`. Use

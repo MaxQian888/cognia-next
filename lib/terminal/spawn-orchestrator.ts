@@ -75,9 +75,9 @@ export interface SpawnFromDockInput {
   hooks?: ReturnType<typeof getPluginEventHooks>
   /**
    * Identity of the agent driving this spawn — set when the dock is
-   * spawned via the `terminal-dock-tool` MCP path. `terminal-store`
-   * scopes agent visibility by this key so the agent only sees its own
-   * tabs.
+   * spawned via the `terminal_dock_*` MCP tool path
+   * (`lib/terminal/dock-tool-handler.ts`). `terminal-store` scopes
+   * agent visibility by this key so the agent only sees its own tabs.
    */
   agentSpawner?: string
 }

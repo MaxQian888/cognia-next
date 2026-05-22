@@ -10,7 +10,11 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: () => mockIsCapacitor,
 }))
 
-import { selectTerminalTransport, terminalAvailable } from "./pick-transport"
+import {
+  selectTerminalTransport,
+  selectTerminalTransportChain,
+  terminalAvailable,
+} from "./pick-transport"
 
 beforeEach(() => {
   mockIsTauri = false
@@ -52,5 +56,21 @@ describe("terminalAvailable", () => {
 
   it("returns false in plain browser", () => {
     expect(terminalAvailable()).toBe(false)
+  })
+})
+
+describe("selectTerminalTransportChain", () => {
+  it("returns only tauri-channel on Tauri (no remote ambiguity)", () => {
+    mockIsTauri = true
+    expect(selectTerminalTransportChain()).toEqual(["tauri-channel"])
+  })
+
+  it("returns ws on Capacitor (webrtc follow-up will join once wired)", () => {
+    mockIsCapacitor = true
+    expect(selectTerminalTransportChain()).toEqual(["ws"])
+  })
+
+  it("returns an empty chain in plain browser", () => {
+    expect(selectTerminalTransportChain()).toEqual([])
   })
 })

@@ -1,0 +1,25 @@
+{
+  "id": "cognia-builtin-characters",
+  "name": "Cognia Built-in Characters",
+  "version": "1.0.0",
+  "description": "First-party character pack shipping the six default Cognia personas (Coding Assistant, Writing Editor, Research Analyst, Brainstorm Buddy, Translator, Goal Tracker). Equivalent to seedBuiltInCharacters() pre-v49.",
+  "type": "frontend",
+  "capabilities": ["character-pack"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

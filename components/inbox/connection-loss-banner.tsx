@@ -50,10 +50,21 @@ function hashSet(ids: string[]): string {
   return ids.slice().sort().join("|")
 }
 
+/**
+ * v49 — persist the dismiss snapshot in `localStorage` instead of
+ * `sessionStorage` so a tab reload (or app cold-start) doesn't rebroadcast
+ * the same failure set. TTL still kicks in via the existing timer; once
+ * the snapshot ages past 30 minutes it's cleared on next render.
+ *
+ * localStorage was chosen over a Dexie settings field because the read
+ * needs to be synchronous (the initial render decides whether to mount
+ * the banner) and the value is single-user, single-device by design — no
+ * benefit from companion-sync mirroring.
+ */
 function readDismiss(): PersistedDismiss | null {
   if (typeof window === "undefined") return null
   try {
-    const raw = window.sessionStorage.getItem(DISMISS_KEY)
+    const raw = window.localStorage.getItem(DISMISS_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<PersistedDismiss>
     if (typeof parsed.hash !== "string" || typeof parsed.at !== "number") return null
@@ -66,12 +77,21 @@ function readDismiss(): PersistedDismiss | null {
 function writeDismiss(hash: string): void {
   if (typeof window === "undefined") return
   try {
-    window.sessionStorage.setItem(
+    window.localStorage.setItem(
       DISMISS_KEY,
       JSON.stringify({ hash, at: Date.now() } satisfies PersistedDismiss)
     )
   } catch {
     // Best-effort — Safari private mode rejects writes.
+  }
+}
+
+function clearDismiss(): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(DISMISS_KEY)
+  } catch {
+    // Best-effort.
   }
 }
 
@@ -123,6 +143,9 @@ export function ConnectionLossBanner() {
     setTrackedHash(setHash)
     if (dismissed && dismissed.hash !== setHash) {
       setDismissed(null)
+      // v49 — also clear the persisted snapshot so the next mount doesn't
+      // re-hide for an already-changed failing set.
+      clearDismiss()
     }
   }
 
@@ -132,7 +155,12 @@ export function ConnectionLossBanner() {
   useEffect(() => {
     if (!dismissed) return
     const remaining = Math.max(0, dismissed.at + DISMISS_TTL_MS - Date.now())
-    const id = window.setTimeout(() => setDismissed(null), remaining)
+    const id = window.setTimeout(() => {
+      setDismissed(null)
+      // Drop the persisted snapshot so a tab reload at exactly the TTL
+      // boundary doesn't re-hide for the now-stale failure set.
+      clearDismiss()
+    }, remaining)
     return () => window.clearTimeout(id)
   }, [dismissed])
 

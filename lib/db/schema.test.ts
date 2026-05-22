@@ -54,6 +54,216 @@ describe("getDb", () => {
     expect(db.connectorAttachments).toBeDefined()
     // v27 — Plugin Dexie table registry (M0 platform feature).
     expect(db.pluginDexieMeta).toBeDefined()
+    // v49 — Inbox telemetry ring buffer.
+    expect(db.inboxTelemetryEvents).toBeDefined()
+  })
+
+  // v49 — Inbox optimization pass: messages.platformMessageId index + new
+  // telemetry table. Verify the messages table accepts a row with the
+  // denormalized field and the index resolves it; the telemetry table
+  // accepts inserts via its primary key.
+  it("v49 messages.platformMessageId index + inboxTelemetryEvents round-trip", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(49)
+    const now = Date.now()
+
+    // Messages row carries the new denormalized field + matching metadata.
+    await db.messages.put({
+      id: "m-v49",
+      sessionId: "s-v49",
+      role: "user",
+      parts: [{ type: "text", text: "hi" }],
+      platformMessageId: "tg:msg-42",
+      metadata: {
+        platformMessage: {
+          messageId: "tg:msg-42",
+          platform: "telegram",
+          sender: {
+            id: "u-alice",
+            platform: "telegram",
+            adapterId: "tg-1",
+            remoteUserId: "999",
+            displayName: "Alice",
+          },
+        },
+      },
+      createdAt: now,
+    })
+    const byIndex = await db.messages.where("platformMessageId").equals("tg:msg-42").toArray()
+    expect(byIndex).toHaveLength(1)
+    expect(byIndex[0].id).toBe("m-v49")
+
+    // Rows without platformMessageId still index-skip cleanly.
+    await db.messages.put({
+      id: "m-v49-no-pm",
+      sessionId: "s-v49",
+      role: "assistant",
+      parts: [{ type: "text", text: "reply" }],
+      createdAt: now,
+    })
+    expect(await db.messages.where("platformMessageId").equals("tg:msg-42").count()).toBe(1)
+
+    // Telemetry table inserts via primary key + lists newest-first via the
+    // `at` index.
+    await db.inboxTelemetryEvents.bulkPut([
+      { id: "te-1", kind: "inbound.received", at: 100, adapterId: "tg-1" },
+      { id: "te-2", kind: "outbound.sent", at: 200, adapterId: "tg-1" },
+      { id: "te-3", kind: "breaker.open", at: 300, adapterId: "tg-1" },
+    ])
+    const newest = await db.inboxTelemetryEvents.orderBy("at").reverse().limit(2).toArray()
+    expect(newest.map((r) => r.id)).toEqual(["te-3", "te-2"])
+  })
+
+  // v49 upgrade hook backfills platformMessageId from
+  // metadata.platformMessage.messageId on pre-existing rows.
+  it("v49 upgrade hook backfills platformMessageId on legacy messages", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v48 — last pre-bump version that already had senderId column.
+    legacy.version(48).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+    })
+    await legacy.open()
+    await legacy.table("messages").put({
+      id: "m-legacy",
+      sessionId: "s-legacy",
+      role: "user",
+      parts: [{ type: "text", text: "old" }],
+      metadata: {
+        platformMessage: {
+          messageId: "discord:msg-7",
+          platform: "discord",
+          sender: { remoteUserId: "u7", displayName: "Bob" },
+        },
+      },
+      createdAt: 0,
+    })
+    // Row that never went through a connector — no platformMessage metadata.
+    await legacy.table("messages").put({
+      id: "m-legacy-direct",
+      sessionId: "s-legacy",
+      role: "assistant",
+      parts: [{ type: "text", text: "direct" }],
+      createdAt: 0,
+    })
+    legacy.close()
+
+    // Re-open through production schema — v49 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    const backfilled = await db.messages.get("m-legacy")
+    expect(backfilled?.platformMessageId).toBe("discord:msg-7")
+    const direct = await db.messages.get("m-legacy-direct")
+    expect(direct?.platformMessageId).toBeUndefined()
+
+    // The new index can locate the backfilled row.
+    const byIndex = await db.messages.where("platformMessageId").equals("discord:msg-7").first()
+    expect(byIndex?.id).toBe("m-legacy")
+  })
+
+  // v50 — Built-in characters → first-party character pack (ADR-0030
+  // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
+  // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and
+  // `packVersionAtClone` so the new clone-hides-overlay dedupe rule
+  // treats them as user clones of the overlay. User customisations
+  // (e.g. a tampered systemPrompt) must survive verbatim.
+  it("v50 upgrade hook tags legacy built-in character rows with overlay attribution", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(48).stores({
+      characters: "id, name, updatedAt, isBuiltIn",
+    })
+    await legacy.open()
+    await legacy.table("characters").bulkPut([
+      {
+        id: "char_builtin_coding",
+        name: "Coding Assistant",
+        avatarColor: "x",
+        systemPrompt: "USER TAMPERED",
+        isBuiltIn: true,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      {
+        id: "char_builtin_writer",
+        name: "Writing Editor",
+        avatarColor: "x",
+        systemPrompt: "y",
+        isBuiltIn: true,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      // A user-created character — must not be tagged.
+      {
+        id: "char_user_demo",
+        name: "User",
+        avatarColor: "x",
+        systemPrompt: "z",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+    const coding = await db.characters.get("char_builtin_coding")
+    expect(coding?.sourcePluginId).toBe("cognia-builtin-characters")
+    expect(coding?.sourcePackId).toBe("builtin")
+    expect(coding?.clonedFromPackCharacterId).toBe(
+      "cognia-pack:cognia-builtin-characters:builtin:coding"
+    )
+    expect(coding?.packVersionAtClone).toBe("1.0.0")
+    // The systemPrompt the user had tampered with must not be touched by
+    // the upgrade hook itself — the seeder may re-stamp on next open, but
+    // the upgrade hook's job is attribution-only.
+    expect(coding?.systemPrompt).toBe("USER TAMPERED")
+
+    const writer = await db.characters.get("char_builtin_writer")
+    expect(writer?.clonedFromPackCharacterId).toBe(
+      "cognia-pack:cognia-builtin-characters:builtin:writer"
+    )
+
+    // Non-builtin rows are left strictly alone.
+    const user = await db.characters.get("char_user_demo")
+    expect(user?.sourcePluginId).toBeUndefined()
+    expect(user?.clonedFromPackCharacterId).toBeUndefined()
+  })
+
+  it("v50 upgrade hook is idempotent — rows already tagged are not re-tagged", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(48).stores({
+      characters: "id, name, updatedAt, isBuiltIn",
+    })
+    await legacy.open()
+    // Already-tagged row (simulates a previous v50 run + manual edit).
+    await legacy.table("characters").put({
+      id: "char_builtin_coding",
+      name: "Coding Assistant",
+      avatarColor: "x",
+      systemPrompt: "y",
+      isBuiltIn: true,
+      sourcePluginId: "third-party-imposter",
+      sourcePackId: "evil",
+      clonedFromPackCharacterId: "cognia-pack:third-party-imposter:evil:coding",
+      packVersionAtClone: "9.9.9",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+    const coding = await db.characters.get("char_builtin_coding")
+    // The pre-existing attribution must survive verbatim — the upgrade
+    // hook's `if (row.sourcePluginId) return` clause protects rows that
+    // were already attributed (whether by this hook or a manual edit).
+    expect(coding?.sourcePluginId).toBe("third-party-imposter")
+    expect(coding?.packVersionAtClone).toBe("9.9.9")
   })
 
   it("opens at schema v41 (IM connector complete gap closure)", async () => {

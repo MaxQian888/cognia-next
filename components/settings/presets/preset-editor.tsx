@@ -10,7 +10,7 @@
 // `presetToEditorState` live in `preset-editor-state.ts` and are re-exported
 // here so existing imports (`prompt-presets-section.tsx`) keep working.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -27,6 +27,14 @@ import {
   type PresetEditorState,
 } from "./preset-editor-state"
 
+/**
+ * Patch callback the four built-in sections (Identity / Capability / Tools /
+ * Advanced) already use. Extracted into a named type so consumers that
+ * inject `extraSections` (e.g. TeammateConfigDialog) can mirror the same
+ * signature without re-deriving it from the inline component types.
+ */
+export type PresetEditorOnPatch = (patch: Partial<PresetEditorState>) => void
+
 export {
   emptyEditorState,
   presetToEditorState,
@@ -41,6 +49,20 @@ interface Props {
   submitLabel?: string
   onCancel: () => void
   onSave: (output: PresetEditorOutput) => Promise<void>
+  /**
+   * Optional additional sections rendered between Advanced and the footer.
+   * Passed `state` + `onPatch` so the extra sections can edit the same
+   * `PresetEditorState`. Used by TeammateConfigDialog to add the team-
+   * specific selectors (native tools / character / subagents / etc.).
+   */
+  extraSections?: (props: { state: PresetEditorState; onPatch: PresetEditorOnPatch }) => ReactNode
+  /**
+   * When `false`, the system-prompt content field is not required at submit
+   * time. Defaults to `true` to keep preset-editor's historical contract.
+   * TeammateConfigDialog passes `false` because teammate configs can rely
+   * on the team-level default system prompt instead of supplying their own.
+   */
+  requireContent?: boolean
 }
 
 export function PresetEditor({
@@ -50,6 +72,8 @@ export function PresetEditor({
   submitLabel,
   onCancel,
   onSave,
+  extraSections,
+  requireContent = true,
 }: Props) {
   const t = useTranslations("presets")
   const safeT = (k: string, fallback: string) => {
@@ -75,7 +99,7 @@ export function PresetEditor({
       toast.error(safeT("validation.nameRequired", "Preset name is required."))
       return
     }
-    if (!state.content.trim()) {
+    if (requireContent && !state.content.trim()) {
       toast.error(safeT("validation.contentRequired", "System prompt cannot be empty."))
       return
     }
@@ -99,6 +123,12 @@ export function PresetEditor({
         workingDir: state.workingDir.trim() || undefined,
         isDefault: state.isDefault,
         isFavorite: state.isFavorite,
+        nativeAnthropicToolIds: state.nativeAnthropicToolIds?.length
+          ? state.nativeAnthropicToolIds
+          : undefined,
+        characterPackId: state.characterPackId,
+        externalAgentPresetId: state.externalAgentPresetId,
+        subagentIds: state.subagentIds?.length ? state.subagentIds : undefined,
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -118,6 +148,7 @@ export function PresetEditor({
         mcpCatalog={mcpCatalog}
       />
       <AdvancedSection state={state} onPatch={onPatch} />
+      {extraSections?.({ state, onPatch })}
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>

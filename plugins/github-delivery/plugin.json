@@ -11,7 +11,13 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch", "secrets:read", "secrets:write"],
+  "permissions": [
+    "network:fetch",
+    "secrets:read",
+    "secrets:write",
+    "terminal:spawn",
+    "terminal:write"
+  ],
   "activationEvents": ["onStartup"],
   "runtimeCompatibility": {
     "browser": {

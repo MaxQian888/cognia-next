@@ -65,7 +65,7 @@ function heartbeat(
 
 beforeEach(() => {
   if (typeof window !== "undefined") {
-    window.sessionStorage.clear()
+    window.localStorage.clear()
   }
   mockRequeue.mockClear()
   mockRecent = []
@@ -108,11 +108,11 @@ describe("ConnectionLossBanner", () => {
     await waitFor(() => expect(mockRequeue).toHaveBeenCalledWith("lark-1"))
   })
 
-  it("dismiss persists per-set hash in sessionStorage", () => {
+  it("dismiss persists per-set hash in localStorage", () => {
     mockRecent = [heartbeat("lark-1", "degraded"), heartbeat("b", "down")]
     wrap(<ConnectionLossBanner />)
     fireEvent.click(screen.getByTestId("connection-loss-dismiss"))
-    expect(window.sessionStorage.getItem("inbox.connectionLossBanner.dismiss")).not.toBeNull()
+    expect(window.localStorage.getItem("inbox.connectionLossBanner.dismiss")).not.toBeNull()
   })
 
   it("dismiss is per-set: a new failing set re-renders the banner", () => {

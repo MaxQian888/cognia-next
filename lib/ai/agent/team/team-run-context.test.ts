@@ -18,6 +18,7 @@ const fakeCtx = (runId: string): TeamRunContext =>
     concurrency: {} as TeamRunContext["concurrency"],
     modelPref: {} as TeamRunContext["modelPref"],
     storeWriter: {} as TeamRunContext["storeWriter"],
+    resolvedCapabilities: new Map(),
   }) satisfies TeamRunContext
 
 describe("TeamRunContext registry", () => {

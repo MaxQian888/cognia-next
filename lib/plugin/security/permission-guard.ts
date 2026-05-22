@@ -127,6 +127,10 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "filesystem:write",
   "secrets:write",
   "terminal:spawn",
+  // Wave 3 — writing to an existing terminal session is equivalent to
+  // executing arbitrary shell commands in that shell, so it sits in
+  // the same risk tier as `shell:execute` and `terminal:spawn`.
+  "terminal:write",
 ]
 
 // =============================================================================

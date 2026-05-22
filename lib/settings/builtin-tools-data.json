@@ -297,6 +297,44 @@
           "alwaysLoad": false
         }
       ]
+    },
+    {
+      "id": "terminalRepl",
+      "nameKey": "terminalRepl",
+      "descriptionKey": "terminalReplDesc",
+      "riskLevel": "high",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "terminal_repl_spawn",
+          "descriptionKey": "tools.terminalReplSpawn",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "terminal_repl_write",
+          "descriptionKey": "tools.terminalReplWrite",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "terminal_repl_read",
+          "descriptionKey": "tools.terminalReplRead",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "terminal_repl_kill",
+          "descriptionKey": "tools.terminalReplKill",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
     }
   ]
 }

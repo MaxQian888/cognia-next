@@ -820,7 +820,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (!character?.disablePluginTools) {
     try {
       const { buildPluginToolsManifest } = await import("@/lib/plugin/bridge/sidecar-tools-bridge")
-      let manifest = buildPluginToolsManifest()
+      // Wave 1 — when the user has opted into agent-driven terminal use,
+      // the manifest carries 4 synthetic `terminal_dock_*` entries that
+      // route through the existing plugin_tool_exec wire and land in
+      // `lib/terminal/dock-tool-handler.ts:runTerminalDockAction`. The
+      // setting lives in `appSettings.terminal.exposeDockToAgents` and
+      // defaults to false (agent has no terminal access).
+      const exposeDockToAgents = appSettings?.terminal?.exposeDockToAgents === true
+      let manifest = buildPluginToolsManifest({ exposeDockToAgents })
       if (!computerUseAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
       }
@@ -1071,8 +1078,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // sidecar restarts can recover the workflow chat seamlessly.
   if (session?.kind === "workflow-editor") {
     try {
-      const { workflowEditorSubagents } = await import("@/lib/claude/agents/subagents")
-      opts.agents = { ...(opts.agents ?? {}), ...workflowEditorSubagents() }
+      const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
+      opts.agents = {
+        ...(opts.agents ?? {}),
+        ...resolveAllSubagents({ context: "workflow-editor" }),
+      }
     } catch (err) {
       console.warn("workflow-editor subagent registration failed:", err)
     }
@@ -1128,6 +1138,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       delete opts.mcpServers
     } catch (err) {
       console.warn("workflow-editor copilot prompt installation failed:", err)
+    }
+  } else if (session?.kind === "team") {
+    // Team chat sessions union the 4 built-in workflow-* subagents with
+    // every plugin-contributed subagent from the `subagent-registry`
+    // overlay. Plugin subagent ids are namespaced as `<pluginId>:<id>`
+    // so they can never collide with built-in dispatcher names.
+    try {
+      const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
+      opts.agents = {
+        ...(opts.agents ?? {}),
+        ...resolveAllSubagents({ context: "team" }),
+      }
+    } catch (err) {
+      console.warn("team session subagent registration failed:", err)
     }
   }
 

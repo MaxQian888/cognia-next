@@ -338,10 +338,10 @@ function AgentTeamWorkspaceInner() {
           />
         </TabsContent>
         <TabsContent value="activity" className="pt-4">
-          <AgentTeamActivity events={events} />
+          <AgentTeamActivity events={events} report={team.executionReport} />
         </TabsContent>
         <TabsContent value="members" className="pt-4">
-          <AgentTeamMembers teamId={team.id} teammates={teammates} leadId={team.leadId} />
+          <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
         </TabsContent>
         <TabsContent value="settings" className="pt-4">
           <AgentTeamSettings team={team} />

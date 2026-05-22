@@ -21,6 +21,21 @@ import type {
 } from "./connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
+import { append as appendConnectorAudit } from "./connector-audit"
+
+/**
+ * Soft cap on the `outboundQueue` table. When `enqueueOutbound` brings the
+ * total past this watermark we age the oldest still-pending rows to
+ * `deadlettered` and emit an audit row per aged job. The cap is
+ * intentionally permissive: real-world backlogs rarely exceed a few hundred
+ * rows even during a sustained adapter outage, so 5000 only trips on a
+ * cascading failure where every adapter is jammed at once. The dead-letter
+ * transition preserves the row so the operator can still inspect it via
+ * the Outbound tab; it just stops the runner from re-trying.
+ *
+ * Exported for the saturation banner threshold derivation + tests.
+ */
+export const OUTBOUND_QUEUE_SOFT_CAP = 5000
 
 function newId(): string {
   return "oqj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -66,7 +81,55 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
       : {}),
   }
   await getDb().outboundQueue.add(row)
+  await enforceQueueSoftCap(now)
   return row
+}
+
+/**
+ * If the outboundQueue exceeds `OUTBOUND_QUEUE_SOFT_CAP`, transition the
+ * oldest still-pending rows to `deadlettered` until the table is back
+ * under the cap. Each aged row emits a `outbound.queue_capped` audit row
+ * carrying the job id and its age in ms, so the operator can correlate
+ * the banner trip with the specific jobs that were dropped. Sending /
+ * failed / already-deadlettered rows are NOT aged — they're either in
+ * flight or already terminal.
+ *
+ * Best-effort: a failure to write the audit row must not block the
+ * dead-letter transition.
+ */
+async function enforceQueueSoftCap(now: number): Promise<void> {
+  const db = getDb()
+  const total = await db.outboundQueue.count()
+  if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
+  const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
+  const oldestPending = await db.outboundQueue.filter((r) => r.status === "pending").toArray()
+  oldestPending.sort((a, b) => a.createdAt - b.createdAt)
+  const victims = oldestPending.slice(0, overflow)
+  for (const job of victims) {
+    await db.outboundQueue.update(job.id, {
+      status: "deadlettered",
+      lastErrorCode: "queue_capped",
+      lastError: `outboundQueue exceeded soft cap of ${OUTBOUND_QUEUE_SOFT_CAP}`,
+    })
+    try {
+      await appendConnectorAudit({
+        adapterId: job.adapterId,
+        kind: "outbound.queue_capped",
+        at: now,
+        conversationKey: job.conversationKey,
+        idempotencyKey: job.idempotencyKey,
+        message: `aged pending job to deadlettered (queue overflow)`,
+        fields: {
+          jobId: job.id,
+          ageMs: now - job.createdAt,
+          createdAt: job.createdAt,
+          source: job.source,
+        },
+      })
+    } catch {
+      // Best-effort — audit failure must not block the dead-letter transition.
+    }
+  }
 }
 
 /**

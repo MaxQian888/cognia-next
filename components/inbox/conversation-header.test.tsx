@@ -318,7 +318,7 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         policy={EMPTY_POLICY}
       />
     )
-    expect(screen.queryByTestId("conversation-header-degraded")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("adapter-health-badge")).not.toBeInTheDocument()
   })
 
   it("renders the degraded badge with the localized state when adapter is down", () => {
@@ -341,7 +341,7 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         policy={EMPTY_POLICY}
       />
     )
-    const badge = screen.getByTestId("conversation-header-degraded")
+    const badge = screen.getByTestId("adapter-health-badge")
     expect(badge).toBeInTheDocument()
     expect(badge).toHaveTextContent(/offline/i)
   })
@@ -366,7 +366,7 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         policy={EMPTY_POLICY}
       />
     )
-    expect(screen.getByTestId("conversation-header-degraded")).toBeInTheDocument()
+    expect(screen.getByTestId("adapter-health-badge")).toBeInTheDocument()
   })
 
   it("renders the last-inbound chip when the hook returns a timestamp (Task P2.5)", () => {
@@ -422,8 +422,8 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         policy={EMPTY_POLICY}
       />
     )
-    fireEvent.click(screen.getByTestId("conversation-header-degraded"))
-    const reconnect = await screen.findByTestId("conversation-header-reconnect")
+    fireEvent.click(screen.getByTestId("adapter-health-badge"))
+    const reconnect = await screen.findByTestId("adapter-health-reconnect")
     fireEvent.click(reconnect)
     await new Promise((r) => setTimeout(r, 0))
     expect(mockRequeueAdapter).toHaveBeenCalledWith("adp-1")

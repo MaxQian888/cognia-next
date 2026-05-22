@@ -185,3 +185,50 @@ describe("handlePluginToolExec — built-in skill fallback", () => {
     expect(response.error).toBe("plugin tool not found: no_such_tool")
   })
 })
+
+// ── Wave 1 — Terminal dock fallback ──────────────────────────────────
+describe("handlePluginToolExec — terminal-dock fallback", () => {
+  beforeEach(() => {
+    jest.resetModules()
+  })
+
+  afterEach(() => {
+    __setPluginToolResolverForTesting(null)
+  })
+
+  it("routes terminal_dock_* names to the dock-tool-handler", async () => {
+    // Plugin resolver misses + built-in skill registry empty → terminal-dock path.
+    __setPluginToolResolverForTesting({ getTool: () => undefined })
+    const runTerminalDockAction = jest.fn().mockResolvedValue({
+      ok: true,
+      sessionId: "tab-1",
+      exitCode: 0,
+      output: "ls",
+    })
+    jest.doMock("@/lib/terminal/dock-tool-handler", () => ({ runTerminalDockAction }))
+
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    freshSet({ getTool: () => undefined })
+
+    const response = await freshHandle({
+      type: "plugin_tool_exec",
+      sessionId: "sess-X",
+      toolUseId: "use-X",
+      name: "terminal_dock_write",
+      args: { tabId: "tab-1", command: "ls" },
+    })
+
+    expect(runTerminalDockAction).toHaveBeenCalledWith({
+      action: "write",
+      args: { tabId: "tab-1", command: "ls" },
+      chatSessionId: "sess-X",
+    })
+    expect(response.result).toEqual({
+      ok: true,
+      sessionId: "tab-1",
+      exitCode: 0,
+      output: "ls",
+    })
+  })
+})

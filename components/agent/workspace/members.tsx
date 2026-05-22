@@ -50,9 +50,10 @@ import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TEAMMATE_STATUS_CONFIG } from "@/types/agent/agent-team"
-import type { AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
+import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { DEFAULT_TEAMMATE_RUNTIME } from "@/types/agent/agent-team"
 import { RuntimeBadge } from "./runtime-badge"
+import { TeammateConfigDialog } from "./teammate-config-dialog"
 
 const RUNTIME_OPTIONS: TeammateRuntime[] = [
   "claude",
@@ -78,12 +79,26 @@ function runtimeLabelKey(runtime: TeammateRuntime): string {
 }
 
 export interface AgentTeamMembersProps {
-  teamId: string
+  /**
+   * Full team object — required for the new "Configure teammate" dialog
+   * that needs `team.config.capabilities` to compute capability overlays.
+   * Falls back to a minimal stub when only `teamId` is supplied (legacy
+   * test fixtures); the configure affordance is disabled in that case.
+   */
+  team?: AgentTeam
   teammates: AgentTeammate[]
   leadId: string
+  /** Legacy entry point: pass `team` instead. Kept for prop-back-compat. */
+  teamId?: string
 }
 
-export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembersProps) {
+export function AgentTeamMembers({
+  team,
+  teammates,
+  leadId,
+  teamId: legacyTeamId,
+}: AgentTeamMembersProps) {
+  const teamId = team?.id ?? legacyTeamId ?? ""
   const t = useTranslations("agentTeamsWorkspace.members")
   const prefersReducedMotion = useReducedMotion()
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
@@ -92,6 +107,7 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
 
   const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<AgentTeammate | null>(null)
+  const [configuring, setConfiguring] = useState<AgentTeammate | null>(null)
 
   const lead = teammates.find((m) => m.id === leadId)
   const workers = teammates.filter((m) => m.role === "teammate")
@@ -168,6 +184,7 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
             member={lead}
             isLead
             onRemove={() => setRemoving(lead)}
+            onConfigure={() => setConfiguring(lead)}
             onRuntimeChange={(r) => handleRuntimeChange(lead, r)}
           />
         </Card>
@@ -191,6 +208,7 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
                 <MemberRow
                   member={m}
                   onRemove={() => setRemoving(m)}
+                  onConfigure={() => setConfiguring(m)}
                   onRuntimeChange={(r) => handleRuntimeChange(m, r)}
                 />
               </Card>
@@ -198,6 +216,17 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
           ))}
         </div>
       )}
+
+      {configuring && team ? (
+        <TeammateConfigDialog
+          open={!!configuring}
+          onOpenChange={(open) => {
+            if (!open) setConfiguring(null)
+          }}
+          teammate={configuring}
+          team={team}
+        />
+      ) : null}
 
       <AddDialog open={addOpen} onOpenChange={setAddOpen} onSave={handleAdd} />
 
@@ -237,11 +266,13 @@ function MemberRow({
   member,
   isLead,
   onRemove,
+  onConfigure,
   onRuntimeChange,
 }: {
   member: AgentTeammate
   isLead?: boolean
   onRemove: () => void
+  onConfigure: () => void
   onRuntimeChange: (runtime: TeammateRuntime) => void
 }) {
   const t = useTranslations("agentTeamsWorkspace.members")
@@ -303,7 +334,7 @@ function MemberRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onClick={onConfigure} data-testid={`configure-${member.id}`}>
             <Settings2Icon className="mr-2 size-3.5" />
             {t("configure")}
           </DropdownMenuItem>

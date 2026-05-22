@@ -43,6 +43,7 @@ const DEFAULT_VALUES: TerminalSettings = {
   enableShellIntegration: true,
   copyOnSelect: false,
   exposeDockToAgents: false,
+  runInDockTimeoutSec: 60,
 }
 
 const AUTO = "__auto__"
@@ -213,6 +214,32 @@ export function TerminalCard() {
           onCheckedChange={(checked) => update({ exposeDockToAgents: checked })}
           aria-label={t("settings.terminal.exposeDockToAgents.label")}
           data-testid="terminal-card-expose-to-agents"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs" htmlFor="terminal-card-run-in-dock-timeout">
+            {t("settings.terminal.runInDockTimeout.label")}
+          </Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.runInDockTimeout.helper")}
+          </p>
+        </div>
+        <Input
+          id="terminal-card-run-in-dock-timeout"
+          type="number"
+          min={5}
+          max={600}
+          className="w-24"
+          value={terminal.runInDockTimeoutSec ?? 60}
+          onChange={(e) => {
+            const next = Number(e.target.value)
+            if (!Number.isFinite(next)) return
+            update({ runInDockTimeoutSec: Math.max(5, Math.min(600, Math.floor(next))) })
+          }}
+          aria-label={t("settings.terminal.runInDockTimeout.label")}
+          data-testid="terminal-card-run-in-dock-timeout"
         />
       </div>
 

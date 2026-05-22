@@ -18,7 +18,7 @@ import { gitTools } from "./git.mjs"
 import { processTools } from "./process.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
-import { terminalDockTools } from "./terminal-dock-tool.mjs"
+import { terminalReplTools } from "./terminal-repl-tool.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -28,11 +28,16 @@ const TOOLS_BY_CATEGORY = {
   environment: environmentTools,
   shellAdvanced: shellAdvancedTools,
   /**
-   * Wave 3D: agent-facing dock terminal. Gated by the
-   * `terminal.exposeDockToAgents` settings flag — the renderer passes
-   * the flag's value into `enabled.terminalDock` at server-build time.
+   * Wave 1 — node-pty-backed interactive REPL surface. Orthogonal to
+   * the renderer-relayed `terminal_dock_*` tools (those live in the
+   * pluginTools manifest, see `lib/plugin/bridge/sidecar-tools-bridge.ts`):
+   * REPL gives the agent a *private* persistent shell in the sidecar
+   * for use cases that need stateful I/O (python / claude-code / sql).
+   *
+   * Lazy node-pty require — when the native binding is missing the
+   * tool returns a clean structured error rather than crashing.
    */
-  terminalDock: terminalDockTools,
+  terminalRepl: terminalReplTools,
 }
 
 /**

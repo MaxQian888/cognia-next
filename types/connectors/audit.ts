@@ -17,6 +17,24 @@ export type AuditKind =
   | "inbound.deferred_manual_mode"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
+  // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the
+  // oldest pending row to `deadlettered`. Carries `fields.jobId`,
+  // `fields.ageMs`, `fields.createdAt`, `fields.source`. Drives the
+  // Inbox `OutboundSaturationBanner` (>100 capped rows in 24h →
+  // visible banner).
+  | "outbound.queue_capped"
+  // Callback binding expired and was reaped from
+  // `connectorCallbackBindings`. Per-row audit so "the button stopped
+  // working" tickets can find the actionId + conversationKey that
+  // dropped off. Emitted from `callback-binding-cleanup.ts` inside the
+  // existing daily prune sweep.
+  | "callback.binding_expired"
+  // /goal command targeted an IM-bound conversation. Two flavors:
+  // `goal.blocked.im` — no `allowGoalDriving` override; `goal.started.im`
+  // — opt-in granted. Either way the IM audit lets the operator see
+  // self-driving goals running in inbox sessions.
+  | "goal.started.im"
+  | "goal.blocked.im"
   | "circuit.opened"
   | "circuit.half_opened"
   | "circuit.closed"

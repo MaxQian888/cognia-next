@@ -41,7 +41,34 @@ import {
   listGoalsBySession,
   updateGoal,
 } from "@/lib/db/goals"
+import { getDb } from "@/lib/db/schema"
+import { readForResolution } from "@/lib/db/conversation-overrides"
+import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { redactObjective } from "./redact-objective"
+
+/**
+ * Thrown by `GoalRuntime.createGoal` when the target session is bound to
+ * an IM platform conversation and the matching `ConversationOverrideRow`
+ * does not carry `allowGoalDriving === true`. The block is the v49
+ * inbox-optimization guardrail: self-driving goals are off by default on
+ * IM channels because the loop can auto-reply without operator review.
+ *
+ * Callers (slash command handler, workflow goal-action node) should
+ * surface this to the user — silently swallowing it would hide a refused
+ * goal start.
+ */
+export class GoalImBlocked extends Error {
+  readonly conversationKey: string
+  readonly adapterId: string
+  constructor(conversationKey: string, adapterId: string) {
+    super(
+      `goal blocked: conversation ${conversationKey} is IM-bound and ConversationOverrideRow.allowGoalDriving is not true`
+    )
+    this.name = "GoalImBlocked"
+    this.conversationKey = conversationKey
+    this.adapterId = adapterId
+  }
+}
 import { renderObjectiveUpdatedMessage } from "./prompts"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,6 +170,52 @@ class GoalRuntime {
     appSettings?: AppSettings | null
     startPaused?: boolean
   }): Promise<Goal> {
+    // ── v49 IM guardrail (inbox-optimization plan) ───────────────────────
+    // Self-driving goals must be opted-in per-IM-conversation. If the
+    // session is bound to a platform conversation, we read the override
+    // row and short-circuit when `allowGoalDriving` is not explicitly
+    // true. The block fires a `goal.blocked.im` audit row so the
+    // operator can see refused starts in the inbox audit view.
+    const session = await getDb().sessions.get(input.sessionId)
+    const platformBinding = session?.platformBinding
+    if (platformBinding) {
+      const override = await readForResolution(platformBinding.conversationKey).catch(
+        () => undefined
+      )
+      const allowed = override?.allowGoalDriving === true
+      const auditAt = Date.now()
+      if (!allowed) {
+        try {
+          await appendConnectorAudit({
+            adapterId: platformBinding.adapterId,
+            kind: "goal.blocked.im",
+            at: auditAt,
+            conversationKey: platformBinding.conversationKey,
+            reason: "allow_goal_driving_off",
+            message: "GoalRuntime.createGoal blocked — IM conversation not opted in",
+            fields: { sessionId: input.sessionId, platform: platformBinding.platform },
+          })
+        } catch {
+          // Best-effort audit — must not block the throw.
+        }
+        throw new GoalImBlocked(platformBinding.conversationKey, platformBinding.adapterId)
+      }
+      // Opt-in branch: stamp the start in the inbox audit so operators
+      // can see self-driving goals running in IM conversations.
+      try {
+        await appendConnectorAudit({
+          adapterId: platformBinding.adapterId,
+          kind: "goal.started.im",
+          at: auditAt,
+          conversationKey: platformBinding.conversationKey,
+          message: "GoalRuntime.createGoal — opt-in granted",
+          fields: { sessionId: input.sessionId, platform: platformBinding.platform },
+        })
+      } catch {
+        // Audit failure must not block the goal start.
+      }
+    }
+
     const existing = await getOpenGoalForSession(input.sessionId)
     if (existing) {
       this.fireAbort(existing.id)

@@ -27,6 +27,7 @@
  */
 
 import { getDb } from "@/lib/db/schema"
+import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 
 /** Interval between cleanup sweeps. 24 h matches the OS-scheduler conventions used elsewhere. */
 export const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -66,6 +67,13 @@ export async function cleanupExpiredCallbackBindings(
   let expiredCount = 0
   let legacyCount = 0
   const toDelete: string[] = []
+  const auditRows: Array<{
+    adapterId: string
+    conversationKey?: string
+    actionId: string
+    expiredAt: number | undefined
+    reason: "expired" | "legacy_grace"
+  }> = []
 
   // One full-table scan is fine — the table is bounded by per-row TTL and
   // typically holds at most a few thousand entries. A compound index on
@@ -76,6 +84,13 @@ export async function cleanupExpiredCallbackBindings(
       if (row.expiresAt < now) {
         expiredCount++
         toDelete.push(row.id)
+        auditRows.push({
+          adapterId: row.adapterId,
+          conversationKey: row.conversationKey,
+          actionId: row.actionId,
+          expiredAt: row.expiresAt,
+          reason: "expired",
+        })
       }
       return
     }
@@ -83,11 +98,36 @@ export async function cleanupExpiredCallbackBindings(
     if (row.createdAt < legacyCutoff) {
       legacyCount++
       toDelete.push(row.id)
+      auditRows.push({
+        adapterId: row.adapterId,
+        conversationKey: row.conversationKey,
+        actionId: row.actionId,
+        expiredAt: undefined,
+        reason: "legacy_grace",
+      })
     }
   })
 
   if (toDelete.length > 0) {
     await db.connectorCallbackBindings.bulkDelete(toDelete)
+    // v49 — per-row audit so "the button stopped working" tickets can
+    // reach back from the conversationKey + actionId to the pruned
+    // binding. Best-effort; a failed audit write must not block the
+    // bulkDelete that already landed.
+    for (const audit of auditRows) {
+      try {
+        await appendConnectorAudit({
+          adapterId: audit.adapterId,
+          kind: "callback.binding_expired",
+          at: now,
+          conversationKey: audit.conversationKey,
+          reason: audit.reason,
+          fields: { actionId: audit.actionId, expiredAt: audit.expiredAt },
+        })
+      } catch {
+        // Swallow per-row audit failures.
+      }
+    }
   }
 
   return { expiredCount, legacyCount, total: toDelete.length }

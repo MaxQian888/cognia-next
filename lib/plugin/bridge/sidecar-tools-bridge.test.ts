@@ -3,7 +3,8 @@
  * Plugin tools manifest builder for the SDK sidecar runtime.
  */
 
-import { buildPluginToolsManifest } from "./sidecar-tools-bridge"
+import { buildPluginToolsManifest, buildTerminalDockManifestEntries } from "./sidecar-tools-bridge"
+import { TERMINAL_DOCK_PLUGIN_ID } from "./terminal-dock-schemas"
 import { usePluginStore } from "@/stores/plugin"
 import type { Plugin, PluginTool } from "@/types/plugin"
 
@@ -151,5 +152,57 @@ describe("buildPluginToolsManifest", () => {
     })
     const result = buildPluginToolsManifest()
     expect(result.map((t) => t.name)).toEqual(["kept"])
+  })
+
+  it("does NOT include terminal-dock entries by default (gate off)", () => {
+    setStore({ p: makePlugin("p", { tools: [makeTool("only")] }) })
+    const result = buildPluginToolsManifest()
+    expect(result.find((t) => t.name.startsWith("terminal_dock_"))).toBeUndefined()
+  })
+
+  it("appends 4 terminal-dock entries when exposeDockToAgents is on", () => {
+    setStore({ p: makePlugin("p", { tools: [makeTool("only")] }) })
+    const result = buildPluginToolsManifest({ exposeDockToAgents: true })
+    const dockEntries = result.filter((t) => t.name.startsWith("terminal_dock_"))
+    expect(dockEntries.map((t) => t.name).sort()).toEqual([
+      "terminal_dock_read_recent",
+      "terminal_dock_spawn",
+      "terminal_dock_wait_for_exit",
+      "terminal_dock_write",
+    ])
+    expect(dockEntries.every((t) => t.pluginId === TERMINAL_DOCK_PLUGIN_ID)).toBe(true)
+  })
+
+  it("places terminal-dock entries after plugin entries (stable ordering)", () => {
+    setStore({ alpha: makePlugin("alpha", { tools: [makeTool("plug_a")] }) })
+    const result = buildPluginToolsManifest({ exposeDockToAgents: true })
+    expect(result[0].name).toBe("plug_a")
+    expect(result.slice(1).every((t) => t.name.startsWith("terminal_dock_"))).toBe(true)
+  })
+})
+
+describe("buildTerminalDockManifestEntries", () => {
+  it("returns an empty array when the gate is off", () => {
+    expect(buildTerminalDockManifestEntries()).toEqual([])
+    expect(buildTerminalDockManifestEntries({ exposeDockToAgents: false })).toEqual([])
+  })
+
+  it("returns four entries with stable names + descriptions when on", () => {
+    const entries = buildTerminalDockManifestEntries({ exposeDockToAgents: true })
+    expect(entries).toHaveLength(4)
+    for (const entry of entries) {
+      expect(entry.name).toMatch(/^terminal_dock_/)
+      expect(entry.pluginId).toBe(TERMINAL_DOCK_PLUGIN_ID)
+      expect(typeof entry.description).toBe("string")
+      expect(entry.description.length).toBeGreaterThan(20)
+      expect(entry.jsonSchema).toMatchObject({ type: "object", additionalProperties: false })
+    }
+  })
+
+  it("does not mutate its schemas between calls (frozen identity)", () => {
+    const a = buildTerminalDockManifestEntries({ exposeDockToAgents: true })
+    const b = buildTerminalDockManifestEntries({ exposeDockToAgents: true })
+    // Schema objects are imported constants — must be the same reference.
+    expect(a[0].jsonSchema).toBe(b[0].jsonSchema)
   })
 })

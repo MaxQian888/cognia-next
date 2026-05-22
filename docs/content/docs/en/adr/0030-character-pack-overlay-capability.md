@@ -114,3 +114,82 @@ Future format versions bump `schemaVersion`; today's reader rejects future versi
 3. **Dangling session.characterId.** Covered by `<CharacterMissingBanner>`. Re-enable hides the banner automatically.
 4. **Manifest size.** 50 characters × 10 KB systemPrompt = 500 KB per plugin; `createOverlayRegistry` stores entries by reference so memory cost is bounded. SDK helper enforces the soft cap.
 5. **Plugin-owned Dexie tables not auto-dropped on uninstall** (pre-existing gap, not introduced by this work). A clone whose `sourcePluginId` points to an uninstalled plugin becomes a Dexie "orphan" — still usable, just without an overlay parent.
+
+## Amendment — 2026-05-23 (v50)
+
+### Reversed: D5 — built-in seeds now ride the overlay too
+
+The original ADR (§D5, §Alternatives) chose to keep the six built-in
+characters out of the overlay-registry path: they stayed in
+`seedBuiltInCharacters()` as plain Dexie rows. Two reasons make that
+choice no longer optimal:
+
+1. The new **Apply Update** flow (selective overwrite of pack-managed
+   fields while preserving user edits) is built on top of the
+   overlay-plus-snapshot model. Keeping the built-ins outside that model
+   meant they would never benefit from in-place updates as Cognia ships
+   prompt-engineering improvements to its own personas.
+2. Concept consistency: every other character source — third-party
+   plugin, local `.cognia-pack.json` file — flows through the overlay
+   registry. Treating the built-ins as a special case forced two
+   parallel code paths in `listCharacters`, `duplicateCharacter`, and
+   the settings UI.
+
+**New layout:**
+
+- The six personas now live in
+  `plugins/cognia-builtin-characters/src/index.ts` as a real
+  first-party plugin. `BUILTIN_PACK.id = "builtin"`, plugin id
+  `cognia-builtin-characters`, version `1.0.0`. The pack is
+  re-registered on every app start via the standard plugin manager
+  activation path.
+- Dexie schema **v50** adds an upgrade hook that tags the legacy
+  `char_builtin_*` rows with the new `sourcePluginId`/`sourcePackId`/
+  `clonedFromPackCharacterId`/`packVersionAtClone` attribution. User
+  customisations are preserved verbatim — only attribution fields are
+  added.
+- `listCharacters` gains a **clone-hides-overlay** dedupe rule: when a
+  Dexie row's `clonedFromPackCharacterId` matches an overlay synthetic
+  id, the overlay copy is suppressed in the picker. Built-ins therefore
+  appear once (the Dexie row), and their attribution + Apply Update
+  badge now work just like third-party-pack clones.
+
+### Added: v2 manifest fields + Apply Update flow
+
+Three optional fields land on `PluginCharacterDef`, gated by
+`CHARACTER_PACK_FILE_SCHEMA_VERSION = 2`:
+
+- `avatarImage?: { tauriPath?, webDataUrl? }` — author picks per-shell
+  source; UI falls back to `avatarEmoji + avatarColor`.
+- `persona?: { tone, personality, openingMessage, exemplarPrompts }` —
+  display-only this round (the build-options pipeline does not consume
+  them yet).
+- `voiceProfile?: { provider, voiceId, rate?, pitch?, volume? }` —
+  consumed via the new
+  `lib/plugin/character-pack/character-voice.ts:resolveCharacterVoice`
+  helper, which projects to a `Partial<SpeechSettings>` overlay for
+  `TTSOrchestrator.speak()`. No `AppSettings` mutation.
+
+`SUPPORTED_SCHEMA_VERSIONS = {1, 2}` — v1 packs keep parsing; new writes
+emit v2.
+
+**Apply Update** (selective overwrite):
+
+- `Character.pristineSnapshot?: PackPristineSnapshot` records the
+  pack-managed field values at clone/last-apply time.
+- `lib/plugin/character-pack/diff-pack-update.ts` is a pure diff: per
+  field, if `row[f]` still equals `snapshot[f]` the user hasn't touched
+  it → safe to overwrite from the new overlay. Otherwise preserve.
+- Settings UI gets an **Apply update** button (single) and **Apply to
+  all (N)** (when ≥2 clones from the same pack are pending). Dialog
+  shows the two-column diff before the user confirms.
+- Legacy clones without a snapshot (created on v48) fall back to a
+  confirm-before-overwrite-all path — the dialog surfaces a warning so
+  the user can duplicate-for-backup first.
+
+### Out of scope (follow-up)
+
+- Wiring `resolveCharacterVoice` into the actual TTS dispatch site.
+- `useTauriAssetUrl` hook for `avatarImage.tauriPath` rendering.
+- Ed25519 signature verification for `.cognia-pack.json` files.
+- New `requires` dimension types (theme-pack / connector / provider).

@@ -890,6 +890,7 @@ describe("action.team.task.dispatch", () => {
           taskStatuses.push({ id, status, result, error }),
         updateTeammate: () => {},
       },
+      resolvedCapabilities: new Map(),
     }
     registerTeamRunContext(ctx as never)
     return { messages, taskStatuses, ctx }
@@ -1046,6 +1047,7 @@ describe("action.team.task.dispatch output validation", () => {
           setTaskStatus: () => {},
           updateTeammate: () => {},
         },
+        resolvedCapabilities: new Map(),
       }
       registerTeamRunContext(ctx as never)
       return { ctx }

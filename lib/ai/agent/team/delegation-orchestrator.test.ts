@@ -1,0 +1,249 @@
+/**
+ * Delegation orchestrator tests.
+ *
+ * Mocks the plugin hooks + executeAgent + background-agent manager so we
+ * can drive the orchestrator without spinning the AI provider runtime.
+ * Asserts the full lifecycle: create → start hook → settle → complete hook,
+ * plus cancellation and approval branches.
+ */
+
+import "fake-indexeddb/auto"
+
+const dispatchOnTeamDelegationStart = jest.fn()
+const dispatchOnTeamDelegationComplete = jest.fn()
+
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginLifecycleHooks: jest.fn(() => ({
+    dispatchOnTeamDelegationStart,
+    dispatchOnTeamDelegationComplete,
+  })),
+}))
+
+jest.mock("@/lib/ai/agent/background-agent-manager", () => {
+  const registerAgent = jest.fn()
+  const cancelAgent = jest.fn()
+  const finishAgent = jest.fn()
+  return {
+    __mocks: { registerAgent, cancelAgent, finishAgent },
+    getBackgroundAgentManager: jest.fn(() => ({
+      registerAgent,
+      cancelAgent,
+      finishAgent,
+    })),
+    __resetBackgroundAgentManagerForTesting: jest.fn(),
+  }
+})
+
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(),
+}))
+
+import * as bgManagerModule from "@/lib/ai/agent/background-agent-manager"
+import { executeAgent } from "@/lib/ai/agent/agent-executor"
+const {
+  registerAgent: registerAgentMock,
+  cancelAgent: cancelAgentMock,
+  finishAgent: finishAgentMock,
+} = (
+  bgManagerModule as unknown as {
+    __mocks: { registerAgent: jest.Mock; cancelAgent: jest.Mock; finishAgent: jest.Mock }
+  }
+).__mocks
+const executeAgentMock = executeAgent as unknown as jest.Mock
+
+import {
+  approveDelegation,
+  cancelDelegation,
+  completeExternalDelegation,
+  delegateToBackground,
+  delegateToExternal,
+} from "./delegation-orchestrator"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+
+describe("delegation-orchestrator", () => {
+  beforeEach(() => {
+    useAgentTeamStore.getState().reset()
+    dispatchOnTeamDelegationStart.mockReset()
+    dispatchOnTeamDelegationComplete.mockReset()
+    registerAgentMock.mockReset()
+    cancelAgentMock.mockReset()
+    finishAgentMock.mockReset()
+    executeAgentMock.mockReset()
+    registerAgentMock.mockImplementation(() => {
+      const controller = new AbortController()
+      return controller.signal
+    })
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+  })
+
+  describe("delegateToBackground", () => {
+    it("creates an active delegation and fires onTeamDelegationStart", async () => {
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "Investigate",
+        reason: "Investigate offline",
+      })
+      expect(delegation.status).toBe("active")
+      expect(delegation.targetType).toBe("background")
+      expect(delegation.targetId).toMatch(/^bg_/)
+      expect(useAgentTeamStore.getState().delegations[delegation.id]).toBeDefined()
+      expect(dispatchOnTeamDelegationStart).toHaveBeenCalledWith(
+        expect.objectContaining({
+          delegationId: delegation.id,
+          sourceTeamId: "team-1",
+          sourceTaskId: "task-1",
+          targetType: "background",
+        })
+      )
+    })
+
+    it("dispatches executeAgent and settles to completed on success", async () => {
+      executeAgentMock.mockResolvedValue({ text: "background result" })
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "Investigate",
+        reason: "offline",
+      })
+      const settled = await completionPromise
+      expect(executeAgentMock).toHaveBeenCalled()
+      expect(settled.status).toBe("completed")
+      expect(settled.result).toBe("background result")
+      expect(finishAgentMock).toHaveBeenCalled()
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "completed",
+      })
+    })
+
+    it("settles to failed when executeAgent throws", async () => {
+      executeAgentMock.mockRejectedValue(new Error("boom"))
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "x",
+        reason: "y",
+      })
+      const settled = await completionPromise
+      expect(settled.status).toBe("failed")
+      expect(settled.result).toBe("boom")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "failed",
+      })
+    })
+
+    it("respects awaitingApproval and keeps the delegation in that status", async () => {
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "x",
+        reason: "needs review",
+        awaitingApproval: true,
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      const settled = await completionPromise
+      expect(settled.status).toBe("awaiting_approval")
+      expect(executeAgentMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("delegateToExternal", () => {
+    it("creates an active sub_agent delegation and fires onTeamDelegationStart", () => {
+      const out = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "claude-code",
+        reason: "use external",
+      })
+      expect(out.status).toBe("active")
+      expect(out.targetType).toBe("sub_agent")
+      expect(out.targetId).toBe("claude-code")
+      expect(dispatchOnTeamDelegationStart).toHaveBeenCalled()
+    })
+
+    it("completeExternalDelegation settles status and fires the complete hook", () => {
+      const out = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        reason: "x",
+      })
+      const settled = completeExternalDelegation(out.id, "completed", "external result")
+      expect(settled?.status).toBe("completed")
+      expect(settled?.result).toBe("external result")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: out.id,
+        status: "completed",
+      })
+    })
+
+    it("completeExternalDelegation no-ops for unknown ids", () => {
+      const result = completeExternalDelegation("missing", "completed")
+      expect(result).toBeUndefined()
+    })
+  })
+
+  describe("approveDelegation", () => {
+    it("flips awaiting_approval to active", () => {
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "x",
+        reason: "y",
+        awaitingApproval: true,
+      })
+      const after = approveDelegation(delegation.id)
+      expect(after?.status).toBe("active")
+    })
+
+    it("no-ops on non-awaiting delegations", () => {
+      const out = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "x",
+        reason: "y",
+      })
+      const after = approveDelegation(out.id)
+      expect(after?.status).toBe("active")
+    })
+  })
+
+  describe("cancelDelegation", () => {
+    it("flips active background delegation to cancelled and aborts the runtime signal", () => {
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "x",
+        reason: "y",
+      })
+      const after = cancelDelegation(delegation.id)
+      expect(after?.status).toBe("cancelled")
+      expect(cancelAgentMock).toHaveBeenCalledWith(delegation.targetId)
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "cancelled",
+      })
+    })
+
+    it("no-ops on already-settled delegations", () => {
+      const out = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "x",
+        reason: "y",
+      })
+      completeExternalDelegation(out.id, "completed")
+      cancelAgentMock.mockReset()
+      const after = cancelDelegation(out.id)
+      expect(after?.status).toBe("completed")
+      expect(cancelAgentMock).not.toHaveBeenCalled()
+    })
+
+    it("returns undefined for unknown delegationId", () => {
+      const after = cancelDelegation("missing")
+      expect(after).toBeUndefined()
+    })
+  })
+})

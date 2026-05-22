@@ -35,6 +35,19 @@ jest.mock("@/components/mobile/connection-state-badge", () => ({
   ConnectionStateBadge: () => <div data-testid="connection-state-badge-stub" />,
 }))
 
+// Wave 2 — search + history overlays mounted on the mobile screen.
+// Stubbed to surface deterministic markers without standing up the
+// full xterm search addon / store-bound history rail.
+jest.mock("@/components/terminal/terminal-search-overlay", () => ({
+  TerminalSearchOverlay: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="terminal-search-overlay-stub" /> : null,
+}))
+jest.mock("@/components/terminal/terminal-history-panel", () => ({
+  TerminalHistoryPanel: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="terminal-history-panel-stub" data-session-id={sessionId} />
+  ),
+}))
+
 // Force transport selection so tests are deterministic.
 let mockTransport: "ws" | "tauri-channel" | "unsupported" = "ws"
 jest.mock("@/lib/terminal/pick-transport", () => ({
@@ -114,5 +127,30 @@ describe("MobileTerminalScreen", () => {
     render(<MobileTerminalScreen />)
     fireEvent.click(screen.getByLabelText("close"))
     expect(mockKillFromDock).toHaveBeenCalled()
+  })
+
+  describe("Wave 2 — overlay parity", () => {
+    it("search + history buttons are disabled when no session is active", () => {
+      render(<MobileTerminalScreen />)
+      expect(screen.getByTestId("mobile-terminal-search")).toBeDisabled()
+      expect(screen.getByTestId("mobile-terminal-history")).toBeDisabled()
+    })
+
+    it("clicking the search button toggles the search overlay open", () => {
+      useTerminalStore.getState().registerSession(info())
+      render(<MobileTerminalScreen />)
+      expect(screen.queryByTestId("terminal-search-overlay-stub")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("mobile-terminal-search"))
+      expect(screen.getByTestId("terminal-search-overlay-stub")).toBeInTheDocument()
+    })
+
+    it("clicking the history button opens the slide-up sheet with the active session", () => {
+      useTerminalStore.getState().registerSession(info())
+      render(<MobileTerminalScreen />)
+      expect(screen.queryByTestId("terminal-history-panel-stub")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("mobile-terminal-history"))
+      const panel = screen.getByTestId("terminal-history-panel-stub")
+      expect(panel).toHaveAttribute("data-session-id", "s-1")
+    })
   })
 })

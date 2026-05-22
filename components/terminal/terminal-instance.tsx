@@ -270,7 +270,22 @@ function TerminalInstanceImpl(
 
       const fit = new FitAddon()
       term.loadAddon(fit)
+      // Plain-text URL detection (regex-based). Handles `https://…` and `www.…`
+      // sequences that the shell emits without any escape codes.
       term.loadAddon(new WebLinksAddon())
+      // Wave 4 — OSC 8 explicit hyperlinks (`\e]8;;<url>\e\<text>\e]8;;\e\`).
+      // xterm.js 5.x ships an OSC 8 parser that surfaces the URL via the
+      // `linkHandler` API; we register a handler that opens the URL in the
+      // default browser (Tauri's openExternal protocol when present, or
+      // window.open as a fallback). Without this hook, OSC 8 sequences
+      // would underline the text but clicks would be no-ops.
+      term.options.linkHandler = {
+        activate: (_event: MouseEvent, uri: string) => {
+          openExternalLink(uri)
+        },
+        hover: () => undefined,
+        leave: () => undefined,
+      }
       const uni = new Unicode11Addon()
       term.loadAddon(uni)
       term.unicode.activeVersion = "11"
@@ -497,3 +512,41 @@ export const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInsta
 TerminalInstance.displayName = "TerminalInstance"
 
 export default TerminalInstance
+
+/**
+ * Open an OSC 8 hyperlink target. Prefer Tauri's `openExternal` (writes
+ * through the OS without an in-app webview hop) when running inside the
+ * desktop shell; fall back to `window.open` in the browser / Capacitor
+ * builds. Refuses to open unsafe schemes — only http / https / mailto
+ * / file pass the allowlist. This is the same policy `WebLinksAddon`
+ * enforces for plain-text URLs.
+ */
+function openExternalLink(uri: string): void {
+  try {
+    const url = new URL(uri)
+    const safeSchemes = ["http:", "https:", "mailto:", "file:"]
+    if (!safeSchemes.includes(url.protocol)) {
+      console.warn(`terminal: refusing to open OSC 8 link with scheme "${url.protocol}"`)
+      return
+    }
+  } catch {
+    console.warn(`terminal: ignoring malformed OSC 8 URI: ${uri}`)
+    return
+  }
+  // Best-effort dynamic import of Tauri's opener plugin so the renderer
+  // can ship to Capacitor / web without the desktop dep.
+  void (async () => {
+    try {
+      const mod = await import("@tauri-apps/plugin-opener")
+      await mod.openUrl(uri)
+      return
+    } catch {
+      /* fall through to window.open */
+    }
+    try {
+      window.open(uri, "_blank", "noopener,noreferrer")
+    } catch {
+      /* both paths failed — give up silently */
+    }
+  })()
+}

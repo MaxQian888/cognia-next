@@ -22,10 +22,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Toggle } from "@/components/ui/toggle"
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
+import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import type { ChatSession } from "@/lib/claude/types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { PlatformBadge } from "./platform-badge"
 import { UnreadPill } from "./unread-pill"
+import { ComputerUseChip } from "./computer-use-chip"
 import { ConversationSearchInput } from "./search/conversation-search-input"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -45,24 +47,6 @@ interface EnrichedSession {
   /** Lazy plaintext snippet of the latest message; populated only when
    *  the operator is searching. */
   lastMessagePreview?: string
-}
-
-/**
- * Extract a plaintext fragment from a UIMessage `parts` array. Walks
- * text-typed parts and concatenates their `text` fields, leaving room
- * for the caller's downstream length cap (default ~240 chars).
- */
-function extractPlainText(parts: unknown): string {
-  if (!Array.isArray(parts)) return ""
-  const buf: string[] = []
-  for (const part of parts) {
-    if (!part || typeof part !== "object") continue
-    const p = part as { type?: unknown; text?: unknown }
-    if (p.type === "text" && typeof p.text === "string") {
-      buf.push(p.text)
-    }
-  }
-  return buf.join(" ").replace(/\s+/g, " ").trim()
 }
 
 /**
@@ -367,6 +351,10 @@ function ConversationRow({
         </div>
 
         <UnreadPill count={unreadCount} />
+        {/* v49 — read-only chip flagging the elevated-permission flag
+         * on this conversation so operators can pick out IM channels
+         * with Computer Use granted without opening the override dialog. */}
+        <ComputerUseChip active={override?.allowComputerUse === true} />
       </button>
 
       {/* Plugin contributions: per-row actions (archive, mute, transfer to

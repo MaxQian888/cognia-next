@@ -50,6 +50,8 @@ export function TerminalDock() {
   const renameSession = useTerminalStore((s) => s.renameSession)
   const setAgentTrusted = useTerminalStore((s) => s.setAgentTrusted)
 
+  const setPanelHeight = useTerminalStore((s) => s.setPanelHeight)
+
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const project = useProjectStore((s) =>
     s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
@@ -166,10 +168,32 @@ export function TerminalDock() {
 
   return (
     <div
-      className="flex h-full w-full flex-col border-t bg-background"
+      className="relative flex h-full w-full flex-col border-t bg-background"
       data-testid="terminal-dock"
       data-project-id={activeProjectId ?? "none"}
     >
+      {/* Wave 4 — drag-resize handle. Pinned to the top edge so
+          dragging up grows the dock at the expense of the editor
+          area above. Keyboard-accessible via arrow keys when
+          focused (the focus ring shows up via focus-visible:bg). */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        tabIndex={0}
+        aria-label={t("resize")}
+        data-testid="terminal-dock-resize-handle"
+        className="absolute -top-0.5 left-0 right-0 z-10 h-1 cursor-row-resize bg-transparent hover:bg-primary/50 focus-visible:bg-primary focus-visible:outline-none"
+        onPointerDown={(e) => beginResize(e, setPanelHeight)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp") {
+            e.preventDefault()
+            adjustPanelHeight(useTerminalStore.getState().panelHeightPct, -2, setPanelHeight)
+          } else if (e.key === "ArrowDown") {
+            e.preventDefault()
+            adjustPanelHeight(useTerminalStore.getState().panelHeightPct, 2, setPanelHeight)
+          }
+        }}
+      />
       <TerminalTabStrip
         tabs={tabs}
         activeId={activeId}
@@ -301,3 +325,52 @@ function DockRenameOverlay({
 }
 
 export default TerminalDock
+
+/**
+ * Begin a pointer-drag resize of the dock height. Captures pointer move
+ * events on the window so the cursor doesn't have to stay glued to the
+ * handle; clamps to TERMINAL_LAYOUT_BOUNDS via the store.
+ *
+ * The handle sits at the TOP of the dock — dragging up grows it, down
+ * shrinks it. We translate the deltaY into a pct of the viewport so the
+ * stored value survives a resize / different display.
+ */
+function beginResize(
+  startEvent: React.PointerEvent<HTMLDivElement>,
+  setPanelHeight: (pct: number) => void
+): void {
+  startEvent.preventDefault()
+  const viewportH = typeof window !== "undefined" ? window.innerHeight : 800
+  if (viewportH <= 0) return
+  const startY = startEvent.clientY
+  const startPct = useTerminalStore.getState().panelHeightPct
+  let lastPct = startPct
+
+  function onMove(e: PointerEvent) {
+    const deltaY = e.clientY - startY
+    const deltaPct = (deltaY / viewportH) * 100
+    // Drag up (negative deltaY) → bigger panel. Subtract so the dock
+    // grows toward the cursor.
+    const next = startPct - deltaPct
+    if (Math.abs(next - lastPct) < 0.25) return
+    lastPct = next
+    setPanelHeight(next)
+  }
+  function onUp() {
+    window.removeEventListener("pointermove", onMove)
+    window.removeEventListener("pointerup", onUp)
+    window.removeEventListener("pointercancel", onUp)
+  }
+  window.addEventListener("pointermove", onMove)
+  window.addEventListener("pointerup", onUp)
+  window.addEventListener("pointercancel", onUp)
+}
+
+/** Keyboard-driven height adjustment for the resize separator (2% per press). */
+function adjustPanelHeight(
+  currentPct: number,
+  delta: number,
+  setPanelHeight: (pct: number) => void
+): void {
+  setPanelHeight(currentPct + delta)
+}

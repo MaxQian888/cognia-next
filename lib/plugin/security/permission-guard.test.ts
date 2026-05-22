@@ -420,12 +420,19 @@ describe("Permission Constants", () => {
       expect(PERMISSION_DESCRIPTIONS["terminal:kill"]).toBeTruthy()
     })
 
-    it("flags terminal:spawn as dangerous (arbitrary code execution surface)", () => {
+    it("flags terminal:spawn and terminal:write as dangerous (arbitrary code execution surface)", () => {
       expect(DANGEROUS_PERMISSIONS).toContain("terminal:spawn")
+      // Wave 3 — writing to an existing terminal session is equivalent
+      // to executing arbitrary shell commands in that shell, so it
+      // sits in the same risk tier as terminal:spawn.
+      expect(DANGEROUS_PERMISSIONS).toContain("terminal:write")
     })
 
-    it("does NOT flag terminal:write or terminal:kill as dangerous on their own", () => {
-      expect(DANGEROUS_PERMISSIONS).not.toContain("terminal:write")
+    it("does NOT flag terminal:kill as dangerous on its own", () => {
+      // Killing a session you already have a handle to is recoverable —
+      // medium risk at worst (kills the user's work). Marking it
+      // dangerous would force per-call confirmation which is more
+      // annoying than the action warrants.
       expect(DANGEROUS_PERMISSIONS).not.toContain("terminal:kill")
     })
 

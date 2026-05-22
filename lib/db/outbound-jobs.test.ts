@@ -248,4 +248,164 @@ describe("outbound-jobs", () => {
       expect(stored?.sourceWorkflow).toBeUndefined()
     })
   })
+
+  // ── v49 — outboundQueue soft cap (inbox optimization plan) ──────────
+  //
+  // `enqueueOutbound` checks `count()` post-insert and, when above the
+  // cap, ages the oldest pending rows to `deadlettered` with an audit
+  // row per victim. Sending / failed / already-deadlettered rows are
+  // preserved (in flight or terminal).
+  describe("v49 — outboundQueue soft cap", () => {
+    // Direct import inside the describe to keep test setup minimal and
+    // avoid touching the outer module — the cap is a module-level const
+    // so a single import is enough for the threshold assertions below.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { OUTBOUND_QUEUE_SOFT_CAP } = require("./outbound-jobs") as {
+      OUTBOUND_QUEUE_SOFT_CAP: number
+    }
+
+    it("exports a 5000-row soft cap", () => {
+      expect(OUTBOUND_QUEUE_SOFT_CAP).toBe(5000)
+    })
+
+    it("no-ops the cap enforcement when count <= cap", async () => {
+      // Seed three rows; count is well under the cap, so no transitions
+      // happen. We use the audit table count as a proxy: if the cap had
+      // fired, the audit table would carry queue_capped rows.
+      const before = await getDb().connectorAudit.count()
+      for (let i = 0; i < 3; i++) {
+        await enqueue({
+          adapterId: "adp_under",
+          conversationKey: `c_${i}`,
+          request: makeRequest(`k_${i}`),
+        })
+      }
+      const after = await getDb().connectorAudit.count()
+      // No `outbound.queue_capped` rows should have been written.
+      const capped = await getDb()
+        .connectorAudit.where("kind")
+        .equals("outbound.queue_capped")
+        .count()
+      expect(capped).toBe(0)
+      // The audit table grew only via the cap enforcement; since no cap
+      // fired, count delta must be zero.
+      expect(after - before).toBe(0)
+    })
+
+    it("ages oldest pending row(s) to deadlettered + emits per-victim audit", async () => {
+      // Force the cap to 3 via a temporary module mock would be ideal,
+      // but the cap is a const for ergonomics. Instead, pre-seed rows
+      // directly into Dexie so the table holds 5000 entries before the
+      // next enqueue call. Each pre-seeded row uses unique createdAt so
+      // FIFO ordering is deterministic.
+      const db = getDb()
+      const baseAt = Date.now() - 10_000_000
+      const seedRows = Array.from({ length: 5000 }, (_, idx) => ({
+        id: `seed-${idx}`,
+        adapterId: "adp_full",
+        conversationKey: `c_${idx}`,
+        request: makeRequest(`seed_${idx}`),
+        status: "pending" as const,
+        attempts: 0,
+        createdAt: baseAt + idx,
+        nextAttemptAt: baseAt + idx,
+        idempotencyKey: `seed_${idx}`,
+        source: "ai-run" as const,
+      }))
+      await db.outboundQueue.bulkAdd(seedRows)
+      expect(await db.outboundQueue.count()).toBe(5000)
+
+      // The next enqueue pushes the table to 5001 → cap fires → the
+      // oldest pending row (`seed-0`) is aged to `deadlettered`.
+      await enqueue({
+        adapterId: "adp_new",
+        conversationKey: "c_new",
+        request: makeRequest("k_new"),
+      })
+
+      const victim = await db.outboundQueue.get("seed-0")
+      expect(victim?.status).toBe("deadlettered")
+      expect(victim?.lastErrorCode).toBe("queue_capped")
+      // Total count stays at 5001 — aging changes status, not row count.
+      // The cap throttles pending growth; aged rows are preserved so the
+      // operator can inspect them via the Outbound tab. The pending
+      // count is the number to watch — it stayed at 5000 (the cap value).
+      expect(await db.outboundQueue.count()).toBe(5001)
+      const pendingCount = await db.outboundQueue.filter((r) => r.status === "pending").count()
+      expect(pendingCount).toBe(5000)
+
+      // Audit row was written for the aged victim.
+      const audit = await db.connectorAudit.where("kind").equals("outbound.queue_capped").toArray()
+      expect(audit).toHaveLength(1)
+      expect(audit[0].adapterId).toBe("adp_full")
+      expect(audit[0].fields?.jobId).toBe("seed-0")
+      expect(typeof audit[0].fields?.ageMs).toBe("number")
+    })
+
+    it("does not age sending or already-deadlettered rows", async () => {
+      // Pre-seed a row in `sending` status (in flight) and another in
+      // `deadlettered` (terminal). Both must survive the cap enforcement.
+      const db = getDb()
+      const baseAt = Date.now() - 10_000_000
+      const seedRows = Array.from({ length: 4998 }, (_, idx) => ({
+        id: `bulk-${idx}`,
+        adapterId: "adp_mix",
+        conversationKey: `c_${idx}`,
+        request: makeRequest(`bulk_${idx}`),
+        status: "pending" as const,
+        attempts: 0,
+        createdAt: baseAt + 1000 + idx,
+        nextAttemptAt: baseAt + 1000 + idx,
+        idempotencyKey: `bulk_${idx}`,
+        source: "ai-run" as const,
+      }))
+      // The "sending" + "deadlettered" rows have the OLDEST createdAt —
+      // if the FIFO logic naïvely picked the oldest createdAt without
+      // status filtering, these would be the first victims. They MUST
+      // be skipped.
+      await db.outboundQueue.bulkAdd([
+        {
+          id: "in-flight",
+          adapterId: "adp_mix",
+          conversationKey: "c_in_flight",
+          request: makeRequest("in_flight"),
+          status: "sending",
+          attempts: 1,
+          createdAt: baseAt,
+          nextAttemptAt: baseAt,
+          idempotencyKey: "in_flight",
+          source: "ai-run",
+        },
+        {
+          id: "already-dead",
+          adapterId: "adp_mix",
+          conversationKey: "c_dead",
+          request: makeRequest("dead"),
+          status: "deadlettered",
+          attempts: 5,
+          createdAt: baseAt + 1,
+          nextAttemptAt: baseAt + 1,
+          idempotencyKey: "dead",
+          source: "ai-run",
+          lastErrorCode: "max_retries",
+          lastError: "gave up",
+        },
+        ...seedRows,
+      ])
+      expect(await db.outboundQueue.count()).toBe(5000)
+
+      // Trip the cap with one more enqueue.
+      await enqueue({
+        adapterId: "adp_overflow",
+        conversationKey: "c_overflow",
+        request: makeRequest("overflow"),
+      })
+
+      expect((await db.outboundQueue.get("in-flight"))?.status).toBe("sending")
+      expect((await db.outboundQueue.get("already-dead"))?.status).toBe("deadlettered")
+      // The actual victim is the oldest PENDING row — `bulk-0`.
+      expect((await db.outboundQueue.get("bulk-0"))?.status).toBe("deadlettered")
+      expect((await db.outboundQueue.get("bulk-0"))?.lastErrorCode).toBe("queue_capped")
+    })
+  })
 })

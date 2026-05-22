@@ -8,26 +8,44 @@
  * Composition reuses `TerminalTabStrip` + `TerminalInstance` directly so
  * the dock and the mobile screen share the same tab logic and renderer
  * setup. The mobile shell adds:
- *   * a header with the connection-state badge + "+ New" + close-page,
+ *   * a header with the connection-state badge, search + history
+ *     toggles, "+ New" and close-page,
  *   * a smaller default font (mobile-pinned) and reduced backlog,
  *   * a one-line empty state when there are no live remote sessions.
  *
- * Transport: the picker is fixed to `ws` for this surface. Mobile is the
- * primary user of the LAN/WAN remote terminal, and Tauri-channel doesn't
- * apply.
+ * Wave 2 — overlay parity. Where the desktop dock pins the search
+ * overlay top-right and the history panel as a right rail, the mobile
+ * screen pops them on demand:
+ *   * search: floats above the xterm pane (`<TerminalSearchOverlay>`).
+ *   * history: slides up as a `<Sheet>` so it doesn't fight the
+ *     keyboard on a narrow viewport (`<TerminalHistoryPanel>`).
+ *
+ * Transport: the picker is fixed to `ws` for this surface (with the
+ * future WAN fallback to `webrtc` via `selectTerminalTransportChain`).
+ * Mobile is the primary user of the LAN/WAN remote terminal, and
+ * Tauri-channel doesn't apply.
  */
 
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, PlusIcon } from "lucide-react"
+import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
+import { TerminalHistoryPanel } from "@/components/terminal/terminal-history-panel"
 import {
   TerminalInstance,
   type TerminalInstanceHandle,
 } from "@/components/terminal/terminal-instance"
+import { TerminalSearchOverlay } from "@/components/terminal/terminal-search-overlay"
 import { TerminalTabStrip } from "@/components/terminal/terminal-tab-strip"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
 import { killFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
@@ -55,6 +73,8 @@ export function MobileTerminalScreen() {
   )
 
   const instanceRef = useRef<TerminalInstanceHandle | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const projectKey = activeProjectId ?? ""
   const tabs = useMemo<TerminalSessionRow[]>(
@@ -122,6 +142,30 @@ export function MobileTerminalScreen() {
           size="icon"
           variant="ghost"
           className="h-8 w-8"
+          disabled={!activeRow}
+          onClick={() => setSearchOpen((open) => !open)}
+          aria-label={t("search")}
+          aria-pressed={searchOpen}
+          data-testid="mobile-terminal-search"
+        >
+          <SearchIcon className="h-4 w-4" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          disabled={!activeRow}
+          onClick={() => setHistoryOpen((open) => !open)}
+          aria-label={t("history")}
+          aria-pressed={historyOpen}
+          data-testid="mobile-terminal-history"
+        >
+          <HistoryIcon className="h-4 w-4" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
           onClick={() => {
             void handleNew()
           }}
@@ -140,12 +184,19 @@ export function MobileTerminalScreen() {
       />
       <div className="relative flex-1 overflow-hidden">
         {activeRow ? (
-          <TerminalInstance
-            ref={instanceRef}
-            sessionId={activeRow.id}
-            fontSize={MOBILE_FONT_SIZE}
-            scrollback={MOBILE_SCROLLBACK}
-          />
+          <>
+            <TerminalInstance
+              ref={instanceRef}
+              sessionId={activeRow.id}
+              fontSize={MOBILE_FONT_SIZE}
+              scrollback={MOBILE_SCROLLBACK}
+            />
+            <TerminalSearchOverlay
+              open={searchOpen}
+              onClose={() => setSearchOpen(false)}
+              instanceRef={instanceRef}
+            />
+          </>
         ) : (
           <div
             className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs text-muted-foreground"
@@ -173,6 +224,18 @@ export function MobileTerminalScreen() {
           </div>
         )}
       </div>
+      {/* History as a slide-up sheet — on narrow viewports a right rail
+          (the desktop pattern) would either eat too much width or fight
+          the on-screen keyboard. */}
+      <Sheet open={historyOpen && !!activeRow} onOpenChange={setHistoryOpen}>
+        <SheetContent side="bottom" className="h-[60dvh] p-0">
+          <SheetHeader className="px-4 pt-3 pb-1">
+            <SheetTitle>{t("historyTitle")}</SheetTitle>
+            <SheetDescription>{t("historySubtitle")}</SheetDescription>
+          </SheetHeader>
+          {activeRow ? <TerminalHistoryPanel sessionId={activeRow.id} className="flex-1" /> : null}
+        </SheetContent>
+      </Sheet>
     </main>
   )
 }

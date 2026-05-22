@@ -28,6 +28,14 @@ import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
 import { wikiRead, wikiSearch } from "../handlers/wiki"
+import {
+  connectorsListAdapters,
+  connectorsListConversations,
+  connectorsGetAudit,
+  connectorsExportAudit,
+  connectorsListDrafts,
+  connectorsSendMessage,
+} from "../handlers/connectors"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -56,6 +64,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerRagTool(server, opts.settingsGetter)
   registerRuntimeTool(server, opts.settingsGetter)
   registerComputerUseTool(server, opts.settingsGetter)
+  registerConnectorTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server)
 
@@ -281,6 +290,184 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         scope: "mcp:computer-use",
         check: checkToolCall(await settingsGetter(), "computer_use"),
         body: () => computerUse(args as Parameters<typeof computerUse>[0]),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inbox connector tools (v49) — read-only introspection + one write tool.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerConnectorTools(server: McpServer, settingsGetter: SettingsGetter) {
+  // connectors_list_adapters
+  server.registerTool(
+    "connectors_list_adapters",
+    {
+      title: "List Inbox adapters",
+      description:
+        "Return the registered platform adapters (Telegram / Discord / Slack / Lark / OneBot) with id, type, enabled flag, default mode, and muted state.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {},
+    },
+    async () =>
+      runWithGate({
+        tool: "connectors_list_adapters",
+        scope: "inbox:connectors:read",
+        check: checkToolCall(await settingsGetter(), "connectors_list_adapters"),
+        body: () => connectorsListAdapters(),
+      })
+  )
+
+  // connectors_list_conversations
+  server.registerTool(
+    "connectors_list_conversations",
+    {
+      title: "List Inbox conversations",
+      description:
+        "List conversations bound to a platform adapter with optional filters (adapterId, pinnedOnly, unreadOnly, archived).",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        adapterId: z.string().optional(),
+        pinnedOnly: z.boolean().optional(),
+        unreadOnly: z.boolean().optional(),
+        archived: z.boolean().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "connectors_list_conversations",
+        scope: "inbox:connectors:read",
+        check: checkToolCall(await settingsGetter(), "connectors_list_conversations"),
+        body: () => connectorsListConversations(args),
+      })
+  )
+
+  // connectors_get_audit
+  server.registerTool(
+    "connectors_get_audit",
+    {
+      title: "Fetch Inbox audit rows",
+      description:
+        "Read the connector audit log (delivery / inbound / breaker / callback / policy events). Optional adapterId and conversationKey filters.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        adapterId: z.string().optional(),
+        conversationKey: z.string().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "connectors_get_audit",
+        scope: "inbox:connectors:read",
+        check: checkToolCall(await settingsGetter(), "connectors_get_audit"),
+        body: () => connectorsGetAudit(args),
+      })
+  )
+
+  // connectors_export_audit
+  server.registerTool(
+    "connectors_export_audit",
+    {
+      title: "Export Inbox audit (CSV/JSON)",
+      description:
+        "Serialise the audit log into CSV or JSON for incident reporting. The MCP client writes the returned `body` to a file locally.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        format: z.enum(["csv", "json"]),
+        adapterId: z.string().optional(),
+        conversationKey: z.string().optional(),
+        limit: z.number().int().min(1).max(5000).optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "connectors_export_audit",
+        scope: "inbox:connectors:read",
+        check: checkToolCall(await settingsGetter(), "connectors_export_audit"),
+        body: () => connectorsExportAudit(args),
+      })
+  )
+
+  // connectors_list_drafts
+  server.registerTool(
+    "connectors_list_drafts",
+    {
+      title: "List pending Inbox drafts",
+      description:
+        "Read the pending draft replies (operator-approval queue). Returns id, conversationKey, sessionId, status, createdAt, and a 240-char text preview.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {},
+    },
+    async () =>
+      runWithGate({
+        tool: "connectors_list_drafts",
+        scope: "inbox:connectors:read",
+        check: checkToolCall(await settingsGetter(), "connectors_list_drafts"),
+        body: () => connectorsListDrafts(),
+      })
+  )
+
+  // connectors_send_message — the single write-side tool.
+  server.registerTool(
+    "connectors_send_message",
+    {
+      title: "Send a connector message via the AI loop",
+      description:
+        "Enqueue an AI reply on an existing inbox conversation. Delegates to runConnectorDigestTurn so PII gate, policy resolver, idempotency cache, and outbound runner all stay in path. Requires the conversation to have a pre-existing ChatSession; returns `{ok:false, reason:'session_missing'}` otherwise. Default OFF; gate via Settings → External Bridge → inbox:connectors:send.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        adapterId: z.string(),
+        conversationKey: z.string(),
+        prompt: z.string(),
+        characterId: z.string().optional(),
+        sourceTaskId: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "connectors_send_message",
+        scope: "inbox:connectors:send",
+        check: checkToolCall(await settingsGetter(), "connectors_send_message"),
+        body: () =>
+          connectorsSendMessage({
+            adapterId: args.adapterId,
+            conversationKey: args.conversationKey,
+            prompt: args.prompt,
+            characterId: args.characterId,
+            sourceTaskId: args.sourceTaskId,
+          }),
       })
   )
 }

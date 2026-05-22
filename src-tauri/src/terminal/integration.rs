@@ -36,6 +36,13 @@ pub enum ShellKind {
     /// probing). `build(Cmd, …)` returns an empty setup — cmd.exe has
     /// no rcfile mechanism we can hook.
     Cmd,
+    /// `fish` — uses native event hooks (`fish_prompt` / `fish_preexec`)
+    /// rather than --rcfile. Loaded via `fish --init-command "source …"`.
+    Fish,
+    /// `nu` (nushell) — loaded via `nu --config <tempdir>/config.nu`.
+    /// The temp config re-sources the user's original config first, then
+    /// applies our hook upserts.
+    Nu,
     Unknown,
 }
 
@@ -52,6 +59,8 @@ impl ShellKind {
             "pwsh" => ShellKind::Pwsh,
             "powershell" => ShellKind::PowerShell,
             "cmd" => ShellKind::Cmd,
+            "fish" => ShellKind::Fish,
+            "nu" => ShellKind::Nu,
             _ => ShellKind::Unknown,
         }
     }
@@ -98,6 +107,8 @@ pub fn build(
         ShellKind::Bash => build_bash(script_dir, nonce),
         ShellKind::Zsh => build_zsh(script_dir, nonce),
         ShellKind::Pwsh | ShellKind::PowerShell => build_pwsh(script_dir, nonce),
+        ShellKind::Fish => build_fish(script_dir, nonce),
+        ShellKind::Nu => build_nu(script_dir, nonce),
         // cmd.exe + anything unrecognised both fall through to an empty
         // setup — the shell spawns normally without OSC 633 events.
         ShellKind::Cmd | ShellKind::Unknown => Ok(IntegrationSetup::empty()),
@@ -190,6 +201,79 @@ fn build_pwsh(script_dir: &Path, nonce: &str) -> io::Result<IntegrationSetup> {
     })
 }
 
+fn build_fish(script_dir: &Path, nonce: &str) -> io::Result<IntegrationSetup> {
+    let script = script_dir.join("shell-integration.fish");
+    if !script.exists() {
+        return Ok(IntegrationSetup::empty());
+    }
+    let mut env = HashMap::new();
+    env.insert("COGNIA_TERM_NONCE".to_string(), nonce.to_string());
+    // fish loads its own conf.d / user config before evaluating
+    // `--init-command`, so user functions are in scope by the time we
+    // attach our `fish_prompt` / `fish_preexec` event handlers.
+    let cmd = format!("source '{}'", script.to_string_lossy().replace('\'', "\\'"));
+    Ok(IntegrationSetup {
+        extra_args: vec!["--init-command".to_string(), cmd],
+        env_overrides: env,
+        tempdir: None,
+    })
+}
+
+fn build_nu(script_dir: &Path, nonce: &str) -> io::Result<IntegrationSetup> {
+    let script = script_dir.join("shell-integration.nu");
+    if !script.exists() {
+        return Ok(IntegrationSetup::empty());
+    }
+    // Nushell's `--config` REPLACES the user's config rather than
+    // composing — so we generate a temp config that explicitly
+    // re-sources the user's regular config first, then sources our
+    // hook script. The temp dir survives via `IntegrationSetup.tempdir`.
+    let tempdir = std::env::temp_dir().join(format!("cognia-nu-{nonce}"));
+    fs::create_dir_all(&tempdir)?;
+    let config_path = tempdir.join("config.nu");
+    let user_default = default_nu_config_path();
+    let mut body = String::new();
+    // Re-source the user's regular config when one exists, ignoring
+    // errors so a missing / empty file doesn't abort our hooks.
+    if let Some(user) = user_default {
+        body.push_str(&format!(
+            "try {{ source '{user}' }} catch {{ }}\n",
+            user = user.to_string_lossy().replace('\'', "''")
+        ));
+    }
+    body.push_str(&format!(
+        "source '{script}'\n",
+        script = script.to_string_lossy().replace('\'', "''")
+    ));
+    fs::write(&config_path, body)?;
+    let mut env = HashMap::new();
+    env.insert("COGNIA_TERM_NONCE".to_string(), nonce.to_string());
+    Ok(IntegrationSetup {
+        extra_args: vec![
+            "--config".to_string(),
+            config_path.to_string_lossy().into_owned(),
+        ],
+        env_overrides: env,
+        tempdir: Some(tempdir),
+    })
+}
+
+/// Best-effort guess at the user's regular nushell config path. We don't
+/// care if this is wrong — the temp config wraps the source in try/catch.
+fn default_nu_config_path() -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|appdata| PathBuf::from(appdata).join("nushell").join("config.nu"))
+    } else {
+        std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))
+            .map(|cfg| cfg.join("nushell").join("config.nu"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +309,56 @@ mod tests {
             ShellKind::Cmd
         );
         assert_eq!(ShellKind::from_shell_path("cmd"), ShellKind::Cmd);
+    }
+
+    #[test]
+    fn detects_fish_and_nu() {
+        assert_eq!(ShellKind::from_shell_path("/usr/bin/fish"), ShellKind::Fish);
+        assert_eq!(ShellKind::from_shell_path("fish"), ShellKind::Fish);
+        assert_eq!(ShellKind::from_shell_path("/usr/local/bin/nu"), ShellKind::Nu);
+        assert_eq!(ShellKind::from_shell_path("nu"), ShellKind::Nu);
+    }
+
+    #[test]
+    fn build_fish_returns_empty_when_script_missing() {
+        let tempdir = std::env::temp_dir().join("cognia-test-fish-noscript");
+        let _ = fs::create_dir_all(&tempdir);
+        let setup = build(ShellKind::Fish, &tempdir, "n").unwrap();
+        assert!(setup.extra_args.is_empty());
+    }
+
+    #[test]
+    fn build_fish_emits_init_command_when_script_present() {
+        let tempdir = std::env::temp_dir().join("cognia-test-fish-yes");
+        let _ = fs::create_dir_all(&tempdir);
+        let script = tempdir.join("shell-integration.fish");
+        let _ = fs::write(&script, "# test stub");
+        let setup = build(ShellKind::Fish, &tempdir, "nonce-xyz").unwrap();
+        assert_eq!(setup.extra_args.first().map(String::as_str), Some("--init-command"));
+        let cmd = setup.extra_args.get(1).cloned().unwrap_or_default();
+        assert!(cmd.starts_with("source "));
+        assert!(cmd.contains("shell-integration.fish"));
+        assert_eq!(
+            setup.env_overrides.get("COGNIA_TERM_NONCE").map(String::as_str),
+            Some("nonce-xyz")
+        );
+        let _ = fs::remove_dir_all(&tempdir);
+    }
+
+    #[test]
+    fn build_nu_writes_temp_config_referencing_the_script() {
+        let tempdir = std::env::temp_dir().join("cognia-test-nu");
+        let _ = fs::create_dir_all(&tempdir);
+        let script = tempdir.join("shell-integration.nu");
+        let _ = fs::write(&script, "# test nu stub");
+        let setup = build(ShellKind::Nu, &tempdir, "n-abc").unwrap();
+        assert_eq!(setup.extra_args.first().map(String::as_str), Some("--config"));
+        let cfg_path = setup.extra_args.get(1).cloned().unwrap_or_default();
+        let cfg_body = fs::read_to_string(&cfg_path).expect("temp config readable");
+        assert!(cfg_body.contains("source"));
+        assert!(cfg_body.contains("shell-integration.nu"));
+        assert!(setup.tempdir.is_some());
+        let _ = fs::remove_dir_all(&tempdir);
     }
 
     #[test]

@@ -77,6 +77,11 @@ export type WorkflowNodeKind =
   | "action.desktop.windowResize"
   | "action.desktop.wait"
   | "trigger.desktop.event"
+  // Wave 3 — integrated terminal action. Runs a command in a dock tab
+  // (or spawns a fresh tab), surfaces stdout / exit code downstream.
+  // Reuses `lib/terminal/run-in-dock.ts` so the consent + tab gating
+  // matches the chat affordance and the agent's MCP tool path.
+  | "action.system.terminal"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -174,6 +179,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.desktop.windowResize",
   "action.desktop.wait",
   "trigger.desktop.event",
+  "action.system.terminal",
   "ai.prompt",
   "ai.classify",
   "ai.extract",

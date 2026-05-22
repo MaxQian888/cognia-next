@@ -23,5 +23,8 @@
     "diff": "^7.0.0",
     "fast-glob": "^3.3.3",
     "zod": "^4.0.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
   }
 }

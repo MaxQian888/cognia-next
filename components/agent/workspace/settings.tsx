@@ -1,24 +1,26 @@
 "use client"
 
+/**
+ * Workspace settings tab composer.
+ *
+ * Splits what was a single flat card stack into four collapsible accordion
+ * sections — Overview / Plugins / Governance / Memory — each in its own
+ * file under `settings/`. The historical save / delete path stays on this
+ * file because the Overview state lives here; the new sections persist
+ * their patches eagerly through the store so they need no save button.
+ */
+
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { AlertTriangleIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,27 +32,23 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createLogger } from "@/lib/logger"
 
+import { OverviewSection } from "./settings/section-overview"
+import { PluginsSection } from "./settings/section-plugins"
+import { GovernanceSection } from "./settings/section-governance"
+import { MemorySection } from "./settings/section-memory"
+
 const log = createLogger("agentTeams.settings")
-
-const EXECUTION_MODES: ReadonlyArray<{ value: string; labelKey: string }> = [
-  { value: "coordinated", labelKey: "coordinated" },
-  { value: "autonomous", labelKey: "autonomous" },
-  { value: "delegate", labelKey: "delegate" },
-]
-
-const EXECUTION_PATTERNS: ReadonlyArray<{ value: string; labelKey: string }> = [
-  { value: "manager_worker", labelKey: "managerWorker" },
-  { value: "parallel_specialists", labelKey: "parallelSpecialists" },
-  { value: "background_handoff", labelKey: "backgroundHandoff" },
-  { value: "external_handoff", labelKey: "externalHandoff" },
-  { value: "single_agent_recommended", labelKey: "singleAgent" },
-]
 
 export interface AgentTeamSettingsProps {
   team: AgentTeam
@@ -59,18 +57,20 @@ export interface AgentTeamSettingsProps {
 export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   const t = useTranslations("agentTeamsWorkspace.settings")
   const tCommon = useTranslations("agentTeamsWorkspace")
-  const tMode = useTranslations("agentTeamsWorkspace.settings.executionModeOption")
-  const tPattern = useTranslations("agentTeamsWorkspace.settings.executionPatternOption")
   const router = useRouter()
 
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
   const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
 
+  // Overview-section local state. Persisted on explicit Save (matches the
+  // pre-refactor UX). The other sections persist eagerly through the store.
   const [name, setName] = useState(team.name)
   const [description, setDescription] = useState(team.description ?? "")
-  const [executionMode, setExecutionMode] = useState(team.config.executionMode ?? "coordinated")
-  const [executionPattern, setExecutionPattern] = useState(
+  const [executionMode, setExecutionMode] = useState<string>(
+    team.config.executionMode ?? "coordinated"
+  )
+  const [executionPattern, setExecutionPattern] = useState<string>(
     team.config.preferredExecutionPattern ?? "manager_worker"
   )
   const [maxConcurrent, setMaxConcurrent] = useState(
@@ -121,126 +121,70 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
 
   return (
     <div className="space-y-4" data-testid="workspace-settings">
-      {/* General */}
-      <Card className="space-y-3 p-4">
-        <p className="text-sm font-medium">{t("title")}</p>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("name")}</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} className="max-w-md" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("description")}</Label>
-          <Textarea
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="max-w-2xl text-xs"
-          />
-        </div>
-      </Card>
-
-      {/* Execution */}
-      <Card className="space-y-3 p-4">
-        <p className="text-sm font-medium">{t("sectionExecution")}</p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-xs">{t("executionMode")}</Label>
-            <Select
-              value={executionMode}
-              onValueChange={(v) => setExecutionMode(v as typeof executionMode)}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_MODES.map((m) => (
-                  <SelectItem key={m.value} value={m.value}>
-                    {tMode(m.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("executionPattern")}</Label>
-            <Select
-              value={executionPattern}
-              onValueChange={(v) => setExecutionPattern(v as typeof executionPattern)}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_PATTERNS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {tPattern(p.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-xs">{t("maxConcurrent")}</Label>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={maxConcurrent}
-              onChange={(e) => setMaxConcurrent(e.target.value)}
-              className="h-8 text-xs"
+      <Accordion type="multiple" defaultValue={["overview"]} className="space-y-2">
+        <AccordionItem value="overview" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.overview")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <OverviewSection
+              team={team}
+              name={name}
+              setName={setName}
+              description={description}
+              setDescription={setDescription}
+              executionMode={executionMode}
+              setExecutionMode={setExecutionMode}
+              executionPattern={executionPattern}
+              setExecutionPattern={setExecutionPattern}
+              maxConcurrent={maxConcurrent}
+              setMaxConcurrent={setMaxConcurrent}
+              tokenBudget={tokenBudget}
+              setTokenBudget={setTokenBudget}
+              autoShutdown={autoShutdown}
+              setAutoShutdown={setAutoShutdown}
+              enableMessaging={enableMessaging}
+              setEnableMessaging={setEnableMessaging}
+              requirePlanApproval={requirePlanApproval}
+              setRequirePlanApproval={setRequirePlanApproval}
+              maxRetries={maxRetries}
+              setMaxRetries={setMaxRetries}
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("tokenBudget")}</Label>
-            <Input
-              type="number"
-              min={0}
-              value={tokenBudget}
-              onChange={(e) => setTokenBudget(e.target.value)}
-              className="h-8 text-xs"
-            />
-          </div>
-        </div>
-      </Card>
+            <div className="flex justify-end pt-2">
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? t("saving") : t("save")}
+              </Button>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      {/* Toggles */}
-      <Card className="space-y-3 p-4">
-        <p className="text-sm font-medium">{t("sectionControls")}</p>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("autoShutdown")}</Label>
-            <Switch checked={autoShutdown} onCheckedChange={setAutoShutdown} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("enableMessaging")}</Label>
-            <Switch checked={enableMessaging} onCheckedChange={setEnableMessaging} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("requirePlanApproval")}</Label>
-            <Switch checked={requirePlanApproval} onCheckedChange={setRequirePlanApproval} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("maxRetries")}</Label>
-            <Input
-              type="number"
-              min={0}
-              max={10}
-              value={maxRetries}
-              onChange={(e) => setMaxRetries(e.target.value)}
-              className="h-8 w-24 text-xs"
-            />
-          </div>
-        </div>
-      </Card>
+        <AccordionItem value="plugins" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.plugins")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <PluginsSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
 
-      {/* Save */}
-      <div className="flex justify-end">
-        <Button size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? t("saving") : t("save")}
-        </Button>
-      </div>
+        <AccordionItem value="governance" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.governance")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <GovernanceSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="memory" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.memory")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <MemorySection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
 
       <Separator />
 

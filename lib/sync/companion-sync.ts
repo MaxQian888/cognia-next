@@ -33,6 +33,7 @@ import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
+import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
 import { syncSessions } from "./handlers/sessions"
@@ -61,6 +62,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "plugins", run: syncPlugins },
   { table: "adapterInstances", run: syncAdapterInstances },
   { table: "settings", run: syncAppSettings },
+  // v49 — Inbox optimization. Mobile reads pinned/archived/unread state
+  // from conversationOverrides; without this handler the orchestrator
+  // never pulls it and the mobile inbox renders every conversation as
+  // unread + unpinned.
+  { table: "conversationOverrides", run: syncConversationOverrides },
 ]
 
 /**

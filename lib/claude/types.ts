@@ -42,6 +42,14 @@ export interface BuiltinToolsConfig {
   environment: boolean
   /** Allowlist-gated single-program shell. Off by default — overlaps SDK Bash. */
   shellAdvanced: boolean
+  /**
+   * Interactive PTY sessions in the SDK sidecar via `node-pty` (lazy
+   * require — falls back to a clean error when the native binding is
+   * unavailable). Off by default. Wave 1 — orthogonal to the dock-relay
+   * path (`settings.terminal.exposeDockToAgents`); REPL gives the agent
+   * a *private* persistent shell, the dock-relay shares the user's.
+   */
+  terminalRepl?: boolean
 }
 
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
@@ -51,6 +59,7 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   process: false,
   environment: true,
   shellAdvanced: false,
+  terminalRepl: false,
 }
 
 export interface SendOptions {
@@ -651,6 +660,16 @@ export interface StoredMessage {
   /** Character id for team-session assistant messages; undefined otherwise. */
   senderId?: string
   senderKind?: MessageSenderKind
+  /**
+   * Denormalized copy of `metadata.platformMessage.messageId` (v49). Indexed
+   * so `ConnectorBus.applyMessageEdit` / `applyMessageDelete` can locate the
+   * target message in O(log n) instead of scanning every row. The v49
+   * upgrade hook backfills this from existing metadata; new rows MUST keep
+   * the field in sync with the metadata when both are present. Undefined
+   * on assistant-side messages that never round-tripped through a
+   * connector.
+   */
+  platformMessageId?: string
   /** Carries `usage` / `cost` info attached to the result-bearing assistant message. */
   metadata?: Record<string, unknown> & {
     /** Set on inbound messages from a platform connector. */
@@ -802,13 +821,26 @@ export interface AppSettings {
      */
     copyOnSelect?: boolean
     /**
-     * When true, the renderer registers the `terminal-dock-tool` MCP tool
-     * so an agent can spawn / write / read dock tabs it created itself.
+     * When true, the renderer manifests 4 synthetic `terminal_dock_*` tools
+     * to the SDK sidecar through `pluginTools` (see
+     * `lib/plugin/bridge/sidecar-tools-bridge.ts:buildTerminalDockManifestEntries`).
+     * The sidecar proxies invocations back via `plugin_tool_exec`; the
+     * renderer routes them to `lib/terminal/dock-tool-handler.ts` which
+     * drives the user's visible PTY through `runInDockTab`. The agent
+     * and the user share one shell.
+     *
      * Off by default — the user opts in per machine. Agent access never
      * surfaces tabs the user spawned; the filter is by `agentSpawner` row
-     * field on `useTerminalStore`. (Wave 3D.)
+     * field on `useTerminalStore`. (Wave 1, supersedes Wave 3D.)
      */
     exposeDockToAgents?: boolean
+    /**
+     * Maximum wait (seconds) for `command_end` after writing into a dock
+     * tab — applies to `runInDockTab` (chat affordance) and the agent's
+     * `terminal_dock_*` MCP tool. Defaults to 60. Per-call overrides
+     * (via the `timeoutSec` schema field) clamp to [5, 600]. Wave 4.
+     */
+    runInDockTimeoutSec?: number
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
@@ -1674,8 +1706,78 @@ export interface Character {
    * "Update available". Updated only when the user explicitly re-clones.
    */
   packVersionAtClone?: string
+  /**
+   * v49 — snapshot of pack-managed fields at the moment this row was last
+   * cloned (or last "Apply Update"-ed). Used by `applyPackUpdate` to
+   * distinguish "user hasn't touched this field" (current value still
+   * equals the snapshot → safe to overwrite from the pack) from "user
+   * edited it" (diverged → preserve). Undefined for rows created before
+   * v49 — `applyPackUpdate` falls back to a confirm-before-overwrite-all
+   * dialog in that case.
+   */
+  pristineSnapshot?: PackPristineSnapshot
+
+  // ---- v2 character-pack fields (mirror PluginCharacterDef v2) -------------
+  /**
+   * Optional avatar image — populated when the source character pack ships
+   * one. UI renders this in preference to `avatarEmoji + avatarColor`; if
+   * neither branch resolves in the current shell, falls back to the emoji.
+   */
+  avatarImage?: import("@/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
+  /** Personality / interaction metadata. Display-only this round. */
+  persona?: import("@/types/plugin/plugin-character-pack").PluginCharacterPersona
+  /**
+   * Voice profile riding `lib/tts/`. When set, `resolveCharacterVoice()`
+   * projects this into a `SpeechSettings` overlay at speak time.
+   */
+  voiceProfile?: import("@/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
+  /**
+   * Platform availability filter — when set, the overlay / picker suppresses
+   * the character on platforms not listed. Inherited from the source pack
+   * character at clone time; user may edit on cloned rows.
+   */
+  availableOnPlatforms?: import("@/types/plugin").PluginRuntimeProfile[]
+
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * Frozen snapshot of every pack-managed field on a character row at the
+ * moment of its last clone / apply-update. Lives in `Character.pristineSnapshot`.
+ *
+ * The field set IS the single source of truth for which fields `applyPackUpdate`
+ * overwrites — never extend without updating
+ * `lib/plugin/character-pack/diff-pack-update.ts` in the same change.
+ *
+ * Fields are stored verbatim (deep-copied at capture time) so the diff is a
+ * simple value comparison. Optional fields can be `undefined`, which means
+ * "the source pack didn't define it" — distinct from "the user cleared it"
+ * (which would change the row's field while leaving the snapshot intact).
+ */
+export interface PackPristineSnapshot {
+  systemPrompt?: string
+  description?: string
+  avatarColor?: string
+  avatarEmoji?: string
+  model?: string
+  providerId?: string
+  permissionMode?: SendOptions["permissionMode"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  mcpServerIds?: string[]
+  skillIds?: string[]
+  pluginSkillIds?: string[]
+  enableComputerUse?: boolean
+  computerUseSettings?: Character["computerUseSettings"]
+  sandboxTier?: Character["sandboxTier"]
+  a2uiEnabled?: boolean
+  a2uiCatalogId?: string
+  platformDefaults?: Character["platformDefaults"]
+  availableOnPlatforms?: import("@/types/plugin").PluginRuntimeProfile[]
+  avatarImage?: import("@/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
+  persona?: import("@/types/plugin/plugin-character-pack").PluginCharacterPersona
+  voiceProfile?: import("@/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
 }
 
 /**

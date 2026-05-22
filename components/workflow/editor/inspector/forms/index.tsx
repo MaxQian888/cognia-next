@@ -2365,6 +2365,109 @@ function SubworkflowPicker({
   )
 }
 
+// ── action.system.terminal ────────────────────────────────────────────────
+// Wave 3 — config form for the integrated terminal action. Mirrors the
+// executor's input contract in `lib/workflow/nodes/terminal.ts`.
+export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.systemTerminal")
+  const command = readString(params, "command")
+  const cwd = readString(params, "cwd")
+  const shell = readString(params, "shell")
+  const tabId = readString(params, "tabId")
+  const timeoutSec = readNumber(params, "timeoutSec", 60)
+  const onFailure = readString(params, "onFailure", "throw")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("command.label")}
+        htmlFor="term-command"
+        hint={t("command.hint")}
+        name="command"
+        required
+      >
+        <Textarea
+          id="term-command"
+          value={command}
+          onChange={(e) => onChange(patchParam(params, "command", e.target.value))}
+          placeholder={t("command.placeholder")}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label={t("cwd.label")} htmlFor="term-cwd" hint={t("cwd.hint")} name="cwd">
+          <Input
+            id="term-cwd"
+            value={cwd}
+            onChange={(e) => onChange(patchParam(params, "cwd", e.target.value))}
+            placeholder={t("cwd.placeholder")}
+          />
+        </Field>
+        <Field label={t("shell.label")} htmlFor="term-shell" hint={t("shell.hint")} name="shell">
+          <Input
+            id="term-shell"
+            value={shell}
+            onChange={(e) => onChange(patchParam(params, "shell", e.target.value))}
+            placeholder={t("shell.placeholder")}
+          />
+        </Field>
+      </div>
+      <Field label={t("tabId.label")} htmlFor="term-tab" hint={t("tabId.hint")} name="tabId">
+        <Input
+          id="term-tab"
+          value={tabId}
+          onChange={(e) => onChange(patchParam(params, "tabId", e.target.value))}
+          placeholder={t("tabId.placeholder")}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("timeoutSec.label")}
+          htmlFor="term-timeout"
+          hint={t("timeoutSec.hint")}
+          name="timeoutSec"
+        >
+          <Input
+            id="term-timeout"
+            type="number"
+            min={5}
+            max={600}
+            value={timeoutSec}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "timeoutSec",
+                  Math.max(5, Math.min(600, Number(e.target.value) || 60))
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("onFailure.label")}
+          htmlFor="term-onfail"
+          hint={t("onFailure.hint")}
+          name="onFailure"
+        >
+          <Select
+            value={onFailure}
+            onValueChange={(v) => onChange(patchParam(params, "onFailure", v))}
+          >
+            <SelectTrigger id="term-onfail">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="throw">{t("onFailure.options.throw")}</SelectItem>
+              <SelectItem value="branch">{t("onFailure.options.branch")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
 // Suppress unused-import warnings when only one of these helpers is exercised
 // in a given form's tests. They're real call sites in production.
 void listAdapterInstances
