@@ -6,6 +6,7 @@
 // shape of `components/skills/skill-card.tsx` so future shared treatments
 // (drag/drop, multi-select) port cleanly.
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -13,7 +14,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
+import { getAllContributions } from "@/lib/plugin/capability-contributions"
 import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
@@ -63,6 +66,10 @@ export function PluginCard({
     return "unverified"
   })()
   const updateAvailable = !!(plugin.manifest as { updateAvailable?: boolean })?.updateAvailable
+  const contributions = useMemo(
+    () => getAllContributions(plugin.capabilities, plugin.manifest),
+    [plugin.capabilities, plugin.manifest]
+  )
 
   return (
     <Card
@@ -73,9 +80,10 @@ export function PluginCard({
         "group relative flex h-full flex-col gap-2 p-3 transition-colors hover:border-primary/40",
         selected && "border-primary",
         !plugin.enabled && "opacity-70",
-        errored && "border-destructive/50"
+        errored && "border-destructive bg-destructive/5"
       )}
       data-plugin-id={plugin.id}
+      data-errored={errored || undefined}
     >
       <div className="flex items-start gap-2">
         <Checkbox
@@ -117,14 +125,17 @@ export function PluginCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        {plugin.capabilities.slice(0, 4).map((cap) => (
-          <Badge key={cap} variant="outline" className="text-xs">
-            {cap}
-          </Badge>
+        {contributions.slice(0, 4).map((contribution) => (
+          <CardCapabilityChip
+            key={contribution.capability}
+            capability={String(contribution.capability)}
+            count={contribution.count}
+            entries={contribution.entries}
+          />
         ))}
-        {plugin.capabilities.length > 4 && (
+        {contributions.length > 4 && (
           <Badge variant="outline" className="text-xs">
-            +{plugin.capabilities.length - 4}
+            +{contributions.length - 4}
           </Badge>
         )}
       </div>
@@ -157,5 +168,55 @@ export function PluginCard({
         </div>
       )}
     </Card>
+  )
+}
+
+interface CardCapabilityChipProps {
+  capability: string
+  count: number
+  entries: ReadonlyArray<{ id: string; label?: string }>
+}
+
+// Mirror of PluginLibraryRow's capability chip — same surface so the two
+// views stay consistent. Plain chip when no contribution surface is mapped,
+// hover-card with id list otherwise.
+function CardCapabilityChip({ capability, count, entries }: CardCapabilityChipProps) {
+  const t = useTranslations("plugins.card")
+  const label = count > 0 ? `${capability} · ${count}` : capability
+  if (entries.length === 0) {
+    return (
+      <Badge variant="outline" className="text-xs">
+        {label}
+      </Badge>
+    )
+  }
+  return (
+    <HoverCard openDelay={150}>
+      <HoverCardTrigger asChild>
+        <Badge
+          variant="outline"
+          className="text-xs cursor-help"
+          tabIndex={0}
+          aria-label={t("capabilityChipAria", { capability, count })}
+        >
+          {label}
+        </Badge>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-72 p-3" align="start">
+        <div className="space-y-2">
+          <div className="text-xs font-semibold">{label}</div>
+          <ul className="space-y-0.5 text-xs">
+            {entries.map((entry) => (
+              <li key={entry.id} className="flex items-baseline gap-1.5">
+                <code className="font-mono text-[10px] text-muted-foreground">{entry.id}</code>
+                {entry.label && entry.label !== entry.id && (
+                  <span className="text-muted-foreground">— {entry.label}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   )
 }

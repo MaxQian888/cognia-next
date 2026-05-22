@@ -40,6 +40,11 @@ import {
 } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import {
+  refreshAllPackWarnings,
+  registerCharacterPack,
+  unregisterCharacterPacksByPlugin,
+} from "@/lib/plugin/registries/character-pack-registry"
+import {
   registerPreset as registerExternalAgentPresetOverlay,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
 } from "@/lib/ai/agent/external/presets"
@@ -77,8 +82,8 @@ export interface OverlayCapabilityDescriptor {
 }
 
 /**
- * The 4 capabilities whose enable/disable dispatch follows the
- * uniform overlay-registry shape. Adding a 5th overlay-registry
+ * The 5 capabilities whose enable/disable dispatch follows the
+ * uniform overlay-registry shape. Adding a 6th overlay-registry
  * capability is a single map entry away from being picked up by the
  * dispatch loop — no manager surgery required.
  */
@@ -87,24 +92,41 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     manifestField: "skills",
     registerEntry: (def, ctx) => {
       // Skill defs pass through verbatim — the registry stores the
-      // entire entry under its `id`.
+      // entire entry under its `id`. After registration we refresh any
+      // character-pack `requires` warnings (ADR-0030): a pack that was
+      // previously missing this skill id now has the dep available.
       registerSkill(def.id, def as unknown as never, ctx)
+      refreshAllPackWarnings()
     },
-    unregisterAllByPlugin: unregisterSkillsByPlugin,
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterSkillsByPlugin(pluginId)
+      refreshAllPackWarnings()
+      return n
+    },
   },
   "mcp-server-preset": {
     manifestField: "mcpServerPresets",
     registerEntry: (def, ctx) => {
       registerMcpServerPreset(def.id, def as unknown as never, ctx)
+      refreshAllPackWarnings()
     },
-    unregisterAllByPlugin: unregisterMcpServerPresetsByPlugin,
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterMcpServerPresetsByPlugin(pluginId)
+      refreshAllPackWarnings()
+      return n
+    },
   },
   "native-anthropic-tool": {
     manifestField: "nativeAnthropicTools",
     registerEntry: (def, ctx) => {
       registerNativeAnthropicTool(def.id, def as unknown as never, ctx)
+      refreshAllPackWarnings()
     },
-    unregisterAllByPlugin: unregisterNativeAnthropicToolsByPlugin,
+    unregisterAllByPlugin: (pluginId) => {
+      const n = unregisterNativeAnthropicToolsByPlugin(pluginId)
+      refreshAllPackWarnings()
+      return n
+    },
   },
   "external-agent-preset": {
     manifestField: "externalAgentPresets",
@@ -116,6 +138,19 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerExternalAgentPresetOverlay(id, config as unknown as never, ctx)
     },
     unregisterAllByPlugin: unregisterExternalAgentPresetsByPlugin,
+  },
+  "character-pack": {
+    // ADR-0030. Plugin contributes ready-to-use character bundles. Pack
+    // defs flow through verbatim — the registry stores the entire entry
+    // under its `id` (the pack id). Pack-local character ids are
+    // separately resolved through `getPackCharacterByRuntimeId` when
+    // `lib/db/characters.ts:resolveCharacterById` projects an overlay
+    // synthetic id into a `Character` row.
+    manifestField: "characterPacks",
+    registerEntry: (def, ctx) => {
+      registerCharacterPack(def.id, def as unknown as never, ctx)
+    },
+    unregisterAllByPlugin: unregisterCharacterPacksByPlugin,
   },
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

@@ -96,6 +96,10 @@ const SpeechSection = dynamic(() => import("./speech-section").then((m) => m.Spe
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const TerminalSection = dynamic(
+  () => import("./terminal/terminal-section").then((m) => m.TerminalSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const LogsSection = dynamic(() => import("./sections/logs-section").then((m) => m.LogsSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -322,6 +326,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <OcrSection />
     case "appearance":
       return <AppearanceSection />
+    case "terminal":
+      return <TerminalSection />
     case "speech":
       return <SpeechSection />
     case "characters":

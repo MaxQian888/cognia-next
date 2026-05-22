@@ -42,14 +42,27 @@ describe("status-bar", () => {
 
   it("syncWithTheme picks LIGHT bar for dark theme", async () => {
     const sb = makeSb()
-    await syncWithTheme("dark", async () => sb)
+    await syncWithTheme("dark", undefined, async () => sb)
     expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
   })
 
   it("syncWithTheme picks DARK bar for light theme", async () => {
     const sb = makeSb()
-    await syncWithTheme("light", async () => sb)
+    await syncWithTheme("light", undefined, async () => sb)
     expect(sb.setStyle).toHaveBeenCalledWith({ style: "DARK" })
+  })
+
+  it("syncWithTheme also pushes a token-derived backgroundHex when provided", async () => {
+    const sb = makeSb()
+    await syncWithTheme("dark", "#101820", async () => sb)
+    expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
+    expect(sb.setBackgroundColor).toHaveBeenCalledWith({ color: "#101820" })
+  })
+
+  it("syncWithTheme leaves the background colour alone when no backgroundHex is passed", async () => {
+    const sb = makeSb()
+    await syncWithTheme("light", undefined, async () => sb)
+    expect(sb.setBackgroundColor).not.toHaveBeenCalled()
   })
 
   it("returns unsupported when plugin not loadable", async () => {

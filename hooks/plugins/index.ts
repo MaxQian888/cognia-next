@@ -23,3 +23,5 @@ export {
   __resetPluginMarketplaceClientForTests,
 } from "./use-plugin-marketplace"
 export { useDevtoolsGate, DEVTOOLS_GATE_STORAGE_KEY } from "./use-devtools-gate"
+export { usePluginRow, type PluginRowState } from "./use-plugin-row"
+export { usePluginDiagnostics } from "./use-plugin-diagnostics"

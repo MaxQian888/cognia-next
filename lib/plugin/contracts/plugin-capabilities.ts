@@ -491,6 +491,50 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "sidecar/vscode-ext-host/tests/lsp-client.test.mjs",
     ],
   },
+  {
+    // ADR-0030. Plugins declaring this capability contribute character
+    // packs — bundles of ready-to-use personas (system prompt + model
+    // defaults + skill / mcp / native-tool wiring) that flow into the
+    // dynamic overlay at
+    // `lib/plugin/registries/character-pack-registry.ts`. The plugin's
+    // manifest carries a `characterPacks` array; the plugin manager
+    // calls `registerCharacterPack(id, def, { pluginId })` on enable
+    // and `unregisterCharacterPacksByPlugin(pluginId)` on disable.
+    // `lib/db/characters.ts:listCharacters` unions Dexie rows with
+    // `listAllPackCharacters()` so a single source feeds every picker
+    // UI; `resolveCharacterById` resolves overlay synthetic ids
+    // (`cognia-pack:<plugin>:<pack>:<local>`) for the build-options
+    // pipeline.
+    id: "character-pack",
+    support: "supported",
+    manifestFields: ["characterPacks"],
+    runtimeBinding:
+      "registerCharacterPack + character-pack-registry overlay + listCharacters union",
+    hostBindings: [
+      "lib/plugin/registries/character-pack-registry.ts",
+      "lib/db/characters.ts",
+      "lib/claude/build-options.ts",
+      "components/settings/characters-section.tsx",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/character-pack.ts",
+      "lib/plugin/sdk/define-character-pack.ts",
+    ],
+    pythonSdk: [
+      // Python plugins declare character packs through the same manifest
+      // schema; the existing context bridge serialises the shape into the
+      // host without a dedicated helper, matching how `skills` are wired.
+      "plugin-sdk/python/src/cognia/context.py",
+      "plugin-sdk/python/src/cognia/types.py",
+    ],
+    builtinContributionPaths: ["plugins/cognia-character-seeds/src/index.ts"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/character-pack-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+      "lib/plugin/character-pack/validate-requires.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

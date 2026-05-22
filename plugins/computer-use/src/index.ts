@@ -32,6 +32,53 @@ import {
   type TextEditorAction,
 } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
+import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import type { CallContext } from "@/lib/automation/client"
+
+// ADR-0020 W1 audit-fix — build the CallContext for a chat-path
+// dispatch. Reads the active character's `requireConsent` setting
+// (stashed by `applyComputerUseTools` at chat-send time, keyed by
+// session id) and stamps `forceTier: "perCall"` when set. The Rust
+// `command_body!` macro then upgrades the gate decision to
+// `RequireConsent` so the floating overlay fires. Session id is read
+// from a chat-session-aware host helper; we keep this defensive
+// because the plugin SDK doesn't (yet) expose session id directly to
+// the execute callback.
+function buildChatCallContext(): CallContext {
+  const sessionId = resolveActiveSessionId()
+  const ctx: CallContext = {
+    surface: "computerUse",
+    pluginId: PLUGIN_ID,
+  }
+  if (sessionId) {
+    const settings = getActiveComputerUseSettings(sessionId)
+    if (settings?.requireConsent === true) {
+      ctx.forceTier = "perCall"
+    }
+  }
+  return ctx
+}
+
+/**
+ * Best-effort active session id resolver. The Plugin MCP `execute`
+ * callback runs in the renderer at the time the SDK dispatches a
+ * tool call. The chat-store keeps the active session id under
+ * `useChatStore.getState().sessionId`. Late-imported so this module
+ * stays Tauri-runtime-only when the host hasn't booted the chat
+ * machinery (e.g. settings-only views).
+ */
+function resolveActiveSessionId(): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("@/stores/chat/chat-store") as {
+      useChatStore?: { getState: () => { activeSessionId?: string | null } }
+    }
+    const sid = mod.useChatStore?.getState().activeSessionId
+    return typeof sid === "string" && sid.length > 0 ? sid : undefined
+  } catch {
+    return undefined
+  }
+}
 
 const COMPUTER_TOOL = defineNativeAnthropicTool({
   id: "computer",
@@ -206,11 +253,10 @@ function buildPluginTools(): PluginTool[] {
       execute: async (args) => {
         // Surface stays "computerUse" — chat-driven invocations route
         // through the Anthropic native tool semantics. The Rust permission
-        // gate uses this to pick the right tier.
-        return dispatchAnthropicAction(args as unknown as ComputerAction, {
-          surface: "computerUse",
-          pluginId: PLUGIN_ID,
-        })
+        // gate uses this to pick the right tier. ADR-0020 W1 audit-fix —
+        // `buildChatCallContext` adds `forceTier: "perCall"` when the
+        // active character's `requireConsent` is on.
+        return dispatchAnthropicAction(args as unknown as ComputerAction, buildChatCallContext())
       },
     },
     {
@@ -224,10 +270,7 @@ function buildPluginTools(): PluginTool[] {
         parametersSchema: BASH_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args) => {
-        return pluginComputerUseBash(args as unknown as BashAction, {
-          surface: "computerUse",
-          pluginId: PLUGIN_ID,
-        })
+        return pluginComputerUseBash(args as unknown as BashAction, buildChatCallContext())
       },
     },
     {
@@ -241,10 +284,10 @@ function buildPluginTools(): PluginTool[] {
         parametersSchema: TEXT_EDITOR_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args) => {
-        return pluginComputerUseTextEditor(args as unknown as TextEditorAction, {
-          surface: "computerUse",
-          pluginId: PLUGIN_ID,
-        })
+        return pluginComputerUseTextEditor(
+          args as unknown as TextEditorAction,
+          buildChatCallContext()
+        )
       },
     },
   ]

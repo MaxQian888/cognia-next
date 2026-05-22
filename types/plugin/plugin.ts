@@ -17,6 +17,7 @@ import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { Skill as _Skill } from "./_compat"
 import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
 import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
+import type { PluginCharacterPackDef } from "./plugin-character-pack"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
 import type { PluginSkillDef } from "./plugin-skill"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
@@ -80,6 +81,7 @@ export type PluginCapability =
   | "theme-pack" // Bundles colors + fonts + wallpapers + density into a single applyable pack
   | "fonts" // Contributes font families bundled in plugin assets (@font-face injection)
   | "wallpapers" // Contributes built-in wallpaper entries (bundled images/gradients/colors)
+  | "character-pack" // Bundles ready-to-use characters into a portable pack (ADR-0030)
 
 /**
  * Plugin status in the lifecycle
@@ -275,6 +277,9 @@ export type PluginPermission =
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
   | "secrets:write" // Write to OS keyring / secure storage
+  | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
+  | "terminal:write" // Pipe bytes into an existing terminal session's stdin
+  | "terminal:kill" // Signal-terminate an existing terminal session
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -481,6 +486,14 @@ export interface PluginManifest {
   skills?: PluginSkillDef[]
   /** External-agent presets — backfill: contract declares this field at plugin-capabilities.ts:346 but the manifest type doesn't expose it yet. */
   externalAgentPresets?: PluginExternalAgentPresetDef[]
+  /**
+   * Character packs contributed by this plugin (character-pack capability — ADR-0030).
+   * Each pack bundles one or more `PluginCharacterDef`s with optional cross-capability
+   * dependencies (skills / mcp-presets / native-tools). Registered overlay-only on
+   * enable, dropped on disable; user-edited clones live in Dexie and survive plugin
+   * lifecycle. See `lib/plugin/registries/character-pack-registry.ts`.
+   */
+  characterPacks?: PluginCharacterPackDef[]
 
   // Visual Workflows (ADR 0017)
   /**
@@ -540,7 +553,7 @@ export interface PluginManifest {
    * other contributions by id, so packs do not duplicate the underlying
    * assets. See `lib/plugin/bridge/themes-bridge.ts` for the apply path.
    *
-   * v47 (ADR-0029).
+   * v47 (ADR-0030).
    */
   themePacks?: PluginThemePackContribution[]
 
@@ -548,14 +561,14 @@ export interface PluginManifest {
    * Font families bundled inside the plugin's `assets/` directory. The host
    * font-bridge generates `@font-face` declarations on enable and removes
    * them on disable. File bytes are validated against woff2/ttf/otf magic
-   * before injection. v47 (ADR-0029).
+   * before injection. v47 (ADR-0030).
    */
   fonts?: PluginFontContribution[]
 
   /**
    * Bundled wallpapers (built-in entries that appear in the wallpaper
    * gallery while the plugin is enabled). User-uploaded wallpapers are
-   * never touched by enable/disable. v47 (ADR-0029).
+   * never touched by enable/disable. v47 (ADR-0030).
    */
   wallpapers?: PluginWallpaperContribution[]
 
@@ -563,7 +576,7 @@ export interface PluginManifest {
    * Named density tuples that callers can refer to from `themePacks[i].applies.density`.
    * Plugins may also override the host defaults with the canonical names
    * (`compact` / `comfortable` / `spacious`) — the bridge logs a warning but
-   * does not reject. v47 (ADR-0029).
+   * does not reject. v47 (ADR-0030).
    */
   densityPresets?: PluginDensityPresetContribution[]
 
@@ -699,7 +712,7 @@ export type PluginThemeContribution =
     }
 
 // ----------------------------------------------------------------------------
-// v47 — Theme Packs / Fonts / Wallpapers / Density Presets (ADR-0029)
+// v47 — Theme Packs / Fonts / Wallpapers / Density Presets (ADR-0030)
 // ----------------------------------------------------------------------------
 
 /**

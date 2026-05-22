@@ -24,6 +24,7 @@
     "0021-webrtc-datachannel-wan-transport",
     "0022-agent-team-runtime-hardening",
     "0023-vector-cloud-backends-in-rust",
-    "0024-ocr-subsystem"
+    "0024-ocr-subsystem",
+    "0030-character-pack-overlay-capability"
   ]
 }

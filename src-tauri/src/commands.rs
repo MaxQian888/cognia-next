@@ -1,9 +1,13 @@
 use serde::Serialize;
+use tauri::WebviewWindow;
+use tauri::window::Color;
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
     #[error("name cannot be empty")]
     EmptyName,
+    #[error("invalid hex color: {0}")]
+    InvalidHex(String),
 }
 
 #[tauri::command]
@@ -12,6 +16,47 @@ pub fn greet(name: &str) -> Result<String, AppError> {
         return Err(AppError::EmptyName);
     }
     Ok(format!("Hello, {name}! Welcome to Tauri 2."))
+}
+
+/// Parse a `#RRGGBB` or `#RRGGBBAA` (or unprefixed) hex string into a
+/// `tauri::window::Color` tuple. Used by `set_window_background_color`; kept
+/// pub(crate) so the unit tests in this module can drive it directly without
+/// instantiating a WebviewWindow.
+pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
+    let cleaned = hex.trim().trim_start_matches('#');
+    if cleaned.len() != 6 && cleaned.len() != 8 {
+        return Err(AppError::InvalidHex(hex.to_string()));
+    }
+    let r = u8::from_str_radix(&cleaned[0..2], 16)
+        .map_err(|_| AppError::InvalidHex(hex.to_string()))?;
+    let g = u8::from_str_radix(&cleaned[2..4], 16)
+        .map_err(|_| AppError::InvalidHex(hex.to_string()))?;
+    let b = u8::from_str_radix(&cleaned[4..6], 16)
+        .map_err(|_| AppError::InvalidHex(hex.to_string()))?;
+    let a = if cleaned.len() == 8 {
+        u8::from_str_radix(&cleaned[6..8], 16)
+            .map_err(|_| AppError::InvalidHex(hex.to_string()))?
+    } else {
+        255
+    };
+    Ok(Color(r, g, b, a))
+}
+
+/// Drive the desktop window background color from the renderer side so a
+/// theme switch repaints the custom titlebar / chrome area without a full
+/// reload. Tauri 2.9 doesn't expose a runtime `setTitleBarStyle`, so on
+/// Windows with `decorations=false` the window background is what the
+/// titlebar surface inherits.
+#[tauri::command]
+pub fn set_window_background_color(
+    window: WebviewWindow,
+    hex: String,
+) -> Result<(), String> {
+    let color = parse_hex_color(&hex).map_err(|e| e.to_string())?;
+    window
+        .set_background_color(Some(color))
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Authoritative list of every custom menu id the desktop chrome dispatches.
@@ -116,6 +161,43 @@ mod tests {
             );
             assert!(!id.is_empty(), "empty menu id");
         }
+    }
+
+    #[test]
+    fn parse_hex_color_accepts_six_digit_hex() {
+        let color = parse_hex_color("#ff8800").unwrap();
+        assert_eq!(color.0, 0xff);
+        assert_eq!(color.1, 0x88);
+        assert_eq!(color.2, 0x00);
+        assert_eq!(color.3, 0xff);
+    }
+
+    #[test]
+    fn parse_hex_color_accepts_eight_digit_hex_with_alpha() {
+        let color = parse_hex_color("#11223344").unwrap();
+        assert_eq!(color.0, 0x11);
+        assert_eq!(color.1, 0x22);
+        assert_eq!(color.2, 0x33);
+        assert_eq!(color.3, 0x44);
+    }
+
+    #[test]
+    fn parse_hex_color_accepts_unprefixed() {
+        let color = parse_hex_color("0a0a0a").unwrap();
+        assert_eq!(color.0, 0x0a);
+        assert_eq!(color.1, 0x0a);
+        assert_eq!(color.2, 0x0a);
+        assert_eq!(color.3, 0xff);
+    }
+
+    #[test]
+    fn parse_hex_color_rejects_short_form() {
+        assert!(matches!(parse_hex_color("#abc"), Err(AppError::InvalidHex(_))));
+    }
+
+    #[test]
+    fn parse_hex_color_rejects_garbage_chars() {
+        assert!(matches!(parse_hex_color("#zzzzzz"), Err(AppError::InvalidHex(_))));
     }
 
     /// Sanity: the renderer-side `MENU_ACTION_IDS` list in

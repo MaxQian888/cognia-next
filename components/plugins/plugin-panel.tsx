@@ -271,7 +271,7 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
         maxSize: 26,
       }}
       rightPane={{
-        label: "Plugin detail",
+        label: t("detailSheetLabel"),
         content: <PluginDetailPane />,
         defaultSize: 38,
         minSize: 28,
@@ -296,12 +296,20 @@ function SectionHeader() {
 
 function PluginDeleteDialogHost() {
   const target = usePluginsStore((s) => s.deleteTarget)
+  const queueLength = usePluginsStore((s) => s.deleteQueue.length)
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
+  const advanceDeleteQueue = usePluginsStore((s) => s.advanceDeleteQueue)
+  // After confirm / cancel, advance to the next queued target so a batch
+  // uninstall walks the whole selection without re-opening the bar.
+  const advance = () => {
+    if (queueLength > 0) advanceDeleteQueue()
+    else setDeleteTarget(null)
+  }
   return (
     <PluginDeleteDialog
       open={target !== null}
       pluginName={target?.name ?? ""}
-      onCancel={() => setDeleteTarget(null)}
+      onCancel={advance}
       onConfirm={async ({ cascade }) => {
         if (!target) return
         const id = target.pluginId
@@ -314,7 +322,7 @@ function PluginDeleteDialogHost() {
             db.pluginScheduledJobs.where("pluginId").equals(id).delete(),
           ])
         }
-        setDeleteTarget(null)
+        advance()
       }}
     />
   )

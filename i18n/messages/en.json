@@ -3,6 +3,69 @@
     "openLeft": "Open {name}",
     "openRight": "Open {name}"
   },
+  "terminal": {
+    "dock": {
+      "newSession": "New terminal",
+      "closePanel": "Close panel"
+    },
+    "tab": {
+      "close": "Close terminal",
+      "status": {
+        "idle": "Idle",
+        "running": "Running",
+        "exitedOk": "Exited cleanly",
+        "exitedFail": "Exited with non-zero code"
+      },
+      "menu": {
+        "rename": "Rename tab",
+        "restart": "Restart",
+        "close": "Close",
+        "closeOthers": "Close others",
+        "trustAgent": "Trust agent in this tab"
+      },
+      "rename": {
+        "label": "Rename terminal tab",
+        "inputLabel": "New tab title",
+        "placeholder": "Tab title"
+      }
+    },
+    "search": {
+      "placeholder": "Find in terminal",
+      "caseSensitive": "Match case",
+      "previous": "Previous match",
+      "next": "Next match",
+      "close": "Close find"
+    },
+    "history": {
+      "title": "Command history",
+      "open": "Show command history",
+      "close": "Hide command history",
+      "empty": "No commands yet.",
+      "blank": "(blank)",
+      "copy": "Copy command",
+      "rerun": "Re-run command",
+      "status": {
+        "ok": "Exited cleanly",
+        "error": "Exited with non-zero code",
+        "unknown": "No exit code reported"
+      }
+    },
+    "emptyState": {
+      "desktop": {
+        "title": "No terminals yet",
+        "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
+        "action": "+ New terminal"
+      },
+      "mobile": {
+        "title": "Remote terminal not configured",
+        "body": "Pair this device with the desktop server to connect to its terminal over LAN."
+      },
+      "unsupported": {
+        "title": "Terminal unavailable",
+        "body": "The integrated terminal needs the desktop or mobile shell — it isn't available in the plain browser preview."
+      }
+    }
+  },
   "agentTeamsWorkspace": {
     "listTitle": "Agent Teams",
     "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
@@ -483,6 +546,18 @@
     "slashCommand": {
       "ranSlashCommand": "ran slash command"
     },
+    "terminalTool": {
+      "bashLabel": "Bash",
+      "runningStatus": "running",
+      "runInDock": {
+        "label": "Run in dock",
+        "searchPlaceholder": "Find a tab",
+        "empty": "No tabs match.",
+        "existingTabs": "Existing tabs",
+        "newTab": "New tab",
+        "trustedBadge": "trusted"
+      }
+    },
     "twinBadge": {
       "label": "twin · {chunks}",
       "openWorkbench": "Open twin workbench",
@@ -799,7 +874,21 @@
       "description": "Each character has its own system prompt, model, and tools.",
       "searchPlaceholder": "Search characters…",
       "empty": "No characters match.",
-      "groupHeading": "Characters"
+      "groupHeading": "Characters",
+      "groupBuiltIn": "Built-in",
+      "groupPlugin": "From {name}",
+      "groupLocalFile": "From local file",
+      "groupUser": "Yours"
+    },
+    "characterMissing": {
+      "title": "Character unavailable",
+      "body": "The {source} provider for this conversation is no longer available. Messages now use the app defaults.",
+      "sourcePlugin": "plugin \"{name}\"",
+      "sourceLocalFile": "local pack file",
+      "action": {
+        "pickAnother": "Pick another character",
+        "reEnablePluginHint": "Re-enable the plugin to restore the original."
+      }
     },
     "renderers": {
       "code": {
@@ -971,6 +1060,7 @@
     "searchAria": "Search discover",
     "featured": "Featured",
     "builtInBadge": "Built-in",
+    "pluginBadge": "Plugin",
     "memberCount": "{count} agents",
     "createCharacter": "Create character",
     "emptyCharacters": "No characters yet — create one on the desktop.",
@@ -1615,6 +1705,7 @@
     "tabs": {
       "general": "General",
       "appearance": "Appearance",
+      "terminal": "Terminal",
       "apiKey": "API key",
       "ccswitch": "CCSwitch",
       "agents": "Agents",
@@ -1657,6 +1748,7 @@
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "appearance": "Theme, font scale, language and motion.",
+      "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
       "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
@@ -3110,6 +3202,49 @@
       "duplicateAria": "Duplicate {name}",
       "deleteAria": "Delete {name}",
       "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
+      "overlayReadOnly": "Plugin-provided characters are read-only — duplicate first",
+      "overlayUndeletable": "Plugin-provided characters cannot be deleted — disable the plugin instead",
+      "badge": {
+        "fromPlugin": "From {name}",
+        "fromLocalFile": "From local file",
+        "cloned": "Cloned from {name}",
+        "clonedFromLocalFile": "Cloned from local file",
+        "updateAvailable": "Update available",
+        "missingDep": "{count, plural, =1 {Missing dep} other {Missing deps (#)}}"
+      },
+      "packs": {
+        "title": "Character Packs",
+        "emptyHint": "Plugins can contribute character packs. Import a .cognia-pack.json to add one manually.",
+        "importJsonAction": "Import .cognia-pack.json",
+        "importedToast": "Imported pack \"{id}\".",
+        "importUnavailableWeb": "Local pack import requires the desktop app.",
+        "deletedToast": "Removed pack \"{id}\".",
+        "exportedToast": "Exported to {path}",
+        "exportedToastBrowser": "Pack downloaded",
+        "sourceLocal": "Local file",
+        "sourcePlugin": "Plugin: {name}",
+        "characterCount": "{count, plural, =1 {# character} other {# characters}}",
+        "delete": "Remove pack",
+        "deleteAria": "Remove pack {id}",
+        "removeTitle": "Remove pack?",
+        "removeBody": "Pack \"{id}\" will be removed. User-cloned characters from this pack stay in your library.",
+        "expandAria": "Show characters in pack {id}",
+        "collapseAria": "Hide characters in pack {id}",
+        "rescan": "Re-scan local packs",
+        "rescanToast": "Local packs re-scanned ({registered} registered, {skipped} skipped)",
+        "skippedToast": "Skipped {count} local pack file(s) — see logs"
+      },
+      "actions": {
+        "recloneFromPack": "Re-clone",
+        "recloneFromPackTitle": "Replace this clone with a fresh copy from the updated pack",
+        "dismissUpdate": "Dismiss",
+        "dismissUpdateTitle": "Stop showing the update-available indicator for this clone",
+        "exportPack": "Export pack"
+      },
+      "recloneFromPackToast": "Re-cloned as \"{name}\".",
+      "dismissUpdateToast": "Update indicator dismissed.",
+      "exportPackUnavailable": "Could not resolve a pack to export.",
+      "exportPackAria": "Export source pack for {name}",
       "validation": {
         "nameRequired": "Name is required.",
         "systemPromptRequired": "System prompt cannot be empty."
@@ -3558,6 +3693,54 @@
         "mcpSubsetOverride": "MCP subset override",
         "moveUp": "Move {name} up",
         "moveDown": "Move {name} down"
+      }
+    },
+    "terminal": {
+      "heading": "Integrated terminal",
+      "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
+      "shell": {
+        "label": "Default shell",
+        "auto": "Auto-detect (recommended)",
+        "bash": "bash",
+        "zsh": "zsh",
+        "pwsh": "PowerShell 7 (pwsh.exe)",
+        "powershell": "Windows PowerShell (powershell.exe)",
+        "cmd": "Command Prompt (cmd.exe)",
+        "custom": "Custom path…",
+        "customLabel": "Custom shell path",
+        "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration."
+      },
+      "fontFamily": {
+        "label": "Font family"
+      },
+      "fontSize": {
+        "label": "Font size"
+      },
+      "scrollback": {
+        "label": "Scrollback lines",
+        "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000."
+      },
+      "shellIntegration": {
+        "label": "Enable shell integration",
+        "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences."
+      },
+      "copyOnSelect": {
+        "label": "Copy on selection",
+        "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard."
+      },
+      "exposeDockToAgents": {
+        "label": "Expose dock to agents",
+        "helper": "Lets the chat agent spawn / read / write isolated terminal sessions via the terminal-dock MCP tool. Agent sessions are sandboxed from the visual dock and only the spawning agent can address them."
+      },
+      "projectOverride": {
+        "title": "Per-project override",
+        "helper": "Pick a project to override its shell or cwd. Empty fields fall back to the global default.",
+        "selectProject": "Select a project…",
+        "emptyProjects": "No projects yet — overrides become available once you create one.",
+        "shellLabel": "Shell",
+        "shellPlaceholder": "/usr/local/bin/fish",
+        "cwdLabel": "Working directory",
+        "cwdPlaceholder": "/path/to/cwd"
       }
     },
     "speech": {
@@ -5154,6 +5337,7 @@
       "discover": "Discover",
       "governance": "Governance",
       "devtools": "Devtools",
+      "detailSheetLabel": "Plugin detail",
       "librarySub": {
         "all": "All",
         "enabled": "Enabled",
@@ -5305,6 +5489,9 @@
       "actionsMenuAria": "Plugin actions for {name}",
       "permissionCount": "{count, plural, =0 {no permissions} =1 {1 permission} other {# permissions}}",
       "updateBadge": "Update available",
+      "erroredAria": "Plugin reported an error",
+      "capabilityChipAria": "{capability} capability — {count} contributions",
+      "moreCapabilitiesAria": "{count} more capabilities",
       "status": {
         "error": "Error",
         "loading": "Loading…",
@@ -5387,6 +5574,21 @@
       "optionalEmpty": "No optional permissions.",
       "dependencies": "Dependencies",
       "notFound": "Plugin not found.",
+      "verification": {
+        "title": "Verification",
+        "current": "Current",
+        "lastGood": "Last good",
+        "verifiedAt": "Verified {date}",
+        "lastSuccessfulAt": "Last success {date}",
+        "lastFailureAt": "Failed {date}",
+        "rollbackTo": "Rollback to v{version}"
+      },
+      "diagnostics": {
+        "ariaLabel": "Recent diagnostics",
+        "title": "{count, plural, =1 {1 diagnostic entry} other {# diagnostic entries}}",
+        "showMore": "Show {count} more",
+        "collapse": "Collapse"
+      },
       "contributed": {
         "empty": "This plugin has not registered any runtime contributions.",
         "countBadge": "{count}",
@@ -5490,7 +5692,25 @@
       "filteredBadge": "{count} shown",
       "searchPlaceholder": "Search plugins…",
       "filtersButton": "Filters",
-      "categoriesButton": "Categories"
+      "categoriesButton": "Categories",
+      "resultsCount": "{count} of {total} plugins",
+      "resultsCountEmpty": "No matches — {total} plugins installed"
+    },
+    "activeFilters": {
+      "ariaLabel": "Active filters",
+      "clearAll": "Clear all",
+      "removeAria": "Remove {name}",
+      "chip": {
+        "query": "Search: {value}",
+        "capability": "Capability: {value}",
+        "permission": "Permission: {value}",
+        "source": "Source: {value}",
+        "status": "Status: {value}",
+        "hasUpdate": "Has update",
+        "configurable": "Configurable",
+        "signedOnly": "Signed only",
+        "sort": "Sort: {value}"
+      }
     },
     "toolbar": {
       "install": "Install",
@@ -10822,6 +11042,17 @@
       "workflows": "Workflows",
       "discover": "Discover",
       "me": "Me"
+    },
+    "terminal": {
+      "title": "Terminal",
+      "back": "Back",
+      "newSession": "New terminal session",
+      "empty": {
+        "remoteReady": "No remote terminal sessions yet. Spawn one to connect via the paired desktop server.",
+        "notMobile": "The integrated terminal here runs as a desktop dock — switch to the desktop app to use it.",
+        "unavailable": "Terminal isn't available in this browser preview. Use the desktop or Capacitor build.",
+        "action": "Start session"
+      }
     },
     "tabBar": {
       "unread": "{count} unread"

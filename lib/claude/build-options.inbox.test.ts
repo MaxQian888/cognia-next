@@ -15,7 +15,8 @@ import { resolveSendOptions } from "./build-options"
 // exercised below touch characters, skills, MCP, or routing — but the
 // resolver imports them eagerly, so we stub them to no-op.
 jest.mock("@/lib/db/characters", () => ({
-  getCharacter: jest.fn(async () => null),
+  // ADR-0030: build-options calls resolveCharacterById (overlay-aware).
+  resolveCharacterById: jest.fn(async () => null),
   listCharactersByIds: jest.fn(async () => []),
 }))
 jest.mock("@/lib/db/skills", () => ({

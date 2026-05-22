@@ -55,9 +55,12 @@ export const D3ForceGraphRichOutput = memo(function D3ForceGraphRichOutput({
       .force("charge", d3.forceManyBody().strength(-260))
       .force("center", d3.forceCenter(width / 2, height / 2))
 
+    // SVG presentation attributes accept `var(--token)` directly in modern
+    // engines, so the link / node / label colors track the active appearance
+    // palette without a JS subscription.
     const links = svg
       .append("g")
-      .attr("stroke", "#94a3b8")
+      .attr("stroke", "var(--muted-foreground)")
       .selectAll("line")
       .data(simulationLinks)
       .enter()
@@ -71,7 +74,7 @@ export const D3ForceGraphRichOutput = memo(function D3ForceGraphRichOutput({
       .enter()
       .append("circle")
       .attr("r", 18)
-      .attr("fill", "#0ea5e9")
+      .attr("fill", "var(--primary)")
 
     const labels = svg
       .append("g")
@@ -82,7 +85,7 @@ export const D3ForceGraphRichOutput = memo(function D3ForceGraphRichOutput({
       .text((d) => d.label)
       .attr("text-anchor", "middle")
       .attr("dy", 4)
-      .attr("fill", "#fff")
+      .attr("fill", "var(--primary-foreground)")
       .attr("font-size", 11)
 
     simulation.on("tick", () => {

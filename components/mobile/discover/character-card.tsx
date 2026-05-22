@@ -60,6 +60,14 @@ export function CharacterCard({ character, href, onSelect, className }: Characte
               {t("builtInBadge")}
             </Badge>
           ) : null}
+          {/* ADR-0030 — plugin-overlay or cloned-from-plugin attribution
+              surfaces a single "Plugin" pill on mobile so the user can
+              tell at a glance whether a row came from a plugin pack. */}
+          {character.sourcePluginId ? (
+            <Badge variant="outline" className="text-[10px]">
+              {t("pluginBadge")}
+            </Badge>
+          ) : null}
         </ItemTitle>
         {character.description ? (
           <ItemDescription className="line-clamp-1 text-xs">

@@ -34,22 +34,29 @@ describe("navigation-bar wrapper", () => {
 
   it("syncWithTheme picks the dark hex when resolved theme is dark", async () => {
     const nb = makeNb()
-    await syncWithTheme("dark", async () => nb)
+    await syncWithTheme("dark", undefined, async () => nb)
     expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#0a0a0a" })
     expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: true })
   })
 
   it("syncWithTheme picks the light hex when resolved theme is light", async () => {
     const nb = makeNb()
-    await syncWithTheme("light", async () => nb)
+    await syncWithTheme("light", undefined, async () => nb)
     expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ffffff" })
     expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: false })
   })
 
   it("syncWithTheme defaults to the light hex when the theme name is unknown", async () => {
     const nb = makeNb()
-    await syncWithTheme(undefined, async () => nb)
+    await syncWithTheme(undefined, undefined, async () => nb)
     expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ffffff" })
+  })
+
+  it("syncWithTheme prefers a token-derived backgroundHex over the historical fallback", async () => {
+    const nb = makeNb()
+    await syncWithTheme("dark", "#ff8800", async () => nb)
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ff8800" })
+    expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: true })
   })
 
   it("returns unsupported when the plugin module is missing", async () => {

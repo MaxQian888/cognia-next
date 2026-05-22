@@ -190,6 +190,18 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     env: baseEnv,
 
     canUseTool: (toolName, input, ctx) => {
+      // ADR-0020 W3 — short-circuit the chat-side approval modal when
+      // the renderer has pre-approved this tool for the session. The
+      // Rust permission gate runs its own check on every `desktop.*`
+      // call, so suppressing here only skips the *redundant* second
+      // prompt. Populated by `applyComputerUseTools` from
+      // per-session grants when `chatConsentMode === "session-grant"`.
+      const suppressList = Array.isArray(sendOptions.suppressApprovalForTools)
+        ? sendOptions.suppressApprovalForTools
+        : null
+      if (suppressList && suppressList.includes(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
       const requestId = randomUUID()
       emit({
         type: "permission_request",

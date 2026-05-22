@@ -1,27 +1,27 @@
 "use client"
 
 /**
- * VS Code extension host bar — visibility-gated wrapper around the four
- * orphan extension-point components (`vscode.sidebar.view`,
- * `vscode.webview.panel`, `vscode.activity-bar`, `vscode.terminal.output`).
+ * VS Code extension host bar — visibility-gated wrapper around the
+ * extension-point WebView panels (`vscode.sidebar.view`,
+ * `vscode.webview.panel`, `vscode.activity-bar`).
  *
- * The raw `VscodeExtensionPanel` and `VscodeTerminalPanel` components
- * always render *something* (an empty-state notice) so they can't be
- * dropped into a layout that should stay invisible when no extension
- * has registered yet. This bar is the polite mounter: it polls the
- * bridge and renders nothing at all when both stores are empty.
+ * Terminal output used to be a fourth slot here (`vscode.terminal.output`)
+ * but the integrated terminal dock now owns every terminal — both
+ * user-spawned and extension-spawned. The bridge's `createTerminal` API
+ * still works for VS Code extensions; their sessions just appear as new
+ * tabs in `<TerminalDock>` instead of in a separate panel. See plan
+ * `vscode-vivid-wilkinson.md` §Reuse map row #9.
  *
- * Layout-wise the bar is a flex column — the host (chat shell / desktop
- * shell / mobile drawer) controls whether it sits on the right of the
- * editor, in a bottom panel, or in a settings tab. The bar itself is
- * agnostic.
+ * The raw `VscodeExtensionPanel` always renders *something* (an
+ * empty-state notice) so it can't be dropped into a layout that should
+ * stay invisible when no extension has registered yet. This bar is the
+ * polite mounter: it polls the bridge and renders nothing at all when
+ * no webview is active.
  */
 
 import { useEffect, useState } from "react"
 import { listPanels, type WebviewRecord } from "@/lib/plugin/vscode-shim/webview-bridge"
-import { listTerminals, type TerminalRecord } from "@/lib/plugin/vscode-shim/terminal-bridge"
 import { VscodeExtensionPanel } from "./vscode-extension-panel"
-import { VscodeTerminalPanel } from "./vscode-terminal-panel"
 
 const POLL_INTERVAL_MS = 250
 
@@ -32,92 +32,55 @@ export interface VscodeExtensionHostBarProps {
    * right-rail mount and `"panel"` for the centre area.
    */
   webviewSlot?: WebviewRecord["hostSlot"]
-  /**
-   * Hide the terminal sub-panel even when terminals exist. Lets the host
-   * split the two surfaces across separate layout regions.
-   */
-  hideTerminal?: boolean
-  /**
-   * Hide the webview sub-panel. Mirror of `hideTerminal` for the other
-   * direction.
-   */
-  hideWebviews?: boolean
   className?: string
 }
 
 /**
- * Subscribe to the bridge stores and re-render when either surface
- * becomes non-empty. Polls because the bridges don't currently emit a
- * change event — same pattern the inner components use.
+ * Subscribe to the webview-bridge store and re-render when it becomes
+ * non-empty. Polls because the bridge doesn't currently emit a change
+ * event — same pattern the inner component uses.
  */
-function useActiveExtensionSurfaces(slot?: WebviewRecord["hostSlot"]): {
-  webviews: WebviewRecord[]
-  terminals: TerminalRecord[]
-} {
+function useActiveWebviews(slot?: WebviewRecord["hostSlot"]): WebviewRecord[] {
   const [webviews, setWebviews] = useState<WebviewRecord[]>(() =>
     slot ? listPanels().filter((p) => p.hostSlot === slot) : listPanels()
   )
-  const [terminals, setTerminals] = useState<TerminalRecord[]>(() => listTerminals())
   useEffect(() => {
     let mounted = true
     const id = setInterval(() => {
       if (!mounted) return
       const w = slot ? listPanels().filter((p) => p.hostSlot === slot) : listPanels()
-      const t = listTerminals()
       setWebviews((prev) => (sameIds(prev, w) ? prev : w))
-      setTerminals((prev) => (sameIds(prev, t) ? prev : t))
     }, POLL_INTERVAL_MS)
     return () => {
       mounted = false
       clearInterval(id)
     }
   }, [slot])
-  return { webviews, terminals }
+  return webviews
 }
 
-function sameIds<T extends { panelId?: string; terminalId?: string; id?: string }>(
-  a: T[],
-  b: T[]
-): boolean {
+function sameIds(a: WebviewRecord[], b: WebviewRecord[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i += 1) {
-    const ai = a[i]
-    const bi = b[i]
-    // `TerminalRecord` uses `.id`; `WebviewRecord` uses `.panelId`; the
-    // legacy mock shape exposes `.terminalId`. Cover all three so the
-    // helper works for whichever shape the bridges hand us today.
-    if ((ai?.panelId ?? ai?.terminalId ?? ai?.id) !== (bi?.panelId ?? bi?.terminalId ?? bi?.id)) {
-      return false
-    }
+    if (a[i]?.panelId !== b[i]?.panelId) return false
   }
   return true
 }
 
 export function VscodeExtensionHostBar({
   webviewSlot,
-  hideTerminal,
-  hideWebviews,
   className,
 }: VscodeExtensionHostBarProps = {}) {
-  const { webviews, terminals } = useActiveExtensionSurfaces(webviewSlot)
-  const showWebviews = !hideWebviews && webviews.length > 0
-  const showTerminal = !hideTerminal && terminals.length > 0
-  if (!showWebviews && !showTerminal) return null
+  const webviews = useActiveWebviews(webviewSlot)
+  if (webviews.length === 0) return null
   return (
     <div
       data-testid="vscode-extension-host-bar"
       className={`flex h-full w-full flex-col gap-2 ${className ?? ""}`}
     >
-      {showWebviews ? (
-        <div className="min-h-0 flex-1" data-testid="vscode-extension-host-bar-webviews">
-          <VscodeExtensionPanel slot={webviewSlot} />
-        </div>
-      ) : null}
-      {showTerminal ? (
-        <div className="min-h-[8rem] flex-1" data-testid="vscode-extension-host-bar-terminal">
-          <VscodeTerminalPanel />
-        </div>
-      ) : null}
+      <div className="min-h-0 flex-1" data-testid="vscode-extension-host-bar-webviews">
+        <VscodeExtensionPanel slot={webviewSlot} />
+      </div>
     </div>
   )
 }

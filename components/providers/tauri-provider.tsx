@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { useTheme } from "next-themes"
 import { toast } from "sonner"
 import { useSessionNotifications } from "@/hooks/chat"
 import { useTauriEvents } from "@/hooks/system"
@@ -9,6 +10,8 @@ import { ensureNotificationPermission } from "@/lib/tauri/notification"
 import { getLaunchCli } from "@/lib/tauri/cli"
 import { getLaunchDeepLink } from "@/lib/tauri/deep-link"
 import { getPref } from "@/lib/tauri/store"
+import { setWindowBackgroundColor } from "@/lib/tauri/shell-window"
+import { getShellColors } from "@/lib/appearance/shell-sync"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -38,6 +41,29 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   // persisted layout / bindings have hydrated.
   useSyncTrayToRust()
   useSyncShortcutsToRust()
+
+  const { resolvedTheme } = useTheme()
+  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
+  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
+  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+
+  // Push the appearance background colour into the native Tauri window so
+  // the custom titlebar (decorations=false on Windows) repaints in lockstep
+  // with the in-app theme. No-op on web; `setWindowBackgroundColor`
+  // short-circuits when not running under Tauri.
+  useEffect(() => {
+    if (!isTauri()) return
+    if (!resolvedTheme) return
+    const shellColors = getShellColors(
+      {
+        colorTheme: appearanceColorTheme,
+        activeCustomThemeId: appearanceActiveCustomThemeId,
+        customThemes: appearanceCustomThemes,
+      },
+      resolvedTheme
+    )
+    void setWindowBackgroundColor(shellColors.backgroundHex)
+  }, [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes])
 
   useEffect(() => {
     if (!isTauri()) return

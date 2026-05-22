@@ -10,8 +10,10 @@ jest.mock("next-intl", () => ({
 }))
 
 let mockPlugin: PluginRow | undefined
+let mockPhase: "loading" | "resolved" = "resolved"
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockPlugin,
+  useLiveQuery: <T,>(_fn: () => unknown, _deps: unknown[], def?: T) =>
+    mockPhase === "loading" ? def : mockPlugin,
 }))
 jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
@@ -62,6 +64,7 @@ describe("PluginDetailPane", () => {
   beforeEach(() => {
     usePluginsStore.setState({ detailPluginId: null, detailSubTab: "overview" })
     mockPlugin = makePlugin()
+    mockPhase = "resolved"
   })
 
   it("renders the empty state when nothing is selected", () => {
@@ -83,8 +86,18 @@ describe("PluginDetailPane", () => {
 
   it("renders the not-found hint when detailPluginId is set but the row is missing", () => {
     mockPlugin = undefined
+    mockPhase = "resolved"
     usePluginsStore.setState({ detailPluginId: "missing" })
     render(<PluginDetailPane />)
     expect(screen.getByText("notFound")).toBeInTheDocument()
+  })
+
+  it("renders a skeleton loader while the live-query is still resolving", () => {
+    mockPhase = "loading"
+    usePluginsStore.setState({ detailPluginId: "alpha" })
+    render(<PluginDetailPane />)
+    expect(screen.getByTestId("plugin-detail-pane-loading")).toBeInTheDocument()
+    // Sub-tab content must not mount while loading.
+    expect(screen.queryByTestId("overview")).not.toBeInTheDocument()
   })
 })

@@ -2,13 +2,18 @@
  * Tests for Theme Plugin API
  */
 
-import { createThemeAPI } from "./theme-api"
+import {
+  createThemeAPI,
+  clearCustomThemesForPluginContext,
+  __resetThemeApiOwnershipForTesting,
+} from "./theme-api"
 import type { CustomTheme } from "@/types/plugin/plugin-extended"
 
 // Mock settings store
 let mockTheme = "light"
 let mockColorTheme = "default"
 let mockActiveCustomThemeId: string | null = null
+let mockCreateCounter = 0
 const mockCustomThemes: CustomTheme[] = []
 const mockSubscribers: Array<(state: unknown) => void> = []
 
@@ -28,7 +33,10 @@ jest.mock("@/stores", () => ({
         mockSubscribers.forEach((cb) => cb({ colorTheme: mockColorTheme }))
       }),
       createCustomTheme: jest.fn((theme) => {
-        const id = `custom-${Date.now()}`
+        // Monotonic counter so back-to-back registrations don't collide on
+        // `Date.now()` and produce duplicate ids in the mock store.
+        mockCreateCounter += 1
+        const id = `custom-${mockCreateCounter}`
         mockCustomThemes.push({ ...theme, id })
         return id
       }),
@@ -122,6 +130,8 @@ describe("Theme API", () => {
     mockActiveCustomThemeId = null
     mockCustomThemes.length = 0
     mockSubscribers.length = 0
+    mockCreateCounter = 0
+    __resetThemeApiOwnershipForTesting()
   })
 
   describe("createThemeAPI", () => {
@@ -453,6 +463,118 @@ describe("Theme API", () => {
       expect(payload.colors.primary).toBe("#123456")
 
       unsubscribe()
+    })
+  })
+
+  describe("clearCustomThemesForPluginContext", () => {
+    it("removes every custom theme the plugin registered through the API", () => {
+      const api = createThemeAPI("plugin-a")
+      const otherApi = createThemeAPI("plugin-b")
+
+      api.registerCustomTheme({
+        name: "A-1",
+        isDark: false,
+        colors: {
+          primary: "#000",
+          secondary: "#000",
+          accent: "#000",
+          background: "#fff",
+          foreground: "#000",
+          muted: "#ccc",
+        },
+      })
+      api.registerCustomTheme({
+        name: "A-2",
+        isDark: true,
+        colors: {
+          primary: "#fff",
+          secondary: "#fff",
+          accent: "#fff",
+          background: "#000",
+          foreground: "#fff",
+          muted: "#333",
+        },
+      })
+      otherApi.registerCustomTheme({
+        name: "B-1",
+        isDark: false,
+        colors: {
+          primary: "#111",
+          secondary: "#222",
+          accent: "#333",
+          background: "#fff",
+          foreground: "#000",
+          muted: "#eee",
+        },
+      })
+
+      expect(mockCustomThemes).toHaveLength(3)
+
+      clearCustomThemesForPluginContext("plugin-a")
+
+      // Only plugin-b's theme survives.
+      expect(mockCustomThemes).toHaveLength(1)
+      expect(mockCustomThemes[0].name).toBe("B-1")
+    })
+
+    it("is idempotent — a second call for the same plugin is a no-op", () => {
+      const api = createThemeAPI("plugin-a")
+      api.registerCustomTheme({
+        name: "A-1",
+        isDark: false,
+        colors: {
+          primary: "#000",
+          secondary: "#000",
+          accent: "#000",
+          background: "#fff",
+          foreground: "#000",
+          muted: "#ccc",
+        },
+      })
+
+      clearCustomThemesForPluginContext("plugin-a")
+      clearCustomThemesForPluginContext("plugin-a")
+
+      expect(mockCustomThemes).toHaveLength(0)
+    })
+
+    it("does not throw when the plugin never registered anything", () => {
+      expect(() => clearCustomThemesForPluginContext("ghost-plugin")).not.toThrow()
+    })
+
+    it("stops tracking ids after `deleteCustomTheme` so subsequent clears skip them", () => {
+      const api = createThemeAPI("plugin-a")
+      const id1 = api.registerCustomTheme({
+        name: "A-1",
+        isDark: false,
+        colors: {
+          primary: "#000",
+          secondary: "#000",
+          accent: "#000",
+          background: "#fff",
+          foreground: "#000",
+          muted: "#ccc",
+        },
+      })
+      const id2 = api.registerCustomTheme({
+        name: "A-2",
+        isDark: true,
+        colors: {
+          primary: "#fff",
+          secondary: "#fff",
+          accent: "#fff",
+          background: "#000",
+          foreground: "#fff",
+          muted: "#333",
+        },
+      })
+
+      // Plugin explicitly deletes one of its themes ahead of time.
+      api.deleteCustomTheme(id1)
+      expect(mockCustomThemes.map((t) => t.id)).toEqual([id2])
+
+      clearCustomThemesForPluginContext("plugin-a")
+      expect(mockCustomThemes).toHaveLength(0)
     })
   })
 

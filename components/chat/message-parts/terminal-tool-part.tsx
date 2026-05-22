@@ -6,12 +6,26 @@
  * the `input-available` (running) state. Once the result lands, the part
  * falls back to the regular ToolBody so the user sees the structured
  * stdout / errorText section.
+ *
+ * Wave 3D: adds a "Run in dock" affordance that lets the user send the
+ * same command into a selected dock tab. The tab picker is anchored
+ * inside this part so the action lives next to the command preview.
  */
 
+import { useState } from "react"
 import type { ToolUIPart } from "ai"
 import { useTranslations } from "next-intl"
+import { TerminalSquareIcon } from "lucide-react"
+
 import { Tool, ToolBody, ToolContent, ToolHeader, ToolInput } from "@/components/ai-elements/tool"
 import { Terminal, TerminalHeader, TerminalStatus } from "@/components/ai-elements/terminal"
+import { Button } from "@/components/ui/button"
+import { TerminalTabPicker } from "@/components/chat/terminal-tab-picker"
+import { runInDockTab } from "@/lib/terminal/run-in-dock"
+import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
+import { useChatStore } from "@/stores/chat/chat-store"
 
 interface TerminalToolPartProps {
   part: ToolUIPart
@@ -42,6 +56,22 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
   const running = part.state === "input-available"
   const command = extractCommand(part.input)
   const liveOutput = extractRunningOutput(part.output)
+  const chatSessionId = useChatStore((s) =>
+    typeof (s as { activeSessionId?: string }).activeSessionId === "string"
+      ? (s as { activeSessionId: string }).activeSessionId
+      : ""
+  )
+  const project = useProjectStore((s) =>
+    s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
+  )
+  const settingsShell = useSettingsStore(
+    (s) => (s.settings?.terminal as { defaultShell?: string } | undefined)?.defaultShell
+  )
+
+  const [busy, setBusy] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  const canRun = !!command && command.length > 0 && !!chatSessionId
 
   return (
     <Tool defaultOpen={running} data-testid="terminal-tool-part">
@@ -62,6 +92,61 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
         ) : (
           <ToolBody part={part} />
         )}
+        {canRun ? (
+          <div className="mt-2 flex justify-end">
+            <TerminalTabPicker
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              onPick={async (choice) => {
+                if (!command || !chatSessionId) return
+                setBusy(true)
+                try {
+                  if (choice.kind === "existing") {
+                    await runInDockTab({
+                      chatSessionId,
+                      tabId: choice.row.id,
+                      command,
+                    })
+                  } else {
+                    await runInDockTab({
+                      chatSessionId,
+                      newTab: {
+                        req: {
+                          shell: resolveDefaultShell({
+                            projectShell: project?.terminalConfig?.shell,
+                            settingShell: settingsShell,
+                          }),
+                          cwd:
+                            project?.terminalConfig?.cwd?.trim() ||
+                            project?.rootDir?.trim() ||
+                            undefined,
+                          env: project?.terminalConfig?.env,
+                          projectId: project?.id,
+                          rows: 24,
+                          cols: 80,
+                        },
+                      },
+                      command,
+                    })
+                  }
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 text-xs"
+                disabled={busy}
+                data-testid="terminal-tool-part-run-in-dock"
+              >
+                <TerminalSquareIcon className="h-3 w-3" />
+                {t("runInDock.label")}
+              </Button>
+            </TerminalTabPicker>
+          </div>
+        ) : null}
       </ToolContent>
     </Tool>
   )

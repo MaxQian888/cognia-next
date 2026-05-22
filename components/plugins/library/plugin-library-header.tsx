@@ -14,10 +14,12 @@
 import { useTranslations } from "next-intl"
 import { FilterIcon, SearchIcon } from "lucide-react"
 import { usePluginsStore } from "@/stores/plugins"
+import { usePlugins } from "@/hooks/plugins"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PluginCategorySheet } from "../plugin-category-sheet"
 import { PluginPanelToolbar } from "../plugin-panel-toolbar"
+import { PluginActiveFilters } from "./plugin-active-filters"
 import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
@@ -32,6 +34,11 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
   const filters = usePluginsStore((s) => s.filters)
   const setQuery = usePluginsStore((s) => s.setQuery)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
+  const { filtered, totals, loading } = usePlugins()
+  // Only surface the count when the visible set is narrower than the total
+  // (or when a search query is active). Hides on the unfiltered "All" view
+  // so the header stays tidy when there's nothing to communicate.
+  const showCount = !loading && totals.total > 0 && filtered.length !== totals.total
 
   return (
     <div className="w-full space-y-2">
@@ -68,6 +75,19 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
         />
       </div>
       <PluginLibrarySubFilter />
+      <PluginActiveFilters />
+      {showCount && (
+        <p
+          className="text-xs text-muted-foreground"
+          role="status"
+          aria-live="polite"
+          data-testid="plugin-library-result-count"
+        >
+          {filtered.length === 0
+            ? t("resultsCountEmpty", { total: totals.total })
+            : t("resultsCount", { count: filtered.length, total: totals.total })}
+        </p>
+      )}
     </div>
   )
 }

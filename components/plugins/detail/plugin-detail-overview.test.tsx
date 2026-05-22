@@ -20,6 +20,19 @@ jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
 }))
 
+// In-memory PluginManager store — drives the new Verification card. Default
+// to no snapshot so existing tests still see the original Overview shape.
+let mockPluginInMemory:
+  | {
+      verificationSnapshot?: unknown
+      lastKnownGoodVerification?: unknown
+    }
+  | undefined
+jest.mock("@/stores/plugin/plugin-store", () => ({
+  usePluginStore: (selector: (s: unknown) => unknown) =>
+    selector({ plugins: mockPluginInMemory ? { alpha: mockPluginInMemory } : {} }),
+}))
+
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginDetailOverview } from "./plugin-detail-overview"
 
@@ -50,6 +63,7 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 describe("PluginDetailOverview", () => {
   beforeEach(() => {
     mockPlugin = makePlugin()
+    mockPluginInMemory = undefined
     usePluginsStore.setState({ rollbackTarget: null })
   })
 
@@ -78,5 +92,67 @@ describe("PluginDetailOverview", () => {
     render(<PluginDetailOverview pluginId="alpha" />)
     fireEvent.click(screen.getByText("rawManifest"))
     expect(screen.getByText("rawManifestTitle")).toBeInTheDocument()
+  })
+
+  it("hides the Verification card when no snapshot exists in memory", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-detail-verification-card")).not.toBeInTheDocument()
+  })
+
+  it("renders the Verification card when a snapshot is available", () => {
+    mockPluginInMemory = {
+      verificationSnapshot: {
+        pluginId: "alpha",
+        source: "marketplace",
+        status: "enabled",
+        verificationStage: "activation",
+        lastVerifiedAction: "enable",
+        lastVerifiedAt: "2026-05-22T00:00:00Z",
+        lastSuccessfulAt: "2026-05-22T00:00:00Z",
+        resolvedVersion: "1.2.3",
+        diagnostics: [],
+      },
+    }
+    render(<PluginDetailOverview pluginId="alpha" />)
+    const card = screen.getByTestId("plugin-detail-verification-card")
+    expect(card).toBeInTheDocument()
+    expect(card.textContent).toContain("title")
+    // Snapshot status pill within the card.
+    expect(card.textContent).toContain("enabled")
+    // verificationStage badge within the card.
+    expect(card.textContent).toContain("activation")
+  })
+
+  it("surfaces a rollback CTA when current and last-good diverge", () => {
+    mockPluginInMemory = {
+      verificationSnapshot: {
+        pluginId: "alpha",
+        source: "marketplace",
+        status: "error",
+        verificationStage: "activation",
+        lastVerifiedAction: "enable",
+        lastVerifiedAt: "2026-05-22T00:00:00Z",
+        lastFailureAt: "2026-05-22T00:00:00Z",
+        resolvedVersion: "1.3.0",
+        diagnostics: [],
+      },
+      lastKnownGoodVerification: {
+        pluginId: "alpha",
+        source: "marketplace",
+        status: "enabled",
+        verificationStage: "activation",
+        lastVerifiedAction: "enable",
+        lastVerifiedAt: "2026-05-01T00:00:00Z",
+        lastSuccessfulAt: "2026-05-01T00:00:00Z",
+        resolvedVersion: "1.2.3",
+        diagnostics: [],
+      },
+    }
+    render(<PluginDetailOverview pluginId="alpha" />)
+    const card = screen.getByTestId("plugin-detail-verification-card")
+    expect(card).toBeInTheDocument()
+    // Rollback CTA renders within the Verification card.
+    expect(card.textContent).toContain("rollbackTo")
+    expect(card.textContent).toContain("1.2.3")
   })
 })

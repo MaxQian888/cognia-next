@@ -9,6 +9,7 @@ import {
   useViewModelInstance,
   useViewModelInstanceColor,
 } from "@rive-app/react-webgl2"
+import { useTheme as useNextTheme } from "next-themes"
 import type { FC, ReactNode } from "react"
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 
@@ -79,57 +80,16 @@ const sources = {
   },
 }
 
-const getCurrentTheme = (): "light" | "dark" => {
-  if (typeof window !== "undefined") {
-    if (document.documentElement.classList.contains("dark")) {
-      return "dark"
-    }
-    if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-      return "dark"
-    }
-  }
-  return "light"
-}
-
-const useTheme = (enabled: boolean) => {
-  const [theme, setTheme] = useState<"light" | "dark">(getCurrentTheme)
-
-  useEffect(() => {
-    // Skip if not enabled (avoids unnecessary observers for non-dynamic-color variants)
-    if (!enabled) {
-      return
-    }
-
-    // Watch for classList changes
-    const observer = new MutationObserver(() => {
-      setTheme(getCurrentTheme())
-    })
-
-    observer.observe(document.documentElement, {
-      attributeFilter: ["class"],
-      attributes: true,
-    })
-
-    // Watch for OS-level theme changes
-    let mql: MediaQueryList | null = null
-    const handleMediaChange = () => {
-      setTheme(getCurrentTheme())
-    }
-
-    if (window.matchMedia) {
-      mql = window.matchMedia("(prefers-color-scheme: dark)")
-      mql.addEventListener("change", handleMediaChange)
-    }
-
-    return () => {
-      observer.disconnect()
-      if (mql) {
-        mql.removeEventListener("change", handleMediaChange)
-      }
-    }
-  }, [enabled])
-
-  return theme
+// LOCAL-PATCH: replaced the upstream bespoke matchMedia + MutationObserver
+// hook with a thin wrapper over next-themes. The Persona Rive surface now
+// follows the user's chosen theme via the app's single source of truth
+// instead of OS dark mode, so an in-app light override no longer leaves the
+// surface stuck on a dark palette. next-themes already manages a single
+// efficient subscription, so the previous `enabled` gate is no longer
+// load-bearing — callers ignore the return value for non-dynamic variants.
+const useTheme = (): "light" | "dark" => {
+  const { resolvedTheme } = useNextTheme()
+  return resolvedTheme === "dark" ? "dark" : "light"
 }
 
 interface PersonaWithModelProps {
@@ -139,7 +99,7 @@ interface PersonaWithModelProps {
 }
 
 const PersonaWithModel = memo(({ rive, source, children }: PersonaWithModelProps) => {
-  const theme = useTheme(source.dynamicColor)
+  const theme = useTheme()
   const viewModel = useViewModel(rive, { useDefault: true })
   const viewModelInstance = useViewModelInstance(viewModel, {
     rive,

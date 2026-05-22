@@ -308,6 +308,14 @@ export default function MobileSchedulerPage() {
                 title={t(`kindFilter.${kind}`) || kind}
                 testid={`mobile-scheduler-group-${kind}`}
               >
+                {/*
+                  Mobile scheduler shell: `MeSection` (canonical /me/* grouping) wraps
+                  `UnifiedTaskSidebarItem` rows. The row body stays shared with the
+                  desktop scheduler — it carries a status dot + a dropdown menu
+                  (run / pause / edit / delete) that `MeRow` cannot express without
+                  losing functionality. The outer `SubPageShell + MeSection` chrome
+                  gives this page the same visual cadence as the rest of `/me/*`.
+                */}
                 {items.map((item) => (
                   <UnifiedTaskSidebarItem
                     key={item.unifiedId}

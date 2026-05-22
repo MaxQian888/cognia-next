@@ -19,8 +19,10 @@ jest.mock("@/lib/db/schema", () => ({
 describe("GithubDeliveryPage", () => {
   it("renders the plugin-not-enabled empty state when getDb fails (returns null)", () => {
     mockOrders = null
-    render(<GithubDeliveryPage />)
+    const { container } = render(<GithubDeliveryPage />)
     expect(screen.getByText(/plugin is not enabled/)).toBeInTheDocument()
+    // Wallpaper-scope marker so the chat-scoped background reaches this surface.
+    expect(container.querySelector("main[data-bg-target='chat']")).not.toBeNull()
   })
 
   it("renders the 6 kanban columns when orders are loaded", () => {
@@ -45,7 +47,9 @@ describe("GithubDeliveryPage", () => {
       },
     ]
     render(<GithubDeliveryPage />)
-    expect(screen.getByTestId("github-delivery-kanban")).toBeInTheDocument()
+    const kanban = screen.getByTestId("github-delivery-kanban")
+    expect(kanban).toBeInTheDocument()
+    expect(kanban).toHaveAttribute("data-bg-target", "chat")
     expect(screen.getByTestId("kanban-col-open")).toBeInTheDocument()
     expect(screen.getByTestId("kanban-col-in_progress")).toBeInTheDocument()
     expect(screen.getByTestId("kanban-col-pr_opened")).toBeInTheDocument()

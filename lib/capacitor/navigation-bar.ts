@@ -67,19 +67,21 @@ export async function setLightContent(
 
 /**
  * Derive a navigation bar appearance from the current `next-themes`
- * resolved theme name. Light theme → near-white bar with dark icons;
- * dark theme → near-black bar with light icons. The hex values track the
- * cognia design tokens documented in `globals.css`.
+ * resolved theme name plus an optional `backgroundHex` from the appearance
+ * shell-sync helper. When `backgroundHex` is supplied the bar paints with
+ * the live appearance palette; otherwise we fall back to the historical
+ * near-white / near-black defaults so existing call sites keep working.
  *
  * Returns the outcome of the color call; `setLightContent` is best-effort
  * and its failure does not flip this result.
  */
 export async function syncWithTheme(
   resolvedTheme: "light" | "dark" | string | undefined,
+  backgroundHex?: string,
   loader: NavigationBarLoader = defaultLoader
 ): Promise<SimpleOutcome> {
   const isDark = resolvedTheme === "dark"
-  const color = isDark ? "#0a0a0a" : "#ffffff"
+  const color = backgroundHex ?? (isDark ? "#0a0a0a" : "#ffffff")
   // Icons should contrast the bar — light icons on dark bar.
   const lightIcons = isDark
   // Fire the icon-contrast hint but don't gate on it.

@@ -57,6 +57,8 @@ pub mod signaling;
 pub mod tls;
 pub mod tunnel;
 pub mod ws;
+pub mod ws_terminal;
+pub mod ws_terminal_test;
 
 pub mod commands;
 

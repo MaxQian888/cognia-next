@@ -1,0 +1,139 @@
+// Capability → contribution mapping for the plugin management UI.
+//
+// A plugin's `capabilities[]` is just a tag set ("tools", "skills", "themes"…).
+// The actual contributed entries live on dedicated manifest fields
+// (`manifest.tools`, `manifest.skills`, `manifest.themes`…). This module
+// resolves each capability tag into the concrete entries the plugin
+// contributes for it, so the library row + detail header can show
+// "4 tools · 2 skills · 1 theme" instead of bare tag chips.
+
+import type { PluginCapability } from "@/types/plugin"
+
+export interface CapabilityEntry {
+  /** Stable identifier for the contributed entry. */
+  id: string
+  /** Display label — falls back to id if the manifest entry has no name. */
+  label?: string
+}
+
+export interface CapabilityContribution {
+  capability: PluginCapability | string
+  entries: CapabilityEntry[]
+  count: number
+}
+
+interface ManifestShape {
+  tools?: Array<{ id?: string; name?: string }>
+  nativeAnthropicTools?: Array<{ name?: string; type?: string }>
+  skills?: Array<{ id?: string; name?: string }>
+  modes?: Array<{ id?: string; name?: string }>
+  commands?: Array<{ id?: string; name?: string }>
+  themes?: Array<{ id?: string; name?: string }>
+  themePacks?: Array<{ id?: string; name?: string }>
+  fonts?: Array<{ id?: string; family?: string; name?: string }>
+  wallpapers?: Array<{ id?: string; name?: string }>
+  densityPresets?: Array<{ id?: string; name?: string }>
+  mcpServerPresets?: Array<{ id?: string; name?: string }>
+  externalAgentPresets?: Array<{ id?: string; name?: string }>
+  ocrProviders?: Array<{ id?: string; name?: string }>
+  aiProviders?: Array<{ id?: string; name?: string }>
+  workspaceBackends?: Array<{ id?: string; name?: string }>
+  messageRenderers?: Array<{ id?: string; name?: string }>
+  modalMounts?: Array<{ id?: string; name?: string }>
+  chatMiddlewares?: Array<{ id?: string; name?: string }>
+  connectors?: Array<{ id?: string; name?: string; adapter?: string }>
+  lspServers?: Array<{ id?: string; name?: string; language?: string }>
+  a2uiComponents?: Array<{ id?: string; name?: string }>
+  a2uiTemplates?: Array<{ id?: string; name?: string }>
+  scheduledTasks?: Array<{ id?: string; name?: string }>
+  workflows?: {
+    nodeExecutors?: Array<{ id?: string; name?: string }>
+    triggers?: Array<{ id?: string; name?: string }>
+  }
+}
+
+function asArray<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function entry(id: string | undefined, label?: string): CapabilityEntry | null {
+  if (!id) return null
+  return label && label !== id ? { id, label } : { id }
+}
+
+function compact<T>(values: Array<T | null>): T[] {
+  return values.filter((v): v is T => v !== null)
+}
+
+/**
+ * Return the concrete entries this plugin contributes for a single capability
+ * tag. Unknown capabilities (or capabilities whose manifest field isn't yet
+ * mapped) return an empty array — callers should treat that as "no rich data
+ * available" rather than an error.
+ */
+export function getContributionsForCapability(
+  manifest: unknown,
+  capability: PluginCapability | string
+): CapabilityEntry[] {
+  const m = (manifest ?? {}) as ManifestShape
+  switch (capability) {
+    case "tools":
+      return compact(asArray(m.tools).map((t) => entry(t.id, t.name)))
+    case "native-anthropic-tool":
+      return compact(asArray(m.nativeAnthropicTools).map((t) => entry(t.name ?? t.type, t.type)))
+    case "skills":
+      return compact(asArray(m.skills).map((s) => entry(s.id, s.name)))
+    case "modes":
+      return compact(asArray(m.modes).map((s) => entry(s.id, s.name)))
+    case "commands":
+      return compact(asArray(m.commands).map((s) => entry(s.id, s.name)))
+    case "themes":
+      return compact(asArray(m.themes).map((s) => entry(s.id, s.name)))
+    case "theme-pack":
+      return compact(asArray(m.themePacks).map((s) => entry(s.id, s.name)))
+    case "fonts":
+      return compact(asArray(m.fonts).map((s) => entry(s.id, s.family ?? s.name)))
+    case "wallpapers":
+      return compact(asArray(m.wallpapers).map((s) => entry(s.id, s.name)))
+    case "mcp-server-preset":
+      return compact(asArray(m.mcpServerPresets).map((s) => entry(s.id, s.name)))
+    case "external-agent-preset":
+      return compact(asArray(m.externalAgentPresets).map((s) => entry(s.id, s.name)))
+    case "ai-provider":
+    case "providers":
+      return compact(asArray(m.aiProviders).map((s) => entry(s.id, s.name)))
+    case "media":
+      // OCR providers are the most common media contribution surface.
+      return compact(asArray(m.ocrProviders).map((s) => entry(s.id, s.name)))
+    case "connectors":
+      return compact(asArray(m.connectors).map((s) => entry(s.id, s.name ?? s.adapter)))
+    case "lsp-server":
+      return compact(asArray(m.lspServers).map((s) => entry(s.id, s.name ?? s.language)))
+    case "a2ui":
+    case "components":
+      return compact(asArray(m.a2uiComponents).map((s) => entry(s.id, s.name)))
+    case "scheduler":
+      return compact(asArray(m.scheduledTasks).map((s) => entry(s.id, s.name)))
+    case "workflow":
+      return compact(asArray(m.workflows?.nodeExecutors).map((s) => entry(s.id, s.name)))
+    case "workflow-trigger":
+      return compact(asArray(m.workflows?.triggers).map((s) => entry(s.id, s.name)))
+    default:
+      return []
+  }
+}
+
+/**
+ * Resolve every capability tag the plugin declares into its contribution
+ * entries. Preserves the order of `capabilities[]` so the UI can render
+ * predictable summaries like "4 tools · 2 skills · 1 theme".
+ */
+export function getAllContributions(
+  capabilities: ReadonlyArray<PluginCapability | string>,
+  manifest: unknown
+): CapabilityContribution[] {
+  return capabilities.map((capability) => {
+    const entries = getContributionsForCapability(manifest, capability)
+    return { capability, entries, count: entries.length }
+  })
+}

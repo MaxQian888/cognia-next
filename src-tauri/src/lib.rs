@@ -28,6 +28,7 @@ mod settings;
 mod shell;
 mod skills;
 mod subscription;
+mod terminal;
 mod tts;
 mod twin;
 mod vector;
@@ -252,6 +253,11 @@ pub fn run() {
         .manage(plugin_api::wasm::WasmPluginState::default())
         // ADR-0028 Phase 14 — OAuth refresh watchers per Anthropic account.
         .manage(subscription::anthropic::credential::WatcherRegistry::new())
+        // Integrated terminal (`src-tauri/src/terminal/`) — VSCode-style
+        // PTY sessions exposed to the renderer via `tauri::ipc::Channel`.
+        // The store outlives the window; dropping it on app shutdown
+        // cascades into per-session Drop kills.
+        .manage(terminal::TerminalState::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("vscode-extensions"))
@@ -265,6 +271,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::menu_action_ids,
+            commands::set_window_background_color,
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
             claude::commands::claude_approve,
@@ -360,6 +367,12 @@ pub fn run() {
             settings::write_claude_project_settings,
             settings::write_claude_local_settings,
             shell::shell_exec,
+            terminal::commands::terminal_spawn,
+            terminal::commands::terminal_write,
+            terminal::commands::terminal_resize,
+            terminal::commands::terminal_kill,
+            terminal::commands::terminal_list_for_project,
+            terminal::commands::terminal_list_all,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
             tts::keyring::tts_keyring_delete,

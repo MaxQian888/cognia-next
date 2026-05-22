@@ -406,6 +406,43 @@ describe("Permission Constants", () => {
     expect(DANGEROUS_PERMISSIONS).toContain("shell:execute")
     expect(DANGEROUS_PERMISSIONS).toContain("process:spawn")
   })
+
+  describe("terminal:* permissions (plan: vscode-vivid-wilkinson)", () => {
+    it("groups terminal permissions under a `terminal` family", () => {
+      expect(PERMISSION_GROUPS.terminal).toEqual(
+        expect.arrayContaining(["terminal:spawn", "terminal:write", "terminal:kill"])
+      )
+    })
+
+    it("describes each terminal permission", () => {
+      expect(PERMISSION_DESCRIPTIONS["terminal:spawn"]).toBeTruthy()
+      expect(PERMISSION_DESCRIPTIONS["terminal:write"]).toBeTruthy()
+      expect(PERMISSION_DESCRIPTIONS["terminal:kill"]).toBeTruthy()
+    })
+
+    it("flags terminal:spawn as dangerous (arbitrary code execution surface)", () => {
+      expect(DANGEROUS_PERMISSIONS).toContain("terminal:spawn")
+    })
+
+    it("does NOT flag terminal:write or terminal:kill as dangerous on their own", () => {
+      expect(DANGEROUS_PERMISSIONS).not.toContain("terminal:write")
+      expect(DANGEROUS_PERMISSIONS).not.toContain("terminal:kill")
+    })
+
+    it("granting terminal:spawn lets check() pass for that permission only", () => {
+      const guard = new PermissionGuard()
+      guard.registerPlugin("term-plugin", ["terminal:spawn"])
+      expect(guard.check("term-plugin", "terminal:spawn")).toBe(true)
+      expect(guard.check("term-plugin", "terminal:write")).toBe(false)
+      expect(guard.check("term-plugin", "terminal:kill")).toBe(false)
+    })
+
+    it("checkMultiple gates a plugin that only holds spawn but not write", () => {
+      const guard = new PermissionGuard()
+      guard.registerPlugin("term-plugin", ["terminal:spawn"])
+      expect(guard.checkMultiple("term-plugin", ["terminal:spawn", "terminal:write"])).toBe(false)
+    })
+  })
 })
 
 describe("Singleton", () => {

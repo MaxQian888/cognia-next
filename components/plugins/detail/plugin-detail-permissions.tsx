@@ -11,10 +11,9 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { getPlugin } from "@/lib/db/plugins"
-import { usePluginPermissions } from "@/hooks/plugins"
+import { usePluginPermissions, usePluginRow } from "@/hooks/plugins"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PermissionRow } from "../plugin-permission-review"
 import {
   Table,
@@ -32,10 +31,11 @@ import type { PluginManifest, PluginPermission } from "@/types/plugin"
 export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.permissionReview")
   const tDetail = useTranslations("plugins.detail")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const rowState = usePluginRow(pluginId)
   const perms = usePluginPermissions()
 
-  const manifest = plugin?.manifest as PluginManifest | undefined
+  const manifest =
+    rowState.state === "ready" ? (rowState.row.manifest as PluginManifest) : undefined
   const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
   const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
   const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])
@@ -54,7 +54,16 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
     [perms.auditLog, pluginId]
   )
 
-  if (!plugin) {
+  if (rowState.state === "loading") {
+    return (
+      <div className="space-y-3" data-testid="plugin-detail-permissions-loading" aria-busy="true">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-16 w-full" />
+      </div>
+    )
+  }
+
+  if (rowState.state === "not-found") {
     return <p className="text-sm text-muted-foreground">{tDetail("notFound")}</p>
   }
 

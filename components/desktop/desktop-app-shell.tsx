@@ -29,6 +29,9 @@ import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
 import { VscodeExtensionHostBar } from "@/components/extensions/vscode-extension-host-bar"
+import { TerminalDock } from "@/components/terminal/terminal-dock"
+import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { whenSeeded } from "@/lib/db/schema"
@@ -56,6 +59,11 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // by the ui-store so the choice sticks across reloads.
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+
+  // Terminal dock (plan: vscode-vivid-wilkinson) — height drives the
+  // dock's slice of the shell's vertical column. Hidden when closed.
+  const terminalPanelOpen = useTerminalStore((s) => s.panelOpen)
+  const terminalPanelHeightPct = useTerminalStore((s) => s.panelHeightPct)
 
   // Bridge native-menu `menu://<id>` events into renderer actions. Must run
   // even when the in-app Menubar would render in its hamburger form so the
@@ -103,12 +111,24 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <WindowFocusTracker />
       <WindowResizeEdges />
       <ZoomShortcuts />
+      <TerminalToggleShortcut />
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
         {!guildRailCollapsed && (
           <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
         )}
-        <div className="flex min-w-0 flex-1 overflow-hidden">{children}</div>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+          {terminalPanelOpen ? (
+            <div
+              data-testid="terminal-dock-region"
+              className="min-h-0 shrink-0"
+              style={{ height: `${terminalPanelHeightPct}%` }}
+            >
+              <TerminalDock />
+            </div>
+          ) : null}
+        </div>
         {/*
          * VS Code extension host bar — hosts webviews + terminals from
          * any activated extension. Returns `null` until an extension

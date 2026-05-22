@@ -152,4 +152,37 @@ describe("PluginCard", () => {
     await user.click(menuTrigger!)
     expect(screen.queryByText("rollback")).not.toBeInTheDocument()
   })
+
+  it("renders capability chips with inline contribution counts when manifest provides them", () => {
+    const cb = callbacks()
+    render(
+      <PluginCard
+        plugin={{
+          ...baseRow,
+          capabilities: ["tools"],
+          manifest: {
+            ...baseRow.manifest,
+            tools: [{ id: "a" }, { id: "b" }, { id: "c" }],
+          },
+        }}
+        selected={false}
+        {...cb}
+      />
+    )
+    expect(screen.getByText("tools · 3")).toBeInTheDocument()
+  })
+
+  it("tags the errored card with data-errored and a destructive tint", () => {
+    const cb = callbacks()
+    const { container } = render(
+      <PluginCard
+        plugin={{ ...baseRow, status: "error", error: "boom" }}
+        selected={false}
+        {...cb}
+      />
+    )
+    const card = container.querySelector('[data-errored="true"]') as HTMLElement
+    expect(card).toBeTruthy()
+    expect(card.className).toContain("bg-destructive/5")
+  })
 })

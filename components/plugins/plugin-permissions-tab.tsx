@@ -133,12 +133,17 @@ export function PluginPermissionsTab() {
 
 function BulkReview({ rows, onOpen }: { rows: PluginRow[]; onOpen: (id: string) => void }) {
   const t = useTranslations("plugins.permissions")
-  if (rows.length === 0) return null
+  const permissioned = rows.filter((row) => {
+    const declared = (row.manifest as { permissions?: unknown[] }).permissions ?? []
+    const optional = (row.manifest as { optionalPermissions?: unknown[] }).optionalPermissions ?? []
+    return declared.length + optional.length > 0
+  })
+  if (permissioned.length === 0) return null
   return (
     <Card className="p-3 space-y-2">
       <p className="text-xs font-medium text-muted-foreground">{t("bulkHeading")}</p>
       <div className="flex flex-wrap gap-1.5">
-        {rows.map((row) => (
+        {permissioned.map((row) => (
           <Button
             key={row.id}
             size="sm"

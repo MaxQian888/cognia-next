@@ -17,7 +17,13 @@ import type {
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin"
 import { loggers } from "../core/logger"
-import type { PluginHooksAll, HookSandboxExecutionResult } from "@/types/plugin/plugin-hooks"
+import type {
+  PluginHooksAll,
+  HookSandboxExecutionResult,
+  PluginTerminalSpawnRequest,
+  PluginTerminalSpawnDecision,
+  PluginTerminalLifecycleEvent,
+} from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
@@ -1633,6 +1639,51 @@ export class PluginEventHooks {
     const results = await this.executeHook("onShortcut", (hooks) => hooks.onShortcut?.(shortcut))
 
     return results.some((r) => r.success && r.result === true)
+  }
+
+  // =============================================================================
+  // Terminal Hooks (plan: vscode-vivid-wilkinson)
+  // =============================================================================
+
+  /**
+   * Pre-spawn veto/modify gate for the integrated terminal dock.
+   *
+   * Each subscribed plugin sees the (possibly already-mutated) request
+   * and returns a decision. The first `"deny"` short-circuits. Mutations
+   * chain. `"allow"`, `void`, and undefined are equivalent. Hook errors
+   * and timeouts default to `"allow"` so a buggy plugin never wedges the
+   * dock.
+   */
+  async dispatchTerminalWillSpawn(
+    initial: PluginTerminalSpawnRequest
+  ): Promise<{ decision: "allow" | "deny"; req: PluginTerminalSpawnRequest }> {
+    let req = { ...initial }
+    const results = await this.executeHook("onTerminalWillSpawn", (hooks) =>
+      hooks.onTerminalWillSpawn?.(req)
+    )
+    for (const r of results) {
+      if (!r.success) continue
+      const value = r.result as PluginTerminalSpawnDecision | undefined
+      if (value === undefined || value === "allow") continue
+      if (value === "deny") {
+        return { decision: "deny", req }
+      }
+      // Mutation — the plugin returned a fresh request shape. Subsequent
+      // plugins (within this same dispatch) saw the pre-mutation form,
+      // which is acceptable: the dispatcher already collected all
+      // promises before iterating. Downstream callers re-call dispatch
+      // if they want plugins to see the post-mutation form.
+      req = { ...req, ...value }
+    }
+    return { decision: "allow", req }
+  }
+
+  /**
+   * Fire-and-forget terminal lifecycle event for audit / activity-log
+   * plugins. Never blocks the dock.
+   */
+  dispatchTerminalLifecycle(event: PluginTerminalLifecycleEvent): void {
+    this.executeHook("onTerminalLifecycle", (hooks) => hooks.onTerminalLifecycle?.(event))
   }
 
   async dispatchContextMenuShow(context: {

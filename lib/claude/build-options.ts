@@ -9,7 +9,7 @@
 
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
-import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
+import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
@@ -299,7 +299,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // --- Resolve the active character -----------------------------------------
   let character = ctx.character ?? null
   if (!character && session?.characterId) {
-    character = (await getCharacter(session.characterId)) ?? null
+    // ADR-0030: resolveCharacterById falls through to the plugin-overlay
+    // pack registry when the id is a synthetic `cognia-pack:` runtime id,
+    // so a session bound to a plugin-contributed character keeps working
+    // without a Dexie row.
+    character = (await resolveCharacterById(session.characterId)) ?? null
   }
 
   // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
@@ -855,11 +859,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // the native-anthropic-tool registry.
   try {
     const { applyComputerUseTools } = await import("@/lib/claude/computer-use-tools")
+    // ADR-0020 W3 — read the live Rust gate tier ahead of the call so
+    // `chatConsentMode: "auto"` can decide whether to suppress the
+    // chat modal in favour of the Rust overlay. Best-effort: any
+    // failure (web mode, IPC hiccup, gate misread) falls through to
+    // an undefined tier, in which case `applyComputerUseTools` treats
+    // `auto` as `always-ask` (the safe default).
+    let computerUseGateTier: "off" | "whitelist" | "perCall" | undefined
+    try {
+      const [{ desktop }, { isTauri }] = await Promise.all([
+        import("@/lib/automation/client"),
+        import("@/lib/tauri"),
+      ])
+      if (isTauri()) {
+        const settings = await desktop.settingsGet()
+        computerUseGateTier = settings.perSurface?.computerUse?.tier
+      }
+    } catch {
+      // Silent fallthrough — undefined tier short-circuits to safe default.
+    }
     const applied = applyComputerUseTools({
       character,
       opts,
       imSession,
       allowImComputerUse,
+      // ADR-0020 W3 — session id flows in so the per-session grant
+      // lookup can suppress redundant chat modals when the operator
+      // chose `chatConsentMode: "session-grant"`.
+      sessionId: session?.id,
+      computerUseGateTier,
     })
     Object.assign(opts, applied.opts)
   } catch {

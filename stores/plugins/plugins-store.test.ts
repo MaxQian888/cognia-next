@@ -26,6 +26,7 @@ const RESET = {
   configTarget: null,
   importStaging: null,
   deleteTarget: null,
+  deleteQueue: [],
   permissionReviewTarget: null,
   conflictDialogTarget: null,
   rollbackTarget: null,
@@ -51,6 +52,7 @@ describe("usePluginsStore", () => {
     expect(result.current.configTarget).toBeNull()
     expect(result.current.importStaging).toBeNull()
     expect(result.current.deleteTarget).toBeNull()
+    expect(result.current.deleteQueue).toEqual([])
     expect(result.current.permissionReviewTarget).toBeNull()
     expect(result.current.conflictDialogTarget).toBeNull()
     expect(result.current.rollbackTarget).toBeNull()
@@ -319,6 +321,58 @@ describe("usePluginsStore", () => {
       })
       act(() => result.current.setDeleteTarget(null))
       expect(result.current.deleteTarget).toBeNull()
+    })
+
+    it("enqueueDeleteTargets pops the head into deleteTarget and stores the rest", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() =>
+        result.current.enqueueDeleteTargets([
+          { pluginId: "a", name: "A" },
+          { pluginId: "b", name: "B" },
+          { pluginId: "c", name: "C" },
+        ])
+      )
+      expect(result.current.deleteTarget).toEqual({ pluginId: "a", name: "A" })
+      expect(result.current.deleteQueue).toEqual([
+        { pluginId: "b", name: "B" },
+        { pluginId: "c", name: "C" },
+      ])
+    })
+
+    it("enqueueDeleteTargets with an empty list clears both target and queue", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() => result.current.setDeleteTarget({ pluginId: "x", name: "X" }))
+      act(() => result.current.enqueueDeleteTargets([]))
+      expect(result.current.deleteTarget).toBeNull()
+      expect(result.current.deleteQueue).toEqual([])
+    })
+
+    it("advanceDeleteQueue walks the queue until it's empty, then clears", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() =>
+        result.current.enqueueDeleteTargets([
+          { pluginId: "a", name: "A" },
+          { pluginId: "b", name: "B" },
+        ])
+      )
+      act(() => result.current.advanceDeleteQueue())
+      expect(result.current.deleteTarget).toEqual({ pluginId: "b", name: "B" })
+      expect(result.current.deleteQueue).toEqual([])
+      act(() => result.current.advanceDeleteQueue())
+      expect(result.current.deleteTarget).toBeNull()
+    })
+
+    it("clearDeleteQueue drops pending entries without clearing the active target", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() =>
+        result.current.enqueueDeleteTargets([
+          { pluginId: "a", name: "A" },
+          { pluginId: "b", name: "B" },
+        ])
+      )
+      act(() => result.current.clearDeleteQueue())
+      expect(result.current.deleteTarget).toEqual({ pluginId: "a", name: "A" })
+      expect(result.current.deleteQueue).toEqual([])
     })
 
     it("openPermissionReview / closePermissionReview toggle the review dialog", () => {

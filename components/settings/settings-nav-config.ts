@@ -59,6 +59,7 @@ export type SettingsSectionId =
   | "tools"
   | "search"
   | "appearance"
+  | "terminal"
   | "speech"
   | "characters"
   | "skills"
@@ -275,6 +276,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "speech",
     group: "interface",
     icon: Volume2Icon,
+  },
+  {
+    id: "terminal",
+    labelKey: "terminal",
+    descriptionKey: "terminal",
+    group: "interface",
+    icon: TerminalSquareIcon,
+    desktopOnly: true,
   },
   {
     id: "presets",
@@ -599,6 +608,25 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "research",
   ],
   appearance: ["theme", "dark", "light", "font", "language"],
+  terminal: [
+    "terminal",
+    "shell",
+    "pty",
+    "bash",
+    "zsh",
+    "pwsh",
+    "powershell",
+    "xterm",
+    "ConPTY",
+    "scrollback",
+    "shell integration",
+    "OSC 633",
+    "vscode terminal",
+    "集成终端",
+    "命令行",
+    "终端",
+    "外壳",
+  ],
   canvas: [
     "canvas",
     "monaco",

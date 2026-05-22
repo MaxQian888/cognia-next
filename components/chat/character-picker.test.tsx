@@ -1,6 +1,15 @@
 // Coverage for character-picker after the data-hooks refactor — verifies the
 // component reads characters via DataAdapter (no direct Dexie call) and that
-// `onPick` / `onOpenChange` fire correctly.
+// `onPick` / `onOpenChange` fire correctly. ADR-0030 added group headings
+// driven by plugin attribution.
+
+// Stub the plugin store so the picker can resolve "From <plugin name>"
+// labels without booting the real Zustand store + manager.
+let pluginsState: Record<string, { id: string; manifest: { name?: string } }> = {}
+jest.mock("@/stores/plugin/plugin-store", () => ({
+  usePluginStore: <T,>(selector: (s: { plugins: typeof pluginsState }) => T) =>
+    selector({ plugins: pluginsState }),
+}))
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { ReactNode } from "react"
@@ -88,5 +97,44 @@ describe("CharacterPicker", () => {
       </DataAdapterProvider>
     )
     expect(screen.queryByRole("option")).toBeNull()
+  })
+
+  it("groups characters by source (ADR-0030): built-in / plugin / user", () => {
+    pluginsState = { "plug-a": { id: "plug-a", manifest: { name: "Plug A" } } }
+    const builtIn: Character = {
+      ...mkChar("Built", "char_builtin_x"),
+      isBuiltIn: true,
+    }
+    const overlay: Character = {
+      ...mkChar("Plugin Alice", "cognia-pack:plug-a:workplace:alice"),
+      sourcePluginId: "plug-a",
+    }
+    const user = mkChar("User Bob", "char_user_bob")
+
+    const Wrapper = withAdapter(makeAdapter([builtIn, overlay, user]))
+    render(
+      <Wrapper>
+        <CharacterPicker open onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+
+    expect(screen.getByText("Built")).toBeInTheDocument()
+    expect(screen.getByText("Plugin Alice")).toBeInTheDocument()
+    expect(screen.getByText("User Bob")).toBeInTheDocument()
+  })
+
+  it("renders a local-file group heading for synthetic ids without a registered plugin", () => {
+    pluginsState = {}
+    const localOverlay: Character = {
+      ...mkChar("Local Carol", "cognia-pack:local:imported:tinypack:carol"),
+      sourcePluginId: "local:imported",
+    }
+    const Wrapper = withAdapter(makeAdapter([localOverlay]))
+    render(
+      <Wrapper>
+        <CharacterPicker open onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    expect(screen.getByText("Local Carol")).toBeInTheDocument()
   })
 })

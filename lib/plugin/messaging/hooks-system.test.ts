@@ -714,6 +714,119 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
       }).not.toThrow()
     })
   })
+
+  describe("Terminal dispatchers", () => {
+    const baseReq = {
+      shell: "/bin/bash",
+      rows: 24,
+      cols: 80,
+      projectId: "proj-a",
+    } as const
+
+    it("returns allow + original req when no plugins are registered", async () => {
+      usePluginStore.getState.mockReturnValue({ plugins: {} })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("allow")
+      expect(out.req).toEqual({ ...baseReq })
+    })
+
+    it("returns allow when the only subscriber returns 'allow'", async () => {
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          "allow-plugin": {
+            status: "enabled",
+            hooks: { onTerminalWillSpawn: () => "allow" as const },
+          },
+        },
+      })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("allow")
+    })
+
+    it("short-circuits to deny when any subscriber returns 'deny'", async () => {
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          "deny-plugin": {
+            status: "enabled",
+            hooks: { onTerminalWillSpawn: () => "deny" as const },
+          },
+        },
+      })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("deny")
+    })
+
+    it("merges mutations from a subscriber into the resolved request", async () => {
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          mutator: {
+            status: "enabled",
+            hooks: {
+              onTerminalWillSpawn: () => ({
+                ...baseReq,
+                shell: "/usr/local/bin/fish",
+                cwd: "/tmp/forced",
+              }),
+            },
+          },
+        },
+      })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("allow")
+      expect(out.req.shell).toBe("/usr/local/bin/fish")
+      expect(out.req.cwd).toBe("/tmp/forced")
+    })
+
+    it("treats undefined / void returns as allow", async () => {
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          silent: {
+            status: "enabled",
+            hooks: { onTerminalWillSpawn: () => undefined },
+          },
+        },
+      })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("allow")
+    })
+
+    it("treats hook errors as allow (never wedges the dock)", async () => {
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          buggy: {
+            status: "enabled",
+            hooks: {
+              onTerminalWillSpawn: () => {
+                throw new Error("boom")
+              },
+            },
+          },
+        },
+      })
+      const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
+      expect(out.decision).toBe("allow")
+    })
+
+    it("dispatchTerminalLifecycle fans out without blocking", () => {
+      const handler = jest.fn()
+      usePluginStore.getState.mockReturnValue({
+        plugins: {
+          audit: {
+            status: "enabled",
+            hooks: { onTerminalLifecycle: handler },
+          },
+        },
+      })
+      eventHooks.dispatchTerminalLifecycle({
+        kind: "spawned",
+        sessionId: "sess-1",
+        projectId: "proj-a",
+      })
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "spawned", sessionId: "sess-1" })
+      )
+    })
+  })
 })
 
 describe("HookDispatcher deterministic ordering", () => {

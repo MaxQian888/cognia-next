@@ -4,6 +4,7 @@ import { useCallback, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
+import { CharacterMissingBanner } from "./character-missing-banner"
 import { EmptyChatState } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
@@ -105,6 +106,11 @@ export function ChatPane({
           onOpenSettings={() => onOpenSettings("api-key")}
         />
       )}
+      {/* ADR-0030 — surfaces a destructive Alert when session.characterId
+          no longer resolves (plugin disabled, local pack deleted). Renders
+          nothing when the character resolves or the id is a plain Dexie
+          row that's simply missing. */}
+      <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
       <ExternalAgentSessionPanel />
       {messages.length === 0 ? (
         <EmptyChatState

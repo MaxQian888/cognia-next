@@ -18,6 +18,7 @@ import { gitTools } from "./git.mjs"
 import { processTools } from "./process.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
+import { terminalDockTools } from "./terminal-dock-tool.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -26,6 +27,12 @@ const TOOLS_BY_CATEGORY = {
   process: processTools,
   environment: environmentTools,
   shellAdvanced: shellAdvancedTools,
+  /**
+   * Wave 3D: agent-facing dock terminal. Gated by the
+   * `terminal.exposeDockToAgents` settings flag — the renderer passes
+   * the flag's value into `enabled.terminalDock` at server-build time.
+   */
+  terminalDock: terminalDockTools,
 }
 
 /**

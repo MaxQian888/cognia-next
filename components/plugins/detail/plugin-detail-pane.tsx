@@ -12,10 +12,11 @@
 // old PluginDetail's `key={pluginId}` semantics.
 
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
-import { getPlugin } from "@/lib/db/plugins"
+import { Skeleton } from "@/components/ui/skeleton"
+import { usePluginRow } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginDetailEmpty } from "./plugin-detail-empty"
+import { PluginDetailHeader } from "./plugin-detail-header"
 import { PluginDetailTabs } from "./plugin-detail-tabs"
 import { PluginDetailOverview } from "./plugin-detail-overview"
 import { PluginDetailCapabilities } from "./plugin-detail-capabilities"
@@ -34,26 +35,38 @@ export function PluginDetailPane() {
 
 function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const rowState = usePluginRow(pluginId)
   const subTab = usePluginsStore((s) => s.detailSubTab)
 
-  if (!plugin) {
+  if (rowState.state === "loading") {
+    return (
+      <div
+        className="flex h-full min-h-0 flex-col"
+        data-testid="plugin-detail-pane-loading"
+        aria-busy="true"
+      >
+        <header className="shrink-0 border-b px-4 py-3 space-y-2">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-3 w-full" />
+        </header>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      </div>
+    )
+  }
+
+  if (rowState.state === "not-found") {
     return <p className="text-sm text-muted-foreground p-4">{t("notFound")}</p>
   }
 
+  const plugin = rowState.row
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="shrink-0 border-b px-4 py-3 space-y-1">
-        <h2 className="text-base font-semibold">
-          {plugin.name}{" "}
-          <span className="text-muted-foreground text-sm font-normal">v{plugin.version}</span>
-        </h2>
-        {(plugin.manifest as { description?: string }).description ? (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {(plugin.manifest as { description?: string }).description}
-          </p>
-        ) : null}
-      </header>
+      <PluginDetailHeader plugin={plugin} />
 
       <PluginDetailTabs />
 

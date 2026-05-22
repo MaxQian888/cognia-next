@@ -20,7 +20,30 @@ import {
   computeAnthropicBetaHeaders,
   listNativeAnthropicToolEntries,
 } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { hasSessionGrant } from "@/lib/claude/computer-use-session-grants"
+import {
+  clearActiveComputerUseSettings,
+  setActiveComputerUseSettings,
+} from "@/lib/claude/computer-use-active-settings"
 import type { Character, SendOptions } from "@/lib/claude/types"
+
+/**
+ * ADR-0020 W3 — plugin tool names that the chat-side `canUseTool` modal
+ * can suppress when a session grant is present (or the operator chose
+ * `chatConsentMode: "auto"`). Mirror of the constant in
+ * `hooks/chat/use-claude-chat.ts` — kept in two places because both
+ * sides have to agree on the name set and the file boundary makes
+ * sharing awkward (a third lib file just for one constant would be
+ * worse than the duplication, and the names rarely change).
+ */
+const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
+  "computer_use",
+  "bash",
+  "text_editor",
+  "mcp__cognia-plugin-tools__computer_use",
+  "mcp__cognia-plugin-tools__bash",
+  "mcp__cognia-plugin-tools__text_editor",
+] as const
 
 export interface ApplyComputerUseInput {
   character: Character | null | undefined
@@ -36,6 +59,25 @@ export interface ApplyComputerUseInput {
    */
   imSession?: boolean
   allowImComputerUse?: boolean
+  /**
+   * ADR-0020 W3 — chat session id, used to look up per-session grants
+   * when `Character.computerUseSettings.chatConsentMode === "session-grant"`.
+   * Optional because non-chat callers (workflow nodes, MCP) never
+   * accumulate session grants. When unset the grant lookup short-circuits
+   * and no tools are suppressed.
+   */
+  sessionId?: string
+  /**
+   * ADR-0020 W3 — live Rust gate tier for the `computerUse` surface
+   * (`"off"` / `"whitelist"` / `"perCall"`). Required for
+   * `chatConsentMode: "auto"` to make a decision: when the Rust gate
+   * is at `perCall`, the chat-side modal is suppressed so only the
+   * floating overlay fires (the user-confirmed "Rust overlay wins"
+   * design from Round 2). build-options.ts fetches it via
+   * `desktop.settingsGet()` ahead of the call and forwards. Optional
+   * because non-Tauri / non-chat callers can't observe the gate.
+   */
+  computerUseGateTier?: "off" | "whitelist" | "perCall"
 }
 
 export interface ApplyComputerUseResult {
@@ -56,7 +98,22 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
   const { character } = input
   const opts = { ...input.opts }
   if (!character?.enableComputerUse) {
+    // Drop any stale cached settings for this session — disabling
+    // Computer Use mid-session must not leave a force-tier zombie
+    // around for the plugin executor to pick up.
+    if (input.sessionId) clearActiveComputerUseSettings(input.sessionId)
     return { opts, attachedCount: 0 }
+  }
+  // ADR-0020 W1 audit-fix — stash the active character's
+  // computerUseSettings so the chat-path plugin executor in
+  // `plugins/computer-use/src/index.ts` can stamp
+  // `ctx.forceTier: "perCall"` on every Tauri dispatch when the
+  // operator chose `requireConsent: true`. Without this the Rust
+  // CallContext.force_tier field was wired but never received a value
+  // from the chat path (the Claude Code SDK ignores
+  // `opts.anthropicTools` so the field on that surface is dead).
+  if (input.sessionId && character.computerUseSettings) {
+    setActiveComputerUseSettings(input.sessionId, character.computerUseSettings)
   }
   // G6 IM blacklist — short-circuit before the registry walk so even a
   // character that has Computer Use globally enabled can't fire native
@@ -85,7 +142,43 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
   // so the Rust gate upgrades the next dispatch to RequireConsent.
   const settings = character.computerUseSettings
   const forceTier: "perCall" | undefined = settings?.requireConsent === true ? "perCall" : undefined
-  opts.computerUseConsentMode = settings?.chatConsentMode ?? "always-ask"
+  const consentMode = settings?.chatConsentMode ?? "always-ask"
+  opts.computerUseConsentMode = consentMode
+
+  // ADR-0020 W3 — chat-modal suppression.
+  //
+  // Two consent modes can suppress the redundant chat-side prompt:
+  //
+  //   - `session-grant`: suppress when the operator has already
+  //     approved this specific tool earlier in the session. The chat
+  //     store's `respondToApproval` writes grants on the first allow;
+  //     subsequent turns inside the same session skip the modal.
+  //   - `auto`: defer to the Rust gate. When the live `computerUse`
+  //     surface tier is `perCall`, the floating overlay alone gates the
+  //     call (Round-2 user-confirmed "Rust overlay wins"); we add every
+  //     computer-use plugin tool to the suppress list so the chat modal
+  //     stays out of the way. Other tiers (`off` / `whitelist`) leave
+  //     the chat modal to do its normal job — the gate either denies
+  //     (chat modal will report) or pre-approves silently (chat modal
+  //     is the only prompt the operator can see).
+  //
+  // Both modes union into `opts.suppressApprovalForTools` so the
+  // sidecar's `canUseTool` short-circuit treats them identically.
+  const grantSuppressions =
+    consentMode === "session-grant" && input.sessionId
+      ? COMPUTER_USE_PLUGIN_TOOL_NAMES.filter((toolName) =>
+          hasSessionGrant(input.sessionId!, toolName)
+        )
+      : []
+  const autoSuppressions =
+    consentMode === "auto" && input.computerUseGateTier === "perCall"
+      ? [...COMPUTER_USE_PLUGIN_TOOL_NAMES]
+      : []
+  if (grantSuppressions.length > 0 || autoSuppressions.length > 0) {
+    const existing = opts.suppressApprovalForTools ?? []
+    const dedup = new Set([...existing, ...grantSuppressions, ...autoSuppressions])
+    opts.suppressApprovalForTools = Array.from(dedup)
+  }
 
   // Map registry entries → wire shape. The renderer-only `executeIpc.invoke`
   // string travels with each tool so the sidecar can route `tool_use`

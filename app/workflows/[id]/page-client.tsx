@@ -72,7 +72,7 @@ export function WorkflowEditorPageClient({ params }: PageProps) {
   }
 
   return (
-    <div className="h-full w-full overflow-hidden">
+    <div className="h-full w-full overflow-hidden" data-bg-target="canvas">
       <WorkflowEditorCanvas workflow={workflow} />
     </div>
   )

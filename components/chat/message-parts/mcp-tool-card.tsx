@@ -23,6 +23,7 @@ import { RuntimeQueryCard } from "./mcp-renderers/runtime-query-card"
 import { PlanCard } from "./mcp-renderers/plan-card"
 import { ReadCard } from "./mcp-renderers/read-card"
 import { GlobCard } from "./mcp-renderers/glob-card"
+import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
 type CardComponent = (props: { part: ToolUIPart }) => React.JSX.Element | null
@@ -41,6 +42,12 @@ const REGISTRY: Record<string, CardComponent> = {
   // share the same payload shape: { proposalId, summary, opCount, ... }).
   wf_propose_batch: WorkflowProposalCard,
   wf_apply_template: WorkflowProposalCard,
+  // ADR-0020 W3 — Computer Use plugin MCP tool. Inline screenshot
+  // rendering + compact action chip. Registered under both the bare
+  // `computer_use` name and the cognia-plugin-tools-prefixed name so
+  // both sidecar bridge variants land on the same card.
+  computer_use: ComputerUseCard,
+  "mcp__cognia-plugin-tools__computer_use": ComputerUseCard,
 }
 
 export function isStructuredMcpToolType(type: string): boolean {

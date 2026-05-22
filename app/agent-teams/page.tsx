@@ -241,6 +241,7 @@ export default function AgentTeamsListPage() {
     <div
       className="mx-auto h-full w-full max-w-6xl space-y-6 overflow-y-auto p-4 sm:p-6"
       data-testid="agent-teams-list-page"
+      data-bg-target="chat"
     >
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -8,13 +8,16 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
-import { CodeIcon, RotateCcwIcon } from "lucide-react"
+import { CheckCircle2Icon, CodeIcon, RotateCcwIcon, ShieldAlertIcon } from "lucide-react"
 
-import { getPlugin } from "@/lib/db/plugins"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
+import { usePluginRow } from "@/hooks/plugins"
+import { usePluginStore } from "@/stores/plugin/plugin-store"
+import type { PluginVerificationSnapshot } from "@/types/plugin"
 import {
   Dialog,
   DialogContent,
@@ -35,12 +38,30 @@ interface ManifestShape {
 
 export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const rowState = usePluginRow(pluginId)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
   const [manifestOpen, setManifestOpen] = useState(false)
+  // verificationSnapshot / lastKnownGoodVerification live on the in-memory
+  // PluginManager store, not the Dexie row — subscribe directly so the
+  // Overview surfaces "last successful state" without needing a schema
+  // change to PluginRow.
+  const verificationSnapshot = usePluginStore((s) => s.plugins[pluginId]?.verificationSnapshot)
+  const lastKnownGoodVerification = usePluginStore(
+    (s) => s.plugins[pluginId]?.lastKnownGoodVerification
+  )
 
-  if (!plugin) return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
-
+  if (rowState.state === "loading") {
+    return (
+      <div className="space-y-3" data-testid="plugin-detail-overview-loading" aria-busy="true">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-20 w-full" />
+      </div>
+    )
+  }
+  if (rowState.state === "not-found") {
+    return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
+  }
+  const plugin = rowState.row
   const manifest = plugin.manifest as ManifestShape
   const author =
     typeof manifest.author === "string" ? manifest.author : (manifest.author?.name ?? "")
@@ -111,12 +132,98 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
         </Card>
       )}
 
+      <VerificationCard
+        current={verificationSnapshot}
+        lastGood={lastKnownGoodVerification}
+        onRollback={() => setRollbackTarget(plugin.id)}
+      />
+
       {plugin.error && (
         <Card className="border-destructive p-3 space-y-1">
           <div className="text-xs font-semibold text-destructive">{t("metaError")}</div>
           <div className="text-xs text-destructive">{plugin.error}</div>
         </Card>
       )}
+    </div>
+  )
+}
+
+interface VerificationCardProps {
+  current: PluginVerificationSnapshot | undefined
+  lastGood: PluginVerificationSnapshot | undefined
+  onRollback: () => void
+}
+
+function VerificationCard({ current, lastGood, onRollback }: VerificationCardProps) {
+  const t = useTranslations("plugins.detail.verification")
+  if (!current && !lastGood) return null
+  // "Drifted" — last good differs from current OR current is in a failure
+  // state. Surfaces a rollback CTA only when there's actually a last-good
+  // snapshot to roll back to.
+  const drifted =
+    !!lastGood &&
+    !!current &&
+    (current.status !== lastGood.status ||
+      current.lastFailureAt !== undefined ||
+      current.lastVerifiedAt !== lastGood.lastVerifiedAt)
+
+  return (
+    <Card className="p-3 space-y-2" data-testid="plugin-detail-verification-card">
+      <div className="flex items-center gap-2">
+        {drifted ? (
+          <ShieldAlertIcon className="size-4 text-amber-600" />
+        ) : (
+          <CheckCircle2Icon className="size-4 text-emerald-600" />
+        )}
+        <div className="text-xs font-semibold">{t("title")}</div>
+      </div>
+      {current && <VerificationRow label={t("current")} snapshot={current} highlight={drifted} />}
+      {lastGood && lastGood.lastVerifiedAt !== current?.lastVerifiedAt && (
+        <VerificationRow label={t("lastGood")} snapshot={lastGood} />
+      )}
+      {drifted && (
+        <div className="pt-1">
+          <Button size="sm" variant="outline" onClick={onRollback}>
+            <RotateCcwIcon className="size-3.5 mr-1.5" />
+            {t("rollbackTo", { version: lastGood?.resolvedVersion ?? "" })}
+          </Button>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function VerificationRow({
+  label,
+  snapshot,
+  highlight,
+}: {
+  label: string
+  snapshot: PluginVerificationSnapshot
+  highlight?: boolean
+}) {
+  const t = useTranslations("plugins.detail.verification")
+  return (
+    <div className="flex items-start justify-between gap-3 text-xs">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <div className="flex flex-wrap items-center gap-1.5 justify-end">
+        <Badge variant={highlight ? "destructive" : "outline"} className="text-[10px]">
+          {snapshot.status}
+        </Badge>
+        <Badge variant="outline" className="text-[10px]">
+          {snapshot.verificationStage}
+        </Badge>
+        {snapshot.resolvedVersion && (
+          <span className="font-mono text-muted-foreground">v{snapshot.resolvedVersion}</span>
+        )}
+        <span className="text-muted-foreground">
+          {snapshot.lastSuccessfulAt
+            ? t("lastSuccessfulAt", { date: snapshot.lastSuccessfulAt })
+            : snapshot.lastFailureAt
+              ? t("lastFailureAt", { date: snapshot.lastFailureAt })
+              : t("verifiedAt", { date: snapshot.lastVerifiedAt })}
+        </span>
+      </div>
     </div>
   )
 }

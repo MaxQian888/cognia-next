@@ -1,0 +1,346 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import {
+  useTerminalStore,
+  TERMINAL_LAYOUT_DEFAULTS,
+  TERMINAL_LAYOUT_BOUNDS,
+  TERMINAL_HISTORY_RING_SIZE,
+  TERMINAL_PROMPT_RING_SIZE,
+  displayTitle,
+} from "./terminal-store"
+import type { SessionInfo } from "@/lib/terminal/types"
+
+function baseInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
+  return {
+    id: "s-1",
+    projectId: "proj-a",
+    extensionId: null,
+    origin: "local",
+    shell: "/bin/bash",
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  useTerminalStore.getState().reset()
+})
+
+describe("dock layout state", () => {
+  it("starts with defaults", () => {
+    expect(useTerminalStore.getState().panelOpen).toBe(TERMINAL_LAYOUT_DEFAULTS.panelOpen)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelHeightPct)
+  })
+
+  it("toggles panelOpen", () => {
+    const start = useTerminalStore.getState().panelOpen
+    useTerminalStore.getState().togglePanel()
+    expect(useTerminalStore.getState().panelOpen).toBe(!start)
+    useTerminalStore.getState().togglePanel()
+    expect(useTerminalStore.getState().panelOpen).toBe(start)
+  })
+
+  it("clamps panelHeight within bounds", () => {
+    useTerminalStore.getState().setPanelHeight(99)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
+    useTerminalStore.getState().setPanelHeight(0)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMinPct)
+  })
+})
+
+describe("session registry", () => {
+  it("registers a new session and makes it active for its project", () => {
+    useTerminalStore.getState().registerSession(baseInfo())
+    const state = useTerminalStore.getState()
+    expect(state.sessions["s-1"]).toMatchObject({
+      id: "s-1",
+      projectId: "proj-a",
+      status: "idle",
+      shell: "/bin/bash",
+    })
+    expect(state.getActiveSession("proj-a")).toBe("s-1")
+  })
+
+  it("derives a sensible title from the shell path", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ shell: "/usr/local/bin/zsh" }))
+    expect(useTerminalStore.getState().sessions["s-1"]?.title).toBe("zsh")
+  })
+
+  it("title strips .exe on Windows shells", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "s-w", shell: "C:\\Windows\\System32\\pwsh.exe" }))
+    expect(useTerminalStore.getState().sessions["s-w"]?.title).toBe("pwsh")
+  })
+
+  it("title prefixes extensionId when present", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "s-ext", extensionId: "cline.cline", shell: "/bin/bash" }))
+    expect(useTerminalStore.getState().sessions["s-ext"]?.title).toContain("cline.cline")
+  })
+
+  it("removeSession drops the row and falls back to the next-most-recent tab", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "s-1" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "s-2" }))
+    useTerminalStore.getState().setActiveSession("proj-a", "s-2")
+    useTerminalStore.getState().removeSession("s-2")
+    expect(useTerminalStore.getState().sessions["s-2"]).toBeUndefined()
+    expect(useTerminalStore.getState().getActiveSession("proj-a")).toBe("s-1")
+  })
+
+  it("removeSession on the last tab clears the active pointer", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "s-1" }))
+    useTerminalStore.getState().removeSession("s-1")
+    expect(useTerminalStore.getState().getActiveSession("proj-a")).toBeNull()
+  })
+
+  it("setSessionStatus updates only the matching row", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().setSessionStatus("a", "running")
+    expect(useTerminalStore.getState().sessions["a"]?.status).toBe("running")
+    expect(useTerminalStore.getState().sessions["b"]?.status).toBe("idle")
+  })
+
+  it("setSessionExit flips status to exited and records the code", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().setSessionExit("a", 1)
+    expect(useTerminalStore.getState().sessions["a"]?.status).toBe("exited")
+    expect(useTerminalStore.getState().sessions["a"]?.exitCode).toBe(1)
+  })
+
+  it("setSessionCwd updates the cwd field", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().setSessionCwd("a", "/tmp/foo")
+    expect(useTerminalStore.getState().sessions["a"]?.cwd).toBe("/tmp/foo")
+  })
+
+  it("setSessionTitle replaces the title", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().setSessionTitle("a", "Build · cargo run")
+    expect(useTerminalStore.getState().sessions["a"]?.title).toBe("Build · cargo run")
+  })
+
+  it("ignores updates targeting unknown session ids", () => {
+    useTerminalStore.getState().setSessionStatus("ghost", "running")
+    useTerminalStore.getState().setSessionExit("ghost", 0)
+    useTerminalStore.getState().setSessionCwd("ghost", "/tmp")
+    useTerminalStore.getState().setSessionTitle("ghost", "Phantom")
+    expect(useTerminalStore.getState().sessions["ghost"]).toBeUndefined()
+  })
+})
+
+describe("project filtering", () => {
+  it("sessionsForProject returns only the matching project's tabs, sorted by createdAt", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a", projectId: "proj-a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b", projectId: "proj-b" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "c", projectId: "proj-a" }))
+    const a = useTerminalStore
+      .getState()
+      .sessionsForProject("proj-a")
+      .map((r) => r.id)
+    expect(a).toEqual(["a", "c"])
+  })
+
+  it("sessionsForProject handles null projectId (orphan tabs)", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "orphan", projectId: null }))
+    const rows = useTerminalStore.getState().sessionsForProject(null)
+    expect(rows.map((r) => r.id)).toEqual(["orphan"])
+  })
+
+  it("active session per project is independent", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a", projectId: "proj-a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b", projectId: "proj-b" }))
+    expect(useTerminalStore.getState().getActiveSession("proj-a")).toBe("a")
+    expect(useTerminalStore.getState().getActiveSession("proj-b")).toBe("b")
+  })
+})
+
+describe("reset", () => {
+  it("clears every session + restores layout defaults", () => {
+    useTerminalStore.getState().setPanelOpen(true)
+    useTerminalStore.getState().setPanelHeight(50)
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().reset()
+    expect(useTerminalStore.getState().panelOpen).toBe(TERMINAL_LAYOUT_DEFAULTS.panelOpen)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelHeightPct)
+    expect(useTerminalStore.getState().sessions).toEqual({})
+  })
+})
+
+describe("custom title (Rename)", () => {
+  it("renameSession sets customTitle and displayTitle prefers it", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().renameSession("a", "Build")
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.customTitle).toBe("Build")
+    expect(displayTitle(row)).toBe("Build")
+  })
+
+  it("renameSession with empty string clears the override", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().renameSession("a", "Build")
+    useTerminalStore.getState().renameSession("a", "")
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.customTitle).toBeNull()
+    expect(displayTitle(row)).toBe(row.title)
+  })
+
+  it("renameSession with whitespace-only clears the override", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().renameSession("a", "Build")
+    useTerminalStore.getState().renameSession("a", "   ")
+    expect(useTerminalStore.getState().sessions["a"]?.customTitle).toBeNull()
+  })
+
+  it("renameSession trims whitespace", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().renameSession("a", "  Build  ")
+    expect(useTerminalStore.getState().sessions["a"]?.customTitle).toBe("Build")
+  })
+
+  it("displayTitle falls back to auto title when customTitle is null", () => {
+    expect(displayTitle({ title: "zsh", customTitle: null })).toBe("zsh")
+  })
+})
+
+describe("agent trust + spawner", () => {
+  it("defaults to untrusted and no spawner", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.agentTrusted).toBe(false)
+    expect(row.agentSpawner).toBeNull()
+  })
+
+  it("registerSession can record an agentSpawner up front", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }), {
+      agentSpawner: "claude:sess-xyz",
+    })
+    expect(useTerminalStore.getState().sessions["a"]?.agentSpawner).toBe("claude:sess-xyz")
+  })
+
+  it("setAgentTrusted flips the flag", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().setAgentTrusted("a", true)
+    expect(useTerminalStore.getState().sessions["a"]?.agentTrusted).toBe(true)
+    useTerminalStore.getState().setAgentTrusted("a", false)
+    expect(useTerminalStore.getState().sessions["a"]?.agentTrusted).toBe(false)
+  })
+
+  it("setAgentSpawner can update or clear the spawner", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().setAgentSpawner("a", "claude:sess-xyz")
+    expect(useTerminalStore.getState().sessions["a"]?.agentSpawner).toBe("claude:sess-xyz")
+    useTerminalStore.getState().setAgentSpawner("a", null)
+    expect(useTerminalStore.getState().sessions["a"]?.agentSpawner).toBeNull()
+  })
+
+  it("sessionsForAgent returns only matching agentSpawner rows sorted by createdAt", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }), { agentSpawner: "agent-1" })
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }), { agentSpawner: "agent-2" })
+    useTerminalStore.getState().registerSession(baseInfo({ id: "c" }), { agentSpawner: "agent-1" })
+    const ids = useTerminalStore
+      .getState()
+      .sessionsForAgent("agent-1")
+      .map((r) => r.id)
+    expect(ids).toEqual(["a", "c"])
+  })
+
+  it("sessionsForAgent excludes user-spawned tabs (null spawner)", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "user" }))
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "agent" }), { agentSpawner: "agent-1" })
+    const ids = useTerminalStore
+      .getState()
+      .sessionsForAgent("agent-1")
+      .map((r) => r.id)
+    expect(ids).toEqual(["agent"])
+  })
+})
+
+describe("prompt boundaries (OSC 633 A/B)", () => {
+  it("pushPrompt appends an open boundary", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().pushPrompt("a", 1000)
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.promptBoundaries).toEqual([{ startMs: 1000 }])
+  })
+
+  it("closePrompt fills endMs on the tail boundary", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().pushPrompt("a", 1000)
+    useTerminalStore.getState().closePrompt("a", 1500)
+    expect(useTerminalStore.getState().sessions["a"]?.promptBoundaries).toEqual([
+      { startMs: 1000, endMs: 1500 },
+    ])
+  })
+
+  it("closePrompt on an already-closed tail is a no-op", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().pushPrompt("a", 1000)
+    useTerminalStore.getState().closePrompt("a", 1500)
+    useTerminalStore.getState().closePrompt("a", 9999)
+    expect(useTerminalStore.getState().sessions["a"]?.promptBoundaries).toEqual([
+      { startMs: 1000, endMs: 1500 },
+    ])
+  })
+
+  it("closePrompt with no boundaries is a no-op", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().closePrompt("a", 5000)
+    expect(useTerminalStore.getState().sessions["a"]?.promptBoundaries).toEqual([])
+  })
+
+  it("ring trims to TERMINAL_PROMPT_RING_SIZE", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    for (let i = 0; i < TERMINAL_PROMPT_RING_SIZE + 5; i++) {
+      useTerminalStore.getState().pushPrompt("a", i)
+    }
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.promptBoundaries.length).toBe(TERMINAL_PROMPT_RING_SIZE)
+    expect(row.promptBoundaries[0].startMs).toBe(5)
+    expect(row.promptBoundaries[row.promptBoundaries.length - 1].startMs).toBe(
+      TERMINAL_PROMPT_RING_SIZE + 4
+    )
+  })
+})
+
+describe("command history ring", () => {
+  it("pushCommand appends entries", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().pushCommand("a", { cmd: "ls", exitCode: 0, endedAt: 1 })
+    useTerminalStore.getState().pushCommand("a", { cmd: "pwd", exitCode: 0, endedAt: 2 })
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.lastCommands.map((r) => r.cmd)).toEqual(["ls", "pwd"])
+  })
+
+  it("ring trims to TERMINAL_HISTORY_RING_SIZE keeping the newest", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    for (let i = 0; i < TERMINAL_HISTORY_RING_SIZE + 3; i++) {
+      useTerminalStore.getState().pushCommand("a", { cmd: `c${i}`, exitCode: 0, endedAt: i })
+    }
+    const row = useTerminalStore.getState().sessions["a"]!
+    expect(row.lastCommands.length).toBe(TERMINAL_HISTORY_RING_SIZE)
+    expect(row.lastCommands[0].cmd).toBe("c3")
+    expect(row.lastCommands[row.lastCommands.length - 1].cmd).toBe(
+      `c${TERMINAL_HISTORY_RING_SIZE + 2}`
+    )
+  })
+
+  it("pushCommand on unknown session is a no-op", () => {
+    useTerminalStore.getState().pushCommand("ghost", { cmd: "x", exitCode: 0, endedAt: 0 })
+    expect(useTerminalStore.getState().sessions["ghost"]).toBeUndefined()
+  })
+})
+
+describe("history panel toggle", () => {
+  it("setHistoryOpen flips the per-tab flag", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    expect(useTerminalStore.getState().sessions["a"]?.historyOpen).toBe(false)
+    useTerminalStore.getState().setHistoryOpen("a", true)
+    expect(useTerminalStore.getState().sessions["a"]?.historyOpen).toBe(true)
+  })
+})

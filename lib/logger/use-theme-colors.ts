@@ -4,9 +4,11 @@
  * Recharts renders `<path fill={...}>` as an SVG presentation attribute,
  * which doesn't resolve `var(--token)`. So for raw Recharts (no
  * <ChartContainer> wrapper) we have to inline the actual color value.
- * This hook reads the variables from `document.documentElement` and
- * re-reads them whenever the `class` attribute on `<html>` changes
- * (i.e., when next-themes toggles between light and dark).
+ *
+ * Delegates to `@/lib/appearance/use-theme-css-vars` so this hook and the
+ * A2UI rich-output components share a single live-reader (and so the
+ * inline-style bug — the original observer only watched `class`, not
+ * `style` — is fixed in one place).
  *
  * SSR-safe: returns the static :root defaults on the server / first paint,
  * then upgrades to the live oklch values on mount. Defaults mirror the
@@ -16,7 +18,8 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
+import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 import type { ThemeColorKey } from "./level-theme"
 
 const THEME_KEYS: readonly ThemeColorKey[] = [
@@ -43,35 +46,26 @@ const DEFAULT_COLORS: Record<ThemeColorKey, string> = {
   "chart-5": "oklch(0.769 0.188 70.08)",
 }
 
+// Pre-prefix to `--theme-key` so the generic hook can read them directly.
+// Stable module-level constants — no per-render allocation.
+const VAR_KEYS: readonly string[] = THEME_KEYS.map((key) => `--${key}`)
+const VAR_DEFAULTS: Record<string, string> = Object.fromEntries(
+  THEME_KEYS.map((key) => [`--${key}`, DEFAULT_COLORS[key]])
+)
+
 export type ThemeColors = Record<ThemeColorKey, string>
 
 export function useThemeColors(): ThemeColors {
-  const [colors, setColors] = useState<ThemeColors>(DEFAULT_COLORS)
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof document === "undefined") return
-
-    const root = document.documentElement
-
-    const readColors = () => {
-      const computed = getComputedStyle(root)
-      const next = {} as ThemeColors
-      for (const key of THEME_KEYS) {
-        const value = computed.getPropertyValue(`--${key}`).trim()
-        next[key] = value || DEFAULT_COLORS[key]
-      }
-      setColors(next)
+  const raw = useThemeCssVars(VAR_KEYS, VAR_DEFAULTS)
+  // Project the prefixed map back to the legacy non-prefixed shape so
+  // existing call sites (level icons, Recharts paths) don't need to change.
+  return useMemo(() => {
+    const next = {} as ThemeColors
+    for (const key of THEME_KEYS) {
+      next[key] = raw[`--${key}`]
     }
-
-    readColors()
-
-    const observer = new MutationObserver(readColors)
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
-
-    return () => observer.disconnect()
-  }, [])
-
-  return colors
+    return next
+  }, [raw])
 }
 
 export { DEFAULT_COLORS as DEFAULT_THEME_COLORS, THEME_KEYS }

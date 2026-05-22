@@ -178,6 +178,20 @@ export interface SendOptions {
   computerUseConsentMode?: "always-ask" | "session-grant" | "auto"
 
   /**
+   * ADR-0020 W3 — chat-modal suppression list. The sidecar's
+   * `canUseTool` callback resolves `{ behavior: "allow" }` immediately
+   * for any tool whose name appears here, skipping the renderer-side
+   * `permission_request` event. Populated by `applyComputerUseTools`
+   * from per-session grants when `chatConsentMode === "session-grant"`.
+   *
+   * SAFETY: the Rust permission gate runs independently on every
+   * `desktop.*` call. Suppressing the chat modal does not bypass the
+   * Rust-side check — it only spares the operator from a redundant
+   * second prompt when both gates would have asked.
+   */
+  suppressApprovalForTools?: string[]
+
+  /**
    * Extra HTTP headers the sidecar should merge into the Anthropic
    * request. Populated by `resolveSendOptions` from
    * `computeAnthropicBetaHeaders` when at least one Anthropic native
@@ -767,6 +781,35 @@ export interface AppSettings {
   webviewZoom?: number
   /** Forward-compat opt-in for future telemetry; never wired in v1. */
   telemetryEnabled?: boolean
+  /**
+   * Integrated terminal preferences (plan: vscode-vivid-wilkinson).
+   * `defaultShell` is the absolute path or PATH-resolvable name of the
+   * shell binary used by the dock's "+ New" affordance when no
+   * per-project override is set. Empty / unset → platform default
+   * (`pwsh.exe` on Windows, `/bin/zsh` on macOS, `/bin/bash` on Linux).
+   * The other fields drive xterm.js rendering and OSC 633 enablement.
+   */
+  terminal?: {
+    defaultShell?: string
+    fontFamily?: string
+    fontSize?: number
+    scrollback?: number
+    enableShellIntegration?: boolean
+    /**
+     * When true, every selection in a terminal tab is auto-copied to the
+     * system clipboard. Defaults to false so accidental selections don't
+     * overwrite the user's clipboard.
+     */
+    copyOnSelect?: boolean
+    /**
+     * When true, the renderer registers the `terminal-dock-tool` MCP tool
+     * so an agent can spawn / write / read dock tabs it created itself.
+     * Off by default — the user opts in per machine. Agent access never
+     * surfaces tabs the user spawned; the filter is by `agentSpawner` row
+     * field on `useTerminalStore`. (Wave 3D.)
+     */
+    exposeDockToAgents?: boolean
+  }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
   /** `MediaDeviceInfo.deviceId` of the user's last-picked microphone. */
@@ -1610,6 +1653,27 @@ export interface Character {
      */
     chatConsentMode?: "always-ask" | "session-grant" | "auto"
   }
+  /**
+   * Set ONLY when this row is a user-cloned copy of a plugin-overlay character
+   * (ADR-0030). Never set on app-seeded built-ins or pure user-created rows.
+   * Pairs with `sourcePackId` + `clonedFromPackCharacterId` to drive the
+   * "Update available" comparison on the row when the pack ships a new version.
+   */
+  sourcePluginId?: string
+  /** Pack id within the source plugin. See `sourcePluginId`. */
+  sourcePackId?: string
+  /**
+   * The synthetic runtime id (`cognia-pack:<plugin>:<pack>:<local>`) at the
+   * moment the user clicked Duplicate. Used to surface the original overlay
+   * row in the Re-clone affordance.
+   */
+  clonedFromPackCharacterId?: string
+  /**
+   * Pack semver at clone time. Compared against the currently-registered
+   * `PluginCharacterPackDef.version` to decide whether to show
+   * "Update available". Updated only when the user explicitly re-clones.
+   */
+  packVersionAtClone?: string
   createdAt: number
   updatedAt: number
 }

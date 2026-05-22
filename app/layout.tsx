@@ -20,6 +20,8 @@ import { SubscriptionInitializer } from "@/components/providers/initializers/sub
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
+import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
+import { TerminalBridgeInitializer } from "@/components/providers/initializers/terminal-bridge-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
@@ -114,7 +116,9 @@ export default async function RootLayout({
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />
                     <ComputerUseKillSwitchInitializer />
+                    <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />
+                    <LocalCharacterPackInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>

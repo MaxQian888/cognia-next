@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use axum::{middleware::{from_fn, from_fn_with_state}, routing::{any, get, post}, Router};
 use axum_server::tls_rustls::RustlsConfig;
-use super::{healthz, rpc, tls::TlsMaterial, ws};
+use super::{healthz, rpc, tls::TlsMaterial, ws, ws_terminal};
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -226,6 +226,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
         .route("/ws/v1/events", any(ws::ws_handler))
+        .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,

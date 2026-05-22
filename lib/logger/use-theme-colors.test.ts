@@ -82,7 +82,11 @@ describe("useThemeColors", () => {
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
   })
 
-  it("observes only the class attribute on documentElement", () => {
+  it("observes both `class` and `style` attributes on documentElement", () => {
+    // `style` is observed so inline-style writes from `CustomThemeApplier`
+    // (the appearance v47 path) propagate into chart colors. The previous
+    // implementation only watched `class` and silently dropped every
+    // custom-theme update.
     renderHook(() => useThemeColors())
     const observer = observers[observers.length - 1] as unknown as {
       observe: jest.Mock
@@ -90,6 +94,6 @@ describe("useThemeColors", () => {
     expect(observer.observe).toHaveBeenCalledTimes(1)
     const [target, init] = observer.observe.mock.calls[0]
     expect(target).toBe(document.documentElement)
-    expect(init).toEqual({ attributes: true, attributeFilter: ["class"] })
+    expect(init).toEqual({ attributes: true, attributeFilter: ["class", "style"] })
   })
 })

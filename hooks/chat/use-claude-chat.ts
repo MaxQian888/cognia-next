@@ -19,6 +19,26 @@ import {
   sendPrompt,
 } from "@/lib/claude/ipc"
 import { detectPlatform } from "@/hooks/use-platform"
+
+// ADR-0020 W3 — the chat-modal session grant only ever applies to the
+// three plugin MCP tools that the `cognia-computer-use` plugin
+// contributes. Hard-coded as a tight const so a typo in a future tool
+// rename won't silently flip permissions on the wrong tool.
+const COMPUTER_USE_PLUGIN_TOOL_NAMES = new Set([
+  "computer_use",
+  "bash",
+  "text_editor",
+  // The sidecar surfaces them through the cognia-plugin-tools MCP, so
+  // the prefixed form lands on the chat side. Match both bare and
+  // prefixed in case the upstream renames the bridge.
+  "mcp__cognia-plugin-tools__computer_use",
+  "mcp__cognia-plugin-tools__bash",
+  "mcp__cognia-plugin-tools__text_editor",
+])
+
+function isComputerUsePluginToolName(name: string): boolean {
+  return COMPUTER_USE_PLUGIN_TOOL_NAMES.has(name)
+}
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
@@ -401,6 +421,21 @@ export function useClaudeChat() {
       // Persist always-allow choice.
       if (decision === "allow_always") {
         await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+      }
+      // ADR-0020 W3 — remember the operator's Allow for any computer-use
+      // plugin tool so subsequent turns inside this session skip the chat
+      // modal when the active character's `chatConsentMode ===
+      // "session-grant"`. The Rust ConsentBroker keeps its own
+      // per-tuple session grants for defence-in-depth; this store only
+      // governs the chat-side prompt cadence. Recording unconditionally
+      // is safe because the SEND-side check
+      // (`applyComputerUseTools`) consults `chatConsentMode` before
+      // honouring a grant.
+      if (decision === "allow" || decision === "allow_always") {
+        if (isComputerUsePluginToolName(approval.toolName)) {
+          const { recordSessionGrant } = await import("@/lib/claude/computer-use-session-grants")
+          recordSessionGrant(approval.sessionId, approval.toolName)
+        }
       }
       try {
         await approveTool(

@@ -1,0 +1,25 @@
+{
+  "id": "cognia-character-seeds",
+  "name": "Character Seeds",
+  "version": "0.1.0",
+  "description": "Reference implementation for the character-pack capability (ADR-0030). Ships two demo packs — Workplace Suite and Study Buddies — that plugin authors can use as a starting point.",
+  "type": "frontend",
+  "capabilities": ["character-pack"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

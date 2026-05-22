@@ -14,9 +14,9 @@
 // pane stays a thin composition wrapper.
 
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { getPlugin } from "@/lib/db/plugins"
+import { Skeleton } from "@/components/ui/skeleton"
+import { usePluginRow } from "@/hooks/plugins"
 import { DEFAULT_RATE_LIMITS } from "@/lib/plugin/security/rate-limiter"
 import { PluginAnalytics } from "../plugin-analytics"
 import { PluginScheduledJobs } from "../plugin-scheduled-jobs"
@@ -35,10 +35,21 @@ const RESOURCE_LIMITS = Object.entries(DEFAULT_RATE_LIMITS).map(([key, cfg]) => 
 
 export function PluginDetailData({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const rowState = usePluginRow(pluginId)
 
-  if (!plugin) return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
-
+  if (rowState.state === "loading") {
+    return (
+      <div className="space-y-3" data-testid="plugin-detail-data-loading" aria-busy="true">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-full" />
+      </div>
+    )
+  }
+  if (rowState.state === "not-found") {
+    return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
+  }
+  const plugin = rowState.row
   const manifest = plugin.manifest as { dependencies?: Record<string, string> }
 
   return (

@@ -114,6 +114,11 @@ sqlite-vec = "0.1"
 
 gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
+# Cross-platform PTY backend for the integrated terminal (`src-tauri/src/terminal/`).
+# Uses ConPTY on Windows (Win10 1809+), forkpty on macOS/Linux. wezterm's
+# upstream of choice — accept its known ConPTY quirks (resize artifacts,
+# Alt-key duplication) for v1 and patch downstream if hit.
+portable-pty = "0.8"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
@@ -320,6 +325,9 @@ enigo = "0.6"
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
 wiremock = "0.6"
+# Percent-encoding helper for the ws_terminal integration test — small
+# (~200 LOC), no transitive deps. Only needed in test builds.
+urlencoding = "2"
 
 # ADR-0024 — OCR backend opt-in features. The default build ships
 # placeholder backends so the dispatch table compiles everywhere; each

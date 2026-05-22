@@ -1317,6 +1317,15 @@ export class CogniaDB extends Dexie {
     //   appliers / settings selectors rather than during DB upgrade so the
     //   Dexie callback stays non-blocking.
     this.version(47).stores({})
+
+    // v48 — Character pack overlay capability (ADR-0030). Adds four optional
+    //   non-indexed fields to `characters` rows: `sourcePluginId`,
+    //   `sourcePackId`, `clonedFromPackCharacterId`, `packVersionAtClone`. The
+    //   fields are populated only when a user duplicates a plugin-overlay
+    //   character into a Dexie row, so existing rows remain valid with all
+    //   four undefined → treated as "user-created" by the badge logic. Pure
+    //   additive — no upgrade hook, no index change.
+    this.version(48).stores({})
   }
 
   sessionState!: Table<SessionStateRow, string>

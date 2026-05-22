@@ -8,7 +8,7 @@
 
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { PowerIcon, Trash2Icon, XIcon, RefreshCcwIcon } from "lucide-react"
+import { PowerIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -19,7 +19,8 @@ export function PluginBatchActionsBar() {
   const t = useTranslations("plugins.batchActions")
   const selection = usePluginsStore((s) => s.selection)
   const clearSelection = usePluginsStore((s) => s.clearSelection)
-  const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
+  const enqueueDeleteTargets = usePluginsStore((s) => s.enqueueDeleteTargets)
+  const clearDeleteQueue = usePluginsStore((s) => s.clearDeleteQueue)
   const rows = useLiveQuery(() => listPlugins(), [])
 
   if (selection.size === 0) return null
@@ -32,14 +33,16 @@ export function PluginBatchActionsBar() {
   }
 
   const handleUninstallAll = () => {
-    // Open the delete dialog for each target sequentially. The dialog host
-    // confirms one at a time; clearing selection on close keeps state tidy.
     if (targets.length === 0) return
-    const head = targets[0]
-    if (head) setDeleteTarget({ pluginId: head.id, name: head.name })
-    // Subsequent targets are picked up in `PluginDeleteDialogHost` queue —
-    // for the v1 batch action we surface the head and let the user repeat.
-    // Multi-confirm queueing is a follow-up.
+    // Push every selected plugin into the delete queue — the dialog host
+    // pops them one at a time on confirm/cancel so the user walks the
+    // whole selection through a single batch action.
+    enqueueDeleteTargets(targets.map((row) => ({ pluginId: row.id, name: row.name })))
+  }
+
+  const handleClearSelection = () => {
+    clearDeleteQueue()
+    clearSelection()
   }
 
   return (
@@ -64,27 +67,6 @@ export function PluginBatchActionsBar() {
       <Button
         size="sm"
         variant="ghost"
-        aria-label={t("refresh")}
-        onClick={() => {
-          // Force re-fetch by toggling a no-op selection reset/restore.
-          // This keeps the bar reactive even when the underlying rows
-          // changed behind the scenes (e.g., manager updated a status).
-          clearSelection()
-          // Re-select originals in the next tick.
-          setTimeout(() => {
-            const store = usePluginsStore.getState()
-            for (const id of targets.map((t) => t.id)) {
-              store.toggleSelection(id)
-            }
-          }, 0)
-        }}
-      >
-        <RefreshCcwIcon className="size-3.5 sm:mr-1.5" />
-        <span className="hidden sm:inline">{t("refresh")}</span>
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
         className="text-destructive"
         onClick={handleUninstallAll}
         aria-label={t("uninstall")}
@@ -97,7 +79,7 @@ export function PluginBatchActionsBar() {
         size="icon"
         variant="ghost"
         className="size-7"
-        onClick={() => clearSelection()}
+        onClick={handleClearSelection}
         aria-label={t("clearSelection")}
       >
         <XIcon className="size-3.5" />

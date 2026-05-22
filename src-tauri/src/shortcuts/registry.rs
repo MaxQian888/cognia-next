@@ -174,6 +174,14 @@ impl ShortcutRegistry {
                 use tauri::Manager;
                 let state = app.state::<crate::automation::commands::AutomationState>();
                 state.gate.engage_kill_switch();
+                // ADR-0020 W3 — parity with the `automation_kill_switch`
+                // Tauri command (which is what the renderer's Settings →
+                // Automation kill button calls): engaging the switch
+                // drops every Rust-side per-session consent grant. The
+                // shortcut path used to only flip the engine; now it
+                // matches the renderer path so the operator-facing
+                // semantics are the same regardless of trigger.
+                state.consent.clear_session_grants();
                 let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
             }
             _ => {}

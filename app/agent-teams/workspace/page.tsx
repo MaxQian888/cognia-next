@@ -258,7 +258,11 @@ function AgentTeamWorkspaceInner() {
     : "overview"
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6" data-testid="agent-team-workspace">
+    <div
+      className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6"
+      data-testid="agent-team-workspace"
+      data-bg-target="chat"
+    >
       {/* Back + Title */}
       <div className="flex items-center gap-3">
         <Button

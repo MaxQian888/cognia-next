@@ -28,6 +28,7 @@ import {
 import {
   createCharacter,
   deleteCharacter,
+  dismissPackUpdate,
   duplicateCharacter,
   listCharacters,
   updateCharacter,
@@ -35,12 +36,48 @@ import {
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
 import type { AppSettings, Character, McpServer, Skill } from "@/lib/claude/types"
+// ADR-0020 W2 — Computer Use sub-settings UI reads the live native-tool
+// registry so allowedToolIds is a real picker (one checkbox per
+// registered tool) instead of a free-form text field. `listEntries`
+// returns the same shape `applyComputerUseTools` filters against.
+import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+// ADR-0030 — Character pack overlay + local-imported pack file support.
+import {
+  getPackCharacterWarnings,
+  getPackWarnings,
+  isOverlayCharacterId,
+  listCharacterPackEntries,
+} from "@/lib/plugin/registries/character-pack-registry"
+import type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+import {
+  deleteLocalPack,
+  importLocalPack,
+  LOCAL_PACK_PLUGIN_ID,
+} from "@/lib/plugin/character-pack/local-pack-store"
+import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
+import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { isTauri } from "@/lib/tauri"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import {
   TwinBindingSection,
   type TwinBindingValue,
 } from "@/components/settings/character/twin-binding-section"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CopyIcon, PencilIcon, PlusIcon, Trash2Icon, UsersRoundIcon } from "lucide-react"
+import {
+  CopyIcon,
+  DownloadIcon,
+  PackageIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  UploadIcon,
+  UsersRoundIcon,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
@@ -105,6 +142,8 @@ export function CharactersSection() {
         </Button>
       </div>
 
+      <CharacterPacksSubsection />
+
       {characters.length === 0 && !creating ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {t("emptyHint")}
@@ -150,6 +189,93 @@ export function CharactersSection() {
                   setEditing(dup)
                 } catch (err) {
                   log.error("character_duplicate_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
+              onRecloneFromPack={async () => {
+                // ADR-0030 §D.3 — duplicate from the overlay synthetic id
+                // (the live pack), then delete the stale Dexie row so the
+                // user has a single up-to-date clone.
+                if (!c.clonedFromPackCharacterId) return
+                try {
+                  const dup = await duplicateCharacter(c.clonedFromPackCharacterId)
+                  await deleteCharacter(c.id)
+                  log.info("character_recloned_from_pack", {
+                    staleId: c.id,
+                    newId: dup.id,
+                    overlayId: c.clonedFromPackCharacterId,
+                  })
+                  toast.success(t("recloneFromPackToast", { name: dup.name }))
+                  setEditing(dup)
+                } catch (err) {
+                  log.error("character_reclone_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
+              onDismissUpdate={async () => {
+                if (!c.sourcePackId) return
+                const entry = listCharacterPackEntries().find(
+                  (e) => e.entry.id === c.sourcePackId && e.pluginId === c.sourcePluginId
+                )
+                if (!entry) return
+                try {
+                  await dismissPackUpdate(c.id, entry.entry.version)
+                  log.info("character_pack_update_dismissed", {
+                    id: c.id,
+                    pinnedVersion: entry.entry.version,
+                  })
+                  toast.success(t("dismissUpdateToast"))
+                } catch (err) {
+                  log.error("character_dismiss_update_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
+              }}
+              onExportPack={async () => {
+                // Resolve the pack id from the row: overlay rows parse it
+                // from their synthetic id; cloned rows use sourcePackId.
+                let packId: string | undefined
+                if (isOverlayCharacterId(c.id)) {
+                  packId = c.id.slice("cognia-pack:".length).split(":")[1]
+                } else if (c.sourcePackId) {
+                  packId = c.sourcePackId
+                }
+                if (!packId) {
+                  toast.error(t("exportPackUnavailable"))
+                  return
+                }
+                try {
+                  // Lazy import to avoid pulling the Tauri save dialog into
+                  // the renderer bundle for non-export paths.
+                  const { exportPack } =
+                    await import("@/lib/plugin/character-pack/local-pack-store")
+                  const result = exportPack(packId)
+                  if (!result.ok) {
+                    toast.error(result.error)
+                    return
+                  }
+                  if (isTauri()) {
+                    const { save } = await import("@tauri-apps/plugin-dialog")
+                    const target = await save({
+                      defaultPath: result.value.filename,
+                      filters: [{ name: "Cognia Pack", extensions: ["json"] }],
+                    })
+                    if (!target) return
+                    const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+                    await writeTextFile(target, result.value.body)
+                    toast.success(t("packs.exportedToast", { path: target }))
+                  } else {
+                    // Browser fallback — trigger a download via a Blob link.
+                    const blob = new Blob([result.value.body], { type: "application/json" })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = result.value.filename
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    toast.success(t("packs.exportedToastBrowser"))
+                  }
+                } catch (err) {
+                  log.error("character_export_pack_failed", err, { id: c.id })
                   toast.error(err instanceof Error ? err.message : String(err))
                 }
               }}
@@ -216,6 +342,12 @@ interface RowProps {
   onSave: (patch: EditorOutput) => Promise<void>
   onDelete: () => Promise<void>
   onDuplicate: () => Promise<void>
+  /** Re-clone from the current overlay-registered pack (ADR-0030 §D.3). */
+  onRecloneFromPack: () => Promise<void>
+  /** Snap `packVersionAtClone` to current pack.version to silence the badge. */
+  onDismissUpdate: () => Promise<void>
+  /** Export the source pack (overlay or cloned) as a `.cognia-pack.json`. */
+  onExportPack: () => Promise<void>
 }
 
 function CharacterRow({
@@ -229,8 +361,15 @@ function CharacterRow({
   onSave,
   onDelete,
   onDuplicate,
+  onRecloneFromPack,
+  onDismissUpdate,
+  onExportPack,
 }: RowProps) {
   const t = useTranslations("settings.characters")
+  // Hook calls must precede the editing-mode early return below to keep
+  // the call order stable across renders (rules-of-hooks).
+  const sourcePluginId = character.sourcePluginId
+  const pluginMeta = usePluginMetadata(sourcePluginId)
   if (editing) {
     return (
       <CharacterEditor
@@ -274,6 +413,61 @@ function CharacterRow({
     .filter(Boolean)
     .join(", ")
 
+  // ADR-0030 row-source classification. Three orthogonal facts drive
+  // the badge set and the action gating:
+  //   - isOverlay: synthetic id, not a Dexie row (plugin / local-pack)
+  //   - isCloned: Dexie row carrying sourcePluginId attribution
+  //   - showUpdateAvailable: clone whose pack version moved
+  const isOverlay = isOverlayCharacterId(character.id)
+  const isCloned = !isOverlay && Boolean(character.sourcePluginId)
+  const sourceLabel = isOverlay
+    ? sourcePluginId === LOCAL_PACK_PLUGIN_ID || !sourcePluginId
+      ? t("badge.fromLocalFile")
+      : t("badge.fromPlugin", { name: pluginMeta?.name ?? sourcePluginId })
+    : isCloned
+      ? sourcePluginId === LOCAL_PACK_PLUGIN_ID
+        ? t("badge.clonedFromLocalFile")
+        : t("badge.cloned", { name: pluginMeta?.name ?? sourcePluginId })
+      : null
+  // Update-available comparison runs on cloned rows whose source pack is
+  // still registered. We look up the live pack via listCharacterPackEntries
+  // (a Map iteration, O(N) over registered packs — fine for the typical
+  // ~10 packs case). When the pack is unregistered (plugin disabled,
+  // local file deleted) we leave the clone alone — no orphan badge.
+  const livePackVersion =
+    isCloned && character.sourcePackId
+      ? listCharacterPackEntries().find(
+          (e) => e.entry.id === character.sourcePackId && e.pluginId === character.sourcePluginId
+        )?.entry.version
+      : undefined
+  const showUpdateAvailable =
+    isCloned &&
+    Boolean(character.packVersionAtClone) &&
+    Boolean(livePackVersion) &&
+    livePackVersion !== character.packVersionAtClone
+
+  // ADR-0030 §B.6 — surface `requires` warnings stamped at register time.
+  // Overlay rows query their pack via the synthetic id (parsed via the
+  // overlay-id format); cloned Dexie rows query their pack via the source
+  // attribution fields. Either way the warnings come from the same
+  // `getPackCharacterWarnings` / `getPackWarnings` accessors.
+  let warnings: readonly PluginCharacterPackWarning[] = []
+  if (isOverlay) {
+    const idSegments = character.id.slice("cognia-pack:".length).split(":")
+    const packId = idSegments[1]
+    const localId = idSegments.slice(2).join(":")
+    if (packId && localId) warnings = getPackCharacterWarnings(packId, localId)
+  } else if (isCloned && character.sourcePackId) {
+    warnings = getPackWarnings(character.sourcePackId)
+  }
+  const warningTitle = warnings
+    .map((w) =>
+      w.characterLocalId
+        ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
+        : `${w.code}: ${w.missingId}`
+    )
+    .join("\n")
+
   return (
     <Card className="p-3">
       <div className="flex items-start gap-3">
@@ -293,6 +487,52 @@ function CharacterRow({
             {character.isBuiltIn && (
               <Badge variant="secondary" className="text-[10px]">
                 {t("builtIn")}
+              </Badge>
+            )}
+            {sourceLabel && (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                title={pluginMeta?.id ?? sourcePluginId}
+              >
+                {sourceLabel}
+              </Badge>
+            )}
+            {showUpdateAvailable && (
+              <>
+                <Badge
+                  variant="outline"
+                  className="border-yellow-500/40 bg-yellow-500/10 text-[10px] text-yellow-700 dark:text-yellow-300"
+                >
+                  {t("badge.updateAvailable")}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-[10px] text-yellow-700 hover:text-yellow-800 dark:text-yellow-300"
+                  onClick={() => void onRecloneFromPack()}
+                  title={t("actions.recloneFromPackTitle")}
+                >
+                  {t("actions.recloneFromPack")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-[10px] text-muted-foreground"
+                  onClick={() => void onDismissUpdate()}
+                  title={t("actions.dismissUpdateTitle")}
+                >
+                  {t("actions.dismissUpdate")}
+                </Button>
+              </>
+            )}
+            {warnings.length > 0 && (
+              <Badge
+                variant="outline"
+                className="border-yellow-500/40 bg-yellow-500/10 text-[10px] text-yellow-700 dark:text-yellow-300"
+                title={warningTitle}
+              >
+                {t("badge.missingDep", { count: warnings.length })}
               </Badge>
             )}
             {character.model && (
@@ -318,8 +558,14 @@ function CharacterRow({
             className="size-7"
             onClick={onEditStart}
             aria-label={t("editAria", { name: character.name })}
-            disabled={character.isBuiltIn}
-            title={character.isBuiltIn ? t("builtInReadOnly") : t("edit")}
+            disabled={character.isBuiltIn || isOverlay}
+            title={
+              character.isBuiltIn
+                ? t("builtInReadOnly")
+                : isOverlay
+                  ? t("overlayReadOnly")
+                  : t("edit")
+            }
           >
             <PencilIcon className="size-3.5" />
           </Button>
@@ -333,6 +579,18 @@ function CharacterRow({
           >
             <CopyIcon className="size-3.5" />
           </Button>
+          {(isOverlay || isCloned) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => void onExportPack()}
+              aria-label={t("exportPackAria", { name: character.name })}
+              title={t("actions.exportPack")}
+            >
+              <DownloadIcon className="size-3.5" />
+            </Button>
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
@@ -340,8 +598,14 @@ function CharacterRow({
                 size="icon"
                 className="size-7 text-destructive hover:text-destructive"
                 aria-label={t("deleteAria", { name: character.name })}
-                disabled={character.isBuiltIn}
-                title={character.isBuiltIn ? t("builtInUndeletable") : t("delete")}
+                disabled={character.isBuiltIn || isOverlay}
+                title={
+                  character.isBuiltIn
+                    ? t("builtInUndeletable")
+                    : isOverlay
+                      ? t("overlayUndeletable")
+                      : t("delete")
+                }
               >
                 <Trash2Icon className="size-3.5" />
               </Button>
@@ -359,6 +623,321 @@ function CharacterRow({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+// ===========================================================================
+// ADR-0030 — Character packs subsection (overlay registry view + local
+// pack import). Lives inline above the character list so users can see
+// where each pack came from without an extra navigation step.
+// ===========================================================================
+
+function CharacterPacksSubsection() {
+  const t = useTranslations("settings.characters")
+  // Subscribe to plugin state so the subsection re-renders when a plugin
+  // enables/disables (the overlay registry changes synchronously with
+  // the store). We read pack entries inside the render path — the call
+  // is cheap and the registry only mutates on enable/disable, never per
+  // keystroke.
+  const _pluginCount = usePluginStore((s) => Object.keys(s.plugins).length)
+  void _pluginCount
+  // Force re-render on every store change. We don't read the data via
+  // the selector because the registry isn't part of the Zustand state —
+  // it's a separate in-memory Map updated by the plugin manager. The
+  // selector subscription serves purely as a "something changed" tick.
+  const packs = listCharacterPackEntries()
+
+  const handleImport = async () => {
+    if (!isTauri()) {
+      toast.error(t("packs.importUnavailableWeb"))
+      return
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog")
+      const selection = await open({
+        multiple: false,
+        filters: [{ name: "Cognia Pack", extensions: ["json"] }],
+      })
+      if (!selection || typeof selection !== "string") return
+      const { readTextFile } = await import("@tauri-apps/plugin-fs")
+      const body = await readTextFile(selection)
+      const result = await importLocalPack(body)
+      if (result.ok) {
+        toast.success(t("packs.importedToast", { id: result.value.packId }))
+      } else {
+        toast.error(result.error)
+      }
+    } catch (err) {
+      log.error("pack_import_failed", err)
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleRescan = async () => {
+    try {
+      const { scanAndRegisterLocalPacks } =
+        await import("@/lib/plugin/character-pack/local-pack-store")
+      const result = await scanAndRegisterLocalPacks()
+      log.info("pack_rescan_done", {
+        registered: result.registered.length,
+        skipped: result.skipped.length,
+      })
+      toast.success(
+        t("packs.rescanToast", {
+          registered: result.registered.length,
+          skipped: result.skipped.length,
+        })
+      )
+    } catch (err) {
+      log.error("pack_rescan_failed", err)
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  if (packs.length === 0) {
+    // Don't render the accordion at all when there are no packs —
+    // the Import button moves into the main toolbar so users still
+    // have a discoverable affordance. We render that affordance
+    // alongside the empty hint below.
+    if (!isTauri()) return null
+    return (
+      <div className="flex items-center justify-between rounded-md border border-dashed p-3">
+        <div className="space-y-0.5">
+          <p className="text-xs font-medium">{t("packs.title")}</p>
+          <p className="text-[11px] text-muted-foreground">{t("packs.emptyHint")}</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void handleImport()}>
+          <UploadIcon className="mr-2 size-3.5" />
+          {t("packs.importJsonAction")}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <Accordion type="single" collapsible defaultValue="packs">
+      <AccordionItem value="packs">
+        <AccordionTrigger className="text-sm">
+          <span className="flex items-center gap-2">
+            <PackageIcon className="size-4" />
+            {t("packs.title")}
+            <Badge variant="secondary" className="ml-1 text-[10px]">
+              {packs.length}
+            </Badge>
+          </span>
+        </AccordionTrigger>
+        <AccordionContent className="space-y-2">
+          {packs.map((entry) => (
+            <PackRow
+              key={`${entry.pluginId ?? ""}:${entry.id}`}
+              packId={entry.id}
+              packName={entry.entry.name}
+              packVersion={entry.entry.version}
+              packDescription={entry.entry.description}
+              packIcon={entry.entry.icon}
+              characters={entry.entry.characters}
+              pluginId={entry.pluginId}
+            />
+          ))}
+          {isTauri() && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => void handleImport()}>
+                <UploadIcon className="mr-2 size-3.5" />
+                {t("packs.importJsonAction")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void handleRescan()}>
+                {t("packs.rescan")}
+              </Button>
+            </div>
+          )}
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  )
+}
+
+function PackRow({
+  packId,
+  packName,
+  packVersion,
+  packDescription,
+  packIcon,
+  characters,
+  pluginId,
+}: {
+  packId: string
+  packName: string
+  packVersion: string
+  packDescription?: string
+  packIcon?: { emoji?: string; color?: string }
+  characters: ReadonlyArray<import("@/types/plugin/plugin-character-pack").PluginCharacterDef>
+  pluginId: string | undefined
+}) {
+  const t = useTranslations("settings.characters")
+  const pluginMeta = usePluginMetadata(pluginId)
+  const isLocal = pluginId === LOCAL_PACK_PLUGIN_ID || !pluginId
+  const sourceText = isLocal
+    ? t("packs.sourceLocal")
+    : t("packs.sourcePlugin", { name: pluginMeta?.name ?? pluginId })
+  const [expanded, setExpanded] = useState(false)
+  // ADR-0030 §B.6 — surface pack-level warnings on the pack header chip
+  // so the user knows at a glance that something inside this pack has a
+  // missing dependency. Character-level detail is reached by expanding.
+  const packWarnings = getPackWarnings(packId)
+
+  const handleDelete = async () => {
+    const result = await deleteLocalPack(packId)
+    if (result.ok) {
+      toast.success(t("packs.deletedToast", { id: packId }))
+    } else {
+      toast.error(result.error)
+    }
+  }
+
+  const handleExport = async () => {
+    try {
+      const { exportPack } = await import("@/lib/plugin/character-pack/local-pack-store")
+      const result = exportPack(packId)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      if (isTauri()) {
+        const { save } = await import("@tauri-apps/plugin-dialog")
+        const target = await save({
+          defaultPath: result.value.filename,
+          filters: [{ name: "Cognia Pack", extensions: ["json"] }],
+        })
+        if (!target) return
+        const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+        await writeTextFile(target, result.value.body)
+        toast.success(t("packs.exportedToast", { path: target }))
+      } else {
+        const blob = new Blob([result.value.body], { type: "application/json" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = result.value.filename
+        a.click()
+        URL.revokeObjectURL(url)
+        toast.success(t("packs.exportedToastBrowser"))
+      }
+    } catch (err) {
+      log.error("pack_export_failed", err, { packId })
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <Card className="p-3">
+      <div className="flex items-start gap-3">
+        <span
+          className="flex size-9 shrink-0 items-center justify-center rounded-md text-base"
+          style={{
+            backgroundColor: packIcon?.color ?? "oklch(0.7 0.1 250)",
+            color: "white",
+          }}
+          aria-hidden
+        >
+          {packIcon?.emoji ?? "📦"}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">{packName}</p>
+            <Badge variant="outline" className="font-mono text-[10px]">
+              v{packVersion}
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              {sourceText}
+            </Badge>
+            {packWarnings.length > 0 && (
+              <Badge
+                variant="outline"
+                className="border-yellow-500/40 bg-yellow-500/10 text-[10px] text-yellow-700 dark:text-yellow-300"
+                title={packWarnings
+                  .map((w) =>
+                    w.characterLocalId
+                      ? `${w.code} (${w.characterLocalId}): ${w.missingId}`
+                      : `${w.code}: ${w.missingId}`
+                  )
+                  .join("\n")}
+              >
+                {t("badge.missingDep", { count: packWarnings.length })}
+              </Badge>
+            )}
+          </div>
+          {packDescription && (
+            <p className="mt-0.5 text-xs text-muted-foreground">{packDescription}</p>
+          )}
+          <button
+            type="button"
+            className="mt-1 text-left text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={
+              expanded
+                ? t("packs.collapseAria", { id: packId })
+                : t("packs.expandAria", { id: packId })
+            }
+          >
+            {t("packs.characterCount", { count: characters.length })}
+            <span aria-hidden> {expanded ? "▾" : "▸"}</span>
+          </button>
+          {expanded && (
+            <ul className="mt-2 space-y-1 border-l-2 border-border pl-3">
+              {characters.map((ch) => (
+                <li key={ch.localId} className="text-[11px]">
+                  <span className="font-medium">{ch.name}</span>
+                  {ch.description && (
+                    <span className="text-muted-foreground"> — {ch.description}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={() => void handleExport()}
+            aria-label={t("exportPackAria", { name: packName })}
+            title={t("actions.exportPack")}
+          >
+            <DownloadIcon className="size-3.5" />
+          </Button>
+          {isLocal && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-destructive hover:text-destructive"
+                  aria-label={t("packs.deleteAria", { id: packId })}
+                  title={t("packs.delete")}
+                >
+                  <Trash2Icon className="size-3.5" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("packs.removeTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t("packs.removeBody", { id: packId })}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleDelete()}>
+                    {t("remove")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
     </Card>
@@ -731,6 +1310,12 @@ function CharacterEditor({
             aria-label={t("computerUseToggle.aria")}
           />
         </div>
+        {s.enableComputerUse && (
+          <ComputerUseSubSettings
+            value={s.computerUseSettings}
+            onChange={(next) => setS({ ...s, computerUseSettings: next })}
+          />
+        )}
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-0.5">
             <Label className="cursor-pointer text-xs">{tSandbox("enable.label")}</Label>
@@ -838,6 +1423,124 @@ function CharacterEditor({
         </Button>
       </div>
     </Card>
+  )
+}
+
+// ADR-0020 W2 — per-character Computer Use sub-settings.
+//
+// Only rendered when `enableComputerUse === true`. Surfaces three knobs
+// that were declared in v40 but had no UI consumer pre-W2:
+//
+//  - `requireConsent` — forces every driving call into the Rust
+//    `PerCall` consent path for this character, regardless of the
+//    global `automationSettings.perSurface.computerUse.tier`.
+//    `applyComputerUseTools` stamps `forceTier: "perCall"` on each
+//    Anthropic tool def when this is set.
+//  - `chatConsentMode` — drives Wave 3's chat-side dedup logic. `auto`
+//    suppresses the chat modal when the Rust gate is PerCall;
+//    `session-grant` remembers the operator's first decision for the
+//    session; `always-ask` keeps both gates prompting independently.
+//  - `allowedToolIds` — narrows which registered native tools the
+//    character actually exposes. Empty set = "all", matching the
+//    fast-path in `applyComputerUseTools`.
+interface ComputerUseSubSettingsProps {
+  value: Character["computerUseSettings"]
+  onChange: (next: Character["computerUseSettings"]) => void
+}
+
+function ComputerUseSubSettings({ value, onChange }: ComputerUseSubSettingsProps) {
+  const t = useTranslations("settings.characters.editor.computerUseSubSettings")
+  const v = value ?? {}
+  const requireConsent = Boolean(v.requireConsent)
+  const consentMode = v.chatConsentMode ?? "always-ask"
+  const allowed = v.allowedToolIds ?? []
+
+  // Read the live registry once on mount. The registry doesn't change
+  // at runtime within a single render pass, so a useState seed is fine
+  // — re-mounting the editor (e.g. switching characters) picks up any
+  // newly-enabled tool plugin.
+  const [registeredTools] = useState(() =>
+    listNativeAnthropicToolEntries().map((row) => ({
+      id: row.id,
+      name: row.entry.name,
+    }))
+  )
+
+  function update(patch: Partial<NonNullable<Character["computerUseSettings"]>>): void {
+    onChange({ ...v, ...patch })
+  }
+
+  function toggleTool(id: string, on: boolean): void {
+    const next = new Set(allowed)
+    if (on) next.add(id)
+    else next.delete(id)
+    // Treat "empty set" as "all" by storing `undefined` rather than
+    // `[]` — the runtime fast-path in `applyComputerUseTools` reads
+    // `undefined` as "no filter" and we keep the stored shape minimal.
+    update({ allowedToolIds: next.size === 0 ? undefined : Array.from(next) })
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/10 p-3 pl-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label className="cursor-pointer text-xs">{t("requireConsent.label")}</Label>
+          <p className="text-[10px] text-muted-foreground">{t("requireConsent.description")}</p>
+        </div>
+        <Switch
+          checked={requireConsent}
+          onCheckedChange={(b) => update({ requireConsent: b })}
+          aria-label={t("requireConsent.label")}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs">{t("chatConsentMode.label")}</Label>
+        <p className="text-[10px] text-muted-foreground">{t("chatConsentMode.description")}</p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {(["always-ask", "session-grant", "auto"] as const).map((mode) => (
+            <Button
+              key={mode}
+              type="button"
+              size="sm"
+              variant={consentMode === mode ? "default" : "outline"}
+              onClick={() => update({ chatConsentMode: mode })}
+            >
+              {t(`chatConsentMode.options.${mode}`)}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs">{t("allowedToolIds.label")}</Label>
+        <p className="text-[10px] text-muted-foreground">{t("allowedToolIds.description")}</p>
+        {registeredTools.length === 0 ? (
+          <p className="text-[10px] text-muted-foreground">{t("allowedToolIds.empty")}</p>
+        ) : (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {registeredTools.map((tool) => {
+              const checked = allowed.length === 0 || allowed.includes(tool.id)
+              return (
+                <label
+                  key={tool.id}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px]"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3"
+                    checked={checked}
+                    onChange={(e) => toggleTool(tool.id, e.target.checked)}
+                    aria-label={tool.name}
+                  />
+                  <code className="font-mono">{tool.name}</code>
+                </label>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

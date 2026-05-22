@@ -66,7 +66,7 @@ export default function GithubDeliveryPage() {
 
   if (orders === null) {
     return (
-      <main className="p-6 space-y-3">
+      <main className="p-6 space-y-3" data-bg-target="chat">
         <h1 className="text-xl font-semibold">GitHub Delivery</h1>
         <Card className="p-6 space-y-2">
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -82,12 +82,13 @@ export default function GithubDeliveryPage() {
   }
 
   return (
-    <main className="p-6 space-y-4" data-testid="github-delivery-kanban">
+    <main className="p-6 space-y-4" data-testid="github-delivery-kanban" data-bg-target="chat">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">GitHub Delivery</h1>
           <p className="text-sm text-muted-foreground">
-            AI-driven Issue → PR work orders. {orders === undefined ? "Loading…" : `${orders.length} total`}
+            AI-driven Issue → PR work orders.{" "}
+            {orders === undefined ? "Loading…" : `${orders.length} total`}
           </p>
         </div>
       </header>
@@ -96,11 +97,7 @@ export default function GithubDeliveryPage() {
         {COLUMNS.map((col) => {
           const rows = grouped.get(col.id) ?? []
           return (
-            <section
-              key={col.id}
-              className="space-y-2"
-              data-testid={`kanban-col-${col.id}`}
-            >
+            <section key={col.id} className="space-y-2" data-testid={`kanban-col-${col.id}`}>
               <h2 className="text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-2">
                 {col.label}
                 <Badge variant="outline" className="text-[10px]">

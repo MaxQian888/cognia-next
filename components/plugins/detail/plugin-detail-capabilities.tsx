@@ -6,18 +6,29 @@
 // three existing surfaces rather than re-implementing any of them.
 
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
-import { getPlugin } from "@/lib/db/plugins"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { usePluginRow } from "@/hooks/plugins"
 import { PluginContributedTab } from "../plugin-contributed-tab"
 import { PluginTriggersTab } from "../plugin-triggers-tab"
 
 export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const rowState = usePluginRow(pluginId)
 
-  if (!plugin) return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
+  if (rowState.state === "loading") {
+    return (
+      <div className="space-y-3" data-testid="plugin-detail-capabilities-loading" aria-busy="true">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    )
+  }
+  if (rowState.state === "not-found") {
+    return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
+  }
+  const plugin = rowState.row
 
   const manifest = plugin.manifest as {
     contributes?: Record<string, unknown>

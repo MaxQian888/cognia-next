@@ -7,6 +7,8 @@ import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
 import { usePlatform } from "@/hooks/use-platform"
+import { useSettingsStore } from "@/stores/settings"
+import { getShellColors } from "@/lib/appearance/shell-sync"
 import { subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
 import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
@@ -58,15 +60,38 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   const t = useTranslations("mobile.companion")
   const ranRef = useRef(false)
 
+  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
+  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
+  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+
   // Status bar + Android nav bar track the resolved theme on every change.
   // Decoupled from the boot effect because theme can flip after boot
   // (system preference change, manual toggle). The nav-bar wrapper is a
   // no-op on iOS and on devices without the @capgo plugin installed.
+  //
+  // `getShellColors` derives a token-driven hex pair from the active
+  // appearance palette so the chrome paints in lockstep with custom themes,
+  // not just light/dark. Falls back to safe defaults when the palette
+  // can't be resolved.
   useEffect(() => {
     if (platform !== "mobile") return
-    void syncStatusBar(resolvedTheme)
-    void syncNavBar(resolvedTheme)
-  }, [platform, resolvedTheme])
+    const shellColors = getShellColors(
+      {
+        colorTheme: appearanceColorTheme,
+        activeCustomThemeId: appearanceActiveCustomThemeId,
+        customThemes: appearanceCustomThemes,
+      },
+      resolvedTheme
+    )
+    void syncStatusBar(resolvedTheme, shellColors.backgroundHex)
+    void syncNavBar(resolvedTheme, shellColors.backgroundHex)
+  }, [
+    platform,
+    resolvedTheme,
+    appearanceColorTheme,
+    appearanceActiveCustomThemeId,
+    appearanceCustomThemes,
+  ])
 
   useEffect(() => {
     if (platform !== "mobile") return

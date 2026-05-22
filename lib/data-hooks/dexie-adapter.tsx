@@ -7,12 +7,13 @@
 // doing inline before this refactor — same SSR guards, same dependency keys.
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { listCharacters, getCharacter } from "@/lib/db/characters"
+import { listCharacters, resolveCharacterById } from "@/lib/db/characters"
 import { listSkillsByIds } from "@/lib/db/skills"
 import { listPresets, recordPresetUsage } from "@/lib/db/prompt-presets"
 import { updateSession } from "@/lib/db/sessions"
 import { clearMessages } from "@/lib/db/messages"
 import { trustWorkspace } from "@/lib/db/trusted-workspaces"
+import { usePluginStore } from "@/stores/plugin/plugin-store"
 import type { DataAdapter, SessionPatch } from "./types"
 
 const isClient = (): boolean => typeof window !== "undefined"
@@ -28,9 +29,21 @@ export const dexieAdapter: DataAdapter = {
   },
 
   useCharacter(id) {
+    // ADR-0030 — resolve through the overlay-aware path so chat sessions
+    // whose `characterId` points at a plugin-contributed (synthetic)
+    // overlay id render correctly. `useLiveQuery` only tracks Dexie
+    // mutations, so we add an enabled-plugin count tick that flips
+    // whenever the plugin manager toggles a plugin's status — this is
+    // when the character-pack-registry overlay mutates. The tick is a
+    // proxy: it doesn't fire for every overlay change (e.g., a local-pack
+    // import bypasses the plugin store), but the chat header re-renders
+    // on a session-id change too, so transient drift is bounded.
+    const enabledPluginsTick = usePluginStore(
+      (s) => Object.values(s.plugins).filter((p) => p.status === "enabled").length
+    )
     return useLiveQuery(
-      () => (isClient() && id ? getCharacter(id) : Promise.resolve(undefined)),
-      [id ?? ""]
+      () => (isClient() && id ? resolveCharacterById(id) : Promise.resolve(undefined)),
+      [id ?? "", enabledPluginsTick]
     )
   },
 

@@ -2,7 +2,9 @@
 // exercised as a pure function. We never want to touch Dexie or Zustand here.
 
 jest.mock("@/lib/db/characters", () => ({
-  getCharacter: jest.fn(),
+  // ADR-0030: build-options switched to resolveCharacterById so plugin-
+  // overlay characters resolve through the same path as Dexie rows.
+  resolveCharacterById: jest.fn(),
   listCharactersByIds: jest.fn(),
 }))
 
@@ -52,7 +54,7 @@ jest.mock("@/lib/claude/env-resolver", () => ({
 
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
-import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
+import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { getTeam } from "@/lib/db/teams"
@@ -63,7 +65,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
 
-const mGetCharacter = getCharacter as jest.Mock
+const mGetCharacter = resolveCharacterById as jest.Mock
 const mListCharsByIds = listCharactersByIds as jest.Mock
 const mListSkills = listEnabledSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
@@ -177,7 +179,7 @@ describe("resolveSendOptions — character + skills", () => {
     expect(opts.systemPrompt).toBe("from-char-sys")
   })
 
-  it("treats undefined character as null when getCharacter resolves undefined", async () => {
+  it("treats undefined character as null when resolveCharacterById resolves undefined", async () => {
     mGetCharacter.mockResolvedValueOnce(undefined)
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", characterId: "c-missing" }),

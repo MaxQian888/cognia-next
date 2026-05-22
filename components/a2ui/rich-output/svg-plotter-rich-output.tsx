@@ -50,20 +50,29 @@ export const SvgPlotterRichOutput = memo(function SvgPlotterRichOutput({
         className
       )}
     >
+      {/* SVG presentation attributes resolve `var(--token)` so the axis
+          rules and plot line track the active appearance palette. */}
       <svg width="100%" height={height} viewBox={`0 0 640 ${height}`}>
         <line
           x1="32"
           y1={height - 32}
           x2="608"
           y2={height - 32}
-          stroke="#94a3b8"
+          stroke="var(--muted-foreground)"
           strokeWidth="1.5"
         />
-        <line x1="32" y1="32" x2="32" y2={height - 32} stroke="#94a3b8" strokeWidth="1.5" />
+        <line
+          x1="32"
+          y1="32"
+          x2="32"
+          y2={height - 32}
+          stroke="var(--muted-foreground)"
+          strokeWidth="1.5"
+        />
         <path
           d={path}
           fill="none"
-          stroke="#0ea5e9"
+          stroke="var(--primary)"
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"

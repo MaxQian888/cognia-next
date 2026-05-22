@@ -156,19 +156,36 @@ describe("PluginPermissionsTab", () => {
     expect(openPermissionReview).toHaveBeenCalledWith("alpha-id")
   })
 
-  it("Bulk review surface lists every installed plugin", () => {
+  it("Bulk review surface lists only plugins that declare permissions", () => {
     mockUsePlugins.mockReturnValue({
       all: [
-        makeRow({ id: "a", name: "Alpha" }),
-        makeRow({ id: "b", name: "Bravo" }),
-        makeRow({ id: "c", name: "Charlie" }),
+        makeRow({ id: "a", name: "Alpha", manifest: { permissions: ["clipboard:read"] } }),
+        makeRow({
+          id: "b",
+          name: "Bravo",
+          manifest: { optionalPermissions: ["clipboard:read"] },
+        }),
+        // Charlie declares nothing — should be filtered out of BulkReview.
+        makeRow({ id: "c", name: "Charlie", manifest: {} }),
       ],
       loading: false,
     })
     render(<PluginPermissionsTab />)
     expect(screen.getByText("bulkHeading")).toBeInTheDocument()
-    const bulkButtons = screen.getAllByLabelText(/reviewAria/)
-    expect(bulkButtons.length).toBeGreaterThanOrEqual(3)
+    // Alpha + Bravo each render in BulkReview + once per permission cell, so >= 2 each.
+    expect(screen.getAllByLabelText(/reviewAria.*Alpha/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByLabelText(/reviewAria.*Bravo/).length).toBeGreaterThanOrEqual(1)
+    // Charlie has no permissions, so should NOT appear in BulkReview or any matrix cell.
+    expect(screen.queryAllByLabelText(/reviewAria.*Charlie/).length).toBe(0)
+  })
+
+  it("BulkReview disappears entirely when no plugin declares permissions", () => {
+    mockUsePlugins.mockReturnValue({
+      all: [makeRow({ id: "a", name: "Alpha", manifest: {} })],
+      loading: false,
+    })
+    render(<PluginPermissionsTab />)
+    expect(screen.queryByText("bulkHeading")).not.toBeInTheDocument()
   })
 
   it("does not duplicate holders if same permission appears in declared+granted", () => {

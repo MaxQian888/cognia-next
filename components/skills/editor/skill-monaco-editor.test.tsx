@@ -3,7 +3,11 @@
  */
 
 const fakeEditor = { id: "monaco-1" }
-const fakeMonaco = { editor: {}, languages: {}, Uri: {} }
+const fakeMonaco = {
+  editor: { defineTheme: jest.fn(), setTheme: jest.fn() },
+  languages: {},
+  Uri: {},
+}
 
 jest.mock("@monaco-editor/react", () => ({
   __esModule: true,

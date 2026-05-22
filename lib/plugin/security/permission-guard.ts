@@ -85,7 +85,8 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   database: ["database:read", "database:write"],
   settings: ["settings:read", "settings:write"],
   session: ["session:read", "session:write"],
-  dangerous: ["shell:execute", "process:spawn", "python:execute"],
+  terminal: ["terminal:spawn", "terminal:write", "terminal:kill"],
+  dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
@@ -114,6 +115,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "sandbox:web-execute": "Execute code inside the browser sandbox",
   "secrets:read": "Read secrets from the OS keyring",
   "secrets:write": "Store secrets in the OS keyring",
+  "terminal:spawn": "Open a new terminal session in the integrated dock",
+  "terminal:write": "Pipe input into an existing terminal session",
+  "terminal:kill": "Terminate an existing terminal session",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
@@ -122,6 +126,7 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "python:execute",
   "filesystem:write",
   "secrets:write",
+  "terminal:spawn",
 ]
 
 // =============================================================================

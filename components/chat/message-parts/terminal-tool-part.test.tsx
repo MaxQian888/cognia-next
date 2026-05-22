@@ -48,6 +48,46 @@ jest.mock("@/components/ai-elements/terminal", () => ({
   ),
 }))
 
+// Stub the dock picker + run helper so terminal-tool-part stays in
+// isolation. The full pickers have their own dedicated tests.
+const mockRunInDock = jest.fn(async () => ({
+  kind: "ok" as const,
+  sessionId: "s",
+  exitCode: 0,
+  output: "",
+}))
+jest.mock("@/lib/terminal/run-in-dock", () => ({
+  runInDockTab: (...args: unknown[]) => mockRunInDock(...args),
+}))
+jest.mock("@/components/chat/terminal-tab-picker", () => ({
+  TerminalTabPicker: ({
+    children,
+    onPick,
+  }: {
+    children: React.ReactNode
+    onPick: (c: { kind: "new" }) => void
+  }) => (
+    <div data-testid="terminal-tab-picker-stub" onClick={() => onPick({ kind: "new" })}>
+      {children}
+    </div>
+  ),
+}))
+
+// Force chat store to expose an active session id so the Run-in-dock
+// button stays enabled.
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: (selector: (s: { activeSessionId: string }) => unknown) =>
+    selector({ activeSessionId: "chat-1" }),
+}))
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: (selector: (s: { projects: never[]; activeProjectId: null }) => unknown) =>
+    selector({ projects: [], activeProjectId: null }),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: { settings: { terminal: object } }) => unknown) =>
+    selector({ settings: { terminal: {} } }),
+}))
+
 const bashPart = (state: ToolUIPart["state"], extra: Partial<ToolUIPart> = {}): ToolUIPart =>
   ({
     type: "tool-Bash",
@@ -101,5 +141,24 @@ describe("TerminalToolPart", () => {
     )
     expect(screen.queryByTestId("terminal-tool-running")).toBeNull()
     expect(screen.getByTestId("tool-body")).toBeInTheDocument()
+  })
+
+  it("renders the Run-in-dock button when a command is present and chatSessionId is known", () => {
+    render(<TerminalToolPart part={bashPart("input-available")} />)
+    expect(screen.getByTestId("terminal-tool-part-run-in-dock")).toBeInTheDocument()
+  })
+
+  it("clicking Run-in-dock through the picker forwards the command via runInDockTab", () => {
+    render(<TerminalToolPart part={bashPart("input-available")} />)
+    mockRunInDock.mockClear()
+    // The picker stub fires onPick({kind:'new'}) on its container click.
+    screen.getByTestId("terminal-tab-picker-stub").click()
+    expect(mockRunInDock).toHaveBeenCalled()
+    const call = mockRunInDock.mock.calls[0][0] as {
+      chatSessionId: string
+      command: string
+    }
+    expect(call.chatSessionId).toBe("chat-1")
+    expect(call.command).toBe("ls -la")
   })
 })

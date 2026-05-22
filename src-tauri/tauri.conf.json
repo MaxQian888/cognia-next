@@ -41,7 +41,10 @@
       "../sidecar/node_modules/**/*",
       "../sidecar/vscode-ext-host/package.json",
       "../sidecar/vscode-ext-host/dist/**/*",
-      "../sidecar/vscode-ext-host/node_modules/**/*"
+      "../sidecar/vscode-ext-host/node_modules/**/*",
+      "resources/terminal/shell-integration.bash",
+      "resources/terminal/shell-integration.zsh",
+      "resources/terminal/shell-integration.ps1"
     ],
     "icon": [
       "icons/32x32.png",

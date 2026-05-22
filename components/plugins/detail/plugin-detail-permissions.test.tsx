@@ -39,6 +39,11 @@ jest.mock("@/hooks/plugins", () => ({
     setTier: mockSetTier,
     getTiersForPlugin: () => [],
   }),
+  usePluginRow: () =>
+    mockPlugin === undefined
+      ? { state: "not-found" as const }
+      : { state: "ready" as const, row: mockPlugin },
+  usePluginDiagnostics: () => [],
 }))
 
 // PermissionRow is what we're verifying we reuse.

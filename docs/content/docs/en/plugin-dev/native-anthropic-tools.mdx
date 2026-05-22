@@ -1,0 +1,274 @@
+---
+title: Native Anthropic Tools
+description: Register custom Anthropic native tools (computer / bash / text_editor-style) from your plugin. Includes the executeIpc Tauri contract, character allowedToolIds filtering, and a complete spreadsheet-tool example.
+---
+
+# Native Anthropic Tools
+
+ADR-0020 ("Computer Use Completeness") shipped a registry for **native
+Anthropic tools** — the `computer_20251124`, `bash_20250124`, and
+`text_editor_20250728` shapes the Anthropic API understands natively.
+Cognia's in-tree `cognia-computer-use` plugin uses this surface, but
+**any plugin** can contribute its own native tool: e.g. a spreadsheet
+plugin that ships a `spreadsheet_20260601` tool the model can call
+directly with cell ranges and formulas.
+
+This page is the practical reference. For background, see
+[ADR-0020](/docs/en/adr/0020-computer-use-completeness).
+
+## When to use a native tool vs a Plugin MCP tool
+
+| Surface | Use when… | Cost |
+|---|---|---|
+| **Native Anthropic tool** | Anthropic ships a pretrained shape for your domain (computer / bash / text_editor today; more in future model releases) and you want the API-level prompt boost the native shape triggers. | Requires the `anthropic-beta` header for the tool type; only the Anthropic provider supports it. |
+| **Plugin MCP tool** (the more common choice) | You're shipping a custom tool no provider knows about, or you need cross-provider compatibility (the Claude Code SDK exposes the same `cognia-plugin-tools` MCP server to every chat). | Standard MCP tool — the model sees it as `mcp__cognia-plugin-tools__<name>`. |
+
+If you're unsure, ship a Plugin MCP tool first. Promote to a native
+tool only when Anthropic publishes a pretrained shape that matches
+your domain.
+
+## Manifest field — `nativeAnthropicTools`
+
+Native tools are registered **declaratively** in `plugin.json` so the
+plugin manager can register them at enable time and tear them down
+cleanly on disable. The same shape can be created in code with
+`defineNativeAnthropicTool`.
+
+```jsonc
+// plugin.json
+{
+  "id": "cognia-spreadsheet-tool",
+  "name": "Spreadsheet Tool",
+  "version": "0.1.0",
+  "type": "frontend",
+  "capabilities": ["native-anthropic-tool"],
+  "main": "src/index.ts",
+  "nativeAnthropicTools": [
+    {
+      "id": "spreadsheet",
+      "name": "spreadsheet",
+      "type": "spreadsheet_20260601",
+      "betaHeader": "spreadsheet-2026-06-01",
+      "executeIpc": { "invoke": "plugin_spreadsheet_execute" },
+      "permissionPolicy": "always-ask"
+    }
+  ],
+  "permissions": ["native:input"]
+}
+```
+
+### Field reference
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | yes | Stable id within the registry. `Character.computerUseSettings.allowedToolIds` filters by this id. |
+| `name` | yes | The name the model sees. Should match the conventional snake_case used by Anthropic's existing native tools. |
+| `type` | yes | The Anthropic native tool type tag (e.g. `computer_20251124`, `text_editor_20250728`). Drives the `anthropic-beta` header. |
+| `betaHeader` | optional | Override for the `anthropic-beta` header value when the tool type isn't one Cognia's defaults map to. |
+| `displayWidthPx` / `displayHeightPx` / `displayNumber` / `enableZoom` | optional | Display metadata for computer-style tools. Omit for non-screen tools. |
+| `executeIpc.invoke` | yes | The Tauri command name the sidecar forwards every `tool_use` to. **You implement this command** — see the next section. |
+| `permissionPolicy` | optional | `"always-ask"` (default) / `"session-allow"` / `"preauth"`. Hint to the renderer-side approval flow; the Rust permission gate runs independently. |
+
+## Tauri command contract — `executeIpc.invoke`
+
+Every native tool ships a Tauri command that takes the model's `input`
+JSON and an optional `CallContext` and returns a result your tool's
+schema says you'll return. The sidecar forwards `tool_use` events to
+your command verbatim.
+
+```rust
+// src-tauri/src/plugins/spreadsheet/commands.rs (in your plugin's Rust workspace)
+use tauri::AppHandle;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallContext {
+    surface: Option<String>,          // "computerUse" | "mcp" | "workflow" | "plugin"
+    plugin_id: Option<String>,
+    process_name: Option<String>,
+    window_title: Option<String>,
+    force_tier: Option<String>,        // ADR-0020 W1 — "perCall" forces consent
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SpreadsheetAction {
+    Read { range: String },
+    Write { range: String, value: serde_json::Value },
+    EvaluateFormula { range: String, formula: String },
+}
+
+#[tauri::command]
+pub async fn plugin_spreadsheet_execute(
+    _app: AppHandle,
+    action: SpreadsheetAction,
+    _ctx: Option<CallContext>,
+) -> Result<serde_json::Value, String> {
+    // Route through the host's automation permission gate first if your
+    // tool drives the desktop — see `automation::commands::command_body!`
+    // for the canonical skeleton. The host's gate fires automatically for
+    // every `desktop_*` command; if your tool calls those, you inherit
+    // the gate for free.
+    match action {
+        SpreadsheetAction::Read { range } => Ok(serde_json::json!({
+            "ok": true,
+            "value": read_range(&range)?,
+        })),
+        SpreadsheetAction::Write { range, value } => {
+            write_range(&range, value)?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
+        SpreadsheetAction::EvaluateFormula { range, formula } => Ok(serde_json::json!({
+            "ok": true,
+            "value": evaluate_formula(&range, &formula)?,
+        })),
+    }
+}
+```
+
+Three rules:
+
+1. **Result shape matches your schema.** The model sees what your
+   command returns as the `tool_result.content`. Mirror Anthropic's
+   `{ ok, output, error, … }` convention so failures are visible to
+   the model.
+2. **Permission gating is your responsibility for non-desktop calls.**
+   The host's `automation::commands::command_body!` macro gates every
+   `desktop_*` Tauri command through the permission tier; if your tool
+   doesn't drive the desktop, you implement your own gate.
+3. **Honour `ctx.force_tier == Some("perCall")`.** ADR-0020 W1 added
+   this as the wire field characters set via
+   `requireConsent: true`. The host's
+   `permission::maybe_upgrade_to_consent` helper does this for
+   automation commands; if your tool dispatches its own gate, you
+   should mirror it.
+
+## Code-side registration (alternative to `manifest.nativeAnthropicTools`)
+
+If you need to compute the tool definition at runtime (e.g. swap
+`displayWidthPx` based on the active monitor), you can build the def
+in `activate()` instead of declaring it in the manifest:
+
+```ts
+// src/index.ts
+import { defineNativeAnthropicTool } from "cognia-plugin-sdk/api/native-anthropic-tool"
+import type { PluginContext, PluginDefinition } from "cognia-plugin-sdk"
+
+const definition: PluginDefinition = {
+  manifest: {
+    id: "cognia-spreadsheet-tool",
+    name: "Spreadsheet Tool",
+    version: "0.1.0",
+    type: "frontend",
+    capabilities: ["native-anthropic-tool"],
+    main: "src/index.ts",
+    permissions: ["native:input"],
+    // No `nativeAnthropicTools` — we register imperatively below.
+  } as never,
+  activate: async (ctx: PluginContext) => {
+    if (!ctx.agent?.registerNativeAnthropicTool) {
+      ctx.logger?.warn("agent.registerNativeAnthropicTool unavailable")
+      return
+    }
+    ctx.agent.registerNativeAnthropicTool(
+      defineNativeAnthropicTool({
+        id: "spreadsheet",
+        name: "spreadsheet",
+        type: "spreadsheet_20260601",
+        executeIpc: { invoke: "plugin_spreadsheet_execute" },
+        permissionPolicy: "always-ask",
+      })
+    )
+  },
+}
+
+export default definition
+```
+
+Pick **manifest declaration** unless you genuinely need runtime values
+— the manifest path teardown handles plugin disable / uninstall
+cleanup automatically, while imperative registration requires a
+matching `unregisterNativeAnthropicToolById` call in `deactivate()`.
+
+## Per-character filtering via `allowedToolIds`
+
+`Character.computerUseSettings.allowedToolIds` filters the registry at
+send time. The character editor (Settings → Characters → Edit) renders
+a checkbox group sourced from `listNativeAnthropicToolEntries()`, so
+the user can opt in to your tool the same way they opt in to the
+built-in `computer` / `bash` / `text_editor`. No extra work from your
+plugin — the registry filter does the right thing.
+
+When the operator wants your tool gated through the renderer's
+floating consent overlay too, they flip
+`Character.computerUseSettings.requireConsent: true` — that stamps
+`forceTier: "perCall"` on every tool def for the turn. Your Tauri
+command receives it as `ctx.forceTier === "perCall"`.
+
+## Permission flow at a glance
+
+```
+model emits tool_use ──► sidecar canUseTool ──► chat-side approval modal
+                                                          │
+                                                          ▼
+                                            Tauri command (your code)
+                                                          │
+                                                          ▼
+                                          (optional) host permission gate
+                                                          │
+                                                          ▼
+                                                  tool_result back
+```
+
+Two independent gates: the chat modal (controlled by
+`chatConsentMode`) and the host's Rust gate (the
+`automation::commands::command_body!` macro for desktop calls; your
+own equivalent for non-desktop calls). The renderer-side
+`<ConsentOverlay />` only fires when the Rust gate decides
+`RequireConsent`. ADR-0020 W3's session-grant logic suppresses the
+chat modal when the operator has already approved your tool earlier
+in the session — your Tauri command does not need to be aware.
+
+## Audit trail
+
+Every successful dispatch through `command_body!` emits an
+`automation:event` Tauri event that the renderer mirrors into the
+Dexie `automationAuditLog` table. If your tool routes through
+`desktop_*` you get audit for free; if it implements its own gate,
+emit the same event shape so the Settings → Automation → Audit tab
+surfaces your tool's calls alongside the built-ins.
+
+## Capability proof
+
+The `native-anthropic-tool` capability contract is locked at
+`runtime-proof-audit.test.ts`. When your plugin contributes a native
+tool, make sure your `plugin.json` declares
+`"capabilities": ["native-anthropic-tool"]` — the proof's `verified`
+status depends on the manifest carrying the capability name.
+
+## Common mistakes
+
+- **`executeIpc.invoke` points at a Tauri command that doesn't exist.**
+  Symptoms: every tool call fails with `Command not found`. Fix:
+  ensure your `tauri::generate_handler![...]` array includes the
+  command name.
+- **Returning a String instead of a JSON object from the Tauri
+  command.** The Claude Code SDK forwards the return value verbatim;
+  a bare string lands as `tool_result.content` text without structure.
+  Always return `serde_json::Value` shaped like Anthropic's
+  `{ ok, output, error, … }` so the host's
+  `<ComputerUseCard />`-style renderers can decode it.
+- **Forgetting the `betaHeader`.** Without the right `anthropic-beta`
+  token, Anthropic rejects the request as "unknown tool type". The
+  registry's `computeAnthropicBetaHeaders` does the right thing when
+  your `type` field uses one of the known Anthropic shapes; only
+  override `betaHeader` when shipping a wholly new type.
+
+## Reference
+
+- In-tree example: [`plugins/computer-use/`](https://github.com/your-org/cognia-next/tree/master/plugins/computer-use) — the canonical implementation of `computer_20251124` / `bash_20250124` / `text_editor_20250728`.
+- SDK re-export: `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` — the published entry point this capability contract advertises.
+- Registry source: `lib/plugin/registries/native-anthropic-tool-registry.ts` — register / unregister / list / compute beta header.
+- Wire shape: `types/plugin/plugin-native-tool.ts` — `PluginNativeAnthropicToolDef`.
+- ADR: [ADR-0020 — Computer Use Completeness](/docs/en/adr/0020-computer-use-completeness).

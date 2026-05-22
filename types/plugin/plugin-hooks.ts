@@ -393,6 +393,58 @@ export interface WorkflowHookEvents {
 // =============================================================================
 
 /**
+ * Integrated-terminal hook events (plan: vscode-vivid-wilkinson).
+ *
+ * `onTerminalWillSpawn` gives plugins a chance to veto or modify a new
+ * terminal session before the Rust spawn runs. Resolution rules in
+ * `dispatchTerminalWillSpawn`:
+ *
+ *   * Each subscriber may return:
+ *     - `"allow"` — explicit pass-through.
+ *     - `"deny"` — abort the spawn.
+ *     - a `PluginTerminalSpawnRequest` — mutate the request (shell, cwd,
+ *       env, etc.). Subsequent plugins see the mutated form.
+ *     - `void` / `undefined` — defer, equivalent to `"allow"`.
+ *   * The dispatcher iterates by priority and short-circuits on the
+ *     first `"deny"`. Mutations are chained.
+ *   * Timeout / hook-disabled / hook-error → treated as `"allow"` so
+ *     a buggy plugin never wedges the dock.
+ *
+ * `onTerminalLifecycle` is fire-and-forget — used by audit plugins and
+ * the activity log. Never blocks the dock.
+ */
+export interface PluginTerminalSpawnRequest {
+  shell: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  rows: number
+  cols: number
+  projectId?: string
+  extensionId?: string
+  enableShellIntegration?: boolean
+  origin?: "local" | "remote"
+}
+
+export type PluginTerminalSpawnDecision = "allow" | "deny" | PluginTerminalSpawnRequest
+
+export interface PluginTerminalLifecycleEvent {
+  kind: "spawned" | "exited" | "killed"
+  sessionId: string
+  projectId?: string | null
+  extensionId?: string | null
+  exitCode?: number | null
+}
+
+export interface TerminalHookEvents {
+  onTerminalWillSpawn?: (
+    req: PluginTerminalSpawnRequest
+  ) => PluginTerminalSpawnDecision | void | Promise<PluginTerminalSpawnDecision | void>
+
+  onTerminalLifecycle?: (event: PluginTerminalLifecycleEvent) => void
+}
+
+/**
  * UI interaction hook events
  */
 export interface UIHookEvents {
@@ -494,6 +546,10 @@ export interface PluginHooksAll extends PluginHooks {
   onPanelClose?: UIHookEvents["onPanelClose"]
   onShortcut?: UIHookEvents["onShortcut"]
   onContextMenuShow?: UIHookEvents["onContextMenuShow"]
+
+  // Terminal hooks
+  onTerminalWillSpawn?: TerminalHookEvents["onTerminalWillSpawn"]
+  onTerminalLifecycle?: TerminalHookEvents["onTerminalLifecycle"]
 
   // Message lifecycle hooks
   onMessageDelete?: PluginHooks["onMessageDelete"]

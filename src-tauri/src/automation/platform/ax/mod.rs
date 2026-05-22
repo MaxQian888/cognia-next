@@ -1,21 +1,35 @@
-//! macOS AXAPI back-end — minimum viable.
+//! macOS AXAPI back-end.
 //!
-//! Implements the four cross-platform primitives that Anthropic's
-//! `computer_20251124` action set needs even on systems without a UIA tree:
+//! ADR-0020 W2 closed the parity gap with the Windows UIA backend for the
+//! Anthropic `computer_20251124` action surface:
 //!
-//!   - `capabilities` — reports `hasInputSim: true`, `hasScreenshot: true`,
-//!     `hasUia: false` (AXUIElement-based tree navigation lands later).
-//!   - `screenshot` — delegates to the shared xcap-based capture.
-//!   - `click` (Point only — Element targets fall through `UnsupportedPlatform`).
-//!   - `type_text` / `send_keys` — `enigo`-based synthesis.
+//!   - **Input primitives**: every method on `AutomationBackend` that the
+//!     model can reach (`click` / `mouse_move` / `drag` / `scroll` /
+//!     `mouse_button` / `hold_key` / `cursor_position`) is implemented
+//!     via `enigo`. `send_keys` walks the shared keymap IR so modifier
+//!     chords (`ctrl+shift+t`) work — pre-W2 they hard-failed.
+//!   - **Read-only metadata**: `get_focus` / `find` / `pick_at_point`
+//!     shell out to `osascript` (frontmost app + window title via System
+//!     Events). Results are cached for 250ms so a flurry of
+//!     `Whitelist::matches` calls during a single tool turn doesn't
+//!     re-fork the shell. Locator support is restricted to
+//!     `processName` / `windowTitleContains`; deeper AXUIElement tree
+//!     walking is out of scope for the minimum-viable surface.
 //!
-//! The remaining trait methods stay `UnsupportedPlatform`. Once a real
-//! AXUIElement-backed tree walker lands, the gate can flip to `hasUia: true`
-//! and Element-target clicks / window ops / pattern dispatch follow.
+//! `capabilities()` still reports `hasUia: false` because we don't
+//! return a full element tree — only enough metadata for whitelist
+//! gating, focus inspection, and the `pick_at_point` round trip. The
+//! Inspector tab continues to render its "macOS / Linux not yet
+//! supported" message until the full tree lands.
+
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use enigo::{Direction, Enigo, Keyboard, Mouse, Settings};
+use once_cell::sync::Lazy;
 
 use crate::automation::backend::AutomationBackend;
+use crate::automation::platform::shared::keymap::{parse_chord, KeyToken, Modifier, NamedKey};
 use crate::automation::platform::shared::screenshot;
 use crate::automation::types::*;
 
@@ -39,15 +53,45 @@ impl AutomationBackend for AxBackend {
     }
 
     fn get_focus(&self) -> Result<ElementInfo> {
-        Err(AutomationError::UnsupportedPlatform)
+        let snap = read_focused_window()?;
+        Ok(focused_to_element_info(&snap))
     }
 
     fn read_tree(&self, _root: Option<ElementRef>, _opts: TreeOpts) -> Result<Vec<ElementInfo>> {
+        // Full tree traversal requires AXUIElement.children walking; out
+        // of scope for the W2 minimum-viable surface.
         Err(AutomationError::UnsupportedPlatform)
     }
 
-    fn find(&self, _locator: &Locator) -> Result<Option<ElementRef>> {
-        Err(AutomationError::UnsupportedPlatform)
+    fn find(&self, locator: &Locator) -> Result<Option<ElementRef>> {
+        // Locator semantics on macOS are limited to the frontmost
+        // window: we match against processName / windowTitleContains.
+        // Anything else (controlType, automationId) returns None
+        // because we can't introspect deeper than the active window.
+        let snap = read_focused_window()?;
+        if let Some(want_proc) = locator.process_name.as_deref() {
+            let have = snap.process_name.as_deref().unwrap_or("");
+            if !have.eq_ignore_ascii_case(want_proc) {
+                return Ok(None);
+            }
+        }
+        if let Some(want_title) = locator.window_title_contains.as_deref() {
+            let have = snap.window_title.as_deref().unwrap_or("");
+            if !have.contains(want_title) {
+                return Ok(None);
+            }
+        }
+        if locator.name.is_some()
+            || locator.name_contains.is_some()
+            || locator.automation_id.is_some()
+            || locator.control_type.is_some()
+            || locator.class_name.is_some()
+        {
+            // We can't satisfy these constraints with osascript metadata
+            // alone; advertise as "no match" instead of pretending.
+            return Ok(None);
+        }
+        Ok(Some(snap_to_element_ref(&snap)))
     }
 
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot> {
@@ -62,11 +106,15 @@ impl AutomationBackend for AxBackend {
                 e.move_mouse(x, y, enigo::Coordinate::Abs)
                     .map_err(input_err("mouse move"))?;
                 let button = to_enigo_button(opts.button);
-                if opts.double.unwrap_or(false) {
+                let count = opts.count.unwrap_or(if opts.double.unwrap_or(false) { 2 } else { 1 });
+                for i in 0..count.max(1) {
                     e.button(button, Direction::Click).map_err(input_err("click"))?;
-                    e.button(button, Direction::Click).map_err(input_err("click"))?;
-                } else {
-                    e.button(button, Direction::Click).map_err(input_err("click"))?;
+                    if i + 1 < count {
+                        // Spacing to fall inside the typical macOS
+                        // double-click threshold (500ms). 50ms is far
+                        // enough below it to register as a multi-click.
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                 }
                 Ok(())
             }
@@ -79,30 +127,11 @@ impl AutomationBackend for AxBackend {
     }
 
     fn send_keys(&self, chord: &KeyChord) -> Result<()> {
+        let tokens = parse_chord(&chord.0).map_err(|e| AutomationError::BackendError {
+            message: format!("send_keys: {e}"),
+        })?;
         let mut e = enigo_new()?;
-        // enigo's text-style chord input ("a", "b") doesn't cover modifier
-        // chords. For the minimum-viable AX backend we accept simple single
-        // tokens like "Enter", "Tab", "Escape" — anything more elaborate
-        // (Ctrl+Shift+T) needs the same parser the UIA backend uses; that's
-        // not in scope for the minimum-viable surface.
-        let key = match chord.0.to_lowercase().as_str() {
-            "enter" | "return" => enigo::Key::Return,
-            "tab" => enigo::Key::Tab,
-            "escape" | "esc" => enigo::Key::Escape,
-            "backspace" => enigo::Key::Backspace,
-            "delete" | "del" => enigo::Key::Delete,
-            "space" => enigo::Key::Space,
-            other => {
-                return Err(AutomationError::BackendError {
-                    message: format!(
-                        "macOS minimum-viable backend supports single-token chords \
-                         (Enter / Tab / Escape / Backspace / Delete / Space). \
-                         Got: '{other}'."
-                    ),
-                });
-            }
-        };
-        e.key(key, Direction::Click).map_err(input_err("send_keys"))
+        send_chord(&mut e, &tokens, Duration::ZERO)
     }
 
     fn invoke_pattern(
@@ -166,13 +195,11 @@ impl AutomationBackend for AxBackend {
     }
 
     fn hold_key(&self, chord: &KeyChord, duration_ms: u32) -> Result<()> {
-        let _ = chord;
-        let _ = duration_ms;
-        Err(AutomationError::BackendError {
-            message: "hold_key on macOS requires a full keyboard parser — not in the \
-                      minimum-viable surface"
-                .into(),
-        })
+        let tokens = parse_chord(&chord.0).map_err(|e| AutomationError::BackendError {
+            message: format!("hold_key: {e}"),
+        })?;
+        let mut e = enigo_new()?;
+        send_chord(&mut e, &tokens, Duration::from_millis(u64::from(duration_ms)))
     }
 
     fn mouse_button(
@@ -194,6 +221,17 @@ impl AutomationBackend for AxBackend {
         let (x, y) = e.location().map_err(input_err("cursor_position"))?;
         Ok(Point { x, y })
     }
+
+    fn pick_at_point(&self, _point: Point) -> Result<ElementInfo> {
+        // macOS minimum-viable: `pick_at_point` resolves to whichever
+        // element System Events identifies as the frontmost app's
+        // window. Cursor-coordinate-based hit-testing requires
+        // AXUIElementCopyElementAtPosition; out of scope for W2 but the
+        // Inspector still gets a useful result (the focused window's
+        // metadata) so the affordance isn't a no-op.
+        let snap = read_focused_window()?;
+        Ok(focused_to_element_info(&snap))
+    }
 }
 
 fn enigo_new() -> Result<Enigo> {
@@ -213,5 +251,211 @@ fn to_enigo_button(b: Option<MouseButton>) -> enigo::Button {
 fn input_err(label: &'static str) -> impl Fn(enigo::InputError) -> AutomationError {
     move |e| AutomationError::BackendError {
         message: format!("{label}: {e}"),
+    }
+}
+
+/// Press modifiers, fire / hold the main key, release modifiers. When
+/// `hold` is `Duration::ZERO` the main key fires once (W2 `send_keys`);
+/// otherwise the main key is pressed-and-held for `hold` then released
+/// (W2 `hold_key`). All errors propagate through the same
+/// `BackendError` channel.
+fn send_chord(e: &mut Enigo, tokens: &[KeyToken], hold: Duration) -> Result<()> {
+    let mut modifiers: Vec<enigo::Key> = Vec::new();
+    let mut main: Option<enigo::Key> = None;
+    for tok in tokens {
+        match tok {
+            KeyToken::Modifier(m) => modifiers.push(modifier_to_enigo(*m)),
+            KeyToken::Named(n) => main = Some(named_to_enigo(*n)),
+            KeyToken::Char(c) => main = Some(enigo::Key::Unicode(*c)),
+        }
+    }
+    let Some(main_key) = main else {
+        return Err(AutomationError::BackendError {
+            message: "chord has no main key".into(),
+        });
+    };
+    for m in &modifiers {
+        e.key(*m, Direction::Press).map_err(input_err("chord.mod_press"))?;
+    }
+    if hold.is_zero() {
+        e.key(main_key, Direction::Click).map_err(input_err("chord.main_click"))?;
+    } else {
+        e.key(main_key, Direction::Press).map_err(input_err("chord.main_press"))?;
+        std::thread::sleep(hold);
+        e.key(main_key, Direction::Release).map_err(input_err("chord.main_release"))?;
+    }
+    for m in modifiers.iter().rev() {
+        e.key(*m, Direction::Release).map_err(input_err("chord.mod_release"))?;
+    }
+    Ok(())
+}
+
+fn modifier_to_enigo(m: Modifier) -> enigo::Key {
+    match m {
+        Modifier::Shift => enigo::Key::Shift,
+        Modifier::Control => enigo::Key::Control,
+        Modifier::Alt => enigo::Key::Alt,
+        Modifier::Meta => enigo::Key::Meta,
+    }
+}
+
+fn named_to_enigo(n: NamedKey) -> enigo::Key {
+    match n {
+        NamedKey::Enter => enigo::Key::Return,
+        NamedKey::Tab => enigo::Key::Tab,
+        NamedKey::Escape => enigo::Key::Escape,
+        NamedKey::Backspace => enigo::Key::Backspace,
+        NamedKey::Delete => enigo::Key::Delete,
+        NamedKey::Space => enigo::Key::Space,
+        NamedKey::Home => enigo::Key::Home,
+        NamedKey::End => enigo::Key::End,
+        NamedKey::PageUp => enigo::Key::PageUp,
+        NamedKey::PageDown => enigo::Key::PageDown,
+        NamedKey::ArrowUp => enigo::Key::UpArrow,
+        NamedKey::ArrowDown => enigo::Key::DownArrow,
+        NamedKey::ArrowLeft => enigo::Key::LeftArrow,
+        NamedKey::ArrowRight => enigo::Key::RightArrow,
+        NamedKey::F(n) => enigo::Key::F(n),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Focused-window metadata via `osascript`. Cached for 250ms.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct FocusedSnapshot {
+    process_name: Option<String>,
+    window_title: Option<String>,
+    pid: Option<u32>,
+}
+
+struct FocusedCache {
+    snapshot: Option<FocusedSnapshot>,
+    captured_at: Instant,
+}
+
+static FOCUSED_CACHE: Lazy<Mutex<FocusedCache>> = Lazy::new(|| {
+    Mutex::new(FocusedCache {
+        snapshot: None,
+        captured_at: Instant::now() - Duration::from_secs(60),
+    })
+});
+
+const FOCUS_CACHE_TTL: Duration = Duration::from_millis(250);
+
+fn read_focused_window() -> Result<FocusedSnapshot> {
+    {
+        let guard = FOCUSED_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(snap) = guard.snapshot.as_ref() {
+            if guard.captured_at.elapsed() < FOCUS_CACHE_TTL {
+                return Ok(snap.clone());
+            }
+        }
+    }
+    let snap = fork_osascript()?;
+    let mut guard = FOCUSED_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    guard.snapshot = Some(snap.clone());
+    guard.captured_at = Instant::now();
+    Ok(snap)
+}
+
+fn fork_osascript() -> Result<FocusedSnapshot> {
+    // Single AppleScript run that returns three lines:
+    //   line 1: front process name
+    //   line 2: front process PID
+    //   line 3: front window name (or empty)
+    let script = r#"tell application "System Events"
+    set frontApp to first process whose frontmost is true
+    set procName to name of frontApp
+    set procPid to unix id of frontApp
+    set winName to ""
+    try
+        set winName to name of front window of frontApp
+    end try
+end tell
+return procName & "\n" & procPid & "\n" & winName"#;
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("osascript spawn failed: {e}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(AutomationError::BackendError {
+            message: format!("osascript exited {}: {stderr}", output.status),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    let process_name = lines.next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let pid = lines
+        .next()
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    let window_title = lines.next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    Ok(FocusedSnapshot {
+        process_name,
+        window_title,
+        pid,
+    })
+}
+
+fn snap_to_element_ref(snap: &FocusedSnapshot) -> ElementRef {
+    // Opaque ref convention on macOS: "macos|pid=<n>|title=<title>".
+    // The renderer never inspects the inner string — it just passes it
+    // back to subsequent calls — so we use a printable shape that's
+    // helpful when debugging audit rows.
+    let pid_part = snap.pid.map(|p| p.to_string()).unwrap_or_default();
+    let title_part = snap.window_title.clone().unwrap_or_default();
+    ElementRef(format!("macos|pid={pid_part}|title={title_part}"))
+}
+
+fn focused_to_element_info(snap: &FocusedSnapshot) -> ElementInfo {
+    ElementInfo {
+        element_ref: snap_to_element_ref(snap),
+        name: snap.window_title.clone(),
+        automation_id: None,
+        control_type: None,
+        class_name: None,
+        bounding_rect: None,
+        is_enabled: true,
+        is_focused: true,
+        process_id: snap.pid,
+        process_name: snap.process_name.clone(),
+        window_title: snap.window_title.clone(),
+        children: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focused_to_element_info_passes_metadata_through() {
+        let snap = FocusedSnapshot {
+            process_name: Some("Safari".into()),
+            window_title: Some("Apple - Start".into()),
+            pid: Some(1234),
+        };
+        let info = focused_to_element_info(&snap);
+        assert_eq!(info.process_name.as_deref(), Some("Safari"));
+        assert_eq!(info.process_id, Some(1234));
+        assert_eq!(info.window_title.as_deref(), Some("Apple - Start"));
+        assert!(info.is_focused);
+    }
+
+    #[test]
+    fn snap_to_element_ref_uses_macos_marker_for_observability() {
+        let snap = FocusedSnapshot {
+            process_name: None,
+            window_title: Some("Untitled".into()),
+            pid: Some(42),
+        };
+        let r = snap_to_element_ref(&snap);
+        assert!(r.0.starts_with("macos|"));
+        assert!(r.0.contains("pid=42"));
     }
 }

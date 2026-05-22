@@ -54,6 +54,17 @@ export interface CallContext {
   clickX?: number
   /** ADR-0028 / T5 — pixel y of the action's target. */
   clickY?: number
+  /**
+   * ADR-0020 W1 — per-call tier upgrade. Carried over the wire as
+   * `forceTier`; deserialized into `automation::commands::CallContext.force_tier`
+   * on the Rust side. Today only `"perCall"` has a real effect: the
+   * `command_body!` macro upgrades a gate `Allow` into `RequireConsent`
+   * for driving calls so the floating overlay fires. Populated by the
+   * computer-use plugin's `execute()` callback from the active
+   * character's `requireConsent: true` setting (see
+   * `lib/claude/computer-use-active-settings.ts`).
+   */
+  forceTier?: "off" | "whitelist" | "perCall"
 }
 
 export const desktop = {

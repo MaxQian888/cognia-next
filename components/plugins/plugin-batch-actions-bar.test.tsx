@@ -60,6 +60,8 @@ beforeEach(() => {
   setPluginEnabledMock.mockClear()
   usePluginsStore.setState({
     selection: new Set(["a", "b"]),
+    deleteTarget: null,
+    deleteQueue: [],
   })
 })
 
@@ -92,11 +94,35 @@ describe("PluginBatchActionsBar", () => {
   it("hides secondary labels behind hidden sm:inline on narrow viewports", () => {
     render(<PluginBatchActionsBar />)
     const disableLabel = screen.getByText("disableAll")
-    const refreshLabel = screen.getByText("refresh")
     const uninstallLabel = screen.getByText("uninstall")
-    for (const label of [disableLabel, refreshLabel, uninstallLabel]) {
+    for (const label of [disableLabel, uninstallLabel]) {
       expect(label.className).toContain("hidden")
       expect(label.className).toContain("sm:inline")
     }
+  })
+
+  it("does not render the legacy refresh button", () => {
+    render(<PluginBatchActionsBar />)
+    expect(screen.queryByText("refresh")).not.toBeInTheDocument()
+  })
+
+  it("Uninstall enqueues every selected plugin into the delete queue", () => {
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByLabelText("uninstall"))
+    const state = usePluginsStore.getState()
+    // Head of the queue lands in deleteTarget, the rest stays in deleteQueue.
+    expect(state.deleteTarget).toEqual({ pluginId: "a", name: "A" })
+    expect(state.deleteQueue).toEqual([{ pluginId: "b", name: "B" }])
+  })
+
+  it("Clear-selection drops any pending delete queue", () => {
+    usePluginsStore.setState({
+      selection: new Set(["a"]),
+      deleteQueue: [{ pluginId: "b", name: "B" }],
+    })
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByLabelText("clearSelection"))
+    expect(usePluginsStore.getState().deleteQueue).toEqual([])
+    expect(usePluginsStore.getState().selection.size).toBe(0)
   })
 })

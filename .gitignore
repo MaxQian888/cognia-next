@@ -98,7 +98,19 @@ rustc-ice-*.txt
 
 # local lint / verification dumps
 .lint-output.*
+.lint.log
+.lint-i18n.log
+.lint-i18n.json
+.typecheck.log
+.test-coverage.log
+.sidecar-test.log
+.audit-slots.log
+.discover.json
+.citest-map.json
+.ci/
+.codegraph/
 batch-final-verify-*.png
+workflows-*.png
 dist
 
 # IDE-local data (Tallycode VSCode extension cache)

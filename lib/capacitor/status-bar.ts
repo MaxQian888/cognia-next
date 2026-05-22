@@ -77,13 +77,27 @@ export async function setOverlay(
 }
 
 /**
- * Convenience: derive a status-bar style from the current `next-themes`
- * resolved theme name. Background tracks app surface.
+ * Convenience: drive the iOS status bar from a `next-themes` resolved
+ * theme name plus an optional `backgroundHex` from the appearance shell-
+ * sync helper. Both the icon style (light / dark) and the background
+ * colour are pushed so a custom appearance palette repaints the bar in
+ * lockstep with the in-app theme.
+ *
+ * Backwards-compatible — the old call site (`syncWithTheme(resolvedTheme)`)
+ * still works; without `backgroundHex` the bar style flips but the
+ * background colour is left to the OS default.
  */
 export async function syncWithTheme(
   resolvedTheme: "light" | "dark" | string | undefined,
+  backgroundHex?: string,
   loader: StatusBarLoader = defaultLoader
 ): Promise<SimpleOutcome> {
   const style: StatusBarStyle = resolvedTheme === "dark" ? "light" : "dark"
-  return setStyle(style, loader)
+  const styleOutcome = await setStyle(style, loader)
+  if (backgroundHex) {
+    // Fire-and-await so a colour failure surfaces in the caller's logs;
+    // the style outcome is what we return because it's the primary signal.
+    await setBackgroundColor(backgroundHex, loader)
+  }
+  return styleOutcome
 }

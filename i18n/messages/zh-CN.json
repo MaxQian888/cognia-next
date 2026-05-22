@@ -3,6 +3,69 @@
     "openLeft": "打开{name}",
     "openRight": "打开{name}"
   },
+  "terminal": {
+    "dock": {
+      "newSession": "新建终端",
+      "closePanel": "关闭面板"
+    },
+    "tab": {
+      "close": "关闭终端",
+      "status": {
+        "idle": "空闲",
+        "running": "运行中",
+        "exitedOk": "已正常退出",
+        "exitedFail": "退出码非零"
+      },
+      "menu": {
+        "rename": "重命名 tab",
+        "restart": "重启",
+        "close": "关闭",
+        "closeOthers": "关闭其他",
+        "trustAgent": "信任此 tab 的智能体"
+      },
+      "rename": {
+        "label": "重命名终端 tab",
+        "inputLabel": "新 tab 名称",
+        "placeholder": "Tab 名称"
+      }
+    },
+    "search": {
+      "placeholder": "在终端中查找",
+      "caseSensitive": "区分大小写",
+      "previous": "上一个匹配",
+      "next": "下一个匹配",
+      "close": "关闭查找"
+    },
+    "history": {
+      "title": "命令历史",
+      "open": "展开命令历史",
+      "close": "收起命令历史",
+      "empty": "暂无命令。",
+      "blank": "（空）",
+      "copy": "复制命令",
+      "rerun": "重新运行",
+      "status": {
+        "ok": "已正常退出",
+        "error": "退出码非零",
+        "unknown": "未报告退出码"
+      }
+    },
+    "emptyState": {
+      "desktop": {
+        "title": "暂无终端",
+        "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
+        "action": "+ 新建终端"
+      },
+      "mobile": {
+        "title": "尚未配置远程终端",
+        "body": "在本设备和桌面服务器之间完成配对，即可通过 LAN 连接桌面终端。"
+      },
+      "unsupported": {
+        "title": "终端不可用",
+        "body": "集成终端需要桌面或移动 shell，在纯浏览器预览中不可用。"
+      }
+    }
+  },
   "agentTeamsWorkspace": {
     "listTitle": "智能体团队",
     "listDescription": "多智能体团队：规划、分工并并行执行。",
@@ -483,6 +546,18 @@
     "slashCommand": {
       "ranSlashCommand": "执行了斜杠命令"
     },
+    "terminalTool": {
+      "bashLabel": "Bash",
+      "runningStatus": "运行中",
+      "runInDock": {
+        "label": "在终端中运行",
+        "searchPlaceholder": "搜索 tab",
+        "empty": "没有匹配的 tab。",
+        "existingTabs": "已有 tab",
+        "newTab": "新建 tab",
+        "trustedBadge": "已信任"
+      }
+    },
     "twinBadge": {
       "label": "孪生 · {chunks}",
       "openWorkbench": "打开孪生工作台",
@@ -799,7 +874,21 @@
       "description": "每个角色都有自己的系统提示、模型与工具。",
       "searchPlaceholder": "搜索角色…",
       "empty": "没有匹配的角色。",
-      "groupHeading": "角色"
+      "groupHeading": "角色",
+      "groupBuiltIn": "内置",
+      "groupPlugin": "来自 {name}",
+      "groupLocalFile": "来自本地文件",
+      "groupUser": "我的角色"
+    },
+    "characterMissing": {
+      "title": "角色不可用",
+      "body": "此会话使用的{source}已不可用。后续消息将使用应用默认配置。",
+      "sourcePlugin": "插件「{name}」",
+      "sourceLocalFile": "本地角色包",
+      "action": {
+        "pickAnother": "选择其它角色",
+        "reEnablePluginHint": "重新启用该插件即可恢复。"
+      }
     },
     "renderers": {
       "code": {
@@ -971,6 +1060,7 @@
     "searchAria": "搜索发现内容",
     "featured": "精选",
     "builtInBadge": "内置",
+    "pluginBadge": "插件",
     "memberCount": "{count} 个智能体",
     "createCharacter": "新建角色",
     "emptyCharacters": "还没有角色 — 在桌面端创建一个吧。",
@@ -1615,6 +1705,7 @@
     "tabs": {
       "general": "常规",
       "appearance": "外观",
+      "terminal": "终端",
       "apiKey": "API 密钥",
       "ccswitch": "CCSwitch",
       "agents": "外部代理",
@@ -1657,6 +1748,7 @@
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
       "appearance": "主题、字号、语言与动效。",
+      "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "apiKey": "Anthropic API 密钥（由本地 sidecar 使用）。",
       "ccswitch": "复用 CCSwitch 中的服务商、MCP 服务器、提示词与技能，一键切换激活订阅。",
       "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
@@ -3110,6 +3202,49 @@
       "duplicateAria": "复制 {name}",
       "deleteAria": "删除 {name}",
       "skillsCount": "{count} 项技能",
+      "overlayReadOnly": "插件提供的角色为只读——请先复制",
+      "overlayUndeletable": "插件提供的角色无法删除——请禁用对应插件",
+      "badge": {
+        "fromPlugin": "来自 {name}",
+        "fromLocalFile": "来自本地文件",
+        "cloned": "克隆自 {name}",
+        "clonedFromLocalFile": "克隆自本地文件",
+        "updateAvailable": "有更新",
+        "missingDep": "{count, plural, =1 {缺依赖} other {缺 # 项依赖}}"
+      },
+      "packs": {
+        "title": "角色包",
+        "emptyHint": "插件可以贡献角色包。也可以手动导入 .cognia-pack.json 文件。",
+        "importJsonAction": "导入 .cognia-pack.json",
+        "importedToast": "已导入角色包「{id}」。",
+        "importUnavailableWeb": "本地角色包导入仅在桌面端可用。",
+        "deletedToast": "已删除角色包「{id}」。",
+        "exportedToast": "已导出至 {path}",
+        "exportedToastBrowser": "角色包已下载",
+        "sourceLocal": "本地文件",
+        "sourcePlugin": "插件：{name}",
+        "characterCount": "{count} 个角色",
+        "delete": "删除角色包",
+        "deleteAria": "删除角色包 {id}",
+        "removeTitle": "删除角色包？",
+        "removeBody": "角色包「{id}」将被移除。从该角色包克隆的角色仍保留在你的库中。",
+        "expandAria": "展开角色包 {id} 中的角色",
+        "collapseAria": "收起角色包 {id} 中的角色",
+        "rescan": "重新扫描本地包",
+        "rescanToast": "本地角色包扫描完成（注册 {registered}，跳过 {skipped}）",
+        "skippedToast": "跳过 {count} 个本地角色包文件 — 详见日志"
+      },
+      "actions": {
+        "recloneFromPack": "重新克隆",
+        "recloneFromPackTitle": "用新版本的角色包覆盖当前克隆",
+        "dismissUpdate": "忽略",
+        "dismissUpdateTitle": "不再为此克隆显示更新提示",
+        "exportPack": "导出角色包"
+      },
+      "recloneFromPackToast": "已重新克隆为「{name}」。",
+      "dismissUpdateToast": "已忽略更新提示。",
+      "exportPackUnavailable": "找不到可导出的角色包。",
+      "exportPackAria": "导出 {name} 的源角色包",
       "validation": {
         "nameRequired": "请填写名称。",
         "systemPromptRequired": "系统提示词不能为空。"
@@ -3558,6 +3693,54 @@
         "mcpSubsetOverride": "MCP 子集覆盖",
         "moveUp": "把 {name} 上移",
         "moveDown": "把 {name} 下移"
+      }
+    },
+    "terminal": {
+      "heading": "集成终端",
+      "subheading": "底部终端面板的默认 shell、字体和回滚行数。按项目覆盖优先于全局默认。",
+      "shell": {
+        "label": "默认 shell",
+        "auto": "自动检测（推荐）",
+        "bash": "bash",
+        "zsh": "zsh",
+        "pwsh": "PowerShell 7 (pwsh.exe)",
+        "powershell": "Windows PowerShell (powershell.exe)",
+        "cmd": "命令提示符 (cmd.exe)",
+        "custom": "自定义路径…",
+        "customLabel": "自定义 shell 路径",
+        "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按项目覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。"
+      },
+      "fontFamily": {
+        "label": "字体"
+      },
+      "fontSize": {
+        "label": "字号"
+      },
+      "scrollback": {
+        "label": "回滚行数",
+        "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。"
+      },
+      "shellIntegration": {
+        "label": "启用 shell 集成",
+        "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。"
+      },
+      "copyOnSelect": {
+        "label": "选中即复制",
+        "helper": "开启后，终端中的任何文本选区都会自动复制到剪贴板。默认关闭，避免误选覆盖剪贴板。"
+      },
+      "exposeDockToAgents": {
+        "label": "向智能体开放终端",
+        "helper": "允许聊天智能体通过 terminal-dock MCP 工具创建/读取/写入隔离的终端会话。智能体会话与可见 dock 隔离，仅创建它的智能体能访问。"
+      },
+      "projectOverride": {
+        "title": "按项目覆盖",
+        "helper": "选择项目以覆盖其 shell 或工作目录。留空则回退到全局默认。",
+        "selectProject": "选择一个项目…",
+        "emptyProjects": "暂无项目 — 创建项目后即可在此覆盖。",
+        "shellLabel": "Shell",
+        "shellPlaceholder": "/usr/local/bin/fish",
+        "cwdLabel": "工作目录",
+        "cwdPlaceholder": "/path/to/cwd"
       }
     },
     "speech": {
@@ -5154,6 +5337,7 @@
       "discover": "发现",
       "governance": "治理",
       "devtools": "开发工具",
+      "detailSheetLabel": "插件详情",
       "librarySub": {
         "all": "全部",
         "enabled": "已启用",
@@ -5305,6 +5489,9 @@
       "actionsMenuAria": "{name} 的操作菜单",
       "permissionCount": "{count, plural, =0 {无权限} other {# 项权限}}",
       "updateBadge": "有更新",
+      "erroredAria": "插件报告了错误",
+      "capabilityChipAria": "{capability} 能力——共 {count} 项贡献",
+      "moreCapabilitiesAria": "另有 {count} 项能力",
       "status": {
         "error": "异常",
         "loading": "加载中…",
@@ -5387,6 +5574,21 @@
       "optionalEmpty": "无可选权限。",
       "dependencies": "依赖",
       "notFound": "未找到该插件。",
+      "verification": {
+        "title": "运行校验",
+        "current": "当前",
+        "lastGood": "上次可用",
+        "verifiedAt": "校验时间 {date}",
+        "lastSuccessfulAt": "最近成功 {date}",
+        "lastFailureAt": "失败时间 {date}",
+        "rollbackTo": "回滚到 v{version}"
+      },
+      "diagnostics": {
+        "ariaLabel": "最近诊断",
+        "title": "{count} 条诊断记录",
+        "showMore": "再显示 {count} 条",
+        "collapse": "收起"
+      },
       "contributed": {
         "empty": "此插件尚未注册任何运行时贡献。",
         "countBadge": "{count}",
@@ -5490,7 +5692,25 @@
       "filteredBadge": "显示 {count}",
       "searchPlaceholder": "搜索插件…",
       "filtersButton": "筛选",
-      "categoriesButton": "分类"
+      "categoriesButton": "分类",
+      "resultsCount": "{count} / {total} 个插件",
+      "resultsCountEmpty": "无匹配——已安装 {total} 个插件"
+    },
+    "activeFilters": {
+      "ariaLabel": "已激活的筛选条件",
+      "clearAll": "全部清除",
+      "removeAria": "移除 {name}",
+      "chip": {
+        "query": "搜索：{value}",
+        "capability": "能力：{value}",
+        "permission": "权限：{value}",
+        "source": "来源：{value}",
+        "status": "状态：{value}",
+        "hasUpdate": "可更新",
+        "configurable": "可配置",
+        "signedOnly": "仅签名",
+        "sort": "排序：{value}"
+      }
     },
     "toolbar": {
       "install": "安装",
@@ -10825,6 +11045,17 @@
     },
     "tabBar": {
       "unread": "{count} 未读"
+    },
+    "terminal": {
+      "title": "终端",
+      "back": "返回",
+      "newSession": "新建终端会话",
+      "empty": {
+        "remoteReady": "暂无远程终端会话。新建一个以通过已配对的桌面服务器连接。",
+        "notMobile": "这里的集成终端以桌面 dock 形式运行 — 请切换到桌面应用使用。",
+        "unavailable": "该浏览器预览中暂不可用，请使用桌面或 Capacitor 构建。",
+        "action": "开始会话"
+      }
     },
     "pair": {
       "title": "连接桌面",

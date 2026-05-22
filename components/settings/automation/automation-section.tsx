@@ -455,6 +455,8 @@ function PermissionsTab() {
           })}
         </CardContent>
       </Card>
+
+      <PerPluginOverridesCard settings={settings} onChange={update} saving={saving} />
     </div>
   )
 }
@@ -493,6 +495,144 @@ function TierSelect({
         </Button>
       ))}
     </div>
+  )
+}
+
+// ADR-0020 W2 — per-plugin tier overrides.
+//
+// `AutomationSettings.perSurface.plugin.perPluginOverrides` was present
+// on the Rust gate + TS types since the original ADR but had no UI
+// editor — the code path was unreachable from the product. W2 makes
+// it editable: every enabled plugin that declares the `native:input`
+// permission gets a row with its own TierSelect that writes back to
+// `perPluginOverrides[pluginId].tier`. Plugins without an override
+// inherit the surface tier (today's behaviour).
+function PerPluginOverridesCard({
+  settings,
+  onChange,
+  saving,
+}: {
+  settings: AutomationSettings
+  onChange: (next: AutomationSettings) => Promise<void>
+  saving: boolean
+}) {
+  const t = useTranslations("automation.permissions.perPlugin")
+  const tSurfaceLabel = useTranslations("automation.permissions.tier")
+  const [eligible, setEligible] = useState<Array<{ id: string; name: string }>>([])
+  const [loading, setLoading] = useState(true)
+
+  // Late-import the plugin store so this component is safe to mount in
+  // jsdom / Storybook contexts where the Zustand store would explode on
+  // a missing IDB shim.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { usePluginStore } = await import("@/stores/plugin/plugin-store")
+        const plugins = Object.values(usePluginStore.getState().plugins)
+        const rows = plugins
+          .filter((p) => p.status === "enabled")
+          .filter((p) =>
+            (p.manifest.permissions ?? []).some(
+              (perm) => perm === "native:input" || perm === "native:screen"
+            )
+          )
+          .map((p) => ({ id: p.manifest.id, name: p.manifest.name }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        if (!cancelled) setEligible(rows)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const overrides = settings.perSurface.plugin.perPluginOverrides ?? {}
+
+  function setPluginTier(pluginId: string, tier: Tier): void {
+    const nextOverrides: Record<string, { tier: Tier }> = { ...overrides }
+    nextOverrides[pluginId] = { tier }
+    const next: AutomationSettings = {
+      ...settings,
+      perSurface: {
+        ...settings.perSurface,
+        plugin: {
+          ...settings.perSurface.plugin,
+          perPluginOverrides: nextOverrides,
+        },
+      },
+    }
+    void onChange(next)
+  }
+
+  function clearPluginOverride(pluginId: string): void {
+    const nextOverrides: Record<string, { tier: Tier }> = { ...overrides }
+    delete nextOverrides[pluginId]
+    const next: AutomationSettings = {
+      ...settings,
+      perSurface: {
+        ...settings.perSurface,
+        plugin: {
+          ...settings.perSurface.plugin,
+          perPluginOverrides: nextOverrides,
+        },
+      },
+    }
+    void onChange(next)
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("title")}</CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : eligible.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("empty")}</p>
+        ) : (
+          eligible.map((plugin) => {
+            const override = overrides[plugin.id]
+            return (
+              <div
+                key={plugin.id}
+                className="flex items-start justify-between gap-4 rounded-md border bg-muted/20 p-2"
+              >
+                <div className="space-y-0.5">
+                  <Label className="font-medium text-xs">{plugin.name}</Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    {override
+                      ? t("rowOverridden", { tier: tSurfaceLabel(override.tier) })
+                      : t("rowInheriting")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <TierSelect
+                    value={override?.tier ?? settings.perSurface.plugin.tier}
+                    onChange={(v) => setPluginTier(plugin.id, v)}
+                    disabled={saving}
+                  />
+                  {override && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => clearPluginOverride(plugin.id)}
+                      disabled={saving}
+                    >
+                      {t("clearOverride")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          })
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

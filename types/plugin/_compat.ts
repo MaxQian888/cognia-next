@@ -174,6 +174,20 @@ export interface Project {
   updatedAt: Date
   lastAccessedAt: Date
   metadata?: Record<string, unknown>
+  /**
+   * Per-project override for the integrated terminal dock (ADR plan
+   * `vscode-vivid-wilkinson.md`). When set, the dock's "+ New" affordance
+   * uses these fields instead of the global settings defaults.
+   *
+   *   * `shell` — absolute path or PATH-resolvable shell binary
+   *   * `cwd` — initial cwd (falls back to `rootDir`, then `$HOME`)
+   *   * `env` — extra env vars to layer on top of the inherited env
+   */
+  terminalConfig?: {
+    shell?: string
+    cwd?: string
+    env?: Record<string, string>
+  }
 }
 
 export interface CreateProjectInput {

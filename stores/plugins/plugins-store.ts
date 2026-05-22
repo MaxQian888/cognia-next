@@ -135,6 +135,12 @@ interface PluginsStoreState {
   importStaging: PluginImportStaging | null
   /** When non-null, show the delete confirmation. */
   deleteTarget: { pluginId: string; name: string } | null
+  /**
+   * FIFO of pending deletes from a batch-uninstall. The dialog host pops the
+   * head into `deleteTarget` on every cancel/confirm so the user walks the
+   * full selection without re-triggering the batch action manually.
+   */
+  deleteQueue: { pluginId: string; name: string }[]
   /** When non-null, render the permission-review dialog for this plugin. */
   permissionReviewTarget: { pluginId: string } | null
   /** When non-null, show the conflict dialog before completing an install. */
@@ -161,6 +167,21 @@ interface PluginsStoreState {
   closeConfigure: () => void
   setImportStaging: (staging: PluginImportStaging | null) => void
   setDeleteTarget: (target: { pluginId: string; name: string } | null) => void
+  /**
+   * Queue a batch of plugins for sequential deletion. Sets the first entry
+   * as the active `deleteTarget` and stores the remaining ones in
+   * `deleteQueue`. Use `advanceDeleteQueue` after the user confirms or
+   * cancels each dialog.
+   */
+  enqueueDeleteTargets: (targets: { pluginId: string; name: string }[]) => void
+  /**
+   * Pop the next queued delete into `deleteTarget`. Called by the dialog
+   * host after both cancel and confirm so the bulk uninstall walks the
+   * whole selection without losing entries.
+   */
+  advanceDeleteQueue: () => void
+  /** Drop any pending batch deletes (used by clear-selection / bar dismiss). */
+  clearDeleteQueue: () => void
   openPermissionReview: (pluginId: string) => void
   closePermissionReview: () => void
   setConflictDialogTarget: (target: ConflictSummary | null) => void
@@ -250,6 +271,7 @@ export const usePluginsStore = create<PluginsStoreState>()(
       configTarget: null,
       importStaging: null,
       deleteTarget: null,
+      deleteQueue: [],
       permissionReviewTarget: null,
       conflictDialogTarget: null,
       rollbackTarget: null,
@@ -309,6 +331,19 @@ export const usePluginsStore = create<PluginsStoreState>()(
       closeConfigure: () => set({ configTarget: null }),
       setImportStaging: (staging) => set({ importStaging: staging }),
       setDeleteTarget: (target) => set({ deleteTarget: target }),
+      enqueueDeleteTargets: (targets) =>
+        set(() => {
+          if (targets.length === 0) return { deleteTarget: null, deleteQueue: [] }
+          const [head, ...rest] = targets
+          return { deleteTarget: head, deleteQueue: rest }
+        }),
+      advanceDeleteQueue: () =>
+        set((s) => {
+          if (s.deleteQueue.length === 0) return { deleteTarget: null, deleteQueue: [] }
+          const [next, ...rest] = s.deleteQueue
+          return { deleteTarget: next, deleteQueue: rest }
+        }),
+      clearDeleteQueue: () => set({ deleteQueue: [] }),
       openPermissionReview: (pluginId) => set({ permissionReviewTarget: { pluginId } }),
       closePermissionReview: () => set({ permissionReviewTarget: null }),
       setConflictDialogTarget: (target) => set({ conflictDialogTarget: target }),

@@ -1,7 +1,11 @@
 /**
  * Plugin Theme API Implementation
  *
- * Provides theme customization capabilities to plugins.
+ * Provides theme customization capabilities to plugins. Custom themes are
+ * tracked per owning plugin (mirroring the chat-api `ownedByPlugin` pattern)
+ * so `clearCustomThemesForPluginContext` can garbage-collect orphan rows when
+ * a plugin is disabled — otherwise plugin-injected `CustomTheme` rows linger
+ * in Dexie indefinitely (ADR-0007 follow-up).
  */
 
 import { useSettingsStore } from "@/stores"
@@ -15,6 +19,14 @@ import type {
   CustomTheme,
   ThemeState,
 } from "@/types/plugin/plugin-extended"
+
+/**
+ * Per-plugin ownership of `CustomTheme` row ids created through the API. The
+ * tracking lives only in memory for the current session — cross-restart
+ * cleanup is deferred to ADR follow-up (would require a `ownerPluginId`
+ * column on the Dexie `customThemes` table).
+ */
+const ownedByPlugin = new Map<string, Set<string>>()
 
 /**
  * Get resolved theme mode (handles 'system' -> 'light' | 'dark')
@@ -127,6 +139,9 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
         },
       }
       const id = store.createCustomTheme(themeWithDefaults)
+      const owned = ownedByPlugin.get(pluginId) ?? new Set<string>()
+      owned.add(id)
+      ownedByPlugin.set(pluginId, owned)
       logger.info(`Registered custom theme: ${theme.name} (${id})`)
       return id
     },
@@ -158,6 +173,11 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
     deleteCustomTheme: (id: string) => {
       const store = useSettingsStore.getState()
       store.deleteCustomTheme(id)
+      const owned = ownedByPlugin.get(pluginId)
+      if (owned) {
+        owned.delete(id)
+        if (owned.size === 0) ownedByPlugin.delete(pluginId)
+      }
       logger.info(`Deleted custom theme: ${id}`)
     },
 
@@ -216,4 +236,26 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       }
     },
   }
+}
+
+/**
+ * Plugin-disable hook — delete every `CustomTheme` row this plugin created
+ * through `ctx.theme.registerCustomTheme`. The store's `deleteCustomTheme`
+ * already nulls `activeCustomThemeId` when the deleted row was active, so
+ * the UI falls back to the default preset automatically. Idempotent: a
+ * second call for the same plugin is a no-op.
+ */
+export function clearCustomThemesForPluginContext(pluginId: string): void {
+  const owned = ownedByPlugin.get(pluginId)
+  if (!owned) return
+  const store = useSettingsStore.getState()
+  for (const id of owned) {
+    store.deleteCustomTheme(id)
+  }
+  ownedByPlugin.delete(pluginId)
+}
+
+/** Test-only. */
+export function __resetThemeApiOwnershipForTesting(): void {
+  ownedByPlugin.clear()
 }

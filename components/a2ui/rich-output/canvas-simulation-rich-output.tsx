@@ -2,11 +2,19 @@
 
 import { memo, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
+import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 
 interface CanvasSimulationRichOutputProps {
   config?: Record<string, unknown> | null
   height?: number
   className?: string
+}
+
+// Stable module-level constants so the live-reader hook never resubscribes
+// across renders.
+const VAR_KEYS = ["--primary"] as const
+const VAR_DEFAULTS: Record<(typeof VAR_KEYS)[number], string> = {
+  "--primary": "#0ea5e9",
 }
 
 export const CanvasSimulationRichOutput = memo(function CanvasSimulationRichOutput({
@@ -15,6 +23,10 @@ export const CanvasSimulationRichOutput = memo(function CanvasSimulationRichOutp
   className,
 }: CanvasSimulationRichOutputProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  // Canvas 2D needs an actual color string (oklch / hex); `canvasSafe` flips
+  // the legacy-WebView fallback so old engines without oklch get hex.
+  const themeVars = useThemeCssVars(VAR_KEYS, VAR_DEFAULTS, { canvasSafe: true })
+  const primary = themeVars["--primary"]
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -32,12 +44,13 @@ export const CanvasSimulationRichOutput = memo(function CanvasSimulationRichOutp
       frame += 1
       const { width, height: canvasHeight } = canvas
       context.clearRect(0, 0, width, canvasHeight)
+      // Subtle motion-trail fade — neutral overlay, not theme-coupled.
       context.fillStyle = "rgba(15, 23, 42, 0.04)"
       context.fillRect(0, 0, width, canvasHeight)
 
       context.beginPath()
       context.lineWidth = 3
-      context.strokeStyle = "#0ea5e9"
+      context.strokeStyle = primary
       for (let x = 0; x <= width; x += 4) {
         const wave = Math.sin((x / width) * Math.PI * frequency + frame * 0.06)
         const y = canvasHeight / 2 + wave * amplitude
@@ -54,7 +67,7 @@ export const CanvasSimulationRichOutput = memo(function CanvasSimulationRichOutp
 
     rafId = window.requestAnimationFrame(renderFrame)
     return () => window.cancelAnimationFrame(rafId)
-  }, [config])
+  }, [config, primary])
 
   return (
     <div

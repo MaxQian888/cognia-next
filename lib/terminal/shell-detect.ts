@@ -1,0 +1,75 @@
+"use client"
+
+/**
+ * Default-shell suggestion for the integrated terminal.
+ *
+ * The renderer can't probe the filesystem to know if `/bin/zsh` exists,
+ * so we return a best-guess based on platform. The user can override via
+ * settings (`useSettingsStore`) or per-project (`Project.terminalConfig`)
+ * — those overrides take precedence over the value returned here.
+ *
+ * Detection sources, in priority order:
+ *   1. Per-project override (`Project.terminalConfig.shell`).
+ *   2. User setting (`settings.terminalDefaultShell`).
+ *   3. `navigator.userAgent` platform sniff.
+ *
+ * The Rust side validates the shell binary exists at spawn time; an
+ * invalid path surfaces as a `spawn_command failed` error which the dock
+ * presents to the user.
+ */
+
+export type ShellPlatform = "windows" | "macos" | "linux" | "other"
+
+export function detectPlatform(ua?: string): ShellPlatform {
+  const haystack = (
+    ua ?? (typeof navigator !== "undefined" ? navigator.userAgent : "")
+  ).toLowerCase()
+  if (haystack.includes("windows")) return "windows"
+  if (haystack.includes("mac os") || haystack.includes("macintosh")) return "macos"
+  if (haystack.includes("linux") || haystack.includes("x11")) return "linux"
+  return "other"
+}
+
+/**
+ * Best-guess default shell by platform. Use as a fallback when no
+ * project override and no user setting are set.
+ */
+export function platformDefaultShell(platform: ShellPlatform): string {
+  switch (platform) {
+    case "windows":
+      // pwsh.exe is on PATH when PowerShell 7+ is installed; the Rust
+      // side falls back gracefully to a non-existent-binary error if
+      // it's not, and the user can swap to `powershell.exe` or
+      // `cmd.exe` from settings.
+      return "pwsh.exe"
+    case "macos":
+      return "/bin/zsh"
+    case "linux":
+      return "/bin/bash"
+    case "other":
+    default:
+      return "/bin/sh"
+  }
+}
+
+export interface ResolveShellInput {
+  projectShell?: string
+  settingShell?: string
+  /** Override for tests; defaults to `navigator.userAgent`. */
+  userAgent?: string
+}
+
+/**
+ * Resolve the shell path the dock should spawn for a new tab. Empty
+ * strings are treated as "unset" so that an empty per-project override
+ * field doesn't shadow the user setting.
+ */
+export function resolveDefaultShell(input: ResolveShellInput): string {
+  if (input.projectShell && input.projectShell.trim().length > 0) {
+    return input.projectShell
+  }
+  if (input.settingShell && input.settingShell.trim().length > 0) {
+    return input.settingShell
+  }
+  return platformDefaultShell(detectPlatform(input.userAgent))
+}
