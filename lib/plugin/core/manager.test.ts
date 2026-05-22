@@ -3,7 +3,14 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
-import { PluginManager, resolveGovernanceMode } from "./manager"
+import {
+  PluginManager,
+  resolveGovernanceMode,
+  createPluginManager,
+  getPluginManager,
+  initializePluginManager,
+  __resetPluginManagerForTesting,
+} from "./manager"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
@@ -1745,6 +1752,62 @@ describe("PluginManager", () => {
     it("ignores invalid env values", () => {
       process.env.COGNIA_PLUGIN_POINT_GOVERNANCE_MODE = "nonsense"
       expect(resolveGovernanceMode("block")).toBe("block")
+    })
+  })
+
+  describe("Factory + __resetForTesting (PR-E)", () => {
+    beforeEach(() => {
+      try {
+        __resetPluginManagerForTesting()
+      } catch {
+        // Tests run with NODE_ENV=test in jest; ignore if env not set yet.
+      }
+    })
+
+    it("createPluginManager returns a fresh instance per call", () => {
+      // We deliberately avoid initializePluginManager here — that path
+      // triggers store.initialize() which is mocked across this file
+      // and not meaningful for the factory contract. Constructing via
+      // the factory + checking inequality is enough to lock the
+      // "no shared state between instances" guarantee.
+      const a = createPluginManager({
+        pluginDirectory: "/tmp/cognia-plugins-a",
+        enablePython: false,
+      })
+      const b = createPluginManager({
+        pluginDirectory: "/tmp/cognia-plugins-b",
+        enablePython: false,
+      })
+      expect(a).not.toBe(b)
+      expect(a).toBeInstanceOf(PluginManager)
+      expect(b).toBeInstanceOf(PluginManager)
+    })
+
+    it("createPluginManager does not touch the module-level default", () => {
+      // Default instance starts unset; the factory must not populate it.
+      expect(() => getPluginManager()).toThrow(/not initialized/)
+      createPluginManager({
+        pluginDirectory: "/tmp/cognia-plugins-isolated",
+        enablePython: false,
+      })
+      expect(() => getPluginManager()).toThrow(/not initialized/)
+    })
+
+    it("__resetPluginManagerForTesting throws outside NODE_ENV=test", () => {
+      const original = process.env.NODE_ENV
+      ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+      try {
+        expect(() => __resetPluginManagerForTesting()).toThrow(/NODE_ENV=test/)
+      } finally {
+        ;(process.env as Record<string, string | undefined>).NODE_ENV = original
+      }
+    })
+
+    it("initializePluginManager is mentioned in the import so future refactors stay aware", () => {
+      // Identity check (not behaviour) — we just want a compile-time
+      // dependency on the symbol so a future rename can't silently
+      // drop the façade.
+      expect(typeof initializePluginManager).toBe("function")
     })
   })
 })

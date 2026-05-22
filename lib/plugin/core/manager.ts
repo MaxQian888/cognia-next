@@ -190,7 +190,7 @@ export interface PythonPluginInfo {
 }
 
 // =============================================================================
-// Plugin Manager Singleton
+// Plugin Manager Singleton + Factory (PR-E)
 // =============================================================================
 
 let pluginManagerInstance: PluginManager | null = null
@@ -202,14 +202,40 @@ export function getPluginManager(): PluginManager {
   return pluginManagerInstance
 }
 
+/**
+ * Build a fresh `PluginManager` without touching the module-level
+ * default instance. PR-E added this so tests / dev-mode can spin up
+ * an isolated manager alongside the running one (e.g. for plugin
+ * dev-server sandboxing). Behaviour matches `new PluginManager(config)`
+ * — exposed as a named export so callers reading the code at a glance
+ * see "factory" rather than `new`.
+ */
+export function createPluginManager(config: PluginManagerConfig): PluginManager {
+  return new PluginManager(config)
+}
+
 export async function initializePluginManager(config: PluginManagerConfig): Promise<PluginManager> {
   if (pluginManagerInstance) {
     return pluginManagerInstance
   }
 
-  pluginManagerInstance = new PluginManager(config)
+  pluginManagerInstance = createPluginManager(config)
   await pluginManagerInstance.initialize()
   return pluginManagerInstance
+}
+
+/**
+ * Test-only escape hatch — drops the default instance so the next
+ * `initializePluginManager()` call starts from scratch. Throws when
+ * called outside the test runner so production code can't reach for
+ * it accidentally. Matches the `__resetForTesting` convention from
+ * `lib/plugin/registries/createOverlayRegistry.ts:74`.
+ */
+export function __resetPluginManagerForTesting(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__resetPluginManagerForTesting is only callable in NODE_ENV=test")
+  }
+  pluginManagerInstance = null
 }
 
 // =============================================================================

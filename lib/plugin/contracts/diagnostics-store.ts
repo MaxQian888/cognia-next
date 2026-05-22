@@ -96,3 +96,30 @@ export function recordSilentFailure(
     hint: errMsg,
   })
 }
+
+// =============================================================================
+// Test-only helpers (PR-E)
+// =============================================================================
+
+/**
+ * Drops every recorded diagnostic + every subscription + resets the
+ * revision counter. PR-E added this so tests don't have to
+ * `vi.resetModules()` or remember to call `clearAllPluginPointDiagnostics`
+ * + the (no-op-for-listeners) `unsubscribe` separately. Throws
+ * outside NODE_ENV=test so production code can't drop diagnostics by
+ * mistake.
+ *
+ * The diagnostics store stays as module-level state on purpose —
+ * 25+ callers reach for `recordSilentFailure` / `recordPluginPointDiagnostic`
+ * by name and a factory wrap would force a churn-heavy parameter
+ * threading without a measurable benefit. See PR-E in
+ * `plans/noble-hatching-mango.md` for the deviation rationale.
+ */
+export function __resetDiagnosticsStoreForTesting(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__resetDiagnosticsStoreForTesting is only callable in NODE_ENV=test")
+  }
+  diagnosticsByPlugin.clear()
+  listeners.clear()
+  revision = 0
+}

@@ -1,5 +1,6 @@
 import { loggers } from "../core/logger"
 import {
+  __resetDiagnosticsStoreForTesting,
   clearAllPluginPointDiagnostics,
   clearPluginPointDiagnostics,
   getAllPluginPointDiagnostics,
@@ -137,5 +138,38 @@ describe("diagnostics-store", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1)
     const [diagnostic] = getPluginPointDiagnostics("plugin-a")
     expect(diagnostic.hint).toBe("raw string error")
+  })
+
+  describe("__resetDiagnosticsStoreForTesting (PR-E)", () => {
+    it("clears every recorded diagnostic, subscription, and revision counter", () => {
+      jest.spyOn(loggers.manager, "warn").mockImplementation(() => undefined)
+      recordPluginPointDiagnostic("plugin-a", sample({ message: "before" }))
+      const listener = jest.fn()
+      subscribePluginPointDiagnostics(listener)
+      // Confirm listener fires before reset
+      recordPluginPointDiagnostic("plugin-b", sample({ message: "trigger" }))
+      const revBefore = getPluginPointDiagnosticsRevision()
+      expect(revBefore).toBeGreaterThan(0)
+      expect(listener).toHaveBeenCalled()
+      listener.mockClear()
+
+      __resetDiagnosticsStoreForTesting()
+
+      expect(getAllPluginPointDiagnostics()).toEqual({})
+      expect(getPluginPointDiagnosticsRevision()).toBe(0)
+      // Listener should no longer fire — it was dropped.
+      recordPluginPointDiagnostic("plugin-c", sample({ message: "after" }))
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it("throws outside NODE_ENV=test", () => {
+      const original = process.env.NODE_ENV
+      ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+      try {
+        expect(() => __resetDiagnosticsStoreForTesting()).toThrow(/NODE_ENV=test/)
+      } finally {
+        ;(process.env as Record<string, string | undefined>).NODE_ENV = original
+      }
+    })
   })
 })

@@ -6,6 +6,8 @@ import {
   PermissionGuard,
   getPermissionGuard,
   resetPermissionGuard,
+  createPermissionGuard,
+  __resetPermissionGuardForTesting,
   PermissionError,
   createGuardedAPI,
   PERMISSION_GROUPS,
@@ -412,5 +414,38 @@ describe("Singleton", () => {
     const instance1 = getPermissionGuard()
     const instance2 = getPermissionGuard()
     expect(instance1).toBe(instance2)
+  })
+})
+
+describe("Factory + __resetForTesting (PR-E)", () => {
+  beforeEach(() => {
+    resetPermissionGuard()
+  })
+
+  it("createPermissionGuard returns a fresh instance independent of the default", () => {
+    const defaultGuard = getPermissionGuard()
+    const isolated = createPermissionGuard({ strictMode: false })
+    expect(isolated).not.toBe(defaultGuard)
+    // State changes on the isolated guard MUST NOT leak into the default.
+    isolated.registerPlugin("isolated-plugin", ["network:fetch"])
+    expect(isolated.check("isolated-plugin", "network:fetch")).toBe(true)
+    expect(defaultGuard.check("isolated-plugin", "network:fetch")).toBe(false)
+  })
+
+  it("__resetPermissionGuardForTesting drops the default instance", () => {
+    const first = getPermissionGuard()
+    __resetPermissionGuardForTesting()
+    const second = getPermissionGuard()
+    expect(first).not.toBe(second)
+  })
+
+  it("__resetPermissionGuardForTesting throws outside NODE_ENV=test", () => {
+    const original = process.env.NODE_ENV
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    try {
+      expect(() => __resetPermissionGuardForTesting()).toThrow(/NODE_ENV=test/)
+    } finally {
+      ;(process.env as Record<string, string | undefined>).NODE_ENV = original
+    }
   })
 })

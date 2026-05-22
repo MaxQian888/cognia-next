@@ -625,11 +625,36 @@ export function getPermissionGuard(config?: Partial<PermissionGuardConfig>): Per
   return permissionGuardInstance
 }
 
+/**
+ * Build a fresh `PermissionGuard` without touching the module-level
+ * default instance. PR-E added this so tests / dev-mode can compare
+ * grant decisions across isolated guards (e.g. preview a different
+ * tier overlay before applying it). The class constructor already
+ * accepts the full config — this wrapper exists so callers reading
+ * the code see "factory" instead of `new`.
+ */
+export function createPermissionGuard(config?: Partial<PermissionGuardConfig>): PermissionGuard {
+  return new PermissionGuard(config)
+}
+
 export function resetPermissionGuard(): void {
   if (permissionGuardInstance) {
     permissionGuardInstance.clear()
     permissionGuardInstance = null
   }
+}
+
+/**
+ * Test-only alias for `resetPermissionGuard` that throws outside the
+ * test runner. Mirrors the `__resetForTesting` convention from
+ * `lib/plugin/registries/createOverlayRegistry.ts:74` so suites can
+ * grep for one name across all the singletons.
+ */
+export function __resetPermissionGuardForTesting(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__resetPermissionGuardForTesting is only callable in NODE_ENV=test")
+  }
+  resetPermissionGuard()
 }
 
 // =============================================================================
