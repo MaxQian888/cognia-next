@@ -192,6 +192,34 @@ export interface PythonPluginInfo {
 }
 
 // =============================================================================
+// Typed errors (PR-A)
+// =============================================================================
+
+/**
+ * Thrown when a plugin's `enablePlugin` flow fails partway. Carries
+ * the original cause + pluginId so UI callers can pattern-match
+ * (e.g. show a "retry" affordance only for known recoverable errors)
+ * without parsing a free-form error message.
+ *
+ * The original cause is preserved on the `cause` field per the
+ * standard `Error` extension pattern.
+ */
+export class PluginEnableError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly originalError: unknown
+  ) {
+    super(
+      `Failed to enable plugin "${pluginId}": ${
+        originalError instanceof Error ? originalError.message : String(originalError)
+      }`,
+      { cause: originalError }
+    )
+    this.name = "PluginEnableError"
+  }
+}
+
+// =============================================================================
 // Plugin Manager Singleton + Factory (PR-E)
 // =============================================================================
 
@@ -1144,7 +1172,22 @@ export class PluginManager {
         ],
         metadata: { reason },
       })
-      throw error
+      // PR-A — route the failure through the shared diagnostics store
+      // so the devtools panel surfaces it alongside other plugin-point
+      // diagnostics (existing flow only wrote to per-plugin error
+      // state via `setPluginError`, which the audit panel doesn't
+      // read). The verification entry above is for the verification
+      // log; this is for the audit timeline.
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.enablePlugin",
+          message: `Failed to enable plugin: ${reason}`,
+          expected: false,
+        },
+        error
+      )
+      throw new PluginEnableError(pluginId, error)
     }
   }
 

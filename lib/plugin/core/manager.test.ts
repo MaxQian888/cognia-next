@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import {
   PluginManager,
+  PluginEnableError,
   resolveGovernanceMode,
   createPluginManager,
   getPluginManager,
@@ -1808,6 +1809,34 @@ describe("PluginManager", () => {
       // dependency on the symbol so a future rename can't silently
       // drop the façade.
       expect(typeof initializePluginManager).toBe("function")
+    })
+  })
+
+  describe("PluginEnableError (PR-A)", () => {
+    it("carries pluginId and the original cause", () => {
+      const original = new Error("registry blew up")
+      const err = new PluginEnableError("plugin-x", original)
+      expect(err).toBeInstanceOf(PluginEnableError)
+      expect(err).toBeInstanceOf(Error)
+      expect(err.pluginId).toBe("plugin-x")
+      expect(err.originalError).toBe(original)
+      expect(err.cause).toBe(original)
+      expect(err.name).toBe("PluginEnableError")
+      expect(err.message).toContain("plugin-x")
+      expect(err.message).toContain("registry blew up")
+    })
+
+    it("coerces non-Error causes via String()", () => {
+      const err = new PluginEnableError("plugin-y", "string failure")
+      expect(err.originalError).toBe("string failure")
+      expect(err.message).toContain("string failure")
+    })
+
+    it("uses 'PluginEnableError' as the error name (for pattern matching)", () => {
+      const err = new PluginEnableError("plugin-z", new Error("x"))
+      // Callers can branch on err.name === "PluginEnableError" or use
+      // `err instanceof PluginEnableError` interchangeably.
+      expect(err.name).toBe("PluginEnableError")
     })
   })
 })
