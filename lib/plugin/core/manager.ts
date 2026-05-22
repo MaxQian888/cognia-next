@@ -83,6 +83,7 @@ import {
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
 } from "@/lib/ai/agent/external/presets"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
 
 // =============================================================================
 // Governance mode resolution
@@ -1209,8 +1210,9 @@ export class PluginManager {
       // Remove context
       this.contexts.delete(pluginId)
 
-      // Unload from loader
-      this.loader.unload(pluginId)
+      // Unload from loader (awaited so a hung runtime teardown can't
+      // race the store update — PR-B of the plugin optimization plan).
+      await this.loader.unload(pluginId)
 
       // Update store
       await store.unloadPlugin(pluginId, { viaManager: false })
@@ -1702,7 +1704,7 @@ export class PluginManager {
     }
 
     if (options.unloadModule) {
-      this.loader.unload(pluginId)
+      await this.loader.unload(pluginId)
     }
   }
 
@@ -2051,6 +2053,11 @@ export class PluginManager {
     this.a2uiBridge?.unregisterPluginComponents(pluginId)
     this.a2uiBridge?.unregisterPluginTemplates(pluginId)
     this.themesBridge?.unregisterPluginThemes(pluginId)
+    // GC any `CustomTheme` rows the plugin created via `ctx.theme.registerCustomTheme`.
+    // The manifest-themes path above handles in-memory plugin themes; this
+    // line handles the persistent Dexie-backed rows. Both are required to
+    // avoid orphan entries lingering after disable.
+    clearCustomThemesForPluginContext(pluginId)
     clearPluginExtensions(pluginId)
     purgeMessagePartRenderersForPlugin(pluginId)
 

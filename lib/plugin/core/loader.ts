@@ -4,12 +4,24 @@
 
 import { loggers } from "@/lib/logger"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
+import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
 import { loadVscodeDefinition, unloadVscodeExtension } from "./vscode-loader"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
+
+/**
+ * Per-runtime teardown budget. WASM / VSCode unload calls cross an IPC
+ * boundary and can stall under host pressure; 5s is enough for clean
+ * paths while keeping a hung teardown from blocking
+ * `disablePlugin` / `uninstallPlugin` indefinitely. On expiry the
+ * runtime call is left running in the background, the failure is
+ * recorded via `recordSilentFailure`, and the plugin is marked dirty
+ * via `dirtyTeardowns` so a subsequent `load()` can react.
+ */
+export const DEFAULT_TEARDOWN_TIMEOUT_MS = 5_000
 
 // =============================================================================
 // Types
@@ -20,13 +32,45 @@ interface LoadedModule {
   exports: Record<string, unknown>
 }
 
+/**
+ * Reason a plugin's previous teardown did not finish cleanly. Stored
+ * per-pluginId so the manager (or a future re-load policy) can decide
+ * whether to refuse, force-clean, or proceed.
+ */
+export type DirtyTeardownReason = "timeout" | "error"
+
+export interface DirtyTeardownRecord {
+  reason: DirtyTeardownReason
+  /** Manifest type the previous unload targeted (wasm / vscode-extension). */
+  manifestType: string
+  /** Wall-clock ms when the dirty event was recorded. */
+  at: number
+  /** Original error message, when one was thrown / produced. */
+  message: string
+}
+
 // =============================================================================
 // Plugin Loader
 // =============================================================================
 
+export interface PluginLoaderOptions {
+  /**
+   * Override the per-runtime teardown timeout. Defaults to
+   * `DEFAULT_TEARDOWN_TIMEOUT_MS` (5s). Tests can shrink this to keep
+   * fake-timer suites fast.
+   */
+  teardownTimeoutMs?: number
+}
+
 export class PluginLoader {
   private loadedModules: Map<string, LoadedModule> = new Map()
   private loadingPromises: Map<string, Promise<PluginDefinition>> = new Map()
+  private dirtyTeardowns: Map<string, DirtyTeardownRecord> = new Map()
+  private readonly teardownTimeoutMs: number
+
+  constructor(options: PluginLoaderOptions = {}) {
+    this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS
+  }
 
   /**
    * Load a plugin module
@@ -540,38 +584,83 @@ export class PluginLoader {
   }
 
   /**
-   * Unload a plugin module
+   * Unload a plugin module. Awaits the per-runtime teardown (WASM /
+   * VSCode) with a timeout so the caller (`disablePlugin` /
+   * `uninstallPlugin`) can be confident the next activation starts
+   * from a clean slate. On timeout or failure, the call is dropped
+   * into the background (no JS-side cancellation available), the
+   * failure is recorded via `recordSilentFailure`, and the plugin id
+   * is marked dirty via `dirtyTeardowns`.
+   *
+   * The `loadedModules` and `loadingPromises` entries are cleared
+   * unconditionally — once the unload starts the plugin is no longer
+   * usable, regardless of whether the runtime call resolved.
    */
-  unload(pluginId: string): void {
+  async unload(pluginId: string): Promise<void> {
     const entry = this.loadedModules.get(pluginId)
     const manifestType = entry?.definition?.manifest?.type
+
     if (manifestType === "wasm") {
-      void unloadWasmPlugin(pluginId).catch((error) =>
-        recordSilentFailure(
-          pluginId,
-          {
-            site: "loader.unloadWasmPlugin",
-            message: "Failed to unload WASM plugin during teardown",
-            expected: false,
-          },
-          error
-        )
+      await this.runTeardown(pluginId, manifestType, "loader.unloadWasmPlugin", () =>
+        unloadWasmPlugin(pluginId)
       )
     } else if (manifestType === "vscode-extension") {
-      void unloadVscodeExtension(pluginId).catch((error) =>
-        recordSilentFailure(
-          pluginId,
-          {
-            site: "loader.unloadVscodeExtension",
-            message: "Failed to unload VS Code extension during teardown",
-            expected: false,
-          },
-          error
-        )
+      await this.runTeardown(pluginId, manifestType, "loader.unloadVscodeExtension", () =>
+        unloadVscodeExtension(pluginId)
       )
     }
+
     this.loadedModules.delete(pluginId)
     this.loadingPromises.delete(pluginId)
+  }
+
+  private async runTeardown(
+    pluginId: string,
+    manifestType: string,
+    site: string,
+    runner: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await withTimeout(runner(), this.teardownTimeoutMs, site)
+    } catch (error) {
+      const reason: DirtyTeardownReason = error instanceof TimeoutError ? "timeout" : "error"
+      const message = error instanceof Error ? error.message : String(error)
+      this.dirtyTeardowns.set(pluginId, {
+        reason,
+        manifestType,
+        at: Date.now(),
+        message,
+      })
+      recordSilentFailure(
+        pluginId,
+        {
+          site,
+          message:
+            reason === "timeout"
+              ? `${manifestType} unload exceeded ${this.teardownTimeoutMs}ms — abandoned`
+              : `Failed to unload ${manifestType} plugin during teardown`,
+          expected: false,
+        },
+        error
+      )
+    }
+  }
+
+  /**
+   * Returns the dirty-teardown record for a plugin, or `null` when the
+   * previous unload completed cleanly. Manager / re-load policy can
+   * consult this before resurrecting a plugin.
+   */
+  getDirtyTeardown(pluginId: string): DirtyTeardownRecord | null {
+    return this.dirtyTeardowns.get(pluginId) ?? null
+  }
+
+  /**
+   * Clear the dirty marker for a plugin (call after a successful
+   * forced re-load, or when the user explicitly accepts the risk).
+   */
+  clearDirtyTeardown(pluginId: string): boolean {
+    return this.dirtyTeardowns.delete(pluginId)
   }
 
   /**

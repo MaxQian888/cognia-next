@@ -34,7 +34,7 @@ export function formatDurationShort(ms: number | null | undefined): string {
 }
 
 // Re-export for code copied from upstream that imports `isTauri` from `@/lib/utils`.
-export { isTauri } from "./tauri"
+export { isTauri } from "../tauri"
 
 /**
  * Tailwind class for SelectTrigger / Combobox / fixed-width form controls

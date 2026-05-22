@@ -293,12 +293,12 @@ describe("PluginLoader", () => {
 
       expect(loader.isLoaded(pluginId)).toBe(true)
 
-      loader.unload(pluginId)
+      await loader.unload(pluginId)
 
       expect(loader.isLoaded(pluginId)).toBe(false)
     })
 
-    it("should cancel pending loading promises", () => {
+    it("should cancel pending loading promises", async () => {
       const pluginId = "pending"
 
       // Manually add loading promise
@@ -306,7 +306,7 @@ describe("PluginLoader", () => {
         loader as unknown as { loadingPromises: Map<string, Promise<unknown>> }
       ).loadingPromises.set(pluginId, Promise.resolve())
 
-      loader.unload(pluginId)
+      await loader.unload(pluginId)
 
       expect(
         (
@@ -335,13 +335,19 @@ describe("PluginLoader", () => {
             exports: {},
           }
         )
-        loader.unload(pluginId)
-        await new Promise((r) => setTimeout(r, 100))
+        await loader.unload(pluginId)
         expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,
           expect.objectContaining({ site: "loader.unloadWasmPlugin", expected: false }),
           expect.any(Error)
+        )
+        expect(loader.getDirtyTeardown(pluginId)).toEqual(
+          expect.objectContaining({
+            reason: "error",
+            manifestType: "wasm",
+            message: "wasm boom",
+          })
         )
       })
 
@@ -357,14 +363,71 @@ describe("PluginLoader", () => {
             exports: {},
           }
         )
-        loader.unload(pluginId)
-        await new Promise((r) => setTimeout(r, 100))
+        await loader.unload(pluginId)
         expect(vscodeLoader.unloadVscodeExtension).toHaveBeenCalledWith(pluginId)
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,
           expect.objectContaining({ site: "loader.unloadVscodeExtension", expected: false }),
           expect.any(Error)
         )
+        expect(loader.getDirtyTeardown(pluginId)).toEqual(
+          expect.objectContaining({
+            reason: "error",
+            manifestType: "vscode-extension",
+            message: "vscode boom",
+          })
+        )
+      })
+    })
+
+    describe("teardown timeout (chaos)", () => {
+      it("abandons a hung WASM teardown after the configured timeout and marks dirty", async () => {
+        jest.useRealTimers()
+        diagModule.recordSilentFailure.mockReset()
+        wasmLoader.unloadWasmPlugin.mockReset()
+        // Never-resolving teardown
+        wasmLoader.unloadWasmPlugin.mockImplementation(() => new Promise<void>(() => {}))
+
+        // Tiny budget so the test finishes quickly
+        const fastLoader = new PluginLoader({ teardownTimeoutMs: 30 })
+        const pluginId = "wasm-hung"
+        ;(fastLoader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
+          pluginId,
+          { definition: { manifest: { type: "wasm" } }, exports: {} }
+        )
+
+        const t0 = Date.now()
+        await fastLoader.unload(pluginId)
+        const elapsed = Date.now() - t0
+
+        expect(elapsed).toBeGreaterThanOrEqual(25)
+        expect(elapsed).toBeLessThan(500)
+        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
+        expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
+          pluginId,
+          expect.objectContaining({
+            site: "loader.unloadWasmPlugin",
+            message: expect.stringContaining("exceeded 30ms"),
+          }),
+          expect.any(Error)
+        )
+        expect(fastLoader.isLoaded(pluginId)).toBe(false)
+        const dirty = fastLoader.getDirtyTeardown(pluginId)
+        expect(dirty).toEqual(expect.objectContaining({ reason: "timeout", manifestType: "wasm" }))
+        expect(fastLoader.clearDirtyTeardown(pluginId)).toBe(true)
+        expect(fastLoader.getDirtyTeardown(pluginId)).toBeNull()
+      })
+
+      it("does not mark dirty when teardown resolves cleanly", async () => {
+        jest.useRealTimers()
+        wasmLoader.unloadWasmPlugin.mockReset().mockResolvedValue(undefined)
+        const pluginId = "wasm-clean"
+        ;(loader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
+          pluginId,
+          { definition: { manifest: { type: "wasm" } }, exports: {} }
+        )
+        await loader.unload(pluginId)
+        expect(loader.getDirtyTeardown(pluginId)).toBeNull()
       })
     })
   })

@@ -153,6 +153,34 @@ describe("loadWasmPlugin", () => {
     expect(dispose).toHaveBeenCalledTimes(1)
   })
 
+  it("dispose() remains idempotent even when the underlying instance.dispose rejects", async () => {
+    // The outer handle sets `disposed=true` BEFORE awaiting the underlying
+    // dispose, so the first throw propagates exactly once and subsequent
+    // calls short-circuit. This guards against a regression that would
+    // re-run a failing teardown on every retry — a real risk when the
+    // plugin loader's retry / cleanup path loops on transient failures.
+    const dispose = jest.fn(async () => {
+      throw new Error("teardown explosion")
+    })
+    const factory: WasmRuntimeFactory = jest.fn(async () => ({
+      async call() {
+        return null
+      },
+      dispose,
+    }))
+    const handle = await loadWasmPlugin(
+      "id-plugin-err",
+      { kind: "bytes", data: new Uint8Array() },
+      { runtimeFactory: factory }
+    )
+    await expect(handle.dispose()).rejects.toThrow("teardown explosion")
+    // Second call: no-op, no re-throw — the disposed sentinel guards us.
+    await expect(handle.dispose()).resolves.toBeUndefined()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    // Subsequent call() still rejects with the disposed sentinel.
+    await expect(handle.call("ping")).rejects.toThrow(/disposed/)
+  })
+
   it("preopens reflect the grant resolver override", async () => {
     const resolver = jest.fn(() => ["/only-here"])
     const factory: WasmRuntimeFactory = jest.fn(async () => ({

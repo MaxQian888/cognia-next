@@ -1,4 +1,4 @@
-import { cn, formatVideoTime, formatDurationShort, isTauri, responsiveSelectClass } from "./utils"
+import { cn, formatVideoTime, formatDurationShort, isTauri, responsiveSelectClass } from "./index"
 
 describe("cn", () => {
   it("merges tailwind classes and resolves conflicts", () => {
@@ -71,7 +71,7 @@ describe("formatDurationShort", () => {
 })
 
 describe("isTauri re-export", () => {
-  it("re-exports the same function from ./tauri", () => {
+  it("re-exports the same function from ../tauri", () => {
     expect(typeof isTauri).toBe("function")
     // In jsdom without window.__TAURI_INTERNALS__ this is always false.
     expect(isTauri()).toBe(false)
