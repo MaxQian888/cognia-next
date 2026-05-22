@@ -12,7 +12,7 @@ import {
   getExtensionRevision,
   getExtensionsForPoint,
   subscribeExtensionChanges,
-} from "@/lib/plugin/api/extension-api"
+} from "@/lib/plugin/api"
 import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {

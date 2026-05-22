@@ -4,10 +4,10 @@ import {
   getExtensionsForPoint,
   getExtensionRevision,
   subscribeExtensionChanges,
-} from "@/lib/plugin/api/extension-api"
+} from "@/lib/plugin/api"
 import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-jest.mock("@/lib/plugin/api/extension-api", () => ({
+jest.mock("@/lib/plugin/api", () => ({
   getExtensionsForPoint: jest.fn(),
   getExtensionRevision: jest.fn(() => 0),
   subscribeExtensionChanges: jest.fn(() => () => {}),

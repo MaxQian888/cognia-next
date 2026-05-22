@@ -1,5 +1,5 @@
 import type { ComponentType } from "react"
-import { clearPluginExtensions, createExtensionAPI } from "@/lib/plugin/api/extension-api"
+import { clearPluginExtensions, createExtensionAPI } from "@/lib/plugin/api"
 import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 import type { ExtensionProps } from "@/types/plugin/plugin-extended"
 
