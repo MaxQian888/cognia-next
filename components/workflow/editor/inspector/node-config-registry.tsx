@@ -14,6 +14,19 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { SchemaForm } from "./forms/schema-form"
 import {
+  DesktopScreenshotConfig,
+  DesktopFindElementConfig,
+  DesktopReadTreeConfig,
+  DesktopClickConfig,
+  DesktopTypeConfig,
+  DesktopKeysConfig,
+  DesktopInvokePatternConfig,
+  DesktopWindowFocusConfig,
+  DesktopWindowCloseConfig,
+  DesktopWindowResizeConfig,
+  DesktopWaitConfig,
+} from "./forms/desktop"
+import {
   GithubClosePrConfig,
   GithubCloseIssueConfig,
   GithubCommentIssueConfig,
@@ -44,6 +57,7 @@ import {
   ConnectorInboundConfig,
   ConnectorSendConfig,
   CronConfig,
+  DesktopEventTriggerConfig,
   GenericJsonConfig,
   GroupAnnotationConfig,
   HttpRequestConfig,
@@ -62,6 +76,8 @@ import {
   SystemTerminalConfig,
   TeamCreateConfig,
   TeamRunConfig,
+  TeamTaskDispatchConfig,
+  TeamTriggerConfig,
   TeamUpdateConfig,
   TemplateConfig,
   TransformConfig,
@@ -84,12 +100,15 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.connector.inbound": ConnectorInboundConfig,
   "trigger.chat.message": ChatMessageTriggerConfig,
   "trigger.webhook": WebhookTriggerConfig,
+  "trigger.team": TeamTriggerConfig,
+  "trigger.desktop.event": DesktopEventTriggerConfig,
   // Actions: characters
   "action.character.send": CharacterSendConfig,
   "action.character.create": CharacterCreateConfig,
   "action.character.update": CharacterUpdateConfig,
   // Actions: teams
   "action.team.run": TeamRunConfig,
+  "action.team.task.dispatch": TeamTaskDispatchConfig,
   "action.team.create": TeamCreateConfig,
   "action.team.update": TeamUpdateConfig,
   // Actions: skills
@@ -104,6 +123,18 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolConfig,
   "action.plugin.invoke": PluginInvokeConfig,
+  // Actions: desktop UI automation (forms in ./forms/desktop)
+  "action.desktop.screenshot": DesktopScreenshotConfig,
+  "action.desktop.findElement": DesktopFindElementConfig,
+  "action.desktop.readTree": DesktopReadTreeConfig,
+  "action.desktop.click": DesktopClickConfig,
+  "action.desktop.type": DesktopTypeConfig,
+  "action.desktop.keys": DesktopKeysConfig,
+  "action.desktop.invokePattern": DesktopInvokePatternConfig,
+  "action.desktop.windowFocus": DesktopWindowFocusConfig,
+  "action.desktop.windowClose": DesktopWindowCloseConfig,
+  "action.desktop.windowResize": DesktopWindowResizeConfig,
+  "action.desktop.wait": DesktopWaitConfig,
   // Actions: system (Wave 3 — integrated terminal)
   "action.system.terminal": SystemTerminalConfig,
   // AI

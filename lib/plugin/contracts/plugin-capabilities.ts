@@ -611,6 +611,29 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/contracts/capability-bridge-map.test.ts",
     ],
   },
+  {
+    // ADR-0017/0032. Plugins declaring this capability contribute complete
+    // visual-workflow blueprints (nodes + edges + settings + requires) surfaced
+    // in the editor's Settings tab → "Plugins & capabilities". The manifest
+    // carries a `workflowTemplates` array.
+    id: "workflow-template",
+    support: "supported",
+    manifestFields: ["workflowTemplates"],
+    runtimeBinding:
+      "registerWorkflowTemplate + workflow-template-registry overlay + validateWorkflowTemplateRequires",
+    hostBindings: [
+      "lib/plugin/registries/workflow-template-registry.ts",
+      "lib/workflow/templates/project-plugin-workflow-template.ts",
+      "components/workflow/editor/right-sidebar/settings/plugin-capabilities-section.tsx",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-workflow-template.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/workflow-template-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

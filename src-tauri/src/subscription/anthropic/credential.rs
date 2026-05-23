@@ -173,7 +173,14 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
                 if let Err(err) = sink_clone.update(&account_clone, &fresh) {
                     log::warn!("credential vault writeback failed: {err}");
                 } else {
-                    applied_clone.fetch_add(1, Ordering::SeqCst);
+                    let applied = applied_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                    let observed = observed_clone.load(Ordering::SeqCst);
+                    log::info!(
+                        "credential rotation applied for account={} (observed={} applied={})",
+                        account_clone,
+                        observed,
+                        applied
+                    );
                 }
             }
             Err(err) => log::warn!("credential read failed: {err}"),
@@ -227,6 +234,12 @@ impl WatcherRegistry {
             return Ok(());
         }
         let handle = watch_configdir_credentials(account_id.to_string(), configdir)?;
+        log::info!(
+            "credential watcher started for account={} configdir={:?} (total watchers={})",
+            handle.account_id,
+            handle.configdir,
+            self.len()
+        );
         guard.insert(account_id.to_string(), handle);
         Ok(())
     }
@@ -234,7 +247,20 @@ impl WatcherRegistry {
     /// Stop watching `account_id` if a watcher is registered. No-op
     /// otherwise.
     pub fn stop_watching(&self, account_id: &str) {
-        self.inner.lock().remove(account_id);
+        let mut guard = self.inner.lock();
+        if let Some(handle) = guard.remove(account_id) {
+            let obs = handle.events_observed.load(Ordering::SeqCst);
+            let rot = handle.rotations_applied.load(Ordering::SeqCst);
+            let empty = self.is_empty();
+            log::info!(
+                "credential watcher stopped for account={} (observed={} rotations={} remaining={} empty={})",
+                handle.account_id,
+                obs,
+                rot,
+                self.len(),
+                empty
+            );
+        }
     }
 
     /// Diagnostic — how many watchers are alive right now.

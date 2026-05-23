@@ -122,6 +122,7 @@ export const visualWorkflowSchema = z.object({
   edges: z.array(edgeSchema),
   settings: settingsSchema,
   credentials: z.record(z.string(), credentialRefSchema).optional(),
+  variables: z.record(z.string(), z.string()).optional(),
   pinData: z.record(z.string(), z.unknown()).optional(),
   staticData: z.record(z.string(), z.unknown()).optional(),
   viewport: viewportSchema.optional(),

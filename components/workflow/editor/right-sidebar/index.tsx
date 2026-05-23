@@ -25,6 +25,7 @@ import { Activity, lazy, memo, Suspense, useEffect, useRef, useState } from "rea
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { Loader2Icon } from "lucide-react"
+import type { ReactFlowInstance } from "@xyflow/react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
@@ -47,16 +48,22 @@ const ChangelogTab = lazy(() =>
   import("./changelog-tab").then((m) => ({ default: m.ChangelogTab }))
 )
 
-type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog"
+const SettingsTab = lazy(() => import("./settings-tab").then((m) => ({ default: m.SettingsTab })))
+
+const RunsTab = lazy(() => import("./runs-tab").then((m) => ({ default: m.RunsTab })))
+
+type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog" | "settings" | "runs"
 
 function RightSidebarInner({
   useStore,
   className,
   onOpenWorkflowSettings,
+  reactFlowInstance,
 }: {
   useStore: EditorStore
   className?: string
   onOpenWorkflowSettings?: (tab?: string) => void
+  reactFlowInstance?: ReactFlowInstance | null
 }) {
   const t = useTranslations("workflowEditor.rightSidebar")
   const [tab, setTab] = useState<RightSidebarTab>("chat")
@@ -100,9 +107,21 @@ function RightSidebarInner({
           ? "templates"
           : next === "changelog"
             ? "changelog"
-            : "inspector"
+            : next === "settings"
+              ? "settings"
+              : next === "runs"
+                ? "runs"
+                : "inspector"
     userPinnedTab.current = v
     setTab(v)
+  }
+
+  // Deep-link target for the chat tab's "open settings" affordance: switch the
+  // local tab to Settings and forward to any external handler.
+  const handleOpenSettings = (settingsTab?: string) => {
+    userPinnedTab.current = "settings"
+    setTab("settings")
+    onOpenWorkflowSettings?.(settingsTab)
   }
 
   return (
@@ -112,7 +131,7 @@ function RightSidebarInner({
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-4">
+      <TabsList className="m-2 grid w-auto grid-cols-6">
         <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
           {t("tabs.chat")}
         </TabsTrigger>
@@ -122,8 +141,14 @@ function RightSidebarInner({
             <span className="ml-1 text-[10px] opacity-70">×{selectionCount}</span>
           ) : null}
         </TabsTrigger>
+        <TabsTrigger value="runs" data-testid="workflow-right-sidebar-tab-runs">
+          {t("tabs.runs")}
+        </TabsTrigger>
         <TabsTrigger value="templates" data-testid="workflow-right-sidebar-tab-templates">
           {t("tabs.templates")}
+        </TabsTrigger>
+        <TabsTrigger value="settings" data-testid="workflow-right-sidebar-tab-settings">
+          {t("tabs.settings")}
         </TabsTrigger>
         <TabsTrigger value="changelog" data-testid="workflow-right-sidebar-tab-changelog">
           {t("tabs.changelog")}
@@ -151,7 +176,7 @@ function RightSidebarInner({
               useStore={useStore}
               workflowId={workflowId}
               workflowName={workflowName}
-              onOpenWorkflowSettings={onOpenWorkflowSettings}
+              onOpenWorkflowSettings={handleOpenSettings}
             />
           </Suspense>
         </Activity>
@@ -172,6 +197,40 @@ function RightSidebarInner({
           }
         >
           <TemplatesTab useStore={useStore} workflowId={workflowId} />
+        </Suspense>
+      </TabsContent>
+      <TabsContent value="runs" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-runs-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <RunsTab
+            useStore={useStore}
+            workflowId={workflowId}
+            reactFlowInstance={reactFlowInstance}
+          />
+        </Suspense>
+      </TabsContent>
+      <TabsContent value="settings" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-settings-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <SettingsTab useStore={useStore} />
         </Suspense>
       </TabsContent>
       <TabsContent value="changelog" className="flex-1 m-0 overflow-hidden">

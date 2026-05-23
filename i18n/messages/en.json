@@ -1056,7 +1056,8 @@
       "usageCacheWrite": "Cache write: {n}",
       "usageCost": "Cost: ${cost}",
       "attachmentAlt": "attachment",
-      "todoPlanTitle": "Plan · {done}/{total} done"
+      "todoPlanTitle": "Plan · {done}/{total} done",
+      "toolCallFailed": "Tool call failed"
     },
     "toolApproval": {
       "titleFallback": "Allow {tool}?",
@@ -12544,6 +12545,7 @@
       "noConfigYet": "No dedicated config form yet — edit the raw JSON above.",
       "closeAria": "Close inspector",
       "errorBadge": "{count, plural, one {# issue} other {# issues}}",
+      "jumpToError": "Jump to next error",
       "categoryBadge": {
         "trigger": "Trigger",
         "action": "Action",
@@ -12598,6 +12600,7 @@
       "invalidType": "Expected {expected}",
       "invalidFormat": "Invalid format",
       "cronExpr": "Use a 5-field cron expression (minute hour day month weekday)",
+      "invalidUrl": "Enter a valid http(s) URL or a '{{ }}' expression",
       "webhookPath": "Use letters, digits, dashes, underscores, and slashes only",
       "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
       "switchCasesRequired": "Add at least one case",
@@ -13315,10 +13318,47 @@
         "skillNoneItem": "— create new —",
         "mcpServer": "Select an MCP server",
         "plugin": "Select a plugin",
-        "subworkflow": "Select a workflow"
+        "subworkflow": "Select a workflow",
+        "twin": "Select a twin",
+        "none": "None",
+        "noResults": "No matches",
+        "useExpression": "Use expression",
+        "usePicker": "Pick from list"
       },
       "manualTrigger": {
         "intro": "Fires when you click the Run button in the editor. No additional configuration."
+      },
+      "teamTrigger": {
+        "intro": "Fired internally by the agent-team runtime. This trigger has no configuration."
+      },
+      "teamTaskDispatch": {
+        "teamId": { "label": "Team" },
+        "taskId": {
+          "label": "Task id",
+          "hint": "Stable identifier for the dispatched task.",
+          "placeholder": "task_..."
+        },
+        "title": { "label": "Title", "placeholder": "Summarize the latest report" },
+        "description": {
+          "label": "Description",
+          "placeholder": "Detailed instructions for the assigned teammate."
+        },
+        "expectedOutput": {
+          "label": "Expected output (optional)",
+          "hint": "What a successful result looks like — used to validate the teammate's output."
+        }
+      },
+      "desktopEventTrigger": {
+        "desktopOnly": "Desktop only — fires on UI Automation events; has no effect in the browser.",
+        "kinds": {
+          "label": "Event kinds",
+          "hint": "Fire when any of the selected UI Automation events occur.",
+          "options": {
+            "focus-changed": "Focus changed",
+            "structure-changed": "Structure changed",
+            "property-changed": "Property changed"
+          }
+        }
       },
       "cron": {
         "cronExpression": {
@@ -13330,6 +13370,20 @@
           "label": "Timezone",
           "hint": "Optional. Defaults to the workflow's timezone setting.",
           "placeholder": "Asia/Shanghai"
+        },
+        "builder": {
+          "presetLabel": "Preset",
+          "presets": {
+            "everyMinute": "Every minute",
+            "hourly": "Hourly",
+            "daily": "Daily at 9:00",
+            "weekdays": "Weekdays at 9:00",
+            "weekly": "Weekly (Mon 9:00)",
+            "monthly": "Monthly (1st, 9:00)",
+            "custom": "Custom"
+          },
+          "nextRunsLabel": "Next runs",
+          "invalidExpression": "Invalid cron expression"
         }
       },
       "connectorInbound": {
@@ -13508,8 +13562,14 @@
           }
         },
         "durationMs": {
-          "label": "Duration (ms)",
-          "hint": "The orchestrator pauses the run for this long before continuing."
+          "label": "Duration",
+          "hint": "The orchestrator pauses the run for this long before continuing.",
+          "units": {
+            "ms": "ms",
+            "sec": "seconds",
+            "min": "minutes",
+            "hour": "hours"
+          }
         }
       },
       "httpRequest": {
@@ -14368,9 +14428,76 @@
         "chat": "Chat",
         "inspector": "Inspector",
         "templates": "Templates",
-        "changelog": "Changes"
+        "changelog": "Changes",
+        "settings": "Settings",
+        "runs": "Runs"
       },
       "chatLoading": "Loading chat…"
+    },
+    "settings": {
+      "runPolicy": { "title": "Run policy" },
+      "errorPolicy": {
+        "label": "On error",
+        "stop": "Stop the run",
+        "continue": "Continue (skip failed branch)",
+        "branch": "Route to error branch"
+      },
+      "timeoutMs": {
+        "label": "Run timeout",
+        "hint": "Hard ceiling on a single run's wall-clock time."
+      },
+      "concurrency": { "label": "Concurrent runs", "hint": "Of this workflow." },
+      "maxConcurrency": { "label": "Max in-run nodes", "hint": "Parallel nodes per run." },
+      "retry": {
+        "title": "Retry defaults",
+        "attempts": "Attempts",
+        "backoff": "Backoff",
+        "exponential": "Exponential",
+        "fixed": "Fixed",
+        "baseMs": "Base (ms)",
+        "maxMs": "Max (ms)"
+      },
+      "timezone": {
+        "label": "Timezone",
+        "hint": "Default cron timezone; falls back to the app setting."
+      },
+      "variables": {
+        "title": "Variables",
+        "hint": "Author-time values referenced in expressions as '{{ $vars.KEY }}'.",
+        "addButton": "Add variable",
+        "keyPlaceholder": "KEY",
+        "valuePlaceholder": "value",
+        "removeAria": "Remove variable",
+        "invalidKey": "Use a valid identifier (letters, digits, underscores; not starting with a digit).",
+        "duplicateKey": "Duplicate key.",
+        "empty": "No variables yet."
+      },
+      "credentials": {
+        "title": "Credentials",
+        "hint": "References resolved from the OS keyring at run time.",
+        "addButton": "Add credential ref",
+        "idPlaceholder": "keyring:ns:key",
+        "namePlaceholder": "Display name",
+        "kindPlaceholder": "kind",
+        "removeAria": "Remove credential ref",
+        "refOnlyNote": "Refs only — secret values are never stored in the workflow.",
+        "empty": "No credential references yet."
+      },
+      "plugins": {
+        "title": "Plugins & capabilities",
+        "hint": "Workflow nodes, triggers, and templates contributed by installed plugins.",
+        "empty": "No plugin-contributed workflow capabilities installed.",
+        "sections": { "nodes": "Nodes", "triggers": "Triggers", "templates": "Templates" },
+        "contributedBy": "Provided by {plugin}",
+        "useTemplate": "Use",
+        "missingDep": "Missing: {id}"
+      }
+    },
+    "runs": {
+      "empty": "No runs yet. Run the workflow to see its execution history here.",
+      "backToList": "Back to runs",
+      "revealOnCanvas": "Reveal on canvas",
+      "notFound": "Run not found."
     },
     "chat": {
       "noWorkflow": "Open a workflow to start a co-pilot session.",

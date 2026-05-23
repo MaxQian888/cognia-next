@@ -1761,6 +1761,35 @@ export class PluginEventHooks {
     this.executeHook("onWorkflowError", (hooks) => hooks.onWorkflowError?.(workflowId, error))
   }
 
+  dispatchWorkflowNodeStart(workflowId: string, nodeId: string, nodeType: string) {
+    this.executeHook("onWorkflowNodeStart", (hooks) =>
+      hooks.onWorkflowNodeStart?.(workflowId, nodeId, nodeType)
+    )
+  }
+
+  dispatchWorkflowNodeComplete(
+    workflowId: string,
+    nodeId: string,
+    nodeType: string,
+    output: unknown
+  ) {
+    this.executeHook("onWorkflowNodeComplete", (hooks) =>
+      hooks.onWorkflowNodeComplete?.(workflowId, nodeId, nodeType, output)
+    )
+  }
+
+  dispatchWorkflowNodeError(workflowId: string, nodeId: string, error: Error) {
+    this.executeHook("onWorkflowNodeError", (hooks) =>
+      hooks.onWorkflowNodeError?.(workflowId, nodeId, error)
+    )
+  }
+
+  dispatchWorkflowTriggerFired(workflowId: string, triggerKind: string, payload: unknown) {
+    this.executeHook("onWorkflowTriggerFired", (hooks) =>
+      hooks.onWorkflowTriggerFired?.(workflowId, triggerKind, payload)
+    )
+  }
+
   // =============================================================================
   // UI Hooks
   // =============================================================================

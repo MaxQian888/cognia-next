@@ -85,6 +85,7 @@ export type PluginCapability =
   | "subagent" // Contributes Claude SDK subagents callable by teams + workflow editor
   | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
   | "shared-memory-adapter" // Contributes a bidirectional backing store for agent-team shared memory
+  | "workflow-template" // Contributes complete visual-workflow blueprints surfaced in the editor (ADR-0017/0032)
 
 /**
  * Plugin status in the lifecycle
@@ -537,6 +538,15 @@ export interface PluginManifest {
    * be declared in `capabilities[]` for the bridge to pick them up.
    */
   workflows?: import("./plugin-workflow").PluginManifestWorkflowsBlock
+
+  /**
+   * Complete visual-workflow blueprints contributed by this plugin
+   * (`workflow-template` capability). Registered into the
+   * `workflow-template-registry` overlay on enable and surfaced in the editor's
+   * Settings tab → "Plugins & capabilities". Each entry's `requires` block
+   * declares cross-capability dependencies (mirrors `agentTeamTemplates`).
+   */
+  workflowTemplates?: import("./plugin-workflow-template").PluginWorkflowTemplateDef[]
 
   /**
    * Language Server Protocol servers contributed by this plugin (Phase B

@@ -386,6 +386,26 @@ export interface WorkflowHookEvents {
 
   /** Called when a workflow errors */
   onWorkflowError?: (workflowId: string, error: Error) => void
+
+  /** Called immediately before a node executor runs (per-node; may interleave
+   * under concurrency — correlate by `nodeId`). */
+  onWorkflowNodeStart?: (workflowId: string, nodeId: string, nodeType: string) => void
+
+  /** Called after a node executor produces output. */
+  onWorkflowNodeComplete?: (
+    workflowId: string,
+    nodeId: string,
+    nodeType: string,
+    output: unknown
+  ) => void
+
+  /** Called when a single node's executor throws (distinct from the run-level
+   * `onWorkflowError`). */
+  onWorkflowNodeError?: (workflowId: string, nodeId: string, error: Error) => void
+
+  /** Called when a trigger fires for a workflow (cron / webhook / connector /
+   * chat / plugin), before the run is scheduled. */
+  onWorkflowTriggerFired?: (workflowId: string, triggerKind: string, payload: unknown) => void
 }
 
 // =============================================================================
@@ -539,6 +559,10 @@ export interface PluginHooksAll extends PluginHooks {
   onWorkflowStepComplete?: WorkflowHookEvents["onWorkflowStepComplete"]
   onWorkflowComplete?: WorkflowHookEvents["onWorkflowComplete"]
   onWorkflowError?: WorkflowHookEvents["onWorkflowError"]
+  onWorkflowNodeStart?: WorkflowHookEvents["onWorkflowNodeStart"]
+  onWorkflowNodeComplete?: WorkflowHookEvents["onWorkflowNodeComplete"]
+  onWorkflowNodeError?: WorkflowHookEvents["onWorkflowNodeError"]
+  onWorkflowTriggerFired?: WorkflowHookEvents["onWorkflowTriggerFired"]
 
   // UI hooks
   onSidebarToggle?: UIHookEvents["onSidebarToggle"]

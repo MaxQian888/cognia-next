@@ -142,12 +142,14 @@ export function ExpressionField({
   const shallowSelector = useShallow((s: WfEditorState) => ({
     nodes: s.nodes,
     workflowId: s.baseWorkflow.id,
+    variables: s.baseWorkflow.variables,
     isDraggingAny: s.isDraggingAny,
     performanceTier: s.performanceTier as PerformanceTier,
   }))
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const workflowId = editorState?.workflowId
+  const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
   const isDraggingAny = editorState?.isDraggingAny ?? false
   // Gate the live-query on the resolved tier's `liveQueryWhileDragging` flag.
   // Tests / headless renders without a store fall back to "always enabled"
@@ -197,6 +199,7 @@ export function ExpressionField({
         nodes: nodes as unknown as Parameters<typeof buildExpressionSuggestions>[0]["nodes"],
         currentNodeId,
         outputSchemas,
+        varKeys,
       })
       return {
         from,
@@ -210,7 +213,7 @@ export function ExpressionField({
         validFor: /[\w$.[\]'"-]*$/,
       }
     }
-  }, [nodes, currentNodeId, upstreamOutputs])
+  }, [nodes, currentNodeId, upstreamOutputs, varKeys])
 
   // Mount the EditorView once.
   useEffect(() => {

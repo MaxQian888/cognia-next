@@ -58,7 +58,7 @@ use crate::{
     skills::{install, native as skills_native, registry},
     subscription::{
         active::ActiveAccountState,
-        anthropic::AnthropicProvider,
+        anthropic::{ AnthropicProvider, credential::WatcherRegistry },
         codex::CodexProvider,
         opencode::OpencodeProvider,
         provider::{ProviderId, SubscriptionProvider},
@@ -573,6 +573,10 @@ pub(super) async fn dispatch(
             };
             vault_doc.remove_account(&account_id);
             vault::save(provider_id, &vault_doc).map_err(RpcError::internal)?;
+            if provider_id == ProviderId::Anthropic {
+                let watcher: tauri::State<'_, WatcherRegistry> = app.state();
+                watcher.stop_watching(&account_id);
+            }
             Ok(Value::Null)
         }
 

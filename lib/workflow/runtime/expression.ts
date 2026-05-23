@@ -39,6 +39,8 @@ export interface ExpressionScope {
   staticData: Record<string, unknown>
   /** This node's resolved params before expression-evaluation (read-only). */
   params: Record<string, unknown>
+  /** Author-time environment variables, referenced as `{{ $vars.KEY }}`. */
+  variables?: Record<string, string>
 }
 
 /**
@@ -152,6 +154,9 @@ export function evalToken(expr: string, scope: ExpressionScope): unknown {
         break
       case "$static":
         cursor = scope.staticData
+        break
+      case "$vars":
+        cursor = scope.variables ?? {}
         break
       case "$params":
         cursor = scope.params

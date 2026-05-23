@@ -61,6 +61,11 @@ import {
   registerSharedMemoryAdapter,
   unregisterSharedMemoryAdaptersByPlugin,
 } from "@/lib/plugin/registries/shared-memory-adapter-registry"
+import {
+  refreshAllWorkflowTemplateWarnings,
+  registerWorkflowTemplate,
+  unregisterWorkflowTemplatesByPlugin,
+} from "@/lib/plugin/registries/workflow-template-registry"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -112,11 +117,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerSkill(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterSkillsByPlugin(pluginId)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
       return n
     },
   },
@@ -126,11 +133,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerMcpServerPreset(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterMcpServerPresetsByPlugin(pluginId)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
       return n
     },
   },
@@ -140,11 +149,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerNativeAnthropicTool(def.id, def as unknown as never, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterNativeAnthropicToolsByPlugin(pluginId)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
       return n
     },
   },
@@ -193,10 +204,12 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     registerEntry: (def, ctx) => {
       registerSubagent(def.id, def as unknown as never, ctx)
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterSubagentsByPlugin(pluginId)
       refreshAllTemplateWarnings()
+      refreshAllWorkflowTemplateWarnings()
       return n
     },
   },
@@ -224,6 +237,18 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerSharedMemoryAdapter(def.id, def as unknown as never, ctx)
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
+  },
+  "workflow-template": {
+    // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —
+    // nodes + edges + settings + a `requires` block declaring cross-capability
+    // dependencies. `registerWorkflowTemplate` runs `validateWorkflowTemplateRequires`
+    // internally and stamps non-blocking warnings; the editor Settings tab reads
+    // them via `getWorkflowTemplateWarnings`.
+    manifestField: "workflowTemplates",
+    registerEntry: (def, ctx) => {
+      registerWorkflowTemplate(def.id, def as unknown as never, ctx)
+    },
+    unregisterAllByPlugin: unregisterWorkflowTemplatesByPlugin,
   },
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

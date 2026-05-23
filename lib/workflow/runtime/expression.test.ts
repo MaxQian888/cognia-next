@@ -80,6 +80,14 @@ describe("evalToken", () => {
     expect(evalToken("$params.mode", scope)).toBe("live")
   })
 
+  it("resolves $vars from the workflow variables map", () => {
+    const withVars: ExpressionScope = { ...scope, variables: { API_BASE: "https://api.test" } }
+    expect(evalToken("$vars.API_BASE", withVars)).toBe("https://api.test")
+    // Missing var → undefined (not throwing); absent map → undefined.
+    expect(evalToken("$vars.NOPE", withVars)).toBeUndefined()
+    expect(evalToken("$vars.API_BASE", scope)).toBeUndefined()
+  })
+
   it("returns undefined on missing paths instead of throwing", () => {
     expect(evalToken("$node['n_missing'].x", scope)).toBeUndefined()
     expect(evalToken("$static.absent.deep.path", scope)).toBeUndefined()

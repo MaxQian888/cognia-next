@@ -225,4 +225,26 @@ describe("WorkflowNodeComponent", () => {
     const card = screen.getByTestId("wf-node-trigger.manual")
     expect(card.getAttribute("data-connection-candidate")).toBeNull()
   })
+
+  // ── errorPolicy: "branch" error handle (Workstream E) ───────────────────
+  function branchStore(): EditorStore {
+    const wf = makeWorkflow()
+    return createEditorStore({ ...wf, settings: { ...wf.settings, errorPolicy: "branch" } })
+  }
+
+  it("renders the error source handle on an action node when errorPolicy is 'branch'", () => {
+    renderNode({ store: branchStore(), id: "n_a", kind: "ai.prompt" })
+    expect(screen.getByTestId("wf-node-handle-error-n_a")).toBeInTheDocument()
+  })
+
+  it("does NOT render the error handle under the default 'stop' policy", () => {
+    const { store } = withStore()
+    renderNode({ store, id: "n_a", kind: "ai.prompt" })
+    expect(screen.queryByTestId("wf-node-handle-error-n_a")).toBeNull()
+  })
+
+  it("does NOT render the error handle on a trigger node even under 'branch'", () => {
+    renderNode({ store: branchStore(), id: "n_t", kind: "trigger.manual" })
+    expect(screen.queryByTestId("wf-node-handle-error-n_t")).toBeNull()
+  })
 })

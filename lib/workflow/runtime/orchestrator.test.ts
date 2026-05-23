@@ -11,6 +11,10 @@ const mockHooksManager = {
   dispatchWorkflowStepComplete: jest.fn(),
   dispatchWorkflowComplete: jest.fn(),
   dispatchWorkflowError: jest.fn(),
+  dispatchWorkflowNodeStart: jest.fn(),
+  dispatchWorkflowNodeComplete: jest.fn(),
+  dispatchWorkflowNodeError: jest.fn(),
+  dispatchWorkflowTriggerFired: jest.fn(),
 }
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => mockHooksManager),
@@ -747,5 +751,143 @@ describe("runWorkflow — concurrent scheduling", () => {
     // We accept any terminal status — the assertion is "doesn't hang".
     const result = (await guarded) as Awaited<ReturnType<typeof runWorkflow>>
     expect(result).toBeDefined()
+  })
+})
+
+// ── errorPolicy: stop / continue / branch (Workstream E) ─────────────────────
+describe("runWorkflow — errorPolicy", () => {
+  beforeEach(() => {
+    registerNodeExecutor({
+      kind: "test.fail" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("boom")
+      },
+    })
+  })
+
+  function buildFailWorkflow(
+    policy: "stop" | "continue" | "branch",
+    { withErrorEdge }: { withErrorEdge: boolean }
+  ): VisualWorkflow {
+    const edges: VisualWorkflow["edges"] = [
+      { id: "e1", source: "n_start", target: "n_fail" },
+      { id: "e2", source: "n_fail", target: "n_success" },
+    ]
+    if (withErrorEdge) {
+      edges.push({ id: "e3", source: "n_fail", target: "n_recover", sourceHandle: "error" })
+    }
+    const nodes: VisualWorkflow["nodes"] = [
+      {
+        id: "n_start",
+        type: "trigger.manual",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: { label: "start", params: {} },
+      },
+      {
+        id: "n_fail",
+        type: "test.fail" as never,
+        typeVersion: 1,
+        position: { x: 200, y: 0 },
+        data: { label: "boom", params: {} },
+      },
+      {
+        id: "n_success",
+        type: "flow.set",
+        typeVersion: 1,
+        position: { x: 400, y: 0 },
+        data: { label: "ok", params: { variable: "ok", value: "success_path" } },
+      },
+    ]
+    if (withErrorEdge) {
+      nodes.push({
+        id: "n_recover",
+        type: "flow.set",
+        typeVersion: 1,
+        position: { x: 400, y: 120 },
+        data: { label: "recover", params: { variable: "rec", value: "recovered" } },
+      })
+    }
+    return {
+      id: "wf_x",
+      schemaVersion: 1,
+      name: "Fail workflow",
+      createdAt: 0,
+      updatedAt: 0,
+      nodes,
+      edges,
+      settings: {
+        errorPolicy: policy,
+        timeoutMs: 60_000,
+        concurrency: 1,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+      },
+    }
+  }
+
+  it('"stop" fails the whole run on the first error', async () => {
+    const r = await runWorkflow({
+      workflow: buildFailWorkflow("stop", { withErrorEdge: false }),
+      trigger,
+    })
+    expect(r.status).toBe("failed")
+    expect(r.error?.nodeId).toBe("n_fail")
+  })
+
+  it("dispatches per-node start / complete / error hooks", async () => {
+    await runWorkflow({ workflow: buildFailWorkflow("stop", { withErrorEdge: false }), trigger })
+    // Node start fires for the trigger + the failing node.
+    expect(mockHooksManager.dispatchWorkflowNodeStart).toHaveBeenCalledWith(
+      "wf_x",
+      "n_fail",
+      "test.fail"
+    )
+    // The failing node emits a node-error with the correct id.
+    expect(mockHooksManager.dispatchWorkflowNodeError).toHaveBeenCalledWith(
+      "wf_x",
+      "n_fail",
+      expect.any(Error)
+    )
+    // The trigger node completed → node-complete fired for it.
+    expect(mockHooksManager.dispatchWorkflowNodeComplete).toHaveBeenCalledWith(
+      "wf_x",
+      "n_start",
+      "trigger.manual",
+      expect.anything()
+    )
+  })
+
+  it('"branch" with an error edge keeps the run alive and takes the error path', async () => {
+    const r = await runWorkflow({
+      workflow: buildFailWorkflow("branch", { withErrorEdge: true }),
+      trigger,
+    })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    // Error-branch target ran; success-path target was skipped.
+    expect(
+      events.find((e) => e.type === "step_completed" && e.stepId === "n_recover")
+    ).toBeDefined()
+    expect(events.find((e) => e.type === "step_skipped" && e.stepId === "n_success")).toBeDefined()
+  })
+
+  it('"branch" without an error edge falls back to stop semantics', async () => {
+    const r = await runWorkflow({
+      workflow: buildFailWorkflow("branch", { withErrorEdge: false }),
+      trigger,
+    })
+    expect(r.status).toBe("failed")
+    expect(r.error?.nodeId).toBe("n_fail")
+  })
+
+  it('"continue" skips the failed node\'s downstream but completes the run', async () => {
+    const r = await runWorkflow({
+      workflow: buildFailWorkflow("continue", { withErrorEdge: false }),
+      trigger,
+    })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    expect(events.find((e) => e.type === "step_skipped" && e.stepId === "n_success")).toBeDefined()
   })
 })

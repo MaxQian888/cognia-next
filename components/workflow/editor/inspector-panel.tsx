@@ -170,6 +170,28 @@ function InspectorPanelInner({
     [node]
   )
 
+  // Cycle focus through the invalid fields when the error badge is clicked.
+  // `Field` stamps `data-invalid="true"` on each field with an error.
+  const formScrollRef = useRef<HTMLDivElement | null>(null)
+  const jumpIndexRef = useRef(0)
+  const jumpToNextError = useCallback(() => {
+    const root = formScrollRef.current
+    if (!root) return
+    const invalids = Array.from(root.querySelectorAll<HTMLElement>('[data-invalid="true"]'))
+    if (invalids.length === 0) {
+      // Only object-level (`_root`) errors with no field target — scroll to top.
+      root.scrollIntoView({ block: "start", behavior: "smooth" })
+      return
+    }
+    const idx = jumpIndexRef.current % invalids.length
+    jumpIndexRef.current = idx + 1
+    const target = invalids[idx]
+    target.scrollIntoView({ block: "center", behavior: "smooth" })
+    target
+      .querySelector<HTMLElement>("input, textarea, select, [contenteditable], [tabindex]")
+      ?.focus()
+  }, [])
+
   if (!node || !entry) {
     return (
       <aside
@@ -200,14 +222,18 @@ function InspectorPanelInner({
               {t(`categoryBadge.${category}`)}
             </Badge>
             {errorCount > 0 ? (
-              <Badge
-                variant="destructive"
-                className="gap-1 font-normal"
+              <button
+                type="button"
+                onClick={jumpToNextError}
+                aria-label={t("jumpToError")}
                 data-testid="inspector-error-badge"
+                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <AlertCircleIcon className="size-3" aria-hidden="true" />
-                {t("errorBadge", { count: errorCount })}
-              </Badge>
+                <Badge variant="destructive" className="gap-1 font-normal pointer-events-none">
+                  <AlertCircleIcon className="size-3" aria-hidden="true" />
+                  {t("errorBadge", { count: errorCount })}
+                </Badge>
+              </button>
             ) : null}
           </div>
           <h3 className="mt-1.5 text-sm font-semibold leading-tight">
@@ -228,7 +254,7 @@ function InspectorPanelInner({
         </Button>
       </header>
       <ScrollArea className="flex-1">
-        <div className="space-y-4 px-4 py-4">
+        <div className="space-y-4 px-4 py-4" ref={formScrollRef}>
           <Field label={t("label")} htmlFor="ins-label" required>
             <Input
               id="ins-label"

@@ -114,6 +114,19 @@ impl ReplayBuffer {
             event,
         });
         ring.total_bytes += size;
+        // Diagnostic: log when the buffer grows large (>>75% capacity).
+        let retained = ring.total_bytes;
+        let count = ring.events.len();
+        drop(ring);
+        if retained > self.capacity_bytes * 3 / 4 {
+            log::debug!(
+                "replay buffer at {}/{} bytes ({} events), seq={}",
+                retained,
+                self.capacity_bytes,
+                count,
+                seq
+            );
+        }
         seq
     }
 
@@ -133,7 +146,7 @@ impl ReplayBuffer {
     }
 
     /// Most-recently-assigned seq. `0` when no events have been pushed
-    /// yet. Useful for tests + diagnostics.
+    /// yet. Used by WS resume to validate `resume_from` bounds.
     pub fn last_seq(&self) -> u64 {
         self.next_seq.load(Ordering::Relaxed).saturating_sub(1)
     }
@@ -151,7 +164,8 @@ impl ReplayBuffer {
         self.len() == 0
     }
 
-    /// Total retained bytes (approximate). Useful for tests + telemetry.
+    /// Total retained bytes (approximate). Used by push() diagnostic log
+    /// and tests.
     pub fn retained_bytes(&self) -> usize {
         match self.inner.lock() {
             Ok(g) => g.total_bytes,

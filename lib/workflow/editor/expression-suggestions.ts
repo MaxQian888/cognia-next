@@ -43,6 +43,8 @@ export function buildExpressionSuggestions(opts: {
   outputSchemas?: Record<string, string[]>
   /** Static-data variable names declared so far. */
   staticKeys?: string[]
+  /** Workflow `variables` keys (env vars), referenced as `$vars.<key>`. */
+  varKeys?: string[]
   /** Trigger payload keys hinted by the trigger kind. */
   triggerHints?: { kind: string; payloadKeys: string[] }
 }): SuggestionEntry[] {
@@ -58,6 +60,7 @@ export function buildExpressionSuggestions(opts: {
       boost: 90,
     },
     { insert: "$static", label: "$static", detail: "static data", kind: "keyword", boost: 80 },
+    { insert: "$vars", label: "$vars", detail: "workflow variables", kind: "keyword", boost: 85 },
     {
       insert: "$params",
       label: "$params",
@@ -95,6 +98,17 @@ export function buildExpressionSuggestions(opts: {
       detail: "static data",
       kind: "variable",
       boost: 55,
+    })
+  }
+
+  // Workflow environment variables ($vars).
+  for (const k of opts.varKeys ?? []) {
+    out.push({
+      insert: `$vars.${k}`,
+      label: `$vars.${k}`,
+      detail: "workflow variable",
+      kind: "variable",
+      boost: 58,
     })
   }
 

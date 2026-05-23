@@ -31,7 +31,7 @@ export function ToolCallCard({ call, className }: ToolCallCardProps) {
       data-testid={`tool-call-card-${call.id}`}
       data-status={call.status}
       className={cn(
-        "rounded-md border bg-muted/30 text-[11px]",
+        "rounded-md border bg-muted/50 text-[11px] backdrop-blur-sm",
         call.status === "error" && "border-destructive/40 bg-destructive/5",
         className
       )}
@@ -41,7 +41,7 @@ export function ToolCallCard({ call, className }: ToolCallCardProps) {
         onClick={() => hasDetails && setOpen((v) => !v)}
         className={cn(
           "flex w-full items-center gap-1.5 px-2 py-1.5 text-left",
-          hasDetails && "hover:bg-muted/60 cursor-pointer",
+          hasDetails && "hover:bg-muted/70 cursor-pointer",
           !hasDetails && "cursor-default"
         )}
         aria-expanded={open}
@@ -69,7 +69,7 @@ export function ToolCallCard({ call, className }: ToolCallCardProps) {
           {call.input && (
             <div className="space-y-0.5">
               <p className="text-[10px] font-medium text-muted-foreground">{t("input")}</p>
-              <pre className="overflow-x-auto rounded bg-background/80 px-2 py-1 font-mono text-[10px]">
+              <pre className="overflow-x-auto rounded bg-background px-2 py-1 font-mono text-[10px]">
                 {truncate(call.input)}
               </pre>
             </div>
@@ -79,7 +79,7 @@ export function ToolCallCard({ call, className }: ToolCallCardProps) {
               <p className="text-[10px] font-medium text-muted-foreground">{t("output")}</p>
               <pre
                 className={cn(
-                  "max-h-48 overflow-auto rounded bg-background/80 px-2 py-1 font-mono text-[10px] whitespace-pre-wrap",
+                  "max-h-48 overflow-auto rounded bg-background px-2 py-1 font-mono text-[10px] whitespace-pre-wrap",
                   call.status === "error" && "text-destructive"
                 )}
               >

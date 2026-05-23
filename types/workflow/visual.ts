@@ -208,8 +208,9 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Top-level shape version. Bumped on breaking changes to the JSON shape;
- * `lib/workflow/definition/migrate.ts` carries one migration function per bump.
+ * Top-level shape version. Bumped on breaking changes to the JSON shape.
+ * The optional `variables` map added alongside the Settings tab is additive
+ * (every prior row stays valid) so it does NOT require a version bump.
  */
 export type VisualWorkflowSchemaVersion = 1
 
@@ -242,6 +243,12 @@ export interface VisualWorkflow {
   settings: WorkflowSettings
   /** Refs only — never values. Resolved at run time from the keychain. */
   credentials?: Record<string, WorkflowCredentialRef>
+  /**
+   * Author-time environment variables, referenced in expressions as
+   * `{{ $vars.KEY }}`. Distinct from `staticData` (run-mutable). Keys must be
+   * valid identifiers so they resolve through the expression tokenizer.
+   */
+  variables?: Record<string, string>
   /** UI-only test data pinned per node so the inspector can replay outputs. */
   pinData?: Record<string, unknown>
   /** Cross-run mutable state. Persisted on the workflow row, not snapshots. */
@@ -299,7 +306,7 @@ export interface WorkflowEdge {
   data?: { kind?: WorkflowEdgeKind }
 }
 
-export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop"
+export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop" | "error"
 
 export interface WorkflowSettings {
   errorPolicy: "stop" | "continue" | "branch"

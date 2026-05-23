@@ -98,6 +98,7 @@ pub async fn subscription_delete_account(
     provider: String,
     account_id: String,
     state: State<'_, ActiveAccountState>,
+    watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
     let mut vault = match vault::load(id)? {
@@ -112,6 +113,11 @@ pub async fn subscription_delete_account(
         // The active pointer is gone — drop the cache so the next sidecar
         // spawn doesn't reuse a credential that no longer exists.
         state.set(id, ActiveSnapshot::default()).await;
+    }
+    // ADR-0028 Phase 14 — stop the credential watcher so the deleted
+    // account's file watch doesn't leak forever.
+    if id == ProviderId::Anthropic {
+        watcher.stop_watching(&account_id);
     }
     Ok(())
 }

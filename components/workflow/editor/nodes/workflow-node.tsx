@@ -202,6 +202,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       connectionState: s.connectionState,
       requestContextMenu: s.requestContextMenu,
       requestRunFromStep: s.requestRunFromStep,
+      errorPolicy: s.baseWorkflow.settings.errorPolicy,
     })
   )
   const storeBits = store?.(storeSelector)
@@ -248,6 +249,14 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
     const wouldCycle = hasEdgeBetween(store.getState().edges, id, cs.sourceId)
     connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
   }
+
+  // Error-branch handle: shown on fallible nodes (not triggers/annotations)
+  // when the workflow opts into `errorPolicy: "branch"`.
+  const showErrorHandle =
+    showOutput &&
+    storeBits?.errorPolicy === "branch" &&
+    !data.kind.startsWith("trigger.") &&
+    !isAnnotation
 
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
@@ -375,11 +384,35 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       </div>
       {showLastRun && effectiveLastRun ? <LastRunFooter lastRun={effectiveLastRun} /> : null}
       {showOutput ? (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
-        />
+        // When the workflow's errorPolicy is "branch", actions expose a second
+        // source handle ("error") that routes the run down a failure path. The
+        // success handle shifts up to make room. Triggers/annotations keep a
+        // single handle (they can't fail into a branch meaningfully).
+        showErrorHandle ? (
+          <>
+            <Handle
+              type="source"
+              position={Position.Right}
+              style={{ top: "38%" }}
+              className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
+              data-testid={`wf-node-handle-source-${id}`}
+            />
+            <Handle
+              type="source"
+              id="error"
+              position={Position.Right}
+              style={{ top: "68%" }}
+              className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
+              data-testid={`wf-node-handle-error-${id}`}
+            />
+          </>
+        ) : (
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
+          />
+        )
       ) : null}
     </div>
   )

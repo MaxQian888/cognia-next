@@ -99,6 +99,30 @@ describe("editor store — envelope mutators", () => {
     expect(useStore.getState().baseWorkflow.description).toBe("A description")
     expect(useStore.getState().nodes).toHaveLength(1)
   })
+
+  it("setSettings shallow-merges run settings and marks dirty", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setSettings({ errorPolicy: "branch", concurrency: 4 })
+    const s = useStore.getState().baseWorkflow.settings
+    expect(s.errorPolicy).toBe("branch")
+    expect(s.concurrency).toBe(4)
+    // Unrelated settings preserved.
+    expect(s.timeoutMs).toBeGreaterThan(0)
+    expect(useStore.getState().dirty).toBe(true)
+  })
+
+  it("setVariables replaces the variables map and marks dirty", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setVariables({ API_BASE: "https://x" })
+    expect(useStore.getState().baseWorkflow.variables).toEqual({ API_BASE: "https://x" })
+    expect(useStore.getState().dirty).toBe(true)
+  })
+
+  it("setCredentials replaces the credential refs map", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setCredentials({ a: { id: "a", name: "A" } })
+    expect(useStore.getState().baseWorkflow.credentials).toEqual({ a: { id: "a", name: "A" } })
+  })
 })
 
 describe("editor store — toWorkflow round-trip", () => {

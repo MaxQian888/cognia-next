@@ -34,6 +34,22 @@ function numberRange(min?: number, max?: number) {
   return s
 }
 
+/**
+ * Accepts an http(s) URL or any value containing a `{{ … }}` expression
+ * (resolved at run time, so we can't validate the final shape here). Empty
+ * strings pass — required-ness is enforced separately so this only checks
+ * format when a literal URL is present.
+ */
+function isHttpUrlOrExpression(value: string): boolean {
+  if (value.length === 0 || value.includes("{{")) return true
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 // ── Triggers ────────────────────────────────────────────────────────────────
 
 const ManualTriggerParams = z.object({})
@@ -105,6 +121,17 @@ const TeamUpdateParams = z.object({
   patch: z.record(z.string(), z.unknown()).optional(),
 })
 
+// Synthesizer-emitted dispatch node. `requiredString` MUST be called — passing
+// the bare function reference made every field validate as a Zod function type
+// instead of a non-empty string, silently disabling validation here.
+const TeamTaskDispatchParams = z.object({
+  teamId: requiredString("required"),
+  taskId: requiredString("required"),
+  title: requiredString("required"),
+  description: requiredString("required"),
+  expectedOutput: optionalString,
+})
+
 const SkillInvokeParams = z.object({
   skillIds: requiredString("required"),
 })
@@ -132,7 +159,7 @@ const TwinIngestParams = z
     sourceMode: z.enum(["paste", "fetch"]).optional(),
     format: z.enum(["markdown", "text", "code", "chat"]).optional(),
     content: optionalString,
-    url: optionalString,
+    url: z.string().refine(isHttpUrlOrExpression, "invalidUrl").optional(),
     title: optionalString,
   })
   .refine(
@@ -307,7 +334,7 @@ const TemplateParams = z.object({
 
 const HttpRequestParams = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).optional(),
-  url: requiredString("required"),
+  url: requiredString("required").refine(isHttpUrlOrExpression, "invalidUrl"),
   body: optionalString,
   followRedirects: z.boolean().optional(),
 })
@@ -350,13 +377,7 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "action.character.update": CharacterUpdateParams,
   // Actions: teams
   "action.team.run": TeamRunParams,
-  "action.team.task.dispatch": z.object({
-    teamId: requiredString,
-    taskId: requiredString,
-    title: requiredString,
-    description: requiredString,
-    expectedOutput: optionalString,
-  }),
+  "action.team.task.dispatch": TeamTaskDispatchParams,
   "action.team.create": TeamCreateParams,
   "action.team.update": TeamUpdateParams,
   // Actions: skills

@@ -23,6 +23,8 @@ import {
   recordSkillUsage,
   updateSkill,
 } from "@/lib/db/skills"
+import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
+import { getMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -40,6 +42,22 @@ import "./terminal"
 // ── trigger.manual ────────────────────────────────────────────────────────
 registerNodeExecutor({
   kind: "trigger.manual",
+  typeVersion: 1,
+  execute: async (ctx) => ({
+    output: {
+      firedAt: ctx.trigger.originAt,
+      payload: ctx.trigger.payload,
+    },
+  }),
+})
+
+// ── trigger.team ──────────────────────────────────────────────────────────
+// Synthesizer-internal: real firing happens in the agent-team runtime. This
+// passthrough exists so the node round-trips when a workflow runs in
+// "manual + trigger.team" mode (mirrors trigger.manual). Must stay side-effect
+// free — it must NOT kick off a team run.
+registerNodeExecutor({
+  kind: "trigger.team",
   typeVersion: 1,
   execute: async (ctx) => ({
     output: {
@@ -568,21 +586,35 @@ registerNodeExecutor({
       return { output: { skills: [], markdown: "" } }
     }
     const skills = await listSkillsByIds(ids)
-    const markdown = skills
-      .map(
-        (s) =>
-          `### ${s.name}\n\n${
-            (s as unknown as { systemPrompt?: string; body?: string }).systemPrompt ??
-            (s as unknown as { body?: string }).body ??
-            ""
-          }`
-      )
-      .join("\n\n")
+    const resolved = skills.map((s) => ({
+      id: s.id,
+      name: s.name,
+      markdown:
+        (s as unknown as { systemPrompt?: string; body?: string }).systemPrompt ??
+        (s as unknown as { body?: string }).body ??
+        "",
+    }))
+    // Fall back to plugin-contributed skills (skill-registry overlay) for any
+    // ids the Dexie table didn't resolve. Inline-source skills carry their
+    // markdown directly; folder/managed sources resolve elsewhere, so we
+    // surface the name without a body here.
+    const dbIds = new Set(skills.map((s) => s.id))
+    for (const id of ids) {
+      if (dbIds.has(id)) continue
+      const def = getPluginSkill(id)
+      if (!def) continue
+      resolved.push({
+        id: def.id,
+        name: def.name,
+        markdown: def.source.kind === "inline" ? def.source.markdown : "",
+      })
+    }
+    const markdown = resolved.map((s) => `### ${s.name}\n\n${s.markdown}`).join("\n\n")
     // Best-effort: record usage so the panel can sort by lastUsedAt.
     void recordSkillUsage(ids).catch(() => undefined)
     return {
       output: {
-        skills: skills.map((s) => ({ id: s.id, name: s.name })),
+        skills: resolved.map((s) => ({ id: s.id, name: s.name })),
         markdown,
       },
     }
@@ -1622,7 +1654,14 @@ registerNodeExecutor({
     >
 
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
-    const server = await getMcpServer(serverId)
+    const dbServer = await getMcpServer(serverId)
+    // Fall back to a plugin-contributed MCP server preset (overlay registry)
+    // when the Dexie table has no row for this id. Presets share the
+    // `{ name, transport, config }` shape with stored servers.
+    const preset = dbServer ? null : getMcpServerPreset(serverId)
+    const server =
+      dbServer ??
+      (preset ? { name: preset.name, transport: preset.transport, config: preset.config } : null)
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
 
     // Lazily import the SDK to keep the workflow runtime tree-shakable.

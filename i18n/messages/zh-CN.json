@@ -1056,7 +1056,8 @@
       "usageCacheWrite": "缓存写入：{n}",
       "usageCost": "费用：${cost}",
       "attachmentAlt": "附件",
-      "todoPlanTitle": "计划 · {done}/{total} 已完成"
+      "todoPlanTitle": "计划 · {done}/{total} 已完成",
+      "toolCallFailed": "工具调用失败"
     },
     "toolApproval": {
       "titleFallback": "允许执行 {tool}？",
@@ -12543,6 +12544,7 @@
       "deleteNode": "删除节点",
       "noConfigYet": "暂无专属配置表单 — 在上方编辑原始 JSON。",
       "closeAria": "关闭检查器",
+      "jumpToError": "跳到下一个错误",
       "errorBadge": "{count} 个问题",
       "categoryBadge": {
         "trigger": "触发",
@@ -12598,6 +12600,7 @@
       "invalidType": "应为 {expected}",
       "invalidFormat": "格式无效",
       "cronExpr": "请使用五字段 cron 表达式（分 时 日 月 周）",
+      "invalidUrl": "请输入有效的 http(s) URL 或 '{{ }}' 表达式",
       "webhookPath": "仅支持字母、数字、短划线、下划线和斜杠",
       "variableName": "请使用合法标识符（字母 / 数字 / 下划线，且不能以数字开头）",
       "switchCasesRequired": "至少添加一个 case",
@@ -13315,10 +13318,47 @@
         "skillNoneItem": "— 新建 —",
         "mcpServer": "选择 MCP 服务器",
         "plugin": "选择插件",
-        "subworkflow": "选择工作流"
+        "subworkflow": "选择工作流",
+        "twin": "选择数字分身",
+        "none": "无",
+        "noResults": "无匹配项",
+        "useExpression": "使用表达式",
+        "usePicker": "从列表选择"
       },
       "manualTrigger": {
         "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
+      },
+      "teamTrigger": {
+        "intro": "由智能体团队运行时在内部触发，此触发器无需配置。"
+      },
+      "teamTaskDispatch": {
+        "teamId": { "label": "团队" },
+        "taskId": {
+          "label": "任务 id",
+          "hint": "派发任务的稳定标识。",
+          "placeholder": "task_..."
+        },
+        "title": { "label": "标题", "placeholder": "总结最新报告" },
+        "description": {
+          "label": "描述",
+          "placeholder": "分配给成员的详细说明。"
+        },
+        "expectedOutput": {
+          "label": "期望产出（可选）",
+          "hint": "成功结果的样子——用于校验成员的输出。"
+        }
+      },
+      "desktopEventTrigger": {
+        "desktopOnly": "仅桌面端——在 UI Automation 事件上触发；浏览器中无效。",
+        "kinds": {
+          "label": "事件类型",
+          "hint": "当所选的任一 UI Automation 事件发生时触发。",
+          "options": {
+            "focus-changed": "焦点变化",
+            "structure-changed": "结构变化",
+            "property-changed": "属性变化"
+          }
+        }
       },
       "cron": {
         "cronExpression": {
@@ -13330,6 +13370,20 @@
           "label": "时区",
           "hint": "可选。默认使用工作流的时区设置。",
           "placeholder": "Asia/Shanghai"
+        },
+        "builder": {
+          "presetLabel": "预设",
+          "presets": {
+            "everyMinute": "每分钟",
+            "hourly": "每小时",
+            "daily": "每天 9:00",
+            "weekdays": "工作日 9:00",
+            "weekly": "每周（周一 9:00）",
+            "monthly": "每月（1 号 9:00）",
+            "custom": "自定义"
+          },
+          "nextRunsLabel": "接下来的运行",
+          "invalidExpression": "无效的 cron 表达式"
         }
       },
       "connectorInbound": {
@@ -13508,8 +13562,14 @@
           }
         },
         "durationMs": {
-          "label": "时长（毫秒）",
-          "hint": "编排器会把运行暂停这么长后继续。"
+          "label": "时长",
+          "hint": "编排器会把运行暂停这么长后继续。",
+          "units": {
+            "ms": "毫秒",
+            "sec": "秒",
+            "min": "分钟",
+            "hour": "小时"
+          }
         }
       },
       "httpRequest": {
@@ -14368,9 +14428,76 @@
         "chat": "对话",
         "inspector": "检查器",
         "templates": "模板",
-        "changelog": "变更"
+        "changelog": "变更",
+        "settings": "设置",
+        "runs": "运行记录"
       },
       "chatLoading": "正在加载对话…"
+    },
+    "settings": {
+      "runPolicy": { "title": "运行策略" },
+      "errorPolicy": {
+        "label": "出错时",
+        "stop": "停止运行",
+        "continue": "继续（跳过失败分支）",
+        "branch": "走错误分支"
+      },
+      "timeoutMs": {
+        "label": "运行超时",
+        "hint": "单次运行的墙钟时间上限。"
+      },
+      "concurrency": { "label": "并发运行数", "hint": "针对本工作流。" },
+      "maxConcurrency": { "label": "运行内最大节点数", "hint": "单次运行内并行的节点数。" },
+      "retry": {
+        "title": "默认重试",
+        "attempts": "次数",
+        "backoff": "退避",
+        "exponential": "指数",
+        "fixed": "固定",
+        "baseMs": "基准（毫秒）",
+        "maxMs": "上限（毫秒）"
+      },
+      "timezone": {
+        "label": "时区",
+        "hint": "默认 cron 时区；缺省时回退到应用设置。"
+      },
+      "variables": {
+        "title": "变量",
+        "hint": "在表达式中以 '{{ $vars.KEY }}' 引用的作者期取值。",
+        "addButton": "添加变量",
+        "keyPlaceholder": "KEY",
+        "valuePlaceholder": "值",
+        "removeAria": "删除变量",
+        "invalidKey": "请使用合法标识符（字母、数字、下划线；不能以数字开头）。",
+        "duplicateKey": "键重复。",
+        "empty": "暂无变量。"
+      },
+      "credentials": {
+        "title": "凭据",
+        "hint": "运行时从操作系统密钥环解析的引用。",
+        "addButton": "添加凭据引用",
+        "idPlaceholder": "keyring:ns:key",
+        "namePlaceholder": "显示名称",
+        "kindPlaceholder": "类型",
+        "removeAria": "删除凭据引用",
+        "refOnlyNote": "仅引用——密钥值绝不会存入工作流。",
+        "empty": "暂无凭据引用。"
+      },
+      "plugins": {
+        "title": "插件与能力",
+        "hint": "由已安装插件贡献的工作流节点、触发器与模板。",
+        "empty": "尚未安装插件贡献的工作流能力。",
+        "sections": { "nodes": "节点", "triggers": "触发器", "templates": "模板" },
+        "contributedBy": "由 {plugin} 提供",
+        "useTemplate": "使用",
+        "missingDep": "缺少：{id}"
+      }
+    },
+    "runs": {
+      "empty": "暂无运行记录。运行工作流后将在此显示执行历史。",
+      "backToList": "返回运行列表",
+      "revealOnCanvas": "在画布中定位",
+      "notFound": "未找到该运行。"
     },
     "chat": {
       "noWorkflow": "打开一个工作流以启动 AI 协作会话。",

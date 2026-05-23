@@ -10,12 +10,12 @@
  * Phase 9 polish.
  */
 
-import { useEffect, useMemo, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Plus, Trash2 } from "lucide-react"
 import {
@@ -29,13 +29,18 @@ import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } fr
 import { ExpressionField } from "./shared/expression-field"
 import { useInspectorExpressionCtx } from "./shared/inspector-context"
 import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
-import { listCharacters } from "@/lib/db/characters"
-import { listTeams } from "@/lib/db/teams"
-import { listSkills } from "@/lib/db/skills"
-import { listMcpServers } from "@/lib/db/mcp-servers"
-import { listPlugins } from "@/lib/db/plugins"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
-import { listWorkflows } from "@/lib/db/workflows"
+import {
+  CharacterPicker,
+  TeamPicker,
+  SkillPicker,
+  McpServerPicker,
+  PluginPicker,
+  SubworkflowPicker,
+  TwinPicker,
+} from "./shared/entity-picker"
+import { CronBuilder } from "./shared/cron-builder"
+import { DurationField } from "./shared/duration-field"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
@@ -65,12 +70,11 @@ export function CronConfig({ params, onChange }: ConfigProps) {
         name="cron"
         required
       >
-        <Input
+        <CronBuilder
           id="cron-expr"
           value={cron}
-          onChange={(e) => onChange(patchParam(params, "cron", e.target.value))}
-          placeholder={t("cronExpression.placeholder")}
-          className="font-mono"
+          onChange={(next) => onChange(patchParam(params, "cron", next))}
+          timezone={tz || undefined}
         />
       </Field>
       <Field
@@ -215,11 +219,10 @@ export function TeamRunConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <Field label={t("teamId.label")} htmlFor="tr-team" name="teamId" required>
-        <Input
+        <TeamPicker
           id="tr-team"
           value={teamId}
-          onChange={(e) => onChange(patchParam(params, "teamId", e.target.value))}
-          placeholder={t("teamId.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
         />
       </Field>
       <Field label={t("goal.label")} htmlFor="tr-goal" hint={t("goal.hint")} name="goal" required>
@@ -267,11 +270,10 @@ export function TwinRagConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <Field label={t("twinId.label")} htmlFor="tr-twin" name="twinId" required>
-        <Input
+        <TwinPicker
           id="tr-twin"
           value={twinId}
-          onChange={(e) => onChange(patchParam(params, "twinId", e.target.value))}
-          placeholder={t("twinId.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "twinId", v))}
         />
       </Field>
       <Field
@@ -534,14 +536,10 @@ export function WaitConfig({ params, onChange }: ConfigProps) {
           hint={t("durationMs.hint")}
           name="durationMs"
         >
-          <Input
+          <DurationField
             id="w-dur"
-            type="number"
-            min={0}
             value={durationMs}
-            onChange={(e) =>
-              onChange(patchParam(params, "durationMs", Number(e.target.value) || 0))
-            }
+            onChange={(next) => onChange(patchParam(params, "durationMs", next))}
           />
         </Field>
       ) : null}
@@ -1245,11 +1243,10 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <Field label={t("twinId.label")} htmlFor="ti-twin" name="twinId" required>
-        <Input
+        <TwinPicker
           id="ti-twin"
           value={twinId}
-          onChange={(e) => onChange(patchParam(params, "twinId", e.target.value))}
-          placeholder={t("twinId.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "twinId", v))}
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -2170,198 +2167,118 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
   )
 }
 
-// ── Picker helpers ────────────────────────────────────────────────────────
-function CharacterPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const t = useTranslations("workflows.forms.pickers")
-  const characters = useLiveQuery(() => listCharacters(), [])
-  const options = useMemo(
-    () => characters?.map((c) => ({ value: c.id, label: c.name })) ?? [],
-    [characters]
-  )
+// Entity pickers (Character/Team/Skill/McpServer/Plugin/Subworkflow/Twin) now
+// live in `./shared/entity-picker` as searchable comboboxes — imported above.
+
+// ── trigger.team ──────────────────────────────────────────────────────────
+// Synthesizer-internal: fired by the agent-team runtime, not hand-authored.
+// Informational panel only — params schema is empty (`z.object({})`).
+export function TeamTriggerConfig() {
+  const t = useTranslations("workflows.forms.teamTrigger")
+  return <p className="text-xs text-muted-foreground">{t("intro")}</p>
+}
+
+// ── action.team.task.dispatch ─────────────────────────────────────────────
+// Synthesizer-emitted dispatch node. Mirrors the executor's input contract in
+// `lib/workflow/nodes/built-ins.ts` (teamId/taskId/title/description + optional
+// expectedOutput).
+export function TeamTaskDispatchConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamTaskDispatch")
+  const teamId = readString(params, "teamId")
+  const taskId = readString(params, "taskId")
+  const title = readString(params, "title")
+  const description = readString(params, "description")
+  const expectedOutput = readString(params, "expectedOutput")
   return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={t("character")} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <FieldGroup>
+      <Field label={t("teamId.label")} htmlFor="ttd-team" name="teamId" required>
+        <TeamPicker
+          id="ttd-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field
+        label={t("taskId.label")}
+        htmlFor="ttd-task"
+        hint={t("taskId.hint")}
+        name="taskId"
+        required
+      >
+        <Input
+          id="ttd-task"
+          value={taskId}
+          onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
+          placeholder={t("taskId.placeholder")}
+        />
+      </Field>
+      <Field label={t("title.label")} htmlFor="ttd-title" name="title" required>
+        <Input
+          id="ttd-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+          placeholder={t("title.placeholder")}
+        />
+      </Field>
+      <Field label={t("description.label")} htmlFor="ttd-desc" name="description" required>
+        <Textarea
+          id="ttd-desc"
+          rows={3}
+          value={description}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          placeholder={t("description.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("expectedOutput.label")}
+        htmlFor="ttd-expected"
+        hint={t("expectedOutput.hint")}
+        name="expectedOutput"
+      >
+        <Textarea
+          id="ttd-expected"
+          rows={2}
+          value={expectedOutput}
+          onChange={(e) => onChange(patchParam(params, "expectedOutput", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
   )
 }
 
-function TeamPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const tp = useTranslations("workflows.forms.pickers")
-  const teams = useLiveQuery(() => listTeams(), [])
-  const options = useMemo(() => teams?.map((t) => ({ value: t.id, label: t.name })) ?? [], [teams])
-  return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={tp("team")} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
+// ── trigger.desktop.event ─────────────────────────────────────────────────
+// Desktop-only. Multi-selects the UIA event kinds the executor reads from
+// `params.kinds` (see `lib/automation/types.ts:EventKind`).
+const DESKTOP_EVENT_KINDS = ["focus-changed", "structure-changed", "property-changed"] as const
 
-function SkillPicker({
-  id,
-  value,
-  onChange,
-  allowEmpty = false,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-  allowEmpty?: boolean
-}) {
-  const t = useTranslations("workflows.forms.pickers")
-  const skills = useLiveQuery(() => listSkills(), [])
-  const options = useMemo(
-    () => skills?.map((s) => ({ value: s.id, label: s.name })) ?? [],
-    [skills]
-  )
+export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.desktopEventTrigger")
+  const selected = Array.isArray(params.kinds) ? (params.kinds as string[]) : []
+  const toggle = (kind: string) => {
+    const next = selected.includes(kind) ? selected.filter((k) => k !== kind) : [...selected, kind]
+    onChange(patchParam(params, "kinds", next))
+  }
   return (
-    <Select value={value || undefined} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={allowEmpty ? t("skillNew") : t("skill")} />
-      </SelectTrigger>
-      <SelectContent>
-        {allowEmpty ? <SelectItem value="__none__">{t("skillNoneItem")}</SelectItem> : null}
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function McpServerPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const t = useTranslations("workflows.forms.pickers")
-  const servers = useLiveQuery(() => listMcpServers(), [])
-  const options = useMemo(
-    () =>
-      servers?.map((s) => ({
-        value: s.id,
-        label: s.name ?? s.id,
-      })) ?? [],
-    [servers]
-  )
-  return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={t("mcpServer")} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function PluginPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const t = useTranslations("workflows.forms.pickers")
-  const plugins = useLiveQuery(() => listPlugins(), [])
-  const options = useMemo(
-    () =>
-      plugins?.map((p) => ({
-        value: p.id,
-        label: p.name ?? p.id,
-      })) ?? [],
-    [plugins]
-  )
-  return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={t("plugin")} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function SubworkflowPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const t = useTranslations("workflows.forms.pickers")
-  const workflows = useLiveQuery(() => listWorkflows(), [])
-  const options = useMemo(
-    () => workflows?.map((w) => ({ value: w.id, label: w.name })) ?? [],
-    [workflows]
-  )
-  return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={t("subworkflow")} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>
+      <Field label={t("kinds.label")} hint={t("kinds.hint")} name="kinds">
+        <div className="space-y-1.5">
+          {DESKTOP_EVENT_KINDS.map((kind) => (
+            <label
+              key={kind}
+              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+            >
+              <Checkbox
+                checked={selected.includes(kind)}
+                onCheckedChange={() => toggle(kind)}
+                data-testid={`desktop-event-${kind}`}
+              />
+              <span>{t(`kinds.options.${kind}` as never)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+    </FieldGroup>
   )
 }
 

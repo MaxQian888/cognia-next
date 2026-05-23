@@ -36,6 +36,13 @@ describe("buildExpressionSuggestions", () => {
     expect(staticEntries.map((e) => e.label).sort()).toEqual(["$static.counter", "$static.user"])
   })
 
+  it("includes the $vars keyword and one entry per workflow variable", () => {
+    const out = buildExpressionSuggestions({ nodes: [], varKeys: ["API_BASE", "TOKEN"] })
+    expect(out.some((e) => e.label === "$vars")).toBe(true)
+    const varEntries = out.filter((e) => e.label.startsWith("$vars."))
+    expect(varEntries.map((e) => e.label).sort()).toEqual(["$vars.API_BASE", "$vars.TOKEN"])
+  })
+
   it("excludes the current node from per-node entries", () => {
     const nodes = [n("a", "ai.prompt"), n("b", "data.transform")]
     const out = buildExpressionSuggestions({ nodes, currentNodeId: "a" })

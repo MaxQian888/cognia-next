@@ -64,6 +64,7 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
     targetY,
     sourcePosition,
     targetPosition,
+    sourceHandleId,
     markerEnd,
     animated,
     data,
@@ -107,8 +108,12 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
 
   const kind = useMemo(() => {
     const v = (data as { kind?: unknown } | undefined)?.kind
-    return isEdgeKind(v) ? v : null
-  }, [data])
+    if (isEdgeKind(v)) return v
+    // Edges drawn from a node's "error" source handle are error-branch edges
+    // even when their data.kind hasn't been stamped.
+    if (sourceHandleId === "error") return "error" as EdgeKind
+    return null
+  }, [data, sourceHandleId])
 
   const customLabel = useMemo(() => {
     const v = (data as { label?: unknown } | undefined)?.label
@@ -147,7 +152,12 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
         markerEnd={markerEnd}
         interactionWidth={20}
         style={{
-          stroke: isHovered || selected ? "oklch(var(--primary))" : undefined,
+          stroke:
+            isHovered || selected
+              ? "oklch(var(--primary))"
+              : kind === "error"
+                ? "#f43f5e"
+                : undefined,
           strokeWidth: isHovered || selected ? 2 : 1.5,
           strokeDasharray: animations && animated ? "5 5" : undefined,
         }}

@@ -11,6 +11,7 @@
 
 import { getWorkflow } from "@/lib/db/workflows"
 import type { TriggerEvent } from "@/types/workflow/visual"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { runWorkflow } from "./orchestrator"
 import { listenTriggerEvents } from "./tauri-bridge"
 
@@ -45,6 +46,10 @@ export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
     console.warn(`workflow trigger bridge: workflow ${event.workflowId} not found; ignoring`)
     return
   }
+  // Single canonical fan-in for every trigger path (cron / webhook / connector
+  // / chat / plugin all route through here). Resume does NOT call this, so a
+  // resumed run correctly does not re-fire the trigger hook.
+  getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
   await runWorkflow({ workflow, trigger: event })
 }
 

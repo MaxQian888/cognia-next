@@ -25,6 +25,38 @@ describe("trigger schemas", () => {
     ).toBe(true)
   })
 
+  it("action.team.task.dispatch enforces non-empty string fields (regression: requiredString was uncalled)", () => {
+    const schema = PARAMS_SCHEMAS["action.team.task.dispatch"]
+    // Missing required fields must fail.
+    expect(schema.safeParse({}).success).toBe(false)
+    expect(schema.safeParse({ teamId: "t", taskId: "k", title: "x" }).success).toBe(false)
+    // Empty strings must fail (the bug let these through as a Zod function type).
+    expect(
+      schema.safeParse({ teamId: "", taskId: "k", title: "x", description: "d" }).success
+    ).toBe(false)
+    // Fully populated passes; expectedOutput stays optional.
+    expect(
+      schema.safeParse({ teamId: "t", taskId: "k", title: "x", description: "d" }).success
+    ).toBe(true)
+  })
+
+  it("io.http rejects a non-URL but accepts URLs and {{ expressions }}", () => {
+    const schema = PARAMS_SCHEMAS["io.http"]
+    expect(schema.safeParse({ url: "not a url" }).success).toBe(false)
+    expect(schema.safeParse({ url: "https://api.example.com/x" }).success).toBe(true)
+    expect(schema.safeParse({ url: "{{ $vars.base }}/x" }).success).toBe(true)
+  })
+
+  it("action.twin.ingest validates the optional URL when present", () => {
+    const schema = PARAMS_SCHEMAS["action.twin.ingest"]
+    expect(schema.safeParse({ twinId: "t", sourceMode: "fetch", url: "ftp://nope" }).success).toBe(
+      false
+    )
+    expect(
+      schema.safeParse({ twinId: "t", sourceMode: "fetch", url: "https://ok.test/page" }).success
+    ).toBe(true)
+  })
+
   it("trigger.connector.inbound requires adapterId", () => {
     expect(PARAMS_SCHEMAS["trigger.connector.inbound"].safeParse({}).success).toBe(false)
     expect(PARAMS_SCHEMAS["trigger.connector.inbound"].safeParse({ adapterId: "tg" }).success).toBe(
@@ -132,7 +164,9 @@ describe("action: twin / connector / mcp / plugin", () => {
   it("action.twin.ingest requires url in fetch mode and content in paste mode", () => {
     const s = PARAMS_SCHEMAS["action.twin.ingest"]
     expect(s.safeParse({ twinId: "t", sourceMode: "fetch" }).success).toBe(false)
-    expect(s.safeParse({ twinId: "t", sourceMode: "fetch", url: "u" }).success).toBe(true)
+    expect(s.safeParse({ twinId: "t", sourceMode: "fetch", url: "https://x.test" }).success).toBe(
+      true
+    )
     expect(s.safeParse({ twinId: "t", sourceMode: "paste" }).success).toBe(false)
     expect(s.safeParse({ twinId: "t", sourceMode: "paste", content: "x" }).success).toBe(true)
     // default mode = paste

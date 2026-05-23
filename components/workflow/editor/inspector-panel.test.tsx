@@ -60,6 +60,7 @@ const MESSAGES = {
         annotation: "Note",
       },
       errorBadge: "{count} issue(s)",
+      jumpToError: "Jump to next error",
       noConfigYet: "No config yet",
     },
     nodes: {},
@@ -131,6 +132,24 @@ describe("InspectorPanel", () => {
     mountInspector(store)
     expect(screen.getByTestId("workflow-inspector")).toBeInTheDocument()
     expect(screen.getByDisplayValue("Prompt A")).toBeInTheDocument()
+  })
+
+  it("surfaces a clickable error badge that jumps without throwing", () => {
+    const store = createEditorStore(buildWorkflow())
+    act(() => {
+      store.getState().setSelectedNodes(["n_a"])
+      // ai.prompt with empty params → missing required userPrompt.
+      store.getState().revalidateNode("n_a")
+    })
+    mountInspector(store)
+    const badge = screen.getByTestId("inspector-error-badge")
+    expect(badge.tagName).toBe("BUTTON")
+    expect(badge).toHaveAttribute("aria-label", "Jump to next error")
+    act(() => {
+      badge.click()
+    })
+    // Still mounted (handler ran; no field target → top-scroll fallback).
+    expect(screen.getByTestId("workflow-inspector")).toBeInTheDocument()
   })
 
   it("debounces revalidate across multiple keystrokes (single trailing fire)", () => {

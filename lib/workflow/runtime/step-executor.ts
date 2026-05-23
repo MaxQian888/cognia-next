@@ -67,6 +67,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     trigger: input.trigger,
     staticData: {},
     params: node.data.params as Record<string, unknown>,
+    variables: input.workflow.variables ?? {},
   })
 
   const ctx: StepExecutionContext = {

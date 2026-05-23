@@ -997,7 +997,11 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           </div>
         </ResizablePrimitive.Separator>
         <ResizablePrimitive.Panel defaultSize="24%" minSize="18%" maxSize="40%">
-          <RightSidebar useStore={store} className="h-full w-full" />
+          <RightSidebar
+            useStore={store}
+            className="h-full w-full"
+            reactFlowInstance={reactFlowInstance}
+          />
         </ResizablePrimitive.Panel>
       </ResizablePrimitive.Group>
       <CommandPalette

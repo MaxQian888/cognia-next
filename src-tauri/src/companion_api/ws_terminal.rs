@@ -343,11 +343,32 @@ async fn handle_terminal_socket(
     // spawns have an empty replay buffer at this point).
     if !is_spawn {
         let resume_from = params.resume_from.unwrap_or(0);
-        for (seq, event) in session.replay().since(resume_from) {
-            if emit_event(&mut socket, seq, &event).await.is_err() {
-                registry.detach_consumer(&session_id);
-                return;
+        let replay = session.replay();
+        let last = replay.last_seq();
+        if resume_from > last {
+            log::warn!(
+                "ws_terminal resume_from={} > last_seq={} for session={}; client ahead of server",
+                resume_from,
+                last,
+                session_id
+            );
+        } else {
+            for (seq, event) in replay.since(resume_from) {
+                if emit_event(&mut socket, seq, &event).await.is_err() {
+                    registry.detach_consumer(&session_id);
+                    return;
+                }
             }
+        }
+        // Diagnostic: log replay buffer state after resuming.
+        if !replay.is_empty() {
+            log::debug!(
+                "ws_terminal replay buffer for session={}: {} events, {} bytes, last_seq={}",
+                session_id,
+                replay.len(),
+                replay.retained_bytes(),
+                last
+            );
         }
     }
 

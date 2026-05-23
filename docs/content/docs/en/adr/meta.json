@@ -28,6 +28,7 @@
     "0030-character-pack-overlay-capability",
     "0031-integrated-terminal",
     "0032-agent-team-plugin-integration",
-    "0033-integrated-terminal-phase-3"
+    "0033-integrated-terminal-phase-3",
+    "0034-workflow-editor-completeness-and-plugin-parity"
   ]
 }

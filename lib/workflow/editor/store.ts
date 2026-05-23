@@ -22,7 +22,13 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 import { temporal, type TemporalState } from "zundo"
 import { nanoid } from "nanoid"
 import type { Viewport } from "@xyflow/react"
-import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
+import type {
+  VisualWorkflow,
+  WorkflowCredentialRef,
+  WorkflowNodeData,
+  WorkflowNodeKind,
+  WorkflowSettings,
+} from "@/types/workflow/visual"
 import {
   reactFlowToWorkflow,
   workflowToReactFlow,
@@ -230,6 +236,12 @@ export interface EditorState extends EditorStateSnapshot {
   // ── mutators (envelope) ───────────────────────────────────────────────────
   setName: (name: string) => void
   setDescription: (d?: string) => void
+  /** Shallow-merge a patch into the workflow's run settings. */
+  setSettings: (patch: Partial<WorkflowSettings>) => void
+  /** Replace the workflow's author-time `variables` map. */
+  setVariables: (next: Record<string, string>) => void
+  /** Replace the workflow's credential refs map (refs only — never values). */
+  setCredentials: (next: Record<string, WorkflowCredentialRef>) => void
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
   /** Replace entire state with a fresh workflow (e.g., on route change). */
@@ -532,6 +544,24 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             baseWorkflow: { ...get().baseWorkflow, description },
             dirty: true,
           }),
+        setSettings: (patch) =>
+          set((s) => ({
+            baseWorkflow: {
+              ...s.baseWorkflow,
+              settings: { ...s.baseWorkflow.settings, ...patch },
+            },
+            dirty: true,
+          })),
+        setVariables: (next) =>
+          set((s) => ({
+            baseWorkflow: { ...s.baseWorkflow, variables: next },
+            dirty: true,
+          })),
+        setCredentials: (next) =>
+          set((s) => ({
+            baseWorkflow: { ...s.baseWorkflow, credentials: next },
+            dirty: true,
+          })),
 
         loadWorkflow: (wf) => {
           const c = workflowToReactFlow(wf)

@@ -39,6 +39,8 @@ jest.mock("@/stores/plugin-runtime", () => ({
   },
 }))
 
+import { usePluginStore } from "@/stores/plugin-runtime"
+
 describe("Plugin Hooks System", () => {
   describe("HookPriority enum", () => {
     it("should have correct values", () => {
@@ -1012,5 +1014,49 @@ describe("PluginLifecycleHooks - Team hook isolation (fire-and-forget)", () => {
     }
     await flushMicrotasks()
     expect(getRecentPluginHookErrors().length).toBe(256)
+  })
+})
+
+describe("PluginEventHooks - Workflow Node + Trigger Hooks", () => {
+  const hooks = getPluginEventHooks()
+  const getState = usePluginStore.getState as jest.Mock
+
+  function withHook(hookName: string, fn: jest.Mock) {
+    getState.mockReturnValue({
+      plugins: { "test-plugin": { status: "enabled", hooks: { [hookName]: fn } } },
+    })
+  }
+
+  afterEach(() => {
+    getState.mockReturnValue({ plugins: {} })
+  })
+
+  it("dispatchWorkflowNodeStart calls the enabled plugin's hook", () => {
+    const fn = jest.fn()
+    withHook("onWorkflowNodeStart", fn)
+    hooks.dispatchWorkflowNodeStart("wf", "n1", "ai.prompt")
+    expect(fn).toHaveBeenCalledWith("wf", "n1", "ai.prompt")
+  })
+
+  it("dispatchWorkflowNodeComplete calls the enabled plugin's hook", () => {
+    const fn = jest.fn()
+    withHook("onWorkflowNodeComplete", fn)
+    hooks.dispatchWorkflowNodeComplete("wf", "n1", "ai.prompt", { ok: true })
+    expect(fn).toHaveBeenCalledWith("wf", "n1", "ai.prompt", { ok: true })
+  })
+
+  it("dispatchWorkflowNodeError calls the enabled plugin's hook", () => {
+    const fn = jest.fn()
+    const err = new Error("boom")
+    withHook("onWorkflowNodeError", fn)
+    hooks.dispatchWorkflowNodeError("wf", "n1", err)
+    expect(fn).toHaveBeenCalledWith("wf", "n1", err)
+  })
+
+  it("dispatchWorkflowTriggerFired calls the enabled plugin's hook", () => {
+    const fn = jest.fn()
+    withHook("onWorkflowTriggerFired", fn)
+    hooks.dispatchWorkflowTriggerFired("wf", "trigger.cron", { at: 1 })
+    expect(fn).toHaveBeenCalledWith("wf", "trigger.cron", { at: 1 })
   })
 })

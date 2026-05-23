@@ -6,6 +6,7 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 // Importing built-ins triggers their side-effecting registrations.
 import "./built-ins"
 import { getExecutor } from "./registry"
+import { registerSkill, __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
 import type { Skill } from "@/lib/claude/types"
 import type {
   StepExecutionContext,
@@ -58,6 +59,13 @@ async function exec(
 describe("trigger.manual", () => {
   it("echoes the trigger payload", async () => {
     const r = await exec("trigger.manual", makeCtx("trigger.manual", {}))
+    expect(r.output).toEqual({ firedAt: trigger.originAt, payload: trigger.payload })
+  })
+})
+
+describe("trigger.team", () => {
+  it("passes through the trigger payload without side effects", async () => {
+    const r = await exec("trigger.team", makeCtx("trigger.team", {}))
     expect(r.output).toEqual({ firedAt: trigger.originAt, payload: trigger.payload })
   })
 })
@@ -502,6 +510,31 @@ describe("action.team.create / update", () => {
     )
     const stored = await getDb().teams.get(tId)
     expect(stored?.description).toBe("patched")
+  })
+})
+
+describe("action.skill.invoke (plugin overlay fallback)", () => {
+  afterEach(() => __resetSkillsForTesting())
+
+  it("resolves a plugin-contributed skill the Dexie table doesn't have", async () => {
+    registerSkill(
+      "p:brand-voice",
+      {
+        id: "p:brand-voice",
+        name: "Brand voice",
+        description: "tone",
+        source: { kind: "inline", markdown: "Stay concise." },
+        scope: "global",
+      } as never,
+      { pluginId: "p" }
+    )
+    const r = await exec(
+      "action.skill.invoke",
+      makeCtx("action.skill.invoke", { skillIds: "p:brand-voice" })
+    )
+    const out = r.output as { skills: Array<{ id: string }>; markdown: string }
+    expect(out.skills).toEqual([{ id: "p:brand-voice", name: "Brand voice" }])
+    expect(out.markdown).toContain("Stay concise.")
   })
 })
 

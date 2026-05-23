@@ -5,6 +5,7 @@ import "fake-indexeddb/auto"
 import { dispatchTrigger, isTriggerEvent } from "./trigger-bridge"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { TriggerEvent } from "@/types/workflow/visual"
 
 beforeEach(async () => {
@@ -75,6 +76,27 @@ describe("dispatchTrigger", () => {
     expect(runs[0].workflowId).toBe(wf.id)
     expect(runs[0].triggerKind).toBe("trigger.cron")
     expect(runs[0].status).toBe("succeeded")
+  })
+
+  it("fires the onWorkflowTriggerFired plugin hook before running", async () => {
+    const wf = await createWorkflow({
+      name: "x",
+      nodes: [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+      ],
+      edges: [],
+    })
+    const spy = jest.spyOn(getPluginEventHooks(), "dispatchWorkflowTriggerFired")
+    const payload = { firedAt: 7 }
+    await dispatchTrigger({ workflowId: wf.id, kind: "trigger.cron", payload, originAt: 1 })
+    expect(spy).toHaveBeenCalledWith(wf.id, "trigger.cron", payload)
+    spy.mockRestore()
   })
 
   it("does not throw when the workflow is missing", async () => {

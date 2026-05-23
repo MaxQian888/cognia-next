@@ -32,6 +32,7 @@ import type {
   RunStatus,
   TriggerEvent,
   VisualWorkflow,
+  WorkflowEdge,
   WorkflowRunRow,
 } from "@/types/workflow/visual"
 // Importing the built-ins triggers their registration side effect.
@@ -284,6 +285,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
 
     return (async () => {
       try {
+        getPluginEventHooks().dispatchWorkflowNodeStart(workflow.id, node.id, node.type)
         const result = await runStep({
           workflow: validated as VisualWorkflow,
           node,
@@ -314,6 +316,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           executedStepIndex,
           result.output
         )
+        getPluginEventHooks().dispatchWorkflowNodeComplete(
+          workflow.id,
+          node.id,
+          node.type,
+          result.output
+        )
 
         // Branch routing — if a node returned `decision`, mark non-chosen
         // outgoing edges' targets as skipped.
@@ -328,10 +336,45 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           }
         }
       } catch (err) {
+        const errorObj = err instanceof Error ? err : new Error(String(err))
+        getPluginEventHooks().dispatchWorkflowNodeError(workflow.id, stepId, errorObj)
+        const policy = validated.settings.errorPolicy
+        const outgoing = validated.edges.filter((e) => e.source === stepId)
+
+        // errorPolicy: "branch" — when the failed node has dedicated error
+        // edges, treat the failure as handled: expose the error to the error
+        // branch, skip the success path, and keep the run alive.
+        if (policy === "branch") {
+          const errorEdges = outgoing.filter(isErrorEdge)
+          if (errorEdges.length > 0) {
+            stepOutputs.set(stepId, { failed: true, error: errorObj.message })
+            completed.add(stepId)
+            for (const edge of outgoing) {
+              if (!isErrorEdge(edge)) {
+                propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+              }
+            }
+            return
+          }
+          // No error edges configured → fall through to "stop" semantics.
+        }
+
+        // errorPolicy: "continue" — best-effort. Drop this node's downstream
+        // but keep independent branches running; the run finalizes normally
+        // (the step_failed event in the log records the failure).
+        if (policy === "continue") {
+          completed.add(stepId)
+          for (const edge of outgoing) {
+            propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+          }
+          return
+        }
+
+        // errorPolicy: "stop" (default) — abort the whole run so concurrent
+        // siblings observing ac.signal cancel early. Subsequent throws after
+        // firstFailure are ignored.
         if (!firstFailure) firstFailure = { stepId, err }
-        // Abort the run so any concurrent sibling tasks observing ac.signal
-        // can cancel early. Subsequent throws after firstFailure are ignored.
-        ac.abort(err instanceof Error ? err : new Error(String(err)))
+        ac.abort(errorObj)
       }
     })()
   }
@@ -432,6 +475,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
 
   return { runId, status: "succeeded", output: finalOutput }
+}
+
+/**
+ * An "error" edge carries the error branch under `errorPolicy: "branch"`.
+ * Either the React Flow source handle id or the edge `data.kind` may mark it.
+ */
+function isErrorEdge(edge: WorkflowEdge): boolean {
+  return edge.sourceHandle === "error" || edge.data?.kind === "error"
 }
 
 /**
