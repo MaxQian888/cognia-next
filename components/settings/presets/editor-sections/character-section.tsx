@@ -16,11 +16,12 @@
  * a startup cost when never expanded.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -39,6 +40,15 @@ export interface CharacterSectionProps {
   state: PresetEditorState
   onPatch: (patch: Partial<PresetEditorState>) => void
   defaultOpen?: boolean
+  /**
+   * Multi-select mode (team-level capability pool). When true the section
+   * renders a checklist and reads/writes `selectedIds` / `onPatchMulti`
+   * instead of the single-select `state.characterPackId`. Default false
+   * preserves the PresetEditor single-character behavior.
+   */
+  multiple?: boolean
+  selectedIds?: string[]
+  onPatchMulti?: (ids: string[]) => void
 }
 
 interface CharacterRow {
@@ -50,9 +60,17 @@ interface CharacterRow {
 
 const NONE_VALUE = "__none__"
 
-export function CharacterSection({ state, onPatch, defaultOpen = false }: CharacterSectionProps) {
+export function CharacterSection({
+  state,
+  onPatch,
+  defaultOpen = false,
+  multiple = false,
+  selectedIds,
+  onPatchMulti,
+}: CharacterSectionProps) {
   const t = useTranslations("presets.editor.sections.character")
   const [rows, setRows] = useState<CharacterRow[]>([])
+  const selectedSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds])
 
   useEffect(() => {
     let cancelled = false
@@ -80,6 +98,42 @@ export function CharacterSection({ state, onPatch, defaultOpen = false }: Charac
   }, [])
 
   const current = state.characterPackId ?? NONE_VALUE
+
+  const toggleMulti = (id: string, next: boolean): void => {
+    const updated = new Set(selectedSet)
+    if (next) updated.add(id)
+    else updated.delete(id)
+    onPatchMulti?.(Array.from(updated))
+  }
+
+  if (multiple) {
+    return (
+      <SettingsCard title={t("title")} description={t("description")} defaultOpen={defaultOpen}>
+        <div className="space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("inherit")}</p>
+          ) : (
+            rows.map((row) => (
+              <label key={row.id} className="flex items-center gap-2 rounded-md border p-2 text-xs">
+                <Checkbox
+                  checked={selectedSet.has(row.id)}
+                  onCheckedChange={(v) => toggleMulti(row.id, v === true)}
+                />
+                <span className="flex items-center gap-2">
+                  <span>{row.name}</span>
+                  {row.source === "pack" ? (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {row.packName}
+                    </Badge>
+                  ) : null}
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+      </SettingsCard>
+    )
+  }
 
   return (
     <SettingsCard title={t("title")} description={t("description")} defaultOpen={defaultOpen}>

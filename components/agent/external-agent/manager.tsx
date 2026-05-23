@@ -24,7 +24,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  Activity,
   AlertCircle,
   ExternalLink,
   Plus,
@@ -65,11 +64,12 @@ import { cn, isTauri } from "@/lib/utils"
 
 import { useExternalAgent } from "@/hooks/agent"
 import { useAgentTraceAnalytics } from "@/hooks/agent-trace"
-import { ExternalAgentCommands } from "./external-agent-commands"
-import { ExternalAgentPlan } from "./external-agent-plan"
-import { ExternalAgentConfigOptions } from "./external-agent-config-options"
+import { ExternalAgentCommands } from "./commands"
+import { ExternalAgentPlan } from "./plan"
+import { ExternalAgentConfigOptions } from "./config-options"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
 import { TraceHealthBadge } from "./trace-health-badge"
+import { ConnectionStatusBadge } from "./connection-status-badge"
 
 import type {
   AcpPermissionOption,
@@ -114,35 +114,6 @@ const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   retryExponentialBackoff: true,
   retryMaxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
   retryOnErrors: "",
-}
-
-// ============================================================================
-// Status Badge
-// ============================================================================
-
-function ConnectionStatusBadge({ status }: { status: ExternalAgentConnectionStatus }) {
-  const t = useTranslations("externalAgent")
-
-  const statusConfig: Record<
-    ExternalAgentConnectionStatus,
-    { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
-  > = {
-    connected: { label: t("statusConnected"), variant: "default" },
-    connecting: { label: t("statusConnecting"), variant: "secondary" },
-    disconnected: { label: t("statusDisconnected"), variant: "outline" },
-    reconnecting: { label: t("statusReconnecting"), variant: "secondary" },
-    error: { label: t("statusError"), variant: "destructive" },
-  }
-
-  const config = statusConfig[status]
-
-  return (
-    <Badge variant={config.variant} className="text-xs">
-      {status === "connected" && <Activity className="mr-1 h-3 w-3" />}
-      {status === "error" && <AlertCircle className="mr-1 h-3 w-3" />}
-      {config.label}
-    </Badge>
-  )
 }
 
 // ============================================================================
@@ -210,7 +181,7 @@ function AgentCard({
               <p className="text-[11px] text-muted-foreground">{ecosystem.surfaceName}</p>
             )}
           </div>
-          <ConnectionStatusBadge status={connectionStatus} />
+          <ConnectionStatusBadge status={connectionStatus} withIcon />
         </div>
       </CardHeader>
       <CardContent className="pb-3">

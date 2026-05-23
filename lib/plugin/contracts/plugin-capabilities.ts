@@ -535,6 +535,82 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/character-pack/validate-requires.test.ts",
     ],
   },
+  {
+    // ADR-0032. Plugins declaring this capability contribute Claude SDK
+    // subagents callable by agent teams + the workflow editor. The manifest
+    // carries a `subagents` array; the plugin manager registers each into
+    // `subagent-registry` on enable and drops them on disable. Runtime
+    // resolution unions them with the host's built-in dispatchers, namespaced
+    // `<pluginId>:<id>`.
+    id: "subagent",
+    support: "supported",
+    manifestFields: ["subagents"],
+    runtimeBinding: "registerSubagent + subagent-registry overlay + resolveAllSubagents union",
+    hostBindings: [
+      "lib/plugin/registries/subagent-registry.ts",
+      "lib/claude/agents/subagents/index.ts",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-subagent.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [
+      "plugins/agent-team-examples/src/index.ts",
+      "plugins/computer-use/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/subagent-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
+    // ADR-0032. Plugins declaring this capability contribute complete agent
+    // team blueprints (roster + tasks + config + requires) surfaced in the
+    // team picker. The manifest carries an `agentTeamTemplates` array.
+    id: "agent-team-template",
+    support: "supported",
+    manifestFields: ["agentTeamTemplates"],
+    runtimeBinding:
+      "registerAgentTeamTemplate + agent-team-template-registry overlay + validateTemplateRequires",
+    hostBindings: [
+      "lib/plugin/registries/agent-team-template-registry.ts",
+      "components/settings/agent/agent-team-templates-section.tsx",
+    ],
+    typescriptSdk: ["lib/plugin/sdk/define-agent-team-template.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [
+      "plugins/agent-team-examples/src/index.ts",
+      "plugins/computer-use/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/agent-team-template-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
+    // ADR-0032 follow-up. Plugins declaring this capability contribute a
+    // bidirectional backing store for agent-team shared memory. The manifest
+    // carries a `sharedMemoryAdapters` array; a team opts into one via
+    // `team.config.sharedMemoryAdapterId`. The orchestrator mirrors writes and
+    // pulls remote changes (local-version-wins).
+    id: "shared-memory-adapter",
+    support: "supported",
+    manifestFields: ["sharedMemoryAdapters"],
+    runtimeBinding:
+      "registerSharedMemoryAdapter + shared-memory-adapter-registry overlay + syncSharedMemoryFromAdapter",
+    hostBindings: [
+      "lib/plugin/registries/shared-memory-adapter-registry.ts",
+      "lib/ai/agent/team/shared-memory-orchestrator.ts",
+    ],
+    typescriptSdk: ["types/plugin/plugin-shared-memory-adapter.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: ["plugins/agent-team-examples/src/demo-adapter.ts"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/shared-memory-adapter-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

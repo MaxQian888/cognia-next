@@ -3,20 +3,15 @@
 /**
  * Workspace settings → Overview section.
  *
- * Original General + Execution + Toggles cards extracted verbatim from
- * `workspace/settings.tsx`. Pure presentation — the parent owns local state
- * and the save handler. Kept as a single file so the accordion composer can
- * mount it without touching any of the historical card layout (per the
- * [[feedback_reuse_existing_components]] rule: the existing 3-card surface
- * is preserved bit-for-bit; only the wrapping changed).
+ * Eager-save: every field persists through the store on its own (debounced)
+ * commit via `EditableSettingRow` — no section-level Save button. The save
+ * indicator in the Settings header reflects the latest write.
  */
 
-import type { Dispatch, SetStateAction } from "react"
 import { useTranslations } from "next-intl"
 
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -26,7 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
+
+import { EditableSettingRow } from "./editable-setting-row"
 
 const EXECUTION_MODES: ReadonlyArray<{ value: string; labelKey: string }> = [
   { value: "coordinated", labelKey: "coordinated" },
@@ -44,116 +42,140 @@ const EXECUTION_PATTERNS: ReadonlyArray<{ value: string; labelKey: string }> = [
 
 export interface OverviewSectionProps {
   team: AgentTeam
-  name: string
-  setName: Dispatch<SetStateAction<string>>
-  description: string
-  setDescription: Dispatch<SetStateAction<string>>
-  executionMode: string
-  setExecutionMode: Dispatch<SetStateAction<string>>
-  executionPattern: string
-  setExecutionPattern: Dispatch<SetStateAction<string>>
-  maxConcurrent: string
-  setMaxConcurrent: Dispatch<SetStateAction<string>>
-  tokenBudget: string
-  setTokenBudget: Dispatch<SetStateAction<string>>
-  autoShutdown: boolean
-  setAutoShutdown: Dispatch<SetStateAction<boolean>>
-  enableMessaging: boolean
-  setEnableMessaging: Dispatch<SetStateAction<boolean>>
-  requirePlanApproval: boolean
-  setRequirePlanApproval: Dispatch<SetStateAction<boolean>>
-  maxRetries: string
-  setMaxRetries: Dispatch<SetStateAction<string>>
 }
 
-export function OverviewSection(props: OverviewSectionProps) {
+export function OverviewSection({ team }: OverviewSectionProps) {
   const t = useTranslations("agentTeamsWorkspace.settings")
   const tMode = useTranslations("agentTeamsWorkspace.settings.executionModeOption")
   const tPattern = useTranslations("agentTeamsWorkspace.settings.executionPatternOption")
+  const updateTeam = useAgentTeamStore((s) => s.updateTeam)
+  const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
+
+  const patchConfig = (patch: Partial<AgentTeam["config"]>): void => {
+    updateTeamConfig(team.id, { ...team.config, ...patch })
+  }
+
   return (
     <div className="space-y-4">
       {/* General */}
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium">{t("title")}</p>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("name")}</Label>
-          <Input
-            value={props.name}
-            onChange={(e) => props.setName(e.target.value)}
-            className="max-w-md"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{t("description")}</Label>
-          <Textarea
-            rows={3}
-            value={props.description}
-            onChange={(e) => props.setDescription(e.target.value)}
-            className="max-w-2xl text-xs"
-          />
-        </div>
+        <EditableSettingRow<string>
+          label={t("name")}
+          value={team.name}
+          onCommit={(v) => updateTeam(team.id, { name: v.trim() || team.name })}
+          testid="overview-name"
+          render={({ value, setValue, commit }) => (
+            <Input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onBlur={commit}
+              className="max-w-md"
+            />
+          )}
+        />
+        <EditableSettingRow<string>
+          label={t("description")}
+          value={team.description ?? ""}
+          onCommit={(v) => updateTeam(team.id, { description: v.trim() || undefined })}
+          testid="overview-description"
+          render={({ value, setValue, commit }) => (
+            <Textarea
+              rows={3}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onBlur={commit}
+              className="max-w-2xl text-xs"
+            />
+          )}
+        />
       </Card>
 
       {/* Execution */}
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium">{t("sectionExecution")}</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-xs">{t("executionMode")}</Label>
-            <Select value={props.executionMode} onValueChange={(v) => props.setExecutionMode(v)}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_MODES.map((m) => (
-                  <SelectItem key={m.value} value={m.value}>
-                    {tMode(m.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("executionPattern")}</Label>
-            <Select
-              value={props.executionPattern}
-              onValueChange={(v) => props.setExecutionPattern(v)}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_PATTERNS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {tPattern(p.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <EditableSettingRow<string>
+            label={t("executionMode")}
+            value={team.config.executionMode ?? "coordinated"}
+            onCommit={(v) =>
+              patchConfig({ executionMode: v as AgentTeam["config"]["executionMode"] })
+            }
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <Select value={value} onValueChange={setValue}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXECUTION_MODES.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {tMode(m.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          <EditableSettingRow<string>
+            label={t("executionPattern")}
+            value={team.config.preferredExecutionPattern ?? "manager_worker"}
+            onCommit={(v) =>
+              patchConfig({
+                preferredExecutionPattern: v as AgentTeam["config"]["preferredExecutionPattern"],
+              })
+            }
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <Select value={value} onValueChange={setValue}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXECUTION_PATTERNS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {tPattern(p.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-xs">{t("maxConcurrent")}</Label>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={props.maxConcurrent}
-              onChange={(e) => props.setMaxConcurrent(e.target.value)}
-              className="h-8 text-xs"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("tokenBudget")}</Label>
-            <Input
-              type="number"
-              min={0}
-              value={props.tokenBudget}
-              onChange={(e) => props.setTokenBudget(e.target.value)}
-              className="h-8 text-xs"
-            />
-          </div>
+          <EditableSettingRow<string>
+            label={t("maxConcurrent")}
+            value={String(team.config.maxConcurrentTeammates ?? 5)}
+            onCommit={(v) =>
+              patchConfig({ maxConcurrentTeammates: Math.max(1, parseInt(v, 10) || 5) })
+            }
+            render={({ value, setValue, commit }) => (
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={commit}
+                className="h-8 text-xs"
+              />
+            )}
+          />
+          <EditableSettingRow<string>
+            label={t("tokenBudget")}
+            value={String(team.config.tokenBudget ?? 0)}
+            onCommit={(v) => patchConfig({ tokenBudget: parseInt(v, 10) || 0 })}
+            render={({ value, setValue, commit }) => (
+              <Input
+                type="number"
+                min={0}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={commit}
+                className="h-8 text-xs"
+              />
+            )}
+          />
         </div>
       </Card>
 
@@ -161,32 +183,58 @@ export function OverviewSection(props: OverviewSectionProps) {
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium">{t("sectionControls")}</p>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("autoShutdown")}</Label>
-            <Switch checked={props.autoShutdown} onCheckedChange={props.setAutoShutdown} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("enableMessaging")}</Label>
-            <Switch checked={props.enableMessaging} onCheckedChange={props.setEnableMessaging} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">{t("requirePlanApproval")}</Label>
-            <Switch
-              checked={props.requirePlanApproval}
-              onCheckedChange={props.setRequirePlanApproval}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("maxRetries")}</Label>
-            <Input
-              type="number"
-              min={0}
-              max={10}
-              value={props.maxRetries}
-              onChange={(e) => props.setMaxRetries(e.target.value)}
-              className="h-8 w-24 text-xs"
-            />
-          </div>
+          <EditableSettingRow<boolean>
+            label={t("autoShutdown")}
+            value={team.config.autoShutdown ?? true}
+            onCommit={(v) => patchConfig({ autoShutdown: v })}
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <div className="flex items-center justify-between">
+                <span className="sr-only">{t("autoShutdown")}</span>
+                <Switch checked={value} onCheckedChange={setValue} />
+              </div>
+            )}
+          />
+          <EditableSettingRow<boolean>
+            label={t("enableMessaging")}
+            value={team.config.enableMessaging ?? true}
+            onCommit={(v) => patchConfig({ enableMessaging: v })}
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <div className="flex items-center justify-between">
+                <span className="sr-only">{t("enableMessaging")}</span>
+                <Switch checked={value} onCheckedChange={setValue} />
+              </div>
+            )}
+          />
+          <EditableSettingRow<boolean>
+            label={t("requirePlanApproval")}
+            value={team.config.requirePlanApproval ?? false}
+            onCommit={(v) => patchConfig({ requirePlanApproval: v })}
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <div className="flex items-center justify-between">
+                <span className="sr-only">{t("requirePlanApproval")}</span>
+                <Switch checked={value} onCheckedChange={setValue} />
+              </div>
+            )}
+          />
+          <EditableSettingRow<string>
+            label={t("maxRetries")}
+            value={String(team.config.maxRetries ?? 3)}
+            onCommit={(v) => patchConfig({ maxRetries: Math.max(0, parseInt(v, 10) || 0) })}
+            render={({ value, setValue, commit }) => (
+              <Input
+                type="number"
+                min={0}
+                max={10}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={commit}
+                className="h-8 w-24 text-xs"
+              />
+            )}
+          />
         </div>
       </Card>
     </div>

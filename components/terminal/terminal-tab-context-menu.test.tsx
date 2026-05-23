@@ -98,4 +98,16 @@ describe("TerminalTabContextMenu", () => {
     const item = screen.getByTestId("terminal-tab-menu-trust")
     expect(item.getAttribute("data-state")).toBe("checked")
   })
+
+  it("hides Locate in conversation for user-spawned tabs", () => {
+    renderMenu()
+    expect(screen.queryByTestId("terminal-tab-menu-locate")).toBeNull()
+  })
+
+  it("shows Locate in conversation for agent tabs and fires onLocateInChat", () => {
+    const onLocateInChat = jest.fn()
+    renderMenu({ row: row({ agentSpawner: "chat-9" }), onLocateInChat })
+    fireEvent.click(screen.getByTestId("terminal-tab-menu-locate"))
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9")
+  })
 })

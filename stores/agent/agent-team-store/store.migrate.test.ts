@@ -20,10 +20,26 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrateAgentTeamPersisted(42 as unknown, 1)).toBe(42)
   })
 
-  it("returns v2+ input unchanged", () => {
-    const v2 = { defaultConfig: { capabilities: { skillIds: ["s"] } } }
-    const out = migrateAgentTeamPersisted(v2, 2)
-    expect(out).toBe(v2)
+  it("returns v3+ input unchanged (idempotency)", () => {
+    const v3 = {
+      defaultConfig: { capabilities: { skillIds: ["s"] }, sharedMemoryAdapterId: undefined },
+      lastAdapterSyncVersion: {},
+    }
+    const out = migrateAgentTeamPersisted(v3, 3)
+    expect(out).toBe(v3)
+  })
+
+  it("upgrades v2 → v3: backfills sharedMemoryAdapterId + lastAdapterSyncVersion", () => {
+    const v2 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      templates: { a: { config: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy } } },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = migrateAgentTeamPersisted(v2, 2) as any
+    expect("sharedMemoryAdapterId" in out.defaultConfig).toBe(true)
+    expect(out.defaultConfig.sharedMemoryAdapterId).toBeUndefined()
+    expect("sharedMemoryAdapterId" in out.templates.a.config).toBe(true)
+    expect(out.lastAdapterSyncVersion).toEqual({})
   })
 
   it("backfills governancePolicy + capabilities on a v1 default config", () => {

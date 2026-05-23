@@ -33,7 +33,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { ExternalAgentManager } from "./external-agent-manager"
+import { ExternalAgentManager } from "./manager"
+import { ConnectionStatusBadge } from "./connection-status-badge"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentConnectionStatus } from "@/types/agent/external-agent"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
@@ -71,32 +72,6 @@ function ConnectionStatusIcon({ status }: { status: ExternalAgentConnectionStatu
     default:
       return <Plug className="h-3 w-3 text-muted-foreground" />
   }
-}
-
-function ConnectionStatusBadge({
-  status,
-  t,
-}: {
-  status: ExternalAgentConnectionStatus
-  t: ReturnType<typeof useTranslations>
-}) {
-  const statusConfig: Record<
-    ExternalAgentConnectionStatus,
-    { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }
-  > = {
-    disconnected: { labelKey: "statusDisconnected", variant: "outline" },
-    connecting: { labelKey: "statusConnecting", variant: "secondary" },
-    connected: { labelKey: "statusConnected", variant: "default" },
-    reconnecting: { labelKey: "statusReconnecting", variant: "secondary" },
-    error: { labelKey: "statusError", variant: "destructive" },
-  }
-
-  const config = statusConfig[status]
-  return (
-    <Badge variant={config.variant} className="text-[10px] h-4 px-1.5">
-      {t(config.labelKey)}
-    </Badge>
-  )
 }
 
 // =============================================================================
@@ -252,7 +227,10 @@ export function ExternalAgentSelector({
                               {t("selectorComingSoon")}
                             </Badge>
                           )}
-                          <ConnectionStatusBadge status={status} t={t} />
+                          <ConnectionStatusBadge
+                            status={status}
+                            className="text-[10px] h-4 px-1.5"
+                          />
                         </div>
                         {executionBlockedReason && (
                           <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">

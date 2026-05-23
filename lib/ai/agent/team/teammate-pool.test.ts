@@ -1,5 +1,17 @@
 import { createTeammatePool } from "./teammate-pool"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { AgentTeammate } from "@/types/agent/agent-team"
+
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginLifecycleHooks: jest.fn(),
+}))
+
+const dispatchOnTeammateClaim = jest.fn()
+const dispatchOnTeammateRelease = jest.fn()
+;(getPluginLifecycleHooks as jest.Mock).mockReturnValue({
+  dispatchOnTeammateClaim,
+  dispatchOnTeammateRelease,
+})
 
 const tm = (id: string, name: string = id): AgentTeammate =>
   ({
@@ -196,5 +208,70 @@ describe("TeammatePool — error classification (PR 6)", () => {
     pool.recordFailure("a", new Error("REFUSAL_DETECTED"))
     expect(pool.availableCount()).toBe(0)
     expect(pool.isDisqualified("a")).toBe(false)
+  })
+})
+
+describe("TeammatePool — claim/release plugin hooks", () => {
+  beforeEach(() => {
+    dispatchOnTeammateClaim.mockClear()
+    dispatchOnTeammateRelease.mockClear()
+  })
+
+  it("does NOT dispatch when teamId/runId are absent", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    pool.claim("task-1")
+    pool.recordSuccess("a")
+    expect(dispatchOnTeammateClaim).not.toHaveBeenCalled()
+    expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
+  })
+
+  it("dispatches onTeammateClaim with team/run context on claim", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
+    pool.claim("task-1")
+    expect(dispatchOnTeammateClaim).toHaveBeenCalledWith({
+      teamId: "team-1",
+      runId: "run-1",
+      teammateId: "a",
+      taskId: "task-1",
+    })
+  })
+
+  it("dispatches onTeammateRelease(success) naming the claimed task", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
+    pool.claim("task-1")
+    pool.recordSuccess("a")
+    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
+      teamId: "team-1",
+      runId: "run-1",
+      teammateId: "a",
+      taskId: "task-1",
+      result: "success",
+      error: undefined,
+    })
+  })
+
+  it("dispatches onTeammateRelease(failure) with the error message", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
+    pool.claim("task-9")
+    pool.recordFailure("a", new Error("boom"))
+    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
+      teamId: "team-1",
+      runId: "run-1",
+      teammateId: "a",
+      taskId: "task-9",
+      result: "failure",
+      error: "boom",
+    })
+  })
+
+  it("does not release a teammate that never claimed", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
+    pool.recordSuccess("a")
+    expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
   })
 })

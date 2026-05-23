@@ -73,16 +73,16 @@ describe("AgentTeamSettings", () => {
     expect(screen.getByDisplayValue("10000")).toBeInTheDocument()
   })
 
-  it("clicking Save persists name + description + config", async () => {
+  it("editing the name eagerly persists via updateTeam on blur", () => {
     render(<AgentTeamSettings team={baseTeam} />)
     const nameInput = screen.getByDisplayValue("Squad Alpha")
     fireEvent.change(nameInput, { target: { value: "Squad Beta" } })
-    await userEvent.click(screen.getByRole("button", { name: /^Save$/i }))
-    expect(updateTeamMock).toHaveBeenCalledTimes(1)
-    expect(updateTeamMock.mock.calls[0][0]).toBe("team_x")
-    expect(updateTeamMock.mock.calls[0][1].name).toBe("Squad Beta")
-    expect(updateTeamConfigMock).toHaveBeenCalledTimes(1)
-    expect(updateTeamConfigMock.mock.calls[0][1].executionMode).toBe("coordinated")
+    // Eager save: blur flushes the debounced commit (no Save button anymore).
+    fireEvent.blur(nameInput)
+    expect(updateTeamMock).toHaveBeenCalledWith(
+      "team_x",
+      expect.objectContaining({ name: "Squad Beta" })
+    )
   })
 
   it("delete button stays disabled until the team name is typed", async () => {

@@ -269,3 +269,53 @@ function reset(value: boolean): boolean {
   PASSPORT_RE.lastIndex = 0
   return value
 }
+
+/**
+ * Deep variant of {@link hasNoLeakingPii}: recursively scans every string
+ * leaf of a value so object- and array-shaped payloads can't smuggle PII
+ * past the gate. Primitives other than strings are inherently safe; a value
+ * that can't be traversed (cyclic / exotic) is treated as unsafe (returns
+ * false) rather than silently allowed.
+ *
+ * Used by the shared-memory orchestrator's `publishEntry` so any value type
+ * (not just strings) is vetted before persistence.
+ */
+export function hasNoLeakingPiiDeep(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet()
+): boolean {
+  if (value === null || value === undefined) return true
+  if (typeof value === "string") return hasNoLeakingPii(value)
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return true
+  }
+  if (value instanceof Date) return true
+  if (Array.isArray(value)) {
+    return value.every((item) => hasNoLeakingPiiDeep(item, seen))
+  }
+  if (value instanceof Map) {
+    for (const [k, v] of value) {
+      if (!hasNoLeakingPiiDeep(k, seen) || !hasNoLeakingPiiDeep(v, seen)) return false
+    }
+    return true
+  }
+  if (value instanceof Set) {
+    for (const item of value) {
+      if (!hasNoLeakingPiiDeep(item, seen)) return false
+    }
+    return true
+  }
+  if (typeof value === "object") {
+    if (seen.has(value)) return false // cycle → treat as unsafe
+    seen.add(value)
+    return Object.values(value as Record<string, unknown>).every((v) =>
+      hasNoLeakingPiiDeep(v, seen)
+    )
+  }
+  // Functions, symbols, and other exotic types: stringify-and-scan fallback.
+  try {
+    return hasNoLeakingPii(String(value))
+  } catch {
+    return false
+  }
+}

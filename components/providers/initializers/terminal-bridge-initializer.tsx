@@ -58,6 +58,12 @@ export function TerminalBridgeInitializer() {
     // the settings store), the lazy import in plugin-tool-ipc.ts still
     // works on the actual call.
     void import("@/lib/terminal/dock-tool-handler").catch(() => undefined)
+    // 1C — reattach to PTY sessions that survived a webview reload. The
+    // Rust process keeps them alive; this restores the dock tabs + live
+    // streams (no-op on first launch / full restart). Best-effort.
+    void import("@/lib/terminal/rehydrate")
+      .then((m) => m.rehydrateTerminals())
+      .catch(() => undefined)
     return () => {
       // Drop the bridge state so a subsequent remount (e.g. after fast
       // refresh) installs a fresh spawn handle. In production this

@@ -8,11 +8,17 @@ import {
   type AgentTeamConfig,
   type AgentTeamTemplate,
   type TeamDelegationRecord,
+  type TeamCapabilityBundle,
+  type TeammateCapabilityOverlay,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
 import { loggers } from "@/lib/logging"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
+import type {
+  CapabilityAuditWarning,
+  CapabilityAuditBucket,
+} from "@/lib/ai/agent/team/capability-audit"
 
 const agentTeamLogger = loggers.agent.child("team-store")
 
@@ -42,6 +48,75 @@ const ensureIdExactlyOnce = (ids: string[], id: string): string[] => {
 
 const removeId = (ids: string[], id: string): string[] =>
   ids.filter((existingId) => existingId !== id)
+
+/**
+ * Group an audit's stale ids by capability bucket. Shared by the team and
+ * teammate cleanup paths in `clearStaleCapabilityIds`.
+ */
+function staleIdsByBucket(
+  warnings: CapabilityAuditWarning[]
+): Map<CapabilityAuditBucket, Set<string>> {
+  const byBucket = new Map<CapabilityAuditBucket, Set<string>>()
+  for (const w of warnings) {
+    const set = byBucket.get(w.bucket) ?? new Set<string>()
+    set.add(w.missingId)
+    byBucket.set(w.bucket, set)
+  }
+  return byBucket
+}
+
+const BUNDLE_LIST_KEYS: ReadonlyArray<keyof TeamCapabilityBundle> = [
+  "mcpServerIds",
+  "skillIds",
+  "nativeAnthropicToolIds",
+  "characterPackIds",
+  "externalAgentPresetIds",
+  "subagentIds",
+  "a2uiTemplateIds",
+]
+
+/** Drop stale ids from a team-level capability bundle. Empty buckets are removed. */
+function stripStaleFromBundle(
+  bundle: TeamCapabilityBundle | undefined,
+  warnings: CapabilityAuditWarning[]
+): TeamCapabilityBundle {
+  const byBucket = staleIdsByBucket(warnings)
+  const next: TeamCapabilityBundle = { ...bundle }
+  for (const bucket of BUNDLE_LIST_KEYS) {
+    const staleSet = byBucket.get(bucket)
+    const current = next[bucket]
+    if (!staleSet || !current) continue
+    const filtered = current.filter((id) => !staleSet.has(id))
+    if (filtered.length > 0) next[bucket] = filtered
+    else delete next[bucket]
+  }
+  return next
+}
+
+/** Drop stale ids from a teammate overlay's add/replace lists per bucket. */
+function stripStaleFromOverlay(
+  overlay: TeammateCapabilityOverlay | undefined,
+  warnings: CapabilityAuditWarning[]
+): TeammateCapabilityOverlay | undefined {
+  if (!overlay) return overlay
+  const byBucket = staleIdsByBucket(warnings)
+  const next: TeammateCapabilityOverlay = { ...overlay }
+  for (const bucket of BUNDLE_LIST_KEYS) {
+    const staleSet = byBucket.get(bucket)
+    const listOverlay = next[bucket]
+    if (!staleSet || !listOverlay) continue
+    const cleaned = { ...listOverlay }
+    if (cleaned.add) cleaned.add = cleaned.add.filter((id) => !staleSet.has(id))
+    if (cleaned.replace) cleaned.replace = cleaned.replace.filter((id) => !staleSet.has(id))
+    // Drop now-empty add/replace arrays, then the whole bucket if it carries
+    // no directive at all.
+    if (cleaned.add && cleaned.add.length === 0) delete cleaned.add
+    if (cleaned.replace && cleaned.replace.length === 0) delete cleaned.replace
+    if (!cleaned.add && !cleaned.remove && !cleaned.replace) delete next[bucket]
+    else next[bucket] = cleaned
+  }
+  return next
+}
 
 export const createAgentTeamActionsSlice = (
   set: AgentTeamStoreSet,
@@ -134,6 +209,51 @@ export const createAgentTeamActionsSlice = (
             ...team,
             config: { ...team.config, capabilities: bundle },
           },
+        },
+      }
+    })
+  },
+
+  clearStaleCapabilityIds: (target, warnings) => {
+    set((state) => {
+      if ("teamId" in target) {
+        const team = state.teams[target.teamId]
+        if (!team) return state
+        const stale = warnings.filter(
+          (w) => w.scope.kind === "team" && w.scope.teamId === target.teamId
+        )
+        if (stale.length === 0) return state
+        const nextBundle = stripStaleFromBundle(team.config.capabilities, stale)
+        const nextConfig = { ...team.config, capabilities: nextBundle }
+        // A stale shared-memory adapter id is cleared from the config field.
+        if (stale.some((w) => w.bucket === "sharedMemoryAdapterId")) {
+          nextConfig.sharedMemoryAdapterId = undefined
+        }
+        return {
+          teams: {
+            ...state.teams,
+            [target.teamId]: { ...team, config: nextConfig },
+          },
+        }
+      }
+
+      const teammate = state.teammates[target.teammateId]
+      if (!teammate) return state
+      const stale = warnings.filter(
+        (w) => w.scope.kind === "teammate" && w.scope.teammateId === target.teammateId
+      )
+      if (stale.length === 0) return state
+      const nextOverlay = stripStaleFromOverlay(teammate.config.capabilities, stale)
+      const nextConfig = { ...teammate.config }
+      if (!nextOverlay || Object.keys(nextOverlay).length === 0) {
+        delete nextConfig.capabilities
+      } else {
+        nextConfig.capabilities = nextOverlay
+      }
+      return {
+        teammates: {
+          ...state.teammates,
+          [target.teammateId]: { ...teammate, config: nextConfig },
         },
       }
     })
@@ -1195,6 +1315,15 @@ export const createAgentTeamActionsSlice = (
           : {}),
       }
     })
+  },
+
+  setAdapterSyncVersion: (teamId, adapterId, version) => {
+    set((state) => ({
+      lastAdapterSyncVersion: {
+        ...state.lastAdapterSyncVersion,
+        [teamId]: { ...(state.lastAdapterSyncVersion[teamId] ?? {}), [adapterId]: version },
+      },
+    }))
   },
 
   // ====================================================================

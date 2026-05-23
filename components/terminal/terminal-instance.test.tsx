@@ -20,6 +20,9 @@ const mockTermInstance: {
   clear: jest.Mock
   registerMarker?: jest.Mock
   registerDecoration?: jest.Mock
+  registerLinkProvider?: jest.Mock
+  scrollToLine?: jest.Mock
+  buffer?: { active: { viewportY: number; getLine?: (n: number) => unknown } }
   options: { fontFamily: string; fontSize: number; scrollback: number; theme?: unknown }
   unicode: { activeVersion: string }
   rows: number
@@ -80,17 +83,14 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: { terminal: {} } })
   ),
 }))
-jest.mock("@/stores/terminal/terminal-store", () => ({
-  useTerminalStore: jest.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      sessions: {
-        "s-1": {
-          promptBoundaries: [],
-        },
-      },
-    })
-  ),
-}))
+jest.mock("@/stores/terminal/terminal-store", () => {
+  const state = { sessions: { "s-1": { promptBoundaries: [], cwd: "/proj" } } }
+  const useTerminalStore = Object.assign(
+    jest.fn((selector: (s: unknown) => unknown) => selector(state)),
+    { getState: () => state }
+  )
+  return { useTerminalStore }
+})
 
 // jsdom doesn't ship ResizeObserver.
 class MockResizeObserver {
@@ -118,6 +118,7 @@ jest.mock("@/lib/terminal/session-registry", () => ({
 }))
 
 import { TerminalInstance } from "./terminal-instance"
+import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 
 function makeFakeSession() {
   return {
@@ -150,9 +151,13 @@ beforeEach(() => {
   mockTermInstance.getSelection = jest.fn(() => "")
   mockTermInstance.paste = jest.fn()
   mockTermInstance.clear = jest.fn()
-  mockTermInstance.registerMarker = jest.fn(() => ({}))
-  mockTermInstance.registerDecoration = jest.fn()
+  mockTermInstance.registerMarker = jest.fn(() => ({ line: 0, dispose: jest.fn() }))
+  mockTermInstance.registerDecoration = jest.fn(() => ({ onRender: jest.fn(), dispose: jest.fn() }))
+  mockTermInstance.registerLinkProvider = jest.fn(() => ({ dispose: jest.fn() }))
+  mockTermInstance.scrollToLine = jest.fn()
+  mockTermInstance.buffer = { active: { viewportY: 0 } }
   mockTermInstance.dispose = jest.fn()
+  useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
   mockTermInstance.options = { fontFamily: "Menlo", fontSize: 13, scrollback: 10000 }
   mockTermInstance.rows = 24
   mockTermInstance.cols = 80
@@ -266,5 +271,120 @@ describe("TerminalInstance", () => {
     rerender(<TerminalInstance sessionId="s-1" fontSize={18} />)
     await flushAsync()
     expect(mockTermInstance.options.fontSize).toBe(18)
+  })
+
+  type IntegrationCb = (ev: { kind: string; exit_code?: number | null; cwd?: string }) => void
+
+  it("registers a marker + gutter decoration on command_start (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    act(() => cb!({ kind: "command_start" }))
+    expect(mockTermInstance.registerMarker).toHaveBeenCalled()
+    expect(mockTermInstance.registerDecoration).toHaveBeenCalled()
+  })
+
+  it("recreates the decoration on command_end so the colour updates (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    const created: Array<{ dispose: jest.Mock; onRender: jest.Mock }> = []
+    mockTermInstance.registerDecoration = jest.fn(() => {
+      const d = { dispose: jest.fn(), onRender: jest.fn() }
+      created.push(d)
+      return d
+    })
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    act(() => {
+      cb!({ kind: "command_start" })
+      cb!({ kind: "command_end", exit_code: 0 })
+    })
+    expect(created).toHaveLength(2) // muted decoration, then recoloured one
+    expect(created[0]!.dispose).toHaveBeenCalled()
+  })
+
+  it("jumpToNextCommand scrolls to the next marker below the viewport (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    let line = 10
+    mockTermInstance.registerMarker = jest.fn(() => ({ line: (line += 10), dispose: jest.fn() }))
+    const ref = createRef<import("./terminal-instance").TerminalInstanceHandle | null>()
+    render(<TerminalInstance ref={ref} sessionId="s-1" />)
+    await flushAsync()
+    act(() => {
+      cb!({ kind: "command_start" }) // marker line 20
+      cb!({ kind: "command_start" }) // marker line 30
+    })
+    mockTermInstance.buffer = { active: { viewportY: 15 } }
+    ref.current!.jumpToNextCommand()
+    expect(mockTermInstance.scrollToLine).toHaveBeenCalledWith(20)
+  })
+
+  it("jumpToPrevCommand scrolls to the previous marker above the viewport (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    let line = 10
+    mockTermInstance.registerMarker = jest.fn(() => ({ line: (line += 10), dispose: jest.fn() }))
+    const ref = createRef<import("./terminal-instance").TerminalInstanceHandle | null>()
+    render(<TerminalInstance ref={ref} sessionId="s-1" />)
+    await flushAsync()
+    act(() => {
+      cb!({ kind: "command_start" }) // marker line 20
+      cb!({ kind: "command_start" }) // marker line 30
+    })
+    mockTermInstance.buffer = { active: { viewportY: 35 } }
+    ref.current!.jumpToPrevCommand()
+    expect(mockTermInstance.scrollToLine).toHaveBeenCalledWith(30)
+  })
+
+  it("registers a file link provider whose activate opens the file viewer (1D)", async () => {
+    type LinkProvider = {
+      provideLinks: (
+        y: number,
+        cb: (links: Array<{ text: string; activate: () => void }> | undefined) => void
+      ) => void
+    }
+    let provider: LinkProvider | null = null
+    mockTermInstance.registerLinkProvider = jest.fn((p: LinkProvider) => {
+      provider = p
+      return { dispose: jest.fn() }
+    })
+    mockTermInstance.buffer = {
+      active: {
+        viewportY: 0,
+        getLine: (n: number) =>
+          n === 0 ? { translateToString: () => "see src/foo.ts:12:3 now" } : undefined,
+      },
+    }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    expect(mockTermInstance.registerLinkProvider).toHaveBeenCalled()
+
+    const links: Array<{ text: string; activate: () => void }> = []
+    provider!.provideLinks(1, (l) => {
+      if (l) links.push(...l)
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]!.text).toBe("src/foo.ts:12:3")
+
+    links[0]!.activate()
+    const viewer = useFileViewerStore.getState()
+    expect(viewer.open).toBe(true)
+    expect(viewer.path).toBe("/proj/src/foo.ts") // resolved against cwd "/proj"
+    expect(viewer.line).toBe(12)
+    expect(viewer.column).toBe(3)
   })
 })

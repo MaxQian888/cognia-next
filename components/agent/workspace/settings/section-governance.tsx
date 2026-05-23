@@ -12,7 +12,7 @@
  * of them rather than buried in collapsibles.
  */
 
-import { useCallback } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Card } from "@/components/ui/card"
@@ -34,6 +34,14 @@ import type {
   TeamGovernancePolicy,
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { markSettingsSaved } from "./settings-save-indicator"
+import { ConfirmActionDialog } from "./confirm-action-dialog"
+
+/** Escalation actions that change runtime blocking — require confirmation. */
+const DANGEROUS_CRITICAL: ReadonlySet<TeamBudgetEscalationAction> = new Set([
+  "pause_for_review",
+  "handoff_to_background",
+])
 
 export interface GovernanceSectionProps {
   team: AgentTeam
@@ -54,22 +62,29 @@ function clamp(value: number, min: number, max: number): number {
 export function GovernanceSection({ team }: GovernanceSectionProps) {
   const t = useTranslations("agentTeamsWorkspace.settings.governance")
   const tEsc = useTranslations("agentTeamsWorkspace.settings.governance.escalationOption")
+  const tConfirm = useTranslations("agentTeamsWorkspace.settings.confirm")
   const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
+  const [pendingCritical, setPendingCritical] = useState<TeamBudgetEscalationAction | null>(null)
 
-  const policy: TeamGovernancePolicy = team.config.governancePolicy ?? {
-    approval: { requirePlanApproval: false, requireDelegationApproval: false },
-    budget: {
-      tokenBudget: 0,
-      warningThreshold: 0.8,
-      criticalThreshold: 0.95,
-      onCritical: "notify",
-    },
-    escalation: { allowOperatorPatternOverride: true, pauseOnHighRisk: false },
-  }
+  const policy: TeamGovernancePolicy = useMemo(
+    () =>
+      team.config.governancePolicy ?? {
+        approval: { requirePlanApproval: false, requireDelegationApproval: false },
+        budget: {
+          tokenBudget: 0,
+          warningThreshold: 0.8,
+          criticalThreshold: 0.95,
+          onCritical: "notify",
+        },
+        escalation: { allowOperatorPatternOverride: true, pauseOnHighRisk: false },
+      },
+    [team.config.governancePolicy]
+  )
 
   const patchConfig = useCallback(
     (patch: Partial<AgentTeamConfig>) => {
       updateTeamConfig(team.id, { ...team.config, ...patch })
+      markSettingsSaved()
     },
     [team.config, team.id, updateTeamConfig]
   )
@@ -80,6 +95,22 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
     },
     [patchConfig]
   )
+
+  const applyOnCritical = useCallback(
+    (action: TeamBudgetEscalationAction) => {
+      patchPolicy({ ...policy, budget: { ...policy.budget, onCritical: action } })
+    },
+    [patchPolicy, policy]
+  )
+
+  const handleOnCriticalChange = (v: string) => {
+    const action = v as TeamBudgetEscalationAction
+    if (DANGEROUS_CRITICAL.has(action)) {
+      setPendingCritical(action)
+      return
+    }
+    applyOnCritical(action)
+  }
 
   return (
     <Card className="space-y-4 p-4">
@@ -180,18 +211,7 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{t("budget.onCritical")}</Label>
-          <Select
-            value={policy.budget.onCritical}
-            onValueChange={(v) =>
-              patchPolicy({
-                ...policy,
-                budget: {
-                  ...policy.budget,
-                  onCritical: v as TeamBudgetEscalationAction,
-                },
-              })
-            }
-          >
+          <Select value={policy.budget.onCritical} onValueChange={handleOnCriticalChange}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
@@ -263,6 +283,22 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
           />
         </div>
       </div>
+
+      <ConfirmActionDialog
+        open={pendingCritical !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingCritical(null)
+        }}
+        title={tConfirm("onCritical.title")}
+        description={tConfirm("onCritical.description")}
+        confirmLabel={tConfirm("confirmLabel")}
+        cancelLabel={tConfirm("cancelLabel")}
+        tone="warning"
+        onConfirm={() => {
+          if (pendingCritical) applyOnCritical(pendingCritical)
+          setPendingCritical(null)
+        }}
+      />
     </Card>
   )
 }

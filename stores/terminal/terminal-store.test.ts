@@ -344,3 +344,95 @@ describe("history panel toggle", () => {
     expect(useTerminalStore.getState().sessions["a"]?.historyOpen).toBe(true)
   })
 })
+
+describe("split panes (1A)", () => {
+  function twoSessions() {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a", projectId: "proj-a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b", projectId: "proj-a" }))
+  }
+
+  it("addPaneToGroup attaches a pane, focuses it, keeps the anchor active", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b", "row")
+    const s = useTerminalStore.getState()
+    expect(s.panesForGroup("a")).toEqual(["a", "b"])
+    expect(s.focusedPaneByAnchor["a"]).toBe("b")
+    expect(s.splitDirection["a"]).toBe("row")
+    // anchor restored as the active tab (b was made active by registerSession)
+    expect(s.getActiveSession("proj-a")).toBe("a")
+  })
+
+  it("defaults split direction to row when none given", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    expect(useTerminalStore.getState().splitDirection["a"]).toBe("row")
+  })
+
+  it("hides split members from tabsForProject but keeps them in sessions", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    const tabs = useTerminalStore
+      .getState()
+      .tabsForProject("proj-a")
+      .map((r) => r.id)
+    expect(tabs).toEqual(["a"])
+    expect(useTerminalStore.getState().sessions["b"]).toBeDefined()
+  })
+
+  it("addPaneToGroup is idempotent and rejects self / unknown", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    useTerminalStore.getState().addPaneToGroup("a", "b") // dup
+    useTerminalStore.getState().addPaneToGroup("a", "a") // self
+    useTerminalStore.getState().addPaneToGroup("a", "ghost") // unknown
+    expect(useTerminalStore.getState().splitPanes["a"]).toEqual(["b"])
+  })
+
+  it("groupAnchorOf resolves members to their anchor and standalone to self", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    expect(useTerminalStore.getState().groupAnchorOf("b")).toBe("a")
+    expect(useTerminalStore.getState().groupAnchorOf("a")).toBe("a")
+  })
+
+  it("setFocusedPane resolves the anchor from a member id", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    useTerminalStore.getState().setFocusedPane("b", "a")
+    expect(useTerminalStore.getState().focusedPaneByAnchor["a"]).toBe("a")
+  })
+
+  it("removing a non-anchor pane keeps the group and resets focus to anchor", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    useTerminalStore.getState().removeSession("b")
+    const s = useTerminalStore.getState()
+    expect(s.panesForGroup("a")).toEqual(["a"])
+    expect(s.splitPanes["a"]).toBeUndefined()
+    expect(s.focusedPaneByAnchor["a"]).toBe("a")
+    expect(s.tabsForProject("proj-a").map((r) => r.id)).toEqual(["a"])
+  })
+
+  it("removing the anchor promotes the next pane and the active pointer follows", () => {
+    twoSessions()
+    useTerminalStore.getState().registerSession(baseInfo({ id: "c", projectId: "proj-a" }))
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    useTerminalStore.getState().addPaneToGroup("a", "c")
+    useTerminalStore.getState().setActiveSession("proj-a", "a")
+    useTerminalStore.getState().removeSession("a")
+    const s = useTerminalStore.getState()
+    // b promoted to anchor, c stays as its member
+    expect(s.panesForGroup("b")).toEqual(["b", "c"])
+    expect(s.getActiveSession("proj-a")).toBe("b")
+    expect(s.tabsForProject("proj-a").map((r) => r.id)).toEqual(["b"])
+  })
+
+  it("reset clears split state", () => {
+    twoSessions()
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    useTerminalStore.getState().reset()
+    expect(useTerminalStore.getState().splitPanes).toEqual({})
+    expect(useTerminalStore.getState().focusedPaneByAnchor).toEqual({})
+    expect(useTerminalStore.getState().splitDirection).toEqual({})
+  })
+})

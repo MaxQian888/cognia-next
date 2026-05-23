@@ -12,6 +12,7 @@ import screenshotManifest from "@/plugins/screenshot/plugin.json"
 import webToolsManifest from "@/plugins/web-tools/plugin.json"
 import workflowAiManifest from "@/plugins/workflow-ai/plugin.json"
 import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
+import agentTeamExamplesManifest from "@/plugins/agent-team-examples/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -22,6 +23,7 @@ import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
 import workflowAiModule from "@/plugins/workflow-ai/src/index"
+import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -86,6 +88,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-workflow-ai",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(workflowAiModule),
+  },
+  {
+    manifest: asPluginManifest(agentTeamExamplesManifest),
+    path: "builtin://cognia-agent-team-examples",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(agentTeamExamplesModule),
   },
 ]
 

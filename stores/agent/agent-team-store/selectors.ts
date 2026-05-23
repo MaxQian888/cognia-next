@@ -218,6 +218,37 @@ export const selectActiveTeamSharedMemory = (state: AgentTeamState) => {
 export const selectActiveTeamSharedMemoryEntries = (state: AgentTeamState) =>
   Object.values(selectActiveTeamSharedMemory(state))
 
+/**
+ * Synthetic reader id representing the human operator. The operator sees
+ * every entry regardless of an entry's `readableBy` allow-list.
+ */
+export const OPERATOR_READER_ID = "operator"
+
+/**
+ * Read-ACL predicate. An entry is readable by `readerId` when:
+ *   - the reader is the operator (sees everything), OR
+ *   - the entry has no `readableBy` allow-list (empty/missing = all-can-read), OR
+ *   - the reader wrote the entry, OR
+ *   - the reader is on the allow-list.
+ */
+export function isEntryReadableBy(entry: SharedMemoryEntry, readerId: string): boolean {
+  if (readerId === OPERATOR_READER_ID) return true
+  if (!entry.readableBy || entry.readableBy.length === 0) return true
+  if (entry.writtenBy === readerId) return true
+  return entry.readableBy.includes(readerId)
+}
+
+/**
+ * ACL-aware projection of a team's shared-memory entries for a specific
+ * reader. Use `OPERATOR_READER_ID` for the operator view.
+ */
+export const selectSharedMemoryEntriesForReader =
+  (teamId: string, readerId: string) =>
+  (state: AgentTeamState): SharedMemoryEntry[] =>
+    Object.values(state.sharedMemory[teamId] ?? {}).filter((entry) =>
+      isEntryReadableBy(entry, readerId)
+    )
+
 // ============================================================================
 // Derived: Capabilities
 // ============================================================================

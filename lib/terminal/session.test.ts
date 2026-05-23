@@ -36,15 +36,19 @@ const baseInfo: SessionInfo = {
   shell: "/bin/bash",
 }
 
-function lastChannel(): MockChannel<TerminalEvent> {
+// The desktop Channel carries `{ seq, event }` envelopes (1C). Fire the
+// inner event wrapped with a monotonic seq, mirroring the Rust sink.
+let seqCounter = 0
+function fire(event: TerminalEvent): void {
   const ch = channelInstances[channelInstances.length - 1]
   if (!ch) throw new Error("no channel constructed")
-  return ch as MockChannel<TerminalEvent>
+  ;(ch as MockChannel<unknown>).__fire({ seq: ++seqCounter, event })
 }
 
 beforeEach(() => {
   mockInvoke.mockReset()
   channelInstances.length = 0
+  seqCounter = 0
 })
 
 describe("TerminalSession.spawn", () => {
@@ -72,6 +76,33 @@ describe("TerminalSession.spawn", () => {
   })
 })
 
+describe("TerminalSession.reattach (1C)", () => {
+  it("invokes terminal_reattach, seeds lastSeq, and dispatches replayed events", async () => {
+    mockInvoke.mockResolvedValueOnce(baseInfo) // terminal_reattach returns SessionInfo
+    const session = await TerminalSession.reattach("sess-1", 5)
+    expect(session.info).toEqual(baseInfo)
+    expect(session.lastSeq).toBe(5)
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "terminal_reattach",
+      expect.objectContaining({ id: "sess-1", resumeFrom: 5, onEvent: expect.any(Object) })
+    )
+    const seen: Uint8Array[] = []
+    session.onData((b) => seen.push(b))
+    fire({ kind: "data", bytes: [9] })
+    expect(seen).toHaveLength(1)
+    expect(session.lastSeq).toBe(1) // tracks the last received envelope's seq
+  })
+
+  it("defaults resumeFrom to 0", async () => {
+    mockInvoke.mockResolvedValueOnce(baseInfo)
+    await TerminalSession.reattach("sess-1")
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "terminal_reattach",
+      expect.objectContaining({ resumeFrom: 0 })
+    )
+  })
+})
+
 describe("event dispatch", () => {
   async function spawn(): Promise<TerminalSession> {
     mockInvoke.mockResolvedValueOnce({ session: baseInfo })
@@ -82,7 +113,7 @@ describe("event dispatch", () => {
     const session = await spawn()
     const seen: Uint8Array[] = []
     session.onData((b) => seen.push(b))
-    lastChannel().__fire({ kind: "data", bytes: [104, 105] })
+    fire({ kind: "data", bytes: [104, 105] })
     expect(seen).toHaveLength(1)
     expect(Array.from(seen[0]!)).toEqual([104, 105])
   })
@@ -91,8 +122,8 @@ describe("event dispatch", () => {
     const session = await spawn()
     const seen: unknown[] = []
     session.onIntegration((e) => seen.push(e))
-    lastChannel().__fire({ kind: "integration", event: { kind: "prompt_start" } })
-    lastChannel().__fire({
+    fire({ kind: "integration", event: { kind: "prompt_start" } })
+    fire({
       kind: "integration",
       event: { kind: "command_end", exit_code: 1 },
     })
@@ -105,7 +136,7 @@ describe("event dispatch", () => {
     session.onExit((code) => {
       captured = code
     })
-    lastChannel().__fire({ kind: "exit", code: 42 })
+    fire({ kind: "exit", code: 42 })
     expect(captured).toBe(42)
     expect(session.isExited).toBe(true)
     expect(session.lastExitCode).toBe(42)
@@ -113,7 +144,7 @@ describe("event dispatch", () => {
 
   it("invokes onExit immediately for late subscribers", async () => {
     const session = await spawn()
-    lastChannel().__fire({ kind: "exit", code: 0 })
+    fire({ kind: "exit", code: 0 })
     let captured: number | null | undefined
     session.onExit((code) => {
       captured = code
@@ -126,9 +157,9 @@ describe("event dispatch", () => {
     const session = await spawn()
     const seen: Uint8Array[] = []
     const off = session.onData((b) => seen.push(b))
-    lastChannel().__fire({ kind: "data", bytes: [1] })
+    fire({ kind: "data", bytes: [1] })
     off()
-    lastChannel().__fire({ kind: "data", bytes: [2] })
+    fire({ kind: "data", bytes: [2] })
     expect(seen).toHaveLength(1)
   })
 
@@ -140,7 +171,7 @@ describe("event dispatch", () => {
       throw new Error("boom")
     })
     session.onData((b) => seen.push(b))
-    lastChannel().__fire({ kind: "data", bytes: [3] })
+    fire({ kind: "data", bytes: [3] })
     expect(seen).toHaveLength(1)
     expect(consoleWarn).toHaveBeenCalled()
     consoleWarn.mockRestore()
@@ -197,7 +228,7 @@ describe("write / resize / kill", () => {
 
   it("kill is a no-op when already exited", async () => {
     const session = await spawn()
-    lastChannel().__fire({ kind: "exit", code: 0 })
+    fire({ kind: "exit", code: 0 })
     const beforeCallCount = mockInvoke.mock.calls.length
     await session.kill()
     expect(mockInvoke.mock.calls.length).toBe(beforeCallCount)

@@ -86,7 +86,7 @@ jest.mock("@/hooks/agent/use-agent-mode", () => ({
 
 // CustomModeEditor pulls in many side-effect-heavy components; stub it so
 // these focused row tests don't need to mount the full editor tree.
-jest.mock("@/components/agent/custom-mode-editor", () => ({
+jest.mock("@/components/agent/mode/custom-mode-editor", () => ({
   CustomModeEditor: () => null,
 }))
 

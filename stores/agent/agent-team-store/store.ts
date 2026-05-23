@@ -19,12 +19,21 @@ import type { AgentTeamState } from "./types"
  *   - Templates with stale category enums are passed through unchanged;
  *     downstream code already tolerates unknown strings via the template
  *     picker filter.
+ *
+ * v2 → v3 (Shared-memory adapter + quiet-hours delivery):
+ *   - `AgentTeamConfig.sharedMemoryAdapterId` (new) defaults to `undefined`
+ *     on `defaultConfig` and every persisted template config.
+ *   - `lastAdapterSyncVersion` (new, root) defaults to `{}` and is now
+ *     persisted so reverse adapter sync resumes incrementally.
+ *   - `governancePolicy.delivery` (new, optional) stays `undefined` by default
+ *     so no migration write is required.
  */
-const PERSIST_VERSION = 2
+const PERSIST_VERSION = 3
 
 interface V1DefaultConfigShape {
   governancePolicy?: unknown
   capabilities?: unknown
+  sharedMemoryAdapterId?: unknown
   [key: string]: unknown
 }
 
@@ -33,6 +42,7 @@ interface V1PersistedShape {
   defaultConfig?: V1DefaultConfigShape
   displayMode?: unknown
   workspaceTab?: unknown
+  lastAdapterSyncVersion?: Record<string, Record<string, number>>
 }
 
 /**
@@ -51,12 +61,16 @@ export function migrateAgentTeamPersisted(
 
   const raw = persistedState as V1PersistedShape
   const defaultConfig = (raw.defaultConfig ?? {}) as V1DefaultConfigShape
-  // Backfill governancePolicy + capabilities on the team-level default.
+  // Backfill governancePolicy + capabilities (v2) + sharedMemoryAdapterId (v3)
+  // on the team-level default.
   if (!defaultConfig.governancePolicy) {
     defaultConfig.governancePolicy = DEFAULT_TEAM_CONFIG.governancePolicy
   }
   if (!("capabilities" in defaultConfig)) {
     defaultConfig.capabilities = undefined
+  }
+  if (!("sharedMemoryAdapterId" in defaultConfig)) {
+    defaultConfig.sharedMemoryAdapterId = undefined
   }
   raw.defaultConfig = defaultConfig
 
@@ -72,8 +86,16 @@ export function migrateAgentTeamPersisted(
         if (!("capabilities" in cfg)) {
           cfg.capabilities = undefined
         }
+        if (!("sharedMemoryAdapterId" in cfg)) {
+          cfg.sharedMemoryAdapterId = undefined
+        }
       }
     }
+  }
+
+  // v3: ensure the persisted adapter-sync cursor map exists.
+  if (!raw.lastAdapterSyncVersion) {
+    raw.lastAdapterSyncVersion = {}
   }
 
   return raw as unknown as AgentTeamState
@@ -94,6 +116,7 @@ export const useAgentTeamStore = create<AgentTeamState>()(
         defaultConfig: state.defaultConfig,
         displayMode: state.displayMode,
         workspaceTab: state.workspaceTab,
+        lastAdapterSyncVersion: state.lastAdapterSyncVersion,
       }),
       migrate: (persistedState, version) => migrateAgentTeamPersisted(persistedState, version),
     }

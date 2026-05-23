@@ -18,7 +18,11 @@
  */
 
 import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
-import { defineNativeAnthropicTool } from "@/lib/plugin/sdk"
+import {
+  defineNativeAnthropicTool,
+  defineSubagent,
+  defineAgentTeamTemplate,
+} from "@/lib/plugin/sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 // ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
 // and auto-wired by the plugin manager on enable. The old imperative
@@ -314,15 +318,94 @@ function pluginLocale(): "en" | "zh-CN" {
   return "en"
 }
 
+// ADR-0032 demo — desktop-automation subagents + a team template wiring them
+// to the native computer-use tools. Surfaced in the Agent Team picker; both
+// subagents are namespaced `cognia-computer-use:<id>` at runtime.
+const SCREEN_WATCHER = defineSubagent({
+  id: "screen-watcher",
+  name: "Screen Watcher",
+  description: "Passive observer — summarises on-screen UI state, never acts.",
+  prompt:
+    "You watch the user's screen via the computer + screenshot tools and surface observations only — never click or type. Summarise visible UI state with timestamps.",
+  tools: ["computer", "screenshot"],
+  disallowedTools: ["bash", "text_editor"],
+  model: "sonnet",
+  effort: "medium",
+})
+
+const GUI_DRIVER = defineSubagent({
+  id: "gui-driver",
+  name: "GUI Driver",
+  description: "Carries out UI instructions via the computer tool, re-checking after each action.",
+  prompt:
+    "Carry out the planner's UI instructions via the computer tool. Always re-screenshot after each action and stop on any unexpected dialog.",
+  tools: ["computer", "screenshot", "bash"],
+  model: "sonnet",
+  effort: "high",
+})
+
+const DESKTOP_AUTOMATION_TEMPLATE = defineAgentTeamTemplate({
+  id: "desktop-automation",
+  name: "Desktop Automation",
+  description: "A screen-watcher observes while a GUI driver executes UI steps.",
+  category: "development",
+  icon: "monitor",
+  teammates: [
+    {
+      name: "Screen Watcher",
+      description: "Observes UI state.",
+      systemPrompt: SCREEN_WATCHER.prompt,
+      // Read-only role: replace the native-tool set to drop bash/text_editor.
+      capabilities: { nativeAnthropicToolIds: { replace: ["computer", "screenshot"] } },
+      tags: ["observe"],
+      iconKey: "eye",
+    },
+    {
+      name: "GUI Driver",
+      description: "Executes UI actions.",
+      systemPrompt: GUI_DRIVER.prompt,
+      capabilities: { subagentIds: { add: [`${PLUGIN_ID}:gui-driver`] } },
+      tags: ["act"],
+      iconKey: "mouse-pointer-click",
+    },
+  ],
+  taskTemplates: [
+    {
+      title: "Identify the target UI",
+      description: "Locate the form/controls.",
+      priority: "high",
+      assignedToIndex: 0,
+    },
+    {
+      title: "Fill required fields",
+      description: "Drive the UI.",
+      priority: "high",
+      assignedToIndex: 1,
+    },
+    {
+      title: "Verify the result",
+      description: "Confirm submission.",
+      priority: "normal",
+      assignedToIndex: 0,
+    },
+  ],
+  requires: {
+    subagentIds: [`${PLUGIN_ID}:screen-watcher`, `${PLUGIN_ID}:gui-driver`],
+    nativeAnthropicToolIds: ["computer", "screenshot", "bash"],
+  },
+})
+
 const definition: PluginDefinition = {
   manifest: {
     id: PLUGIN_ID,
     name: "Computer Use",
     version: "0.1.0",
     type: "frontend",
-    capabilities: ["native-anthropic-tool", "commands"],
+    capabilities: ["native-anthropic-tool", "commands", "subagent", "agent-team-template"],
     main: "src/index.ts",
     nativeAnthropicTools: [COMPUTER_TOOL, BASH_TOOL, TEXT_EDITOR_TOOL],
+    subagents: [SCREEN_WATCHER, GUI_DRIVER],
+    agentTeamTemplates: [DESKTOP_AUTOMATION_TEMPLATE],
     permissions: ["native:input", "native:screen"],
     // ADR-0026 §5 §D — declarative i18n. The plugin manager merges these
     // into the host next-intl bundle under `plugin.cognia-computer-use.*`

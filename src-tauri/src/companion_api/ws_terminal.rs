@@ -275,7 +275,15 @@ async fn handle_terminal_socket(
             let _ = consumer_for_sink.send((seq, event));
         });
 
-        let new_session = match session::spawn_session_with_sink(req, &script_dir, sink) {
+        // Remote sessions fan out through the mpsc sink above; the desktop
+        // Tauri Channel slot stays detached (the WS handler owns reconnect
+        // via its own registry consumer-swap).
+        let new_session = match session::spawn_session_with_sink(
+            req,
+            &script_dir,
+            sink,
+            session::detached_desk_channel(),
+        ) {
             Ok(s) => s,
             Err(reason) => {
                 send_error_and_close(&mut socket, &reason).await;

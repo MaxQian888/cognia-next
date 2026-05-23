@@ -107,4 +107,20 @@ describe("TerminalHistoryPanel", () => {
     fireEvent.click(screen.getByTestId("terminal-history-close"))
     expect(useTerminalStore.getState().sessions["s-1"]?.historyOpen).toBe(false)
   })
+
+  it("hides the locate button for user-spawned sessions", () => {
+    useTerminalStore.getState().registerSession(info())
+    useTerminalStore.getState().setHistoryOpen("s-1", true)
+    render(<TerminalHistoryPanel sessionId="s-1" onLocateInChat={jest.fn()} />)
+    expect(screen.queryByTestId("terminal-history-locate")).toBeNull()
+  })
+
+  it("shows the locate button for agent sessions and fires onLocateInChat", () => {
+    useTerminalStore.getState().registerSession(info(), { agentSpawner: "chat-9" })
+    useTerminalStore.getState().setHistoryOpen("s-1", true)
+    const onLocateInChat = jest.fn()
+    render(<TerminalHistoryPanel sessionId="s-1" onLocateInChat={onLocateInChat} />)
+    fireEvent.click(screen.getByTestId("terminal-history-locate"))
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9")
+  })
 })

@@ -116,6 +116,17 @@ export interface TerminalStoreState {
   sessions: Record<string, TerminalSessionRow>
   activeSessionIdByProject: Record<string, string | null>
 
+  // Split panes (1A) — VS Code-style flat pane groups. A session is a tab
+  // (group "anchor") unless it appears as a non-anchor member of some group
+  // here. `splitPanes[anchorId]` is the ordered list of EXTRA panes beside
+  // the anchor (the anchor itself is implicit at position 0). Absent key =
+  // single pane (current behavior).
+  splitPanes: Record<string, string[]>
+  /** Focused pane per group — anchor or one of its split panes. Defaults to the anchor. */
+  focusedPaneByAnchor: Record<string, string>
+  /** Split orientation per group. Defaults to "row". */
+  splitDirection: Record<string, "row" | "col">
+
   // Mutations
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
@@ -146,6 +157,18 @@ export interface TerminalStoreState {
   /** Tabs spawned by `agentId` — `dock-tool-handler` uses this to scope agent-side reads/writes via `runTerminalDockAction`. */
   sessionsForAgent: (agentId: string) => TerminalSessionRow[]
 
+  // ── Split panes (1A) ──────────────────────────────────────────────
+  /** Add `paneId` as a split pane under `anchorId`'s group, focus it, keep the anchor as the active tab. */
+  addPaneToGroup: (anchorId: string, paneId: string, direction?: "row" | "col") => void
+  /** Set the focused pane within a group (anchor resolved from `anchorOrPaneId`). */
+  setFocusedPane: (anchorOrPaneId: string, paneId: string) => void
+  /** Resolve the group anchor a session belongs to (itself when standalone). */
+  groupAnchorOf: (sessionId: string) => string
+  /** Ordered pane ids for a group including the anchor at position 0. */
+  panesForGroup: (anchorOrPaneId: string) => string[]
+  /** Tab list for `projectId` — group anchors only (split members hidden), sorted by createdAt asc. */
+  tabsForProject: (projectId: string | null) => TerminalSessionRow[]
+
   reset: () => void
 }
 
@@ -168,12 +191,31 @@ function shortShell(path: string): string {
   return tail.replace(/\.exe$/i, "").split(" ")[0] ?? path
 }
 
+/** Resolve the group anchor for a session. Members map back to their anchor; standalone/anchor sessions map to themselves. */
+function resolveAnchor(sessionId: string, splitPanes: Record<string, string[]>): string {
+  for (const [anchor, members] of Object.entries(splitPanes)) {
+    if (members.includes(sessionId)) return anchor
+  }
+  return sessionId
+}
+
+/** True when the session is a non-anchor member of some split group (so it should NOT render as its own tab). */
+function isGroupMember(sessionId: string, splitPanes: Record<string, string[]>): boolean {
+  for (const members of Object.values(splitPanes)) {
+    if (members.includes(sessionId)) return true
+  }
+  return false
+}
+
 export const useTerminalStore = create<TerminalStoreState>()(
   persist(
     (set, get) => ({
       ...TERMINAL_LAYOUT_DEFAULTS,
       sessions: {},
       activeSessionIdByProject: {},
+      splitPanes: {},
+      focusedPaneByAnchor: {},
+      splitDirection: {},
 
       setPanelOpen: (open) => set({ panelOpen: open }),
 
@@ -223,17 +265,69 @@ export const useTerminalStore = create<TerminalStoreState>()(
           if (!s.sessions[id]) return s
           const next = { ...s.sessions }
           delete next[id]
-          // Drop the active pointer if it was pointing at this session.
+
+          // ── Group cleanup (1A) ──────────────────────────────────────
+          // Detach the removed session from its split group. If it was the
+          // anchor, promote the next pane so the group (and its tab)
+          // survives. `anchorRemap` carries the old→new anchor change so
+          // the active pointer can follow it.
+          const splitPanes = { ...s.splitPanes }
+          const focusedPaneByAnchor = { ...s.focusedPaneByAnchor }
+          const splitDirection = { ...s.splitDirection }
+          const anchor = resolveAnchor(id, splitPanes)
+          let anchorRemap: { from: string; to: string } | null = null
+          if (anchor === id) {
+            const members = splitPanes[id] ?? []
+            if (members.length > 0) {
+              const [newAnchor, ...rest] = members
+              delete splitPanes[id]
+              if (rest.length > 0) splitPanes[newAnchor] = rest
+              const dir = splitDirection[id]
+              delete splitDirection[id]
+              if (dir && rest.length > 0) splitDirection[newAnchor] = dir
+              const foc = focusedPaneByAnchor[id]
+              delete focusedPaneByAnchor[id]
+              focusedPaneByAnchor[newAnchor] = foc && foc !== id && next[foc] ? foc : newAnchor
+              anchorRemap = { from: id, to: newAnchor }
+            } else {
+              delete splitPanes[id]
+              delete focusedPaneByAnchor[id]
+              delete splitDirection[id]
+            }
+          } else {
+            const members = (splitPanes[anchor] ?? []).filter((m) => m !== id)
+            if (members.length > 0) splitPanes[anchor] = members
+            else {
+              delete splitPanes[anchor]
+              delete splitDirection[anchor]
+            }
+            if (focusedPaneByAnchor[anchor] === id) focusedPaneByAnchor[anchor] = anchor
+          }
+
+          // ── Active pointer adjust (anchors only) ────────────────────
           const nextActive = { ...s.activeSessionIdByProject }
           for (const [projectId, activeId] of Object.entries(nextActive)) {
             if (activeId === id) {
-              const remaining = Object.values(next)
-                .filter((r) => (r.projectId ?? "") === projectId)
-                .sort((a, b) => a.createdAt - b.createdAt)
-              nextActive[projectId] = remaining[remaining.length - 1]?.id ?? null
+              if (anchorRemap) {
+                nextActive[projectId] = anchorRemap.to
+              } else {
+                const remaining = Object.values(next)
+                  .filter((r) => (r.projectId ?? "") === projectId)
+                  .filter((r) => !isGroupMember(r.id, splitPanes))
+                  .sort((a, b) => a.createdAt - b.createdAt)
+                nextActive[projectId] = remaining[remaining.length - 1]?.id ?? null
+              }
+            } else if (anchorRemap && activeId === anchorRemap.from) {
+              nextActive[projectId] = anchorRemap.to
             }
           }
-          return { sessions: next, activeSessionIdByProject: nextActive }
+          return {
+            sessions: next,
+            activeSessionIdByProject: nextActive,
+            splitPanes,
+            focusedPaneByAnchor,
+            splitDirection,
+          }
         })
       },
 
@@ -370,6 +464,55 @@ export const useTerminalStore = create<TerminalStoreState>()(
           .sort((a, b) => a.createdAt - b.createdAt)
       },
 
+      addPaneToGroup: (anchorId, paneId, direction) => {
+        set((s) => {
+          if (!s.sessions[anchorId] || !s.sessions[paneId] || anchorId === paneId) return s
+          const realAnchor = resolveAnchor(anchorId, s.splitPanes)
+          if (realAnchor === paneId) return s
+          const existing = s.splitPanes[realAnchor] ?? []
+          if (existing.includes(paneId)) return s
+          const splitPanes = { ...s.splitPanes, [realAnchor]: [...existing, paneId] }
+          const focusedPaneByAnchor = { ...s.focusedPaneByAnchor, [realAnchor]: paneId }
+          const splitDirection = { ...s.splitDirection }
+          if (direction) splitDirection[realAnchor] = direction
+          else if (!(realAnchor in splitDirection)) splitDirection[realAnchor] = "row"
+          // The new pane was just registered as the active session by
+          // `registerSession`; restore the anchor as the active tab so the
+          // tab strip keeps showing the group (not the hidden split member).
+          const projectKey = s.sessions[realAnchor].projectId ?? ""
+          const activeSessionIdByProject = {
+            ...s.activeSessionIdByProject,
+            [projectKey]: realAnchor,
+          }
+          return { splitPanes, focusedPaneByAnchor, splitDirection, activeSessionIdByProject }
+        })
+      },
+
+      setFocusedPane: (anchorOrPaneId, paneId) => {
+        set((s) => {
+          const realAnchor = resolveAnchor(anchorOrPaneId, s.splitPanes)
+          if (s.focusedPaneByAnchor[realAnchor] === paneId) return s
+          return { focusedPaneByAnchor: { ...s.focusedPaneByAnchor, [realAnchor]: paneId } }
+        })
+      },
+
+      groupAnchorOf: (sessionId) => resolveAnchor(sessionId, get().splitPanes),
+
+      panesForGroup: (anchorOrPaneId) => {
+        const sp = get().splitPanes
+        const realAnchor = resolveAnchor(anchorOrPaneId, sp)
+        return [realAnchor, ...(sp[realAnchor] ?? [])]
+      },
+
+      tabsForProject: (projectId) => {
+        const target = projectId ?? ""
+        const sp = get().splitPanes
+        return Object.values(get().sessions)
+          .filter((row) => (row.projectId ?? "") === target)
+          .filter((row) => !isGroupMember(row.id, sp))
+          .sort((a, b) => a.createdAt - b.createdAt)
+      },
+
       reset: () => {
         if (pendingFlush) clearTimeout(pendingFlush)
         pendingFlush = null
@@ -377,6 +520,9 @@ export const useTerminalStore = create<TerminalStoreState>()(
           ...TERMINAL_LAYOUT_DEFAULTS,
           sessions: {},
           activeSessionIdByProject: {},
+          splitPanes: {},
+          focusedPaneByAnchor: {},
+          splitDirection: {},
         })
       },
     }),

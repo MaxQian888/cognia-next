@@ -9,13 +9,27 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { StatusBadge } from "@/components/status-badge"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { AgentTeamEvent, TeamExecutionReport } from "@/types/agent/agent-team"
+import type {
+  AgentTeam,
+  AgentTeamEvent,
+  AgentTeammate,
+  TeamExecutionReport,
+} from "@/types/agent/agent-team"
 import { ConsensusPanel } from "./consensus-panel"
+import {
+  ReportKpiCards,
+  ReportTaskline,
+  ReportTokenBurn,
+  ReportPluginSlot,
+} from "./activity-report"
 
 export interface AgentTeamActivityProps {
   events: AgentTeamEvent[]
   /** Latest execution report for the team (when a run has executed). */
   report?: TeamExecutionReport
+  /** Team + roster — enable the rich report (KPI / taskline / token-burn). */
+  team?: AgentTeam
+  teammates?: AgentTeammate[]
 }
 
 /** Render the execution-report checkpoint timeline (chronological). */
@@ -55,8 +69,14 @@ function ReportTimeline({ report }: { report: TeamExecutionReport }) {
   )
 }
 
-export function AgentTeamActivity({ events, report }: AgentTeamActivityProps) {
+export function AgentTeamActivity({
+  events,
+  report,
+  team,
+  teammates = [],
+}: AgentTeamActivityProps) {
   const t = useTranslations("agentTeamsWorkspace.activity")
+  const tReport = useTranslations("agentTeamsWorkspace.activity.report")
   const prefersReducedMotion = useReducedMotion()
 
   if (events.length === 0 && !report) {
@@ -82,7 +102,22 @@ export function AgentTeamActivity({ events, report }: AgentTeamActivityProps) {
 
   return (
     <div className="space-y-4">
-      {report ? <ReportTimeline report={report} /> : null}
+      {report ? (
+        <div className="space-y-4" data-testid="activity-report">
+          <ReportKpiCards report={report} />
+          <ReportTaskline report={report} teammates={teammates} />
+          <ReportTokenBurn report={report} />
+          {team ? <ReportPluginSlot report={report} team={team} /> : null}
+          <details className="rounded-md border px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium">
+              {tReport("checkpoints.toggle")}
+            </summary>
+            <div className="pt-2">
+              <ReportTimeline report={report} />
+            </div>
+          </details>
+        </div>
+      ) : null}
       <ScrollArea className="max-h-[60vh] rounded-md border">
         <ul className="divide-y" data-testid="workspace-activity">
           {ordered.map((event, i) => (

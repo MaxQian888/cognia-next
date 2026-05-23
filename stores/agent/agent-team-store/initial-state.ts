@@ -44,4 +44,8 @@ export const initialState = {
   } as AgentTeamWorkspaceFocus,
   workspaceDetailOpen: true,
   defaultConfig: { ...DEFAULT_TEAM_CONFIG },
+  // Per-(teamId, adapterId) cursor of the last shared-memory version pulled
+  // from a shared-memory adapter. Persisted so reverse sync resumes
+  // incrementally across reloads.
+  lastAdapterSyncVersion: {} as Record<string, Record<string, number>>,
 }

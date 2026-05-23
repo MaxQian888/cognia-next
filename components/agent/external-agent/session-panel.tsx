@@ -14,9 +14,9 @@
 
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
-import { ExternalAgentCommands } from "./external-agent-commands"
-import { ExternalAgentConfigOptions } from "./external-agent-config-options"
-import { ExternalAgentPlan } from "./external-agent-plan"
+import { ExternalAgentCommands } from "./commands"
+import { ExternalAgentConfigOptions } from "./config-options"
+import { ExternalAgentPlan } from "./plan"
 import { Button } from "@/components/ui/button"
 import { GitBranchIcon } from "lucide-react"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"

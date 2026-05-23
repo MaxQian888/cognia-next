@@ -22,20 +22,39 @@ interface SpawnResult {
   session: SessionInfo
 }
 
+/**
+ * Wire envelope from the Rust desktop Channel (1C). The `seq` lets the
+ * renderer resume via `terminal_reattach` after a reload; `event` is the
+ * payload the base class fans out.
+ */
+interface SeqEvent {
+  seq: number
+  event: TerminalEvent
+}
+
 export class TerminalSession extends BaseTerminalSession {
   readonly info: SessionInfo
 
-  private readonly channel: Channel<TerminalEvent>
+  private readonly channel: Channel<SeqEvent>
+  private lastSeqValue = 0
 
-  private constructor(info: SessionInfo, channel: Channel<TerminalEvent>) {
+  private constructor(info: SessionInfo, channel: Channel<SeqEvent>) {
     super()
     this.info = info
     this.channel = channel
-    this.channel.onmessage = (event) => this.dispatch(event)
+    this.channel.onmessage = (msg) => {
+      this.lastSeqValue = msg.seq
+      this.dispatch(msg.event)
+    }
+  }
+
+  /** Highest replay seq received so far — the resume point for `reattach`. */
+  get lastSeq(): number {
+    return this.lastSeqValue
   }
 
   static async spawn(req: SpawnRequest): Promise<TerminalSession> {
-    const onEvent = new Channel<TerminalEvent>()
+    const onEvent = new Channel<SeqEvent>()
     // The spawn handler returns immediately after the reader/waiter
     // threads are spawned; the Channel starts receiving inside that call
     // window, so onmessage must be wired before we await — but we wire
@@ -46,6 +65,24 @@ export class TerminalSession extends BaseTerminalSession {
       onEvent,
     })
     return new TerminalSession(result.session, onEvent)
+  }
+
+  /**
+   * Reattach to a session that survived a webview reload (1C). The Rust
+   * process kept the PTY alive; this rewires a fresh Channel and replays
+   * events with `seq > resumeFrom`. `resumeFrom = 0` replays the whole
+   * retained buffer, restoring recent scrollback into the fresh xterm.
+   */
+  static async reattach(sessionId: string, resumeFrom = 0): Promise<TerminalSession> {
+    const onEvent = new Channel<SeqEvent>()
+    const info = await invoke<SessionInfo>("terminal_reattach", {
+      id: sessionId,
+      onEvent,
+      resumeFrom,
+    })
+    const session = new TerminalSession(info, onEvent)
+    session.lastSeqValue = resumeFrom
+    return session
   }
 
   async write(data: Uint8Array | string): Promise<void> {

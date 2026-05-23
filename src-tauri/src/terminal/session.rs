@@ -113,6 +113,40 @@ pub struct TerminalSessionInfo {
     pub shell: String,
 }
 
+/// Wire envelope for the desktop Tauri Channel (1C). Pairs the replay seq
+/// with the event so the renderer can persist the last-seen seq and resume
+/// via `terminal_reattach` after a webview reload — the Rust process (and
+/// thus the live PTY) survives a reload, only the Channel is torn down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeqEvent {
+    pub seq: u64,
+    pub event: TerminalEvent,
+}
+
+/// Swappable Channel consumer for the desktop dock. The reader/waiter sink
+/// sends through whatever Channel is currently installed; `terminal_reattach`
+/// swaps in a fresh Channel (new webview) and replays the missed events.
+/// `last_seq` is the highest seq delivered to the *current* channel — it
+/// dedupes replay-vs-live so each event reaches a given channel exactly once.
+/// Opaque to other modules — constructed only via [`detached_desk_channel`]
+/// or the desktop spawn path.
+#[derive(Default)]
+pub struct ChannelSlot {
+    channel: Option<Channel<SeqEvent>>,
+    last_seq: u64,
+}
+
+/// Shared, swappable desktop Channel slot. WS / RTC sessions use a detached
+/// (always-`None`) slot since they fan out through their own mpsc sink.
+pub type DeskChannel = Arc<StdMutex<ChannelSlot>>;
+
+/// Build a detached slot — used by remote (WS/RTC) sessions that don't
+/// stream through a Tauri Channel.
+pub fn detached_desk_channel() -> DeskChannel {
+    Arc::new(StdMutex::new(ChannelSlot::default()))
+}
+
 pub struct PtySession {
     pub id: String,
     pub project_id: Option<String>,
@@ -136,6 +170,10 @@ pub struct PtySession {
     /// reconnecting WS clients can resume with `?resumeFrom=<seq>`. See
     /// `super::replay::ReplayBuffer`.
     pub(super) replay: Arc<ReplayBuffer>,
+    /// 1C — swappable desktop Tauri Channel. `terminal_reattach` installs a
+    /// fresh Channel after a webview reload and replays missed events.
+    /// Detached (`None`) for remote (WS/RTC) sessions.
+    pub(super) channel_slot: DeskChannel,
 }
 
 /// Generic event sink — the reader / waiter threads fan out
@@ -164,12 +202,29 @@ pub type EventSink = Arc<dyn Fn(u64, TerminalEvent) + Send + Sync + 'static>;
 pub fn spawn_session(
     req: SpawnRequest,
     script_dir: &Path,
-    event_channel: Channel<TerminalEvent>,
+    event_channel: Channel<SeqEvent>,
 ) -> Result<PtySession, String> {
-    let sink: EventSink = Arc::new(move |_seq, event| {
-        let _ = event_channel.send(event);
+    // Desktop path: the sink sends through a *swappable* Channel slot so a
+    // reload can reattach (see `PtySession::reattach`). `last_seq` dedupes
+    // replay-vs-live for the current channel; a failed send (dead channel
+    // after reload) leaves `last_seq` untouched so the event is replayed.
+    let slot: DeskChannel = Arc::new(StdMutex::new(ChannelSlot {
+        channel: Some(event_channel),
+        last_seq: 0,
+    }));
+    let slot_for_sink = slot.clone();
+    let sink: EventSink = Arc::new(move |seq, event| {
+        if let Ok(mut s) = slot_for_sink.lock() {
+            if seq > s.last_seq {
+                if let Some(ch) = s.channel.as_ref() {
+                    if ch.send(SeqEvent { seq, event }).is_ok() {
+                        s.last_seq = seq;
+                    }
+                }
+            }
+        }
     });
-    spawn_session_with_sink(req, script_dir, sink)
+    spawn_session_with_sink(req, script_dir, sink, slot)
 }
 
 /// Construct a PtySession by spawning the requested shell under a fresh
@@ -180,6 +235,7 @@ pub fn spawn_session_with_sink(
     req: SpawnRequest,
     script_dir: &Path,
     sink: EventSink,
+    channel_slot: DeskChannel,
 ) -> Result<PtySession, String> {
     let nonce = Uuid::new_v4().simple().to_string();
     let shell_kind = ShellKind::from_shell_path(&req.shell);
@@ -265,6 +321,7 @@ pub fn spawn_session_with_sink(
         killer: StdMutex::new(killer),
         tempdir: setup.tempdir,
         replay,
+        channel_slot,
     })
 }
 
@@ -356,6 +413,34 @@ impl PtySession {
     pub fn replay(&self) -> Arc<ReplayBuffer> {
         self.replay.clone()
     }
+
+    /// 1C — reattach a fresh desktop Channel after a webview reload and
+    /// replay every event the renderer missed (`seq > resume_from`).
+    ///
+    /// Lock ordering note: the reader/waiter threads take the replay lock
+    /// and the channel-slot lock *sequentially* (push → release → sink),
+    /// never nested. So holding the slot lock here while snapshotting
+    /// `replay.since()` cannot deadlock, and it makes the swap atomic w.r.t.
+    /// the sink: a concurrently-pushed event is either in the snapshot
+    /// (replayed) or sent by the (blocked) sink afterwards — `last_seq`
+    /// dedupes the overlap, preserving order with no duplicates.
+    pub fn reattach(&self, channel: Channel<SeqEvent>, resume_from: u64) {
+        let mut slot = match self.channel_slot.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        slot.last_seq = resume_from;
+        slot.channel = Some(channel);
+        for (seq, event) in self.replay.since(resume_from) {
+            if seq > slot.last_seq {
+                if let Some(ch) = slot.channel.as_ref() {
+                    if ch.send(SeqEvent { seq, event }).is_ok() {
+                        slot.last_seq = seq;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Drop for PtySession {
@@ -377,19 +462,19 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex2;
 
-    fn capture_channel() -> (Channel<TerminalEvent>, Arc<StdMutex2<Vec<TerminalEvent>>>) {
+    fn capture_channel() -> (Channel<SeqEvent>, Arc<StdMutex2<Vec<TerminalEvent>>>) {
         let sink = Arc::new(StdMutex2::new(Vec::<TerminalEvent>::new()));
         let sink_clone = sink.clone();
-        let channel = Channel::<TerminalEvent>::new(move |body| {
+        let channel = Channel::<SeqEvent>::new(move |body| {
             // The Channel emits InvokeResponseBody::Json(serde_json::Value)
-            // in tests when constructed this way; deserialise back into our
-            // enum so assertions can match on the variant.
+            // in tests when constructed this way; deserialise the SeqEvent
+            // envelope and keep the inner event so assertions match variants.
             let value = match body {
                 tauri::ipc::InvokeResponseBody::Json(s) => s,
                 _ => return Ok(()),
             };
-            if let Ok(event) = serde_json::from_str::<TerminalEvent>(&value) {
-                sink_clone.lock().unwrap().push(event);
+            if let Ok(seqev) = serde_json::from_str::<SeqEvent>(&value) {
+                sink_clone.lock().unwrap().push(seqev.event);
             }
             Ok(())
         });
@@ -576,5 +661,76 @@ mod tests {
         assert_eq!(info.extension_id.as_deref(), Some("ext-b"));
         assert_eq!(info.origin, SessionOrigin::Remote);
         assert_eq!(info.shell, shell);
+    }
+
+    fn spawn_echo(payload: &str) -> Option<PtySession> {
+        let shell = detect_default_shell()?;
+        let (cmd_arg, full) = if cfg!(target_os = "windows") {
+            ("/C", format!("echo {payload}"))
+        } else {
+            ("-c", format!("echo {payload}"))
+        };
+        let (channel, _first) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), full],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            origin: SessionOrigin::Local,
+        };
+        spawn_session(req, &empty_script_dir(), channel).ok()
+    }
+
+    fn wait_for_exit(session: &PtySession) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if session
+                .replay()
+                .since(0)
+                .iter()
+                .any(|(_, e)| matches!(e, TerminalEvent::Exit { .. }))
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn reattach_replays_missed_events_into_a_fresh_channel() {
+        let Some(session) = spawn_echo("replay-me") else {
+            return;
+        };
+        wait_for_exit(&session);
+        // Reattach a fresh channel from seq 0 — it receives the full replay.
+        let (channel2, second) = capture_channel();
+        session.reattach(channel2, 0);
+        let events = second.lock().unwrap().clone();
+        let saw_data = events.iter().any(|e| {
+            matches!(e, TerminalEvent::Data { bytes } if String::from_utf8_lossy(bytes).contains("replay-me"))
+        });
+        let saw_exit = events.iter().any(|e| matches!(e, TerminalEvent::Exit { .. }));
+        assert!(saw_data, "reattach should replay the echoed payload, got: {events:?}");
+        assert!(saw_exit, "reattach should replay the exit event, got: {events:?}");
+    }
+
+    #[test]
+    fn reattach_past_last_seq_replays_nothing() {
+        let Some(session) = spawn_echo("x") else {
+            return;
+        };
+        wait_for_exit(&session);
+        let last = session.replay().last_seq();
+        let (channel2, second) = capture_channel();
+        session.reattach(channel2, last);
+        assert!(
+            second.lock().unwrap().is_empty(),
+            "nothing should replay past the last delivered seq"
+        );
     }
 }

@@ -18,7 +18,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, State};
 
-use super::session::{spawn_session, SpawnRequest, TerminalEvent, TerminalSessionInfo};
+use super::session::{spawn_session, SeqEvent, SpawnRequest, TerminalSessionInfo};
 use super::TerminalState;
 
 /// Locate the bundled shell-integration script directory. In dev
@@ -46,19 +46,40 @@ pub struct SpawnResult {
     pub session: TerminalSessionInfo,
 }
 
-/// Open a new PTY session and start streaming bytes through `on_event`.
+/// Open a new PTY session and start streaming `{seq, event}` envelopes
+/// through `on_event`. The renderer persists the last seen `seq` so it can
+/// resume via `terminal_reattach` after a reload.
 #[tauri::command]
 pub fn terminal_spawn<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, TerminalState>,
     req: SpawnRequest,
-    on_event: Channel<TerminalEvent>,
+    on_event: Channel<SeqEvent>,
 ) -> Result<SpawnResult, String> {
     let script_dir = resolve_script_dir(&app);
     let session = spawn_session(req, &script_dir, on_event)?;
     let info = session.info();
     state.insert(std::sync::Arc::new(session));
     Ok(SpawnResult { session: info })
+}
+
+/// Reattach a fresh Channel to an existing session after a webview reload
+/// (1C). The Rust process — and thus the live PTY — survives a reload; this
+/// rewires the byte stream and replays everything with `seq > resume_from`.
+/// Returns the session info, or an error when the session is gone (e.g. a
+/// full app restart, where sessions are not restored).
+#[tauri::command]
+pub fn terminal_reattach(
+    state: State<'_, TerminalState>,
+    id: String,
+    on_event: Channel<SeqEvent>,
+    resume_from: u64,
+) -> Result<TerminalSessionInfo, String> {
+    let session = state
+        .get(&id)
+        .ok_or_else(|| format!("unknown session id: {id}"))?;
+    session.reattach(on_event, resume_from);
+    Ok(session.info())
 }
 
 /// Pipe bytes into the PTY stdin. `data` is base64-decoded automatically

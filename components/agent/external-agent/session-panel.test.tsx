@@ -6,7 +6,7 @@ import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { ExternalAgentSessionPanel } from "./external-agent-session-panel"
+import { ExternalAgentSessionPanel } from "./session-panel"
 
 const useExternalAgentMock = jest.fn()
 

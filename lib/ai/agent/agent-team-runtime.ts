@@ -16,6 +16,11 @@ import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agen
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import { approve as approveBus, reject as rejectBus } from "@/lib/runtime/approval-bus"
 import { waitForDecision } from "@/lib/runtime/approval-bus"
+import {
+  buildKnownCapabilityIds,
+  validateInstanceCapabilitiesWith,
+  refreshAllInstanceCapabilityWarnings,
+} from "@/lib/ai/agent/team/capability-audit"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
@@ -131,6 +136,34 @@ export async function runTeamLifecycle(
       taskCount: tasks.length,
     })
 
+    // ── Pre-run capability-audit gate ──
+    // If any team/teammate references a capability id that no longer resolves
+    // (e.g. a contributing plugin was disabled), surface the stale ids and ask
+    // the operator to confirm before spending tokens on a degraded run.
+    {
+      const known = await buildKnownCapabilityIds()
+      const auditWarnings = [
+        ...validateInstanceCapabilitiesWith(known, team),
+        ...workers.flatMap((w) => validateInstanceCapabilitiesWith(known, team, w)),
+      ]
+      if (auditWarnings.length > 0) {
+        // Populate the derived sidecar map so the consent UI + Settings red
+        // dots can enumerate exactly which ids are stale.
+        void refreshAllInstanceCapabilityWarnings()
+        const decision = await waitForDecision(
+          { scope: "agent-team-capability-audit", id: runId },
+          ac.signal
+        ).catch(() => ({ outcome: "reject" as const }))
+        if (decision.outcome !== "approve") {
+          return {
+            runId: "",
+            status: "cancelled",
+            reason: "Operator declined to run with stale capabilities",
+          }
+        }
+      }
+    }
+
     // ── Plan-approval gate (synthesizer-local; never enters workflow) ──
     if (team.config.requirePlanApproval) {
       const lead = allMembers.find((m) => m.id === team.leadId)
@@ -185,7 +218,7 @@ export async function runTeamLifecycle(
     const concurrency = createConcurrencyController(team.config.maxConcurrentTeammates ?? 5)
     const modelPref = createModelPreferenceController()
     const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
-    const pool = createTeammatePool({ teammates: workers })
+    const pool = createTeammatePool({ teammates: workers, teamId, runId })
     const budget = createBudgetGuard({
       runId,
       limit: team.config.tokenBudget ?? 0,

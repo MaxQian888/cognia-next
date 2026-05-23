@@ -7,7 +7,14 @@
     "dock": {
       "newSession": "New terminal",
       "closePanel": "Close panel",
+      "closePane": "Close pane",
       "resize": "Drag to resize the terminal dock (arrow keys also work)"
+    },
+    "fileViewer": {
+      "title": "File viewer",
+      "description": "Read-only source file preview",
+      "loading": "Loading…",
+      "error": "Failed to open file: {message}"
     },
     "tab": {
       "close": "Close terminal",
@@ -22,7 +29,8 @@
         "restart": "Restart",
         "close": "Close",
         "closeOthers": "Close others",
-        "trustAgent": "Trust agent in this tab"
+        "trustAgent": "Trust agent in this tab",
+        "locateInChat": "Locate in conversation"
       },
       "rename": {
         "label": "Rename terminal tab",
@@ -45,6 +53,7 @@
       "blank": "(blank)",
       "copy": "Copy command",
       "rerun": "Re-run command",
+      "locateInChat": "Locate in conversation",
       "status": {
         "ok": "Exited cleanly",
         "error": "Exited with non-zero code",
@@ -207,7 +216,28 @@
       "report": {
         "title": "Execution report",
         "status": "Status: {status}",
-        "emptyCheckpoints": "No checkpoints recorded for this run yet."
+        "emptyCheckpoints": "No checkpoints recorded for this run yet.",
+        "kpi": {
+          "duration": "Duration",
+          "tokens": "Total tokens",
+          "successRate": "Success rate",
+          "escalations": "Escalations"
+        },
+        "taskline": {
+          "title": "Task timeline",
+          "empty": "No delegation segments recorded.",
+          "tooltip": "{title} · {start} → {end}"
+        },
+        "tokenBurn": {
+          "title": "Token burn",
+          "empty": "No token usage recorded yet."
+        },
+        "pluginSlot": {
+          "placeholder": "Plugins can render custom analytics here. Install one from the Plugin Marketplace."
+        },
+        "checkpoints": {
+          "toggle": "Checkpoint timeline"
+        }
       }
     },
     "consensus": {
@@ -305,6 +335,35 @@
         "governance": "Governance",
         "memory": "Shared memory"
       },
+      "saveIndicator": {
+        "savedJustNow": "Saved",
+        "savedSecondsAgo": "Saved · {seconds}s ago",
+        "unsaved": "No changes",
+        "auditNow": "Audit now",
+        "auditUnavailable": "Auditor not available",
+        "auditCompleted": "Audit complete · {count} stale id(s)"
+      },
+      "confirm": {
+        "confirmLabel": "Confirm",
+        "cancelLabel": "Cancel",
+        "typeToConfirm": "Type \"{value}\" to confirm",
+        "onCritical": {
+          "title": "Change critical action?",
+          "description": "Selecting \"pause for review\" or \"hand off to background\" changes how the runtime blocks at the critical budget threshold."
+        },
+        "clearMemory": {
+          "title": "Clear shared memory?",
+          "description": "This permanently drops every shared-memory entry for this team."
+        },
+        "forceResolve": {
+          "title": "Force-resolve consensus?",
+          "description": "This resolves the poll with the lead's override, ignoring outstanding votes."
+        },
+        "removeTeammate": {
+          "title": "Remove teammate?",
+          "description": "This removes the teammate from the team. Tasks they claimed will be released."
+        }
+      },
       "plugins": {
         "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
       },
@@ -347,7 +406,53 @@
         "empty": "No shared-memory entries yet.",
         "clearAll": "Clear all",
         "deleteEntry": "Delete \"{key}\"",
-        "writtenBy": "Written by {name} · {when}"
+        "writtenBy": "Written by {name} · {when}",
+        "addEntry": "Add entry",
+        "composer": {
+          "titleCreate": "New memory entry",
+          "titleEdit": "Edit memory entry",
+          "key": "Key",
+          "value": "Value",
+          "parseJson": "Parse value as JSON",
+          "invalidJson": "Value is not valid JSON.",
+          "tags": "Tags",
+          "tagsPlaceholder": "Add a tag and press Enter",
+          "expiresAt": "Expires at (optional)",
+          "readableBy": "Readable by",
+          "readableByAll": "All teammates (leave empty)",
+          "submit": "Save entry",
+          "cancel": "Cancel",
+          "piiBlocked": "Write blocked: the value contains PII."
+        },
+        "filter": {
+          "writer": "Writer",
+          "tags": "Tags",
+          "dateRange": "Date range",
+          "text": "Search key or value",
+          "reset": "Reset filters",
+          "empty": "No entries match the current filters."
+        },
+        "detail": {
+          "title": "Memory entry",
+          "copy": "Copy value",
+          "copied": "Copied",
+          "edit": "Edit",
+          "delete": "Delete"
+        },
+        "acl": {
+          "operatorBadge": "Operator view — all entries",
+          "aclHint": "Empty \"readable by\" means every teammate can read this entry."
+        },
+        "adapter": {
+          "label": "Backing store",
+          "configure": "Configure",
+          "sync": "Sync now",
+          "noAdapter": "Local only",
+          "unset": "(none)",
+          "synced": "{count} entries synced",
+          "syncFailed": "Sync failed",
+          "pickerTitle": "Shared-memory backing store"
+        }
       }
     },
     "planApproval": {
@@ -358,6 +463,7 @@
       "noPlan": "No plan submitted yet."
     },
     "templates": {
+      "missingDependencies": "{count} missing dep(s)",
       "categories": {
         "review": "Review",
         "research": "Research",

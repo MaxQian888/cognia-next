@@ -2210,6 +2210,17 @@ export class PluginManager {
     // Skill bulk-drop happens after the per-character detach hook so
     // a re-enable starts from a fully clean slate (PR-D ordering).
     unregisterSkillsByPlugin(pluginId)
+    // Every overlay capability this plugin contributed is now gone — re-run
+    // the agent-team capability audit so any team/teammate that referenced a
+    // dropped id surfaces a stale-capability warning. Fire-and-forget: the
+    // disable flow must not block on the (async, Dexie-backed) sweep.
+    try {
+      const { refreshAllInstanceCapabilityWarnings } =
+        await import("@/lib/ai/agent/team/capability-audit")
+      void refreshAllInstanceCapabilityWarnings()
+    } catch (err) {
+      loggers.manager.warn(`[plugin:${pluginId}] capability-audit refresh failed:`, err)
+    }
     // Bulk-drop telemetry rows for this plugin's skills so usage counters
     // don't outlive the plugin.
     try {

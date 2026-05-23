@@ -24,8 +24,20 @@ import {
   clearTeamMemory,
   deleteEntry,
   publishEntry,
+  syncSharedMemoryFromAdapter,
 } from "./shared-memory-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import {
+  registerSharedMemoryAdapter,
+  __resetSharedMemoryAdaptersForTesting,
+} from "@/lib/plugin/registries/shared-memory-adapter-registry"
+import type {
+  PluginSharedMemoryAdapterDef,
+  SharedMemoryAdapterChangeSet,
+} from "@/types/plugin/plugin-shared-memory-adapter"
+import type { SharedMemoryEntry } from "@/types/agent/agent-team"
+
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const writer = { id: "w1", name: "Worker 1" }
 const task = { id: "task-1", title: "Test task" }
@@ -169,6 +181,134 @@ describe("shared-memory-orchestrator", () => {
       expect(entry!.tags).toEqual([`task:${task.id}`, `taskTitle:${task.title}`])
       const stored = useAgentTeamStore.getState().sharedMemory[team.id]?.[`task:${task.id}`]
       expect(stored).toEqual(entry)
+    })
+  })
+
+  describe("shared-memory adapter mirror + reverse sync", () => {
+    const ADAPTER_ID = "fake:mem"
+
+    const seedTeamWithAdapter = (): string => {
+      const created = useAgentTeamStore
+        .getState()
+        .createTeam({ name: "Mirror", task: "t", config: { sharedMemoryAdapterId: ADAPTER_ID } })
+      return created.id
+    }
+
+    const makeAdapter = (
+      over: Partial<PluginSharedMemoryAdapterDef> = {}
+    ): PluginSharedMemoryAdapterDef => ({
+      id: ADAPTER_ID,
+      name: "Fake",
+      write: jest.fn(async () => {}),
+      read: jest.fn(async () => undefined),
+      listChanges: jest.fn(
+        async (): Promise<SharedMemoryAdapterChangeSet> => ({
+          entries: [],
+          cursor: 0,
+        })
+      ),
+      delete: jest.fn(async () => {}),
+      ...over,
+    })
+
+    beforeEach(() => {
+      __resetSharedMemoryAdaptersForTesting()
+    })
+
+    it("mirrors a publish to the configured adapter (fire-and-forget)", async () => {
+      const adapter = makeAdapter()
+      registerSharedMemoryAdapter(ADAPTER_ID, adapter, { pluginId: "fake" })
+      const teamId = seedTeamWithAdapter()
+
+      publishEntry({ teamId, key: "k", value: "clean value", writer })
+      await flushMicrotasks()
+      expect(adapter.write).toHaveBeenCalledTimes(1)
+      expect((adapter.write as jest.Mock).mock.calls[0][0]).toBe(teamId)
+    })
+
+    it("mirrors a delete to the configured adapter", async () => {
+      const adapter = makeAdapter()
+      registerSharedMemoryAdapter(ADAPTER_ID, adapter, { pluginId: "fake" })
+      const teamId = seedTeamWithAdapter()
+
+      publishEntry({ teamId, key: "k", value: "v", writer })
+      await flushMicrotasks()
+      deleteEntry(teamId, "k")
+      await flushMicrotasks()
+      expect(adapter.delete).toHaveBeenCalledWith(teamId, "k")
+    })
+
+    it("reverse sync does not echo back to the adapter (no mirror write)", async () => {
+      const adapter = makeAdapter({
+        listChanges: jest.fn(async () => ({
+          entries: [
+            {
+              key: "fromRemote",
+              value: "remote value",
+              writtenBy: "remote",
+              writtenAt: new Date(),
+              version: 1,
+            },
+          ],
+          cursor: 1,
+        })),
+      })
+      registerSharedMemoryAdapter(ADAPTER_ID, adapter, { pluginId: "fake" })
+      const teamId = seedTeamWithAdapter()
+
+      await syncSharedMemoryFromAdapter(teamId)
+      await flushMicrotasks()
+      // The pulled entry is written via the store directly, never through
+      // publishEntry, so it must NOT trigger a mirror write back to the adapter.
+      expect(adapter.write).not.toHaveBeenCalled()
+    })
+
+    it("syncSharedMemoryFromAdapter pulls higher-version entries and skips lower", async () => {
+      const remoteEntries: SharedMemoryEntry[] = [
+        {
+          key: "fromRemote",
+          value: "remote value",
+          writtenBy: "remote",
+          writtenAt: new Date(),
+          version: 3,
+        },
+        {
+          key: "stale",
+          value: "old remote",
+          writtenBy: "remote",
+          writtenAt: new Date(),
+          version: 1,
+        },
+      ]
+      const adapter = makeAdapter({
+        listChanges: jest.fn(async () => ({ entries: remoteEntries, cursor: 7 })),
+      })
+      registerSharedMemoryAdapter(ADAPTER_ID, adapter, { pluginId: "fake" })
+      const teamId = seedTeamWithAdapter()
+
+      // Local "stale" is newer (v2) than the remote (v1) → local wins.
+      useAgentTeamStore.getState().writeSharedMemory(teamId, "stale", {
+        key: "stale",
+        value: "local newer",
+        writtenBy: writer.id,
+        writtenAt: new Date(),
+        version: 2,
+      })
+
+      const { pulled } = await syncSharedMemoryFromAdapter(teamId)
+      expect(pulled).toBe(1) // only fromRemote written back
+      const mem = useAgentTeamStore.getState().sharedMemory[teamId]
+      expect(mem?.fromRemote?.value).toBe("remote value")
+      expect(mem?.fromRemote?.writerName).toBe(`${ADAPTER_ID}:sync`)
+      expect(mem?.stale?.value).toBe("local newer") // unchanged
+      // Cursor advanced.
+      expect(useAgentTeamStore.getState().lastAdapterSyncVersion[teamId]?.[ADAPTER_ID]).toBe(7)
+    })
+
+    it("syncSharedMemoryFromAdapter is a no-op when no adapter is configured", async () => {
+      const created = useAgentTeamStore.getState().createTeam({ name: "NoAdapter", task: "t" })
+      const result = await syncSharedMemoryFromAdapter(created.id)
+      expect(result).toEqual({ pulled: 0 })
     })
   })
 })

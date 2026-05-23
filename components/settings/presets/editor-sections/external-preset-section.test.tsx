@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -36,5 +36,26 @@ describe("ExternalPresetSection", () => {
     // The trigger value reflects the current selection; "inherit" appears
     // inside the closed select trigger via the SelectValue's render path.
     expect(screen.getByText("inherit")).toBeInTheDocument()
+  })
+
+  describe("multiple mode", () => {
+    it("renders a checklist and toggling emits onPatchMulti", () => {
+      const onPatchMulti = jest.fn()
+      render(
+        <ExternalPresetSection
+          state={emptyEditorState()}
+          onPatch={jest.fn()}
+          defaultOpen
+          multiple
+          selectedIds={[]}
+          onPatchMulti={onPatchMulti}
+        />
+      )
+      expect(screen.getByText("Claude Code")).toBeInTheDocument()
+      const checkboxes = screen.getAllByRole("checkbox")
+      expect(checkboxes).toHaveLength(2)
+      fireEvent.click(checkboxes[0])
+      expect(onPatchMulti).toHaveBeenCalledWith(["claude-code"])
+    })
   })
 })

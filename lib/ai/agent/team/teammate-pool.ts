@@ -15,6 +15,7 @@ import {
   type CircuitBreaker,
   type CircuitBreakerOptions,
 } from "@/lib/connectors/circuit-breaker"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 export type TeammateFailureKind =
@@ -42,6 +43,13 @@ export interface TeammatePoolOptions {
   breakerOptions?: Partial<CircuitBreakerOptions>
   strategy?: "round-robin"
   now?: () => number
+  /**
+   * Team + run context. When both are present the pool dispatches the
+   * `onTeammateClaim` / `onTeammateRelease` plugin hooks; when absent (e.g.
+   * a unit-test fixture) hook dispatch is skipped so the pool stays pure.
+   */
+  teamId?: string
+  runId?: string
 }
 
 interface Entry {
@@ -103,6 +111,26 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
   let lastAllUnavailable = entries.size === 0
   let rotationIndex = 0
 
+  // Tracks the task each teammate is currently working so the release hook
+  // can name it. Keyed by teammateId → taskId.
+  const claimedTasks = new Map<string, string>()
+  const canDispatch = Boolean(opts.teamId && opts.runId)
+
+  const dispatchRelease = (teammateId: string, result: "success" | "failure", error?: string) => {
+    if (!canDispatch) return
+    const taskId = claimedTasks.get(teammateId)
+    if (taskId === undefined) return
+    claimedTasks.delete(teammateId)
+    getPluginLifecycleHooks().dispatchOnTeammateRelease({
+      teamId: opts.teamId!,
+      runId: opts.runId!,
+      teammateId,
+      taskId,
+      result,
+      error,
+    })
+  }
+
   const isAvailable = (e: Entry): boolean => !e.disqualified && e.breaker.canPass()
 
   const computeAllUnavailable = (): boolean => {
@@ -130,7 +158,7 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
   }
 
   return {
-    claim: () => {
+    claim: (taskId) => {
       const ids = [...entries.keys()]
       if (ids.length === 0) return null
       for (let i = 0; i < ids.length; i++) {
@@ -139,6 +167,15 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
         if (!entry) continue
         if (isAvailable(entry)) {
           rotationIndex = (rotationIndex + i + 1) % ids.length
+          if (canDispatch) {
+            claimedTasks.set(entry.teammate.id, taskId)
+            getPluginLifecycleHooks().dispatchOnTeammateClaim({
+              teamId: opts.teamId!,
+              runId: opts.runId!,
+              teammateId: entry.teammate.id,
+              taskId,
+            })
+          }
           return entry.teammate
         }
       }
@@ -148,6 +185,7 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
       const e = entries.get(teammateId)
       if (!e) return
       e.breaker.recordSuccess()
+      dispatchRelease(teammateId, "success")
       checkAllUnavailableEdge()
     },
     recordFailure: (teammateId, error) => {
@@ -177,6 +215,7 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
         default:
           e.breaker.recordFailure()
       }
+      dispatchRelease(teammateId, "failure", error instanceof Error ? error.message : String(error))
       checkAllUnavailableEdge()
     },
     availableCount: () => {

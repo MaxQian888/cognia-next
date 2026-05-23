@@ -27,7 +27,16 @@ import type {
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { getSharedMemoryAdapter } from "@/lib/plugin/registries/shared-memory-adapter-registry"
+import { loggers } from "@/lib/logging"
+
+// Re-exported so build-options and other consumers share one ACL predicate.
+export {
+  OPERATOR_READER_ID,
+  isEntryReadableBy,
+  selectSharedMemoryEntriesForReader,
+} from "@/stores/agent/agent-team-store/selectors"
 
 export interface PublishEntryInput {
   teamId: string
@@ -63,7 +72,9 @@ export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
   const teamMemory = store.sharedMemory[input.teamId] ?? {}
   const existing = teamMemory[input.key]
 
-  if (typeof input.value === "string" && !hasNoLeakingPii(input.value)) {
+  // Deep PII gate: scans every string leaf of strings, arrays, and plain
+  // objects so object-shaped values can no longer smuggle PII past the gate.
+  if (!hasNoLeakingPiiDeep(input.value)) {
     throw new SharedMemoryPiiError(input.key)
   }
 
@@ -84,7 +95,27 @@ export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
     key: input.key,
     writerId: input.writer.id,
   })
+  mirrorWriteToAdapter(input.teamId, entry)
   return entry
+}
+
+/**
+ * Mirror a write to the team's configured shared-memory adapter, if any.
+ * Fire-and-forget: a failed mirror logs but never blocks the local write
+ * (per the per-plugin isolation pattern). Skips entries that arrived *from*
+ * the adapter (provenance-tagged via `:sync`) to avoid an echo loop.
+ */
+function mirrorWriteToAdapter(teamId: string, entry: SharedMemoryEntry): void {
+  const adapterId = useAgentTeamStore.getState().teams[teamId]?.config.sharedMemoryAdapterId
+  if (!adapterId) return
+  if (typeof entry.writerName === "string" && entry.writerName.endsWith(":sync")) return
+  const adapter = getSharedMemoryAdapter(adapterId)
+  if (!adapter) return
+  queueMicrotask(() => {
+    adapter.write(teamId, entry).catch((err) => {
+      loggers.agent.warn(`SharedMemoryAdapter ${adapterId} write failed:`, err)
+    })
+  })
 }
 
 /**
@@ -94,6 +125,17 @@ export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
 export function deleteEntry(teamId: string, key: string): void {
   useAgentTeamStore.getState().deleteSharedMemory(teamId, key)
   getPluginLifecycleHooks().dispatchOnSharedMemoryDelete({ teamId, key })
+  const adapterId = useAgentTeamStore.getState().teams[teamId]?.config.sharedMemoryAdapterId
+  if (adapterId) {
+    const adapter = getSharedMemoryAdapter(adapterId)
+    if (adapter) {
+      queueMicrotask(() => {
+        adapter.delete(teamId, key).catch((err) => {
+          loggers.agent.warn(`SharedMemoryAdapter ${adapterId} delete failed:`, err)
+        })
+      })
+    }
+  }
 }
 
 /**
@@ -125,4 +167,40 @@ export function autoPublishTaskResult(
 /** Drop every entry for a team. Convenience wrapper around the store action. */
 export function clearTeamMemory(teamId: string): void {
   useAgentTeamStore.getState().clearTeamSharedMemory(teamId)
+}
+
+/**
+ * Reverse mirror: pull changes from the team's configured shared-memory
+ * adapter and write back any entry the local store is missing or holds an
+ * older version of. Conflict resolution is local-version-wins. Pulled entries
+ * are provenance-tagged (`writerName: "<adapterId>:sync"`) and DO NOT re-fire
+ * the `onSharedMemoryWrite` hook or re-mirror (the `:sync` guard in
+ * `mirrorWriteToAdapter` prevents the echo). Advances the persisted cursor.
+ *
+ * Returns `{ pulled }` — the number of entries written back. A no-op (returns
+ * `{ pulled: 0 }`) when the team has no adapter configured.
+ */
+export async function syncSharedMemoryFromAdapter(teamId: string): Promise<{ pulled: number }> {
+  const store = useAgentTeamStore.getState()
+  const adapterId = store.teams[teamId]?.config.sharedMemoryAdapterId
+  if (!adapterId) return { pulled: 0 }
+  const adapter = getSharedMemoryAdapter(adapterId)
+  if (!adapter) return { pulled: 0 }
+
+  const since = store.lastAdapterSyncVersion[teamId]?.[adapterId]
+  const { entries, cursor } = await adapter.listChanges(teamId, since)
+
+  let pulled = 0
+  for (const remote of entries) {
+    const local = useAgentTeamStore.getState().sharedMemory[teamId]?.[remote.key]
+    if (local && local.version >= remote.version) continue // local wins
+    useAgentTeamStore.getState().writeSharedMemory(teamId, remote.key, {
+      ...remote,
+      writerName: `${adapterId}:sync`,
+    })
+    pulled += 1
+  }
+
+  useAgentTeamStore.getState().setAdapterSyncVersion(teamId, adapterId, cursor)
+  return { pulled }
 }

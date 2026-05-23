@@ -73,8 +73,31 @@ import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
 import { createLogger } from "@/lib/logging"
+import {
+  getTemplateWarnings,
+  listAgentTeamTemplateEntries,
+  type PluginAgentTeamTemplateWarning,
+} from "@/lib/plugin/registries/agent-team-template-registry"
+import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
 
 const log = createLogger("agentTeams.list")
+
+/** Merge built-in / user templates with plugin-overlay templates + warnings. */
+function useMergedTemplates(localTemplates: AgentTeamTemplate[]): {
+  merged: AgentTeamTemplate[]
+  warningsById: Map<string, readonly PluginAgentTeamTemplateWarning[]>
+} {
+  return useMemo(() => {
+    const warningsById = new Map<string, readonly PluginAgentTeamTemplateWarning[]>()
+    const pluginProjected = listAgentTeamTemplateEntries().map((entry) => {
+      const projected = projectPluginTemplate(entry)
+      const warnings = getTemplateWarnings(entry.id)
+      if (warnings.length > 0) warningsById.set(projected.id, warnings)
+      return projected
+    })
+    return { merged: [...localTemplates, ...pluginProjected], warningsById }
+  }, [localTemplates])
+}
 
 const TEMPLATE_CATEGORIES = [
   "all",
@@ -164,8 +187,12 @@ export default function AgentTeamsListPage() {
     return { total: all.length, active, totalTeammates }
   }, [teams, teammates])
 
+  const localTemplates = useMemo(() => Object.values(templates), [templates])
+  const { merged: allTemplates, warningsById: templateWarnings } =
+    useMergedTemplates(localTemplates)
+
   const filteredTemplates = useMemo(() => {
-    const all = Object.values(templates).sort((a, b) => {
+    const all = [...allTemplates].sort((a, b) => {
       const aBuilt = a.isBuiltIn ?? false
       const bBuilt = b.isBuiltIn ?? false
       if (aBuilt !== bBuilt) return aBuilt ? -1 : 1
@@ -173,7 +200,7 @@ export default function AgentTeamsListPage() {
     })
     if (categoryFilter === "all") return all
     return all.filter((tpl) => tpl.category === categoryFilter)
-  }, [templates, categoryFilter])
+  }, [allTemplates, categoryFilter])
 
   /* ---- actions ---- */
   const handlePickTemplate = (tpl: AgentTeamTemplate) => {
@@ -189,7 +216,12 @@ export default function AgentTeamsListPage() {
         name: tm.name,
         description: tm.description,
         role: "teammate",
-        config: tm.config,
+        config: {
+          ...tm.config,
+          systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
+          capabilities: tm.capabilities ?? tm.config?.capabilities,
+          specialization: tm.specialization ?? tm.config?.specialization,
+        },
       })
     }
     log.info("template_used", { templateId: tpl.id, teamId: team.id })
@@ -407,6 +439,20 @@ export default function AgentTeamsListPage() {
                     )}
                   </div>
                   <p className="line-clamp-3 text-xs text-muted-foreground">{tpl.description}</p>
+                  {(templateWarnings.get(tpl.id) ?? []).length > 0 ? (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/50 text-[10px] text-amber-600"
+                      title={(templateWarnings.get(tpl.id) ?? [])
+                        .map((w) => `${w.code}: ${w.missingId}`)
+                        .join("\n")}
+                      data-testid={`template-warnings-${tpl.id}`}
+                    >
+                      {t("templates.missingDependencies", {
+                        count: (templateWarnings.get(tpl.id) ?? []).length,
+                      })}
+                    </Badge>
+                  ) : null}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] text-muted-foreground">
                       {tCat(tpl.category)} · {tpl.teammates.length} teammates
@@ -427,7 +473,7 @@ export default function AgentTeamsListPage() {
       <CreateTeamDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        templates={Object.values(templates)}
+        templates={allTemplates}
         onCreated={(teamId) => {
           setCreateOpen(false)
           router.push(`/agent-teams/workspace?teamId=${teamId}`)
@@ -674,7 +720,12 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
           name: tm.name,
           description: tm.description,
           role: "teammate",
-          config: tm.config,
+          config: {
+            ...tm.config,
+            systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
+            capabilities: tm.capabilities ?? tm.config?.capabilities,
+            specialization: tm.specialization ?? tm.config?.specialization,
+          },
         })
       }
       toast.success(t("teamCreated", { name: team.name }))

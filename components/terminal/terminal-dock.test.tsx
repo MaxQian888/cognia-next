@@ -8,6 +8,11 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
+}))
+
 let transportKind: "tauri-channel" | "ws" | "unsupported" = "tauri-channel"
 jest.mock("@/lib/terminal/pick-transport", () => ({
   selectTerminalTransport: () => transportKind,
@@ -83,14 +88,17 @@ jest.mock("@/lib/terminal/session-registry", () => ({
 import { TerminalDock } from "./terminal-dock"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useChatStore } from "@/stores/chat/chat-store"
 
 beforeEach(() => {
   cleanup()
   useTerminalStore.getState().reset()
   // Hard-reset the project store too.
   useProjectStore.setState({ projects: [], activeProjectId: null })
+  useChatStore.getState().setActiveSession(null)
   mockSpawnFromDock.mockClear()
   mockKillFromDock.mockClear()
+  mockPush.mockClear()
   transportKind = "tauri-channel"
 })
 
@@ -240,6 +248,19 @@ describe("TerminalDock", () => {
     const tab = screen.getAllByTestId("terminal-tab")[0]!
     fireEvent.click(tab)
     expect(useTerminalStore.getState().getActiveSession(project.id)).toBe("s-1")
+  })
+
+  it("locates the spawning chat session from an agent tab's history button", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    useTerminalStore.getState().setAgentSpawner("s-1", "chat-7")
+    useTerminalStore.getState().setHistoryOpen("s-1", true)
+    render(<TerminalDock />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    fireEvent.click(screen.getByTestId("terminal-history-locate"))
+    expect(useChatStore.getState().activeSessionId).toBe("chat-7")
+    expect(mockPush).toHaveBeenCalledWith("/")
   })
 
   it("renders the mobile empty state when running under Capacitor", () => {

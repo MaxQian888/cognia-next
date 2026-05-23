@@ -32,7 +32,7 @@ export type SpawnOutcome =
   | { kind: "denied"; reason?: string }
   | { kind: "error"; message: string }
 
-interface TerminalStoreLike {
+export interface TerminalStoreLike {
   registerSession(
     info: {
       id: string
@@ -146,61 +146,9 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
     input.agentSpawner ? { agentSpawner: input.agentSpawner } : undefined
   )
 
-  // 4. Instrument `write` for command capture. OSC 633 (Cognia's flavor)
-  // does not carry `E` (command-line) frames; we infer the command text
-  // from user input bytes between two newlines and remember the last
-  // completed line. Handles BS/DEL inline so simple line editing yields
-  // an accurate capture. Multi-line paste keeps only the final line. CR
-  // and LF are treated identically.
-  const capture = installCommandCapture(session)
-
-  // 5. Wire integration events → store.
-  session.onIntegration((event) => {
-    switch (event.kind) {
-      case "prompt_start":
-        input.store.pushPrompt(session.info.id, Date.now())
-        break
-      case "prompt_end":
-        input.store.closePrompt(session.info.id, Date.now())
-        break
-      case "command_start":
-        input.store.setSessionStatus(session.info.id, "running")
-        capture.markCommandStart()
-        break
-      case "command_end":
-        input.store.setSessionStatus(session.info.id, "idle")
-        input.store.pushCommand(session.info.id, {
-          cmd: capture.takeCapturedCommand(),
-          exitCode: event.exit_code,
-          endedAt: Date.now(),
-        })
-        // exit_code reported here is the LAST command's exit, not the
-        // shell process's exit. The store's exitCode field is only set
-        // on session exit.
-        break
-      case "cwd_changed":
-        input.store.setSessionCwd(session.info.id, event.cwd)
-        break
-      default:
-        break
-    }
-  })
-
-  // 5. Wire exit → store + audit.
-  session.onExit((code) => {
-    input.store.setSessionExit(session.info.id, code)
-    // Best-effort cleanup so the registry doesn't leak handles for
-    // exited shells. The store row stays so the user can see the
-    // "exited" badge until they explicitly close the tab.
-    unregisterLiveSession(session.info.id)
-    hooks.dispatchTerminalLifecycle({
-      kind: "exited",
-      sessionId: session.info.id,
-      projectId: session.info.projectId,
-      extensionId: session.info.extensionId,
-      exitCode: code,
-    })
-  })
+  // 4-5. Command capture + integration/exit → store wiring. Shared with
+  // the reload-reattach path (`lib/terminal/rehydrate.ts`).
+  wireSessionToStore(session, input.store, hooks)
 
   // 6. Audit the spawn.
   hooks.dispatchTerminalLifecycle({
@@ -211,6 +159,66 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
   })
 
   return { kind: "spawned", sessionId: session.info.id, shell: session.info.shell }
+}
+
+/**
+ * Wire a live session's events into the store: command capture (OSC 633
+ * has no command-line frame, so we infer it from input bytes), integration
+ * events → status / cwd / prompt / history, and exit → exit badge + audit
+ * + registry cleanup. Shared by `spawnFromDock` and the reload-reattach
+ * path so a reattached session behaves identically to a fresh one.
+ */
+export function wireSessionToStore(
+  session: TerminalSession,
+  store: TerminalStoreLike,
+  hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks()
+): void {
+  const capture = installCommandCapture(session)
+
+  session.onIntegration((event) => {
+    switch (event.kind) {
+      case "prompt_start":
+        store.pushPrompt(session.info.id, Date.now())
+        break
+      case "prompt_end":
+        store.closePrompt(session.info.id, Date.now())
+        break
+      case "command_start":
+        store.setSessionStatus(session.info.id, "running")
+        capture.markCommandStart()
+        break
+      case "command_end":
+        store.setSessionStatus(session.info.id, "idle")
+        store.pushCommand(session.info.id, {
+          cmd: capture.takeCapturedCommand(),
+          exitCode: event.exit_code,
+          endedAt: Date.now(),
+        })
+        // exit_code here is the LAST command's exit, not the shell
+        // process's exit; the row's exitCode is only set on session exit.
+        break
+      case "cwd_changed":
+        store.setSessionCwd(session.info.id, event.cwd)
+        break
+      default:
+        break
+    }
+  })
+
+  session.onExit((code) => {
+    store.setSessionExit(session.info.id, code)
+    // Best-effort cleanup so the registry doesn't leak handles for exited
+    // shells. The store row stays so the user sees the "exited" badge until
+    // they explicitly close the tab.
+    unregisterLiveSession(session.info.id)
+    hooks.dispatchTerminalLifecycle({
+      kind: "exited",
+      sessionId: session.info.id,
+      projectId: session.info.projectId,
+      extensionId: session.info.extensionId,
+      exitCode: code,
+    })
+  })
 }
 
 /**

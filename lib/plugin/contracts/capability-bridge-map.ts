@@ -57,6 +57,10 @@ import {
   registerAgentTeamTemplate,
   unregisterAgentTeamTemplatesByPlugin,
 } from "@/lib/plugin/registries/agent-team-template-registry"
+import {
+  registerSharedMemoryAdapter,
+  unregisterSharedMemoryAdaptersByPlugin,
+} from "@/lib/plugin/registries/shared-memory-adapter-registry"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -207,6 +211,19 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerAgentTeamTemplate(def.id, def as unknown as never, ctx)
     },
     unregisterAllByPlugin: unregisterAgentTeamTemplatesByPlugin,
+  },
+  "shared-memory-adapter": {
+    // Plugin contributes a bidirectional backing store for agent-team shared
+    // memory. Registered verbatim under its `id`; a team opts in via
+    // `team.config.sharedMemoryAdapterId`. Registering/dropping one may flip a
+    // team's `missing-shared-memory-adapter` audit warning, but that audit is
+    // refreshed centrally in the manager disable flow, so no inline refresh
+    // is needed here.
+    manifestField: "sharedMemoryAdapters",
+    registerEntry: (def, ctx) => {
+      registerSharedMemoryAdapter(def.id, def as unknown as never, ctx)
+    },
+    unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
   },
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

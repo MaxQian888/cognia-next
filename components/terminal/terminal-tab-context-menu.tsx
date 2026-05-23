@@ -40,6 +40,8 @@ export interface TerminalTabContextMenuProps {
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
   onToggleAgentTrust: (id: string, trusted: boolean) => void
+  /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
+  onLocateInChat?: (chatSessionId: string) => void
 }
 
 export function TerminalTabContextMenu({
@@ -50,6 +52,7 @@ export function TerminalTabContextMenu({
   onClose,
   onCloseOthers,
   onToggleAgentTrust,
+  onLocateInChat,
 }: TerminalTabContextMenuProps) {
   const t = useTranslations("terminal.tab.menu")
   return (
@@ -72,6 +75,17 @@ export function TerminalTabContextMenu({
         >
           {t("closeOthers")}
         </ContextMenuItem>
+        {row.agentSpawner && onLocateInChat ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => onLocateInChat(row.agentSpawner!)}
+              data-testid="terminal-tab-menu-locate"
+            >
+              {t("locateInChat")}
+            </ContextMenuItem>
+          </>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuCheckboxItem
           checked={row.agentTrusted}

@@ -66,7 +66,7 @@ import {
   type CustomModeConfig,
   type CustomModeCategory,
 } from "@/stores/agent/custom-mode-store"
-import { CustomModeEditor } from "@/components/agent/custom-mode-editor"
+import { CustomModeEditor } from "@/components/agent/mode/custom-mode-editor"
 
 // =============================================================================
 // Types

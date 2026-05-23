@@ -16,7 +16,7 @@ jest.mock("./inline-error", () => ({ InlineError: () => null }))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
-jest.mock("@/components/agent/external-agent-session-panel", () => ({
+jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
 }))
 jest.mock("next-intl", () => {

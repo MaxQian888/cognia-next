@@ -368,6 +368,7 @@ pub fn run() {
             settings::write_claude_local_settings,
             shell::shell_exec,
             terminal::commands::terminal_spawn,
+            terminal::commands::terminal_reattach,
             terminal::commands::terminal_write,
             terminal::commands::terminal_resize,
             terminal::commands::terminal_kill,

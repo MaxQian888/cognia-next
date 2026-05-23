@@ -38,6 +38,12 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: jest.fn(),
 }))
 
+jest.mock("@/lib/connectors/outbound-runner", () => ({
+  isInQuietHours: jest.fn(() => false),
+}))
+import { isInQuietHours } from "@/lib/connectors/outbound-runner"
+const isInQuietHoursMock = isInQuietHours as unknown as jest.Mock
+
 import * as bgManagerModule from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 const {
@@ -74,6 +80,7 @@ describe("delegation-orchestrator", () => {
       return controller.signal
     })
     executeAgentMock.mockResolvedValue({ text: "ok" })
+    isInQuietHoursMock.mockReturnValue(false)
   })
 
   describe("delegateToBackground", () => {
@@ -244,6 +251,90 @@ describe("delegation-orchestrator", () => {
     it("returns undefined for unknown delegationId", () => {
       const after = cancelDelegation("missing")
       expect(after).toBeUndefined()
+    })
+  })
+
+  describe("quiet-hours gating", () => {
+    const seedTeamWithQuietHours = (): string => {
+      const team = useAgentTeamStore.getState().createTeam({ name: "Quiet", task: "t" })
+      useAgentTeamStore.setState((s) => ({
+        teams: {
+          ...s.teams,
+          [team.id]: {
+            ...s.teams[team.id],
+            config: {
+              ...s.teams[team.id].config,
+              governancePolicy: {
+                approval: { requirePlanApproval: false, requireDelegationApproval: false },
+                budget: {
+                  tokenBudget: 0,
+                  warningThreshold: 0.8,
+                  criticalThreshold: 0.95,
+                  onCritical: "notify",
+                },
+                escalation: { allowOperatorPatternOverride: true, pauseOnHighRisk: false },
+                delivery: { quietHours: { from: "00:00", to: "23:59", tz: "UTC" } },
+              },
+            },
+          },
+        },
+      }))
+      return team.id
+    }
+
+    it("defers a background delegation to awaiting_approval during quiet hours", async () => {
+      isInQuietHoursMock.mockReturnValue(true)
+      const teamId = seedTeamWithQuietHours()
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: teamId,
+        sourceTaskId: "task-q",
+        prompt: "Investigate",
+        reason: "offline",
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      expect(delegation.metadata?.quietHoursDeferred).toBe(true)
+      expect(executeAgentMock).not.toHaveBeenCalled()
+      await completionPromise
+      expect(executeAgentMock).not.toHaveBeenCalled()
+    })
+
+    it("force=true launches a background delegation even during quiet hours", async () => {
+      isInQuietHoursMock.mockReturnValue(true)
+      const teamId = seedTeamWithQuietHours()
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: teamId,
+        sourceTaskId: "task-q",
+        prompt: "Investigate",
+        reason: "offline",
+        force: true,
+      })
+      expect(delegation.status).toBe("active")
+      await completionPromise
+      expect(executeAgentMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("defers an external delegation to awaiting_approval during quiet hours", () => {
+      isInQuietHoursMock.mockReturnValue(true)
+      const teamId = seedTeamWithQuietHours()
+      const delegation = delegateToExternal({
+        sourceTeamId: teamId,
+        sourceTaskId: "task-q",
+        targetAgentId: "claude-code",
+        reason: "handoff",
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      expect(delegation.metadata?.quietHoursDeferred).toBe(true)
+    })
+
+    it("does not gate when no quiet-hours policy is configured", async () => {
+      isInQuietHoursMock.mockReturnValue(true) // predicate would say yes, but no policy
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-no-policy",
+        sourceTaskId: "task-1",
+        prompt: "Go",
+        reason: "r",
+      })
+      expect(delegation.status).toBe("active")
     })
   })
 })

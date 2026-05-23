@@ -32,6 +32,18 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
+import { isInQuietHours } from "@/lib/connectors/outbound-runner"
+
+/**
+ * True when the team has a quiet-hours window configured and `now` falls
+ * inside it. Returns false when no policy is set so the common path is free.
+ */
+function isDelegationQuietGated(sourceTeamId: string, nowMs: number = Date.now()): boolean {
+  const quietHours =
+    useAgentTeamStore.getState().teams[sourceTeamId]?.config.governancePolicy?.delivery?.quietHours
+  if (!quietHours) return false
+  return isInQuietHours(nowMs, quietHours.from, quietHours.to, quietHours.tz)
+}
 
 export interface DelegateToBackgroundInput {
   sourceTeamId: string
@@ -47,6 +59,12 @@ export interface DelegateToBackgroundInput {
   metadata?: Record<string, unknown>
   /** Optional id of the background-agent run; defaults to nanoid. */
   backgroundAgentId?: string
+  /**
+   * Operator override — when true, launch even inside the team's quiet-hours
+   * window. Default false: a quiet-hours-gated delegation is deferred to
+   * `awaiting_approval` for the operator to release later.
+   */
+  force?: boolean
 }
 
 export interface DelegateToExternalInput {
@@ -56,6 +74,8 @@ export interface DelegateToExternalInput {
   targetAgentId: string
   reason: string
   metadata?: Record<string, unknown>
+  /** Operator override — launch even inside the quiet-hours window. */
+  force?: boolean
 }
 
 /** Build a fresh delegation record with the canonical lifecycle defaults. */
@@ -105,14 +125,18 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
   const store = useAgentTeamStore.getState()
   const hooks = getPluginLifecycleHooks()
   const agentId = input.backgroundAgentId ?? `bg_${nanoid(10)}`
+  // Defer to awaiting_approval when launched inside quiet hours without an
+  // explicit operator override — the operator releases it later.
+  const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
+  const deferred = Boolean(input.awaitingApproval) || quietDeferred
   const delegation = buildDelegation({
     sourceTeamId: input.sourceTeamId,
     sourceTaskId: input.sourceTaskId,
     targetType: "background",
     targetId: agentId,
     reason: input.reason,
-    metadata: input.metadata,
-    status: input.awaitingApproval ? "awaiting_approval" : "active",
+    metadata: quietDeferred ? { ...input.metadata, quietHoursDeferred: true } : input.metadata,
+    status: deferred ? "awaiting_approval" : "active",
   })
   store.upsertDelegation(delegation)
   hooks.dispatchOnTeamDelegationStart({
@@ -128,9 +152,9 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
   })
 
   const completionPromise = (async (): Promise<TeamDelegationRecord> => {
-    if (input.awaitingApproval) {
-      // The orchestrator user is responsible for transitioning out of
-      // awaiting_approval via `approveDelegation` / `cancelDelegation`.
+    if (deferred) {
+      // The operator transitions out of awaiting_approval via
+      // `approveDelegation` / `cancelDelegation`.
       return delegation
     }
     try {
@@ -169,14 +193,15 @@ export function delegateToBackground(input: DelegateToBackgroundInput): {
  */
 export function delegateToExternal(input: DelegateToExternalInput): TeamDelegationRecord {
   const store = useAgentTeamStore.getState()
+  const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
   const delegation = buildDelegation({
     sourceTeamId: input.sourceTeamId,
     sourceTaskId: input.sourceTaskId,
     targetType: "sub_agent",
     targetId: input.targetAgentId,
     reason: input.reason,
-    metadata: input.metadata,
-    status: "active",
+    metadata: quietDeferred ? { ...input.metadata, quietHoursDeferred: true } : input.metadata,
+    status: quietDeferred ? "awaiting_approval" : "active",
   })
   store.upsertDelegation(delegation)
   getPluginLifecycleHooks().dispatchOnTeamDelegationStart({

@@ -56,7 +56,7 @@ import {
   listAgentTeamTemplateEntries,
   type PluginAgentTeamTemplateWarning,
 } from "@/lib/plugin/registries/agent-team-template-registry"
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
 
 const log = createLogger("settings.agent-teams")
 
@@ -92,30 +92,6 @@ export function AgentTeamTemplatesSection() {
    * is `<pluginId>:<defId>` so plugin templates can never collide with
    * store-resident ids.
    */
-  const projectPluginTemplate = useCallback(
-    (entry: {
-      id: string
-      entry: PluginAgentTeamTemplateDef
-      pluginId?: string
-    }): AgentTeamTemplate => ({
-      id: entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id,
-      name: entry.entry.name,
-      description: entry.entry.description,
-      category: entry.entry.category,
-      teammates: entry.entry.teammates.map((tm) => ({
-        name: tm.name,
-        description: tm.description,
-        specialization: tm.specialization,
-        config: tm.config,
-      })),
-      taskTemplates: entry.entry.taskTemplates,
-      config: entry.entry.config,
-      icon: entry.entry.icon,
-      isBuiltIn: false,
-    }),
-    []
-  )
-
   // Built-ins first, then user templates by name, then plugin overlay
   // entries last. Within built-ins, group by category so related
   // templates sit together. Plugin entries carry source metadata in
@@ -149,7 +125,7 @@ export function AgentTeamTemplatesSection() {
       return a.name.localeCompare(b.name)
     })
     return { merged, pluginIndex }
-  }, [templates, projectPluginTemplate])
+  }, [templates])
 
   const handleUse = useCallback(
     (template: AgentTeamTemplate) => {
@@ -165,7 +141,12 @@ export function AgentTeamTemplatesSection() {
           name: tm.name,
           description: tm.description,
           role: "teammate",
-          config: tm.config,
+          config: {
+            ...tm.config,
+            systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
+            capabilities: tm.capabilities ?? tm.config?.capabilities,
+            specialization: tm.specialization ?? tm.config?.specialization,
+          },
         })
       }
       log.info("template_used", { templateId: template.id, teamId: team.id })

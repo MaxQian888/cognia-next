@@ -9,7 +9,7 @@ import en from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { AcpPermissionRequest, ExternalAgentInstance } from "@/types/agent/external-agent"
 
-import { ExternalAgentManager } from "./external-agent-manager"
+import { ExternalAgentManager } from "./manager"
 
 const mockUseExternalAgent = jest.fn()
 
@@ -44,19 +44,19 @@ jest.mock("@/components/ai-elements/code-block", () => ({
   CodeBlock: ({ code }: { code: string }) => <pre data-testid="code-block">{code}</pre>,
 }))
 
-jest.mock("./external-agent-commands", () => ({
+jest.mock("./commands", () => ({
   ExternalAgentCommands: ({ commands }: { commands: Array<{ name: string }> }) => (
     <div data-testid="commands">{commands.map((c) => c.name).join(",")}</div>
   ),
 }))
 
-jest.mock("./external-agent-plan", () => ({
+jest.mock("./plan", () => ({
   ExternalAgentPlan: ({ entries }: { entries: Array<{ content: string }> }) => (
     <div data-testid="plan">{entries.map((e) => e.content).join(",")}</div>
   ),
 }))
 
-jest.mock("./external-agent-config-options", () => ({
+jest.mock("./config-options", () => ({
   ExternalAgentConfigOptions: () => <div data-testid="config-options" />,
 }))
 

@@ -15,7 +15,10 @@ import {
   PluginLifecycleHooks,
   HookDispatcher,
   getPluginEventHooks,
+  getRecentPluginHookErrors,
+  __resetPluginHookErrorsForTesting,
 } from "./hooks-system"
+import type { PluginTeamStartPayload } from "@/types/plugin"
 import type {
   PromptSubmitContext,
   PromptSubmitResult,
@@ -945,4 +948,69 @@ describe("HookDispatcher deterministic ordering", () => {
       expect(secondRun).toEqual(firstRun)
     })
   }
+})
+
+describe("PluginLifecycleHooks - Team hook isolation (fire-and-forget)", () => {
+  const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  const payload: PluginTeamStartPayload = {
+    teamId: "team-1",
+    runId: "run-1",
+    workers: [{ id: "lead", name: "Lead", role: "lead" }],
+    taskCount: 1,
+  }
+
+  beforeEach(() => {
+    __resetPluginHookErrorsForTesting()
+  })
+
+  it("defers handler execution to a microtask (does not run synchronously)", async () => {
+    const hooks = new PluginLifecycleHooks()
+    const onTeamStart = jest.fn()
+    hooks.registerHooks("p-defer", { onTeamStart })
+
+    hooks.dispatchOnTeamStart(payload)
+    expect(onTeamStart).not.toHaveBeenCalled() // queued, not yet run
+
+    await flushMicrotasks()
+    expect(onTeamStart).toHaveBeenCalledWith(payload)
+  })
+
+  it("isolates a throwing plugin so siblings on the same hook still run", async () => {
+    const hooks = new PluginLifecycleHooks()
+    const good = jest.fn()
+    const bad = jest.fn(() => {
+      throw new Error("plugin blew up")
+    })
+    hooks.registerHooks("p-bad", { onTeamStart: bad })
+    hooks.registerHooks("p-good", { onTeamStart: good })
+
+    hooks.dispatchOnTeamStart(payload)
+    await flushMicrotasks()
+
+    expect(bad).toHaveBeenCalledTimes(1)
+    expect(good).toHaveBeenCalledTimes(1)
+
+    const errors = getRecentPluginHookErrors()
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      pluginId: "p-bad",
+      hookName: "onTeamStart",
+      message: "plugin blew up",
+    })
+  })
+
+  it("caps the error ring buffer at 256 records", async () => {
+    const hooks = new PluginLifecycleHooks()
+    hooks.registerHooks("p-spam", {
+      onTeamStart: () => {
+        throw new Error("boom")
+      },
+    })
+    for (let i = 0; i < 300; i += 1) {
+      hooks.dispatchOnTeamStart(payload)
+    }
+    await flushMicrotasks()
+    expect(getRecentPluginHookErrors().length).toBe(256)
+  })
 })

@@ -21,21 +21,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 
@@ -47,6 +34,8 @@ import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
 import { MemorySection } from "./settings/section-memory"
+import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
+import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
 
 const log = createLogger("agentTeams.settings")
 
@@ -59,58 +48,8 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   const tCommon = useTranslations("agentTeamsWorkspace")
   const router = useRouter()
 
-  const updateTeam = useAgentTeamStore((s) => s.updateTeam)
-  const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
-
-  // Overview-section local state. Persisted on explicit Save (matches the
-  // pre-refactor UX). The other sections persist eagerly through the store.
-  const [name, setName] = useState(team.name)
-  const [description, setDescription] = useState(team.description ?? "")
-  const [executionMode, setExecutionMode] = useState<string>(
-    team.config.executionMode ?? "coordinated"
-  )
-  const [executionPattern, setExecutionPattern] = useState<string>(
-    team.config.preferredExecutionPattern ?? "manager_worker"
-  )
-  const [maxConcurrent, setMaxConcurrent] = useState(
-    String(team.config.maxConcurrentTeammates ?? 5)
-  )
-  const [tokenBudget, setTokenBudget] = useState(String(team.config.tokenBudget ?? 0))
-  const [autoShutdown, setAutoShutdown] = useState(team.config.autoShutdown ?? true)
-  const [enableMessaging, setEnableMessaging] = useState(team.config.enableMessaging ?? true)
-  const [requirePlanApproval, setRequirePlanApproval] = useState(
-    team.config.requirePlanApproval ?? false
-  )
-  const [maxRetries, setMaxRetries] = useState(String(team.config.maxRetries ?? 3))
-  const [deleteConfirmText, setDeleteConfirmText] = useState("")
-  const [saving, setSaving] = useState(false)
-
-  const handleSave = () => {
-    setSaving(true)
-    try {
-      updateTeam(team.id, {
-        name: name.trim() || team.name,
-        description: description.trim() || undefined,
-      })
-      updateTeamConfig(team.id, {
-        ...team.config,
-        executionMode: executionMode as AgentTeam["config"]["executionMode"],
-        preferredExecutionPattern:
-          executionPattern as AgentTeam["config"]["preferredExecutionPattern"],
-        maxConcurrentTeammates: Math.max(1, parseInt(maxConcurrent, 10) || 5),
-        tokenBudget: parseInt(tokenBudget, 10) || 0,
-        autoShutdown: autoShutdown,
-        enableMessaging: enableMessaging,
-        requirePlanApproval: requirePlanApproval,
-        maxRetries: Math.max(0, parseInt(maxRetries, 10) || 0),
-      })
-      log.info("team_settings_updated", { id: team.id })
-      toast.success(t("saved"))
-    } finally {
-      setSaving(false)
-    }
-  }
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const handleDelete = () => {
     deleteTeam(team.id)
@@ -121,40 +60,14 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
 
   return (
     <div className="space-y-4" data-testid="workspace-settings">
+      <SettingsSaveIndicator teamId={team.id} />
       <Accordion type="multiple" defaultValue={["overview"]} className="space-y-2">
         <AccordionItem value="overview" className="border-none">
           <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
             {t("accordion.overview")}
           </AccordionTrigger>
           <AccordionContent className="pt-3">
-            <OverviewSection
-              team={team}
-              name={name}
-              setName={setName}
-              description={description}
-              setDescription={setDescription}
-              executionMode={executionMode}
-              setExecutionMode={setExecutionMode}
-              executionPattern={executionPattern}
-              setExecutionPattern={setExecutionPattern}
-              maxConcurrent={maxConcurrent}
-              setMaxConcurrent={setMaxConcurrent}
-              tokenBudget={tokenBudget}
-              setTokenBudget={setTokenBudget}
-              autoShutdown={autoShutdown}
-              setAutoShutdown={setAutoShutdown}
-              enableMessaging={enableMessaging}
-              setEnableMessaging={setEnableMessaging}
-              requirePlanApproval={requirePlanApproval}
-              setRequirePlanApproval={setRequirePlanApproval}
-              maxRetries={maxRetries}
-              setMaxRetries={setMaxRetries}
-            />
-            <div className="flex justify-end pt-2">
-              <Button size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? t("saving") : t("save")}
-              </Button>
-            </div>
+            <OverviewSection team={team} />
           </AccordionContent>
         </AccordionItem>
 
@@ -195,38 +108,21 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           <p className="text-sm font-medium text-destructive">{t("dangerZone")}</p>
         </div>
         <p className="text-xs text-muted-foreground">{t("deleteWarning")}</p>
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive" size="sm">
-              {t("deleteAction")}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{tCommon("deleteTeam")}</AlertDialogTitle>
-              <AlertDialogDescription>{t("deleteWarning")}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="space-y-1">
-              <Label className="text-xs">{t("typeToConfirm", { name: team.name })}</Label>
-              <Input
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder={team.name}
-                className="h-8 text-xs"
-              />
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                disabled={deleteConfirmText !== team.name}
-                onClick={handleDelete}
-              >
-                {t("deleteAction")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+          {t("deleteAction")}
+        </Button>
+        <ConfirmActionDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title={tCommon("deleteTeam")}
+          description={t("deleteWarning")}
+          confirmLabel={t("deleteAction")}
+          cancelLabel={t("cancel")}
+          typeToConfirm={team.name}
+          typeToConfirmLabel={t("typeToConfirm", { name: team.name })}
+          typeToConfirmPlaceholder={team.name}
+          onConfirm={handleDelete}
+        />
       </Card>
     </div>
   )

@@ -7,7 +7,14 @@
     "dock": {
       "newSession": "新建终端",
       "closePanel": "关闭面板",
+      "closePane": "关闭分屏",
       "resize": "拖动调整终端 dock 高度（方向键亦可）"
+    },
+    "fileViewer": {
+      "title": "文件查看器",
+      "description": "只读源码预览",
+      "loading": "加载中…",
+      "error": "打开文件失败：{message}"
     },
     "tab": {
       "close": "关闭终端",
@@ -22,7 +29,8 @@
         "restart": "重启",
         "close": "关闭",
         "closeOthers": "关闭其他",
-        "trustAgent": "信任此 tab 的智能体"
+        "trustAgent": "信任此 tab 的智能体",
+        "locateInChat": "在对话中定位"
       },
       "rename": {
         "label": "重命名终端 tab",
@@ -45,6 +53,7 @@
       "blank": "（空）",
       "copy": "复制命令",
       "rerun": "重新运行",
+      "locateInChat": "在对话中定位",
       "status": {
         "ok": "已正常退出",
         "error": "退出码非零",
@@ -207,7 +216,28 @@
       "report": {
         "title": "执行报告",
         "status": "状态：{status}",
-        "emptyCheckpoints": "本次运行尚未记录任何检查点。"
+        "emptyCheckpoints": "本次运行尚未记录任何检查点。",
+        "kpi": {
+          "duration": "时长",
+          "tokens": "总 Token",
+          "successRate": "成功率",
+          "escalations": "升级次数"
+        },
+        "taskline": {
+          "title": "任务时间线",
+          "empty": "未记录委派分段。",
+          "tooltip": "{title} · {start} → {end}"
+        },
+        "tokenBurn": {
+          "title": "Token 消耗",
+          "empty": "尚未记录 Token 使用。"
+        },
+        "pluginSlot": {
+          "placeholder": "插件可在此渲染自定义分析。可从插件市场安装。"
+        },
+        "checkpoints": {
+          "toggle": "检查点时间线"
+        }
       }
     },
     "consensus": {
@@ -305,6 +335,35 @@
         "governance": "治理",
         "memory": "共享内存"
       },
+      "saveIndicator": {
+        "savedJustNow": "已保存",
+        "savedSecondsAgo": "已保存 · {seconds} 秒前",
+        "unsaved": "未变更",
+        "auditNow": "立即审核",
+        "auditUnavailable": "审核器未就绪",
+        "auditCompleted": "审核完成 · {count} 个失效 id"
+      },
+      "confirm": {
+        "confirmLabel": "确认",
+        "cancelLabel": "取消",
+        "typeToConfirm": "输入 \"{value}\" 以确认",
+        "onCritical": {
+          "title": "更改严重阈值动作？",
+          "description": "选择\"暂停以待审核\"或\"切换到后台\"会改变运行时在严重预算阈值处的阻断方式。"
+        },
+        "clearMemory": {
+          "title": "清空共享内存？",
+          "description": "此操作会永久删除该团队的所有共享内存条目。"
+        },
+        "forceResolve": {
+          "title": "强制解决共识？",
+          "description": "将以 lead 的强制裁定解决该投票，忽略未投出的票。"
+        },
+        "removeTeammate": {
+          "title": "移除队友？",
+          "description": "此操作会将该队友移出团队，其认领的任务将被释放。"
+        }
+      },
       "plugins": {
         "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
       },
@@ -347,7 +406,53 @@
         "empty": "暂无共享内存条目。",
         "clearAll": "清空",
         "deleteEntry": "删除 \"{key}\"",
-        "writtenBy": "由 {name} 写入 · {when}"
+        "writtenBy": "由 {name} 写入 · {when}",
+        "addEntry": "新增条目",
+        "composer": {
+          "titleCreate": "新建内存条目",
+          "titleEdit": "编辑内存条目",
+          "key": "键",
+          "value": "值",
+          "parseJson": "按 JSON 解析值",
+          "invalidJson": "值不是有效的 JSON。",
+          "tags": "标签",
+          "tagsPlaceholder": "输入标签后按回车",
+          "expiresAt": "过期时间（可选）",
+          "readableBy": "可读成员",
+          "readableByAll": "全部队友（留空）",
+          "submit": "保存条目",
+          "cancel": "取消",
+          "piiBlocked": "写入被拦截：值中包含 PII。"
+        },
+        "filter": {
+          "writer": "写入者",
+          "tags": "标签",
+          "dateRange": "时间范围",
+          "text": "搜索键或值",
+          "reset": "重置筛选",
+          "empty": "没有条目匹配当前筛选。"
+        },
+        "detail": {
+          "title": "内存条目",
+          "copy": "复制值",
+          "copied": "已复制",
+          "edit": "编辑",
+          "delete": "删除"
+        },
+        "acl": {
+          "operatorBadge": "操作员视图 — 全部条目",
+          "aclHint": "\"可读成员\"留空表示所有队友都可读取该条目。"
+        },
+        "adapter": {
+          "label": "后端存储",
+          "configure": "配置",
+          "sync": "立即同步",
+          "noAdapter": "仅本地",
+          "unset": "（无）",
+          "synced": "已同步 {count} 条",
+          "syncFailed": "同步失败",
+          "pickerTitle": "共享内存后端存储"
+        }
       }
     },
     "planApproval": {
@@ -358,6 +463,7 @@
       "noPlan": "尚未提交计划。"
     },
     "templates": {
+      "missingDependencies": "缺失 {count} 项依赖",
       "categories": {
         "review": "评审",
         "research": "研究",

@@ -139,6 +139,22 @@ export interface TeamGovernancePolicy {
     allowOperatorPatternOverride: boolean
     pauseOnHighRisk: boolean
   }
+  /**
+   * Optional delivery policy. When `quietHours` is set, delegations launched
+   * during the window are deferred to `awaiting_approval` unless the operator
+   * forces them through. Reuses the connector quiet-hours predicate
+   * (`lib/connectors/outbound-runner.ts:isInQuietHours`).
+   */
+  delivery?: {
+    quietHours?: {
+      /** Local start time, "HH:MM". */
+      from: string
+      /** Local end time, "HH:MM". */
+      to: string
+      /** IANA timezone, e.g. "Asia/Shanghai". */
+      tz: string
+    }
+  }
 }
 
 // ============================================================================
@@ -309,6 +325,13 @@ export interface AgentTeamConfig {
    * Undefined or empty fields produce empty resolved arrays.
    */
   capabilities?: TeamCapabilityBundle
+  /**
+   * Optional id of the plugin-contributed shared-memory adapter this team
+   * mirrors its KV into (see `shared-memory-adapter-registry`). Undefined =
+   * local-only (Zustand). When set, `publishEntry` / `deleteEntry` mirror to
+   * the adapter and `syncSharedMemoryFromAdapter` can pull remote changes.
+   */
+  sharedMemoryAdapterId?: string
 }
 
 /**
@@ -1125,6 +1148,16 @@ export interface AgentTeamTemplate {
     description: string
     specialization?: string
     config?: TeammateConfig
+    /** Optional teammate-specific system prompt (wins over config.systemPrompt). */
+    systemPrompt?: string
+    /** Per-teammate capability overlay applied on top of the team pool. */
+    capabilities?: TeammateCapabilityOverlay
+    /** Optional per-teammate governance hints (opt-in apply in the preview). */
+    governanceHints?: Partial<TeamGovernancePolicy>
+    /** Display-only tags shown on the teammate row in the template preview. */
+    tags?: string[]
+    /** Lucide icon name for the teammate row. */
+    iconKey?: string
   }>
   /** Default tasks */
   taskTemplates?: Array<{

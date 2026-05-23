@@ -26,6 +26,7 @@ import {
   type SendMessageInput,
   type StructuredMessagePayload,
 } from "@/types/agent/agent-team"
+import type { CapabilityAuditWarning } from "@/lib/ai/agent/team/capability-audit"
 
 export interface AgentTeamState {
   // Data
@@ -38,6 +39,12 @@ export interface AgentTeamState {
   consensus: Record<string, ConsensusRequest>
   sharedMemory: Record<string, Record<string, SharedMemoryEntry>>
   delegations: Record<string, TeamDelegationRecord>
+  /**
+   * Per-(teamId, adapterId) cursor of the last shared-memory version pulled
+   * from a shared-memory adapter. Persisted; advanced by
+   * `setAdapterSyncVersion` after each reverse sync.
+   */
+  lastAdapterSyncVersion: Record<string, Record<string, number>>
 
   // UI State
   activeTeamId: string | null
@@ -62,6 +69,16 @@ export interface AgentTeamState {
    * the patch are preserved.
    */
   updateTeamCapabilities: (teamId: string, bundle: TeamCapabilityBundle) => void
+  /**
+   * Strip stale capability ids (those an audit flagged as unresolvable, e.g.
+   * after a contributing plugin was disabled) from a team's default bundle or
+   * a teammate's overlay. `target` selects the scope; `warnings` is the audit
+   * output from `lib/ai/agent/team/capability-audit.ts`.
+   */
+  clearStaleCapabilityIds: (
+    target: { teamId: string } | { teammateId: string },
+    warnings: CapabilityAuditWarning[]
+  ) => void
   deleteTeam: (teamId: string) => void
   setTeamStatus: (teamId: string, status: TeamStatus) => void
 
@@ -148,6 +165,8 @@ export interface AgentTeamState {
   writeSharedMemory: (teamId: string, key: string, entry: SharedMemoryEntry) => void
   deleteSharedMemory: (teamId: string, key: string) => void
   clearTeamSharedMemory: (teamId: string) => void
+  /** Persist the last shared-memory version pulled from `adapterId` for `teamId`. */
+  setAdapterSyncVersion: (teamId: string, adapterId: string, version: number) => void
 
   // Delegations
   upsertDelegation: (delegation: TeamDelegationRecord) => void

@@ -124,6 +124,7 @@ mod tests {
             killer: std::sync::Mutex::new(make_dummy_killer()),
             tempdir: None,
             replay: Arc::new(ReplayBuffer::new()),
+            channel_slot: session::detached_desk_channel(),
         };
         Arc::new(session)
     }

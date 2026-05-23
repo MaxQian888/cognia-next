@@ -42,6 +42,48 @@ import type { Artifact } from "@/types/artifact/artifact"
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
 
 // =============================================================================
+// Plugin hook failure telemetry
+// =============================================================================
+
+/** A single captured plugin-hook failure, surfaced in the Settings panel. */
+export interface PluginHookErrorRecord {
+  pluginId: string
+  hookName: string
+  message: string
+  at: number
+}
+
+const PLUGIN_HOOK_ERROR_BUFFER_CAP = 256
+const pluginHookErrors: PluginHookErrorRecord[] = []
+
+/**
+ * Record a plugin-hook failure into a bounded ring buffer. Called from the
+ * isolated per-plugin try/catch in `dispatchTeamHook` so one misbehaving
+ * plugin's errors are observable without crashing the team runtime.
+ */
+export function recordPluginHookError(pluginId: string, hookName: string, error: unknown): void {
+  pluginHookErrors.push({
+    pluginId,
+    hookName,
+    message: error instanceof Error ? error.message : String(error),
+    at: Date.now(),
+  })
+  if (pluginHookErrors.length > PLUGIN_HOOK_ERROR_BUFFER_CAP) {
+    pluginHookErrors.splice(0, pluginHookErrors.length - PLUGIN_HOOK_ERROR_BUFFER_CAP)
+  }
+}
+
+/** Snapshot of recent plugin-hook failures (newest last). */
+export function getRecentPluginHookErrors(): readonly PluginHookErrorRecord[] {
+  return [...pluginHookErrors]
+}
+
+/** Test-only: clear the captured plugin-hook failure buffer. */
+export function __resetPluginHookErrorsForTesting(): void {
+  pluginHookErrors.length = 0
+}
+
+// =============================================================================
 // Unified Types
 // =============================================================================
 
@@ -762,6 +804,13 @@ export class PluginLifecycleHooks {
    * Generic helper used by all team-context hooks. Each dispatcher below
    * narrows the hook handler signature to its specific payload type — this
    * keeps the per-hook code one-liner-thin while preserving type safety.
+   *
+   * Team hooks are fire-and-forget: each plugin's handler runs in its own
+   * `queueMicrotask` so (a) the runtime path that fired the hook never blocks
+   * on a slow plugin, and (b) a handler side-effect (e.g. a Zustand setState)
+   * can't synchronously re-enter the dispatcher. Each handler is isolated in
+   * its own try/catch — one throwing plugin never starves the others, and the
+   * failure is recorded for the Settings "recent plugin failures" panel.
    */
   private dispatchTeamHook<K extends keyof PluginHooks>(
     name: K,
@@ -770,13 +819,15 @@ export class PluginLifecycleHooks {
     for (const pluginId of this.hookExecutionOrder) {
       const registered = this.registeredHooks.get(pluginId)
       const handler = registered?.hooks[name] as ((p: typeof payload) => void) | undefined
-      if (handler) {
+      if (!handler) continue
+      queueMicrotask(() => {
         try {
           handler(payload)
         } catch (error) {
           loggers.hooks.error(`Error in plugin ${pluginId} ${name}:`, error)
+          recordPluginHookError(pluginId, String(name), error)
         }
-      }
+      })
     }
   }
 

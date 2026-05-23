@@ -14,7 +14,7 @@
  * the vote buttons are disabled with a hint.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 
@@ -33,6 +33,21 @@ import {
   castVote,
   resolveConsensus,
 } from "@/lib/ai/agent/team/consensus-orchestrator"
+import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
+
+/** Lowest-index option leading the raw vote count. Ties fall to lowest index. */
+function leadingOption(row: ConsensusRequest): number {
+  let lead = 0
+  let leadCount = -1
+  for (let i = 0; i < row.options.length; i += 1) {
+    const c = row.votes.filter((v) => v.optionIndex === i).length
+    if (c > leadCount) {
+      lead = i
+      leadCount = c
+    }
+  }
+  return lead
+}
 
 function statusVariant(
   status: ConsensusRequest["status"]
@@ -53,11 +68,13 @@ function statusVariant(
 
 export function ConsensusPanel() {
   const t = useTranslations("agentTeamsWorkspace.consensus")
+  const tConfirm = useTranslations("agentTeamsWorkspace.settings.confirm")
   // selectActiveTeamConsensus materialises a new array each call; useShallow
   // makes the subscriber bail out when the contents are reference-equal, so
   // the panel doesn't re-render every store update.
   const consensus = useAgentTeamStore(useShallow(selectActiveTeamConsensus))
   const selectedTeammateId = useAgentTeamStore(selectSelectedTeammateId)
+  const [pendingResolve, setPendingResolve] = useState<{ id: string; lead: number } | null>(null)
 
   const ordered = useMemo(
     () =>
@@ -133,20 +150,7 @@ export function ConsensusPanel() {
                       <Button
                         size="sm"
                         variant="default"
-                        onClick={() => {
-                          // Lead override: pick whichever option currently
-                          // leads in raw count; ties fall to lowest index.
-                          let lead = 0
-                          let leadCount = -1
-                          for (let i = 0; i < row.options.length; i += 1) {
-                            const c = row.votes.filter((v) => v.optionIndex === i).length
-                            if (c > leadCount) {
-                              lead = i
-                              leadCount = c
-                            }
-                          }
-                          resolveConsensus(row.id, lead)
-                        }}
+                        onClick={() => setPendingResolve({ id: row.id, lead: leadingOption(row) })}
                       >
                         {t("forceResolve")}
                       </Button>
@@ -164,6 +168,22 @@ export function ConsensusPanel() {
           </div>
         </ScrollArea>
       )}
+
+      <ConfirmActionDialog
+        open={pendingResolve !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingResolve(null)
+        }}
+        title={tConfirm("forceResolve.title")}
+        description={tConfirm("forceResolve.description")}
+        confirmLabel={tConfirm("confirmLabel")}
+        cancelLabel={tConfirm("cancelLabel")}
+        tone="warning"
+        onConfirm={() => {
+          if (pendingResolve) resolveConsensus(pendingResolve.id, pendingResolve.lead)
+          setPendingResolve(null)
+        }}
+      />
     </Card>
   )
 }

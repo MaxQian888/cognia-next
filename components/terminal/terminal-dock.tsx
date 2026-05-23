@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { PlusIcon, XIcon } from "lucide-react"
 
@@ -29,13 +30,16 @@ import { Button } from "@/components/ui/button"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
 import { killFromDock, restartFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
+import { FileViewerDialog } from "./file-viewer-dialog"
 import { TerminalEmptyState } from "./terminal-empty-state"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
-import { TerminalInstance, type TerminalInstanceHandle } from "./terminal-instance"
+import { type TerminalInstanceHandle } from "./terminal-instance"
+import { TerminalPaneGroup } from "./terminal-pane-group"
 import { TerminalSearchOverlay } from "./terminal-search-overlay"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
@@ -46,9 +50,11 @@ export function TerminalDock() {
   const setPanelOpen = useTerminalStore((s) => s.setPanelOpen)
   const sessions = useTerminalStore((s) => s.sessions)
   const activeByProject = useTerminalStore((s) => s.activeSessionIdByProject)
+  const splitPanes = useTerminalStore((s) => s.splitPanes)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
   const renameSession = useTerminalStore((s) => s.renameSession)
   const setAgentTrusted = useTerminalStore((s) => s.setAgentTrusted)
+  const addPaneToGroup = useTerminalStore((s) => s.addPaneToGroup)
 
   const setPanelHeight = useTerminalStore((s) => s.setPanelHeight)
 
@@ -63,15 +69,30 @@ export function TerminalDock() {
 
   const projectKey = activeProjectId ?? ""
   const tabs = useMemo<TerminalSessionRow[]>(() => {
+    // Tab strip lists group anchors only — split-pane members are hidden
+    // (they render inside their anchor's TerminalPaneGroup).
+    const isGroupMember = (id: string) =>
+      Object.values(splitPanes).some((members) => members.includes(id))
     return Object.values(sessions)
       .filter((row) => (row.projectId ?? "") === projectKey)
+      .filter((row) => !isGroupMember(row.id))
       .sort((a, b) => a.createdAt - b.createdAt)
-  }, [sessions, projectKey])
+  }, [sessions, splitPanes, projectKey])
 
   const activeId = activeByProject[projectKey] ?? null
   const activeRow = activeId ? sessions[activeId] : undefined
 
-  const instanceRef = useRef<TerminalInstanceHandle | null>(null)
+  // The pane group reports which pane is focused; the search overlay,
+  // history rail and command-jump keys all target that pane.
+  const focusedHandleRef = useRef<TerminalInstanceHandle | null>(null)
+  const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null)
+  const onFocusedChange = useCallback(
+    (sessionId: string, handle: TerminalInstanceHandle | null) => {
+      focusedHandleRef.current = handle
+      setFocusedSessionId(sessionId)
+    },
+    []
+  )
   const [searchOpen, setSearchOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
@@ -96,8 +117,18 @@ export function TerminalDock() {
     })
   }, [project, activeProjectId, settingsTerminalShell])
 
-  const handleClose = useCallback((id: string) => {
+  // Close a single split pane — kills just that session; the group's
+  // other panes (and the tab) survive via the store's anchor-promotion.
+  const handleClosePane = useCallback((id: string) => {
     void killFromDock(id, useTerminalStore.getState())
+  }, [])
+
+  // Close a whole tab — kills every pane in the group.
+  const handleCloseTab = useCallback((anchorId: string) => {
+    const state = useTerminalStore.getState()
+    for (const paneId of state.panesForGroup(anchorId)) {
+      void killFromDock(paneId, state)
+    }
   }, [])
 
   const handleSelect = useCallback(
@@ -108,28 +139,73 @@ export function TerminalDock() {
   )
 
   const handleRestart = useCallback((id: string) => {
-    const term = instanceRef.current
-    const rows = 24
-    const cols = 80
     void restartFromDock({
       sessionId: id,
       store: useTerminalStore.getState(),
-      rows,
-      cols,
+      rows: 24,
+      cols: 80,
     })
-    // term ref is exposed for future spatial-aware respawn; not used here.
-    void term
   }, [])
 
   const handleCloseOthers = useCallback(
-    (id: string) => {
+    (anchorId: string) => {
       const state = useTerminalStore.getState()
-      const others = state.sessionsForProject(activeProjectId).filter((row) => row.id !== id)
+      const others = state.tabsForProject(activeProjectId).filter((row) => row.id !== anchorId)
       for (const row of others) {
-        void killFromDock(row.id, state)
+        for (const paneId of state.panesForGroup(row.id)) {
+          void killFromDock(paneId, state)
+        }
       }
     },
     [activeProjectId]
+  )
+
+  // Split the active tab: spawn a fresh session and attach it to the
+  // active group as a pane. `direction` "row" = side-by-side, "col" =
+  // stacked (mirrors the whole group's orientation).
+  const handleSplit = useCallback(
+    async (direction: "row" | "col") => {
+      const state = useTerminalStore.getState()
+      const anchor = state.activeSessionIdByProject[projectKey] ?? null
+      if (!anchor) return
+      const shell = resolveDefaultShell({
+        projectShell: project?.terminalConfig?.shell,
+        settingShell: settingsTerminalShell,
+      })
+      const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
+      const outcome = await spawnFromDock({
+        req: {
+          shell,
+          rows: 24,
+          cols: 80,
+          cwd,
+          env: project?.terminalConfig?.env,
+          projectId: activeProjectId ?? undefined,
+          enableShellIntegration: true,
+        },
+        store: useTerminalStore.getState(),
+      })
+      if (outcome.kind === "spawned") {
+        addPaneToGroup(anchor, outcome.sessionId, direction)
+      }
+    },
+    [project, activeProjectId, settingsTerminalShell, projectKey, addPaneToGroup]
+  )
+
+  // Alt+Arrow cycles focus through the panes of the active group.
+  const handleMoveFocus = useCallback(
+    (delta: 1 | -1) => {
+      const state = useTerminalStore.getState()
+      const anchor = state.activeSessionIdByProject[projectKey] ?? null
+      if (!anchor) return
+      const panes = state.panesForGroup(anchor)
+      if (panes.length < 2) return
+      const stored = state.focusedPaneByAnchor[anchor]
+      const current = stored && panes.includes(stored) ? stored : anchor
+      const nextIdx = (panes.indexOf(current) + delta + panes.length) % panes.length
+      state.setFocusedPane(anchor, panes[nextIdx])
+    },
+    [projectKey]
   )
 
   const handleToggleTrust = useCallback(
@@ -137,6 +213,18 @@ export function TerminalDock() {
       setAgentTrusted(id, trusted)
     },
     [setAgentTrusted]
+  )
+
+  // Locate the chat session that spawned an agent-driven terminal tab.
+  // The dock is global across routes, so switch the active chat session
+  // AND navigate to the chat view (root route).
+  const router = useRouter()
+  const handleLocateInChat = useCallback(
+    (chatSessionId: string) => {
+      useChatStore.getState().setActiveSession(chatSessionId)
+      router.push("/")
+    },
+    [router]
   )
 
   const handleRename = useCallback((id: string) => {
@@ -198,7 +286,7 @@ export function TerminalDock() {
         tabs={tabs}
         activeId={activeId}
         onSelect={handleSelect}
-        onClose={handleClose}
+        onClose={handleCloseTab}
         testId="terminal-dock-tabs"
         trailing={
           <>
@@ -240,28 +328,54 @@ export function TerminalDock() {
               row={activeRow}
               onRename={handleRename}
               onRestart={handleRestart}
-              onClose={handleClose}
+              onClose={handleCloseTab}
               onCloseOthers={handleCloseOthers}
               onToggleAgentTrust={handleToggleTrust}
+              onLocateInChat={handleLocateInChat}
             >
               <div
                 className="h-full w-full"
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+                  const mod = e.ctrlKey || e.metaKey
+                  if (mod && (e.key === "f" || e.key === "F")) {
                     e.preventDefault()
                     setSearchOpen(true)
+                  } else if (mod && e.key === "\\") {
+                    e.preventDefault()
+                    void handleSplit(e.shiftKey ? "col" : "row")
+                  } else if (mod && e.key === "ArrowUp") {
+                    e.preventDefault()
+                    focusedHandleRef.current?.jumpToPrevCommand()
+                  } else if (mod && e.key === "ArrowDown") {
+                    e.preventDefault()
+                    focusedHandleRef.current?.jumpToNextCommand()
+                  } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowUp")) {
+                    e.preventDefault()
+                    handleMoveFocus(-1)
+                  } else if (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowDown")) {
+                    e.preventDefault()
+                    handleMoveFocus(1)
                   }
                 }}
               >
-                <TerminalInstance ref={instanceRef} sessionId={activeRow.id} />
+                <TerminalPaneGroup
+                  anchorId={activeRow.id}
+                  onFocusedChange={onFocusedChange}
+                  onClosePane={handleClosePane}
+                />
               </div>
             </TerminalTabContextMenu>
             <TerminalSearchOverlay
               open={searchOpen}
               onClose={() => setSearchOpen(false)}
-              instanceRef={instanceRef}
+              instanceRef={focusedHandleRef}
             />
-            <TerminalHistoryPanel sessionId={activeRow.id} />
+            <TerminalHistoryPanel
+              sessionId={
+                focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id
+              }
+              onLocateInChat={handleLocateInChat}
+            />
             {renameTarget === activeRow.id ? (
               <DockRenameOverlay
                 row={activeRow}
@@ -274,6 +388,8 @@ export function TerminalDock() {
           <TerminalEmptyState variant={emptyVariant} onNew={handleNew} />
         )}
       </div>
+      {/* Read-only viewer for clicked terminal file links (1D). */}
+      <FileViewerDialog />
     </div>
   )
 }

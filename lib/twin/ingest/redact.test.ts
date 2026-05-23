@@ -6,7 +6,7 @@
  *   3. zero PII in the redacted output (`hasNoLeakingPii` returns true)
  */
 
-import { hasNoLeakingPii, redactText, unredactText } from "./redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText, unredactText } from "./redact"
 
 describe("redactText", () => {
   it("redacts emails and round-trips perfectly", () => {
@@ -182,5 +182,44 @@ describe("redactText — extended PII coverage", () => {
     expect(hasNoLeakingPii("Server at 8.8.8.8")).toBe(false)
     expect(hasNoLeakingPii("clean text")).toBe(true)
     expect(hasNoLeakingPii("clean text")).toBe(true)
+  })
+})
+
+describe("hasNoLeakingPiiDeep", () => {
+  it("passes clean primitives and structures", () => {
+    expect(hasNoLeakingPiiDeep(null)).toBe(true)
+    expect(hasNoLeakingPiiDeep(undefined)).toBe(true)
+    expect(hasNoLeakingPiiDeep(42)).toBe(true)
+    expect(hasNoLeakingPiiDeep(true)).toBe(true)
+    expect(hasNoLeakingPiiDeep(new Date())).toBe(true)
+    expect(hasNoLeakingPiiDeep(["clean", "also clean", 1, false])).toBe(true)
+    expect(hasNoLeakingPiiDeep({ a: "ok", b: { c: "still ok" } })).toBe(true)
+  })
+
+  it("flags PII nested deep inside an object", () => {
+    expect(hasNoLeakingPiiDeep({ level1: { level2: { contact: "alice@example.com" } } })).toBe(
+      false
+    )
+  })
+
+  it("flags PII inside an array element", () => {
+    expect(hasNoLeakingPiiDeep(["fine", "Server at 8.8.8.8"])).toBe(false)
+  })
+
+  it("scans Map keys and values", () => {
+    const map = new Map<string, unknown>([["k", "token sk-proj-abc123def456ghi789jkl012"]])
+    expect(hasNoLeakingPiiDeep(map)).toBe(false)
+    expect(hasNoLeakingPiiDeep(new Map([["clean", "value"]]))).toBe(true)
+  })
+
+  it("scans Set members", () => {
+    expect(hasNoLeakingPiiDeep(new Set(["clean", "Passport E12345678"]))).toBe(false)
+    expect(hasNoLeakingPiiDeep(new Set(["a", "b"]))).toBe(true)
+  })
+
+  it("treats a circular object as unsafe", () => {
+    const cyclic: Record<string, unknown> = { a: "ok" }
+    cyclic.self = cyclic
+    expect(hasNoLeakingPiiDeep(cyclic)).toBe(false)
   })
 })

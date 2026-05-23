@@ -53,8 +53,12 @@ import {
   selectActiveTeamDelegations,
   selectActiveDelegations,
   selectActiveTeamEvents,
+  selectSharedMemoryEntriesForReader,
+  isEntryReadableBy,
+  OPERATOR_READER_ID,
 } from "./selectors"
 import type { AgentTeamState } from "./types"
+import type { SharedMemoryEntry } from "@/types/agent/agent-team"
 
 jest.mock("@/lib/logging", () => {
   const child = {
@@ -528,6 +532,66 @@ describe("agent-team-store derived selectors with populated state", () => {
   })
 })
 
+describe("shared-memory read ACL", () => {
+  const mkEntry = (over: Partial<SharedMemoryEntry>): SharedMemoryEntry => ({
+    key: over.key ?? "k",
+    value: "v",
+    writtenBy: over.writtenBy ?? "tm-writer",
+    writtenAt: new Date(),
+    version: 1,
+    ...over,
+  })
+
+  it("isEntryReadableBy: empty/missing readableBy is all-can-read", () => {
+    expect(isEntryReadableBy(mkEntry({}), "anyone")).toBe(true)
+    expect(isEntryReadableBy(mkEntry({ readableBy: [] }), "anyone")).toBe(true)
+  })
+
+  it("isEntryReadableBy: allow-list gates non-listed readers", () => {
+    const entry = mkEntry({ readableBy: ["tm-a"], writtenBy: "tm-writer" })
+    expect(isEntryReadableBy(entry, "tm-a")).toBe(true)
+    expect(isEntryReadableBy(entry, "tm-b")).toBe(false)
+  })
+
+  it("isEntryReadableBy: the writer always sees their own entry", () => {
+    const entry = mkEntry({ readableBy: ["tm-a"], writtenBy: "tm-writer" })
+    expect(isEntryReadableBy(entry, "tm-writer")).toBe(true)
+  })
+
+  it("isEntryReadableBy: the operator bypasses every allow-list", () => {
+    const entry = mkEntry({ readableBy: ["tm-a"], writtenBy: "tm-writer" })
+    expect(isEntryReadableBy(entry, OPERATOR_READER_ID)).toBe(true)
+  })
+
+  it("selectSharedMemoryEntriesForReader filters by ACL for a normal reader", () => {
+    const state = {
+      sharedMemory: {
+        "team-1": {
+          open: mkEntry({ key: "open" }),
+          scoped: mkEntry({ key: "scoped", readableBy: ["tm-a"] }),
+          mine: mkEntry({ key: "mine", readableBy: ["tm-a"], writtenBy: "tm-b" }),
+        },
+      },
+    } as unknown as AgentTeamState
+
+    const forB = selectSharedMemoryEntriesForReader(
+      "team-1",
+      "tm-b"
+    )(state)
+      .map((e) => e.key)
+      .sort()
+    expect(forB).toEqual(["mine", "open"])
+
+    const forOperator = selectSharedMemoryEntriesForReader("team-1", OPERATOR_READER_ID)(state)
+    expect(forOperator).toHaveLength(3)
+  })
+
+  it("selectSharedMemoryEntriesForReader returns [] for an unknown team", () => {
+    const state = { sharedMemory: {} } as unknown as AgentTeamState
+    expect(selectSharedMemoryEntriesForReader("nope", "tm-a")(state)).toEqual([])
+  })
+})
+
 describe("agent-team-store initial-state shape", () => {
   it("exports a frozen-shape initialState ready for reset", () => {
     expect(initialState.teams).toEqual({})
@@ -561,11 +625,13 @@ describe("agent-team-store store-level config", () => {
     const stored = window.localStorage.getItem("cognia-agent-teams")
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)
-    expect(parsed.version).toBe(2)
+    expect(parsed.version).toBe(3)
     expect(parsed.state.displayMode).toBe("compact")
-    // partialize keeps templates / defaultConfig / displayMode / workspaceTab only
+    // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
+    // lastAdapterSyncVersion only
     expect(parsed.state.workspaceTab).toBeDefined()
     expect(parsed.state.defaultConfig).toBeDefined()
+    expect(parsed.state.lastAdapterSyncVersion).toBeDefined()
     // teams should not be persisted (excluded by partialize)
     expect(parsed.state.teams).toBeUndefined()
   })

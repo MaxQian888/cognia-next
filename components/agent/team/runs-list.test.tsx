@@ -16,7 +16,7 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { TeamRunsList } from "./team-runs-list"
+import { TeamRunsList } from "./runs-list"
 
 const renderList = (teamId: string) =>
   render(

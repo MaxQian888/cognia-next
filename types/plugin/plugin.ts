@@ -84,6 +84,7 @@ export type PluginCapability =
   | "character-pack" // Bundles ready-to-use characters into a portable pack (ADR-0030)
   | "subagent" // Contributes Claude SDK subagents callable by teams + workflow editor
   | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
+  | "shared-memory-adapter" // Contributes a bidirectional backing store for agent-team shared memory
 
 /**
  * Plugin status in the lifecycle
@@ -515,6 +516,15 @@ export interface PluginManifest {
    * (mirrors the ADR-0030 character-pack `requires` pattern).
    */
   agentTeamTemplates?: import("./plugin-agent-team-template").PluginAgentTeamTemplateDef[]
+  /**
+   * Shared-memory adapters contributed by this plugin (`shared-memory-adapter`
+   * capability). Each adapter mirrors an agent-team's shared-memory KV into an
+   * external backing store (Notion / Lark Wiki / sqlite / …) and can pull
+   * remote changes back. A team opts into a single adapter via
+   * `team.config.sharedMemoryAdapterId`. Registered into
+   * `shared-memory-adapter-registry` on enable.
+   */
+  sharedMemoryAdapters?: import("./plugin-shared-memory-adapter").PluginSharedMemoryAdapterDef[]
 
   // Visual Workflows (ADR 0017)
   /**

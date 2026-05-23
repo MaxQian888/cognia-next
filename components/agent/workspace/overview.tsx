@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { StatusBadge } from "@/components/status-badge"
 import { EditableField } from "./editable-field"
-import { PlanApprovalPanel } from "@/components/agent/plan-approval-panel"
+import { PlanApprovalPanel } from "@/components/agent/team/plan-approval-panel"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface AgentTeamOverviewProps {

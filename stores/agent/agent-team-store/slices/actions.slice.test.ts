@@ -1479,3 +1479,70 @@ describe("useAgentTeamStore default config / reset", () => {
     expect(Object.keys(useAgentTeamStore.getState().templates).length).toBeGreaterThan(0)
   })
 })
+
+describe("useAgentTeamStore clearStaleCapabilityIds", () => {
+  beforeEach(() => reset())
+
+  it("strips flagged ids from a team-level bundle, dropping empty buckets", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "Stale", task: "t" })
+    useAgentTeamStore.getState().updateTeamCapabilities(team.id, {
+      skillIds: ["keep", "ghost"],
+      subagentIds: ["only-ghost"],
+    })
+    useAgentTeamStore.getState().clearStaleCapabilityIds({ teamId: team.id }, [
+      {
+        code: "missing-skill",
+        bucket: "skillIds",
+        missingId: "ghost",
+        scope: { kind: "team", teamId: team.id },
+      },
+      {
+        code: "missing-subagent",
+        bucket: "subagentIds",
+        missingId: "only-ghost",
+        scope: { kind: "team", teamId: team.id },
+      },
+    ])
+    const caps = useAgentTeamStore.getState().teams[team.id].config.capabilities
+    expect(caps?.skillIds).toEqual(["keep"])
+    expect(caps?.subagentIds).toBeUndefined() // emptied → dropped
+  })
+
+  it("strips flagged ids from a teammate overlay add/replace lists", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "Stale2", task: "t" })
+    const teammate = useAgentTeamStore
+      .getState()
+      .addTeammate({ teamId: team.id, name: "W", role: "teammate" })
+    useAgentTeamStore.getState().updateTeammateCapabilities(teammate.id, {
+      skillIds: { add: ["keep", "ghost"] },
+      characterPackIds: { replace: ["pack-ghost"] },
+    })
+    useAgentTeamStore.getState().clearStaleCapabilityIds({ teammateId: teammate.id }, [
+      {
+        code: "missing-skill",
+        bucket: "skillIds",
+        missingId: "ghost",
+        scope: { kind: "teammate", teamId: team.id, teammateId: teammate.id },
+      },
+      {
+        code: "missing-character-pack",
+        bucket: "characterPackIds",
+        missingId: "pack-ghost",
+        scope: { kind: "teammate", teamId: team.id, teammateId: teammate.id },
+      },
+    ])
+    const overlay = useAgentTeamStore.getState().teammates[teammate.id].config.capabilities
+    expect(overlay?.skillIds?.add).toEqual(["keep"])
+    // characterPackIds replace emptied → whole bucket dropped
+    expect(overlay?.characterPackIds).toBeUndefined()
+  })
+
+  it("is a no-op when no warning matches the target scope", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "NoOp", task: "t" })
+    useAgentTeamStore.getState().updateTeamCapabilities(team.id, { skillIds: ["keep"] })
+    useAgentTeamStore.getState().clearStaleCapabilityIds({ teamId: team.id }, [])
+    expect(useAgentTeamStore.getState().teams[team.id].config.capabilities?.skillIds).toEqual([
+      "keep",
+    ])
+  })
+})

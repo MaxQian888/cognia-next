@@ -19,19 +19,19 @@ jest.mock("next/navigation", () => ({
 
 // Stub the heavier sibling components — we only care about props.
 const lastSelectorProps: Record<string, unknown> = {}
-jest.mock("@/components/agent/agent-mode-selector", () => ({
+jest.mock("@/components/agent/mode/mode-selector", () => ({
   AgentModeSelector: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
     return <div data-testid="agent-mode-selector" />
   },
 }))
-jest.mock("@/components/agent/agent-runtime-selector", () => ({
+jest.mock("@/components/agent/mode/runtime-selector", () => ({
   AgentRuntimeSelector: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
     return <div data-testid="agent-runtime-selector" />
   },
 }))
-jest.mock("@/components/agent/external-agent-selector", () => ({
+jest.mock("@/components/agent/external-agent/selector", () => ({
   ExternalAgentSelector: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
     return <div data-testid="external-agent-selector" />

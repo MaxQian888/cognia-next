@@ -31,6 +31,7 @@ import { listSkills } from "@/lib/db/skills"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import type { AgentTeam, TeamCapabilityBundle } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { markSettingsSaved } from "./settings-save-indicator"
 
 export interface PluginsSectionProps {
   team: AgentTeam
@@ -38,9 +39,11 @@ export interface PluginsSectionProps {
 
 /**
  * Project the team-level `TeamCapabilityBundle` into the `PresetEditorState`
- * shape the section components consume. Only the capability fields populate
- * — identity / content / tools etc. stay empty since this surface is purely
- * capability-pool editing.
+ * shape the array-backed section components (Tools / NativeTools / Subagent)
+ * consume. Character and external-preset are NOT projected here — they're
+ * rendered in multi-select mode reading the bundle arrays directly, so the
+ * single-id `characterPackId` / `externalAgentPresetId` round-trip loss is
+ * gone.
  */
 function bundleToEditorState(bundle: TeamCapabilityBundle | undefined): PresetEditorState {
   const base = emptyEditorState()
@@ -50,24 +53,27 @@ function bundleToEditorState(bundle: TeamCapabilityBundle | undefined): PresetEd
     mcpServerIds: bundle.mcpServerIds,
     skillIds: bundle.skillIds ?? [],
     nativeAnthropicToolIds: bundle.nativeAnthropicToolIds,
-    characterPackId: bundle.characterPackIds?.[0],
-    externalAgentPresetId: bundle.externalAgentPresetIds?.[0],
     subagentIds: bundle.subagentIds,
   }
 }
 
 /**
- * Re-extract the bundle from a patched editor-state slice. Empty arrays
- * become `undefined` so the persisted bundle stays minimal.
+ * Re-extract the array-backed bundle fields from a patched editor-state slice.
+ * Empty arrays become `undefined` so the persisted bundle stays minimal.
+ * Character/external-preset arrays are preserved verbatim from `current`
+ * because they're edited via the multi-select handlers, not the editor state.
  */
-function editorStateToBundle(state: PresetEditorState): TeamCapabilityBundle {
+function editorStateToBundle(
+  state: PresetEditorState,
+  current: TeamCapabilityBundle | undefined
+): TeamCapabilityBundle {
   return {
     mcpServerIds:
       state.mcpServerIds && state.mcpServerIds.length > 0 ? state.mcpServerIds : undefined,
     skillIds: state.skillIds.length > 0 ? state.skillIds : undefined,
     nativeAnthropicToolIds: state.nativeAnthropicToolIds,
-    characterPackIds: state.characterPackId ? [state.characterPackId] : undefined,
-    externalAgentPresetIds: state.externalAgentPresetId ? [state.externalAgentPresetId] : undefined,
+    characterPackIds: current?.characterPackIds,
+    externalAgentPresetIds: current?.externalAgentPresetIds,
     subagentIds: state.subagentIds,
   }
 }
@@ -89,10 +95,33 @@ export function PluginsSection({ team }: PluginsSectionProps) {
   const handlePatch = useCallback(
     (patch: Partial<PresetEditorState>) => {
       const merged: PresetEditorState = { ...editorState, ...patch }
-      const bundle = editorStateToBundle(merged)
+      const bundle = editorStateToBundle(merged, team.config.capabilities)
       updateTeamCapabilities(team.id, bundle)
+      markSettingsSaved()
     },
-    [editorState, team.id, updateTeamCapabilities]
+    [editorState, team.id, team.config.capabilities, updateTeamCapabilities]
+  )
+
+  const patchCharacterPacks = useCallback(
+    (ids: string[]) => {
+      updateTeamCapabilities(team.id, {
+        ...team.config.capabilities,
+        characterPackIds: ids.length > 0 ? ids : undefined,
+      })
+      markSettingsSaved()
+    },
+    [team.id, team.config.capabilities, updateTeamCapabilities]
+  )
+
+  const patchExternalPresets = useCallback(
+    (ids: string[]) => {
+      updateTeamCapabilities(team.id, {
+        ...team.config.capabilities,
+        externalAgentPresetIds: ids.length > 0 ? ids : undefined,
+      })
+      markSettingsSaved()
+    },
+    [team.id, team.config.capabilities, updateTeamCapabilities]
   )
 
   return (
@@ -106,9 +135,21 @@ export function PluginsSection({ team }: PluginsSectionProps) {
         defaultOpen={false}
       />
       <NativeToolsSection state={editorState} onPatch={handlePatch} />
-      <CharacterSection state={editorState} onPatch={handlePatch} />
+      <CharacterSection
+        state={editorState}
+        onPatch={handlePatch}
+        multiple
+        selectedIds={team.config.capabilities?.characterPackIds ?? []}
+        onPatchMulti={patchCharacterPacks}
+      />
       <SubagentSection state={editorState} onPatch={handlePatch} />
-      <ExternalPresetSection state={editorState} onPatch={handlePatch} />
+      <ExternalPresetSection
+        state={editorState}
+        onPatch={handlePatch}
+        multiple
+        selectedIds={team.config.capabilities?.externalAgentPresetIds ?? []}
+        onPatchMulti={patchExternalPresets}
+      />
     </div>
   )
 }

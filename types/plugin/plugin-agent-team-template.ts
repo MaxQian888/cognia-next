@@ -17,8 +17,16 @@
  * character-pack `requires` pattern).
  */
 
-import type { AgentTeamConfig, TeammateConfig } from "@/types/agent/agent-team"
+import type {
+  AgentTeamConfig,
+  TeammateConfig,
+  TeammateCapabilityOverlay,
+  TeamGovernancePolicy,
+} from "@/types/agent/agent-team"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
+
+// Re-exported so plugin authors building rich teammate seeds need a single import.
+export type { TeammateCapabilityOverlay } from "@/types/agent/agent-team"
 
 /**
  * Cross-capability dependencies declared by a plugin team template. Each
@@ -54,6 +62,20 @@ export interface PluginAgentTeamTemplateTeammate {
   description: string
   specialization?: string
   config?: TeammateConfig
+  /** Optional teammate-specific system prompt (wins over `config.systemPrompt`). */
+  systemPrompt?: string
+  /** Per-teammate capability overlay applied on top of the team-level pool. */
+  capabilities?: TeammateCapabilityOverlay
+  /**
+   * Optional per-teammate governance hints. NOT auto-applied to the team
+   * policy (that would clobber operator state) — surfaced in the template
+   * preview as opt-in "apply suggestions".
+   */
+  governanceHints?: Partial<TeamGovernancePolicy>
+  /** Display-only tags rendered on the teammate row in the template preview. */
+  tags?: string[]
+  /** Lucide icon name for the teammate row. */
+  iconKey?: string
 }
 
 /**

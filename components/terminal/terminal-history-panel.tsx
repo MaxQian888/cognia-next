@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, PlayIcon } from "lucide-react"
+import { CopyIcon, MessageSquareIcon, PlayIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -29,6 +29,8 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 export interface TerminalHistoryPanelProps {
   sessionId: string
   className?: string
+  /** Jump to the chat session that spawned this terminal. Shown only for agent-spawned tabs. */
+  onLocateInChat?: (chatSessionId: string) => void
 }
 
 function exitDotClass(exitCode: number | null): string {
@@ -43,10 +45,15 @@ function relativeTime(endedAt: number, now: number): string {
   return `${Math.floor(sec / 3600)}h`
 }
 
-export function TerminalHistoryPanel({ sessionId, className }: TerminalHistoryPanelProps) {
+export function TerminalHistoryPanel({
+  sessionId,
+  className,
+  onLocateInChat,
+}: TerminalHistoryPanelProps) {
   const t = useTranslations("terminal.history")
   const lastCommands = useTerminalStore((s) => s.sessions[sessionId]?.lastCommands)
   const open = useTerminalStore((s) => s.sessions[sessionId]?.historyOpen) ?? false
+  const agentSpawner = useTerminalStore((s) => s.sessions[sessionId]?.agentSpawner) ?? null
   const setHistoryOpen = useTerminalStore((s) => s.setHistoryOpen)
   // Tick `now` once per minute so relative timestamps stay fresh without
   // calling Date.now() in render (react-hooks/purity).
@@ -99,16 +106,30 @@ export function TerminalHistoryPanel({ sessionId, className }: TerminalHistoryPa
     >
       <div className="flex items-center justify-between border-b px-2 py-1.5">
         <span className="text-xs font-medium">{t("title")}</span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-6 w-6"
-          onClick={() => setHistoryOpen(sessionId, false)}
-          aria-label={t("close")}
-          data-testid="terminal-history-close"
-        >
-          <span className="text-xs">×</span>
-        </Button>
+        <div className="flex items-center gap-0.5">
+          {agentSpawner && onLocateInChat ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6"
+              onClick={() => onLocateInChat(agentSpawner)}
+              aria-label={t("locateInChat")}
+              data-testid="terminal-history-locate"
+            >
+              <MessageSquareIcon className="h-3 w-3" />
+            </Button>
+          ) : null}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            onClick={() => setHistoryOpen(sessionId, false)}
+            aria-label={t("close")}
+            data-testid="terminal-history-close"
+          >
+            <span className="text-xs">×</span>
+          </Button>
+        </div>
       </div>
       <ScrollArea className="flex-1">
         {!lastCommands || lastCommands.length === 0 ? (
