@@ -27,15 +27,15 @@ description: Single-session 5 formats + batch ZIP export — Markdown / JSON / P
 
 ## Use Cases
 
-| Scenario | Format |
-| ------------------------------------------- | ------------------------------------------------------------------- |
-| Submit to GitHub / Obsidian / other markdown readers | Rich Markdown (preserves tool call blocks, reasoning fenced blocks) |
-| Programmatic processing / API integration | Rich JSON (preserves original `UIMessage.parts` structure) |
-| Copy into email / simple document | Plain text (unformatted) |
-| Offline sharing with non-technical readers | Beautiful HTML (self-contained, beautifully themed) |
-| Presentation, cinematic playback | Animated HTML (fade-in + typing effect, like terminal replay) |
-| Historical archiving | Batch ZIP (per-session filenames use unique slugs) |
-| Custom brand colors | Beautiful / Animated HTML + `customTheme: ThemeTokens` to override default theme |
+| Scenario                                             | Format                                                                           |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Submit to GitHub / Obsidian / other markdown readers | Rich Markdown (preserves tool call blocks, reasoning fenced blocks)              |
+| Programmatic processing / API integration            | Rich JSON (preserves original `UIMessage.parts` structure)                       |
+| Copy into email / simple document                    | Plain text (unformatted)                                                         |
+| Offline sharing with non-technical readers           | Beautiful HTML (self-contained, beautifully themed)                              |
+| Presentation, cinematic playback                     | Animated HTML (fade-in + typing effect, like terminal replay)                    |
+| Historical archiving                                 | Batch ZIP (per-session filenames use unique slugs)                               |
+| Custom brand colors                                  | Beautiful / Animated HTML + `customTheme: ThemeTokens` to override default theme |
 
 For **full-database snapshots (multi-device migration + encryption)**, use the `BackupPackageV3` pipeline from [Backup & Data](./backup-and-data) — a separate, encrypted export path that covers all Dexie tables. This page's export system focuses on "single-session / multi-session readable copies".
 
@@ -94,8 +94,8 @@ flowchart TB
 
 ### Public API
 
-| File | Purpose |
-| --------------------- | ------------------------------------------------------------------------------------- |
+| File                  | Purpose                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `lib/export/index.ts` | Barrel export + `generateFilename(title, ext)`; stable API aliases expected by plugins (`exportToHTML` etc.) |
 
 ```ts
@@ -105,44 +105,44 @@ import { renderSingleExport, exportToHTML, generateFilename } from "@/lib/export
 
 ### Single-Session Orchestration
 
-| File | Purpose |
+| File                              | Purpose                                                      |
 | --------------------------------- | ------------------------------------------------------------ |
-| `lib/export/single/index.ts` | `renderSingleExport(opts) → { content, filename, mimeType }` |
-| `lib/export/single/index.test.ts` | Tests for five formats + slug + mime boundaries |
+| `lib/export/single/index.ts`      | `renderSingleExport(opts) → { content, filename, mimeType }` |
+| `lib/export/single/index.test.ts` | Tests for five formats + slug + mime boundaries              |
 
 ### Text Writers
 
-| File | Function |
+| File                               | Function                                                          |
 | ---------------------------------- | ----------------------------------------------------------------- |
 | `lib/export/text/rich-markdown.ts` | `exportToRichMarkdown` / `exportToRichJSON` / `exportToPlainText` |
 
-Each writer accepts `RichExportData = { session, messages, exportedAt, includeMetadata?, includeTokens? }`. Markdown output renders directly in GitHub / Obsidian / VS Code (tool calls use `` ``` `` fenced blocks, reasoning uses collapsible notes).
+Each writer accepts `RichExportData = { session, messages, exportedAt, includeMetadata?, includeTokens? }`. Markdown output renders directly in GitHub / Obsidian / VS Code (tool calls use ` ``` ` fenced blocks, reasoning uses collapsible notes).
 
 ### HTML Writers
 
-| File | Purpose |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `lib/export/html/beautiful-html.ts` | Inline `<style>` block (built from `ThemeTokens`) + `<details>` collapsible tool/reasoning + compact readable layout |
-| `lib/export/html/animated-html.ts` | Wraps beautiful; injects a `<style>` and `<script>` before `</body>` to achieve fade-in + character-by-character typing (default 12 ms/char) |
-| `lib/export/html/syntax-themes.ts` | `ThemeId × 8` (light / dark / sepia / github / dracula / nord / solarized / monokai) + `ThemeTokens` interface |
+| File                                | Purpose                                                                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/export/html/beautiful-html.ts` | Inline `<style>` block (built from `ThemeTokens`) + `<details>` collapsible tool/reasoning + compact readable layout                         |
+| `lib/export/html/animated-html.ts`  | Wraps beautiful; injects a `<style>` and `<script>` before `</body>` to achieve fade-in + character-by-character typing (default 12 ms/char) |
+| `lib/export/html/syntax-themes.ts`  | `ThemeId × 8` (light / dark / sepia / github / dracula / nord / solarized / monokai) + `ThemeTokens` interface                               |
 
 `ThemeTokens` has 11 tokens: `bg` / `surface` / `text` / `muted` / `border` / `accent` / `userBg` / `assistantBg` / `codeBg` / `codeText` / `detailBg`. The "Custom Theme" editor in the dialog (`components/data/export/custom-theme-editor.tsx`) modifies tokens in real time to override defaults.
 
 ### Batch
 
-| File | Purpose |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| File                               | Purpose                                                                                                                            |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `lib/export/batch/batch-export.ts` | `exportBatch({ sessions, format, theme?, customTheme?, onProgress? })` — JSZip lazy-loaded; slug conflicts auto-appended with `-N` |
 
 ### UI Triggers
 
-| File | Purpose |
-| --------------------------------------------------- | -------------------------------------------------------------- |
+| File                                                | Purpose                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `components/chat/dialogs/single-export-trigger.tsx` | Chat header download icon button; `variant: "icon" \| "labeled"`; opens `SingleExportDialog` |
-| `components/data/export/single-export-dialog.tsx` | Format picker + theme picker + custom theme editor + preview + download button |
-| `components/data/export/batch-export-dialog.tsx` | Batch selection + progress bar |
-| `components/data/export/custom-theme-editor.tsx` | Color picker for 11 tokens, real-time preview |
-| `components/data/export/schedule-card.tsx` | Binds batch export to scheduler tasks ("Export last week every Sunday") |
+| `components/data/export/single-export-dialog.tsx`   | Format picker + theme picker + custom theme editor + preview + download button               |
+| `components/data/export/batch-export-dialog.tsx`    | Batch selection + progress bar                                                               |
+| `components/data/export/custom-theme-editor.tsx`    | Color picker for 11 tokens, real-time preview                                                |
+| `components/data/export/schedule-card.tsx`          | Binds batch export to scheduler tasks ("Export last week every Sunday")                      |
 
 ## Data Flow: Single-Session Export
 
@@ -267,13 +267,21 @@ Historical casing preserved for convenient third-party plugin calls.
 ## Related Subsystems
 
 <Cards>
-  <Card title="Chat & Skills" href="./chat-and-skills" description="The source of exports is chat sessions + messages" />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="The source of exports is chat sessions + messages"
+  />
   <Card
     title="Backup & Data"
     href="./backup-and-data"
     description="Encrypted full-database snapshots follow a separate BackupPackageV3 pipeline"
   />
-  <Card title="Scheduler" href="./scheduler" description="Batch exports can be attached to scheduled tasks" />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="Batch exports can be attached to scheduled tasks"
+  />
 </Cards>
 
 ## Related ADR

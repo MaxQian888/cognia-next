@@ -8,11 +8,10 @@ description: n8n-style visual orchestration layer — wire characters, teams, sk
 <Status variant="stable" />
 
 <TLDR>
-  React Flow v12 editor + Zustand+zundo store + elkjs auto-layout, with 38 node
-  kinds across 7 categories. Runtime is split between Rust (cron daemon, webhook
-  receiver, SQLite mirror) and TS (orchestrator, node execution) for hybrid
-  execution; event logs enable crash recovery. Schema v22 introduces 4 Dexie
-  tables and 10 built-in templates.
+  React Flow v12 editor + Zustand+zundo store + elkjs auto-layout, with 38 node kinds across 7
+  categories. Runtime is split between Rust (cron daemon, webhook receiver, SQLite mirror) and TS
+  (orchestrator, node execution) for hybrid execution; event logs enable crash recovery. Schema v22
+  introduces 4 Dexie tables and 10 built-in templates.
 </TLDR>
 
 <StatGrid>
@@ -39,14 +38,14 @@ cognia-next uses this layer to compose its mature runtime entities — [characte
 
 ## Use Cases
 
-| Scenario | Recommended approach |
-| -------- | -------------------- |
-| Scheduled data sync | `trigger.cron` → `io.http` → `data.transform` → `flow.set` |
-| Inbound auto-reply | `trigger.connector.inbound` → `ai.classify` → `flow.branch` → `action.connector.send` |
-| RAG-backed FAQ reply | `trigger.chat.message` → `action.twin.rag` → `ai.prompt` → chat reply |
-| Webhook bridge | `trigger.webhook` → `ai.extract` → `io.webhook.respond` |
-| Complex aggregation | `flow.loop` + `flow.subworkflow` + `data.template` + `flow.join` |
-| Multi-character task orchestration | `action.team.run` drives the agent-team lifecycle |
+| Scenario                           | Recommended approach                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| Scheduled data sync                | `trigger.cron` → `io.http` → `data.transform` → `flow.set`                            |
+| Inbound auto-reply                 | `trigger.connector.inbound` → `ai.classify` → `flow.branch` → `action.connector.send` |
+| RAG-backed FAQ reply               | `trigger.chat.message` → `action.twin.rag` → `ai.prompt` → chat reply                 |
+| Webhook bridge                     | `trigger.webhook` → `ai.extract` → `io.webhook.respond`                               |
+| Complex aggregation                | `flow.loop` + `flow.subworkflow` + `data.template` + `flow.join`                      |
+| Multi-character task orchestration | `action.team.run` drives the agent-team lifecycle                                     |
 
 ## Architecture
 
@@ -118,75 +117,75 @@ Cross-boundary communication occurs only through Tauri events (`workflow:trigger
 
 ### Types and Definitions
 
-| File | Purpose |
-| ---- | ------- |
-| `types/workflow/visual.ts` | `VisualWorkflow` / `WorkflowNode` / 38 `WorkflowNodeKind` variants |
-| `lib/workflow/definition/validate.ts` | Zod envelope + graph integrity (cycle detection, duplicate id checks) |
-| `lib/workflow/definition/seed.ts` | 10 built-in templates (hello world / classify-branch / RAG FAQ / etc.) |
+| File                                  | Purpose                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `types/workflow/visual.ts`            | `VisualWorkflow` / `WorkflowNode` / 38 `WorkflowNodeKind` variants     |
+| `lib/workflow/definition/validate.ts` | Zod envelope + graph integrity (cycle detection, duplicate id checks)  |
+| `lib/workflow/definition/seed.ts`     | 10 built-in templates (hello world / classify-branch / RAG FAQ / etc.) |
 
 ### Editor
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/workflow/editor/store.ts` | Zustand + zundo store (100-step history limit) |
-| `lib/workflow/editor/auto-layout.ts` | elkjs `layered` algorithm (lazy-loaded) |
-| `lib/workflow/editor/react-flow-converter.ts` | `VisualWorkflow` ↔ React Flow `nodes` / `edges` bidirectional conversion |
-| `lib/workflow/editor/connection-validator.ts` | `isValidConnection` guard (rejects trigger as target, annotation edges, self-loops, duplicate edges) |
-| `lib/workflow/editor/expression-language.ts` | CodeMirror 6 syntax highlighting (`{{ $node['x'].out.field }}`) |
-| `lib/workflow/editor/expression-suggestions.ts` | Context-aware autocomplete |
-| `components/workflow/editor/canvas.tsx` | React Flow shell + toolbar + empty state |
-| `components/workflow/editor/inspector-panel.tsx` | Right inspector panel; dispatches to one of 38 forms by kind |
-| `components/workflow/editor/node-search-sidebar.tsx` | Left drag source (custom MIME `application/x-workflow-kind`) |
-| `components/workflow/editor/command-palette.tsx` | Ctrl+K cmdk panel — all nodes + editor actions + 5 most recent workflows |
+| File                                                 | Purpose                                                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `lib/workflow/editor/store.ts`                       | Zustand + zundo store (100-step history limit)                                                       |
+| `lib/workflow/editor/auto-layout.ts`                 | elkjs `layered` algorithm (lazy-loaded)                                                              |
+| `lib/workflow/editor/react-flow-converter.ts`        | `VisualWorkflow` ↔ React Flow `nodes` / `edges` bidirectional conversion                             |
+| `lib/workflow/editor/connection-validator.ts`        | `isValidConnection` guard (rejects trigger as target, annotation edges, self-loops, duplicate edges) |
+| `lib/workflow/editor/expression-language.ts`         | CodeMirror 6 syntax highlighting (`{{ $node['x'].out.field }}`)                                      |
+| `lib/workflow/editor/expression-suggestions.ts`      | Context-aware autocomplete                                                                           |
+| `components/workflow/editor/canvas.tsx`              | React Flow shell + toolbar + empty state                                                             |
+| `components/workflow/editor/inspector-panel.tsx`     | Right inspector panel; dispatches to one of 38 forms by kind                                         |
+| `components/workflow/editor/node-search-sidebar.tsx` | Left drag source (custom MIME `application/x-workflow-kind`)                                         |
+| `components/workflow/editor/command-palette.tsx`     | Ctrl+K cmdk panel — all nodes + editor actions + 5 most recent workflows                             |
 
 ### Runtime
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/workflow/runtime/orchestrator.ts` | Top-level entry; validate → resolve secrets → topo-sort → step loop → persist |
-| `lib/workflow/runtime/topo-sort.ts` | Kahn's algorithm + `flow.loop` / `flow.wait` back-edge detection |
-| `lib/workflow/runtime/step-executor.ts` | Retry (exponential / fixed backoff) + timeout (`AbortController`) + idempotency |
-| `lib/workflow/runtime/event-log.ts` | Append-only writer; `createRunLogger(runId)` scope capture |
-| `lib/workflow/runtime/idempotency.ts` | Inngest-style memoization; hydrates from event log on crash recovery |
-| `lib/workflow/runtime/expression.ts` | Safe expression parsing (**no** `eval`); `$node` / `$trigger` / `$static` / `$params` |
-| `lib/workflow/runtime/secret-resolver.ts` | `NoopSecretResolver` + in-memory impl; production bridged via keyring |
-| `lib/workflow/runtime/tauri-bridge.ts` | 6 Tauri commands + `workflow:trigger` listener; no-op in web mode |
-| `lib/workflow/runtime/webhook-bridge.ts` | Pushes trigger nodes to Rust on workflow save (idempotent) |
-| `lib/workflow/runtime/trigger-bridge.ts` | `workflow:trigger` event → parse workflowId → `runWorkflow()` |
-| `lib/workflow/runtime/resume-controller.ts` | Replays in-progress runs on startup |
-| `lib/workflow/runtime/run-status-bridge.ts` | Subscribes to `workflowRunEvents` and pushes per-step state to the editor store |
+| File                                        | Purpose                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `lib/workflow/runtime/orchestrator.ts`      | Top-level entry; validate → resolve secrets → topo-sort → step loop → persist         |
+| `lib/workflow/runtime/topo-sort.ts`         | Kahn's algorithm + `flow.loop` / `flow.wait` back-edge detection                      |
+| `lib/workflow/runtime/step-executor.ts`     | Retry (exponential / fixed backoff) + timeout (`AbortController`) + idempotency       |
+| `lib/workflow/runtime/event-log.ts`         | Append-only writer; `createRunLogger(runId)` scope capture                            |
+| `lib/workflow/runtime/idempotency.ts`       | Inngest-style memoization; hydrates from event log on crash recovery                  |
+| `lib/workflow/runtime/expression.ts`        | Safe expression parsing (**no** `eval`); `$node` / `$trigger` / `$static` / `$params` |
+| `lib/workflow/runtime/secret-resolver.ts`   | `NoopSecretResolver` + in-memory impl; production bridged via keyring                 |
+| `lib/workflow/runtime/tauri-bridge.ts`      | 6 Tauri commands + `workflow:trigger` listener; no-op in web mode                     |
+| `lib/workflow/runtime/webhook-bridge.ts`    | Pushes trigger nodes to Rust on workflow save (idempotent)                            |
+| `lib/workflow/runtime/trigger-bridge.ts`    | `workflow:trigger` event → parse workflowId → `runWorkflow()`                         |
+| `lib/workflow/runtime/resume-controller.ts` | Replays in-progress runs on startup                                                   |
+| `lib/workflow/runtime/run-status-bridge.ts` | Subscribes to `workflowRunEvents` and pushes per-step state to the editor store       |
 
 ### Node Executors
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/workflow/nodes/registry.ts` | `registerNodeExecutor(kind, typeVersion, fn)` — plugins call this too |
-| `lib/workflow/nodes/built-ins.ts` | 32 built-in executors; registered on import |
-| `lib/workflow/nodes/catalog.ts` | Per-kind metadata (label / description / icon / keywords) — shared by left sidebar, command palette, and inspector header |
-| `lib/workflow/nodes/params-schemas.ts` | Per-kind JSON Schema — validation + auto-generated forms |
-| `lib/workflow/nodes/validate-params.ts` | Pre-run schema validation per node params |
+| File                                    | Purpose                                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `lib/workflow/nodes/registry.ts`        | `registerNodeExecutor(kind, typeVersion, fn)` — plugins call this too                                                     |
+| `lib/workflow/nodes/built-ins.ts`       | 32 built-in executors; registered on import                                                                               |
+| `lib/workflow/nodes/catalog.ts`         | Per-kind metadata (label / description / icon / keywords) — shared by left sidebar, command palette, and inspector header |
+| `lib/workflow/nodes/params-schemas.ts`  | Per-kind JSON Schema — validation + auto-generated forms                                                                  |
+| `lib/workflow/nodes/validate-params.ts` | Pre-run schema validation per node params                                                                                 |
 
 ### Rust Layer
 
-| File | Purpose |
-| ---- | ------- |
-| `src-tauri/src/workflow/mod.rs` | Module entry + `WorkflowState` |
-| `src-tauri/src/workflow/commands.rs` | 6 Tauri commands (register/unregister/get_webhook_url/persist/reload/ack) |
-| `src-tauri/src/workflow/run_mirror.rs` | SQLite run mirror (for crash recovery) |
-| `src-tauri/src/workflow/state.rs` | `WorkflowState` — holds cron / webhook / mirror handles |
-| `src-tauri/src/workflow/triggers/cron_daemon.rs` | tokio task + `cron` crate; min-heap sorted by next trigger time |
+| File                                                | Purpose                                                                     |
+| --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `src-tauri/src/workflow/mod.rs`                     | Module entry + `WorkflowState`                                              |
+| `src-tauri/src/workflow/commands.rs`                | 6 Tauri commands (register/unregister/get_webhook_url/persist/reload/ack)   |
+| `src-tauri/src/workflow/run_mirror.rs`              | SQLite run mirror (for crash recovery)                                      |
+| `src-tauri/src/workflow/state.rs`                   | `WorkflowState` — holds cron / webhook / mirror handles                     |
+| `src-tauri/src/workflow/triggers/cron_daemon.rs`    | tokio task + `cron` crate; min-heap sorted by next trigger time             |
 | `src-tauri/src/workflow/triggers/webhook_router.rs` | axum receiver, HMAC-SHA256 verification (`x-signature-256`); 1 MiB body cap |
 
 ### UI and Settings
 
-| File | Purpose |
-| ---- | ------- |
-| `app/workflows/page.tsx` | Library list |
-| `app/workflows/[id]/page.tsx` | Full-screen canvas editor |
-| `app/workflows/[id]/runs/page.tsx` | Run history list |
-| `app/workflows/[id]/runs/[runId]/page.tsx` | Gantt timeline + step inspector |
-| `components/workflow/runs/run-timeline.tsx` | Horizontal Gantt rendered from event log via `buildSpans` |
-| `components/workflow/runs/run-detail.tsx` | Single-run view + "re-run from this step" |
+| File                                                  | Purpose                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------- |
+| `app/workflows/page.tsx`                              | Library list                                                        |
+| `app/workflows/[id]/page.tsx`                         | Full-screen canvas editor                                           |
+| `app/workflows/[id]/runs/page.tsx`                    | Run history list                                                    |
+| `app/workflows/[id]/runs/[runId]/page.tsx`            | Gantt timeline + step inspector                                     |
+| `components/workflow/runs/run-timeline.tsx`           | Horizontal Gantt rendered from event log via `buildSpans`           |
+| `components/workflow/runs/run-detail.tsx`             | Single-run view + "re-run from this step"                           |
 | `components/settings/workflows/workflows-section.tsx` | 5-tab settings shell: Library / Runs / Templates / Defaults / Audit |
 
 ## Node Categories (38 kinds)
@@ -234,12 +233,12 @@ Every state transition appends a row to `workflowRunEvents` via `event-log.ts:Ru
 
 ## Database Tables (Dexie v22)
 
-| Table | Primary key | Key indexes | Purpose |
-| ----- | ----------- | ----------- | ------- |
-| `workflows` | `id` | — | Workflow definition (graph + settings + viewport) |
-| `workflowRuns` | `id` | `[workflowId+startedAt]` | One row per execution; includes frozen workflow snapshot — historical re-runs use the snapshot, not the live workflow |
-| `workflowRunEvents` | `id` | `[runId+ts]` | Per-step event log; replayed in chronological order |
-| `workflowTriggers` | `id` | `[workflowId+enabled]` | Registered triggers (cron / webhook / inbound / chat-msg) |
+| Table               | Primary key | Key indexes              | Purpose                                                                                                               |
+| ------------------- | ----------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `id`        | —                        | Workflow definition (graph + settings + viewport)                                                                     |
+| `workflowRuns`      | `id`        | `[workflowId+startedAt]` | One row per execution; includes frozen workflow snapshot — historical re-runs use the snapshot, not the live workflow |
+| `workflowRunEvents` | `id`        | `[runId+ts]`             | Per-step event log; replayed in chronological order                                                                   |
+| `workflowTriggers`  | `id`        | `[workflowId+enabled]`   | Registered triggers (cron / webhook / inbound / chat-msg)                                                             |
 
 Full schema in the [storage](../data/storage) v22 section.
 
@@ -255,7 +254,7 @@ Defined in `types/workflow/visual.ts:WorkflowSettings`, edited via the editor to
 
 ### Expression syntax
 
-Any field marked "supports ``{{ }}`` expressions" accepts:
+Any field marked "supports `{{ }}` expressions" accepts:
 
 ```text
 {{ $node['stepId'].out.fieldName }}     upstream node output
@@ -270,23 +269,23 @@ Supports `.field` / `['key']` / `[index]` access; `expression.test.ts` covers th
 
 Three `runtime`-class extension points:
 
-| Extension point | Purpose |
-| --------------- | ------- |
-| `workflow.node` | Plugins contribute node executors; `PluginNodeDef.execute` registers into the registry |
+| Extension point    | Purpose                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `workflow.node`    | Plugins contribute node executors; `PluginNodeDef.execute` registers into the registry                 |
 | `workflow.trigger` | Plugins contribute long-running trigger sources; `PluginTriggerDef.start` returns a handle with `stop` |
-| `workflow.task` | Existing — target of `action.plugin.invoke` |
+| `workflow.task`    | Existing — target of `action.plugin.invoke`                                                            |
 
 Permission gate: `extension:workflow`. Auditing via `auditPluginPointContracts`. Details in [plugin system](./plugin-system).
 
 ### Trigger hybrid distribution
 
-| Trigger | TS | Rust |
-| ------- | -- | ---- |
-| `trigger.manual` | Editor Run button | — |
-| `trigger.cron` | TS fallback (webview alive) | `cron_daemon.rs` (fires even when minimized to tray) |
-| `trigger.connector.inbound` | `ConnectorBus.dispatchInbound` hook | — |
-| `trigger.chat.message` | `lib/claude/build-options.ts:resolveSendOptions` hook | — |
-| `trigger.webhook` | — | `webhook_router.rs` (desktop only, HMAC-SHA256 verification) |
+| Trigger                     | TS                                                    | Rust                                                         |
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| `trigger.manual`            | Editor Run button                                     | —                                                            |
+| `trigger.cron`              | TS fallback (webview alive)                           | `cron_daemon.rs` (fires even when minimized to tray)         |
+| `trigger.connector.inbound` | `ConnectorBus.dispatchInbound` hook                   | —                                                            |
+| `trigger.chat.message`      | `lib/claude/build-options.ts:resolveSendOptions` hook | —                                                            |
+| `trigger.webhook`           | —                                                     | `webhook_router.rs` (desktop only, HMAC-SHA256 verification) |
 
 ## Related Subsystems
 
@@ -296,7 +295,11 @@ Permission gate: `extension:workflow`. Auditing via `auditPluginPointContracts`.
     href="./platform-connectors"
     description="Source of trigger.connector.inbound + action.connector.send"
   />
-  <Card title="Scheduler" href="./scheduler" description="Cron triggers reuse the Rust scheduling abstraction" />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="Cron triggers reuse the Rust scheduling abstraction"
+  />
   <Card
     title="Skills System"
     href="./skills-system"

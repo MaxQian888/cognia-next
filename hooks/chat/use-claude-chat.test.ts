@@ -7,10 +7,13 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-const isTauriMock = jest.fn().mockReturnValue(true)
+// `stores/index.ts` calls `isTauri()` at module top-level; declaring the
+// jest.fn inside the factory dodges the TDZ that closures over an outer
+// const would otherwise hit during ES import hoisting.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn().mockReturnValue(true),
 }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 const onClaudeUnsub = jest.fn()
 let _messageCallback: ((evt: unknown) => void) | null = null

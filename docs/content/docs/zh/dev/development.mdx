@@ -416,25 +416,25 @@ pnpm typecheck
 
 ## 调试
 
-| 表面                 | 工具                                                                |
-| -------------------- | ------------------------------------------------------------------- |
-| 浏览器层             | DevTools（F12）—— 与普通 Web 一致                                   |
-| Rust 层              | `RUST_LOG=debug pnpm tauri dev`，看控制台与 `app/logs/`             |
-| Sidecar              | sidecar 的 `stderr` 镜像到 Rust 日志、`app/logs/`                   |
-| Dexie                | DevTools → Application → IndexedDB → `cognia-claude`                |
-| 原生日志             | OS 原生日志查看器（事件查看器 / Console.app / `journalctl --user`） |
-| 向量库（sqlite-vec） | `sqlite3 <app_data>/cognia/vectors.sqlite` 然后 `.tables`           |
-| 结构化追踪           | 见 [可观测性](../subsystems/observability)：sidecar / Tauri / Web 三段链路      |
+| 表面                 | 工具                                                                       |
+| -------------------- | -------------------------------------------------------------------------- |
+| 浏览器层             | DevTools（F12）—— 与普通 Web 一致                                          |
+| Rust 层              | `RUST_LOG=debug pnpm tauri dev`，看控制台与 `app/logs/`                    |
+| Sidecar              | sidecar 的 `stderr` 镜像到 Rust 日志、`app/logs/`                          |
+| Dexie                | DevTools → Application → IndexedDB → `cognia-claude`                       |
+| 原生日志             | OS 原生日志查看器（事件查看器 / Console.app / `journalctl --user`）        |
+| 向量库（sqlite-vec） | `sqlite3 <app_data>/cognia/vectors.sqlite` 然后 `.tables`                  |
+| 结构化追踪           | 见 [可观测性](../subsystems/observability)：sidecar / Tauri / Web 三段链路 |
 
 ## 常见重构模式
 
-| 想要……                          | 做法                                                          |
-| ------------------------------- | ------------------------------------------------------------- |
-| 抽取共享 hook                   | 移到 `hooks/` 并更新 import                                   |
+| 想要……                          | 做法                                                                |
+| ------------------------------- | ------------------------------------------------------------------- |
+| 抽取共享 hook                   | 移到 `hooks/` 并更新 import                                         |
 | 加 Tauri 命令                   | 见 [运行时 & Tauri](../core/runtime-and-tauri) §"添加新的 IPC 命令" |
 | 升级 Dexie schema               | 见 [存储](../data/storage) §"新增表"                                |
-| 加 executor / importer / 域传输 | 加注册项；遵循既有模式                                        |
-| 国际化字符串                    | 见 [主题 & 国际化](../ui/theming-and-i18n) §"加新翻译 key"        |
+| 加 executor / importer / 域传输 | 加注册项；遵循既有模式                                              |
+| 国际化字符串                    | 见 [主题 & 国际化](../ui/theming-and-i18n) §"加新翻译 key"          |
 
 ## 在哪里入手
 

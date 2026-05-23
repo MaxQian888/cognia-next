@@ -3,7 +3,7 @@ import { useState, useEffect } from "react"
 import { useWasmCapabilityGrant } from "./use-wasm-capability-grant"
 import type { PluginManifest } from "@/types/plugin"
 
-jest.mock("./wasm-capability-grant-sheet", () => {
+jest.mock("@/components/plugins/dialogs/wasm-capability-grant-sheet", () => {
   // Capture the props passed to the sheet so tests can drive confirm /
   // cancel / openChange callbacks.
   const calls: Array<Record<string, unknown>> = []
@@ -24,7 +24,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const sheetModule = require("./wasm-capability-grant-sheet") as {
+const sheetModule = require("@/components/plugins/dialogs/wasm-capability-grant-sheet") as {
   __sheetCalls: Array<{
     onConfirm?: (decision: unknown) => void
     onCancel?: () => void

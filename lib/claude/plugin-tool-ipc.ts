@@ -82,7 +82,7 @@ export function __setPluginToolResolverForTesting(resolver: PluginToolResolver |
 async function defaultResolver(): Promise<PluginToolResolver> {
   const [{ getPluginManager }, { usePluginStore }] = await Promise.all([
     import("@/lib/plugin/core/manager"),
-    import("@/stores/plugin"),
+    import("@/stores/plugin-runtime/plugin-store"),
   ])
   return {
     getTool: (name) => {

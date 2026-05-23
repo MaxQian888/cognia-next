@@ -8,7 +8,15 @@ description: Unified logging pipeline, OpenTelemetry thin wrapper, native platfo
 Cognia abstracts "where logs go and which entry you can find" into a single unified pipeline: on the browser side, `lib/logging/` is the single entry point, with several transports (console / IndexedDB / remote / native / OTel / Langfuse) mounted on demand at runtime; on the Rust side, `src-tauri/src/logging/` takes over fern dispatch + tauri-plugin-log, mirroring records into the OS platform logger. This page explains who owns which layer and how a single `logger.info(...)` call travels all the way to the Windows Event Viewer.
 
 <TLDR>
-  Browser side: `createLogger("module")` returns a `Logger`; calling `logger.info / warn / error / fatal` enters the unified pipeline in `core.ts`, which performs module registration, sampling, PII redaction, source location capture, then fans out to registered transports. Transports include console, IndexedDB (persistent in browser), remote (with retry queue), native (Tauri event bridge), OTel (OpenTelemetry), and Langfuse. The Rust side uses `fern` + `tauri-plugin-log` to dispatch the same record to stdout / file / webview (back to frontend) / platform logger. The settings UI toggles transports and sampling rates in real time; the log panel `components/logging/log-panel.tsx` aggregates multi-source records and supports filtering, grouping, and export.
+  Browser side: `createLogger("module")` returns a `Logger`; calling `logger.info / warn / error /
+  fatal` enters the unified pipeline in `core.ts`, which performs module registration, sampling, PII
+  redaction, source location capture, then fans out to registered transports. Transports include
+  console, IndexedDB (persistent in browser), remote (with retry queue), native (Tauri event
+  bridge), OTel (OpenTelemetry), and Langfuse. The Rust side uses `fern` + `tauri-plugin-log` to
+  dispatch the same record to stdout / file / webview (back to frontend) / platform logger. The
+  settings UI toggles transports and sampling rates in real time; the log panel
+  `components/logging/log-panel.tsx` aggregates multi-source records and supports filtering,
+  grouping, and export.
 </TLDR>
 
 ## Overview
@@ -195,11 +203,11 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
 `native_bootstrap.rs` decides among three modes at startup:
 
-| Mode       | When active                         | Active targets                            |
-| ---------- | ----------------------------------- | ----------------------------------------- |
-| `Full`     | Default                             | `stdout + folder + webview` (all three)   |
-| `Fallback` | `folder` unavailable (permissions / disk) | `stdout + webview`                        |
-| `Disabled` | `should_register == false`          | None                                      |
+| Mode       | When active                               | Active targets                          |
+| ---------- | ----------------------------------------- | --------------------------------------- |
+| `Full`     | Default                                   | `stdout + folder + webview` (all three) |
+| `Fallback` | `folder` unavailable (permissions / disk) | `stdout + webview`                      |
+| `Disabled` | `should_register == false`                | None                                    |
 
 `NativeLoggingReadiness` is exposed to the frontend (via `logging::commands` Tauri commands), so the log panel can show diagnostics like "persistence failed, downgraded to in-memory".
 
@@ -231,14 +239,14 @@ Full metrics / traces are submitted via `lib/logging/transports/otel-transport.t
 
 `components/logging/log-panel.tsx` is the unified viewer, aggregating multi-source data from `useLogStream / useLogModules / useAgentTraceAsLogs / useTransportHealth`:
 
-| Subcomponent         | Responsibility                                              |
-| -------------------- | ----------------------------------------------------------- |
-| `LogPanelToolbar`    | View mode / search / filters / export actions               |
-| `LogPanelStatsBar`   | Per-level counts, transport health, native log diagnostics  |
-| `VirtualizedLogList` | Large-list virtualization (react-window)                    |
-| `LogDetailPanel`     | Single entry detail (stack, source, data foldable)          |
+| Subcomponent         | Responsibility                                                |
+| -------------------- | ------------------------------------------------------------- |
+| `LogPanelToolbar`    | View mode / search / filters / export actions                 |
+| `LogPanelStatsBar`   | Per-level counts, transport health, native log diagnostics    |
+| `VirtualizedLogList` | Large-list virtualization (react-window)                      |
+| `LogDetailPanel`     | Single entry detail (stack, source, data foldable)            |
 | `LogStatsDashboard`  | Aggregation charts by module / level (uses `chart-config.ts`) |
-| `LogTimeline`        | Density timeline, minute-level buckets                      |
+| `LogTimeline`        | Density timeline, minute-level buckets                        |
 | `LogFilterPresets`   | Preset filters: "Recent errors" / "Scheduler" / "Agent trace" |
 | `LogSettings`        | Real-time toggles for transport / sampling / retention policy |
 
@@ -285,19 +293,31 @@ Each transport can expose a `TransportHealthSnapshot`:
 ## Related Documentation
 
 <Cards>
-  <Card title="Development" href="./development" description="Local debugging + reading logs in browser/Tauri console" />
-  <Card title="Plugin System" href="./plugin-system" description="Which origin plugin logs go through" />
+  <Card
+    title="Development"
+    href="./development"
+    description="Local debugging + reading logs in browser/Tauri console"
+  />
+  <Card
+    title="Plugin System"
+    href="./plugin-system"
+    description="Which origin plugin logs go through"
+  />
   <Card title="Storage" href="./storage" description="Where the log table lives in IndexedDB" />
-  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="log://log event + command interface" />
+  <Card
+    title="Runtime & Tauri"
+    href="./runtime-and-tauri"
+    description="log://log event + command interface"
+  />
 </Cards>
 
 ## Where to Start
 
-| Goal                        | File                                                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new transport         | Implement `Transport` in `lib/logging/transports/<name>-transport.ts` → export in `transports/index.ts` → add registration path in `bootstrap.ts` |
-| Adjust default sampling rate| `lib/logging/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                |
-| Add new redaction fields    | Field name list + regex list in `lib/logging/redaction.ts`                                                                       |
-| Modify Rust → platform log bridge | `src-tauri/src/logging/platform/<os>.rs`                                                                                  |
-| New log panel filter dimension | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                       |
-| OTLP collector configuration| `lib/logging/transports/otel-transport.ts` + startup env                                                                         |
+| Goal                              | File                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new transport               | Implement `Transport` in `lib/logging/transports/<name>-transport.ts` → export in `transports/index.ts` → add registration path in `bootstrap.ts` |
+| Adjust default sampling rate      | `lib/logging/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                                 |
+| Add new redaction fields          | Field name list + regex list in `lib/logging/redaction.ts`                                                                                        |
+| Modify Rust → platform log bridge | `src-tauri/src/logging/platform/<os>.rs`                                                                                                          |
+| New log panel filter dimension    | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                                                        |
+| OTLP collector configuration      | `lib/logging/transports/otel-transport.ts` + startup env                                                                                          |

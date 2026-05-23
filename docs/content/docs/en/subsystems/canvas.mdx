@@ -8,18 +8,21 @@ description: Monaco-based collaborative editor — AI suggestions, version histo
 <Status variant="stable" />
 
 <TLDR>
-  Canvas is a code / rich-text workspace embedded in the cognia-next main shell:
-  Monaco editor core + AI action toolbar (Generate / Refactor / Translate / Explain)
-  + right-hand side panel (Suggestions / History / Comments / Collaboration /
-  Execution). Documents live primarily in Zustand+localStorage, with a write-through
-  to Dexie for backup; CRDT + WebSocket provide optional real-time collaboration;
-  Python code is executed by spawning a real interpreter on the Rust side
+  Canvas is a code / rich-text workspace embedded in the cognia-next main shell: Monaco editor core
+  + AI action toolbar (Generate / Refactor / Translate / Explain) + right-hand side panel
+  (Suggestions / History / Comments / Collaboration / Execution). Documents live primarily in
+  Zustand+localStorage, with a write-through to Dexie for backup; CRDT + WebSocket provide optional
+  real-time collaboration; Python code is executed by spawning a real interpreter on the Rust side
   (sandboxed + timeout).
 </TLDR>
 
 <StatGrid>
   <Stat label="Dexie tables" value="4" hint="documents · versions · comments · sessions" />
-  <Stat label="Sidebar tabs" value="5" hint="Suggestions · History · Comments · Collaboration · Execution" />
+  <Stat
+    label="Sidebar tabs"
+    value="5"
+    hint="Suggestions · History · Comments · Collaboration · Execution"
+  />
   <Stat label="Feature flag" value="2" hint="aiWorkbench.v1 · collaboration.v1" />
   <Stat label="Supported languages" value="15+" hint="Monaco language mapping" />
 </StatGrid>
@@ -174,14 +177,14 @@ flowchart TB
 
 The toolbar exposes actions (`useCanvasActions`) mapped to `CanvasActionType` in `lib/ai/generation/canvas-actions.ts`:
 
-| Action      | Input            | Output                                          |
-| ----------- | ---------------- | ----------------------------------------------- |
-| `generate`  | Natural language prompt | Full generation or selection replacement |
-| `refactor`  | Selection + prompt | Replace selection |
-| `translate` | Target language  | Replace with another programming language |
-| `explain`   | Selection        | Write to right-hand Suggestions (does not modify document) |
-| `debug`     | Selection or full text | List potential issues + fix suggestions |
-| `apply`     | Select a suggestion | Apply the suggestion to the editor |
+| Action      | Input                   | Output                                                     |
+| ----------- | ----------------------- | ---------------------------------------------------------- |
+| `generate`  | Natural language prompt | Full generation or selection replacement                   |
+| `refactor`  | Selection + prompt      | Replace selection                                          |
+| `translate` | Target language         | Replace with another programming language                  |
+| `explain`   | Selection               | Write to right-hand Suggestions (does not modify document) |
+| `debug`     | Selection or full text  | List potential issues + fix suggestions                    |
+| `apply`     | Select a suggestion     | Apply the suggestion to the editor                         |
 
 Every action first assembles context via `lib/canvas/ai/context-analyzer.ts:analyzeContext()`:
 
@@ -330,15 +333,15 @@ The model does not call Canvas directly — it drives it indirectly through eith
 
 ## Where to Start
 
-| Goal                              | File                                                                                     |
-| --------------------------------- | ---------------------------------------------------------------------------------------- |
-| Add new language support          | `lib/artifacts/constants.ts:MONACO_LANGUAGE_MAP` + `lib/canvas/symbols/symbol-parser.ts` |
-| Adjust AI context                 | `lib/canvas/ai/context-analyzer.ts`                                                      |
-| Add new AI action                 | `lib/ai/generation/canvas-actions.ts` + `hooks/canvas/use-canvas-actions.ts`             |
-| Change collaboration protocol     | `lib/canvas/collaboration/`                                                              |
-| Add Monaco theme                  | `lib/canvas/themes/theme-registry.ts`                                                    |
-| Run Python in a real sandbox      | Replace the spawn implementation in `src-tauri/src/canvas/python_exec.rs`                |
-| Debug Dexie write-through         | `lib/canvas/dexie-bridge.ts` (loggers.canvas)                                            |
+| Goal                          | File                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| Add new language support      | `lib/artifacts/constants.ts:MONACO_LANGUAGE_MAP` + `lib/canvas/symbols/symbol-parser.ts` |
+| Adjust AI context             | `lib/canvas/ai/context-analyzer.ts`                                                      |
+| Add new AI action             | `lib/ai/generation/canvas-actions.ts` + `hooks/canvas/use-canvas-actions.ts`             |
+| Change collaboration protocol | `lib/canvas/collaboration/`                                                              |
+| Add Monaco theme              | `lib/canvas/themes/theme-registry.ts`                                                    |
+| Run Python in a real sandbox  | Replace the spawn implementation in `src-tauri/src/canvas/python_exec.rs`                |
+| Debug Dexie write-through     | `lib/canvas/dexie-bridge.ts` (loggers.canvas)                                            |
 
 ## Next
 
@@ -348,6 +351,14 @@ The model does not call Canvas directly — it drives it indirectly through eith
     href="./artifacts-sandbox"
     description="One-shot UI artifacts: iframe isolation + DOMPurify"
   />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="The entry point for upgrading code to Canvas" />
-  <Card title="Remote Control" href="./remote-control" description="Cross-device session and document sharing" />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="The entry point for upgrading code to Canvas"
+  />
+  <Card
+    title="Remote Control"
+    href="./remote-control"
+    description="Cross-device session and document sharing"
+  />
 </Cards>

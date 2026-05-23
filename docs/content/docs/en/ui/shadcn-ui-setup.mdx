@@ -49,89 +49,89 @@ All UI primitives in cognia-next (buttons, dialogs, inputs, tables, Sheet, Drawe
 
 Field-by-field breakdown:
 
-| Field | Value | Explanation |
-| ----------------------- | ----------------- | -------------------------------------------------------------------------- |
-| `style` | `new-york` | One of shadcn's two official styles (vs `default`), more compact and slightly squarer. |
-| `rsc` | `true` | Defaults to `"use server"` compatibility; components are RSC-first, add `"use client"` when interactivity is needed. |
-| `tsx` | `true` | TypeScript JSX. |
-| `tailwind.config` | `""` | Tailwind v4 has no JS config file — leave empty so the CLI skips this field. |
-| `tailwind.css` | `app/globals.css` | Main stylesheet; the CLI targets this when injecting `@theme`. |
-| `tailwind.baseColor` | `neutral` | Neutral gray palette (vs `slate` / `zinc` / `stone`). |
-| `tailwind.cssVariables` | `true` | Uses CSS variables instead of inline hex, enabling easy theming. |
-| `tailwind.prefix` | `""` | No prefix on Tailwind classes. |
-| `iconLibrary` | `lucide` | `lucide-react` — unified icon brand across the entire repository. |
-| `aliases.*` | `@/...` | Path aliases matching `tsconfig.json`. |
-| `registries` | `{}` | No third-party shadcn registries connected yet; add a key here to connect a custom registry. |
+| Field                   | Value             | Explanation                                                                                                          |
+| ----------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `style`                 | `new-york`        | One of shadcn's two official styles (vs `default`), more compact and slightly squarer.                               |
+| `rsc`                   | `true`            | Defaults to `"use server"` compatibility; components are RSC-first, add `"use client"` when interactivity is needed. |
+| `tsx`                   | `true`            | TypeScript JSX.                                                                                                      |
+| `tailwind.config`       | `""`              | Tailwind v4 has no JS config file — leave empty so the CLI skips this field.                                         |
+| `tailwind.css`          | `app/globals.css` | Main stylesheet; the CLI targets this when injecting `@theme`.                                                       |
+| `tailwind.baseColor`    | `neutral`         | Neutral gray palette (vs `slate` / `zinc` / `stone`).                                                                |
+| `tailwind.cssVariables` | `true`            | Uses CSS variables instead of inline hex, enabling easy theming.                                                     |
+| `tailwind.prefix`       | `""`              | No prefix on Tailwind classes.                                                                                       |
+| `iconLibrary`           | `lucide`          | `lucide-react` — unified icon brand across the entire repository.                                                    |
+| `aliases.*`             | `@/...`           | Path aliases matching `tsconfig.json`.                                                                               |
+| `registries`            | `{}`              | No third-party shadcn registries connected yet; add a key here to connect a custom registry.                         |
 
 ## Pre-installed Component Inventory (57)
 
 The table below lists all files under `components/ui/`. **All are pre-installed** — import directly with `import { Component } from "@/components/ui/<file>"` and **do not** run `pnpm dlx shadcn@latest add <name>`.
 
-| File | shadcn Registry Name | Primary Use Case |
-| --------------------- | ------------------ | -------------------------------------------- |
-| `accordion.tsx` | `accordion` | Collapsible groups |
-| `alert.tsx` | `alert` | Inline alert banners |
-| `alert-dialog.tsx` | `alert-dialog` | Dangerous action confirmation (delete, irreversible actions) |
-| `aspect-ratio.tsx` | `aspect-ratio` | Aspect-ratio-locked image/video containers |
-| `avatar.tsx` | `avatar` | User/character avatars |
-| `badge.tsx` | `badge` | Status badges |
-| `breadcrumb.tsx` | `breadcrumb` | Breadcrumbs inside settings panels |
-| `button.tsx` | `button` | Most frequently used atomic component; includes `asChild` mode |
-| `button-group.tsx` | `button-group` | Horizontal button groups |
-| `calendar.tsx` | `calendar` | Date picking |
-| `card.tsx` | `card` | Surface containers (with Header / Content / Footer) |
-| `carousel.tsx` | `carousel` | Mobile featured carousels, welcome cards |
-| `chart.tsx` | `chart` | Recharts wrapper, used on stats pages |
-| `checkbox.tsx` | `checkbox` | Form checkboxes |
-| `collapsible.tsx` | `collapsible` | Single-section collapse (no title styling) |
-| `combobox.tsx` | `combobox` | Input-driven dropdown (upgrade from angular/select) |
-| `command.tsx` | `command` | cmdk command palette — `Ctrl+K` |
-| `context-menu.tsx` | `context-menu` | Right-click context menus |
-| `dialog.tsx` | `dialog` | General-purpose modals |
-| `direction.tsx` | `direction` | RTL/LTR container (Radix) |
-| `drawer.tsx` | `drawer` | Bottom drawer, commonly used on mobile |
-| `dropdown-menu.tsx` | `dropdown-menu` | Avatar menus, More menus |
-| `empty.tsx` | `empty` | Empty-state cards |
-| `field.tsx` | `field` | Form fields with label + validation message |
-| `form.tsx` | `form` | react-hook-form integration |
-| `hover-card.tsx` | `hover-card` | Hover cards (link previews) |
-| `input.tsx` | `input` | Text input |
-| `input-group.tsx` | `input-group` | Inputs with prefix/suffix icons |
-| `input-otp.tsx` | `input-otp` | OTP verification code input |
-| `item.tsx` | `item` | Generic list item layout |
-| `kbd.tsx` | `kbd` | Keyboard key styling |
-| `label.tsx` | `label` | `<label>` wrapper |
-| `menubar.tsx` | `menubar` | Desktop application menu bar |
-| `native-select.tsx` | `native-select` | Native `<select>`, preferred on mobile |
-| `navigation-menu.tsx` | `navigation-menu` | Top-level navigation (top bar menus) |
-| `pagination.tsx` | `pagination` | List pagination |
-| `popover.tsx` | `popover` | General-purpose popovers (settings popups, Composer triggers) |
-| `progress.tsx` | `progress` | Progress bars — backup, import, subscription quotas |
-| `radio-group.tsx` | `radio-group` | Radio groups |
-| `resizable.tsx` | `resizable` | Drag-to-resize split panels, workflow editor three-column layout |
-| `scroll-area.tsx` | `scroll-area` | Custom scrollbars |
-| `select.tsx` | `select` | Radix dropdown select |
-| `separator.tsx` | `separator` | Horizontal/vertical dividers |
-| `sheet.tsx` | `sheet` | Side-slide panels (mobile sidebar, desktop settings sheet) |
-| `sidebar.tsx` | `sidebar` | Application-level sidebar (settings, docs site) |
-| `skeleton.tsx` | `skeleton` | Skeleton placeholders |
-| `slider.tsx` | `slider` | Numeric sliders |
-| `sonner.tsx` | `sonner` | Global toast (already mounted in layout) |
-| `spinner.tsx` | `spinner` | Loading spinners |
-| `switch.tsx` | `switch` | Toggle switches |
-| `table.tsx` | `table` | Basic table + TanStack Table friendly |
-| `tabs.tsx` | `tabs` | Core of tabbed shells — used in almost every section |
-| `textarea.tsx` | `textarea` | Multi-line text + Composer |
-| `toggle.tsx` | `toggle` | State buttons |
-| `toggle-group.tsx` | `toggle-group` | Groups of mutually exclusive / non-exclusive toggles |
-| `tooltip.tsx` | `tooltip` | Hover tooltips (Provider already mounted globally) |
+| File                  | shadcn Registry Name | Primary Use Case                                                 |
+| --------------------- | -------------------- | ---------------------------------------------------------------- |
+| `accordion.tsx`       | `accordion`          | Collapsible groups                                               |
+| `alert.tsx`           | `alert`              | Inline alert banners                                             |
+| `alert-dialog.tsx`    | `alert-dialog`       | Dangerous action confirmation (delete, irreversible actions)     |
+| `aspect-ratio.tsx`    | `aspect-ratio`       | Aspect-ratio-locked image/video containers                       |
+| `avatar.tsx`          | `avatar`             | User/character avatars                                           |
+| `badge.tsx`           | `badge`              | Status badges                                                    |
+| `breadcrumb.tsx`      | `breadcrumb`         | Breadcrumbs inside settings panels                               |
+| `button.tsx`          | `button`             | Most frequently used atomic component; includes `asChild` mode   |
+| `button-group.tsx`    | `button-group`       | Horizontal button groups                                         |
+| `calendar.tsx`        | `calendar`           | Date picking                                                     |
+| `card.tsx`            | `card`               | Surface containers (with Header / Content / Footer)              |
+| `carousel.tsx`        | `carousel`           | Mobile featured carousels, welcome cards                         |
+| `chart.tsx`           | `chart`              | Recharts wrapper, used on stats pages                            |
+| `checkbox.tsx`        | `checkbox`           | Form checkboxes                                                  |
+| `collapsible.tsx`     | `collapsible`        | Single-section collapse (no title styling)                       |
+| `combobox.tsx`        | `combobox`           | Input-driven dropdown (upgrade from angular/select)              |
+| `command.tsx`         | `command`            | cmdk command palette — `Ctrl+K`                                  |
+| `context-menu.tsx`    | `context-menu`       | Right-click context menus                                        |
+| `dialog.tsx`          | `dialog`             | General-purpose modals                                           |
+| `direction.tsx`       | `direction`          | RTL/LTR container (Radix)                                        |
+| `drawer.tsx`          | `drawer`             | Bottom drawer, commonly used on mobile                           |
+| `dropdown-menu.tsx`   | `dropdown-menu`      | Avatar menus, More menus                                         |
+| `empty.tsx`           | `empty`              | Empty-state cards                                                |
+| `field.tsx`           | `field`              | Form fields with label + validation message                      |
+| `form.tsx`            | `form`               | react-hook-form integration                                      |
+| `hover-card.tsx`      | `hover-card`         | Hover cards (link previews)                                      |
+| `input.tsx`           | `input`              | Text input                                                       |
+| `input-group.tsx`     | `input-group`        | Inputs with prefix/suffix icons                                  |
+| `input-otp.tsx`       | `input-otp`          | OTP verification code input                                      |
+| `item.tsx`            | `item`               | Generic list item layout                                         |
+| `kbd.tsx`             | `kbd`                | Keyboard key styling                                             |
+| `label.tsx`           | `label`              | `<label>` wrapper                                                |
+| `menubar.tsx`         | `menubar`            | Desktop application menu bar                                     |
+| `native-select.tsx`   | `native-select`      | Native `<select>`, preferred on mobile                           |
+| `navigation-menu.tsx` | `navigation-menu`    | Top-level navigation (top bar menus)                             |
+| `pagination.tsx`      | `pagination`         | List pagination                                                  |
+| `popover.tsx`         | `popover`            | General-purpose popovers (settings popups, Composer triggers)    |
+| `progress.tsx`        | `progress`           | Progress bars — backup, import, subscription quotas              |
+| `radio-group.tsx`     | `radio-group`        | Radio groups                                                     |
+| `resizable.tsx`       | `resizable`          | Drag-to-resize split panels, workflow editor three-column layout |
+| `scroll-area.tsx`     | `scroll-area`        | Custom scrollbars                                                |
+| `select.tsx`          | `select`             | Radix dropdown select                                            |
+| `separator.tsx`       | `separator`          | Horizontal/vertical dividers                                     |
+| `sheet.tsx`           | `sheet`              | Side-slide panels (mobile sidebar, desktop settings sheet)       |
+| `sidebar.tsx`         | `sidebar`            | Application-level sidebar (settings, docs site)                  |
+| `skeleton.tsx`        | `skeleton`           | Skeleton placeholders                                            |
+| `slider.tsx`          | `slider`             | Numeric sliders                                                  |
+| `sonner.tsx`          | `sonner`             | Global toast (already mounted in layout)                         |
+| `spinner.tsx`         | `spinner`            | Loading spinners                                                 |
+| `switch.tsx`          | `switch`             | Toggle switches                                                  |
+| `table.tsx`           | `table`              | Basic table + TanStack Table friendly                            |
+| `tabs.tsx`            | `tabs`               | Core of tabbed shells — used in almost every section             |
+| `textarea.tsx`        | `textarea`           | Multi-line text + Composer                                       |
+| `toggle.tsx`          | `toggle`             | State buttons                                                    |
+| `toggle-group.tsx`    | `toggle-group`       | Groups of mutually exclusive / non-exclusive toggles             |
+| `tooltip.tsx`         | `tooltip`            | Hover tooltips (Provider already mounted globally)               |
 
 Plus two **non-official shadcn** components that also live in `components/ui/`:
 
-| File | Purpose |
-| -------------------- | ------------------------------------------------ |
-| `loading-states.tsx` | cognia's own composite loading state (skeleton + msg) |
-| `combobox.tsx` | Third-party shadcn extension, included in the vendored set |
+| File                 | Purpose                                                    |
+| -------------------- | ---------------------------------------------------------- |
+| `loading-states.tsx` | cognia's own composite loading state (skeleton + msg)      |
+| `combobox.tsx`       | Third-party shadcn extension, included in the vendored set |
 
 ## Tailwind v4 + oklch Theme
 
@@ -402,35 +402,35 @@ export function ThemeToggle() {
 
 `components/ai-elements/` is another set of vendored components (from [ai-elements](https://www.npmjs.com/package/ai-elements)), on equal footing with shadcn:
 
-| Library | Path | Tests | Coverage | Modification Strategy |
-| ----------- | ------------------------- | -------- | ------ | ---------------- |
-| shadcn/ui | `components/ui/` | None | Not counted | Edit files directly |
-| ai-elements | `components/ai-elements/` | None | Not counted | Edit files directly |
-| Business components | `components/<area>/` | **Required** | ≥90% | Standard development flow |
+| Library             | Path                      | Tests        | Coverage    | Modification Strategy     |
+| ------------------- | ------------------------- | ------------ | ----------- | ------------------------- |
+| shadcn/ui           | `components/ui/`          | None         | Not counted | Edit files directly       |
+| ai-elements         | `components/ai-elements/` | None         | Not counted | Edit files directly       |
+| Business components | `components/<area>/`      | **Required** | ≥90%        | Standard development flow |
 
 ai-elements provides high-level chat components like `Message`, `Reasoning`, `Task`, `Tool`, `Conversation`, `Artifact`, `PromptInput`, `Context`, etc. **Under the hood** most of them are also shadcn primitives (Button, Card, Tabs, ...). See [Chat UI Architecture](./chat-ui-architecture) for details.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-| --------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
-| `cn` did not merge conflicting classes | Template string concatenation bypassed `twMerge` | Change to `cn("base", className)` |
-| Tooltip console warning "TooltipProvider missing" | You wrapped another `<TooltipProvider>`, breaking context | Remove your wrapper; layout already has one |
-| Tailwind class not applied | Tailwind v4 scans `app/globals.css` for content; new file path not picked up | Check file extension and path — `.tsx` / `.ts` / `.mdx` are matched by default |
-| Dark mode not switching | No `.dark` class on `<html>` | Confirm `ThemeProvider` is mounted at the top of layout, and is not SSR-only |
-| New shadcn component styles broken | CLI modified `components.json` or `globals.css` | Revert changes to these two files; keep only `components/ui/<name>.tsx` |
-| `Button asChild` error "Children must be element" | Child is a string/Fragment, not a single React element | Wrap in `<span>` or use `<Button>{text}</Button>` |
+| Symptom                                           | Cause                                                                        | Fix                                                                            |
+| ------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `cn` did not merge conflicting classes            | Template string concatenation bypassed `twMerge`                             | Change to `cn("base", className)`                                              |
+| Tooltip console warning "TooltipProvider missing" | You wrapped another `<TooltipProvider>`, breaking context                    | Remove your wrapper; layout already has one                                    |
+| Tailwind class not applied                        | Tailwind v4 scans `app/globals.css` for content; new file path not picked up | Check file extension and path — `.tsx` / `.ts` / `.mdx` are matched by default |
+| Dark mode not switching                           | No `.dark` class on `<html>`                                                 | Confirm `ThemeProvider` is mounted at the top of layout, and is not SSR-only   |
+| New shadcn component styles broken                | CLI modified `components.json` or `globals.css`                              | Revert changes to these two files; keep only `components/ui/<name>.tsx`        |
+| `Button asChild` error "Children must be element" | Child is a string/Fragment, not a single React element                       | Wrap in `<span>` or use `<Button>{text}</Button>`                              |
 
 ## Where to Start
 
-| Goal | File |
-| ----------------------- | ------------------------------------------------------------------- |
-| Change default theme palette | `:root` / `.dark` blocks in `app/globals.css` |
-| Add chart color palette | `--chart-*` in `app/globals.css` and corresponding mappings in `@theme inline` |
-| Modify `Button` variant | `cva()` block in `components/ui/button.tsx` |
-| Add custom toast default styles | `components/ui/sonner.tsx` |
-| Change Sidebar width | `<SidebarProvider style={{ "--sidebar-width": "..." }} />` at the call site |
-| Add new shadcn component | `pnpm dlx shadcn@latest add <name>`, then update the inventory on this page |
+| Goal                            | File                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------ |
+| Change default theme palette    | `:root` / `.dark` blocks in `app/globals.css`                                  |
+| Add chart color palette         | `--chart-*` in `app/globals.css` and corresponding mappings in `@theme inline` |
+| Modify `Button` variant         | `cva()` block in `components/ui/button.tsx`                                    |
+| Add custom toast default styles | `components/ui/sonner.tsx`                                                     |
+| Change Sidebar width            | `<SidebarProvider style={{ "--sidebar-width": "..." }} />` at the call site    |
+| Add new shadcn component        | `pnpm dlx shadcn@latest add <name>`, then update the inventory on this page    |
 
 ## Related Pages
 

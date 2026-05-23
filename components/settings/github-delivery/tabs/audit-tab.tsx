@@ -28,14 +28,7 @@ import type Dexie from "dexie"
 
 const NAMESPACED_TABLE = "github-delivery:audit"
 
-const ACTION_KINDS: GhAction["kind"][] = [
-  "merge",
-  "push",
-  "release",
-  "comment",
-  "label",
-  "close",
-]
+const ACTION_KINDS: GhAction["kind"][] = ["merge", "push", "release", "comment", "label", "close"]
 
 type DecisionFilter = "all" | "allow" | "deny"
 
@@ -123,7 +116,10 @@ export function AuditTab() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={decisionFilter} onValueChange={(v) => setDecisionFilter(v as DecisionFilter)}>
+          <Select
+            value={decisionFilter}
+            onValueChange={(v) => setDecisionFilter(v as DecisionFilter)}
+          >
             <SelectTrigger className="w-32" data-testid="audit-filter-decision">
               <SelectValue />
             </SelectTrigger>
@@ -147,7 +143,12 @@ export function AuditTab() {
             </SelectContent>
           </Select>
           {filtersActive && (
-            <Button size="sm" variant="ghost" onClick={resetFilters} data-testid="audit-clear-filters">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={resetFilters}
+              data-testid="audit-clear-filters"
+            >
               Clear
             </Button>
           )}

@@ -18,19 +18,19 @@ GitHub Delivery 向工作流注入 **13 个 `action.github.*` 节点**,全部在
 
 ### 共享字段
 
-| 字段             | 类型                  | 必填 | 说明                                                                                  |
-| ---------------- | --------------------- | ---- | ------------------------------------------------------------------------------------- |
-| `repoFullName`   | `string`              | 是   | `owner/name`。表达式 `{{ $trigger.payload.body.repository.full_name }}` 常见。         |
-| `policyOverride` | `Partial<GhPolicy>?`  | 否   | 节点级覆盖,深合并到仓库级或全局策略。详见 [policies](./policies)                       |
+| 字段             | 类型                 | 必填 | 说明                                                                           |
+| ---------------- | -------------------- | ---- | ------------------------------------------------------------------------------ |
+| `repoFullName`   | `string`             | 是   | `owner/name`。表达式 `{{ $trigger.payload.body.repository.full_name }}` 常见。 |
+| `policyOverride` | `Partial<GhPolicy>?` | 否   | 节点级覆盖,深合并到仓库级或全局策略。详见 [policies](./policies)               |
 
 ### 输出结构
 
-| 形状                                                  | 时机                                                                                |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `{ ...nodeSpecific }`                                 | 成功调用 Octokit                                                                    |
-| `{ skipped: true, reason, mustWait? }`                | 策略门拒绝且非 HITL 软拒绝                                                          |
-| `{ skipped: true, reason: "HITL rejected: ...", draftId }` | HITL 草稿被人工拒绝                                                            |
-| 抛错                                                  | Octokit 抛非 2xx;orchestrator 记录 error,按 workflow retry policy 重试            |
+| 形状                                                       | 时机                                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `{ ...nodeSpecific }`                                      | 成功调用 Octokit                                                       |
+| `{ skipped: true, reason, mustWait? }`                     | 策略门拒绝且非 HITL 软拒绝                                             |
+| `{ skipped: true, reason: "HITL rejected: ...", draftId }` | HITL 草稿被人工拒绝                                                    |
+| 抛错                                                       | Octokit 抛非 2xx;orchestrator 记录 error,按 workflow retry policy 重试 |
 
 ### 通用前置流程
 
@@ -61,13 +61,13 @@ flowchart TB
 
 **参数.**
 
-| 字段             | 类型      | 必填 | 说明                                                            |
-| ---------------- | --------- | ---- | --------------------------------------------------------------- |
-| `head`           | `string`  | 是   | 源分支(如 `cognia/feature-xxx`)。命中 `branchProtection` 会被拒。|
-| `base`           | `string`  | 是   | 目标分支(如 `main`)。                                          |
-| `title`          | `string`  | 是   | PR 标题。                                                       |
-| `body`           | `string?` | 否   | PR 描述,Markdown 支持。                                        |
-| `draft`          | `boolean?`| 否   | 默认 `false`。                                                  |
+| 字段    | 类型       | 必填 | 说明                                                              |
+| ------- | ---------- | ---- | ----------------------------------------------------------------- |
+| `head`  | `string`   | 是   | 源分支(如 `cognia/feature-xxx`)。命中 `branchProtection` 会被拒。 |
+| `base`  | `string`   | 是   | 目标分支(如 `main`)。                                             |
+| `title` | `string`   | 是   | PR 标题。                                                         |
+| `body`  | `string?`  | 否   | PR 描述,Markdown 支持。                                           |
+| `draft` | `boolean?` | 否   | 默认 `false`。                                                    |
 
 **输出.** `{ number: number, htmlUrl: string }`
 
@@ -96,9 +96,9 @@ flowchart TB
 
 **参数.**
 
-| 字段       | 类型     | 必填 | 说明 |
-| ---------- | -------- | ---- | ---- |
-| `prNumber` | `number` | 是   | PR 号。|
+| 字段       | 类型     | 必填 | 说明    |
+| ---------- | -------- | ---- | ------- |
+| `prNumber` | `number` | 是   | PR 号。 |
 
 **输出.** `{ number: number, state: string }`(`state` 应为 `"closed"`)
 
@@ -114,20 +114,20 @@ flowchart TB
 
 **参数.**
 
-| 字段            | 类型                              | 必填 | 说明                                                  |
-| --------------- | --------------------------------- | ---- | ----------------------------------------------------- |
-| `prNumber`      | `number`                          | 是   | PR 号。                                               |
-| `mergeMethod`   | `"merge" \| "squash" \| "rebase"` | 否   | 默认 `"merge"`。                                      |
-| `commitTitle`   | `string?`                         | 否   | merge commit 标题(squash/merge 模式可写)。           |
-| `commitMessage` | `string?`                         | 否   | merge commit body。                                   |
+| 字段            | 类型                              | 必填 | 说明                                       |
+| --------------- | --------------------------------- | ---- | ------------------------------------------ |
+| `prNumber`      | `number`                          | 是   | PR 号。                                    |
+| `mergeMethod`   | `"merge" \| "squash" \| "rebase"` | 否   | 默认 `"merge"`。                           |
+| `commitTitle`   | `string?`                         | 否   | merge commit 标题(squash/merge 模式可写)。 |
+| `commitMessage` | `string?`                         | 否   | merge commit body。                        |
 
 **输出.** `{ merged: boolean, sha: string }`
 
 **Octokit.** `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`
 
 <Callout type="warn">
-**HITL 软拒.** `requireHumanApproval` 命中时返回 `needsApproval: true`,被路由到 Inbox 草稿。
-用户在 `<DraftEditor/>` 上 Approve 才会继续 merge。
+  **HITL 软拒.** `requireHumanApproval` 命中时返回 `needsApproval: true`,被路由到 Inbox 草稿。
+  用户在 `<DraftEditor />` 上 Approve 才会继续 merge。
 </Callout>
 
 ---
@@ -141,20 +141,20 @@ flowchart TB
 
 **参数.**
 
-| 字段        | 类型                                                          | 必填 | 说明                                          |
-| ----------- | ------------------------------------------------------------- | ---- | --------------------------------------------- |
-| `prNumber`  | `number`                                                      | 是   | PR 号。                                       |
-| `event`     | `"APPROVE" \| "REQUEST_CHANGES" \| "COMMENT"`                | 是   | review 类型。                                 |
-| `body`      | `string`                                                      | 是   | 总体 review 正文,Markdown 支持。              |
-| `comments`  | `Array<{ path: string; position: number; body: string }>?`    | 否   | legacy 行级评论(基于 diff `position`)。       |
+| 字段       | 类型                                                       | 必填 | 说明                                    |
+| ---------- | ---------------------------------------------------------- | ---- | --------------------------------------- |
+| `prNumber` | `number`                                                   | 是   | PR 号。                                 |
+| `event`    | `"APPROVE" \| "REQUEST_CHANGES" \| "COMMENT"`              | 是   | review 类型。                           |
+| `body`     | `string`                                                   | 是   | 总体 review 正文,Markdown 支持。        |
+| `comments` | `Array<{ path: string; position: number; body: string }>?` | 否   | legacy 行级评论(基于 diff `position`)。 |
 
 **输出.** `{ id: number, state: string }`
 
 **Octokit.** `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
 
 <Callout type="info">
-**首选 `reviewPrInline`.** 新写的工作流应该用 `action.github.reviewPrInline` —— 它接受
-`line` + `side`(更稳),并自带 LLM 调用以输出结构化评论。`reviewPr` 用于人工拼装的场景。
+  **首选 `reviewPrInline`.** 新写的工作流应该用 `action.github.reviewPrInline` —— 它接受 `line` +
+  `side`(更稳),并自带 LLM 调用以输出结构化评论。`reviewPr` 用于人工拼装的场景。
 </Callout>
 
 ---
@@ -168,27 +168,28 @@ flowchart TB
 
 **参数.**
 
-| 字段           | 类型      | 必填 | 说明                                                                    |
-| -------------- | --------- | ---- | ----------------------------------------------------------------------- |
-| `prNumber`     | `number`  | 是   | PR 号。                                                                 |
-| `provider`     | `string`  | 是   | LLM provider id,例如 `anthropic` / `openrouter` / `ollama`。            |
-| `model`        | `string`  | 是   | 模型 id,例如 `claude-sonnet-4-6`。                                     |
-| `apiKey`       | `string`  | 是   | provider 凭据(可绑表达式 `{{ $static.anthropicKey }}`)。                |
-| `baseURL`      | `string?` | 否   | 自定义 endpoint(OpenAI-compatible 时常用)。                            |
-| `maxFiles`     | `number?` | 否   | 默认 5,硬上限 30。                                                     |
-| `focus`        | `string?` | 否   | 自由文本,例如 `"security"` / `"performance"`。                          |
+| 字段       | 类型      | 必填 | 说明                                                         |
+| ---------- | --------- | ---- | ------------------------------------------------------------ |
+| `prNumber` | `number`  | 是   | PR 号。                                                      |
+| `provider` | `string`  | 是   | LLM provider id,例如 `anthropic` / `openrouter` / `ollama`。 |
+| `model`    | `string`  | 是   | 模型 id,例如 `claude-sonnet-4-6`。                           |
+| `apiKey`   | `string`  | 是   | provider 凭据(可绑表达式 `{{ $static.anthropicKey }}`)。     |
+| `baseURL`  | `string?` | 否   | 自定义 endpoint(OpenAI-compatible 时常用)。                  |
+| `maxFiles` | `number?` | 否   | 默认 5,硬上限 30。                                           |
+| `focus`    | `string?` | 否   | 自由文本,例如 `"security"` / `"performance"`。               |
 
 **输出.**
 
-| 字段              | 类型      | 说明                                                                |
-| ----------------- | --------- | ------------------------------------------------------------------- |
-| `reviewId`        | `number`  | GitHub review id。                                                  |
-| `body`            | `string`  | 提交给 GitHub 的高层总结(LLM JSON 解析失败时退化为完整 LLM 输出)。 |
-| `commentCount`    | `number`  | 行级评论数(LLM 上限 8)。                                          |
-| `filesAnalysed`   | `number`  | 实际取到 patch 的文件数(≤ `maxFiles`)。                            |
-| `parsedStructured`| `boolean` | LLM 是否产出可解析 JSON。                                           |
+| 字段               | 类型      | 说明                                                               |
+| ------------------ | --------- | ------------------------------------------------------------------ |
+| `reviewId`         | `number`  | GitHub review id。                                                 |
+| `body`             | `string`  | 提交给 GitHub 的高层总结(LLM JSON 解析失败时退化为完整 LLM 输出)。 |
+| `commentCount`     | `number`  | 行级评论数(LLM 上限 8)。                                           |
+| `filesAnalysed`    | `number`  | 实际取到 patch 的文件数(≤ `maxFiles`)。                            |
+| `parsedStructured` | `boolean` | LLM 是否产出可解析 JSON。                                          |
 
 **Octokit.**
+
 - `GET /repos/{owner}/{repo}/pulls/{pull_number}/files`(取 patch)
 - `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
 
@@ -206,10 +207,10 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段       | 类型      | 必填 | 说明                |
-| ---------- | --------- | ---- | ------------------- |
-| `prNumber` | `number`  | 是   | PR 号。              |
-| `body`     | `string`  | 是   | Markdown 评论正文。  |
+| 字段       | 类型     | 必填 | 说明                |
+| ---------- | -------- | ---- | ------------------- |
+| `prNumber` | `number` | 是   | PR 号。             |
+| `body`     | `string` | 是   | Markdown 评论正文。 |
 
 **输出.** `{ id: number, htmlUrl: string }`
 
@@ -226,10 +227,10 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段          | 类型      | 必填 | 说明 |
-| ------------- | --------- | ---- | ---- |
-| `issueNumber` | `number`  | 是   | Issue 号。 |
-| `body`        | `string`  | 是   | Markdown 评论正文。|
+| 字段          | 类型     | 必填 | 说明                |
+| ------------- | -------- | ---- | ------------------- |
+| `issueNumber` | `number` | 是   | Issue 号。          |
+| `body`        | `string` | 是   | Markdown 评论正文。 |
 
 **输出.** `{ id: number, htmlUrl: string }`
 
@@ -245,15 +246,16 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段          | 类型        | 必填 | 说明                                            |
-| ------------- | ----------- | ---- | ----------------------------------------------- |
-| `issueNumber` | `number`    | 是   | Issue 或 PR 号。                                |
-| `add`         | `string[]?` | 否   | 要追加的标签(数组,顺序无关)。                 |
-| `remove`      | `string[]?` | 否   | 要移除的标签。                                  |
+| 字段          | 类型        | 必填 | 说明                          |
+| ------------- | ----------- | ---- | ----------------------------- |
+| `issueNumber` | `number`    | 是   | Issue 或 PR 号。              |
+| `add`         | `string[]?` | 否   | 要追加的标签(数组,顺序无关)。 |
+| `remove`      | `string[]?` | 否   | 要移除的标签。                |
 
 **输出.** `{ added: string[], removed: string[] }`
 
 **Octokit.**
+
 - 若 `add` 非空:`POST /repos/{owner}/{repo}/issues/{issue_number}/labels`
 - 对 `remove` 中每个 label:`DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}`
 
@@ -267,10 +269,10 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段          | 类型                                | 必填 | 说明                                                      |
-| ------------- | ----------------------------------- | ---- | --------------------------------------------------------- |
-| `issueNumber` | `number`                            | 是   | Issue 号。                                                |
-| `reason`      | `"completed" \| "not_planned"?`     | 否   | GitHub UI 上的 "Close as ..." 选项。                       |
+| 字段          | 类型                            | 必填 | 说明                                 |
+| ------------- | ------------------------------- | ---- | ------------------------------------ |
+| `issueNumber` | `number`                        | 是   | Issue 号。                           |
+| `reason`      | `"completed" \| "not_planned"?` | 否   | GitHub UI 上的 "Close as ..." 选项。 |
 
 **输出.** `{ number: number, state: string }`
 
@@ -287,14 +289,14 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段              | 类型      | 必填 | 说明                                                                 |
-| ----------------- | --------- | ---- | -------------------------------------------------------------------- |
-| `tag`             | `string`  | 是   | release tag(如 `v1.2.3` 或 `1.2.3`)。tag 必须存在。                  |
-| `targetCommitish` | `string?` | 否   | 若 tag 不存在,GitHub 会按 commitish(分支名或 SHA)创建。            |
-| `name`            | `string?` | 否   | release 显示名(默认与 tag 同)。                                    |
-| `body`            | `string?` | 否   | Markdown release 笔记。通常喂 `generateChangelog.markdown`。          |
-| `draft`           | `boolean?`| 否   | 默认 `true`(草稿,安全)。                                            |
-| `prerelease`      | `boolean?`| 否   | 默认 `false`。                                                       |
+| 字段              | 类型       | 必填 | 说明                                                         |
+| ----------------- | ---------- | ---- | ------------------------------------------------------------ |
+| `tag`             | `string`   | 是   | release tag(如 `v1.2.3` 或 `1.2.3`)。tag 必须存在。          |
+| `targetCommitish` | `string?`  | 否   | 若 tag 不存在,GitHub 会按 commitish(分支名或 SHA)创建。      |
+| `name`            | `string?`  | 否   | release 显示名(默认与 tag 同)。                              |
+| `body`            | `string?`  | 否   | Markdown release 笔记。通常喂 `generateChangelog.markdown`。 |
+| `draft`           | `boolean?` | 否   | 默认 `true`(草稿,安全)。                                     |
+| `prerelease`      | `boolean?` | 否   | 默认 `false`。                                               |
 
 **输出.** `{ id: number, htmlUrl: string, tag: string }`
 
@@ -311,23 +313,24 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段              | 类型      | 必填 | 说明                                                  |
-| ----------------- | --------- | ---- | ----------------------------------------------------- |
-| `since`           | `string`  | 是   | 起点 tag 或 SHA(例如 `v1.0.0`、`abc1234`)。           |
-| `currentVersion`  | `string?` | 否   | 当前版本字符串(用于 `applyBump`)。默认 `"0.0.0"`。    |
+| 字段             | 类型      | 必填 | 说明                                               |
+| ---------------- | --------- | ---- | -------------------------------------------------- |
+| `since`          | `string`  | 是   | 起点 tag 或 SHA(例如 `v1.0.0`、`abc1234`)。        |
+| `currentVersion` | `string?` | 否   | 当前版本字符串(用于 `applyBump`)。默认 `"0.0.0"`。 |
 
 **输出.**
 
-| 字段           | 类型                                            | 说明                                                  |
-| -------------- | ----------------------------------------------- | ----------------------------------------------------- |
-| `bump`         | `"major" \| "minor" \| "patch" \| "none"`       | 由 `feat` / `fix` / `breaking` 决定。                  |
-| `nextVersion`  | `string`                                        | applyBump 后的版本号(无前缀 `v`)。                   |
-| `markdown`     | `string`                                        | 分类的 Markdown 笔记(按 Features / Bug Fixes / … 分组)。|
-| `commitCount`  | `number`                                        | 解析成功的提交数(非 conventional 的会被丢弃)。       |
+| 字段          | 类型                                      | 说明                                                     |
+| ------------- | ----------------------------------------- | -------------------------------------------------------- |
+| `bump`        | `"major" \| "minor" \| "patch" \| "none"` | 由 `feat` / `fix` / `breaking` 决定。                    |
+| `nextVersion` | `string`                                  | applyBump 后的版本号(无前缀 `v`)。                       |
+| `markdown`    | `string`                                  | 分类的 Markdown 笔记(按 Features / Bug Fixes / … 分组)。 |
+| `commitCount` | `number`                                  | 解析成功的提交数(非 conventional 的会被丢弃)。           |
 
 **Octokit.** `GET /repos/{owner}/{repo}/compare/{basehead}`(basehead 形如 `since...HEAD`)
 
 **Conventional Commits 实现.** `lib/github/changelog.ts`。grammar:`<type>(<scope>)!:
+
 <subject>` + 可选 body + `BREAKING CHANGE:` footer。`!` 或 footer 命中即 major bump;
 `feat` → minor、`fix` → patch、其他 → none。
 
@@ -342,10 +345,10 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段   | 类型     | 必填 | 说明                       |
-| ------ | -------- | ---- | -------------------------- |
-| `tag`  | `string` | 是   | tag 名(不含 `refs/tags/`)。|
-| `sha`  | `string` | 是   | 要打 tag 的 commit SHA。   |
+| 字段  | 类型     | 必填 | 说明                        |
+| ----- | -------- | ---- | --------------------------- |
+| `tag` | `string` | 是   | tag 名(不含 `refs/tags/`)。 |
+| `sha` | `string` | 是   | 要打 tag 的 commit SHA。    |
 
 **输出.** `{ tag: string, sha: string }`
 
@@ -363,11 +366,11 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **参数.**
 
-| 字段              | 类型                  | 必填 | 说明                                                                    |
-| ----------------- | --------------------- | ---- | ----------------------------------------------------------------------- |
-| `issueNumber`     | `number`              | 是   | 触发的 Issue 号。                                                       |
-| `worktreeMode`    | `"local" \| "e2b"`    | 否   | 默认 `local`。`e2b` 需启用 `e2b-sandbox` 插件并提供 API key。            |
-| `branchTemplate`  | `string?`             | 否   | 默认 `cognia/issue-{n}`,`{n}` 占位符替换为 issueNumber。                |
+| 字段             | 类型               | 必填 | 说明                                                          |
+| ---------------- | ------------------ | ---- | ------------------------------------------------------------- |
+| `issueNumber`    | `number`           | 是   | 触发的 Issue 号。                                             |
+| `worktreeMode`   | `"local" \| "e2b"` | 否   | 默认 `local`。`e2b` 需启用 `e2b-sandbox` 插件并提供 API key。 |
+| `branchTemplate` | `string?`          | 否   | 默认 `cognia/issue-{n}`,`{n}` 占位符替换为 issueNumber。      |
 
 **输出.** `RunIssueLoopResult`
 
@@ -399,11 +402,11 @@ activate 时配为 `SidecarIssueLoopDriver`(连接到 Claude sidecar)。Checkpoi
 `guardedExecutor` 内部 `try / catch` 把任意抛错记到 `step.log("error", msg)`,然后**重新抛出**。
 Orchestrator 按节点的 `retryPolicy` 决定:
 
-| retryPolicy           | 行为                                            |
-| --------------------- | ----------------------------------------------- |
-| `none`(默认)         | 一次失败即 step error,整个 run 走错误分支     |
-| `fixed { times, delayMs }` | 等待 → 重试                              |
-| `exponential { times, baseMs }` | 指数退避                              |
+| retryPolicy                     | 行为                                      |
+| ------------------------------- | ----------------------------------------- |
+| `none`(默认)                    | 一次失败即 step error,整个 run 走错误分支 |
+| `fixed { times, delayMs }`      | 等待 → 重试                               |
+| `exponential { times, baseMs }` | 指数退避                                  |
 
 幂等动词(GET / HEAD / PUT / DELETE)在 Octokit 内部已有最多 3 次自动重试。POST / PATCH
 **不**会被 Octokit 重试 —— 这是为了避免 `mergePr` / `createRelease` 多发。如果你确实想
@@ -418,17 +421,17 @@ GitHub 的"做事"动作没有官方 dry-run 接口,**dry-run 主要是验证策
 
 ## 源码索引
 
-| 文件                                                          | 用途                                               |
-| ------------------------------------------------------------- | -------------------------------------------------- |
-| `plugins/github-delivery/src/workflow/nodes.ts`               | 13 个执行器的注册点(单一文件)                    |
-| `plugins/github-delivery/src/workflow/shared.ts`              | `guardedExecutor` 工厂                            |
-| `plugins/github-delivery/src/workflow/issue-loop.ts`          | `runIssueLoop` 长任务实现                          |
-| `plugins/github-delivery/src/workflow/review-pr-inline.ts`    | `runPRReviewAgent` LLM 代理                       |
-| `plugins/github-delivery/src/workflow/runtime.ts`             | `GithubRuntime` 单例接口                           |
-| `plugins/github-delivery/src/index.ts`                        | 注册路径(`setGithubRuntime` + `setIssueLoopDriver`)|
-| `lib/github/octokit-factory.ts`                               | 节点拿到的 Octokit 实例配置                        |
-| `lib/github/policy-gate.ts`                                   | `checkPolicy` —— 每个节点都过                      |
-| `lib/github/changelog.ts`                                     | `generateChangelog` 的实际解析与渲染              |
-| `lib/github/workspace.ts`                                     | `runIssueLoop` 的 clone / commit / push           |
-| `lib/workflow/runtime/long-step-runner.ts`                    | `runIssueLoop` checkpoint 续跑机制                |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`        | HITL 草稿桥(merge / 非 draft release)           |
+| 文件                                                       | 用途                                                |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| `plugins/github-delivery/src/workflow/nodes.ts`            | 13 个执行器的注册点(单一文件)                       |
+| `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` 工厂                              |
+| `plugins/github-delivery/src/workflow/issue-loop.ts`       | `runIssueLoop` 长任务实现                           |
+| `plugins/github-delivery/src/workflow/review-pr-inline.ts` | `runPRReviewAgent` LLM 代理                         |
+| `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` 单例接口                            |
+| `plugins/github-delivery/src/index.ts`                     | 注册路径(`setGithubRuntime` + `setIssueLoopDriver`) |
+| `lib/github/octokit-factory.ts`                            | 节点拿到的 Octokit 实例配置                         |
+| `lib/github/policy-gate.ts`                                | `checkPolicy` —— 每个节点都过                       |
+| `lib/github/changelog.ts`                                  | `generateChangelog` 的实际解析与渲染                |
+| `lib/github/workspace.ts`                                  | `runIssueLoop` 的 clone / commit / push             |
+| `lib/workflow/runtime/long-step-runner.ts`                 | `runIssueLoop` checkpoint 续跑机制                  |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`     | HITL 草稿桥(merge / 非 draft release)               |

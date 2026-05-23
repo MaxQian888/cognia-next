@@ -337,6 +337,15 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
   },
+  // ── System: integrated terminal ───────────────────────────────────────────
+  "action.system.terminal": {
+    label: "Run terminal command",
+    description:
+      "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
+    iconName: "Terminal",
+    keywords: ["terminal", "shell", "command", "bash", "powershell", "dock", "run"],
+    desktopOnly: true,
+  },
   // ── AI primitives ─────────────────────────────────────────────────────────
   "ai.prompt": {
     label: "AI prompt",

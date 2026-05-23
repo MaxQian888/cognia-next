@@ -68,8 +68,8 @@ jest.mock("@/hooks/logging/use-log-panel-url-sync", () => ({
 }))
 
 // ── Mock hooks the panel depends on.
-const mockUseMediaQuery = jest.fn()
-const mockUseResizableLayout = jest.fn(() => ({
+const mockUseMediaQuery = jest.fn((..._args: unknown[]): boolean => false)
+const mockUseResizableLayout = jest.fn((..._args: unknown[]) => ({
   defaultLayout: undefined,
   onLayoutChanged: jest.fn(),
 }))

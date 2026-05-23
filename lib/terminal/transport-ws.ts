@@ -185,7 +185,11 @@ export class RemoteTerminalSession extends BaseTerminalSession {
   async write(data: Uint8Array | string): Promise<void> {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
     if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(bytes)
+      // `WebSocket.send` only accepts ArrayBuffer-backed views (not the
+      // SharedArrayBuffer side of `Uint8Array<ArrayBufferLike>` that TS 6
+      // surfaces). Callers always hand us ArrayBuffer-backed bytes at
+      // runtime (PTY transport + TextEncoder above), so the cast is safe.
+      this.ws.send(bytes as Uint8Array<ArrayBuffer>)
       return
     }
     if (this.isExited) return
@@ -357,7 +361,7 @@ export class RemoteTerminalSession extends BaseTerminalSession {
     if (this.ws.readyState !== WebSocket.OPEN) return
     for (const bytes of this.pendingWrites) {
       try {
-        this.ws.send(bytes)
+        this.ws.send(bytes as Uint8Array<ArrayBuffer>)
       } catch {
         // Drop the rest if the socket flips closed mid-flush.
         break

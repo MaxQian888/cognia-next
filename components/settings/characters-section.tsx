@@ -520,7 +520,7 @@ function CharacterRow({
     : isCloned
       ? sourcePluginId === LOCAL_PACK_PLUGIN_ID
         ? t("badge.clonedFromLocalFile")
-        : t("badge.cloned", { name: pluginMeta?.name ?? sourcePluginId })
+        : t("badge.cloned", { name: pluginMeta?.name ?? sourcePluginId ?? "" })
       : null
   // Update-available comparison runs on cloned rows whose source pack is
   // still registered. We look up the live pack via listCharacterPackEntries

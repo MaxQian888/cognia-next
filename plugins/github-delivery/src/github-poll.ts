@@ -13,15 +13,8 @@
 
 import type { Octokit } from "@octokit/core"
 import { getOctokitForRepo } from "@/lib/github/octokit-factory"
-import {
-  computePollingDeliveryId,
-  normalizePollingDiff,
-} from "@/lib/github/event-normalizer"
-import type {
-  GhRepoEntry,
-  NormalizedGhEvent,
-  NormalizedGhEventKind,
-} from "@/lib/github/types"
+import { computePollingDeliveryId, normalizePollingDiff } from "@/lib/github/event-normalizer"
+import type { GhRepoEntry, NormalizedGhEvent, NormalizedGhEventKind } from "@/lib/github/types"
 
 export interface PollContext {
   /** Dexie table for the namespaced repos table. */
@@ -143,9 +136,7 @@ async function pollRepo(
   now: number
 ): Promise<PollResult> {
   const octokit = await octokitFor(repo)
-  const headers: Record<string, string> = repo.pollEtag
-    ? { "if-none-match": repo.pollEtag }
-    : {}
+  const headers: Record<string, string> = repo.pollEtag ? { "if-none-match": repo.pollEtag } : {}
 
   const [owner, name] = repo.fullName.split("/")
   if (!owner || !name) throw new Error(`bad repo full name "${repo.fullName}"`)

@@ -36,17 +36,17 @@ Dexie 数据库名是 `cognia-claude`（保留原始代号，避免对已有用�
 
 ### 核心聊天（v1–v4）
 
-| 表              | 索引                                                            | 用途                                  |
-| --------------- | --------------------------------------------------------------- | ------------------------------------- |
-| `sessions`      | `id, updatedAt, createdAt, kind, characterId, teamId`           | 聊天会话                              |
-| `messages`      | `id, sessionId, [sessionId+createdAt], senderId`                | 聊天消息                              |
-| `settings`      | `id`（始终 `"singleton"`）                                      | 全局设置（单例）                      |
-| `promptPresets` | `id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, …` | 可复用提示片段（v12 扩展）            |
-| `mcpServers`    | `id, name, enabled`                                             | MCP 服务器定义                        |
+| 表              | 索引                                                            | 用途                                        |
+| --------------- | --------------------------------------------------------------- | ------------------------------------------- |
+| `sessions`      | `id, updatedAt, createdAt, kind, characterId, teamId`           | 聊天会话                                    |
+| `messages`      | `id, sessionId, [sessionId+createdAt], senderId`                | 聊天消息                                    |
+| `settings`      | `id`（始终 `"singleton"`）                                      | 全局设置（单例）                            |
+| `promptPresets` | `id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, …` | 可复用提示片段（v12 扩展）                  |
+| `mcpServers`    | `id, name, enabled`                                             | MCP 服务器定义                              |
 | `characters`    | `id, name, updatedAt, isBuiltIn`                                | 角色人格（[详见](../chat/chat-and-skills)） |
-| `skills`        | `id, name, updatedAt, isBuiltIn, category, source, status, …`   | 技能定义（v8 扩展）                   |
-| `teams`         | `id, name, updatedAt, isBuiltIn`                                | 多角色团队                            |
-| `sessionState`  | `sessionId, lastReadAt`                                         | 未读 / 最后阅读时间                   |
+| `skills`        | `id, name, updatedAt, isBuiltIn, category, source, status, …`   | 技能定义（v8 扩展）                         |
+| `teams`         | `id, name, updatedAt, isBuiltIn`                                | 多角色团队                                  |
+| `sessionState`  | `sessionId, lastReadAt`                                         | 未读 / 最后阅读时间                         |
 
 ### 信任与备份（v6–v10）
 

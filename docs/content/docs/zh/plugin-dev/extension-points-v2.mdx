@@ -21,9 +21,9 @@ ADR-0026（2026-05）补齐了 cognia-next 插件平台的 17 个真实缺口。
       "id": "baidu",
       "label": "百度 OCR",
       "entry": "providers/baidu.js",
-      "export": "createBaiduProvider"
-    }
-  ]
+      "export": "createBaiduProvider",
+    },
+  ],
 }
 ```
 
@@ -31,14 +31,14 @@ ADR-0026（2026-05）补齐了 cognia-next 插件平台的 17 个真实缺口。
 
 六个新 manifest 块：
 
-| 字段 | 作用 | 权限 |
-|------|------|------|
-| `ocrProviders` | OCR registry 贡献 | `network:fetch` |
-| `workspaceBackends` | Issue-loop / sandbox runner | `process:spawn` |
-| `messageRenderers` | 自定义 `part.type` React 组件 | `extension:ui` |
-| `aiProviders` | 插件内部 LLM / embedding | `network:fetch` |
-| `modalMounts` | 声明式 modal 预注册 | `extension:ui` |
-| `chatMiddlewares` | 围绕式 chat 管道 | `agent:control` |
+| 字段                | 作用                          | 权限            |
+| ------------------- | ----------------------------- | --------------- |
+| `ocrProviders`      | OCR registry 贡献             | `network:fetch` |
+| `workspaceBackends` | Issue-loop / sandbox runner   | `process:spawn` |
+| `messageRenderers`  | 自定义 `part.type` React 组件 | `extension:ui`  |
+| `aiProviders`       | 插件内部 LLM / embedding      | `network:fetch` |
+| `modalMounts`       | 声明式 modal 预注册           | `extension:ui`  |
+| `chatMiddlewares`   | 围绕式 chat 管道              | `agent:control` |
 
 另加 `configComponent?: { entry, export }`，提供每个插件的自定义设置 UI。
 
@@ -52,7 +52,9 @@ export async function activate(ctx: PluginContext) {
     category: "specialist",
     shells: { browser: true, tauri: true, capacitor: false },
     credentialKeys: ["myocr-key"],
-    extract: async (input, providerCtx) => { /* 返回 OcrResult */ },
+    extract: async (input, providerCtx) => {
+      /* 返回 OcrResult */
+    },
   })
 
   // 可选——host 在 disable 时也会自动清。
@@ -69,9 +71,15 @@ ctx.workspace.registerBackend({
   id: "my-sandbox",
   label: "我的沙箱",
   backend: {
-    async clone({ repoFullName, branch, token }) { /* ... */ },
-    async commitAndPush({ workspace, message, remoteBranch }) { /* ... */ },
-    async remove(handle) { /* ... */ },
+    async clone({ repoFullName, branch, token }) {
+      /* ... */
+    },
+    async commitAndPush({ workspace, message, remoteBranch }) {
+      /* ... */
+    },
+    async remove(handle) {
+      /* ... */
+    },
   },
 })
 ```
@@ -95,9 +103,7 @@ ctx.messagePart.registerPartRenderer("x-my-custom-block", MyBlockRenderer)
 **重要：** 主聊天链路永远不会解析到插件 AI provider。这些调用仅供插件自己的后台任务（总结、分类、向量化）使用。想影响主聊天请用 `ctx.chat.use()`。
 
 ```ts
-const { text } = await ctx.ai.chat([
-  { role: "user", content: "总结一下这段" }
-])
+const { text } = await ctx.ai.chat([{ role: "user", content: "总结一下这段" }])
 
 const vectors = await ctx.ai.embed(["hello", "world"])
 ```
@@ -117,12 +123,15 @@ handle.close()
 中间件包裹整个 build-options + send 调用。安全网：每个中间件 5s 超时（最大 60s）、错误隔离（抛错跳过该中间件、不影响主链路）、3 次连续失败熔断。
 
 ```ts
-const dispose = ctx.chat.use(async (req, next) => {
-  const before = Date.now()
-  const res = await next()
-  ctx.logger.info(`turn 用时 ${Date.now() - before}ms`)
-  return res
-}, { id: "telemetry", priority: 10, timeoutMs: 3000 })
+const dispose = ctx.chat.use(
+  async (req, next) => {
+    const before = Date.now()
+    const res = await next()
+    ctx.logger.info(`turn 用时 ${Date.now() - before}ms`)
+    return res
+  },
+  { id: "telemetry", priority: 10, timeoutMs: 3000 }
+)
 ```
 
 只想改字段、不想短路的，用更轻量的 `onBuildOptions` hook：
@@ -133,7 +142,7 @@ export const hooks: PluginHooks = {
     if (options.systemPrompt) {
       return {
         ...options,
-        systemPrompt: options.systemPrompt + "\n\n请简洁回答。"
+        systemPrompt: options.systemPrompt + "\n\n请简洁回答。",
       }
     }
   },
@@ -160,15 +169,13 @@ if (ctx.capabilities.tauri) {
 
 ```jsonc
 {
-  "configComponent": { "entry": "settings.js", "export": "MySettings" }
+  "configComponent": { "entry": "settings.js", "export": "MySettings" },
 }
 ```
 
 ```tsx
 export const MySettings: ConfigComponent = ({ config, onSave }) => {
-  return <button onClick={() => onSave({ ...config, enabled: true })}>
-    启用
-  </button>
+  return <button onClick={() => onSave({ ...config, enabled: true })}>启用</button>
 }
 ```
 
@@ -186,10 +193,10 @@ export const MySettings: ConfigComponent = ({ config, onSave }) => {
       "cssVariables": {
         "--background": "#0a0a0a",
         "--foreground": "#fafafa",
-        "--accent-1": "oklch(0.7 0.15 220)"
-      }
-    }
-  ]
+        "--accent-1": "oklch(0.7 0.15 220)",
+      },
+    },
+  ],
 }
 ```
 
@@ -204,10 +211,10 @@ v2 复活两个之前 deprecated 的槽位：
 
 旧路径仍能跑（`@deprecated` shim 兜底）。建议在后续 PR 中迁移：
 
-| 旧 | 新 |
-|----|----|
-| 全局 `installOcrRuntime()` | `ctx.ocr.registerProvider(...)` |
-| `setE2BBackend(impl)` | `ctx.workspace.registerBackend({ id: "e2b", ... })` |
+| 旧                                        | 新                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| 全局 `installOcrRuntime()`                | `ctx.ocr.registerProvider(...)`                                  |
+| `setE2BBackend(impl)`                     | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
 | `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` 或 `manifest.workflows.nodes[]` |
-| `registerPluginI18n({ ... })` | `manifest.i18n`（已自动 wire） |
-| 直接 `isTauri()` import | `ctx.capabilities.tauri` |
+| `registerPluginI18n({ ... })`             | `manifest.i18n`（已自动 wire）                                   |
+| 直接 `isTauri()` import                   | `ctx.capabilities.tauri`                                         |

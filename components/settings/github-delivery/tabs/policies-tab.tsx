@@ -28,11 +28,17 @@ export function PoliciesTab() {
         </p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <dt className="text-muted-foreground">Require green CI</dt>
-          <dd>{p.requireGreenCi ? <Badge>required</Badge> : <Badge variant="outline">off</Badge>}</dd>
+          <dd>
+            {p.requireGreenCi ? <Badge>required</Badge> : <Badge variant="outline">off</Badge>}
+          </dd>
 
           <dt className="text-muted-foreground">Require human approval</dt>
           <dd>
-            {p.requireHumanApproval ? <Badge>required</Badge> : <Badge variant="outline">off</Badge>}
+            {p.requireHumanApproval ? (
+              <Badge>required</Badge>
+            ) : (
+              <Badge variant="outline">off</Badge>
+            )}
           </dd>
 
           <dt className="text-muted-foreground">Max daily merges</dt>

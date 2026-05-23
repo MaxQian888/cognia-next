@@ -59,12 +59,16 @@ the supplied id must match one of the 17 registered providers (see ADR 0024).
 import type { PluginContext } from "@/types/plugin"
 
 export const myPlugin = {
-  manifest: { /* ... */ },
+  manifest: {
+    /* ... */
+  },
   activate: async (ctx: PluginContext) => {
     ctx.agent?.registerTool?.({
       name: "summarize_screenshot",
       pluginId: ctx.pluginId,
-      definition: { /* ... */ },
+      definition: {
+        /* ... */
+      },
       execute: async ({ attachment_id }: { attachment_id: string }) => {
         // Chain into the OCR tool registered by `cognia-ocr`.
         const ocr = await ctx.agent?.invokeTool?.("ocr.extract", {
@@ -92,11 +96,11 @@ raw string after the command name (e.g. `"att_123 --provider mistral-ocr"`).
 
 Tauri builds can opt into native OCR engines through Cargo features:
 
-| Feature          | Backend                                                            |
-| ---------------- | ------------------------------------------------------------------ |
-| `ocr-tesseract`  | Cross-platform Tesseract via the `tesseract-rs` crate.             |
-| `ocr-windows`    | `Windows.Media.Ocr` via the `winocr` crate. Requires an MSIX build. |
-| `ocr-apple`      | Apple Vision via the Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`. |
+| Feature         | Backend                                                                       |
+| --------------- | ----------------------------------------------------------------------------- |
+| `ocr-tesseract` | Cross-platform Tesseract via the `tesseract-rs` crate.                        |
+| `ocr-windows`   | `Windows.Media.Ocr` via the `winocr` crate. Requires an MSIX build.           |
+| `ocr-apple`     | Apple Vision via the Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`. |
 
 Without these features the registry advertises placeholder backends that report
 `MissingBinding`. The TS layer surfaces that as `unsupported_shell` and the

@@ -8,10 +8,11 @@ description: Connect Claude Pro/Max subscription or Console account to the sidec
 <Status variant="stable">stable · ADR-0010</Status>
 
 <TLDR>
-  Log in to Claude Pro/Max or Console via a paste-back-authorization-code PKCE flow; credentials are kept in the OS keyring, and the sidecar automatically receives Bearer auth through the
-  `CLAUDE_CODE_OAUTH_TOKEN` environment variable. Every real `/v1/messages` response is intercepted by
-  `fetch-interceptor.mjs`, which parses the `anthropic-ratelimit-unified-*` headers and writes them to Dexie, making the 5h / 7d
-  progress bars visible for free.
+  Log in to Claude Pro/Max or Console via a paste-back-authorization-code PKCE flow; credentials are
+  kept in the OS keyring, and the sidecar automatically receives Bearer auth through the
+  `CLAUDE_CODE_OAUTH_TOKEN` environment variable. Every real `/v1/messages` response is intercepted
+  by `fetch-interceptor.mjs`, which parses the `anthropic-ratelimit-unified-*` headers and writes
+  them to Dexie, making the 5h / 7d progress bars visible for free.
 </TLDR>
 
 <StatGrid>
@@ -183,15 +184,18 @@ is set on the SDK client config rather than here, because Node's undici fetch di
   type={{
     accessToken: {
       type: "string",
-      description: "OAuth bearer, used by the sidecar as Authorization: Bearer ...; treated as secret.",
+      description:
+        "OAuth bearer, used by the sidecar as Authorization: Bearer ...; treated as secret.",
     },
     refreshToken: {
       type: "string",
-      description: "Long-term refresh token, may be rotated on every refresh; always write back the latest value.",
+      description:
+        "Long-term refresh token, may be rotated on every refresh; always write back the latest value.",
     },
     expiresAtMs: {
       type: "number",
-      description: "Absolute expiration time, milliseconds since epoch. `Date.now() + expires_in * 1000`.",
+      description:
+        "Absolute expiration time, milliseconds since epoch. `Date.now() + expires_in * 1000`.",
     },
     mode: {
       type: '"subscription" | "console"',
@@ -200,7 +204,10 @@ is set on the SDK client config rather than here, because Node's undici fetch di
     scope: { type: "string?", description: "OAuth scope string echoed by the server." },
     email: { type: "string?", description: "Account email, displayed in the Account tab." },
     plan: { type: "string?", description: "Plan label: pro / max / team / console / other." },
-    storedAtMs: { type: "number", description: "Most recent write time, milliseconds since epoch." },
+    storedAtMs: {
+      type: "number",
+      description: "Most recent write time, milliseconds since epoch.",
+    },
   }}
 />
 
@@ -236,13 +243,13 @@ Rust's stdout pump in `claude/sidecar.rs` forwards this line as a Tauri event `c
 
 After enabling `Settings → Subscription → Settings: Enable active probe`, `scheduler.ts` starts a visible / hidden dual-rate loop:
 
-| State | Default Interval | Purpose |
-| ---- | -------- | ---- |
-| Visible | 5 minutes | When the user stays on the subscription page, the progress bar stays fresh to the second |
-| Hidden | 30 minutes | Background tab, preventing a forgotten browser from burning through quota |
-| Floor | 60 seconds | The UI does not allow either rate to be set below this value |
+| State   | Default Interval | Purpose                                                                                  |
+| ------- | ---------------- | ---------------------------------------------------------------------------------------- |
+| Visible | 5 minutes        | When the user stays on the subscription page, the progress bar stays fresh to the second |
+| Hidden  | 30 minutes       | Background tab, preventing a forgotten browser from burning through quota                |
+| Floor   | 60 seconds       | The UI does not allow either rate to be set below this value                             |
 
-Each probe sends a `max_tokens: 1`, single-character request to `claude-haiku-4-5-20251001` — the cheapest model that still returns the full unified-* headers. **Each probe consumes approximately 10 input + 1 output token**; there is no official free quota. The UI displays this notice when the checkbox is toggled. `ProbeOutcome` distinguishes 5 failure reasons:
+Each probe sends a `max_tokens: 1`, single-character request to `claude-haiku-4-5-20251001` — the cheapest model that still returns the full unified-\* headers. **Each probe consumes approximately 10 input + 1 output token**; there is no official free quota. The UI displays this notice when the checkbox is toggled. `ProbeOutcome` distinguishes 5 failure reasons:
 
 ```ts title="lib/anthropic-subscription/usage-probe.ts"
 reason: "auth" | "rate-limited" | "no-headers" | "transport" | "http"
@@ -273,7 +280,10 @@ this.version(20).stores({
 `Settings → Subscription` (`?section=subscription&subTab=…`) is hosted by `SubscriptionSection`, using the same URL-sync pattern.
 
 <Cards>
-  <Card title="Overview" description="Status badge, 5h/7d progress bars, reset countdown; CTA when not logged in.">
+  <Card
+    title="Overview"
+    description="Status badge, 5h/7d progress bars, reset countdown; CTA when not logged in."
+  >
     `tabs/overview-tab.tsx`
   </Card>
   <Card title="Account" description="Email / plan / expiry; manual refresh + sign out.">
@@ -282,7 +292,10 @@ this.version(20).stores({
   <Card title="Usage" description="Most recent 200 samples table; filter by source / status.">
     `tabs/usage-tab.tsx`
   </Card>
-  <Card title="Settings" description="Active probe toggle, visible/hidden rates, warning threshold.">
+  <Card
+    title="Settings"
+    description="Active probe toggle, visible/hidden rates, warning threshold."
+  >
     `tabs/settings-tab.tsx`
   </Card>
 </Cards>

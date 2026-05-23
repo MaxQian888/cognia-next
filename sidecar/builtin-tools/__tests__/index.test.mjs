@@ -15,9 +15,16 @@ test("server name + version match the shared JSON", () => {
   assert.match(SERVER_VERSION, /^\d+\.\d+\.\d+$/)
 })
 
-test("TOOL_NAMES_BY_CATEGORY exposes all five category buckets", () => {
+test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
   const ids = Object.keys(TOOL_NAMES_BY_CATEGORY).sort()
-  assert.deepEqual(ids, ["environment", "fileExtras", "git", "process", "shellAdvanced"])
+  assert.deepEqual(ids, [
+    "environment",
+    "fileExtras",
+    "git",
+    "process",
+    "shellAdvanced",
+    "terminalRepl",
+  ])
 })
 
 test("buildCogniaToolsServer returns null when no categories enabled", () => {
@@ -30,6 +37,7 @@ test("buildCogniaToolsServer returns null when no categories enabled", () => {
         process: false,
         environment: false,
         shellAdvanced: false,
+        terminalRepl: false,
       },
     }),
     null
@@ -55,6 +63,7 @@ test("buildCogniaToolsServer composes tools from all enabled categories", () => 
       process: true,
       environment: true,
       shellAdvanced: true,
+      terminalRepl: true,
     },
   })
   assert.notEqual(all, null)
@@ -74,6 +83,7 @@ test("namesForDisabledCategories returns nothing when everything is enabled", ()
     process: true,
     environment: true,
     shellAdvanced: true,
+    terminalRepl: true,
   })
   assert.deepEqual(out, [])
 })
@@ -85,6 +95,7 @@ test("namesForDisabledCategories returns prefixed names for off categories", () 
     process: false,
     environment: true,
     shellAdvanced: false,
+    terminalRepl: true,
   })
   assert.ok(out.includes("mcp__cognia-tools__file_hash"))
   assert.ok(out.includes("mcp__cognia-tools__shell_execute_advanced"))
@@ -99,6 +110,7 @@ test("namesForDisabledCategories returns everything when enabled is undefined", 
   assert.ok(out.some((n) => n.endsWith("list_processes")))
   assert.ok(out.some((n) => n.endsWith("system_info")))
   assert.ok(out.some((n) => n.endsWith("shell_execute_advanced")))
+  assert.ok(out.some((n) => n.endsWith("terminal_repl_spawn")))
 })
 
 test("every tool name is unique across categories", () => {

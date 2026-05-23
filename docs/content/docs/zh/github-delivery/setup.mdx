@@ -6,20 +6,20 @@ description: 在 cognia 里启用 GitHub Delivery 插件、配置 GitHub App 或
 # 安装与凭据
 
 <TLDR>
-在 Settings → Plugins → Marketplace 启用 `github-delivery` 插件,然后在
-Settings → GitHub Delivery → Credentials 选择凭据模式(App 推荐 / PAT 快通道)
-并把仓库添加到 Repos Tab。Webhook URL 由 Tauri Rust 接收器随机分配端口,可通过
-cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5 分钟一次)即可。
+  在 Settings → Plugins → Marketplace 启用 `github-delivery` 插件,然后在 Settings → GitHub Delivery
+  → Credentials 选择凭据模式(App 推荐 / PAT 快通道) 并把仓库添加到 Repos Tab。Webhook URL 由 Tauri
+  Rust 接收器随机分配端口,可通过 cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5
+  分钟一次)即可。
 </TLDR>
 
 ## 前置条件
 
-| 条件                                                       | 必需 | 说明                                                                                          |
-| ---------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------- |
-| cognia 0.1.0+                                              | 是   | 插件 manifest 写明 `engines.cognia >= 0.1.0`                                                  |
-| Tauri 桌面构建(macOS / Windows / Linux)                  | 否   | Web 仍可运行节点 + 轮询,但不能注册 webhook                                                   |
-| GitHub 账号 + 仓库写权限                                   | 是   | App 模式需要在仓库或组织内安装 App;PAT 模式需要 token 至少含 `repo` scope                     |
-| 公网入口或 cloudflared                                     | 否   | 仅当用 webhook 触发器时需要;否则继续用轮询                                                   |
+| 条件                                    | 必需 | 说明                                                                      |
+| --------------------------------------- | ---- | ------------------------------------------------------------------------- |
+| cognia 0.1.0+                           | 是   | 插件 manifest 写明 `engines.cognia >= 0.1.0`                              |
+| Tauri 桌面构建(macOS / Windows / Linux) | 否   | Web 仍可运行节点 + 轮询,但不能注册 webhook                                |
+| GitHub 账号 + 仓库写权限                | 是   | App 模式需要在仓库或组织内安装 App;PAT 模式需要 token 至少含 `repo` scope |
+| 公网入口或 cloudflared                  | 否   | 仅当用 webhook 触发器时需要;否则继续用轮询                                |
 
 ## 1. 启用插件
 
@@ -41,8 +41,8 @@ cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5 �
      `checkPolicy` / `getWorkOrder` / `upsertWorkOrder`)。
    - 注册 Issue → PR loop 的 Claude sidecar 驱动器。
    - 通过 `registerPluginAdapters` 把 `github` 连接器适配器登记到 ConnectorBus。
-</Step>
-<Step>
+     </Step>
+     <Step>
 **确认 Settings → GitHub Delivery 可见。** 侧边栏在 "Extensions" 组下出现 GitHub Delivery
 入口。点开后看到 5 个 Tab:Repos / Credentials / Policies / Audit / Usage。
 </Step>
@@ -82,7 +82,7 @@ cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5 �
   - Pull request、Pull request review、Issues、Issue comment、Check run、Release。
 - Webhook URL:留空,稍后回来填(我们要等 cognia 端给出真实路径)。
 - Generate a private key,下载 PEM 文件。
-</Step>
+    </Step>
 <Step>
 **在目标仓库或组织里 Install 该 App。** 安装完成后从 URL 抓取 `installation_id`
 (例如 `https://github.com/settings/installations/12345678` → 12345678)。
@@ -90,14 +90,15 @@ cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5 �
 <Step>
 **在 cognia 填入凭据。** Settings → GitHub Delivery → Credentials,选择 App 模式,填:
 
-| 字段             | 来源                                                |
-| ---------------- | --------------------------------------------------- |
-| App ID           | GitHub App 设置页顶部的 App ID                       |
-| Installation ID  | 安装该 App 后的 URL 路径里                          |
-| Private key (PEM) | 下载的 `.pem` 文件全文                              |
+| 字段              | 来源                           |
+| ----------------- | ------------------------------ |
+| App ID            | GitHub App 设置页顶部的 App ID |
+| Installation ID   | 安装该 App 后的 URL 路径里     |
+| Private key (PEM) | 下载的 `.pem` 文件全文         |
 
 私钥在桌面端会被搬到 OS keyring(`ctx.secrets.set`)并从 IndexedDB 行里抹掉;
 Web 端继续留在加密 blob 里。
+
 </Step>
 </Steps>
 
@@ -122,7 +123,7 @@ Web 端继续留在加密 blob 里。
 - Repository permissions:Contents (RW)、Issues (RW)、Pull requests (RW)、Metadata (Read)、
   Checks (Read)。
 - 不要勾选 Organization permissions(以最小权限为原则)。
-</Step>
+    </Step>
 <Step>
 **在 cognia 粘贴 token.** Settings → GitHub Delivery → Credentials → 选择 PAT,
 粘贴 token。桌面端会在 OS keyring 保存,并把 row 里的 `patToken` 清掉(以 `patKeyringId`
@@ -137,14 +138,14 @@ Web 端继续留在加密 blob 里。
 
 Settings → GitHub Delivery → Repos:
 
-| 字段                    | 含义                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| Full name(`owner/name`)| 仓库的标准全名                                                                             |
-| Credential mode         | `app` 或 `pat`(决定 `octokit-factory` 的路径)                                            |
-| Trigger mode            | `webhook` 或 `polling`(见下节)                                                            |
-| Worktree mode           | `local`(默认,简单 git clone)或 `e2b`(走 e2b-sandbox 插件)                              |
-| Push target             | `source-branch` 默认 / `fork`(向 fork push)                                                |
-| Policy                  | 可选,仓库级覆盖。完整字段见 [policies](./policies)                                          |
+| 字段                    | 含义                                                      |
+| ----------------------- | --------------------------------------------------------- |
+| Full name(`owner/name`) | 仓库的标准全名                                            |
+| Credential mode         | `app` 或 `pat`(决定 `octokit-factory` 的路径)             |
+| Trigger mode            | `webhook` 或 `polling`(见下节)                            |
+| Worktree mode           | `local`(默认,简单 git clone)或 `e2b`(走 e2b-sandbox 插件) |
+| Push target             | `source-branch` 默认 / `fork`(向 fork push)               |
+| Policy                  | 可选,仓库级覆盖。完整字段见 [policies](./policies)        |
 
 行被写到 `github-delivery:repos` 表;主键 = `fullName`。
 
@@ -226,26 +227,26 @@ events 选 `pull_request.opened`,保存。
 
 ## 故障速查
 
-| 现象                                | 可能原因                              | 排查                                                                                |
-| ----------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------- |
-| Webhook 进来但 audit 没有任何行     | 签名校验失败                          | 确认 `x-hub-signature-256` 在头里;Settings → Webhook secret 与 GitHub 端一致         |
-| `401 Bad credentials`               | App private key 错误或 installation 未授权 | 检查 PEM 完整(包括 `-----BEGIN` / `-----END` 行);确认 installation 仍存在        |
-| `404 Not Found`(只读 endpoint)    | App 安装时未勾选必要 repo permission  | 修改 GitHub App permissions,然后在仓库里 "Re-authorize" App                          |
-| Polling 看不到事件                  | `triggerMode` 不是 `polling`,或调度器没开 | 在 Repos Tab 切到 polling;在 Settings → Scheduled tasks 确认 `github-poll` 启用     |
-| 节点抛 `No issue-loop AI driver`    | sidecar 未启动                        | 在 Settings → Providers 连接 Claude Code provider,然后重启插件                       |
-| `tauri.conf.json` shell scope 拒绝 cloudflared | 升级前的旧配置                  | 拉一下 main,确认 shell scope 含 `cloudflared` 的 allow 行                            |
+| 现象                                           | 可能原因                                   | 排查                                                                            |
+| ---------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------- |
+| Webhook 进来但 audit 没有任何行                | 签名校验失败                               | 确认 `x-hub-signature-256` 在头里;Settings → Webhook secret 与 GitHub 端一致    |
+| `401 Bad credentials`                          | App private key 错误或 installation 未授权 | 检查 PEM 完整(包括 `-----BEGIN` / `-----END` 行);确认 installation 仍存在       |
+| `404 Not Found`(只读 endpoint)                 | App 安装时未勾选必要 repo permission       | 修改 GitHub App permissions,然后在仓库里 "Re-authorize" App                     |
+| Polling 看不到事件                             | `triggerMode` 不是 `polling`,或调度器没开  | 在 Repos Tab 切到 polling;在 Settings → Scheduled tasks 确认 `github-poll` 启用 |
+| 节点抛 `No issue-loop AI driver`               | sidecar 未启动                             | 在 Settings → Providers 连接 Claude Code provider,然后重启插件                  |
+| `tauri.conf.json` shell scope 拒绝 cloudflared | 升级前的旧配置                             | 拉一下 main,确认 shell scope 含 `cloudflared` 的 allow 行                       |
 
 ## 源码索引
 
-| 文件                                                  | 用途                                                |
-| ----------------------------------------------------- | --------------------------------------------------- |
-| `plugins/github-delivery/src/index.ts`                | `activate` 时配 runtime / driver / adapter         |
-| `plugins/github-delivery/plugin.json`                 | 4 张 Dexie 表 + `github` 连接器声明                |
-| `lib/github/auth-app.ts`                              | App installation token 缓存与刷新                  |
-| `lib/github/auth-pat.ts`                              | PAT 鉴权                                            |
-| `lib/github/octokit-factory.ts`                       | 按 mode 路由,挂 throttling / retry                |
-| `lib/github/cloudflared-tauri.ts`                     | cloudflared 一键暴露                               |
-| `src-tauri/src/workflow/triggers/webhook_router.rs`   | axum 接收器 + `SignatureMode::Github`               |
-| `plugins/github-delivery/src/github-poll.ts`          | ETag 轮询任务                                       |
-| `components/settings/github-delivery/tabs/repos-tab.tsx`        | Repo CRUD UI                              |
-| `components/settings/github-delivery/tabs/credentials-tab.tsx`  | App / PAT 表单                            |
+| 文件                                                           | 用途                                       |
+| -------------------------------------------------------------- | ------------------------------------------ |
+| `plugins/github-delivery/src/index.ts`                         | `activate` 时配 runtime / driver / adapter |
+| `plugins/github-delivery/plugin.json`                          | 4 张 Dexie 表 + `github` 连接器声明        |
+| `lib/github/auth-app.ts`                                       | App installation token 缓存与刷新          |
+| `lib/github/auth-pat.ts`                                       | PAT 鉴权                                   |
+| `lib/github/octokit-factory.ts`                                | 按 mode 路由,挂 throttling / retry         |
+| `lib/github/cloudflared-tauri.ts`                              | cloudflared 一键暴露                       |
+| `src-tauri/src/workflow/triggers/webhook_router.rs`            | axum 接收器 + `SignatureMode::Github`      |
+| `plugins/github-delivery/src/github-poll.ts`                   | ETag 轮询任务                              |
+| `components/settings/github-delivery/tabs/repos-tab.tsx`       | Repo CRUD UI                               |
+| `components/settings/github-delivery/tabs/credentials-tab.tsx` | App / PAT 表单                             |

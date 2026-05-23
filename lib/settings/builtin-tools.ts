@@ -15,6 +15,7 @@ export type BuiltinToolCategoryId =
   | "process"
   | "environment"
   | "shellAdvanced"
+  | "terminalRepl"
 
 export type BuiltinToolRiskLevel = "low" | "medium" | "high"
 

@@ -54,7 +54,7 @@ describe("WorkspaceHeader", () => {
   it("renders the three mode tabs", () => {
     storeState.surfaces = { sx: { ready: true } }
     renderHeader("sx")
-    const a2uiMessages = (enMessages as { a2ui: Record<string, string> }).a2ui
+    const a2uiMessages = (enMessages as unknown as { a2ui: Record<string, string> }).a2ui
     const editLabel = a2uiMessages.editMode
     const previewLabel = a2uiMessages.previewMode
     const dataLabel = a2uiMessages.dataMode
@@ -73,7 +73,7 @@ describe("WorkspaceHeader", () => {
   it("clicking a mode tab updates workspace mode (smoke test that handlers wire up)", () => {
     storeState.surfaces = { sx: { ready: true } }
     renderHeader("sx")
-    const editLabel = (enMessages as { a2ui: Record<string, string> }).a2ui.editMode
+    const editLabel = (enMessages as unknown as { a2ui: Record<string, string> }).a2ui.editMode
     // The desktop tab text lives inside the TabsTrigger element.
     const editTrigger = screen.getByText(editLabel).closest("button")
     expect(editTrigger).not.toBeNull()

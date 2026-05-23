@@ -3,10 +3,14 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-const isTauriMock = jest.fn().mockReturnValue(false)
+// `stores/index.ts` calls `isTauri()` at module top-level inside a Zustand
+// `create()` factory; that runs during ES import hoisting, before the test's
+// `const mockIsTauri = …` line can initialise. Declaring the jest.fn inside
+// the factory dodges the TDZ; tests grab the live ref via `requireMock`.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn().mockReturnValue(false),
 }))
+const mockIsTauri = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 const renderSingleExportMock = jest.fn()
 jest.mock("@/lib/export/single", () => ({
@@ -50,7 +54,7 @@ import { useSingleExport } from "./use-single-export"
 import { getPluginEventHooks } from "@/lib/plugin"
 
 beforeEach(() => {
-  isTauriMock.mockReset().mockReturnValue(false)
+  mockIsTauri.mockReset().mockReturnValue(false)
   renderSingleExportMock.mockReset()
   saveDialogMock.mockReset()
   writeTextFileMock.mockReset().mockResolvedValue(undefined)
@@ -93,7 +97,7 @@ describe("useSingleExport", () => {
   })
 
   it("Tauri save success", async () => {
-    isTauriMock.mockReturnValue(true)
+    mockIsTauri.mockReturnValue(true)
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.json",
       content: "{}",
@@ -110,7 +114,7 @@ describe("useSingleExport", () => {
   })
 
   it("Tauri cancellation returns canceled", async () => {
-    isTauriMock.mockReturnValue(true)
+    mockIsTauri.mockReturnValue(true)
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.txt",
       content: "x",
@@ -190,7 +194,7 @@ describe("useSingleExport", () => {
   })
 
   it("dispatches onExportComplete(false) when the user cancels the Tauri save dialog", async () => {
-    isTauriMock.mockReturnValue(true)
+    mockIsTauri.mockReturnValue(true)
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.txt",
       content: "x",
@@ -226,7 +230,7 @@ describe("useSingleExport", () => {
   })
 
   it("filename without extension defaults the dialog filter to TXT", async () => {
-    isTauriMock.mockReturnValue(true)
+    mockIsTauri.mockReturnValue(true)
     renderSingleExportMock.mockReturnValueOnce({
       filename: "noext",
       content: "data",

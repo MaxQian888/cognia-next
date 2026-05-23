@@ -274,6 +274,20 @@ const SubworkflowParams = z.object({
   input: z.unknown().optional(),
 })
 
+// ── System: integrated terminal ────────────────────────────────────────────
+// Executor at `lib/workflow/nodes/terminal.ts` requires a non-empty command;
+// the rest of the fields are optional and tolerated by `runTerminalDockAction`.
+const SystemTerminalParams = z.object({
+  command: requiredString("required"),
+  args: z.array(z.string()).optional(),
+  cwd: optionalString,
+  shell: optionalString,
+  projectId: optionalString,
+  tabId: optionalString,
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+})
+
 // ── Data ────────────────────────────────────────────────────────────────────
 
 const TransformParams = z.object({
@@ -386,6 +400,8 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "action.desktop.windowResize": z.object({}).passthrough(),
   "action.desktop.wait": z.object({}).passthrough(),
   "trigger.desktop.event": z.object({}).passthrough(),
+  // System: integrated terminal
+  "action.system.terminal": SystemTerminalParams,
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,

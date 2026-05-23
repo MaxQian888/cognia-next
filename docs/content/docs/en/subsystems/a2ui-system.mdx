@@ -8,7 +8,10 @@ description: Agent-to-UI protocol — Claude creates interactive React panels vi
 <Status variant="experimental" />
 
 <TLDR>
-  Claude (or any external agent) generates a declarative component tree through four MCP tools; the renderer turns it into a real React panel inside the webview; user actions and data model changes flow back to the agent via an event bus. Renderer, catalog, parser, and events all run in the browser layer; the sidecar MCP server + Rust bridge let external agents connect as well.
+  Claude (or any external agent) generates a declarative component tree through four MCP tools; the
+  renderer turns it into a real React panel inside the webview; user actions and data model changes
+  flow back to the agent via an event bus. Renderer, catalog, parser, and events all run in the
+  browser layer; the sidecar MCP server + Rust bridge let external agents connect as well.
 </TLDR>
 
 <StatGrid>
@@ -125,7 +128,8 @@ The canonical definitions live in `lib/a2ui/mcp-tool-schemas.ts`, shared between
       type: "{ surfaceId, surfaceType, catalogId?, title?, widget? }",
     },
     a2ui_update_components: {
-      description: "Fully replace a surface's component tree. New components must conform to the A2UI v0.9 schema.",
+      description:
+        "Fully replace a surface's component tree. New components must conform to the A2UI v0.9 schema.",
       type: "{ surfaceId, components[] }",
     },
     a2ui_data_model_update: {
@@ -145,12 +149,12 @@ The tool namespace in external agents appears as `mcp__a2ui-bridge__a2ui_create_
 
 ## Surface Types
 
-| Type         | Behavior                                    | Persistence                              |
-| ------------ | ------------------------------------------- | ---------------------------------------- |
-| `inline`     | Rendered inside the current chat message bubble | Not stored in Dexie; the message itself is the boundary |
-| `dialog`     | Radix Dialog popup; draggable               | Not stored in Dexie                      |
-| `panel`      | Embedded in sidebar / workbench panel       | Persisted in `a2uiSurfaces` table        |
-| `fullscreen` | Takes over the main area; typically used for mini-app editors | Persisted in `a2uiSurfaces` table        |
+| Type         | Behavior                                                      | Persistence                                             |
+| ------------ | ------------------------------------------------------------- | ------------------------------------------------------- |
+| `inline`     | Rendered inside the current chat message bubble               | Not stored in Dexie; the message itself is the boundary |
+| `dialog`     | Radix Dialog popup; draggable                                 | Not stored in Dexie                                     |
+| `panel`      | Embedded in sidebar / workbench panel                         | Persisted in `a2uiSurfaces` table                       |
+| `fullscreen` | Takes over the main area; typically used for mini-app editors | Persisted in `a2uiSurfaces` table                       |
 
 `inline` messages are bound to a chat message id and are destroyed along with the message; `panel` and `fullscreen` need to survive across restarts, so they go through Dexie.
 
@@ -211,7 +215,7 @@ Data: { value: 42 }
 
 `lib/a2ui/output-profiles.ts` maps 21 common request intents ("draw an architecture diagram", "show a comparison", "build a dashboard"...) to recommended output type + tech stack + host strategy:
 
-| Category                      | Output  | Tech    | Host Strategy         |
+| Category                  | Output  | Tech    | Host Strategy    |
 | ------------------------- | ------- | ------- | ---------------- |
 | `how-it-works-physical`   | svg     | svg     | artifact-preview |
 | `database-schema-erd`     | mermaid | mermaid | native           |
@@ -273,29 +277,29 @@ If you are extending the component catalog, **audit every new component** for XS
 
 ## Tests
 
-| File                                            | Coverage                                           |
-| ----------------------------------------------- | ---------------------------------------------- |
-| `lib/a2ui/parser.test.ts`                       | Message parsing, mixed payload, error recovery               |
-| `lib/a2ui/data-model.test.ts`                   | JSON pointer, deep merge, computed fields          |
-| `lib/a2ui/events.test.ts`                       | Emitter subscription, AI formatting, batch merging              |
-| `lib/a2ui/catalog.test.ts`                      | Catalog registration, fallback, widget resolve             |
-| `lib/a2ui/templates.test.ts`                    | 14 built-in template integrity + integrity checksum           |
-| `lib/a2ui/app-generator.test.ts`                | 18 auto-detection classes + name extraction                       |
-| `lib/a2ui/output-profiles.test.ts`              | 21 intent routes                                  |
-| `components/a2ui/a2ui-renderer.test.tsx`        | Component dispatch, fallback, error boundary              |
-| `components/a2ui/a2ui-widget-families.test.tsx` | Accessibility + behavior for each component family                    |
-| `src-tauri/src/a2ui_bridge/`                    | `runtime_paths_serialize_uses_snake_case_keys` |
+| File                                            | Coverage                                            |
+| ----------------------------------------------- | --------------------------------------------------- |
+| `lib/a2ui/parser.test.ts`                       | Message parsing, mixed payload, error recovery      |
+| `lib/a2ui/data-model.test.ts`                   | JSON pointer, deep merge, computed fields           |
+| `lib/a2ui/events.test.ts`                       | Emitter subscription, AI formatting, batch merging  |
+| `lib/a2ui/catalog.test.ts`                      | Catalog registration, fallback, widget resolve      |
+| `lib/a2ui/templates.test.ts`                    | 14 built-in template integrity + integrity checksum |
+| `lib/a2ui/app-generator.test.ts`                | 18 auto-detection classes + name extraction         |
+| `lib/a2ui/output-profiles.test.ts`              | 21 intent routes                                    |
+| `components/a2ui/a2ui-renderer.test.tsx`        | Component dispatch, fallback, error boundary        |
+| `components/a2ui/a2ui-widget-families.test.tsx` | Accessibility + behavior for each component family  |
+| `src-tauri/src/a2ui_bridge/`                    | `runtime_paths_serialize_uses_snake_case_keys`      |
 
 ## Where to Start
 
-| Goal                           | File                                                                    |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| Add a new component type                   | `lib/a2ui/catalog.ts` + `components/a2ui/<category>/`                   |
-| Adjust MCP tool schema           | `lib/a2ui/mcp-tool-schemas.ts` + `sidecar/a2ui-mcp.mjs` (keep both sides consistent) |
-| Add a new template                       | `lib/a2ui/templates/<category>.ts` + integrity test                     |
-| Change the local bridge protocol                   | `src-tauri/src/a2ui_bridge/mod.rs` + `sidecar/a2ui-mcp.mjs`             |
-| Bind a new strategy for a RichOutput category | `lib/a2ui/output-profiles.ts`                                           |
-| Debug the event loop                   | Settings → A2UI → Debugger (inspect `a2uiEventHistory`)                     |
+| Goal                                          | File                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Add a new component type                      | `lib/a2ui/catalog.ts` + `components/a2ui/<category>/`                                |
+| Adjust MCP tool schema                        | `lib/a2ui/mcp-tool-schemas.ts` + `sidecar/a2ui-mcp.mjs` (keep both sides consistent) |
+| Add a new template                            | `lib/a2ui/templates/<category>.ts` + integrity test                                  |
+| Change the local bridge protocol              | `src-tauri/src/a2ui_bridge/mod.rs` + `sidecar/a2ui-mcp.mjs`                          |
+| Bind a new strategy for a RichOutput category | `lib/a2ui/output-profiles.ts`                                                        |
+| Debug the event loop                          | Settings → A2UI → Debugger (inspect `a2uiEventHistory`)                              |
 
 ## Next
 
@@ -305,11 +309,19 @@ If you are extending the component catalog, **audit every new component** for XS
     href="./mcp-server-sidecar"
     description="Full tool table and protocol details for a2ui-mcp.mjs"
   />
-  <Card title="External Bridge" href="./external-bridge" description="Expose these tools to external agents" />
+  <Card
+    title="External Bridge"
+    href="./external-bridge"
+    description="Expose these tools to external agents"
+  />
   <Card
     title="Artifacts / Sandbox"
     href="./artifacts-sandbox"
     description="Another UI path: iframe-isolated one-shot content"
   />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="How A2UI events feed back into the message loop" />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="How A2UI events feed back into the message loop"
+  />
 </Cards>

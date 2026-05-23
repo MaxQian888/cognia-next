@@ -299,11 +299,11 @@ export function bootstrapLogger(settings: AppSettings) {
 
 ## 在哪里入手
 
-| 目标                 | 文件                                                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 目标                 | 文件                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | 加新 transport       | 在 `lib/logging/transports/<name>-transport.ts` 实现 `Transport` → 在 `transports/index.ts` 导出 → 在 `bootstrap.ts` 注册路径添加 |
 | 调默认采样率         | `lib/logging/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                 |
 | 新增脱敏字段         | `lib/logging/redaction.ts` 的字段名表 + 正则表                                                                                    |
-| 改 Rust → 平台日志桥 | `src-tauri/src/logging/platform/<os>.rs`                                                                                         |
-| 日志面板新过滤维度   | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                            |
+| 改 Rust → 平台日志桥 | `src-tauri/src/logging/platform/<os>.rs`                                                                                          |
+| 日志面板新过滤维度   | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                                        |
 | OTLP collector 配置  | `lib/logging/transports/otel-transport.ts` + 启动期 env                                                                           |

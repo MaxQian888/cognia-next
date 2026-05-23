@@ -95,18 +95,18 @@ flowchart TB
 
 ### TypeScript Business Layer (`lib/skills/`)
 
-| File | Role |
-| ---- | ---- |
-| `executor.ts` | `buildProgressiveSkillsPrompt(activeSkills)` — wraps `renderSkillsSection`, serving as the unified entry point for external agent instruction stacks and Claude SDK build pipelines. |
-| `validate.ts` | Pure-function validator: name format / max length / required body / resource path-traversal detection / resource path deduplication. Returns `SkillValidationError[]` for per-field highlighting in the editor. |
-| `categories.ts` | 8 built-in categories (`creative-design` / `development` / `enterprise` / `productivity` / `data-analysis` / `communication` / `meta` / `custom`) + icons + i18n keys. |
-| `sync.ts` | Bidirectional sync engine — `pushAllToNative` / `pullAllFromNative`, identity matching by `nativeDirectory` first and by name second, writing `syncFingerprint` + `lastSyncedAt` for debouncing. |
-| `marketplace-types.ts` | Shared data structures `MarketplaceItem` / `FetchSkillContent`, normalizing both source types (`registry` / `skillsmp`) into one shape. |
-| `marketplace-registry.ts` | Adapter for the `skills-lock.json` registry (GitHub repo mirror); Tauri goes through Rust, Web falls back to the bundled JSON. |
-| `marketplace-skillsmp.ts` | Adapter for the SkillsMP API (Cognia shared server); reads the base URL from `useSettingsStore`, silently disabled if unconfigured. |
-| `marketplace-install.ts` | `installMarketplaceItem` — idempotent: updates in place if `canonicalId` matches, otherwise calls `createSkill`. Optionally projects to disk via `pushAllToNative()`. |
-| `ai-prompts.ts` | AI correction helper ("fix errors" prompt that feeds structured errors from `validateSkill` into the system prompt). |
-| `export-toast.ts` | Toast copy aggregation for export / sync operations (i18n keys). |
+| File                      | Role                                                                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executor.ts`             | `buildProgressiveSkillsPrompt(activeSkills)` — wraps `renderSkillsSection`, serving as the unified entry point for external agent instruction stacks and Claude SDK build pipelines.                            |
+| `validate.ts`             | Pure-function validator: name format / max length / required body / resource path-traversal detection / resource path deduplication. Returns `SkillValidationError[]` for per-field highlighting in the editor. |
+| `categories.ts`           | 8 built-in categories (`creative-design` / `development` / `enterprise` / `productivity` / `data-analysis` / `communication` / `meta` / `custom`) + icons + i18n keys.                                          |
+| `sync.ts`                 | Bidirectional sync engine — `pushAllToNative` / `pullAllFromNative`, identity matching by `nativeDirectory` first and by name second, writing `syncFingerprint` + `lastSyncedAt` for debouncing.                |
+| `marketplace-types.ts`    | Shared data structures `MarketplaceItem` / `FetchSkillContent`, normalizing both source types (`registry` / `skillsmp`) into one shape.                                                                         |
+| `marketplace-registry.ts` | Adapter for the `skills-lock.json` registry (GitHub repo mirror); Tauri goes through Rust, Web falls back to the bundled JSON.                                                                                  |
+| `marketplace-skillsmp.ts` | Adapter for the SkillsMP API (Cognia shared server); reads the base URL from `useSettingsStore`, silently disabled if unconfigured.                                                                             |
+| `marketplace-install.ts`  | `installMarketplaceItem` — idempotent: updates in place if `canonicalId` matches, otherwise calls `createSkill`. Optionally projects to disk via `pushAllToNative()`.                                           |
+| `ai-prompts.ts`           | AI correction helper ("fix errors" prompt that feeds structured errors from `validateSkill` into the system prompt).                                                                                            |
+| `export-toast.ts`         | Toast copy aggregation for export / sync operations (i18n keys).                                                                                                                                                |
 
 ### React Workbench (`components/skills/` + `app/skills/page.tsx`)
 
@@ -121,15 +121,15 @@ flowchart TB
 
 ### Rust Backend (`src-tauri/src/skills/`)
 
-| File | Command / Purpose |
-| ---- | ----------------- |
-| `mod.rs` | Module entry; the frontend calls each command via `@/lib/claude/ipc`. |
-| `native.rs` | `skills_scan_native()` — walks `~/.claude/skills/<dir>/`, reading SKILL.md + scripts/ + references/ + assets/. Each resource ≤ 2 MiB, max 50 resources per skill. |
-| `install.rs` | `skills_install_native(InstallSkillRequest)` — validates `dirName` (ASCII + `-_`, ≤ 64 chars), optional clean, auto-places resources by `kind` into scripts/ / references/ / assets/ subdirectories; base64 resources are decoded to binary. |
-| `registry.rs` | `skills_load_registry()` — parses the project-root `skills-lock.json` (production reads bundled resource, dev falls back to relative path). |
-| `remote.rs` | `skills_fetch_remote_md(url)` — HTTP(S) proxy (browser-side fetch is blocked by CSP), 15 s timeout, 1 MiB cap. |
-| `scanner.rs` | `skills_scan_security(content)` / `skills_scan_resources(resources)` — lightweight regex-based scan: `rm -rf /` / fork-bomb / `curl \| sh` / `eval()` / reverse shell / hardcoded keys… all return `ScanIssue[]`. |
-| `types.rs` | Wire types (`NativeSkill` / `NativeSkillResource` / `InstallSkillRequest` / `RegistryEntry` / `ScanIssue`), serde camelCase. |
+| File          | Command / Purpose                                                                                                                                                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`      | Module entry; the frontend calls each command via `@/lib/claude/ipc`.                                                                                                                                                                        |
+| `native.rs`   | `skills_scan_native()` — walks `~/.claude/skills/<dir>/`, reading SKILL.md + scripts/ + references/ + assets/. Each resource ≤ 2 MiB, max 50 resources per skill.                                                                            |
+| `install.rs`  | `skills_install_native(InstallSkillRequest)` — validates `dirName` (ASCII + `-_`, ≤ 64 chars), optional clean, auto-places resources by `kind` into scripts/ / references/ / assets/ subdirectories; base64 resources are decoded to binary. |
+| `registry.rs` | `skills_load_registry()` — parses the project-root `skills-lock.json` (production reads bundled resource, dev falls back to relative path).                                                                                                  |
+| `remote.rs`   | `skills_fetch_remote_md(url)` — HTTP(S) proxy (browser-side fetch is blocked by CSP), 15 s timeout, 1 MiB cap.                                                                                                                               |
+| `scanner.rs`  | `skills_scan_security(content)` / `skills_scan_resources(resources)` — lightweight regex-based scan: `rm -rf /` / fork-bomb / `curl \| sh` / `eval()` / reverse shell / hardcoded keys… all return `ScanIssue[]`.                            |
+| `types.rs`    | Wire types (`NativeSkill` / `NativeSkillResource` / `InstallSkillRequest` / `RegistryEntry` / `ScanIssue`), serde camelCase.                                                                                                                 |
 
 ## Data Flow / Control Flow
 
@@ -239,10 +239,10 @@ Idempotency is guaranteed by `canonicalId` (shaped like `registry:ai-elements` o
 
 See [Storage](../data/storage) for details. The skills subsystem uses:
 
-| Table | Indexes | Role |
-| ----- | ------- | ---- |
-| `skills` | `id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId` | Main table; rich indexes added since v8. |
-| `skillResources` | `id, skillId, [skillId+kind], [skillId+path], updatedAt` | Resource bundling (scripts/references/assets). |
+| Table            | Indexes                                                                             | Role                                           |
+| ---------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `skills`         | `id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId` | Main table; rich indexes added since v8.       |
+| `skillResources` | `id, skillId, [skillId+kind], [skillId+path], updatedAt`                            | Resource bundling (scripts/references/assets). |
 
 Key fields on a `Skill` row (full type in `lib/claude/types.ts`):
 

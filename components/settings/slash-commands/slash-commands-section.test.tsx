@@ -54,10 +54,12 @@ jest.mock("@/lib/slash-commands/registry", () => ({
   seedBuiltinSlashCommands: jest.fn(),
 }))
 
-const isTauriMock = jest.fn(() => true)
+// `stores/index.ts` calls `isTauri()` at module top-level; declaring the
+// jest.fn inside the factory dodges the TDZ.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn(() => true),
 }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 const toastSuccess = jest.fn()
 const toastMessage = jest.fn()

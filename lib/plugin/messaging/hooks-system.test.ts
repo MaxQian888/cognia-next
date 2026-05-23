@@ -28,7 +28,7 @@ import type {
 } from "@/types/plugin/plugin-hooks"
 
 // Mock the plugin store
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(() => ({
       plugins: {},
@@ -539,7 +539,7 @@ describe("Hook Type Definitions", () => {
 
 describe("PluginEventHooks - timeout and new dispatchers", () => {
   let eventHooks: PluginEventHooks
-  const { usePluginStore } = jest.requireMock("@/stores/plugin")
+  const { usePluginStore } = jest.requireMock("@/stores/plugin-runtime")
 
   beforeEach(() => {
     eventHooks = new PluginEventHooks()

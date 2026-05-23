@@ -14,12 +14,12 @@ jest.mock("@/lib/terminal/pick-transport", () => ({
   terminalAvailable: () => transportKind !== "unsupported",
 }))
 
-const mockSpawnFromDock = jest.fn(async () => ({
+const mockSpawnFromDock = jest.fn(async (..._args: unknown[]) => ({
   kind: "spawned" as const,
   sessionId: "s-new",
   shell: "/bin/bash",
 }))
-const mockKillFromDock = jest.fn(async () => undefined)
+const mockKillFromDock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
   spawnFromDock: (...args: unknown[]) => mockSpawnFromDock(...(args as [])),
   killFromDock: (...args: unknown[]) => mockKillFromDock(...(args as [])),
@@ -192,7 +192,7 @@ describe("TerminalDock", () => {
       fireEvent.click(screen.getByTestId("terminal-dock-new"))
     })
     expect(mockSpawnFromDock).toHaveBeenCalledTimes(1)
-    const req = mockSpawnFromDock.mock.calls[0]?.[0] as {
+    const req = mockSpawnFromDock.mock.calls[0]?.[0] as unknown as {
       req: { shell: string }
     }
     expect(req.req.shell).toBe("/usr/local/bin/fish")
@@ -204,7 +204,9 @@ describe("TerminalDock", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("terminal-dock-new"))
     })
-    const req = mockSpawnFromDock.mock.calls[0]?.[0] as { req: { cwd?: string } }
+    const req = mockSpawnFromDock.mock.calls[0]?.[0] as unknown as {
+      req: { cwd?: string }
+    }
     expect(req.req.cwd).toBe("/tmp/proj-a")
   })
 

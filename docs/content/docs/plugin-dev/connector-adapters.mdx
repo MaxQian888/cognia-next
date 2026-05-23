@@ -72,14 +72,14 @@ export function createAdapter(ctx) {
 
 Declare what your adapter supports:
 
-| Capability | Meaning |
-|------------|---------|
-| `text` | Plain text messages |
-| `image` | Image attachments |
-| `file` | File attachments |
-| `voice` | Voice messages |
-| `reaction` | Message reactions |
-| `reply` | Threaded replies |
+| Capability | Meaning             |
+| ---------- | ------------------- |
+| `text`     | Plain text messages |
+| `image`    | Image attachments   |
+| `file`     | File attachments    |
+| `voice`    | Voice messages      |
+| `reaction` | Message reactions   |
+| `reply`    | Threaded replies    |
 
 ## Conversation keys
 
@@ -88,6 +88,10 @@ Use a stable format: `platform:accountId:threadId`. This is how Cognia identifie
 ## Related
 
 <Cards>
-  <Card title="Platform Connectors" href="../platform-connectors" description="How the ConnectorBus works." />
+  <Card
+    title="Platform Connectors"
+    href="../platform-connectors"
+    description="How the ConnectorBus works."
+  />
   <Card title="Workflow Nodes" href="./workflow-nodes" description="Contributing workflow nodes." />
 </Cards>

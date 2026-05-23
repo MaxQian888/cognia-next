@@ -69,13 +69,13 @@ flowchart TB
   </Folder>
 </Files>
 
-| File | Responsibility |
-| ---- | -------------- |
-| `mod.rs` | `McpServerState` coordinator; `start` / `stop` guards + state tracking |
-| `commands.rs` | Four `#[tauri::command]` entry points, each mapping 1:1 to the TS side in `lib/external-bridge/tauri-control.ts` |
-| `http_server.rs` | axum router + `auth_middleware` (subtle constant-time comparison) + 1 MiB body limit |
-| `sidecar.rs` | Spawns `node` via `tokio::process::Command`; `SidecarProcess.round_trip` serializes JSON-RPC request/response |
-| `types.rs` | serde alignment with TS `ExternalBridgeSettings` / `McpServerStatus`; `McpServerError` enum |
+| File             | Responsibility                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`         | `McpServerState` coordinator; `start` / `stop` guards + state tracking                                           |
+| `commands.rs`    | Four `#[tauri::command]` entry points, each mapping 1:1 to the TS side in `lib/external-bridge/tauri-control.ts` |
+| `http_server.rs` | axum router + `auth_middleware` (subtle constant-time comparison) + 1 MiB body limit                             |
+| `sidecar.rs`     | Spawns `node` via `tokio::process::Command`; `SidecarProcess.round_trip` serializes JSON-RPC request/response    |
+| `types.rs`       | serde alignment with TS `ExternalBridgeSettings` / `McpServerStatus`; `McpServerError` enum                      |
 
 Registration location: `src-tauri/src/lib.rs:15` imports `mod mcp_server`, `:202` attaches state with `.manage(McpServerState::new())`, `:355-358` registers the four commands.
 
@@ -136,9 +136,9 @@ Rationale:
 
 ### Child Process Environment
 
-| Variable | Source | Purpose |
-| -------- | ------ | ------- |
-| `COGNIA_BRIDGED` | Fixed `"1"` | `standalone-entry.ts` uses this to select bridged mode |
+| Variable                 | Source                       | Purpose                                                  |
+| ------------------------ | ---------------------------- | -------------------------------------------------------- |
+| `COGNIA_BRIDGED`         | Fixed `"1"`                  | `standalone-entry.ts` uses this to select bridged mode   |
 | `COGNIA_BRIDGE_SETTINGS` | JSON from `mcp_server_start` | Injected once; changing scope requires a service restart |
 
 Note: stderr uses `Stdio::inherit()`, so sidecar `console.error` output flows directly into the Tauri main log.
@@ -149,11 +149,11 @@ Note: stderr uses `Stdio::inherit()`, so sidecar `console.error` output flows di
 
 ## HTTP Endpoints
 
-| Method | Path | Auth | Behavior |
-| ------ | ---- | ---- | -------- |
-| GET | `/healthz` | None | `{ "ok": true, "version": "<CARGO_PKG_VERSION>" }` |
-| POST | `/mcp` | Bearer | One line of JSON-RPC in, one line of JSON-RPC out |
-| POST | `/mcp/sse` | Bearer | Phase 1 placeholder → 501 + `{ error: "SSE streaming is not implemented in Phase 1" }` |
+| Method | Path       | Auth   | Behavior                                                                               |
+| ------ | ---------- | ------ | -------------------------------------------------------------------------------------- |
+| GET    | `/healthz` | None   | `{ "ok": true, "version": "<CARGO_PKG_VERSION>" }`                                     |
+| POST   | `/mcp`     | Bearer | One line of JSON-RPC in, one line of JSON-RPC out                                      |
+| POST   | `/mcp/sse` | Bearer | Phase 1 placeholder → 501 + `{ error: "SSE streaming is not implemented in Phase 1" }` |
 
 ```rust title="src-tauri/src/mcp_server/http_server.rs"
 const BODY_LIMIT_BYTES: usize = 1024 * 1024;   // 1 MiB
@@ -171,12 +171,12 @@ let app = Router::new()
 
 The four commands form a complete lifecycle interface; they align 1:1 with the TS side in `lib/external-bridge/tauri-control.ts`.
 
-| Command | Input | Output | Notes |
-| ------- | ----- | ------ | ----- |
-| `mcp_server_start` | `port: u16` · `token: String` · `settings_json: String` · `sidecar_path: String` | `u16` bound port | `port=0` lets the OS choose; return value is the actual port |
-| `mcp_server_stop` | — | `()` | Already stopped → `NotRunning` error |
-| `mcp_server_restart` | Same as start | `u16` bound port | Fault-tolerant stop + fresh start |
-| `mcp_server_status` | — | `McpServerStatus` | `{ running, port, started_at(ISO-8601) }` |
+| Command              | Input                                                                            | Output            | Notes                                                        |
+| -------------------- | -------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------ |
+| `mcp_server_start`   | `port: u16` · `token: String` · `settings_json: String` · `sidecar_path: String` | `u16` bound port  | `port=0` lets the OS choose; return value is the actual port |
+| `mcp_server_stop`    | —                                                                                | `()`              | Already stopped → `NotRunning` error                         |
+| `mcp_server_restart` | Same as start                                                                    | `u16` bound port  | Fault-tolerant stop + fresh start                            |
+| `mcp_server_status`  | —                                                                                | `McpServerStatus` | `{ running, port, started_at(ISO-8601) }`                    |
 
 ### TS Call Example
 
@@ -195,15 +195,15 @@ export async function startMcpServer(args: StartArgs): Promise<number> {
 
 `McpServerError` is derived with `thiserror`, serialized as a single string for easy React toast consumption.
 
-| Variant | Meaning |
-| ------- | ------- |
-| `AlreadyRunning(port)` | A service is already running on the given port |
-| `NotRunning` | Service is not running when `stop` or `status` is called |
-| `Bind { port, source }` | TCP bind failure (port in use, insufficient permissions) |
-| `InvalidSettings(reason)` | `settings_json` is not valid `ExternalBridgeSettings` |
-| `TokenMissing` | Token is an empty string |
-| `SidecarSpawn(reason)` | Failed to spawn `node <path>` (node not in PATH, script missing) |
-| `SidecarIo(reason)` | stdin/stdout read/write failure, or sidecar abnormal exit |
+| Variant                   | Meaning                                                          |
+| ------------------------- | ---------------------------------------------------------------- |
+| `AlreadyRunning(port)`    | A service is already running on the given port                   |
+| `NotRunning`              | Service is not running when `stop` or `status` is called         |
+| `Bind { port, source }`   | TCP bind failure (port in use, insufficient permissions)         |
+| `InvalidSettings(reason)` | `settings_json` is not valid `ExternalBridgeSettings`            |
+| `TokenMissing`            | Token is an empty string                                         |
+| `SidecarSpawn(reason)`    | Failed to spawn `node <path>` (node not in PATH, script missing) |
+| `SidecarIo(reason)`       | stdin/stdout read/write failure, or sidecar abnormal exit        |
 
 ## Security Considerations
 

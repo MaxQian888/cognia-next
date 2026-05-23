@@ -6,11 +6,11 @@ description: 把 PR 自动审阅、Issue → PR 闭环和 Release 自动化收�
 # GitHub Delivery — 概览
 
 <TLDR>
-GitHub Delivery 是一个内置插件,向工作流编辑器注入 13 个 `action.github.*` 节点
-和 8 个出厂模板。它由薄核心层 `lib/github/` + 插件壳 `plugins/github-delivery/`
-组成,凭据走 OS keyring,事件走 webhook 或 ETag 轮询,任何写操作都经
-`lib/github/policy-gate.ts` 拦截一遍,并把决定结果写到命名空间下的 `audit` 表。
-完整架构在 [ADR-0018](/zh/adr/0018-github-delivery)。
+  GitHub Delivery 是一个内置插件,向工作流编辑器注入 13 个 `action.github.*` 节点 和 8
+  个出厂模板。它由薄核心层 `lib/github/` + 插件壳 `plugins/github-delivery/` 组成,凭据走 OS
+  keyring,事件走 webhook 或 ETag 轮询,任何写操作都经 `lib/github/policy-gate.ts`
+  拦截一遍,并把决定结果写到命名空间下的 `audit` 表。 完整架构在
+  [ADR-0018](/zh/adr/0018-github-delivery)。
 </TLDR>
 
 ## 它解决什么
@@ -57,10 +57,10 @@ GitHub Delivery 把这些操作搬进同一个可视化编辑器里,让用户可
 ## 关键概念
 
 <Callout type="info">
-**核心层 vs 插件壳。** 所有"通用 GitHub 知识"(类型、Octokit 工厂、HMAC 验签、
-Conventional Commits parser)放在 `lib/github/`。所有"运行时连接到当前 cognia
-实例"的部分(Dexie 表读写、secrets API、连接器适配器)放在
-`plugins/github-delivery/`。这样核心层可以被任何插件复用,插件壳可以被替换 / 多实例。
+  **核心层 vs 插件壳。** 所有"通用 GitHub 知识"(类型、Octokit 工厂、HMAC 验签、 Conventional Commits
+  parser)放在 `lib/github/`。所有"运行时连接到当前 cognia 实例"的部分(Dexie 表读写、secrets
+  API、连接器适配器)放在 `plugins/github-delivery/`。这样核心层可以被任何插件复用,插件壳可以被替换 /
+  多实例。
 </Callout>
 
 ### NormalizedGhEvent
@@ -111,60 +111,60 @@ flowchart LR
 插件代码通过 `ctx.dexie.table<T>(name)` 访问;外部代码(例如 `/github-delivery`
 看板)直接以全名访问 `db.table("github-delivery:workOrders")`。
 
-| 命名空间内名         | 全名                              | 主键 + 索引                                                            |
-| -------------------- | --------------------------------- | ---------------------------------------------------------------------- |
-| `repos`              | `github-delivery:repos`           | `&fullName, credentialMode, createdAt`                                 |
-| `workOrders`         | `github-delivery:workOrders`      | `++id, [status+repoFullName], issueNumber, prNumber, createdAt, updatedAt` |
-| `events`             | `github-delivery:events`          | `&deliveryId, [repoFullName+seenAt], kind, source`                     |
-| `audit`              | `github-delivery:audit`           | `++id, [repoFullName+at], runId, &[runId+stepId+at]`                   |
+| 命名空间内名 | 全名                         | 主键 + 索引                                                                |
+| ------------ | ---------------------------- | -------------------------------------------------------------------------- |
+| `repos`      | `github-delivery:repos`      | `&fullName, credentialMode, createdAt`                                     |
+| `workOrders` | `github-delivery:workOrders` | `++id, [status+repoFullName], issueNumber, prNumber, createdAt, updatedAt` |
+| `events`     | `github-delivery:events`     | `&deliveryId, [repoFullName+seenAt], kind, source`                         |
+| `audit`      | `github-delivery:audit`      | `++id, [repoFullName+at], runId, &[runId+stepId+at]`                       |
 
 ## UI 入口
 
-| 位置                                              | 用途                                                                      |
-| ------------------------------------------------- | ------------------------------------------------------------------------- |
-| `Settings → GitHub Delivery`(`?section=github-delivery`) | 5 个 Tab:Repos / Credentials / Policies / Audit / Usage(`?ghTab=...`) |
-| `/github-delivery` 独立页面                       | 6 列看板,以 `workOrders` 表为数据源(Open / In progress / PR opened / Awaiting review / Merged / Failed) |
-| Inbox(`/inbox/...`)                              | `pull_request.opened` / `review_requested` 等事件以 InboundMessage 形式呈现 |
-| Workflow 编辑器                                   | 节点搜索栏输入 "github" 即可看到 13 个 `action.github.*` + 1 个 `trigger.github.webhook` |
+| 位置                                                     | 用途                                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `Settings → GitHub Delivery`(`?section=github-delivery`) | 5 个 Tab:Repos / Credentials / Policies / Audit / Usage(`?ghTab=...`)                                   |
+| `/github-delivery` 独立页面                              | 6 列看板,以 `workOrders` 表为数据源(Open / In progress / PR opened / Awaiting review / Merged / Failed) |
+| Inbox(`/inbox/...`)                                      | `pull_request.opened` / `review_requested` 等事件以 InboundMessage 形式呈现                             |
+| Workflow 编辑器                                          | 节点搜索栏输入 "github" 即可看到 13 个 `action.github.*` + 1 个 `trigger.github.webhook`                |
 
 ## Web 模式降级
 
-| 能力              | 桌面(Tauri)    | Web                                                             |
-| ----------------- | ---------------- | --------------------------------------------------------------- |
-| 节点执行(Octokit)| 完整支持         | 完整支持(浏览器 fetch)                                        |
-| Webhook 触发器    | 完整支持(Rust 接收器) | **不可用**(无 Rust);UI 上有 "desktop only" 提示              |
-| 轮询触发器        | 支持             | 支持(只在 webview 存活时跑)                                    |
-| 凭据存储          | OS keyring + Dexie | Dexie 加密 blob                                                |
-| cloudflared 一键暴露 | 桌面 only      | 不可用                                                          |
+| 能力                 | 桌面(Tauri)           | Web                                             |
+| -------------------- | --------------------- | ----------------------------------------------- |
+| 节点执行(Octokit)    | 完整支持              | 完整支持(浏览器 fetch)                          |
+| Webhook 触发器       | 完整支持(Rust 接收器) | **不可用**(无 Rust);UI 上有 "desktop only" 提示 |
+| 轮询触发器           | 支持                  | 支持(只在 webview 存活时跑)                     |
+| 凭据存储             | OS keyring + Dexie    | Dexie 加密 blob                                 |
+| cloudflared 一键暴露 | 桌面 only             | 不可用                                          |
 
 ## 源码索引
 
-| 文件                                                       | 用途                                          |
-| ---------------------------------------------------------- | --------------------------------------------- |
-| `lib/github/types.ts`                                      | 子系统全部类型(共享给 lib/、plugin/、UI)    |
-| `lib/github/octokit-factory.ts`                            | App / PAT 路由,挂 throttling + retry 插件    |
-| `lib/github/auth-app.ts`                                   | installation token 缓存,提前 5 min 刷新       |
-| `lib/github/auth-pat.ts`                                   | PAT 鉴权封装                                  |
-| `lib/github/webhook-verify.ts`                             | `x-hub-signature-256` 常量时间 HMAC 比对      |
-| `lib/github/event-normalizer.ts`                           | webhook + polling → `NormalizedGhEvent`       |
-| `lib/github/policy-gate.ts`                                | 6 类 action 统一策略门 + HITL needsApproval   |
-| `lib/github/workspace.ts`                                  | simple-git 工作树(local + e2b 后端)         |
-| `lib/github/changelog.ts`                                  | Conventional Commits → semver + 笔记          |
-| `lib/github/cloudflared-tauri.ts`                          | 桌面端一键 webhook 暴露                       |
-| `plugins/github-delivery/plugin.json`                      | 插件清单 + 4 张 Dexie 表 + 1 个连接器        |
-| `plugins/github-delivery/src/index.ts`                     | 入口:wire runtime + 适配器                  |
-| `plugins/github-delivery/src/github-poll.ts`               | ETag 轮询调度任务                            |
-| `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` 单例(getRepo / getOctokit 等)|
-| `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` 工厂                       |
-| `plugins/github-delivery/src/workflow/nodes.ts`            | 13 个 `action.github.*` 执行器               |
-| `plugins/github-delivery/src/workflow/issue-loop.ts`       | Issue → PR 主流程                            |
-| `plugins/github-delivery/src/workflow/review-pr-inline.ts` | LLM 行级 PR 评审                             |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`     | HITL 审批桥(用 `connectorDrafts` 表)        |
-| `plugins/github-delivery/src/drivers/sidecar-driver.ts`    | Claude sidecar 驱动器(M5)                   |
-| `plugins/github-delivery/src/adapter/github-adapter.ts`    | `PlatformAdapter` 实现 + Inbox 出站           |
-| `plugins/github-delivery/src/adapter/conversation-key.ts`  | `gh:owner/repo/<kind>-<n>` 路由键编解码      |
+| 文件                                                       | 用途                                           |
+| ---------------------------------------------------------- | ---------------------------------------------- |
+| `lib/github/types.ts`                                      | 子系统全部类型(共享给 lib/、plugin/、UI)       |
+| `lib/github/octokit-factory.ts`                            | App / PAT 路由,挂 throttling + retry 插件      |
+| `lib/github/auth-app.ts`                                   | installation token 缓存,提前 5 min 刷新        |
+| `lib/github/auth-pat.ts`                                   | PAT 鉴权封装                                   |
+| `lib/github/webhook-verify.ts`                             | `x-hub-signature-256` 常量时间 HMAC 比对       |
+| `lib/github/event-normalizer.ts`                           | webhook + polling → `NormalizedGhEvent`        |
+| `lib/github/policy-gate.ts`                                | 6 类 action 统一策略门 + HITL needsApproval    |
+| `lib/github/workspace.ts`                                  | simple-git 工作树(local + e2b 后端)            |
+| `lib/github/changelog.ts`                                  | Conventional Commits → semver + 笔记           |
+| `lib/github/cloudflared-tauri.ts`                          | 桌面端一键 webhook 暴露                        |
+| `plugins/github-delivery/plugin.json`                      | 插件清单 + 4 张 Dexie 表 + 1 个连接器          |
+| `plugins/github-delivery/src/index.ts`                     | 入口:wire runtime + 适配器                     |
+| `plugins/github-delivery/src/github-poll.ts`               | ETag 轮询调度任务                              |
+| `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` 单例(getRepo / getOctokit 等)  |
+| `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` 工厂                         |
+| `plugins/github-delivery/src/workflow/nodes.ts`            | 13 个 `action.github.*` 执行器                 |
+| `plugins/github-delivery/src/workflow/issue-loop.ts`       | Issue → PR 主流程                              |
+| `plugins/github-delivery/src/workflow/review-pr-inline.ts` | LLM 行级 PR 评审                               |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`     | HITL 审批桥(用 `connectorDrafts` 表)           |
+| `plugins/github-delivery/src/drivers/sidecar-driver.ts`    | Claude sidecar 驱动器(M5)                      |
+| `plugins/github-delivery/src/adapter/github-adapter.ts`    | `PlatformAdapter` 实现 + Inbox 出站            |
+| `plugins/github-delivery/src/adapter/conversation-key.ts`  | `gh:owner/repo/<kind>-<n>` 路由键编解码        |
 | `plugins/github-delivery/src/connector/inbox-bridge.ts`    | `NormalizedGhEvent` → `NormalizedInboundEvent` |
-| `lib/workflow/definition/seed-github.ts`                   | 8 个出厂模板                                  |
-| `components/settings/github-delivery/`                     | 5-Tab Settings UI                            |
-| `app/github-delivery/page.tsx`                             | 6 列看板独立页                                |
-| `src-tauri/src/workflow/triggers/webhook_router.rs`        | `SignatureMode { Cognia \| Github }` 头开关   |
+| `lib/workflow/definition/seed-github.ts`                   | 8 个出厂模板                                   |
+| `components/settings/github-delivery/`                     | 5-Tab Settings UI                              |
+| `app/github-delivery/page.tsx`                             | 6 列看板独立页                                 |
+| `src-tauri/src/workflow/triggers/webhook_router.rs`        | `SignatureMode { Cognia \| Github }` 头开关    |

@@ -153,7 +153,7 @@ flowchart TB
 
 `<Reasoning>` is a collapsible card titled "Thinking…", with the reasoning stream inside. During streaming, lines trickle in one by one; it collapses after completion.
 
-### tool-* part
+### tool-\* part
 
 `Tool` + `ToolHeader` + `ToolBody` + `ToolContent` form the "tool call" box:
 
@@ -265,12 +265,12 @@ import {
 
 `composer-trigger.ts` listens to input changes, scanning characters before the caret position:
 
-| Prefix | Trigger condition | Popover content | Hooked to |
-| ------ | ----------------- | --------------- | --------- |
-| `/` | At line start or after space | Slash command list | `lib/chat/slash-command-registry.ts` |
-| `@` | Any position | Characters / team members | `useCharacter()` data hook |
-| `!` | At line start | Skills list | `useSkills()` |
-| `#` | Any position | Knowledge references / documents | `lib/search/` |
+| Prefix | Trigger condition            | Popover content                  | Hooked to                            |
+| ------ | ---------------------------- | -------------------------------- | ------------------------------------ |
+| `/`    | At line start or after space | Slash command list               | `lib/chat/slash-command-registry.ts` |
+| `@`    | Any position                 | Characters / team members        | `useCharacter()` data hook           |
+| `!`    | At line start                | Skills list                      | `useSkills()`                        |
+| `#`    | Any position                 | Knowledge references / documents | `lib/search/`                        |
 
 When matched, a popover appears (`components/chat/composer-popover.tsx`), with arrow-key navigation + Enter to select, then `spliceToken` replaces the prefix fragment.
 
@@ -297,11 +297,11 @@ When a tool call requires approval, the sidecar pushes `pendingApproval` into `u
 
 The desktop shell stacks 4 global floating layers:
 
-| Component | Purpose | File |
-| --------- | ------- | ---- |
-| `TitleBar` | Custom window title bar (no native chrome), with close/min/max + drag area | `components/desktop/title-bar.tsx` |
-| `GuildRail` | Ultra-narrow left vertical rail, listing guild (team) switches | `components/shell/guild-rail.tsx` |
-| `StatusBar` | Bottom status bar — sidecar health, current transport, network indicator | `components/desktop/status-bar.tsx` |
+| Component        | Purpose                                                                        | File                                     |
+| ---------------- | ------------------------------------------------------------------------------ | ---------------------------------------- |
+| `TitleBar`       | Custom window title bar (no native chrome), with close/min/max + drag area     | `components/desktop/title-bar.tsx`       |
+| `GuildRail`      | Ultra-narrow left vertical rail, listing guild (team) switches                 | `components/shell/guild-rail.tsx`        |
+| `StatusBar`      | Bottom status bar — sidecar health, current transport, network indicator       | `components/desktop/status-bar.tsx`      |
 | `CommandPalette` | `Ctrl+K` to invoke: cross-section search + navigation + execute slash commands | `components/desktop/command-palette.tsx` |
 
 `CommandPalette` uses shadcn `Command` (cmdk) + custom result categories: sessions, settings sections, slash commands, characters, skills, documents. Enter executes directly (navigate or trigger).
@@ -325,32 +325,32 @@ All copy goes through `useTranslations(...)`:
 
 ## Testing
 
-| File | Coverage |
-| ---- | -------- |
-| `chat-view.test.tsx` | empty / streaming / error three states + callback routing |
-| `composer.test.tsx` | submit, triggers, attachments, stop toggle |
-| `composer.draft-and-mention.test.tsx` | draft persistence + @-mention injection |
-| `composer.platform-binding.test.tsx` | Send button disabled under platform-bound sessions |
-| `message-list.test.tsx` | anchor scrolling, key stability |
-| `message-renderer.test.tsx` | dispatch for each part type |
-| `markdown-renderer.test.tsx` | Mermaid / KaTeX / code blocks / link safety |
-| `composer-trigger.test.ts` | `/`, `@`, `!`, `#` trigger detection |
-| `bottom-toolbar.*` (via composer) | Context display, Model picker, Permission toggle |
+| File                                  | Coverage                                                  |
+| ------------------------------------- | --------------------------------------------------------- |
+| `chat-view.test.tsx`                  | empty / streaming / error three states + callback routing |
+| `composer.test.tsx`                   | submit, triggers, attachments, stop toggle                |
+| `composer.draft-and-mention.test.tsx` | draft persistence + @-mention injection                   |
+| `composer.platform-binding.test.tsx`  | Send button disabled under platform-bound sessions        |
+| `message-list.test.tsx`               | anchor scrolling, key stability                           |
+| `message-renderer.test.tsx`           | dispatch for each part type                               |
+| `markdown-renderer.test.tsx`          | Mermaid / KaTeX / code blocks / link safety               |
+| `composer-trigger.test.ts`            | `/`, `@`, `!`, `#` trigger detection                      |
+| `bottom-toolbar.*` (via composer)     | Context display, Model picker, Permission toggle          |
 
 `components/ui/` and `components/ai-elements/` do **not** have tests and are excluded from coverage (CLAUDE.md exception list).
 
 ## Where to Start
 
-| Goal | File |
-| ---- | ---- |
-| New message part type | Define in `lib/claude/parts-extensions.ts` + `components/chat/message-parts/<x>-part.tsx` |
-| Add Composer toolbar button | Horizontal toolbar area in `components/chat/composer.tsx` |
-| Add BottomToolbar metadata | `components/chat/composer/bottom-toolbar.tsx` |
-| New slash command | Add registration in `lib/chat/slash-command-registry.ts` |
-| Change Markdown rendering behavior | `components/chat/markdown-renderer.tsx` + Streamdown plugin config |
-| Change ChatHeader items | `components/chat/chat-header.tsx` |
-| Change desktop command palette entries | `components/desktop/command-palette.tsx` |
-| Change mobile gestures | `components/interactions/*` |
+| Goal                                   | File                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| New message part type                  | Define in `lib/claude/parts-extensions.ts` + `components/chat/message-parts/<x>-part.tsx` |
+| Add Composer toolbar button            | Horizontal toolbar area in `components/chat/composer.tsx`                                 |
+| Add BottomToolbar metadata             | `components/chat/composer/bottom-toolbar.tsx`                                             |
+| New slash command                      | Add registration in `lib/chat/slash-command-registry.ts`                                  |
+| Change Markdown rendering behavior     | `components/chat/markdown-renderer.tsx` + Streamdown plugin config                        |
+| Change ChatHeader items                | `components/chat/chat-header.tsx`                                                         |
+| Change desktop command palette entries | `components/desktop/command-palette.tsx`                                                  |
+| Change mobile gestures                 | `components/interactions/*`                                                               |
 
 ## Related Pages
 
@@ -360,9 +360,21 @@ All copy goes through `useTranslations(...)`:
     href="./chat-and-skills"
     description="Domain model and lifecycle of sessions, characters, and skills"
   />
-  <Card title="Theming & i18n" href="./theming-and-i18n" description="oklch tokens + next-intl translations" />
-  <Card title="shadcn/ui Setup" href="./shadcn-ui-setup" description="All UI primitives used on this page" />
-  <Card title="Canvas" href="./canvas" description="Target page for Artifact 'open' state navigation" />
+  <Card
+    title="Theming & i18n"
+    href="./theming-and-i18n"
+    description="oklch tokens + next-intl translations"
+  />
+  <Card
+    title="shadcn/ui Setup"
+    href="./shadcn-ui-setup"
+    description="All UI primitives used on this page"
+  />
+  <Card
+    title="Canvas"
+    href="./canvas"
+    description="Target page for Artifact 'open' state navigation"
+  />
   <Card
     title="Artifacts Sandbox"
     href="./artifacts-sandbox"

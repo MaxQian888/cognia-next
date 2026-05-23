@@ -14,8 +14,15 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 
 // Sentinel object — useLiveQuery returns its third argument verbatim until
 // the underlying promise resolves. Comparing by reference distinguishes the
-// pre-resolution state from a resolved-but-empty (undefined) state.
+// pre-resolution state from a resolved-but-empty (undefined) state. The
+// nominal `__pluginRowLoading` field lets us narrow with `"… in result"`
+// since reference-equality with an `as const` sentinel doesn't narrow.
 const LOADING_SENTINEL = { __pluginRowLoading: true } as const
+type LoadingSentinel = typeof LOADING_SENTINEL
+
+function isLoadingSentinel(x: PluginRow | undefined | LoadingSentinel): x is LoadingSentinel {
+  return x !== undefined && "__pluginRowLoading" in x
+}
 
 export type PluginRowState =
   | { state: "loading" }
@@ -23,12 +30,12 @@ export type PluginRowState =
   | { state: "ready"; row: PluginRow }
 
 export function usePluginRow(pluginId: string): PluginRowState {
-  const result = useLiveQuery<PluginRow | undefined | typeof LOADING_SENTINEL>(
+  const result = useLiveQuery<PluginRow | undefined, LoadingSentinel>(
     () => getPlugin(pluginId),
     [pluginId],
     LOADING_SENTINEL
   )
-  if (result === LOADING_SENTINEL) return { state: "loading" }
+  if (isLoadingSentinel(result)) return { state: "loading" }
   if (result === undefined) return { state: "not-found" }
   return { state: "ready", row: result }
 }

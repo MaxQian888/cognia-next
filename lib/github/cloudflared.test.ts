@@ -1,8 +1,4 @@
-import {
-  parseTrycloudflareUrl,
-  startTunnel,
-  type CloudflaredProcess,
-} from "./cloudflared"
+import { parseTrycloudflareUrl, startTunnel, type CloudflaredProcess } from "./cloudflared"
 
 function fakeProcess(opts: {
   stdoutLines?: string[]
@@ -18,7 +14,8 @@ function fakeProcess(opts: {
   async function* drain(arr: string[]): AsyncIterable<string> {
     for (const line of arr) {
       if (killed) return
-      if (opts.delayBetweenLinesMs) await new Promise((r) => setTimeout(r, opts.delayBetweenLinesMs))
+      if (opts.delayBetweenLinesMs)
+        await new Promise((r) => setTimeout(r, opts.delayBetweenLinesMs))
       yield line
     }
   }
@@ -97,9 +94,9 @@ describe("startTunnel", () => {
 
   it("rejects when process exits without printing a URL", async () => {
     const proc = fakeProcess({ stdoutLines: ["INF starting…"], exitCode: 1 })
-    await expect(
-      startTunnel({ localPort: 1234, spawn: async () => proc })
-    ).rejects.toThrow(/exited|without printing a tunnel URL/)
+    await expect(startTunnel({ localPort: 1234, spawn: async () => proc })).rejects.toThrow(
+      /exited|without printing a tunnel URL/
+    )
   })
 
   it("rejects after waitMs deadline when nothing prints", async () => {

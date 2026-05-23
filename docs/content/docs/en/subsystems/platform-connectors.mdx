@@ -8,9 +8,10 @@ description: Turn AI characters into real bots on Telegram, Discord, Slack, Lark
 <Status variant="stable" />
 
 <TLDR>
-  Five built-in adapters (Telegram / Discord / Slack / Lark / OneBot v11) + a singleton ConnectorBus for fan-in / fan-out +
-  Dexie-backed outbound FIFO (circuit breaker, token bucket, exponential backoff, dead letter, idempotent LRU). Three modes: auto (AI auto-reply) /
-  manual (human typed) / draft (AI drafts, human reviews). Eight Dexie tables added in v18 schema; Inbox UI lives in
+  Five built-in adapters (Telegram / Discord / Slack / Lark / OneBot v11) + a singleton ConnectorBus
+  for fan-in / fan-out + Dexie-backed outbound FIFO (circuit breaker, token bucket, exponential
+  backoff, dead letter, idempotent LRU). Three modes: auto (AI auto-reply) / manual (human typed) /
+  draft (AI drafts, human reviews). Eight Dexie tables added in v18 schema; Inbox UI lives in
   `app/inbox/`; plugins can contribute additional adapters.
 </TLDR>
 
@@ -34,14 +35,14 @@ This page is an **architectural overview**. For platform-specific quick-start gu
 
 ## Use Cases
 
-| Scenario | Recommended Mode + Modules |
-| -------- | -------------------------- |
-| Company support group auto-reply | `auto` + Slack / Lark adapter + character binding + TriggerPolicy keyword limits |
-| Personal assistant draft review | `draft` + Telegram DM + draft review via Inbox UI |
-| Manual bot proxy | `manual` + any adapter + Composer manual input |
-| Scheduled daily digest push | `connection:outbound:send` scheduler task enqueues outbound directly (no AI) |
-| QQ group bot | `onebot` + NapCat / Lagrange / LLOneBot reverse-WS connection |
-| Plugin contributes a new platform | `PluginManifest.connectors[]` + `connectors-bridge.registerPluginAdapters` |
+| Scenario                          | Recommended Mode + Modules                                                       |
+| --------------------------------- | -------------------------------------------------------------------------------- |
+| Company support group auto-reply  | `auto` + Slack / Lark adapter + character binding + TriggerPolicy keyword limits |
+| Personal assistant draft review   | `draft` + Telegram DM + draft review via Inbox UI                                |
+| Manual bot proxy                  | `manual` + any adapter + Composer manual input                                   |
+| Scheduled daily digest push       | `connection:outbound:send` scheduler task enqueues outbound directly (no AI)     |
+| QQ group bot                      | `onebot` + NapCat / Lagrange / LLOneBot reverse-WS connection                    |
+| Plugin contributes a new platform | `PluginManifest.connectors[]` + `connectors-bridge.registerPluginAdapters`       |
 
 ## Architecture Diagram
 
@@ -128,40 +129,40 @@ flowchart TB
 
 ### Types
 
-| File | Purpose |
-| ---- | ------- |
-| `types/connectors/index.ts` | Barrel — re-exports all types |
-| `types/connectors/platform-kind.ts` | `PlatformKind` union: `"telegram" \| "discord" \| ...` |
-| `types/connectors/adapter.ts` | `PlatformAdapter` interface (implemented by each adapter) |
-| `types/connectors/event.ts` | `NormalizedInboundEvent` — cross-platform unified event |
-| `types/connectors/segment.ts` | `MessageSegment[]` — text / markdown / image / file / @ / quote |
-| `types/connectors/outbound.ts` | `OutboundRequest` / `OutboundResult` |
-| `types/connectors/policy.ts` | `TriggerPolicy` + `ConnectorMode` |
-| `types/connectors/binding.ts` | Three-layer binding stack (adapter default / conversation override / event override) |
-| `types/connectors/capability.ts` | Platform capabilities (max message size, supports quote / edit / recall …) |
-| `types/connectors/audit.ts` | `ConnectorAuditEntry` |
+| File                                | Purpose                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `types/connectors/index.ts`         | Barrel — re-exports all types                                                        |
+| `types/connectors/platform-kind.ts` | `PlatformKind` union: `"telegram" \| "discord" \| ...`                               |
+| `types/connectors/adapter.ts`       | `PlatformAdapter` interface (implemented by each adapter)                            |
+| `types/connectors/event.ts`         | `NormalizedInboundEvent` — cross-platform unified event                              |
+| `types/connectors/segment.ts`       | `MessageSegment[]` — text / markdown / image / file / @ / quote                      |
+| `types/connectors/outbound.ts`      | `OutboundRequest` / `OutboundResult`                                                 |
+| `types/connectors/policy.ts`        | `TriggerPolicy` + `ConnectorMode`                                                    |
+| `types/connectors/binding.ts`       | Three-layer binding stack (adapter default / conversation override / event override) |
+| `types/connectors/capability.ts`    | Platform capabilities (max message size, supports quote / edit / recall …)           |
+| `types/connectors/audit.ts`         | `ConnectorAuditEntry`                                                                |
 
 ### ConnectorBus and Orchestration
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/connectors/bus.ts` | Singleton; `registerAdapter` / `dispatchInboundFull` (10-step pipeline) |
-| `lib/connectors/dedup.ts` | `recordAndCheckInbound` — `inboundLedger` 10 k cap |
-| `lib/connectors/policy-eval.ts` | `evaluatePolicy` — TriggerPolicy rules + blocklist → `{ matched, blocked }` |
-| `lib/connectors/policy-resolve.ts` | `resolveBinding` — three-layer stack merged into final mode + characterId |
-| `lib/connectors/mode-router.ts` | `routeInbound(mode, evalResult, storeUnmatchedInDraftMode)` → `RouteDecision` |
-| `lib/connectors/runtime.ts` | `installRuntime` — wires `routeHandler` into the chat send pipeline + writes StoredMessage / creates draft |
-| `lib/connectors/audit.ts` | `appendAudit` — `connectorAudit` writer (capped) |
-| `lib/connectors/adapter-registry.ts` | `buildAdapterFromRow(row)` — instantiates a `PlatformAdapter` from a Dexie row |
+| File                                 | Purpose                                                                                                    |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `lib/connectors/bus.ts`              | Singleton; `registerAdapter` / `dispatchInboundFull` (10-step pipeline)                                    |
+| `lib/connectors/dedup.ts`            | `recordAndCheckInbound` — `inboundLedger` 10 k cap                                                         |
+| `lib/connectors/policy-eval.ts`      | `evaluatePolicy` — TriggerPolicy rules + blocklist → `{ matched, blocked }`                                |
+| `lib/connectors/policy-resolve.ts`   | `resolveBinding` — three-layer stack merged into final mode + characterId                                  |
+| `lib/connectors/mode-router.ts`      | `routeInbound(mode, evalResult, storeUnmatchedInDraftMode)` → `RouteDecision`                              |
+| `lib/connectors/runtime.ts`          | `installRuntime` — wires `routeHandler` into the chat send pipeline + writes StoredMessage / creates draft |
+| `lib/connectors/audit.ts`            | `appendAudit` — `connectorAudit` writer (capped)                                                           |
+| `lib/connectors/adapter-registry.ts` | `buildAdapterFromRow(row)` — instantiates a `PlatformAdapter` from a Dexie row                             |
 
 ### Outbound
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/connectors/outbound-runner.ts` | Main pump + per-conversation FIFO + quiet hours + global mute; exports `isInQuietHours` / `msUntilQuietEnd` |
-| `lib/connectors/circuit-breaker.ts` | 50% failure rate / 10-event window; trips with 30 s cooldown |
-| `lib/connectors/rate-limit.ts` | Token bucket — capacity 20, 5 token/s refill |
-| `lib/connectors/scheduled-outbound.ts` | Registers `connection:outbound:send` / `connection:scheduled:digest` as `TaskExecutor`s |
+| File                                   | Purpose                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `lib/connectors/outbound-runner.ts`    | Main pump + per-conversation FIFO + quiet hours + global mute; exports `isInQuietHours` / `msUntilQuietEnd` |
+| `lib/connectors/circuit-breaker.ts`    | 50% failure rate / 10-event window; trips with 30 s cooldown                                                |
+| `lib/connectors/rate-limit.ts`         | Token bucket — capacity 20, 5 token/s refill                                                                |
+| `lib/connectors/scheduled-outbound.ts` | Registers `connection:outbound:send` / `connection:scheduled:digest` as `TaskExecutor`s                     |
 
 ### Five Built-in Adapters
 
@@ -177,41 +178,41 @@ lib/connectors/adapters/&lt;platform&gt;/
   index.ts        createXxxAdapter(opts) factory
 ```
 
-| Platform | Transport | Signature Verification |
-| -------- | --------- | ---------------------- |
-| Telegram | longpoll or webhook | `X-Telegram-Bot-Api-Secret-Token` (HMAC-SHA256) |
-| Discord | Gateway WS v10 | Ed25519 (`X-Signature-Ed25519`, HTTP interactions only) |
-| Slack | Socket Mode or Events API | HMAC-SHA256 v0 (`X-Slack-Signature`) |
-| Lark | long-connection or webhook | HMAC-SHA256 (`X-Lark-Signature`) |
-| OneBot v11 | Reverse WebSocket (device connects in) | Bearer token (optional) |
+| Platform   | Transport                              | Signature Verification                                  |
+| ---------- | -------------------------------------- | ------------------------------------------------------- |
+| Telegram   | longpoll or webhook                    | `X-Telegram-Bot-Api-Secret-Token` (HMAC-SHA256)         |
+| Discord    | Gateway WS v10                         | Ed25519 (`X-Signature-Ed25519`, HTTP interactions only) |
+| Slack      | Socket Mode or Events API              | HMAC-SHA256 v0 (`X-Slack-Signature`)                    |
+| Lark       | long-connection or webhook             | HMAC-SHA256 (`X-Lark-Signature`)                        |
+| OneBot v11 | Reverse WebSocket (device connects in) | Bearer token (optional)                                 |
 
 ### Rust Layer
 
-| File | Purpose |
-| ---- | ------- |
-| `src-tauri/src/connectors/mod.rs` | Entry point + `ConnectorsState` |
-| `src-tauri/src/connectors/axum_app.rs` | axum app receiving webhooks |
-| `src-tauri/src/connectors/server_lifecycle.rs` | spawn / shutdown |
-| `src-tauri/src/connectors/ws_server.rs` | OneBot reverse-WS server |
-| `src-tauri/src/connectors/ws_client.rs` | Discord Gateway client |
-| `src-tauri/src/connectors/sigverify/` | HMAC / Ed25519 verification |
-| `src-tauri/src/connectors/keyring.rs` | Per-adapter secret read/write |
-| `src-tauri/src/connectors/http_client.rs` | `connectors_http_request` — cross-platform HTTPS outbound |
-| `src-tauri/src/connectors/attachments.rs` | `connectorAttachments` table download cache |
-| `src-tauri/src/connectors/commands.rs` | Tauri command exposure |
+| File                                           | Purpose                                                   |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| `src-tauri/src/connectors/mod.rs`              | Entry point + `ConnectorsState`                           |
+| `src-tauri/src/connectors/axum_app.rs`         | axum app receiving webhooks                               |
+| `src-tauri/src/connectors/server_lifecycle.rs` | spawn / shutdown                                          |
+| `src-tauri/src/connectors/ws_server.rs`        | OneBot reverse-WS server                                  |
+| `src-tauri/src/connectors/ws_client.rs`        | Discord Gateway client                                    |
+| `src-tauri/src/connectors/sigverify/`          | HMAC / Ed25519 verification                               |
+| `src-tauri/src/connectors/keyring.rs`          | Per-adapter secret read/write                             |
+| `src-tauri/src/connectors/http_client.rs`      | `connectors_http_request` — cross-platform HTTPS outbound |
+| `src-tauri/src/connectors/attachments.rs`      | `connectorAttachments` table download cache               |
+| `src-tauri/src/connectors/commands.rs`         | Tauri command exposure                                    |
 
 ### UI
 
-| File | Purpose |
-| ---- | ------- |
-| `app/inbox/page.tsx`, `app/inbox/[conversationKey]/page.tsx` | Inbox entry (static-export compatible) |
-| `components/inbox/inbox-shell.tsx` | Left + right dual-pane shell |
-| `components/inbox/inbox-sidebar.tsx` | Lists all platform-bound `ChatSession`s |
-| `components/inbox/conversation-header.tsx` | Mode switcher (auto / manual / draft) |
-| `components/inbox/draft-banner.tsx`, `components/inbox/draft-editor.tsx` | Draft-mode review UI |
-| `components/inbox/outbound-status-pill.tsx` | Outbound status badge |
-| `components/settings/connections/connections-section.tsx` | Tabbed shell; 6 tabs (Overview / Adapters / Conversations / Inbox / Outbound / Audit) |
-| `components/settings/connections/forms/quiet-hours-and-mute.tsx` | Quiet hours + global mute form |
+| File                                                                     | Purpose                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `app/inbox/page.tsx`, `app/inbox/[conversationKey]/page.tsx`             | Inbox entry (static-export compatible)                                                |
+| `components/inbox/inbox-shell.tsx`                                       | Left + right dual-pane shell                                                          |
+| `components/inbox/inbox-sidebar.tsx`                                     | Lists all platform-bound `ChatSession`s                                               |
+| `components/inbox/conversation-header.tsx`                               | Mode switcher (auto / manual / draft)                                                 |
+| `components/inbox/draft-banner.tsx`, `components/inbox/draft-editor.tsx` | Draft-mode review UI                                                                  |
+| `components/inbox/outbound-status-pill.tsx`                              | Outbound status badge                                                                 |
+| `components/settings/connections/connections-section.tsx`                | Tabbed shell; 6 tabs (Overview / Adapters / Conversations / Inbox / Outbound / Audit) |
+| `components/settings/connections/forms/quiet-hours-and-mute.tsx`         | Quiet hours + global mute form                                                        |
 
 ## Data Flow: Inbound
 
@@ -295,16 +296,16 @@ sequenceDiagram
 
 ## Database Tables (Dexie v18)
 
-| Table | Primary Key | Purpose |
-| ----- | ----------- | ------- |
-| `adapterInstances` | `id` | One row per configured bot (platform, credentials, settings, defaultCharacterId, quietHours, muted) |
-| `platformIdentities` | `id` | One row per observed platform user (username / display name / custom metadata) |
-| `inboundLedger` | `id` | Inbound dedup (`adapterId + messageId`), 10 k cap |
-| `outboundQueue` | `id` | Outbound delivery job; status = queued / sending / sent / failed / deadlettered |
-| `conversationOverrides` | `id` | Per-conversation mode / character override |
-| `connectorAudit` | `id` | Audit log, 5 000 capped ring |
-| `connectorDrafts` | `id` | Drafts awaiting human review in draft mode |
-| `connectorAttachments` | `id` | Platform attachment download cache (schema-only at Phase 1) |
+| Table                   | Primary Key | Purpose                                                                                             |
+| ----------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
+| `adapterInstances`      | `id`        | One row per configured bot (platform, credentials, settings, defaultCharacterId, quietHours, muted) |
+| `platformIdentities`    | `id`        | One row per observed platform user (username / display name / custom metadata)                      |
+| `inboundLedger`         | `id`        | Inbound dedup (`adapterId + messageId`), 10 k cap                                                   |
+| `outboundQueue`         | `id`        | Outbound delivery job; status = queued / sending / sent / failed / deadlettered                     |
+| `conversationOverrides` | `id`        | Per-conversation mode / character override                                                          |
+| `connectorAudit`        | `id`        | Audit log, 5 000 capped ring                                                                        |
+| `connectorDrafts`       | `id`        | Drafts awaiting human review in draft mode                                                          |
+| `connectorAttachments`  | `id`        | Platform attachment download cache (schema-only at Phase 1)                                         |
 
 ## Configuration and Extension Points
 
@@ -370,9 +371,21 @@ See [Scheduler](./scheduler).
     href="./visual-workflows"
     description="trigger.connector.inbound + action.connector.send"
   />
-  <Card title="Mobile Architecture" href="./mobile-architecture" description="Phones are also connector receivers" />
-  <Card title="Scheduler" href="./scheduler" description="Scheduled outbound / periodic digest goes through the scheduler" />
-  <Card title="Plugin System" href="./plugin-system" description="Contribute new platform connectors" />
+  <Card
+    title="Mobile Architecture"
+    href="./mobile-architecture"
+    description="Phones are also connector receivers"
+  />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="Scheduled outbound / periodic digest goes through the scheduler"
+  />
+  <Card
+    title="Plugin System"
+    href="./plugin-system"
+    description="Contribute new platform connectors"
+  />
   <Card title="Slack Setup" href="../connectors/slack-setup" />
   <Card title="Discord Setup" href="../connectors/discord-setup" />
   <Card title="Lark Setup" href="../connectors/lark-setup" />

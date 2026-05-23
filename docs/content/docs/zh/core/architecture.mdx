@@ -160,42 +160,42 @@ export async function greet(name: string): Promise<string> {
 | `agents`                 | Agent 配置文件读写（`read_agent_config` / `write_agent_config`）。                                                                                     |
 | `external_agent`         | 外部 CLI agent（如 Claude Code CLI、OpenCode）派生、ACP 终端管理。                                                                                     |
 | `a2ui_bridge`            | webview ↔ A2UI MCP sidecar 之间的桥；监听 `a2ui_dispatch` 行。                                                                                         |
-| `ccswitch`               | 一键切换 Claude Code 提供商档案 + MCP 服务器 + 提示词；详见 [CCSwitch](../chat/ccswitch)。                                                                   |
-| `anthropic_subscription` | Claude Pro/Max OAuth 凭证持久化（OS keyring）；详见 [Claude 订阅 OAuth](../chat/claude-subscription-oauth)。                                                 |
+| `ccswitch`               | 一键切换 Claude Code 提供商档案 + MCP 服务器 + 提示词；详见 [CCSwitch](../chat/ccswitch)。                                                             |
+| `anthropic_subscription` | Claude Pro/Max OAuth 凭证持久化（OS keyring）；详见 [Claude 订阅 OAuth](../chat/claude-subscription-oauth)。                                           |
 
 ### 数据与基础设施
 
-| 模块              | 用途                                                                                                                               |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `vector`          | sqlite-vec 后端；在任何连接打开前加载 FFI 扩展；详见 [向量库](../data/vector-store)。                                                    |
-| `scheduler`       | 跨平台原生调度器 —— `windows.rs`（Task Scheduler）、`macos.rs`（launchd）、`linux.rs`（systemd）；sqlite 元数据表用于恢复。        |
-| `files` / `shell` | 文件操作（含工作区扫描、claude skills 扫描）、shell 执行（在受信任工作区内放行）。                                                 |
-| `settings`        | Claude Code user / project / local / effective 设置读写。                                                                          |
-| `api_key`         | Anthropic API key + OAuth bearer 内存态；与 sidecar env 同步。                                                                     |
+| 模块              | 用途                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vector`          | sqlite-vec 后端；在任何连接打开前加载 FFI 扩展；详见 [向量库](../data/vector-store)。                                                          |
+| `scheduler`       | 跨平台原生调度器 —— `windows.rs`（Task Scheduler）、`macos.rs`（launchd）、`linux.rs`（systemd）；sqlite 元数据表用于恢复。                    |
+| `files` / `shell` | 文件操作（含工作区扫描、claude skills 扫描）、shell 执行（在受信任工作区内放行）。                                                             |
+| `settings`        | Claude Code user / project / local / effective 设置读写。                                                                                      |
+| `api_key`         | Anthropic API key + OAuth bearer 内存态；与 sidecar env 同步。                                                                                 |
 | `logging`         | `fern` 分发链：tauri-plugin-log（文件 + webview）+ 平台原生日志（EventLog / OSLog / journald）。详见 [可观测性](../subsystems/observability)。 |
 
 ### 输出 / UI
 
-| 模块              | 用途                                                                     |
-| ----------------- | ------------------------------------------------------------------------ |
-| `canvas`          | 画板文档落盘 + 原生 Python 执行；详见 [画板](../subsystems/canvas)。                 |
+| 模块              | 用途                                                                           |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `canvas`          | 画板文档落盘 + 原生 Python 执行；详见 [画板](../subsystems/canvas)。           |
 | `skills`          | 技能资源解析 + 沙箱准备 + 远程注册表；详见 [技能系统](../chat/skills-system)。 |
-| `tts`             | 语音供应商密钥保管库（keyring）、Edge-TTS WebSocket 桥、通用 HTTP 代理。 |
-| `wallpaper`       | 用户壁纸保存 / 列出 / 删除 / 解析路径 / data URL 转换。                  |
-| `hooks`           | 生命周期钩子（chat send、response、error）。                             |
-| `window_behavior` | "关闭到托盘" 偏好与窗口事件。                                            |
-| `tray` / `menu`   | 桌面"外壳"（系统托盘、菜单栏）。                                         |
+| `tts`             | 语音供应商密钥保管库（keyring）、Edge-TTS WebSocket 桥、通用 HTTP 代理。       |
+| `wallpaper`       | 用户壁纸保存 / 列出 / 删除 / 解析路径 / data URL 转换。                        |
+| `hooks`           | 生命周期钩子（chat send、response、error）。                                   |
+| `window_behavior` | "关闭到托盘" 偏好与窗口事件。                                                  |
+| `tray` / `menu`   | 桌面"外壳"（系统托盘、菜单栏）。                                               |
 
 ### 外部桥与连接器
 
-| 模块             | 用途                                                                                                                                   |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 模块             | 用途                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mcp_server`     | Rust 侧 HTTP MCP 服务器，暴露 Wiki + RAG 给外部代理；详见 [Tauri MCP 服务器](../subsystems/mcp-server-tauri)。                                     |
 | `companion_api`  | 移动配对 API（axum + axum-server TLS）、JWT 配对、mDNS 广播、cloudflared 隧道、推送配置；详见 [Companion API](../subsystems/companion-api)。       |
 | `connectors`     | 平台连接器底层：HTTP / WebSocket / keyring / 适配器服务器；详见 [平台连接器](../subsystems/platform-connectors)。                                  |
 | `workflow`       | 工作流 cron 守护进程 + webhook 路由（axum）+ SQLite 运行态镜像；详见 [可视化工作流](../subsystems/visual-workflows)。                              |
 | `remote_control` | 远程控制入站监听器 + HMAC 签名；详见 [远程控制](../subsystems/remote-control)。                                                                    |
-| `proxy_config`   | 系统代理探测、HTTP 测试、统一 HTTP 请求函数。                                                                                          |
+| `proxy_config`   | 系统代理探测、HTTP 测试、统一 HTTP 请求函数。                                                                                                      |
 | `plugin_api`     | 插件生命周期、权限、API 桥、文件系统监视、窗口操作、快捷键、上下文菜单、签名、备份、市场、devtools；详见 [插件系统](../subsystems/plugin-system)。 |
 
 在 `lib.rs` 注册的 Tauri 插件：`single-instance`、`deep-link`、`autostart`、`global-shortcut`、`cli`、`store`、`updater`、`dialog`、`fs`、`notification`、`clipboard-manager`、`opener`、`os`、`process`、`log`、`window-state`。
@@ -230,14 +230,14 @@ Rust 侧（`src-tauri/src/claude/sidecar.rs`）通过 `SidecarState` 持有子�
 | 数据                                                    | 位置                                                                  | 原因                                                                                        |
 | ------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | 聊天会话、角色、技能、团队、孪生表、工作流、连接器表    | Dexie（IndexedDB），schema v26，40+ 张表                              | webview 本地、低延迟、可建索引。Schema 版本只增不改，不要修改旧的 `version().stores()` 块。 |
-| 向量嵌入                                                | `<app_data>/cognia/vectors.sqlite`（桌面）或远程（Web）               | 原生定长向量索引需要 sqlite-vec；Web 退回云端后端。详见 [向量库](../data/vector-store)。          |
-| 备份快照                                                | 用户通过 Tauri 对话框选择的文件夹                                     | 默认 AES-GCM 加密。详见 [备份 & 数据传输](../data/backup-and-data)。                              |
+| 向量嵌入                                                | `<app_data>/cognia/vectors.sqlite`（桌面）或远程（Web）               | 原生定长向量索引需要 sqlite-vec；Web 退回云端后端。详见 [向量库](../data/vector-store)。    |
+| 备份快照                                                | 用户通过 Tauri 对话框选择的文件夹                                     | 默认 AES-GCM 加密。详见 [备份 & 数据传输](../data/backup-and-data)。                        |
 | 调度器元数据                                            | sqlite（Rust 侧 `metadata_store.rs`）                                 | 跨重启保留；交叉引用原生 task ID。                                                          |
 | 工作流运行态                                            | sqlite 镜像（Rust 侧）+ `workflowRuns` / `workflowRunEvents` Dexie 表 | 双写让重启后能恢复 in-flight runs。                                                         |
 | MCP 审计日志                                            | Dexie `mcpAuditLog` 表（最多保留 5000 条最新）                        | 防止权限越界，写入即触发审计。                                                              |
 | 设置                                                    | Dexie `settings` 表（单行 key 为 `"singleton"`）+ `lib/settings/`     | 启动时由 `SettingsSyncProvider` 从 Rust 同步。                                              |
 | API key / OAuth bearer / TTS provider keys / 连接器凭证 | OS keyring（`keyring` crate）                                         | 永不以明文落盘。                                                                            |
-| 推送凭证（FCM / APNs）                                  | OS keyring + Dexie 持久化的 dispatcher 配置                           | 详见 [Companion API](../subsystems/companion-api)。                                                     |
+| 推送凭证（FCM / APNs）                                  | OS keyring + Dexie 持久化的 dispatcher 配置                           | 详见 [Companion API](../subsystems/companion-api)。                                         |
 
 ### 日志
 

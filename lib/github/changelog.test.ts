@@ -23,10 +23,7 @@ describe("parseCommitMessage", () => {
   })
 
   it("flags breaking with footer", () => {
-    const c = parseCommitMessage(
-      "h",
-      "refactor: rewire context\n\nBREAKING CHANGE: ctx.db is gone"
-    )
+    const c = parseCommitMessage("h", "refactor: rewire context\n\nBREAKING CHANGE: ctx.db is gone")
     expect(c?.breaking).toBe(true)
   })
 
@@ -52,7 +49,10 @@ describe("parseCommitMessage", () => {
 
 describe("computeBump", () => {
   const c = (type: string, breaking = false): ParsedCommit => ({
-    hash: "x", type, breaking, subject: "y",
+    hash: "x",
+    type,
+    breaking,
+    subject: "y",
   })
 
   it("returns 'none' for empty input", () => {
@@ -108,8 +108,19 @@ describe("applyBump", () => {
 
 describe("renderChangelog", () => {
   const FEAT: ParsedCommit = { hash: "abc1234", type: "feat", subject: "add x", breaking: false }
-  const FIX: ParsedCommit = { hash: "def5678", type: "fix", subject: "patch y", breaking: false, scope: "auth" }
-  const BREAKING: ParsedCommit = { hash: "0011223", type: "feat", subject: "rewire", breaking: true }
+  const FIX: ParsedCommit = {
+    hash: "def5678",
+    type: "fix",
+    subject: "patch y",
+    breaking: false,
+    scope: "auth",
+  }
+  const BREAKING: ParsedCommit = {
+    hash: "0011223",
+    type: "feat",
+    subject: "rewire",
+    breaking: true,
+  }
 
   it("renders the version header and bump label", () => {
     const md = renderChangelog([FEAT], { bump: "minor", nextVersion: "1.3.0", repoFullName: null })
@@ -118,7 +129,11 @@ describe("renderChangelog", () => {
   })
 
   it("groups by category in canonical order", () => {
-    const md = renderChangelog([FIX, FEAT], { bump: "minor", nextVersion: "1.3.0", repoFullName: null })
+    const md = renderChangelog([FIX, FEAT], {
+      bump: "minor",
+      nextVersion: "1.3.0",
+      repoFullName: null,
+    })
     expect(md.indexOf("Features")).toBeLessThan(md.indexOf("Bug Fixes"))
   })
 
@@ -133,17 +148,27 @@ describe("renderChangelog", () => {
       nextVersion: "1.3.0",
       repoFullName: "octocat/hello-world",
     })
-    expect(md).toMatch(/\[abc1234\]\(https:\/\/github\.com\/octocat\/hello-world\/commit\/abc1234\)/)
+    expect(md).toMatch(
+      /\[abc1234\]\(https:\/\/github\.com\/octocat\/hello-world\/commit\/abc1234\)/
+    )
   })
 
   it("emits a BREAKING CHANGES section when any commit is breaking", () => {
-    const md = renderChangelog([BREAKING], { bump: "major", nextVersion: "2.0.0", repoFullName: null })
+    const md = renderChangelog([BREAKING], {
+      bump: "major",
+      nextVersion: "2.0.0",
+      repoFullName: null,
+    })
     expect(md).toMatch(/⚠ BREAKING CHANGES/)
   })
 
   it("emits 'Other Changes' for unknown types", () => {
     const oddball: ParsedCommit = { hash: "x", type: "wip", subject: "stuff", breaking: false }
-    const md = renderChangelog([oddball], { bump: "none", nextVersion: "1.2.3", repoFullName: null })
+    const md = renderChangelog([oddball], {
+      bump: "none",
+      nextVersion: "1.2.3",
+      repoFullName: null,
+    })
     expect(md).toMatch(/Other Changes/)
   })
 })

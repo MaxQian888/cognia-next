@@ -8,7 +8,13 @@ description: A unified access layer for ten web search providers — query optim
 Cognia abstracts "letting AI search the web" into a provider bus: the upper layer only sees `search(query, options)`, while ten providers (Tavily / Perplexity / Exa / SearchAPI / Serper / SerpAPI / Bing / Google / Google AI / Brave) hang underneath, each supporting general / news / images / videos / academic capabilities. All providers conform to the same `SearchResponse` shape, so callers always receive a consistent result format.
 
 <TLDR>
-  Unified search entry `lib/search/search-service.ts:search()`, automatically selects provider based on settings + failure fallback. Before querying, `optimizeSearchQuery` strips pleasantries and redundant prefixes; hits on the LRU cache (`search-cache.ts`) return immediately; misses are routed by `SearchType` (`search-type-router.ts`) to the specific provider; results optionally pass through `source-verification.ts` for credibility scoring. Provider interfaces live in `lib/search/providers/`, one file per provider, with connection test functions exported alongside the main search function.
+  Unified search entry `lib/search/search-service.ts:search()`, automatically selects provider based
+  on settings + failure fallback. Before querying, `optimizeSearchQuery` strips pleasantries and
+  redundant prefixes; hits on the LRU cache (`search-cache.ts`) return immediately; misses are
+  routed by `SearchType` (`search-type-router.ts`) to the specific provider; results optionally pass
+  through `source-verification.ts` for credibility scoring. Provider interfaces live in
+  `lib/search/providers/`, one file per provider, with connection test functions exported alongside
+  the main search function.
 </TLDR>
 
 ## Overview
@@ -195,18 +201,18 @@ Corresponding test files `<name>.test.ts` use `vi.mock(global.fetch)` to verify 
 
 ### Provider Overview
 
-| Provider     | Best For                                | API Key Form   | Notes                                           |
-| ------------ | --------------------------------------- | -------------- | ----------------------------------------------- |
-| `tavily`     | Default main search; deep search + AI answer | `tvly-...`     | `searchWithTavily / extractContent / getAnswer` |
-| `perplexity` | Built-in LLM summary                    | `pplx-...`     | Single general, no type splitting               |
+| Provider     | Best For                                        | API Key Form   | Notes                                           |
+| ------------ | ----------------------------------------------- | -------------- | ----------------------------------------------- |
+| `tavily`     | Default main search; deep search + AI answer    | `tvly-...`     | `searchWithTavily / extractContent / getAnswer` |
+| `perplexity` | Built-in LLM summary                            | `pplx-...`     | Single general, no type splitting               |
 | `exa`        | Semantic search + similar links + content fetch | `exa_...`      | Good for related discovery                      |
-| `searchapi`  | SerpAPI alternative                     | hex            | Includes scholar                                |
-| `serper`     | Google search results proxy             | hex            | Includes scholar / videos                       |
-| `serpapi`    | Classic SerpAPI                         | hex            | No academic                                     |
-| `bing`       | Microsoft Bing                          | Ocp-Apim form  | No videos                                       |
-| `google`     | Google Custom Search                    | api key + `cx` | Requires cx; tests need both present            |
-| `google-ai`  | Google AI Search (Gemini grounding)     | api key        | Only one that uses LLM grounding                |
-| `brave`      | Brave Search                            | API token      | Most complete type coverage                     |
+| `searchapi`  | SerpAPI alternative                             | hex            | Includes scholar                                |
+| `serper`     | Google search results proxy                     | hex            | Includes scholar / videos                       |
+| `serpapi`    | Classic SerpAPI                                 | hex            | No academic                                     |
+| `bing`       | Microsoft Bing                                  | Ocp-Apim form  | No videos                                       |
+| `google`     | Google Custom Search                            | api key + `cx` | Requires cx; tests need both present            |
+| `google-ai`  | Google AI Search (Gemini grounding)             | api key        | Only one that uses LLM grounding                |
+| `brave`      | Brave Search                                    | API token      | Most complete type coverage                     |
 
 ### Provider Fetch Wrapper
 
@@ -276,18 +282,34 @@ The settings UI is under Settings → Search Provider, with one card per provide
 ## Related Documentation
 
 <Cards>
-  <Card title="Storage" href="./storage" description="Where search settings live in the Dexie schema" />
-  <Card title="Vector Store" href="./vector-store" description="Division of labor between vector retrieval and web search" />
-  <Card title="Chat and Skills" href="./chat-and-skills" description="How the send path assembles search results" />
-  <Card title="Document Processing" href="./document-processing" description="Local document parsing; complementary to web search" />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="Where search settings live in the Dexie schema"
+  />
+  <Card
+    title="Vector Store"
+    href="./vector-store"
+    description="Division of labor between vector retrieval and web search"
+  />
+  <Card
+    title="Chat and Skills"
+    href="./chat-and-skills"
+    description="How the send path assembles search results"
+  />
+  <Card
+    title="Document Processing"
+    href="./document-processing"
+    description="Local document parsing; complementary to web search"
+  />
 </Cards>
 
 ## Where to Start
 
-| Goal                        | Files                                                                                                                                                     |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new provider          | `lib/search/providers/<name>.ts` + export in `providers/index.ts` + `testProviderConnection` switch in `search-service.ts` + capability table in `search-type-router.ts` |
-| Change default fallback order | Adjust priority comparison in `getEnabledProviders` (in `lib/search/types.ts`)                                                                           |
-| Add a new SearchType        | Expand union in `types.ts` + add dispatch in `search-type-router.ts` + check provider support                                                            |
-| Tune cache TTL              | Default values in `search-cache.ts:SearchCacheOptions`                                                                                                   |
-| Adjust credibility scoring  | Domain tables + scoring functions in `source-verification.ts`                                                                                            |
+| Goal                          | Files                                                                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add a new provider            | `lib/search/providers/<name>.ts` + export in `providers/index.ts` + `testProviderConnection` switch in `search-service.ts` + capability table in `search-type-router.ts` |
+| Change default fallback order | Adjust priority comparison in `getEnabledProviders` (in `lib/search/types.ts`)                                                                                           |
+| Add a new SearchType          | Expand union in `types.ts` + add dispatch in `search-type-router.ts` + check provider support                                                                            |
+| Tune cache TTL                | Default values in `search-cache.ts:SearchCacheOptions`                                                                                                                   |
+| Adjust credibility scoring    | Domain tables + scoring functions in `source-verification.ts`                                                                                                            |

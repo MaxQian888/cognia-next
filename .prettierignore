@@ -10,3 +10,16 @@ pnpm-lock.yaml
 *.min.js
 *.min.css
 public/monaco
+# Vendored skill content — managed by the skill plugin, not hand-edited.
+.agents/skills
+.claude/skills
+# CommonJS mocks for Jest; intentionally hand-written, not Prettier-shaped.
+__mocks__
+# Capacitor mobile shell — separate package, has its own conventions.
+mobile
+# IDE configuration files — not project source.
+.vscode
+# Fumadocs MDX content — Prettier's MDX support is non-idempotent on
+# `<Steps>` / `<Step>` whitespace (prettier(input) !== prettier(prettier(input))).
+# The docs workspace owns its own formatting.
+docs/content

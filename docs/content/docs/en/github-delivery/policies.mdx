@@ -23,32 +23,38 @@ and the executor skips immediately. The default policy is `DEFAULT_GH_POLICY`, o
       default: "undefined",
     },
     requireGreenCi: {
-      description: "CI must be success before merge. This field only affects action.kind === 'merge'.",
+      description:
+        "CI must be success before merge. This field only affects action.kind === 'merge'.",
       type: "boolean",
       default: "true",
     },
     requireHumanApproval: {
-      description: "merge / non-draft release must go through human approval. On rejection, returns needsApproval: true and routes to HITL draft.",
+      description:
+        "merge / non-draft release must go through human approval. On rejection, returns needsApproval: true and routes to HITL draft.",
       type: "boolean",
       default: "true",
     },
     maxDailyMerges: {
-      description: "Maximum number of merges per UTC day by the bot. The daily count is scanned from the audit table using the [repoFullName+at] index.",
+      description:
+        "Maximum number of merges per UTC day by the bot. The daily count is scanned from the audit table using the [repoFullName+at] index.",
       type: "number",
       default: "5",
     },
     quietHours: {
-      description: "Quiet-hours window. Reuses the isInQuietHours algorithm from lib/connectors/outbound-runner. Optional.",
+      description:
+        "Quiet-hours window. Reuses the isInQuietHours algorithm from lib/connectors/outbound-runner. Optional.",
       type: "QuietHoursWindow | undefined",
       default: "undefined",
     },
     branchProtection: {
-      description: "List of branch regex patterns that prohibit direct pushes. A match rejects push-type actions.",
+      description:
+        "List of branch regex patterns that prohibit direct pushes. A match rejects push-type actions.",
       type: "string[]",
       default: '["^main$", "^master$", "^release/"]',
     },
     allowedAuthors: {
-      description: "Set of authors the bot is allowed to act on for PRs/Issues. Three kinds: collaborators / members / explicit (explicit logins array).",
+      description:
+        "Set of authors the bot is allowed to act on for PRs/Issues. Three kinds: collaborators / members / explicit (explicit logins array).",
       type: "AllowedAuthors",
       default: '{ kind: "collaborators" }',
     },
@@ -57,9 +63,9 @@ and the executor skips immediately. The default policy is `DEFAULT_GH_POLICY`, o
 
 ```ts title="lib/github/types.ts (excerpt)"
 export interface QuietHoursWindow {
-  from: string  // "HH:MM" 24h
-  to: string    // "HH:MM" 24h
-  tz: string    // IANA tz, e.g. "Asia/Shanghai"
+  from: string // "HH:MM" 24h
+  to: string // "HH:MM" 24h
+  tz: string // IANA tz, e.g. "Asia/Shanghai"
 }
 
 export type AllowedAuthors =
@@ -111,18 +117,18 @@ flowchart TB
 
 ### `merge`
 
-| Check                | On Failure                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `requireGreenCi`     | `deny("merge requires CI=success but got '<status>'")`                                  |
+| Check                  | On Failure                                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `requireGreenCi`       | `deny("merge requires CI=success but got '<status>'")`                                   |
 | `requireHumanApproval` | `denyAwaitingApproval("merge requires explicit human approval")` — `needsApproval: true` |
-| `maxDailyMerges`     | `deny("daily merge cap of N reached (M today)")`                                         |
-| `allowedAuthors`     | See below                                                                                    |
+| `maxDailyMerges`       | `deny("daily merge cap of N reached (M today)")`                                         |
+| `allowedAuthors`       | See below                                                                                |
 
 ### `push`
 
-| Check                                  | On Failure                                                                                                |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `branchProtection` regex                 | `deny("branch '<branch>' matches protection regex '<regex>'")`                                        |
+| Check                    | On Failure                                                     |
+| ------------------------ | -------------------------------------------------------------- |
+| `branchProtection` regex | `deny("branch '<branch>' matches protection regex '<regex>'")` |
 
 Example: `action.github.openPr` treats `head` as the push branch, so if `head` matches a protection regex, it is rejected.
 `action.github.pushTag` treats `refs/tags/<tag>` as the push branch — if you want to protect `release/v*` style tags,
@@ -130,9 +136,9 @@ you can add a `^refs/tags/release/` regex.
 
 ### `release`
 
-| Check                                          | On Failure                                                                                 |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `action.draft === true`                         | Always allow (drafts can be created freely, not visible externally)                                              |
+| Check                                                              | On Failure                                                                      |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `action.draft === true`                                            | Always allow (drafts can be created freely, not visible externally)             |
 | `requireHumanApproval && humanApproved !== true` (and draft=false) | `denyAwaitingApproval("publishing a release requires explicit human approval")` |
 
 ### `comment` / `label` / `close`
@@ -141,10 +147,11 @@ Only `allowedAuthors` is checked (handled by `pickAuthorPolicy`):
 
 ```ts title="lib/github/policy-gate.ts"
 function pickAuthorPolicy(policy, ctx, authorLogin) {
-  if (!authorLogin) return ALLOW  // no author info, allow immediately
+  if (!authorLogin) return ALLOW // no author info, allow immediately
   switch (policy.allowedAuthors.kind) {
     case "explicit":
-      return logins.includes(authorLogin) ? ALLOW
+      return logins.includes(authorLogin)
+        ? ALLOW
         : deny(`author "${authorLogin}" is not in the explicit allow-list`)
     case "collaborators":
     case "members":
@@ -152,7 +159,8 @@ function pickAuthorPolicy(policy, ctx, authorLogin) {
       // no additional requests are made here, only set membership check.
       if (!ctx.knownAllowedLogins)
         return deny(`cannot evaluate "<kind>" policy: caller did not pass knownAllowedLogins`)
-      return ctx.knownAllowedLogins.includes(authorLogin) ? ALLOW
+      return ctx.knownAllowedLogins.includes(authorLogin)
+        ? ALLOW
         : deny(`author "${authorLogin}" is not in the <kind> list`)
   }
 }
@@ -183,23 +191,24 @@ This wait responds to cancellation via `step.signal` (orchestrator calls `abort`
   `approval.editedBody` is passed through by `guardedExecutor` to `run`, and the executor prefers the edited body.
 - `reject`: Writes a deny audit entry "user rejected HITL approval", and the executor returns
   `{ output: { skipped: true, reason: "HITL rejected: ...", draftId } }`.
-</Step>
+    </Step>
 </Steps>
 
 <Callout type="info">
-**Restart-safe.** Drafts remain in Dexie. After a process crash, when the workflow is resumed by the `resume-controller`,
-the bridge first checks whether a pending row for `(runId, stepId)` already exists in `connectorDrafts` — if so, it reuses it
-instead of creating a new draft. `runIssueLoop` uses `long-step-runner` for a similar checkpoint-resume behavior.
+  **Restart-safe.** Drafts remain in Dexie. After a process crash, when the workflow is resumed by
+  the `resume-controller`, the bridge first checks whether a pending row for `(runId, stepId)`
+  already exists in `connectorDrafts` — if so, it reuses it instead of creating a new draft.
+  `runIssueLoop` uses `long-step-runner` for a similar checkpoint-resume behavior.
 </Callout>
 
 ## Quiet Hours Algorithm
 
 Reuses two utility functions from `lib/connectors/outbound-runner`:
 
-| Function                                                   | Purpose                                                                 |
-| ------------------------------------------------------ | -------------------------------------------------------------------- |
-| `isInQuietHours(nowMs, from, to, tz)`                  | Determines whether nowMs falls within the [from, to] interval. Handles midnight-crossing scenarios.               |
-| `msUntilQuietEnd(nowMs, to, tz)`                       | Returns the number of milliseconds until `to`. Used for `mustWait.until = now + msUntilQuietEnd`. |
+| Function                              | Purpose                                                                                             |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `isInQuietHours(nowMs, from, to, tz)` | Determines whether nowMs falls within the [from, to] interval. Handles midnight-crossing scenarios. |
+| `msUntilQuietEnd(nowMs, to, tz)`      | Returns the number of milliseconds until `to`. Used for `mustWait.until = now + msUntilQuietEnd`.   |
 
 ```ts title="lib/github/policy-gate.ts"
 function checkQuietHours(policy, now) {
@@ -238,36 +247,36 @@ override, copy the base array in and add to it.
 
 Typical usage:
 
-| Scenario                                          | `policyOverride` expression                                  |
-| --------------------------------------------- | ------------------------------------------------------ |
-| Emergency release skipping human approval                       | `{ requireHumanApproval: false }`                      |
-| Temporarily bypass quiet hours for a node                  | `{ quietHours: undefined }` (note: because of ??, must clear in the form) |
-| Only allow release branch                         | `{ branchProtection: ["^main$", "^master$"] }`         |
-| Allow non-collaborator PRs to receive auto-comments        | `{ allowedAuthors: { kind: "explicit", logins: ["all"] } }` (use with caution)|
+| Scenario                                            | `policyOverride` expression                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Emergency release skipping human approval           | `{ requireHumanApproval: false }`                                              |
+| Temporarily bypass quiet hours for a node           | `{ quietHours: undefined }` (note: because of ??, must clear in the form)      |
+| Only allow release branch                           | `{ branchProtection: ["^main$", "^master$"] }`                                 |
+| Allow non-collaborator PRs to receive auto-comments | `{ allowedAuthors: { kind: "explicit", logins: ["all"] } }` (use with caution) |
 
 ## Audit Writes
 
 Every `checkPolicy` call is logged as an audit entry by `guardedExecutor`:
 
-| Field                                          | Value                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `repoFullName`                                | Extracted from action (`pr.repo` / `issue.repo` / `repo`)                                       |
-| `runId` / `stepId`                            | Current workflow run / step                                                                    |
-| `action`                                      | `GhAction` discriminant (stored as-is)                                                                 |
-| `decision`                                    | `PolicyDecision` discriminant                                                                     |
-| `reason`                                      | The decision's reason field ("policy allowed" when allow)                                            |
-| `at`                                          | Wall-clock milliseconds                                                                             |
+| Field              | Value                                                     |
+| ------------------ | --------------------------------------------------------- |
+| `repoFullName`     | Extracted from action (`pr.repo` / `issue.repo` / `repo`) |
+| `runId` / `stepId` | Current workflow run / step                               |
+| `action`           | `GhAction` discriminant (stored as-is)                    |
+| `decision`         | `PolicyDecision` discriminant                             |
+| `reason`           | The decision's reason field ("policy allowed" when allow) |
+| `at`               | Wall-clock milliseconds                                   |
 
 The HITL flow writes **two** audit entries (one deny + one allow / final deny), and the workflow editor's audit tab
 automatically merges them for display. See [audit](./audit) for details.
 
 ## Source Index
 
-| File                                                                      | Purpose                                          |
-| ------------------------------------------------------------------------- | --------------------------------------------- |
-| `lib/github/types.ts`                                                     | `GhPolicy` / `PolicyDecision` / `GhAction`     |
-| `lib/github/policy-gate.ts`                                               | `checkPolicy` + `mergePolicy` implementation             |
-| `lib/connectors/outbound-runner.ts`                                       | Shared `isInQuietHours` / `msUntilQuietEnd`    |
-| `plugins/github-delivery/src/workflow/shared.ts`                          | `guardedExecutor` — calls policy + writes audit    |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`                    | HITL draft bridge                                    |
-| `components/settings/github-delivery/tabs/policies-tab.tsx`               | Repository-level policy UI                                  |
+| File                                                        | Purpose                                         |
+| ----------------------------------------------------------- | ----------------------------------------------- |
+| `lib/github/types.ts`                                       | `GhPolicy` / `PolicyDecision` / `GhAction`      |
+| `lib/github/policy-gate.ts`                                 | `checkPolicy` + `mergePolicy` implementation    |
+| `lib/connectors/outbound-runner.ts`                         | Shared `isInQuietHours` / `msUntilQuietEnd`     |
+| `plugins/github-delivery/src/workflow/shared.ts`            | `guardedExecutor` — calls policy + writes audit |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`      | HITL draft bridge                               |
+| `components/settings/github-delivery/tabs/policies-tab.tsx` | Repository-level policy UI                      |

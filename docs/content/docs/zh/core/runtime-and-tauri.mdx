@@ -366,15 +366,15 @@ builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
 
 `src-tauri/src/lib.rs` 的 `setup` 钩子接线了大量后台子系统：
 
-| 钩子                              | 作用                                                                                                                       |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `logging::bootstrap`              | 安装 `tauri-plugin-log` 的 stdout / 文件 / webview 目标，并把记录镜像到 OS 原生日志后端。                                  |
+| 钩子                              | 作用                                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `logging::bootstrap`              | 安装 `tauri-plugin-log` 的 stdout / 文件 / webview 目标，并把记录镜像到 OS 原生日志后端。                                              |
 | `WorkflowState::open`             | 打开工作流 SQLite 镜像、启动 cron 守护进程、把 axum webhook 路由 spawn 到 tokio。详见 [可视化工作流](../subsystems/visual-workflows)。 |
-| `global_shortcut.register`        | 注册 `Ctrl+Shift+Space` / `Ctrl+Shift+L`。                                                                                 |
-| `app.deep_link()`                 | Linux / dev-Windows 上运行时注册 `cognia://`；emit `deep-link://received` 到前端。                                         |
-| CLI matches 转发                  | 把第一次启动的 CLI 参数 emit 为 `cli://matches`。                                                                          |
-| `menu::install` / `tray::install` | 构建应用菜单与系统托盘，事件通过 `tray://*` emit。                                                                         |
-| 窗口关闭拦截                      | 若 `WindowBehavior::tray_on_close()` 为 true，拦截 `CloseRequested` 并改为 `hide()`。                                      |
+| `global_shortcut.register`        | 注册 `Ctrl+Shift+Space` / `Ctrl+Shift+L`。                                                                                             |
+| `app.deep_link()`                 | Linux / dev-Windows 上运行时注册 `cognia://`；emit `deep-link://received` 到前端。                                                     |
+| CLI matches 转发                  | 把第一次启动的 CLI 参数 emit 为 `cli://matches`。                                                                                      |
+| `menu::install` / `tray::install` | 构建应用菜单与系统托盘，事件通过 `tray://*` emit。                                                                                     |
+| 窗口关闭拦截                      | 若 `WindowBehavior::tray_on_close()` 为 true，拦截 `CloseRequested` 并改为 `hide()`。                                                  |
 | `a2ui_bridge::spawn`              | 启动 A2UI 桥 socket 监听器；详见 [A2UI 系统](../subsystems/a2ui-system)。                                                              |
 | `remote_control` 自启动           | 若用户启用过入站监听且 keyring 还有令牌，就 spawn 监听器。详见 [远程控制](../subsystems/remote-control)。                              |
 | Companion push 凭证恢复           | 重新挂载用户上次上传过的 FCM/APNs dispatcher。详见 [Companion API](../subsystems/companion-api)。                                      |
@@ -398,17 +398,17 @@ Cognia 采用**默认 allow-list** 策略（Tauri 2 capability）。`src-tauri/c
 
 ## 跨页参考
 
-| 想做的事                                  | 看这里                                           |
-| ----------------------------------------- | ------------------------------------------------ |
-| 用 Capacitor 把同一份代码跑在 iOS/Android | [移动架构](../ui/mobile-architecture)                |
-| 暴露 Cognia 的 wiki/RAG 给外部代理        | [External Bridge](../subsystems/external-bridge)             |
-| 接 Telegram / Discord / Slack / Lark / QQ | [平台连接器](../subsystems/platform-connectors)              |
-| 跑在 headless 服务器（无 UI）             | [Companion API](../subsystems/companion-api)                 |
-| 通过 HMAC 让其他设备远程触发指令          | [远程控制](../subsystems/remote-control)                     |
+| 想做的事                                  | 看这里                                                 |
+| ----------------------------------------- | ------------------------------------------------------ |
+| 用 Capacitor 把同一份代码跑在 iOS/Android | [移动架构](../ui/mobile-architecture)                  |
+| 暴露 Cognia 的 wiki/RAG 给外部代理        | [External Bridge](../subsystems/external-bridge)       |
+| 接 Telegram / Discord / Slack / Lark / QQ | [平台连接器](../subsystems/platform-connectors)        |
+| 跑在 headless 服务器（无 UI）             | [Companion API](../subsystems/companion-api)           |
+| 通过 HMAC 让其他设备远程触发指令          | [远程控制](../subsystems/remote-control)               |
 | 切换 Claude Code 提供商档案               | [CCSwitch](../chat/ccswitch)                           |
 | 用 Claude Pro/Max OAuth 而不是 API key    | [Claude 订阅 OAuth](../chat/claude-subscription-oauth) |
-| 把 cron 触发器装进 Rust 守护进程          | [可视化工作流](../subsystems/visual-workflows)               |
-| 暴露 Wiki 的 MCP 服务器在 HTTP 上跑       | [Tauri MCP 服务器](../subsystems/mcp-server-tauri)           |
+| 把 cron 触发器装进 Rust 守护进程          | [可视化工作流](../subsystems/visual-workflows)         |
+| 暴露 Wiki 的 MCP 服务器在 HTTP 上跑       | [Tauri MCP 服务器](../subsystems/mcp-server-tauri)     |
 
 ## 下一篇
 

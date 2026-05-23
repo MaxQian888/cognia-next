@@ -8,16 +8,14 @@ description: An offline pipeline that turns Cognia source code into module-level
 <Status variant="stable">Phase 1 implemented · cognia-self scope</Status>
 
 <TLDR>
-  `lib/wiki/` is the "content producer" for External Bridge — it walks through
-  Cognia's own `lib/` `app/` `components/` `hooks/` `types/` directories and
-  outputs one Markdown article per module into `wikiArticles` + `wikiSections`.
-  The pipeline has four steps: FileWalker filtering → `buildMerkleMap` SHA-256
-  → `diffManifest` to compute added/changed/removed → reuse the
-  [Twin chunker](./employee-twin) to split code → run four LLM sub-agents
-  (RepoMap for pageRank, ModuleArticle one call per module, CrossRef to insert
-  `[[slug]]` links in prose, IndexPage to write the top-level navigation) →
-  write to database. Incrementality is the default: unchanged files are skipped;
-  `force=true` does a full rebuild. Not available in web mode — requires real
+  `lib/wiki/` is the "content producer" for External Bridge — it walks through Cognia's own `lib/`
+  `app/` `components/` `hooks/` `types/` directories and outputs one Markdown article per module
+  into `wikiArticles` + `wikiSections`. The pipeline has four steps: FileWalker filtering →
+  `buildMerkleMap` SHA-256 → `diffManifest` to compute added/changed/removed → reuse the [Twin
+  chunker](./employee-twin) to split code → run four LLM sub-agents (RepoMap for pageRank,
+  ModuleArticle one call per module, CrossRef to insert `[[slug]]` links in prose, IndexPage to
+  write the top-level navigation) → write to database. Incrementality is the default: unchanged
+  files are skipped; `force=true` does a full rebuild. Not available in web mode — requires real
   filesystem access.
 </TLDR>
 
@@ -102,19 +100,19 @@ flowchart TB
   </Folder>
 </Files>
 
-| File | Responsibility |
-| ---- | -------------- |
-| `types.ts` | Internal transit types: `CodeChunk` · `ModuleStat` · `ModuleArticleDraft` · `IndexPageDraft` |
-| `file-walker.ts` | Pure function filtering; `shouldIncludeFile` / `bucketByModule` / `moduleForPath` / `moduleToSlug` |
-| `merkle.ts` | SHA-256 incrementality; `hashContent` · `buildMerkleMap` · `refreshSubset` |
-| `prompts.ts` | Three prompts: `WIKI_SYSTEM_VOICE` · `moduleArticlePrompt` · `indexPagePrompt` |
-| `orchestrator.ts` | `rebuildWiki(deps, opts)` — 10-step pipeline, single entry point |
-| `exporter.ts` | `exportWikiToMarkdown(fs, opts)` — Fumadocs MDX output, front-matter includes generatedAt/version |
-| `rebuild-runner.ts` | Tauri adapter: `buildTauriFileSystem` + `buildLlmClient`, decides model + provider |
-| `agents/repo-map-agent.ts` | Heuristic pageRank (size × boost), no LLM call |
-| `agents/module-article-agent.ts` | One LLM call per module, `maxTokens=2048` · `temperature=0` |
-| `agents/cross-ref-agent.ts` | Pure Markdown post-processor, skips fenced code blocks |
-| `agents/index-page-agent.ts` | One LLM call produces the top-level index; `findDeadLinks` validates during assembly |
+| File                             | Responsibility                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `types.ts`                       | Internal transit types: `CodeChunk` · `ModuleStat` · `ModuleArticleDraft` · `IndexPageDraft`       |
+| `file-walker.ts`                 | Pure function filtering; `shouldIncludeFile` / `bucketByModule` / `moduleForPath` / `moduleToSlug` |
+| `merkle.ts`                      | SHA-256 incrementality; `hashContent` · `buildMerkleMap` · `refreshSubset`                         |
+| `prompts.ts`                     | Three prompts: `WIKI_SYSTEM_VOICE` · `moduleArticlePrompt` · `indexPagePrompt`                     |
+| `orchestrator.ts`                | `rebuildWiki(deps, opts)` — 10-step pipeline, single entry point                                   |
+| `exporter.ts`                    | `exportWikiToMarkdown(fs, opts)` — Fumadocs MDX output, front-matter includes generatedAt/version  |
+| `rebuild-runner.ts`              | Tauri adapter: `buildTauriFileSystem` + `buildLlmClient`, decides model + provider                 |
+| `agents/repo-map-agent.ts`       | Heuristic pageRank (size × boost), no LLM call                                                     |
+| `agents/module-article-agent.ts` | One LLM call per module, `maxTokens=2048` · `temperature=0`                                        |
+| `agents/cross-ref-agent.ts`      | Pure Markdown post-processor, skips fenced code blocks                                             |
+| `agents/index-page-agent.ts`     | One LLM call produces the top-level index; `findDeadLinks` validates during assembly               |
 
 ## Pipeline Steps
 
@@ -184,7 +182,7 @@ Goal: let the model write `` `lib/twin/ingest` `` in prose without knowing slug 
 
 Key implementation details:
 
-- Fenced code blocks are masked with `^\`\`\`[\s\S]*?^\`\`\``, stored in `fences[]`, and spliced back after processing.
+- Fenced code blocks are masked with `^\`\`\`[\s\S]\*?^\`\`\``, stored in `fences[]`, and spliced back after processing.
 - Backtick path regex only matches `^(lib|app|components|hooks|types)\/[\w./-]+?$`, skipping casual `` `abc.def` ``.
 - When multiple path segments match, peel from deepest directory upward — `lib/foo/bar.ts` prefers `lib/foo/bar`, then falls back to `lib/foo`, then `lib`.
 
@@ -196,11 +194,11 @@ Feed all articles' `(slug, module, summary, pageRank)` sorted by pageRank to the
 
 Three tables are involved; see [Storage](../data/storage) for full details.
 
-| Table | Primary Key / Indexes | Purpose |
-| ----- | --------------------- | ------- |
-| `wikiArticles` | `id` · `&slug` · `[scope+module]` · `pageRank` | One row per module, containing full text + embedding + sourceRefs + fileHashes |
+| Table          | Primary Key / Indexes                           | Purpose                                                                            |
+| -------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `wikiArticles` | `id` · `&slug` · `[scope+module]` · `pageRank`  | One row per module, containing full text + embedding + sourceRefs + fileHashes     |
 | `wikiSections` | `id` · `articleId` · `[articleId+sectionIndex]` | Sections split from articles, used by `rag_search` and future partial regeneration |
-| `wikiManifest` | `scope` (primary key = scope enum value) | One row per scope: Merkle table + lastBuildAt + articleCount + generator version |
+| `wikiManifest` | `scope` (primary key = scope enum value)        | One row per scope: Merkle table + lastBuildAt + articleCount + generator version   |
 
 `wikiArticles.&slug` is a unique index — `persistDrafts` first calls `getWikiArticleBySlug` + `deleteWikiArticle` to clear the old row (cascading sections) before `bulkAdd`.
 
@@ -235,13 +233,13 @@ export interface FileSystem {
 
 Reuses the `LlmClient` from [Twin distill](./employee-twin) (`lib/twin/distill/llm.ts`). `rebuild-runner.ts:buildLlmClient` sniffs the provider from `settings.apiKey`:
 
-| API key prefix | provider | default model |
-| -------------- | -------- | ------------- |
-| `sk-ant-...` | anthropic | `claude-sonnet-4-6` |
-| `sk-...` | openai | `gpt-4o` |
-| activeProviderId contains `google` | google | `gemini-2.5-pro` |
-| activeProviderId contains `mistral` | mistral | `mistral-large` |
-| others | cohere | `command-r-plus` |
+| API key prefix                      | provider  | default model       |
+| ----------------------------------- | --------- | ------------------- |
+| `sk-ant-...`                        | anthropic | `claude-sonnet-4-6` |
+| `sk-...`                            | openai    | `gpt-4o`            |
+| activeProviderId contains `google`  | google    | `gemini-2.5-pro`    |
+| activeProviderId contains `mistral` | mistral   | `mistral-large`     |
+| others                              | cohere    | `command-r-plus`    |
 
 ### `EmbedFn`
 
@@ -288,13 +286,13 @@ export const EXCLUDED_FILENAME_PATTERNS = [
 
 The wiki pipeline only reuses Twin's **chunker**, nothing else:
 
-| Reuse / No reuse | Part | Reason |
-| ---------------- | ---- | ------ |
-| ✅ Reuse | `lib/twin/ingest/chunk.ts:prepareChunks` | Format-aware code chunker already proven |
-| ✅ Reuse | `lib/twin/distill/llm.ts:LlmClient` | Anthropic / OpenAI / Google / Mistral / Cohere five-provider adapter |
-| ❌ No reuse | Entire distill pipeline | Wiki articles are "durable artifacts", not drafts pending review |
-| ❌ No reuse | redact PII | Cognia source code is not user data; PII scrubbing for user-repo Phase 3 TBD |
-| ❌ No reuse | `twinChunks` / `twinSources` tables | Wiki has its own `wikiArticles` / `wikiSections` |
+| Reuse / No reuse | Part                                     | Reason                                                                       |
+| ---------------- | ---------------------------------------- | ---------------------------------------------------------------------------- |
+| ✅ Reuse         | `lib/twin/ingest/chunk.ts:prepareChunks` | Format-aware code chunker already proven                                     |
+| ✅ Reuse         | `lib/twin/distill/llm.ts:LlmClient`      | Anthropic / OpenAI / Google / Mistral / Cohere five-provider adapter         |
+| ❌ No reuse      | Entire distill pipeline                  | Wiki articles are "durable artifacts", not drafts pending review             |
+| ❌ No reuse      | redact PII                               | Cognia source code is not user data; PII scrubbing for user-repo Phase 3 TBD |
+| ❌ No reuse      | `twinChunks` / `twinSources` tables      | Wiki has its own `wikiArticles` / `wikiSections`                             |
 
 ## Related Subsystems
 
@@ -304,7 +302,11 @@ The wiki pipeline only reuses Twin's **chunker**, nothing else:
     href="./external-bridge"
     description="The consumer of this pipeline — wiki_search / wiki_read read directly from wikiArticles"
   />
-  <Card title="Employee Twin" href="./employee-twin" description="This pipeline reuses its chunker and LlmClient" />
+  <Card
+    title="Employee Twin"
+    href="./employee-twin"
+    description="This pipeline reuses its chunker and LlmClient"
+  />
   <Card
     title="Storage"
     href="./storage"

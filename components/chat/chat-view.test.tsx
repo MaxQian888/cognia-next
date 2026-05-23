@@ -8,6 +8,9 @@ jest.mock("./composer", () => ({ Composer: () => null }))
 jest.mock("./chat-header", () => ({
   ChatHeader: jest.fn(() => null),
 }))
+jest.mock("./character-missing-banner", () => ({
+  CharacterMissingBanner: () => null,
+}))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
 jest.mock("./inline-error", () => ({ InlineError: () => null }))
 jest.mock("./message-list", () => ({

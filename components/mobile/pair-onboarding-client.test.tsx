@@ -18,6 +18,7 @@ const VALID_JWT = "aaa.bbb.ccc"
 
 // Stub the transport singleton — no real RPC layer in jsdom.
 jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn().mockReturnValue(false),
   transport: {
     call: jest.fn(),
     subscribe: jest.fn().mockReturnValue(() => {}),

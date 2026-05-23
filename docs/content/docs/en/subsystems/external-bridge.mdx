@@ -8,7 +8,15 @@ description: A read-only bridge that exposes Cognia's own knowledge to external 
 <Status variant="stable">Phase 1 implemented · stdio + HTTP dual transport</Status>
 
 <TLDR>
-  External Bridge exposes Cognia's self-generated code wiki, RAG chunks, and runtime entities (skills / characters / twins / plugins / agent-teams) to external coding agents (Claude Code, Cursor, Cline, Codex) via the MCP protocol. Every call passes through a **permission-gate** and is checked against a whitelist. By default, only the `wiki:cognia` and `rag:cognia` public code scopes are enabled; all other scopes must be manually toggled in Settings. Every call writes a row to `mcpAuditLog` (capped at 5000 entries), so users can see exactly what the external agent queried under Settings → External Bridge. The stdio transport runs in a Node sidecar launched by Tauri; the HTTP transport is served by Tauri Rust (axum). Both paths reach the same `lib/external-bridge/` code.
+  External Bridge exposes Cognia's self-generated code wiki, RAG chunks, and runtime entities
+  (skills / characters / twins / plugins / agent-teams) to external coding agents (Claude Code,
+  Cursor, Cline, Codex) via the MCP protocol. Every call passes through a **permission-gate** and is
+  checked against a whitelist. By default, only the `wiki:cognia` and `rag:cognia` public code
+  scopes are enabled; all other scopes must be manually toggled in Settings. Every call writes a row
+  to `mcpAuditLog` (capped at 5000 entries), so users can see exactly what the external agent
+  queried under Settings → External Bridge. The stdio transport runs in a Node sidecar launched by
+  Tauri; the HTTP transport is served by Tauri Rust (axum). Both paths reach the same
+  `lib/external-bridge/` code.
 </TLDR>
 
 ## When to Use
@@ -110,36 +118,36 @@ flowchart TB
   </Folder>
 </Files>
 
-| File | Responsibility |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `types.ts` | Re-exports `BridgeScope` / `ExternalBridgeSettings` / `TOOL_TO_SCOPE` / `RUNTIME_ENTITY_TO_SCOPE` |
-| `permission-gate.ts` | `checkScope` / `checkToolCall` / `checkRuntimeCall` / `checkRagCall` — single source of truth |
-| `audit-log.ts` | `recordCall` wrapper → writes to `mcpAuditLog`; swallows Dexie failures without throwing |
-| `token.ts` | 32-byte random hex token, `constantTimeEquals`, `parseBearerHeader` |
-| `tauri-control.ts` | Four IPC wrappers: `startMcpServer` / `stopMcpServer` / `restartMcpServer` / `getMcpServerStatus` |
-| `mcp-server/server.ts` | `buildMcpServer({ settingsGetter })` — registers four tools + three resource families + two guidance prompts |
-| `mcp-server/standalone-entry.ts` | Node CLI entry; picks bridged / standalone settings source based on `COGNIA_BRIDGED` |
-| `handlers/wiki.ts` | Token-overlap sorted `wiki_search` + full-text by slug `wiki_read` |
-| `handlers/rag.ts` | Paragraph-level BM25-ish retrieval (dual path: wiki sections / twin chunks) |
-| `handlers/runtime.ts` | List / read five runtime entity types; list omits fields to keep responses compact, get returns the full row |
-| `handlers/resources.ts` | `cognia://wiki\|skill\|character/:id` URI parsing and reading |
+| File                             | Responsibility                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `types.ts`                       | Re-exports `BridgeScope` / `ExternalBridgeSettings` / `TOOL_TO_SCOPE` / `RUNTIME_ENTITY_TO_SCOPE`            |
+| `permission-gate.ts`             | `checkScope` / `checkToolCall` / `checkRuntimeCall` / `checkRagCall` — single source of truth                |
+| `audit-log.ts`                   | `recordCall` wrapper → writes to `mcpAuditLog`; swallows Dexie failures without throwing                     |
+| `token.ts`                       | 32-byte random hex token, `constantTimeEquals`, `parseBearerHeader`                                          |
+| `tauri-control.ts`               | Four IPC wrappers: `startMcpServer` / `stopMcpServer` / `restartMcpServer` / `getMcpServerStatus`            |
+| `mcp-server/server.ts`           | `buildMcpServer({ settingsGetter })` — registers four tools + three resource families + two guidance prompts |
+| `mcp-server/standalone-entry.ts` | Node CLI entry; picks bridged / standalone settings source based on `COGNIA_BRIDGED`                         |
+| `handlers/wiki.ts`               | Token-overlap sorted `wiki_search` + full-text by slug `wiki_read`                                           |
+| `handlers/rag.ts`                | Paragraph-level BM25-ish retrieval (dual path: wiki sections / twin chunks)                                  |
+| `handlers/runtime.ts`            | List / read five runtime entity types; list omits fields to keep responses compact, get returns the full row |
+| `handlers/resources.ts`          | `cognia://wiki\|skill\|character/:id` URI parsing and reading                                                |
 
 ## Permission Model
 
 Permissions are the core of this subsystem. Ten scopes (`BridgeScope`) map one-to-one to toggles in the Settings UI:
 
-| Scope | Default | Allowed Range |
-| --------------------- | :--: | ------------------------------------------------- |
-| `wiki:cognia` | ✅ | Read wiki articles generated from Cognia's own source code |
-| `wiki:user-repo` | ❌ | Read wiki for user external repos (unlocks in Phase 3) |
-| `rag:cognia` | ✅ | Paragraph-level RAG over Cognia source code |
-| `rag:user-repo` | ❌ | Paragraph-level RAG over user external repos (Phase 3) |
-| `rag:twin` | ❌ | RAG over user digital twin — involves private data, strongly defaults to OFF |
-| `runtime:skills` | ❌ | List / read skills |
-| `runtime:characters` | ❌ | List / read characters |
-| `runtime:twins` | ❌ | List twin ids and their sources |
-| `runtime:plugins` | ❌ | List / read installed plugins |
-| `runtime:agent-teams` | ❌ | List / read agent teams |
+| Scope                 | Default | Allowed Range                                                                |
+| --------------------- | :-----: | ---------------------------------------------------------------------------- |
+| `wiki:cognia`         |   ✅    | Read wiki articles generated from Cognia's own source code                   |
+| `wiki:user-repo`      |   ❌    | Read wiki for user external repos (unlocks in Phase 3)                       |
+| `rag:cognia`          |   ✅    | Paragraph-level RAG over Cognia source code                                  |
+| `rag:user-repo`       |   ❌    | Paragraph-level RAG over user external repos (Phase 3)                       |
+| `rag:twin`            |   ❌    | RAG over user digital twin — involves private data, strongly defaults to OFF |
+| `runtime:skills`      |   ❌    | List / read skills                                                           |
+| `runtime:characters`  |   ❌    | List / read characters                                                       |
+| `runtime:twins`       |   ❌    | List twin ids and their sources                                              |
+| `runtime:plugins`     |   ❌    | List / read installed plugins                                                |
+| `runtime:agent-teams` |   ❌    | List / read agent teams                                                      |
 
 Entry structure in `permission-gate.ts`:
 
@@ -196,12 +204,12 @@ Four helpers normalize different entry points to `checkScope`:
 
 Four new tables, each with a dedicated CRUD module. See [Storage](../data/storage) for details.
 
-| Table | Primary Key / Indexes | Purpose | CRUD File |
-| -------------- | ----------------------------------------------- | -------------------------------------------------------- | ------------------------- |
-| `wikiArticles` | `id` / `&slug` / `[scope+module]` / `pageRank` | One row per "module", containing full Markdown + embedding + sourceRefs | `lib/db/wiki-articles.ts` |
+| Table          | Primary Key / Indexes                           | Purpose                                                                            | CRUD File                 |
+| -------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
+| `wikiArticles` | `id` / `&slug` / `[scope+module]` / `pageRank`  | One row per "module", containing full Markdown + embedding + sourceRefs            | `lib/db/wiki-articles.ts` |
 | `wikiSections` | `id` / `articleId` / `[articleId+sectionIndex]` | Small sections sliced from articles, used by `rag_search` and incremental rebuilds | `lib/db/wiki-sections.ts` |
-| `wikiManifest` | `scope` (composite primary key) | Per-scope Merkle map + last build time + article count | `lib/db/wiki-manifest.ts` |
-| `mcpAuditLog` | `id` / `ts` / `tool` / `allowed` | One row per MCP call; auto-prunes oldest 100 when exceeding 5000 | `lib/db/mcp-audit-log.ts` |
+| `wikiManifest` | `scope` (composite primary key)                 | Per-scope Merkle map + last build time + article count                             | `lib/db/wiki-manifest.ts` |
+| `mcpAuditLog`  | `id` / `ts` / `tool` / `allowed`                | One row per MCP call; auto-prunes oldest 100 when exceeding 5000                   | `lib/db/mcp-audit-log.ts` |
 
 ### `mcpAuditLog` Row Structure
 
@@ -224,12 +232,12 @@ The 5000-row cap is implemented in `lib/db/mcp-audit-log.ts:appendMcpAuditLog`, 
 
 ### Tools (Four)
 
-| Tool | Required Scope | Input | Output Shape |
+| Tool            | Required Scope             | Input                                                    | Output Shape                               |
 | --------------- | -------------------------- | -------------------------------------------------------- | ------------------------------------------ |
-| `wiki_search` | `wiki:cognia` | `query` · `scope?` · `k? (1-20)` | `{ results: WikiSearchHit[], considered }` |
-| `wiki_read` | `wiki:cognia` | `slug` | `WikiReadOutput \| { error }` |
-| `rag_search` | `rag:cognia` or `rag:twin` | `query` · `scope?` · `twinId?` · `k? (1-30)` · `rerank?` | `{ chunks: RagSearchHit[], considered }` |
-| `runtime_query` | `runtime:<entityType>` | `entityType` · `op (list\|get)` · `id?` · `filter?` | `RuntimeQueryOutput` |
+| `wiki_search`   | `wiki:cognia`              | `query` · `scope?` · `k? (1-20)`                         | `{ results: WikiSearchHit[], considered }` |
+| `wiki_read`     | `wiki:cognia`              | `slug`                                                   | `WikiReadOutput \| { error }`              |
+| `rag_search`    | `rag:cognia` or `rag:twin` | `query` · `scope?` · `twinId?` · `k? (1-30)` · `rerank?` | `{ chunks: RagSearchHit[], considered }`   |
+| `runtime_query` | `runtime:<entityType>`     | `entityType` · `op (list\|get)` · `id?` · `filter?`      | `RuntimeQueryOutput`                       |
 
 When registering in `server.ts`, all tools receive `annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }` — Phase 1 is read-only.
 
@@ -298,8 +306,16 @@ External agents can also take over the same code path via stdio: register `cogni
     href="./a2ui-system"
     description="A separate MCP pathway from External Bridge (UI drawing)"
   />
-  <Card title="Employee Twin" href="./employee-twin" description="Source of chunks exposed by the rag:twin scope" />
-  <Card title="Storage" href="./storage" description="Complete schema for the 4 new tables in Dexie v17" />
+  <Card
+    title="Employee Twin"
+    href="./employee-twin"
+    description="Source of chunks exposed by the rag:twin scope"
+  />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="Complete schema for the 4 new tables in Dexie v17"
+  />
 </Cards>
 
 ## Related ADR

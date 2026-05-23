@@ -8,7 +8,11 @@ description: Desktop ↔ Phone sync-down protocol — the phone is a read-only r
 <Status variant="beta" />
 
 <TLDR>
-  The desktop is the source of truth; the phone is a read-only cache. The phone pulls deltas via `POST /api/v1/_rpc/sync_pull`, the desktop Rust layer forwards the request to the webview, the webview queries Dexie and returns a `SyncDelta`, which goes back through Rust to the phone. 9 mirrorable tables, each with an independent cursor, three trigger modes (manual / foreground / WS event-driven). V1 has no tombstones — deletions rely on the V2 `deletedAt` index.
+  The desktop is the source of truth; the phone is a read-only cache. The phone pulls deltas via
+  `POST /api/v1/_rpc/sync_pull`, the desktop Rust layer forwards the request to the webview, the
+  webview queries Dexie and returns a `SyncDelta`, which goes back through Rust to the phone. 9
+  mirrorable tables, each with an independent cursor, three trigger modes (manual / foreground / WS
+  event-driven). V1 has no tombstones — deletions rely on the V2 `deletedAt` index.
 </TLDR>
 
 <StatGrid>
@@ -24,14 +28,14 @@ description: Desktop ↔ Phone sync-down protocol — the phone is a read-only r
 
 ## Applicable Scenarios
 
-| Scenario | Tables & Strategy |
-| -------- | ----------------- |
-| Browse historical sessions on mobile | `sessions` + `messages` (latest 200) |
-| Switch twin / character on mobile | `characters` + `twinProfile` |
-| View workflow definitions on mobile | `workflows` (read-only view) |
-| Toggle plugins on mobile | `plugins` (read → settings outbound upload in V2) |
-| View connector policies on mobile | `adapterInstances` (mode / quietHours read-only view) |
-| Sync user preferences | `settings` single-row `"singleton"` — full snapshot when `since === 0`, then delta by `updatedAt` |
+| Scenario                             | Tables & Strategy                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Browse historical sessions on mobile | `sessions` + `messages` (latest 200)                                                              |
+| Switch twin / character on mobile    | `characters` + `twinProfile`                                                                      |
+| View workflow definitions on mobile  | `workflows` (read-only view)                                                                      |
+| Toggle plugins on mobile             | `plugins` (read → settings outbound upload in V2)                                                 |
+| View connector policies on mobile    | `adapterInstances` (mode / quietHours read-only view)                                             |
+| Sync user preferences                | `settings` single-row `"singleton"` — full snapshot when `since === 0`, then delta by `updatedAt` |
 
 ## Architecture Diagram
 
@@ -88,31 +92,31 @@ flowchart TB
 
 ### Client (Phone)
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/sync/types.ts` | `SyncableTable` / `SyncCursor` / `SyncDelta` / `SyncOutcome` / `SyncFailure` |
-| `lib/sync/companion-sync.ts` | Top-level orchestration: `runSyncDown` / `installForegroundSync` / `installEventDrivenSync` |
-| `lib/sync/handlers/base.ts` | `runSyncHandler<TRow>` — single RPC round-trip + `bulkPut` + `bulkDelete` + error classification |
-| `lib/sync/handlers/characters.ts` | `syncCharacters` — `rowFilter: row => !row.isBuiltIn` (prevents overwriting local built-ins) |
-| `lib/sync/handlers/skills.ts` | `syncSkills` |
-| `lib/sync/handlers/sessions.ts` | `syncSessions` |
-| `lib/sync/handlers/messages.ts` | `syncMessages` — latest 200 rows only |
+| File                              | Purpose                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `lib/sync/types.ts`               | `SyncableTable` / `SyncCursor` / `SyncDelta` / `SyncOutcome` / `SyncFailure`                     |
+| `lib/sync/companion-sync.ts`      | Top-level orchestration: `runSyncDown` / `installForegroundSync` / `installEventDrivenSync`      |
+| `lib/sync/handlers/base.ts`       | `runSyncHandler<TRow>` — single RPC round-trip + `bulkPut` + `bulkDelete` + error classification |
+| `lib/sync/handlers/characters.ts` | `syncCharacters` — `rowFilter: row => !row.isBuiltIn` (prevents overwriting local built-ins)     |
+| `lib/sync/handlers/skills.ts`     | `syncSkills`                                                                                     |
+| `lib/sync/handlers/sessions.ts`   | `syncSessions`                                                                                   |
+| `lib/sync/handlers/messages.ts`   | `syncMessages` — latest 200 rows only                                                            |
 
 ### Desktop Responder
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/sync/desktop-sync-source.ts` | `installDesktopSyncSource` — listens for `companion://sync-pull-request`; queries Dexie; invokes `companion_sync_pull_response` |
-| `lib/sync/desktop-sync-source.test.ts` | Full table + boundary coverage |
+| File                                   | Purpose                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/sync/desktop-sync-source.ts`      | `installDesktopSyncSource` — listens for `companion://sync-pull-request`; queries Dexie; invokes `companion_sync_pull_response` |
+| `lib/sync/desktop-sync-source.test.ts` | Full table + boundary coverage                                                                                                  |
 
 ### Rust Bridge (Companion API)
 
-| File | Purpose |
-| ---- | ------- |
-| `src-tauri/src/companion_api/sync_bridge.rs` | `_rpc/sync_pull` HTTP handler — forwards request to webview, awaits response |
+| File                                           | Purpose                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `src-tauri/src/companion_api/sync_bridge.rs`   | `_rpc/sync_pull` HTTP handler — forwards request to webview, awaits response          |
 | `src-tauri/src/companion_api/sync_registry.rs` | `ALLOWED` whitelist — prevents the phone from forging requests for non-allowed tables |
-| `src-tauri/src/companion_api/rpc.rs` | RPC router — `"sync_pull"` routes to `sync_bridge` |
-| `src-tauri/src/companion_api/commands.rs` | `companion_sync_pull_response` — webview sends delta back through this command |
+| `src-tauri/src/companion_api/rpc.rs`           | RPC router — `"sync_pull"` routes to `sync_bridge`                                    |
+| `src-tauri/src/companion_api/commands.rs`      | `companion_sync_pull_response` — webview sends delta back through this command        |
 
 ## Data Flow: One sync_pull
 
@@ -158,27 +162,27 @@ sequenceDiagram
 
 ## Three Trigger Modes
 
-| Trigger | Implementation |
-| ------- | -------------- |
-| Manual | UI "Sync now" button calls `runSyncDown()` |
-| Foreground | `installForegroundSync` listens for `document.visibilitychange`; runs when becoming `visible` |
+| Trigger         | Implementation                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Manual          | UI "Sync now" button calls `runSyncDown()`                                                                         |
+| Foreground      | `installForegroundSync` listens for `document.visibilitychange`; runs when becoming `visible`                      |
 | WS Event-driven | `installEventDrivenSync` subscribes to `transport.subscribe("sync://invalidate", ...)`; pulls when server notifies |
 
 `runSyncDown` is re-entrant: a second concurrent call reuses the in-flight promise instead of spawning four concurrent RPCs.
 
 ## Tables & Cursor Strategy
 
-| Table | rowFilter | Cursor Field | Notes |
-| ----- | --------- | ------------ | ----- |
-| `characters` | `!row.isBuiltIn` | `updatedAt` | Also filtered on desktop; client-side second filter for safety |
-| `skills` | — | `updatedAt` | — |
-| `sessions` | — | `updatedAt` | — |
-| `messages` | — | `createdAt` (latest 200 only) | Table only has `[sessionId+createdAt]` index; full table scan then sort and truncate to latest 200 |
-| `workflows` | — | `updatedAt` | Read-only view (phone does not write) |
-| `twinProfile` | — | `updatedAt` (nullable) | Old rows without `updatedAt` stabilize after one sync |
-| `plugins` | — | `updatedAt` (nullable) | Same as above |
-| `adapterInstances` | — | `updatedAt` | mode / quietHours read-only |
-| `settings` | — | `singleton` single row; full snapshot when `since===0`; otherwise `updatedAt > since` | No per-row updatedAt; cursor is document-level |
+| Table              | rowFilter        | Cursor Field                                                                          | Notes                                                                                              |
+| ------------------ | ---------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `characters`       | `!row.isBuiltIn` | `updatedAt`                                                                           | Also filtered on desktop; client-side second filter for safety                                     |
+| `skills`           | —                | `updatedAt`                                                                           | —                                                                                                  |
+| `sessions`         | —                | `updatedAt`                                                                           | —                                                                                                  |
+| `messages`         | —                | `createdAt` (latest 200 only)                                                         | Table only has `[sessionId+createdAt]` index; full table scan then sort and truncate to latest 200 |
+| `workflows`        | —                | `updatedAt`                                                                           | Read-only view (phone does not write)                                                              |
+| `twinProfile`      | —                | `updatedAt` (nullable)                                                                | Old rows without `updatedAt` stabilize after one sync                                              |
+| `plugins`          | —                | `updatedAt` (nullable)                                                                | Same as above                                                                                      |
+| `adapterInstances` | —                | `updatedAt`                                                                           | mode / quietHours read-only                                                                        |
+| `settings`         | —                | `singleton` single row; full snapshot when `since===0`; otherwise `updatedAt > since` | No per-row updatedAt; cursor is document-level                                                     |
 
 ## Database Tables
 
@@ -224,7 +228,11 @@ The underlying interface is in `lib/tauri/transport-types.ts`.
 ## Related Subsystems
 
 <Cards>
-  <Card title="Storage" href="./storage" description="The source of the Dexie tables targeted by sync" />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="The source of the Dexie tables targeted by sync"
+  />
   <Card
     title="Backup & Data"
     href="./backup-and-data"

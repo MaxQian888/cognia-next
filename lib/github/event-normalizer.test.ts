@@ -52,7 +52,8 @@ describe("normalizeWebhook", () => {
       normalizeWebhook(env("pull_request", "closed", { pull_request: { number: 7 } }))?.kind
     ).toBe("pull_request.closed")
     expect(
-      normalizeWebhook(env("pull_request", "review_requested", { pull_request: { number: 7 } }))?.kind
+      normalizeWebhook(env("pull_request", "review_requested", { pull_request: { number: 7 } }))
+        ?.kind
     ).toBe("pull_request.review_requested")
   })
 
@@ -61,10 +62,20 @@ describe("normalizeWebhook", () => {
       env("issues", "opened", { issue: { number: 5, user: { login: "bob" } } })
     )
     expect(result?.kind).toBe("issues.opened")
-    expect(result?.issue).toMatchObject({ repo: "octocat/hello-world", issueNumber: 5, authorLogin: "bob" })
-    expect(normalizeWebhook(env("issues", "closed", { issue: { number: 5 } }))?.kind).toBe("issues.closed")
-    expect(normalizeWebhook(env("issues", "assigned", { issue: { number: 5 } }))?.kind).toBe("issues.assigned")
-    expect(normalizeWebhook(env("issues", "labeled", { issue: { number: 5 } }))?.kind).toBe("issues.labeled")
+    expect(result?.issue).toMatchObject({
+      repo: "octocat/hello-world",
+      issueNumber: 5,
+      authorLogin: "bob",
+    })
+    expect(normalizeWebhook(env("issues", "closed", { issue: { number: 5 } }))?.kind).toBe(
+      "issues.closed"
+    )
+    expect(normalizeWebhook(env("issues", "assigned", { issue: { number: 5 } }))?.kind).toBe(
+      "issues.assigned"
+    )
+    expect(normalizeWebhook(env("issues", "labeled", { issue: { number: 5 } }))?.kind).toBe(
+      "issues.labeled"
+    )
   })
 
   it("maps issue_comment.created", () => {
@@ -157,7 +168,9 @@ describe("normalizePollingDiff", () => {
       seenAt: 1_700_000_000_000,
     })
     expect(result.source).toBe("polling")
-    expect(result.deliveryId).toBe(computePollingDeliveryId("pull_request.opened", "octocat/hello-world", 42))
+    expect(result.deliveryId).toBe(
+      computePollingDeliveryId("pull_request.opened", "octocat/hello-world", 42)
+    )
     expect(result.pr).toMatchObject({ prNumber: 42, headSha: "deadbeef" })
     expect(result.ref).toBe("deadbeef")
   })
@@ -169,7 +182,11 @@ describe("normalizePollingDiff", () => {
       primaryId: 7,
       issue: { issueNumber: 7, authorLogin: "bob" },
     })
-    expect(result.issue).toEqual({ repo: "octocat/hello-world", issueNumber: 7, authorLogin: "bob" })
+    expect(result.issue).toEqual({
+      repo: "octocat/hello-world",
+      issueNumber: 7,
+      authorLogin: "bob",
+    })
     expect(result.rawAction).toBe("opened")
   })
 

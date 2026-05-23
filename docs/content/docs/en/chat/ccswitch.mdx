@@ -9,10 +9,10 @@ description: Read-only access to CCSwitch's SQLite database, one-click switching
 
 <TLDR>
   CCSwitch is a community open-source Claude multi-account switcher. Cognia opens its
-  `~/.cc-switch/cc-switch.db` in read-only mode, surfacing 50+ providers, MCP servers, prompts, and skills
-  directly in Settings, and can simultaneously switch cognia-next itself plus any set of external agents
-  in a single action (v1 currently only writes `claude-code`'s `~/.claude/settings.json`). We **never write**
-  to the CCSwitch database.
+  `~/.cc-switch/cc-switch.db` in read-only mode, surfacing 50+ providers, MCP servers, prompts, and
+  skills directly in Settings, and can simultaneously switch cognia-next itself plus any set of
+  external agents in a single action (v1 currently only writes `claude-code`'s
+  `~/.claude/settings.json`). We **never write** to the CCSwitch database.
 </TLDR>
 
 <StatGrid>
@@ -114,13 +114,13 @@ flowchart LR
 
 The CCSwitch schema is not under our control. The core constraints of `db.rs`:
 
-| Scenario        | Behavior                                      |
-| --------------- | --------------------------------------------- |
-| Missing table   | Returns empty array, no error                 |
-| Missing column  | Corresponding field is `None` / empty string  |
-| Extra columns   | Ignored                                       |
-| Corrupted file  | `status` returns `error`, `list_*` returns Err|
-| Renamed schema  | We map a generated superset of column names; whatever matches wins |
+| Scenario       | Behavior                                                           |
+| -------------- | ------------------------------------------------------------------ |
+| Missing table  | Returns empty array, no error                                      |
+| Missing column | Corresponding field is `None` / empty string                       |
+| Extra columns  | Ignored                                                            |
+| Corrupted file | `status` returns `error`, `list_*` returns Err                     |
+| Renamed schema | We map a generated superset of column names; whatever matches wins |
 
 ```rust title="src-tauri/src/ccswitch/db.rs"
 let conn = Connection::open_with_flags(
@@ -152,14 +152,23 @@ Switching is a three-layer action — preview, confirm, execute:
 
 <Steps>
   <Step>
-    **User clicks "Switch to Kimi K2" in the Providers tab** — `ProviderSwitchDialog` opens, rendering two panels: "what will change" and "which agents are affected".
+    **User clicks "Switch to Kimi K2" in the Providers tab** — `ProviderSwitchDialog` opens,
+    rendering two panels: "what will change" and "which agents are affected".
   </Step>
   <Step>
-    **plan** — `planSwitch(provider, scope, current)` is a pure function (no I/O) that turns "switch to this provider" into a `SwitchPlan`: - `cogniaChanges`: before/after for apiKey/baseUrl/activeProviderId, and whether a sidecar restart is needed. - `agentChanges[]`: one row per checked agent — target path (`~/.claude/settings.json` etc.), whether v1 supports it, and the envUpdates array.
+    **plan** — `planSwitch(provider, scope, current)` is a pure function (no I/O) that turns "switch
+    to this provider" into a `SwitchPlan`: - `cogniaChanges`: before/after for
+    apiKey/baseUrl/activeProviderId, and whether a sidecar restart is needed. - `agentChanges[]`:
+    one row per checked agent — target path (`~/.claude/settings.json` etc.), whether v1 supports
+    it, and the envUpdates array.
   </Step>
   <Step>**confirm** — user reviews the preview and clicks "Apply"; only then does I/O begin.</Step>
   <Step>
-    **applySwitch** — execution order is deliberate: 1. Write Dexie `settings` (cheap, rollback-capable). 2. Call `setProviderEnv` to push the new env to the sidecar; if key or URL changed, call `restartSidecar()`. 3. For each supported agent, call `writeClaudeSettingsEnv` to write the env patch. A failed agent does not abort the whole operation — each row is recorded individually as `ok / error`, and the UI shows a partial-success result.
+    **applySwitch** — execution order is deliberate: 1. Write Dexie `settings` (cheap,
+    rollback-capable). 2. Call `setProviderEnv` to push the new env to the sidecar; if key or URL
+    changed, call `restartSidecar()`. 3. For each supported agent, call `writeClaudeSettingsEnv` to
+    write the env patch. A failed agent does not abort the whole operation — each row is recorded
+    individually as `ok / error`, and the UI shows a partial-success result.
   </Step>
 </Steps>
 
@@ -192,11 +201,11 @@ When `drift: true`, the Overview tab renders a drift banner at the top, letting 
 
 We **do not create separate tables for CCSwitch** — MCP servers, prompts, and skills all map to cognia's own corresponding Dexie tables (`mcpServers` / `promptPresets` / `skills`). `lib/ccswitch/import.ts` contains 4 adapters:
 
-| Source type         | Converted to      | Target import function |
-| ------------------- | ----------------- | ---------------------- |
-| `CcswitchMcpServer` | `McpImportDraft`  | `bulkImportMcpServers` |
-| `CcswitchPrompt`    | direct field map  | `createPreset`         |
-| `CcswitchSkill`     | direct field map  | `createSkill`          |
+| Source type         | Converted to      | Target import function          |
+| ------------------- | ----------------- | ------------------------------- |
+| `CcswitchMcpServer` | `McpImportDraft`  | `bulkImportMcpServers`          |
+| `CcswitchPrompt`    | direct field map  | `createPreset`                  |
+| `CcswitchSkill`     | direct field map  | `createSkill`                   |
 | `CcswitchProvider`  | via `applySwitch` | (not imported, only referenced) |
 
 Providers are not imported — they are only referenced as active: writing to `AppSettings.activeProviderId = "ccswitch:<id>"` means the sidecar uses the current env directly at spawn time, with no catalog entries to maintain.
@@ -209,7 +218,10 @@ Providers are not imported — they are only referenced as active: writing to `A
   <Card title="Overview" description="Status card + drift banner + counts.">
     overview-tab.tsx
   </Card>
-  <Card title="Providers" description="50+ providers grouped by kind; row-level active badge + one-click switch.">
+  <Card
+    title="Providers"
+    description="50+ providers grouped by kind; row-level active badge + one-click switch."
+  >
     providers-tab.tsx
   </Card>
   <Card title="MCP" description="MCP servers bundled with CCSwitch; one-click import into cognia.">

@@ -211,8 +211,9 @@ test("character pick advances to tour step (not closes dialog)", async () => {
   expect(onPick).toHaveBeenCalledWith(charactersRef.current[0])
   // Now on tour step — onOpenChange must NOT have fired yet
   expect(onOpenChange).not.toHaveBeenCalled()
+  // TOUR_SLIDES leads with `sandbox` (the WASM sandbox onboarding card).
   await waitFor(() => {
-    expect(screen.getByTestId("onboarding-tour-slide-ocr")).toBeInTheDocument()
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
   })
 })
 
@@ -224,9 +225,12 @@ test("tour Next navigates through all slides and Done closes + dismisses", async
   await user.click(screen.getByRole("button", { name: /continue/i }))
   await waitFor(() => expect(screen.getByText("step2Title")).toBeInTheDocument())
   await user.click(screen.getByText("Helper"))
-  await waitFor(() => expect(screen.getByTestId("onboarding-tour-slide-ocr")).toBeInTheDocument())
-  // Walk forward through 4 Next clicks until we hit the Done state
-  for (let i = 0; i < 4; i++) {
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
+  )
+  // 6 slides: sandbox → ocr → computerUse → connectors → mobile → twin.
+  // 5 Next clicks lands on the final (twin) slide where Done is visible.
+  for (let i = 0; i < 5; i++) {
     await user.click(screen.getByRole("button", { name: /tour\.next/i }))
   }
   await waitFor(() => expect(screen.getByTestId("onboarding-tour-slide-twin")).toBeInTheDocument())
@@ -243,6 +247,11 @@ test("tour Open settings deep-links and dismisses onboarding", async () => {
   await user.click(screen.getByRole("button", { name: /continue/i }))
   await waitFor(() => expect(screen.getByText("step2Title")).toBeInTheDocument())
   await user.click(screen.getByText("Helper"))
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
+  )
+  // Advance one slide so the OCR cta is rendered.
+  await user.click(screen.getByRole("button", { name: /tour\.next/i }))
   await waitFor(() => expect(screen.getByTestId("onboarding-tour-slide-ocr")).toBeInTheDocument())
   await user.click(screen.getByRole("button", { name: /tour\.ocr\.cta/i }))
   await waitFor(() => expect(dismissOnboarding).toHaveBeenCalled())

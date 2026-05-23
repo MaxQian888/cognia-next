@@ -33,7 +33,9 @@ function isTab(v: string | null): v is GithubDeliveryTabId {
 export function GithubDeliverySection() {
   const router = useRouter()
   const params = useSearchParams()
-  const tab = isTab(params.get(TAB_PARAM)) ? (params.get(TAB_PARAM) as GithubDeliveryTabId) : "repos"
+  const tab = isTab(params.get(TAB_PARAM))
+    ? (params.get(TAB_PARAM) as GithubDeliveryTabId)
+    : "repos"
 
   const setTab = (next: string) => {
     const sp = new URLSearchParams(Array.from(params.entries()))

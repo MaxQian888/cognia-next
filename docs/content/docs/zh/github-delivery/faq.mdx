@@ -6,8 +6,8 @@ description: 常见错误的排查路径、App vs PAT 选型建议、cloudflared
 # FAQ
 
 <TLDR>
-本页收集常见问题:webhook 401 / 签名失败、polling 静默、`No issue-loop AI driver`
-的来由,以及 App 与 PAT 怎么选。问题按"症状"分组;每条都附排查清单和源码定位。
+  本页收集常见问题:webhook 401 / 签名失败、polling 静默、`No issue-loop AI driver` 的来由,以及 App
+  与 PAT 怎么选。问题按"症状"分组;每条都附排查清单和源码定位。
 </TLDR>
 
 ## 凭据 / 鉴权
@@ -38,7 +38,7 @@ Audit Tab 没有任何对应行。
 **原因 + 排查清单.**
 
 1. **App 私钥被截断.** Settings → Credentials → 重新粘贴完整的 PEM(必须包含 `-----BEGIN
-   RSA PRIVATE KEY-----` 和 `-----END` 行)。
+RSA PRIVATE KEY-----` 和 `-----END` 行)。
 2. **PAT 已被吊销 / 过期.** GitHub → Settings → Developer settings → tokens 检查;
    重新生成后到 Credentials Tab 粘贴。
 3. **Installation 已被卸载.** 在 GitHub → Settings → Installations 确认 App 仍安装于目标仓库。
@@ -50,13 +50,13 @@ Audit Tab 没有任何对应行。
 
 <Accordion title="GitHub App vs PAT 该怎么选?">
 
-| 场景                             | 推荐    | 原因                                                                              |
-| -------------------------------- | ------- | --------------------------------------------------------------------------------- |
-| 个人玩具仓库,自动化只对自己负责 | **PAT** | 配置最简单,只需要粘贴一个 token                                                  |
-| 公司 / 组织内的协作仓库          | **App** | 安装 / 卸载粒度独立于个人;一个 installation 5K/h 独立桶                          |
-| 多仓共用一个机器人               | **App** | 同上                                                                              |
-| 个人手痒,但担心 5K/h 共享       | **App** | 不与你其他自动化共享速率桶                                                        |
-| 临时实验或一次性任务             | **PAT** | 用完就吊销;App 创建一次性成本相对高                                              |
+| 场景                            | 推荐    | 原因                                                    |
+| ------------------------------- | ------- | ------------------------------------------------------- |
+| 个人玩具仓库,自动化只对自己负责 | **PAT** | 配置最简单,只需要粘贴一个 token                         |
+| 公司 / 组织内的协作仓库         | **App** | 安装 / 卸载粒度独立于个人;一个 installation 5K/h 独立桶 |
+| 多仓共用一个机器人              | **App** | 同上                                                    |
+| 个人手痒,但担心 5K/h 共享       | **App** | 不与你其他自动化共享速率桶                              |
+| 临时实验或一次性任务            | **PAT** | 用完就吊销;App 创建一次性成本相对高                     |
 
 </Accordion>
 </Accordions>
@@ -273,14 +273,14 @@ snapshot(`runs/[runId]` 详情页有 "Re-run from snapshot")。
 
 ## 源码索引
 
-| 文件                                                       | 用途                                                                       |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `lib/github/webhook-verify.ts`                             | webhook 签名校验(401 排查起点)                                          |
-| `lib/github/auth-app.ts`                                   | App token 缓存 + `evictInstallationToken`(401 强清)                       |
-| `lib/github/octokit-factory.ts`                            | throttling / retry 插件(secondary rate limit 行为)                       |
-| `plugins/github-delivery/src/index.ts`                     | activate 时的 driver / adapter 装配                                        |
-| `plugins/github-delivery/src/drivers/sidecar-driver.ts`    | Issue → PR loop 的 Claude 驱动器                                          |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`     | HITL 草稿桥                                                                 |
-| `lib/github/cloudflared-tauri.ts`                          | cloudflared 一键暴露(shell scope 排障起点)                                |
-| `src-tauri/tauri.conf.json`                                | shell scope 配置                                                            |
-| `src-tauri/src/workflow/triggers/webhook_router.rs`        | axum 接收器 + `SignatureMode::Github`                                      |
+| 文件                                                    | 用途                                                |
+| ------------------------------------------------------- | --------------------------------------------------- |
+| `lib/github/webhook-verify.ts`                          | webhook 签名校验(401 排查起点)                      |
+| `lib/github/auth-app.ts`                                | App token 缓存 + `evictInstallationToken`(401 强清) |
+| `lib/github/octokit-factory.ts`                         | throttling / retry 插件(secondary rate limit 行为)  |
+| `plugins/github-delivery/src/index.ts`                  | activate 时的 driver / adapter 装配                 |
+| `plugins/github-delivery/src/drivers/sidecar-driver.ts` | Issue → PR loop 的 Claude 驱动器                    |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`  | HITL 草稿桥                                         |
+| `lib/github/cloudflared-tauri.ts`                       | cloudflared 一键暴露(shell scope 排障起点)          |
+| `src-tauri/tauri.conf.json`                             | shell scope 配置                                    |
+| `src-tauri/src/workflow/triggers/webhook_router.rs`     | axum 接收器 + `SignatureMode::Github`               |

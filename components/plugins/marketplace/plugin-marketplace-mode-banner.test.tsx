@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
 
 // The banner reads sourceState.mode from the persistent zustand store. Mock
 // the selector to return the value we want each test to drive.
-jest.mock("@/stores/plugin/plugin-marketplace-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-marketplace-store", () => ({
   usePluginMarketplaceStore: (selector: (state: unknown) => unknown) =>
     selector({ sourceState: { mode: "remote" } }),
 }))

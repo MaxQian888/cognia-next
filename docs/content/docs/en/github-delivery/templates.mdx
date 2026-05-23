@@ -6,24 +6,25 @@ description: Graph structure, parameters, required credentials, and customizatio
 # Template Reference
 
 <TLDR>
-GitHub Delivery ships with **8 built-in workflow templates** (`lib/workflow/definition/seed-github.ts`),
-all marked `isBuiltIn: true` + `isTemplate: true`. When a user clicks "Use template" in the workflow library,
-a forked editable copy is created with a regenerated id, but the node / edge structure is preserved as-is.
-All templates use only registered executors and run out of the box.
+  GitHub Delivery ships with **8 built-in workflow templates**
+  (`lib/workflow/definition/seed-github.ts`), all marked `isBuiltIn: true` + `isTemplate: true`.
+  When a user clicks "Use template" in the workflow library, a forked editable copy is created with
+  a regenerated id, but the node / edge structure is preserved as-is. All templates use only
+  registered executors and run out of the box.
 </TLDR>
 
 ## Quick Reference
 
-| #  | Template id                              | Name                                      | Trigger                                                 | Main Flow                            |
-| -- | ------------------------------------ | ----------------------------------------- | ---------------------------------------------------- | --------------------------------- |
-| 1  | `wf_builtin_gh_pr_auto_review`       | [GitHub] PR auto-review                   | webhook(`pull_request.opened/synchronize`)          | AI prompt → submit review           |
-| 2  | `wf_builtin_gh_pr_inline_review`     | [GitHub] PR inline AI review              | webhook(`pull_request.opened/synchronize`)          | reviewPrInline(LLM with line-level comments)|
-| 3  | `wf_builtin_gh_issue_triage`         | [GitHub] Issue smart triage               | webhook(`issues.opened`)                            | AI classify → apply labels                  |
-| 4  | `wf_builtin_gh_issue_pr_loop`        | [GitHub] Issue → PR loop                  | webhook(`issues.labeled`)                           | runIssueLoop(Claude sidecar)     |
-| 5  | `wf_builtin_gh_release_conventional` | [GitHub] Release: Conventional Commits    | `trigger.cron`(`0 18 * * *`)                        | generateChangelog → createRelease(draft)|
-| 6  | `wf_builtin_gh_release_continuous`   | [GitHub] Release: continuous              | webhook(`pull_request.closed`)                      | changelog → pushTag → release(final)|
-| 7  | `wf_builtin_gh_release_manual`       | [GitHub] Release: manual                  | `trigger.manual`                                    | direct createRelease(draft)         |
-| 8  | `wf_builtin_gh_ci_diagnose`          | [GitHub] CI failure diagnosis             | webhook(`check_run.completed`)                      | AI diagnose → commentPr               |
+| #   | Template id                          | Name                                   | Trigger                                    | Main Flow                                    |
+| --- | ------------------------------------ | -------------------------------------- | ------------------------------------------ | -------------------------------------------- |
+| 1   | `wf_builtin_gh_pr_auto_review`       | [GitHub] PR auto-review                | webhook(`pull_request.opened/synchronize`) | AI prompt → submit review                    |
+| 2   | `wf_builtin_gh_pr_inline_review`     | [GitHub] PR inline AI review           | webhook(`pull_request.opened/synchronize`) | reviewPrInline(LLM with line-level comments) |
+| 3   | `wf_builtin_gh_issue_triage`         | [GitHub] Issue smart triage            | webhook(`issues.opened`)                   | AI classify → apply labels                   |
+| 4   | `wf_builtin_gh_issue_pr_loop`        | [GitHub] Issue → PR loop               | webhook(`issues.labeled`)                  | runIssueLoop(Claude sidecar)                 |
+| 5   | `wf_builtin_gh_release_conventional` | [GitHub] Release: Conventional Commits | `trigger.cron`(`0 18 * * *`)               | generateChangelog → createRelease(draft)     |
+| 6   | `wf_builtin_gh_release_continuous`   | [GitHub] Release: continuous           | webhook(`pull_request.closed`)             | changelog → pushTag → release(final)         |
+| 7   | `wf_builtin_gh_release_manual`       | [GitHub] Release: manual               | `trigger.manual`                           | direct createRelease(draft)                  |
+| 8   | `wf_builtin_gh_ci_diagnose`          | [GitHub] CI failure diagnosis          | webhook(`check_run.completed`)             | AI diagnose → commentPr                      |
 
 The export order of `buildGithubDeliveryTemplates()` is 1 → 8, but the UI library list is usually sorted by "theme group".
 
@@ -33,19 +34,19 @@ All `{{ ... }}` occurrences in the templates are workflow expression language (s
 [Workflows → Expression language](/docs/workflows/expression-language), written in M2).
 Common anchors in GitHub Delivery templates:
 
-| Expression                                                            | Content                                |
-| ----------------------------------------------------------------- | ----------------------------------- |
-| `$trigger.payload.body.repository.full_name`                      | `"owner/name"`                       |
-| `$trigger.payload.body.pull_request.number`                       | PR number                                |
-| `$trigger.payload.body.pull_request.title`                        | PR title                              |
-| `$trigger.payload.body.pull_request.body`                         | PR description                              |
-| `$trigger.payload.body.pull_request.merge_commit_sha`             | Commit SHA after merge                  |
-| `$trigger.payload.body.issue.number`                              | Issue number                             |
-| `$trigger.payload.body.issue.title` / `.body`                     | Issue title / description                    |
-| `$trigger.payload.body.check_run.name` / `.conclusion`            | CI check info                        |
-| `$trigger.payload.body.check_run.pull_requests[0].number`         | PR associated with the check                      |
-| `$node['<id>'].out.<field>`                                       | Upstream node output                          |
-| `$static.<key>`                                                   | Workflow-level static variable (configured in editor Settings)|
+| Expression                                                | Content                                                        |
+| --------------------------------------------------------- | -------------------------------------------------------------- |
+| `$trigger.payload.body.repository.full_name`              | `"owner/name"`                                                 |
+| `$trigger.payload.body.pull_request.number`               | PR number                                                      |
+| `$trigger.payload.body.pull_request.title`                | PR title                                                       |
+| `$trigger.payload.body.pull_request.body`                 | PR description                                                 |
+| `$trigger.payload.body.pull_request.merge_commit_sha`     | Commit SHA after merge                                         |
+| `$trigger.payload.body.issue.number`                      | Issue number                                                   |
+| `$trigger.payload.body.issue.title` / `.body`             | Issue title / description                                      |
+| `$trigger.payload.body.check_run.name` / `.conclusion`    | CI check info                                                  |
+| `$trigger.payload.body.check_run.pull_requests[0].number` | PR associated with the check                                   |
+| `$node['<id>'].out.<field>`                               | Upstream node output                                           |
+| `$static.<key>`                                           | Workflow-level static variable (configured in editor Settings) |
 
 ---
 
@@ -65,15 +66,16 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node                    | Field           | Template default                                                                |
-| ----------------------- | -------------- | ------------------------------------------------------------------------- |
-| `n_trigger`             | `events`       | `["pull_request.opened", "pull_request.synchronize"]`                     |
-| `n_ai`                  | `systemPrompt` | `"You are a senior reviewer. Read the PR title + body + diff summary. Decide APPROVE / COMMENT / REQUEST_CHANGES. Be terse."` |
-| `n_ai`                  | `userPrompt`   | `{{ $trigger.payload.body.pull_request.title }}\n\n{{ $trigger.payload.body.pull_request.body }}` |
-| `n_review`              | `event`        | `"COMMENT"`                                                               |
-| `n_review`              | `body`         | `{{ $node['n_ai'].out.completion }}`                                      |
+| Node        | Field          | Template default                                                                                                              |
+| ----------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `n_trigger` | `events`       | `["pull_request.opened", "pull_request.synchronize"]`                                                                         |
+| `n_ai`      | `systemPrompt` | `"You are a senior reviewer. Read the PR title + body + diff summary. Decide APPROVE / COMMENT / REQUEST_CHANGES. Be terse."` |
+| `n_ai`      | `userPrompt`   | `{{ $trigger.payload.body.pull_request.title }}\n\n{{ $trigger.payload.body.pull_request.body }}`                             |
+| `n_review`  | `event`        | `"COMMENT"`                                                                                                                   |
+| `n_review`  | `body`         | `{{ $node['n_ai'].out.completion }}`                                                                                          |
 
 **Required credentials.**
+
 - GitHub App or PAT (`reviewPr` uses the `comment` strategy action).
 - AI provider (LLM) API key — configured in the `n_ai` node Inspector, or introduced via `$static.anthropicKey`.
 
@@ -100,15 +102,15 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node         | Field           | Template default                                                                |
-| ------------ | -------------- | ------------------------------------------------------------------------- |
-| `n_trigger`  | `events`       | `["pull_request.opened", "pull_request.synchronize"]`                     |
-| `n_review`   | `repoFullName` | `{{ $trigger.payload.body.repository.full_name }}`                        |
-| `n_review`   | `prNumber`     | `{{ $trigger.payload.body.pull_request.number }}`                         |
-| `n_review`   | `provider`     | `"anthropic"`                                                             |
-| `n_review`   | `model`        | `"claude-sonnet-4-6"`                                                     |
-| `n_review`   | `apiKey`       | `""` (template leaves blank; must be filled after fork)                                          |
-| `n_review`   | `maxFiles`     | `5`                                                                       |
+| Node        | Field          | Template default                                        |
+| ----------- | -------------- | ------------------------------------------------------- |
+| `n_trigger` | `events`       | `["pull_request.opened", "pull_request.synchronize"]`   |
+| `n_review`  | `repoFullName` | `{{ $trigger.payload.body.repository.full_name }}`      |
+| `n_review`  | `prNumber`     | `{{ $trigger.payload.body.pull_request.number }}`       |
+| `n_review`  | `provider`     | `"anthropic"`                                           |
+| `n_review`  | `model`        | `"claude-sonnet-4-6"`                                   |
+| `n_review`  | `apiKey`       | `""` (template leaves blank; must be filled after fork) |
+| `n_review`  | `maxFiles`     | `5`                                                     |
 
 **Required credentials.** GitHub + LLM provider.
 
@@ -137,12 +139,12 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node         | Field           | Template default                                                                |
-| ------------ | -------------- | ------------------------------------------------------------------------- |
-| `n_trigger`  | `events`       | `["issues.opened"]`                                                       |
-| `n_classify` | `text`         | `{{ $trigger.payload.body.issue.title }}\n\n{{ $trigger.payload.body.issue.body }}` |
-| `n_classify` | `categories`   | `["bug", "feature", "question"]`                                          |
-| `n_label`    | `add`          | `["{{ $node['n_classify'].out.category }}"]`                              |
+| Node         | Field        | Template default                                                                    |
+| ------------ | ------------ | ----------------------------------------------------------------------------------- |
+| `n_trigger`  | `events`     | `["issues.opened"]`                                                                 |
+| `n_classify` | `text`       | `{{ $trigger.payload.body.issue.title }}\n\n{{ $trigger.payload.body.issue.body }}` |
+| `n_classify` | `categories` | `["bug", "feature", "question"]`                                                    |
+| `n_label`    | `add`        | `["{{ $node['n_classify'].out.category }}"]`                                        |
 
 **Required credentials.** GitHub + LLM provider (the `ai.classify` node uses the default provider configured in cognia).
 
@@ -168,13 +170,14 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node        | Field           | Template default                                                                |
-| ----------- | -------------- | ------------------------------------------------------------------------- |
-| `n_trigger` | `events`       | `["issues.labeled"]`                                                      |
-| `n_loop`    | `repoFullName` | `{{ $trigger.payload.body.repository.full_name }}`                        |
-| `n_loop`    | `issueNumber`  | `{{ $trigger.payload.body.issue.number }}`                                |
+| Node        | Field          | Template default                                   |
+| ----------- | -------------- | -------------------------------------------------- |
+| `n_trigger` | `events`       | `["issues.labeled"]`                               |
+| `n_loop`    | `repoFullName` | `{{ $trigger.payload.body.repository.full_name }}` |
+| `n_loop`    | `issueNumber`  | `{{ $trigger.payload.body.issue.number }}`         |
 
 **Required credentials.**
+
 - GitHub App or PAT (for clone + push + open PR).
 - Claude provider (Settings → Providers, driver is `SidecarIssueLoopDriver`).
 
@@ -186,9 +189,9 @@ flowchart LR
 - **Specify branch template.** Default is `cognia/issue-{n}`; the `{n}` placeholder is replaced with issueNumber.
 
 <Callout type="warn">
-**Long task reminder.** `runIssueLoop` may run for tens of minutes. `lib/workflow/runtime/long-step-runner.ts`
-writes checkpoints to `workflowRunEvents`; after a process crash, resume continues from the latest checkpoint without
-re-running the LLM.
+  **Long task reminder.** `runIssueLoop` may run for tens of minutes.
+  `lib/workflow/runtime/long-step-runner.ts` writes checkpoints to `workflowRunEvents`; after a
+  process crash, resume continues from the latest checkpoint without re-running the LLM.
 </Callout>
 
 ---
@@ -210,15 +213,15 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node         | Field              | Template default                                                                |
-| ------------ | ----------------- | ------------------------------------------------------------------------- |
-| `n_trigger`  | `cron`            | `"0 18 * * *"`                                                            |
-| `n_changelog`| `repoFullName`    | `"owner/repo"` (template placeholder; change to real value after fork)                              |
-| `n_changelog`| `since`           | `"v1.0.0"` (template placeholder; change to the tag of the last release)                           |
-| `n_changelog`| `currentVersion`  | `"1.0.0"`                                                                 |
-| `n_release`  | `tag`             | `{{ $node['n_changelog'].out.nextVersion }}`                              |
-| `n_release`  | `body`            | `{{ $node['n_changelog'].out.markdown }}`                                 |
-| `n_release`  | `draft`           | `true`                                                                    |
+| Node          | Field            | Template default                                                         |
+| ------------- | ---------------- | ------------------------------------------------------------------------ |
+| `n_trigger`   | `cron`           | `"0 18 * * *"`                                                           |
+| `n_changelog` | `repoFullName`   | `"owner/repo"` (template placeholder; change to real value after fork)   |
+| `n_changelog` | `since`          | `"v1.0.0"` (template placeholder; change to the tag of the last release) |
+| `n_changelog` | `currentVersion` | `"1.0.0"`                                                                |
+| `n_release`   | `tag`            | `{{ $node['n_changelog'].out.nextVersion }}`                             |
+| `n_release`   | `body`           | `{{ $node['n_changelog'].out.markdown }}`                                |
+| `n_release`   | `draft`          | `true`                                                                   |
 
 **Required credentials.** GitHub (no LLM calls).
 
@@ -248,16 +251,16 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node         | Field              | Template default                                                                |
-| ------------ | ----------------- | ------------------------------------------------------------------------- |
-| `n_trigger`  | `events`          | `["pull_request.closed"]`                                                 |
-| `n_changelog`| `since`           | `{{ $static.lastTag }}` (expects `static.lastTag` configured in workflow Settings)       |
-| `n_changelog`| `currentVersion`  | `{{ $static.currentVersion }}`                                            |
-| `n_tag`      | `tag`             | `v{{ $node['n_changelog'].out.nextVersion }}`                             |
-| `n_tag`      | `sha`             | `{{ $trigger.payload.body.pull_request.merge_commit_sha }}`               |
-| `n_release`  | `tag`             | `v{{ $node['n_changelog'].out.nextVersion }}`                             |
-| `n_release`  | `body`            | `{{ $node['n_changelog'].out.markdown }}`                                 |
-| `n_release`  | `draft`           | `false`                                                                   |
+| Node          | Field            | Template default                                                                   |
+| ------------- | ---------------- | ---------------------------------------------------------------------------------- |
+| `n_trigger`   | `events`         | `["pull_request.closed"]`                                                          |
+| `n_changelog` | `since`          | `{{ $static.lastTag }}` (expects `static.lastTag` configured in workflow Settings) |
+| `n_changelog` | `currentVersion` | `{{ $static.currentVersion }}`                                                     |
+| `n_tag`       | `tag`            | `v{{ $node['n_changelog'].out.nextVersion }}`                                      |
+| `n_tag`       | `sha`            | `{{ $trigger.payload.body.pull_request.merge_commit_sha }}`                        |
+| `n_release`   | `tag`            | `v{{ $node['n_changelog'].out.nextVersion }}`                                      |
+| `n_release`   | `body`           | `{{ $node['n_changelog'].out.markdown }}`                                          |
+| `n_release`   | `draft`          | `false`                                                                            |
 
 **Required credentials.** GitHub (no LLM calls).
 
@@ -287,13 +290,13 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node        | Field        | Template default          |
-| ----------- | ----------- | ------------------- |
-| `n_trigger` | (no params)  | —                   |
-| `n_release` | `tag`       | `"v0.0.1"`          |
-| `n_release` | `name`      | `"Initial release"` |
+| Node        | Field       | Template default           |
+| ----------- | ----------- | -------------------------- |
+| `n_trigger` | (no params) | —                          |
+| `n_release` | `tag`       | `"v0.0.1"`                 |
+| `n_release` | `name`      | `"Initial release"`        |
 | `n_release` | `body`      | `"Initial release notes."` |
-| `n_release` | `draft`     | `true`              |
+| `n_release` | `draft`     | `true`                     |
 
 **Required credentials.** GitHub.
 
@@ -319,13 +322,13 @@ flowchart LR
 
 **Parameter configuration.**
 
-| Node         | Field           | Template default                                                                |
-| ------------ | -------------- | ------------------------------------------------------------------------- |
-| `n_trigger`  | `events`       | `["check_run.completed"]`                                                 |
-| `n_ai`       | `systemPrompt` | `"You are a CI failure analyst. Read the check name + conclusion + logs and write a 3-bullet diagnosis of the likely root cause."` |
-| `n_ai`       | `userPrompt`   | `"Check: {{ check_run.name }} — {{ check_run.conclusion }}"`              |
-| `n_comment`  | `prNumber`     | `{{ $trigger.payload.body.check_run.pull_requests[0].number }}`           |
-| `n_comment`  | `body`         | `{{ $node['n_ai'].out.completion }}`                                      |
+| Node        | Field          | Template default                                                                                                                   |
+| ----------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `n_trigger` | `events`       | `["check_run.completed"]`                                                                                                          |
+| `n_ai`      | `systemPrompt` | `"You are a CI failure analyst. Read the check name + conclusion + logs and write a 3-bullet diagnosis of the likely root cause."` |
+| `n_ai`      | `userPrompt`   | `"Check: {{ check_run.name }} — {{ check_run.conclusion }}"`                                                                       |
+| `n_comment` | `prNumber`     | `{{ $trigger.payload.body.check_run.pull_requests[0].number }}`                                                                    |
+| `n_comment` | `body`         | `{{ $node['n_ai'].out.completion }}`                                                                                               |
 
 **Required credentials.** GitHub + LLM provider.
 
@@ -351,22 +354,22 @@ After clicking "Use template" in the workflow library:
 
 ## Templates vs. DIY
 
-| Dimension                | Use templates                            | Build from scratch                                                  |
-| ------------------- | --------------------------------- | ----------------------------------------------------- |
-| Onboarding cost            | Low — click + change two or three fields       | High — assemble pieces yourself, debug connections                          |
-| Track official updates        | No — forked copies are independent           | No (always self-maintained)                                  |
-| Expression anchor correctness | High — templates use proven paths           | Medium — need to check [Expression language](/docs/workflows/expression-language) |
-| Edge case coverage        | Low — templates are intentionally minimal; users often need to add flow.switch | Free, but costly |
+| Dimension                     | Use templates                                                                  | Build from scratch                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Onboarding cost               | Low — click + change two or three fields                                       | High — assemble pieces yourself, debug connections                                |
+| Track official updates        | No — forked copies are independent                                             | No (always self-maintained)                                                       |
+| Expression anchor correctness | High — templates use proven paths                                              | Medium — need to check [Expression language](/docs/workflows/expression-language) |
+| Edge case coverage            | Low — templates are intentionally minimal; users often need to add flow.switch | Free, but costly                                                                  |
 
 **Recommended approach:** Fork the closest template first, then add `flow.switch` / `data.transform` yourself to filter edge cases.
 
 ## Source Index
 
-| File                                                | Purpose                                                  |
-| --------------------------------------------------- | ----------------------------------------------------- |
-| `lib/workflow/definition/seed-github.ts`            | Builder functions for all 8 templates                            |
-| `lib/workflow/definition/seed-github.test.ts`       | Structural tests + id uniqueness for all 8 templates                        |
-| `lib/workflow/definition/seed.ts`                   | Wires `buildGithubDeliveryTemplates()` into the overall template library       |
-| `types/workflow/visual.ts`                          | `VisualWorkflow` / `isTemplate` / `isBuiltIn` definitions     |
-| `components/workflow/library/`                      | Template library UI ("Use template" entry)                       |
-| `lib/workflow/runtime/orchestrator.ts`              | Actual execution path after a template is forked and run                      |
+| File                                          | Purpose                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| `lib/workflow/definition/seed-github.ts`      | Builder functions for all 8 templates                                    |
+| `lib/workflow/definition/seed-github.test.ts` | Structural tests + id uniqueness for all 8 templates                     |
+| `lib/workflow/definition/seed.ts`             | Wires `buildGithubDeliveryTemplates()` into the overall template library |
+| `types/workflow/visual.ts`                    | `VisualWorkflow` / `isTemplate` / `isBuiltIn` definitions                |
+| `components/workflow/library/`                | Template library UI ("Use template" entry)                               |
+| `lib/workflow/runtime/orchestrator.ts`        | Actual execution path after a template is forked and run                 |

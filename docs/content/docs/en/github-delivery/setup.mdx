@@ -6,21 +6,21 @@ description: Enable the GitHub Delivery plugin in cognia, configure a GitHub App
 # Setup & Credentials
 
 <TLDR>
-Enable the `github-delivery` plugin in Settings → Plugins → Marketplace, then go to
-Settings → GitHub Delivery → Credentials to choose a credential mode (App recommended / PAT quick-start)
-and add repositories in the Repos Tab. The webhook URL is assigned a random port by the Tauri Rust receiver
-and can be exposed with a single cloudflared click; if your machine has no public ingress, switch to ETag polling
-(every 5 minutes) instead.
+  Enable the `github-delivery` plugin in Settings → Plugins → Marketplace, then go to Settings →
+  GitHub Delivery → Credentials to choose a credential mode (App recommended / PAT quick-start) and
+  add repositories in the Repos Tab. The webhook URL is assigned a random port by the Tauri Rust
+  receiver and can be exposed with a single cloudflared click; if your machine has no public
+  ingress, switch to ETag polling (every 5 minutes) instead.
 </TLDR>
 
 ## Prerequisites
 
-| Requirement | Required | Notes |
-| ----------- | -------- | ----- |
-| cognia 0.1.0+ | Yes | Plugin manifest specifies `engines.cognia >= 0.1.0` |
-| Tauri desktop build (macOS / Windows / Linux) | No | Web mode still runs nodes + polling, but cannot register webhooks |
-| GitHub account + repo write access | Yes | App mode requires installing the App in a repo or org; PAT mode requires a token with at least `repo` scope |
-| Public ingress or cloudflared | No | Only needed for webhook triggers; otherwise continue using polling |
+| Requirement                                   | Required | Notes                                                                                                       |
+| --------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| cognia 0.1.0+                                 | Yes      | Plugin manifest specifies `engines.cognia >= 0.1.0`                                                         |
+| Tauri desktop build (macOS / Windows / Linux) | No       | Web mode still runs nodes + polling, but cannot register webhooks                                           |
+| GitHub account + repo write access            | Yes      | App mode requires installing the App in a repo or org; PAT mode requires a token with at least `repo` scope |
+| Public ingress or cloudflared                 | No       | Only needed for webhook triggers; otherwise continue using polling                                          |
 
 ## 1. Enable the Plugin
 
@@ -42,8 +42,8 @@ and can be exposed with a single cloudflared click; if your machine has no publi
      `checkPolicy` / `getWorkOrder` / `upsertWorkOrder`).
    - Registers the Claude sidecar driver for the Issue → PR loop.
    - Registers the `github` connector adapter into the ConnectorBus via `registerPluginAdapters`.
-</Step>
-<Step>
+     </Step>
+     <Step>
 **Confirm Settings → GitHub Delivery is visible.** The sidebar shows a GitHub Delivery entry under the "Extensions" group.
 Click it to see 5 tabs: Repos / Credentials / Policies / Audit / Usage.
 </Step>
@@ -83,7 +83,7 @@ the Repos Tab will show a "desktop only" notice.
   - Pull request, Pull request review, Issues, Issue comment, Check run, Release.
 - Webhook URL: leave blank for now; we will fill it in after cognia provides the real path.
 - Generate a private key and download the PEM file.
-</Step>
+    </Step>
 <Step>
 **Install the App in the target repo or org.** After installation, grab the `installation_id` from the URL
 (e.g. `https://github.com/settings/installations/12345678` → 12345678).
@@ -91,14 +91,15 @@ the Repos Tab will show a "desktop only" notice.
 <Step>
 **Enter credentials in cognia.** Settings → GitHub Delivery → Credentials, choose App mode, and fill in:
 
-| Field | Source |
-| ----- | ------ |
-| App ID | Top of the GitHub App settings page |
-| Installation ID | From the URL path after installing the App |
+| Field             | Source                                      |
+| ----------------- | ------------------------------------------- |
+| App ID            | Top of the GitHub App settings page         |
+| Installation ID   | From the URL path after installing the App  |
 | Private key (PEM) | Full contents of the downloaded `.pem` file |
 
 On desktop, the private key is moved to the OS keyring (`ctx.secrets.set`) and wiped from the IndexedDB row;
 on web, it remains in an encrypted blob.
+
 </Step>
 </Steps>
 
@@ -123,7 +124,7 @@ on web, it remains in an encrypted blob.
 - Repository permissions: Contents (RW), Issues (RW), Pull requests (RW), Metadata (Read),
   Checks (Read).
 - Do not check Organization permissions (principle of least privilege).
-</Step>
+    </Step>
 <Step>
 **Paste the token in cognia.** Settings → GitHub Delivery → Credentials → choose PAT,
 paste the token. On desktop, it is saved to the OS keyring and the `patToken` field in the row is cleared
@@ -138,14 +139,14 @@ paste the token. On desktop, it is saved to the OS keyring and the `patToken` fi
 
 Settings → GitHub Delivery → Repos:
 
-| Field | Meaning |
-| ----- | ------- |
-| Full name (`owner/name`) | Standard full name of the repository |
-| Credential mode | `app` or `pat` (determines the `octokit-factory` path) |
-| Trigger mode | `webhook` or `polling` (see next section) |
-| Worktree mode | `local` (default, simple git clone) or `e2b` (via the e2b-sandbox plugin) |
-| Push target | `source-branch` (default) or `fork` (push to a fork) |
-| Policy | Optional, repo-level override. Full fields in [policies](./policies) |
+| Field                    | Meaning                                                                   |
+| ------------------------ | ------------------------------------------------------------------------- |
+| Full name (`owner/name`) | Standard full name of the repository                                      |
+| Credential mode          | `app` or `pat` (determines the `octokit-factory` path)                    |
+| Trigger mode             | `webhook` or `polling` (see next section)                                 |
+| Worktree mode            | `local` (default, simple git clone) or `e2b` (via the e2b-sandbox plugin) |
+| Push target              | `source-branch` (default) or `fork` (push to a fork)                      |
+| Policy                   | Optional, repo-level override. Full fields in [policies](./policies)      |
 
 The row is written to the `github-delivery:repos` table; primary key = `fullName`.
 
@@ -227,26 +228,26 @@ with the latest message being `<sender> opened PR #<n> in <repo>`.
 
 ## Troubleshooting Quick Reference
 
-| Symptom | Likely Cause | How to Check |
-| ------- | ------------ | ------------ |
-| Webhook arrives but audit has no rows | Signature verification failed | Confirm `x-hub-signature-256` is in the headers; verify Settings → Webhook secret matches the GitHub side |
-| `401 Bad credentials` | Wrong App private key or unauthorized installation | Check the PEM is complete (including `-----BEGIN` / `-----END` lines); confirm the installation still exists |
-| `404 Not Found` (read-only endpoint) | Necessary repo permissions were not checked during App installation | Modify GitHub App permissions, then "Re-authorize" the App in the repository |
-| Polling shows no events | `triggerMode` is not `polling`, or the scheduler is off | Switch to polling in the Repos Tab; in Settings → Scheduled tasks, confirm `github-poll` is enabled |
-| Node throws `No issue-loop AI driver` | Sidecar not started | Connect the Claude Code provider in Settings → Providers, then restart the plugin |
-| `tauri.conf.json` shell scope rejects cloudflared | Old config from before upgrade | Pull main and confirm the shell scope contains an allow line for `cloudflared` |
+| Symptom                                           | Likely Cause                                                        | How to Check                                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Webhook arrives but audit has no rows             | Signature verification failed                                       | Confirm `x-hub-signature-256` is in the headers; verify Settings → Webhook secret matches the GitHub side    |
+| `401 Bad credentials`                             | Wrong App private key or unauthorized installation                  | Check the PEM is complete (including `-----BEGIN` / `-----END` lines); confirm the installation still exists |
+| `404 Not Found` (read-only endpoint)              | Necessary repo permissions were not checked during App installation | Modify GitHub App permissions, then "Re-authorize" the App in the repository                                 |
+| Polling shows no events                           | `triggerMode` is not `polling`, or the scheduler is off             | Switch to polling in the Repos Tab; in Settings → Scheduled tasks, confirm `github-poll` is enabled          |
+| Node throws `No issue-loop AI driver`             | Sidecar not started                                                 | Connect the Claude Code provider in Settings → Providers, then restart the plugin                            |
+| `tauri.conf.json` shell scope rejects cloudflared | Old config from before upgrade                                      | Pull main and confirm the shell scope contains an allow line for `cloudflared`                               |
 
 ## Source Index
 
-| File | Purpose |
-| ---- | ------- |
-| `plugins/github-delivery/src/index.ts` | Configures runtime / driver / adapter on `activate` |
-| `plugins/github-delivery/plugin.json` | 4 Dexie tables + `github` connector declaration |
-| `lib/github/auth-app.ts` | App installation token cache and refresh |
-| `lib/github/auth-pat.ts` | PAT authentication |
-| `lib/github/octokit-factory.ts` | Routes by mode, with throttling / retry plugins |
-| `lib/github/cloudflared-tauri.ts` | One-click cloudflared expose |
-| `src-tauri/src/workflow/triggers/webhook_router.rs` | axum receiver + `SignatureMode::Github` |
-| `plugins/github-delivery/src/github-poll.ts` | ETag polling task |
-| `components/settings/github-delivery/tabs/repos-tab.tsx` | Repo CRUD UI |
-| `components/settings/github-delivery/tabs/credentials-tab.tsx` | App / PAT form |
+| File                                                           | Purpose                                             |
+| -------------------------------------------------------------- | --------------------------------------------------- |
+| `plugins/github-delivery/src/index.ts`                         | Configures runtime / driver / adapter on `activate` |
+| `plugins/github-delivery/plugin.json`                          | 4 Dexie tables + `github` connector declaration     |
+| `lib/github/auth-app.ts`                                       | App installation token cache and refresh            |
+| `lib/github/auth-pat.ts`                                       | PAT authentication                                  |
+| `lib/github/octokit-factory.ts`                                | Routes by mode, with throttling / retry plugins     |
+| `lib/github/cloudflared-tauri.ts`                              | One-click cloudflared expose                        |
+| `src-tauri/src/workflow/triggers/webhook_router.rs`            | axum receiver + `SignatureMode::Github`             |
+| `plugins/github-delivery/src/github-poll.ts`                   | ETag polling task                                   |
+| `components/settings/github-delivery/tabs/repos-tab.tsx`       | Repo CRUD UI                                        |
+| `components/settings/github-delivery/tabs/credentials-tab.tsx` | App / PAT form                                      |

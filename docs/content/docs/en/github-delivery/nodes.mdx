@@ -19,19 +19,19 @@ all other nodes are thin wrappers around single Octokit requests.
 
 ### Shared Fields
 
-| Field            | Type                  | Required | Description                                                                          |
-| ---------------- | --------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `repoFullName`   | `string`              | Yes      | `owner/name`. Expression `{{ $trigger.payload.body.repository.full_name }}` is common. |
-| `policyOverride` | `Partial<GhPolicy>?`  | No       | Node-level override, deeply merged into repo-level or global policy. See [policies](./policies) |
+| Field            | Type                 | Required | Description                                                                                     |
+| ---------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `repoFullName`   | `string`             | Yes      | `owner/name`. Expression `{{ $trigger.payload.body.repository.full_name }}` is common.          |
+| `policyOverride` | `Partial<GhPolicy>?` | No       | Node-level override, deeply merged into repo-level or global policy. See [policies](./policies) |
 
 ### Output Structure
 
-| Shape                                                     | When                                                                                |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `{ ...nodeSpecific }`                                     | Successful Octokit call                                                             |
-| `{ skipped: true, reason, mustWait? }`                    | Policy gate denied and not HITL soft rejection                                      |
-| `{ skipped: true, reason: "HITL rejected: ...", draftId }` | HITL draft was manually rejected                                                    |
-| Throws                                                    | Octokit returned non-2xx; orchestrator records error and retries per workflow retry policy |
+| Shape                                                      | When                                                                                       |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `{ ...nodeSpecific }`                                      | Successful Octokit call                                                                    |
+| `{ skipped: true, reason, mustWait? }`                     | Policy gate denied and not HITL soft rejection                                             |
+| `{ skipped: true, reason: "HITL rejected: ...", draftId }` | HITL draft was manually rejected                                                           |
+| Throws                                                     | Octokit returned non-2xx; orchestrator records error and retries per workflow retry policy |
 
 ### Common Pre-execution Flow
 
@@ -62,13 +62,13 @@ policy entirely while still writing a `"[read-only]"` audit entry.
 
 **Parameters.**
 
-| Field            | Type       | Required | Description                                                            |
-| ---------------- | ---------- | -------- | ---------------------------------------------------------------------- |
-| `head`           | `string`   | Yes      | Source branch (e.g. `cognia/feature-xxx`). Blocked if `branchProtection` matches. |
-| `base`           | `string`   | Yes      | Target branch (e.g. `main`).                                           |
-| `title`          | `string`   | Yes      | PR title.                                                              |
-| `body`           | `string?`  | No       | PR description, Markdown supported.                                    |
-| `draft`          | `boolean?` | No       | Defaults to `false`.                                                   |
+| Field   | Type       | Required | Description                                                                       |
+| ------- | ---------- | -------- | --------------------------------------------------------------------------------- |
+| `head`  | `string`   | Yes      | Source branch (e.g. `cognia/feature-xxx`). Blocked if `branchProtection` matches. |
+| `base`  | `string`   | Yes      | Target branch (e.g. `main`).                                                      |
+| `title` | `string`   | Yes      | PR title.                                                                         |
+| `body`  | `string?`  | No       | PR description, Markdown supported.                                               |
+| `draft` | `boolean?` | No       | Defaults to `false`.                                                              |
 
 **Output.** `{ number: number, htmlUrl: string }`
 
@@ -97,9 +97,9 @@ policy entirely while still writing a `"[read-only]"` audit entry.
 
 **Parameters.**
 
-| Field       | Type     | Required | Description |
-| ----------- | -------- | -------- | ----------- |
-| `prNumber`  | `number` | Yes      | PR number.  |
+| Field      | Type     | Required | Description |
+| ---------- | -------- | -------- | ----------- |
+| `prNumber` | `number` | Yes      | PR number.  |
 
 **Output.** `{ number: number, state: string }` (`state` should be `"closed"`)
 
@@ -115,20 +115,20 @@ policy entirely while still writing a `"[read-only]"` audit entry.
 
 **Parameters.**
 
-| Field            | Type                              | Required | Description                                                  |
-| ---------------- | --------------------------------- | -------- | -------------------------------------------------------------|
-| `prNumber`       | `number`                          | Yes      | PR number.                                                   |
-| `mergeMethod`    | `"merge" \| "squash" \| "rebase"` | No       | Defaults to `"merge"`.                                       |
-| `commitTitle`    | `string?`                         | No       | Merge commit title (writable for squash/merge modes).        |
-| `commitMessage`  | `string?`                         | No       | Merge commit body.                                           |
+| Field           | Type                              | Required | Description                                           |
+| --------------- | --------------------------------- | -------- | ----------------------------------------------------- |
+| `prNumber`      | `number`                          | Yes      | PR number.                                            |
+| `mergeMethod`   | `"merge" \| "squash" \| "rebase"` | No       | Defaults to `"merge"`.                                |
+| `commitTitle`   | `string?`                         | No       | Merge commit title (writable for squash/merge modes). |
+| `commitMessage` | `string?`                         | No       | Merge commit body.                                    |
 
 **Output.** `{ merged: boolean, sha: string }`
 
 **Octokit.** `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`
 
 <Callout type="warn">
-**HITL soft rejection.** When `requireHumanApproval` matches, returns `needsApproval: true`, routed to Inbox draft.
-User must Approve in `<DraftEditor/>` before merge proceeds.
+  **HITL soft rejection.** When `requireHumanApproval` matches, returns `needsApproval: true`,
+  routed to Inbox draft. User must Approve in `<DraftEditor />` before merge proceeds.
 </Callout>
 
 ---
@@ -142,20 +142,21 @@ per-line inline comments (legacy field `position`, must be a position in the dif
 
 **Parameters.**
 
-| Field        | Type                                                          | Required | Description                                          |
-| ------------ | ------------------------------------------------------------- | -------- | ---------------------------------------------------- |
-| `prNumber`   | `number`                                                      | Yes      | PR number.                                           |
-| `event`      | `"APPROVE" \| "REQUEST_CHANGES" \| "COMMENT"`                | Yes      | Review type.                                         |
-| `body`       | `string`                                                      | Yes      | Overall review body, Markdown supported.             |
-| `comments`   | `Array<{ path: string; position: number; body: string }>?`    | No       | Legacy line-level comments (based on diff `position`). |
+| Field      | Type                                                       | Required | Description                                            |
+| ---------- | ---------------------------------------------------------- | -------- | ------------------------------------------------------ |
+| `prNumber` | `number`                                                   | Yes      | PR number.                                             |
+| `event`    | `"APPROVE" \| "REQUEST_CHANGES" \| "COMMENT"`              | Yes      | Review type.                                           |
+| `body`     | `string`                                                   | Yes      | Overall review body, Markdown supported.               |
+| `comments` | `Array<{ path: string; position: number; body: string }>?` | No       | Legacy line-level comments (based on diff `position`). |
 
 **Output.** `{ id: number, state: string }`
 
 **Octokit.** `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
 
 <Callout type="info">
-**Prefer `reviewPrInline`.** New workflows should use `action.github.reviewPrInline` — it accepts
-`line` + `side` (more stable) and includes its own LLM call for structured comments. `reviewPr` is for manually assembled scenarios.
+  **Prefer `reviewPrInline`.** New workflows should use `action.github.reviewPrInline` — it accepts
+  `line` + `side` (more stable) and includes its own LLM call for structured comments. `reviewPr` is
+  for manually assembled scenarios.
 </Callout>
 
 ---
@@ -168,27 +169,28 @@ per-line inline comments (legacy field `position`, must be a position in the dif
 
 **Parameters.**
 
-| Field           | Type       | Required | Description                                                                |
-| --------------- | ---------- | -------- | -------------------------------------------------------------------------- |
-| `prNumber`      | `number`   | Yes      | PR number.                                                                 |
-| `provider`      | `string`   | Yes      | LLM provider id, e.g. `anthropic` / `openrouter` / `ollama`.               |
-| `model`         | `string`   | Yes      | Model id, e.g. `claude-sonnet-4-6`.                                        |
-| `apiKey`        | `string`   | Yes      | Provider credentials (can bind expression `{{ $static.anthropicKey }}`).   |
-| `baseURL`       | `string?`  | No       | Custom endpoint (common for OpenAI-compatible).                            |
-| `maxFiles`      | `number?`  | No       | Defaults to 5, hard limit 30.                                              |
-| `focus`         | `string?`  | No       | Free text, e.g. `"security"` / `"performance"`.                          |
+| Field      | Type      | Required | Description                                                              |
+| ---------- | --------- | -------- | ------------------------------------------------------------------------ |
+| `prNumber` | `number`  | Yes      | PR number.                                                               |
+| `provider` | `string`  | Yes      | LLM provider id, e.g. `anthropic` / `openrouter` / `ollama`.             |
+| `model`    | `string`  | Yes      | Model id, e.g. `claude-sonnet-4-6`.                                      |
+| `apiKey`   | `string`  | Yes      | Provider credentials (can bind expression `{{ $static.anthropicKey }}`). |
+| `baseURL`  | `string?` | No       | Custom endpoint (common for OpenAI-compatible).                          |
+| `maxFiles` | `number?` | No       | Defaults to 5, hard limit 30.                                            |
+| `focus`    | `string?` | No       | Free text, e.g. `"security"` / `"performance"`.                          |
 
 **Output.**
 
-| Field               | Type      | Description                                                                  |
-| ------------------- | --------- | ---------------------------------------------------------------------------- |
-| `reviewId`          | `number`  | GitHub review id.                                                            |
-| `body`              | `string`  | High-level summary submitted to GitHub (falls back to full LLM output if JSON parsing fails). |
-| `commentCount`      | `number`  | Number of line-level comments (LLM limit 8).                                 |
-| `filesAnalysed`     | `number`  | Number of files actually fetched patch from (≤ `maxFiles`).                  |
-| `parsedStructured`  | `boolean` | Whether LLM produced parseable JSON.                                         |
+| Field              | Type      | Description                                                                                   |
+| ------------------ | --------- | --------------------------------------------------------------------------------------------- |
+| `reviewId`         | `number`  | GitHub review id.                                                                             |
+| `body`             | `string`  | High-level summary submitted to GitHub (falls back to full LLM output if JSON parsing fails). |
+| `commentCount`     | `number`  | Number of line-level comments (LLM limit 8).                                                  |
+| `filesAnalysed`    | `number`  | Number of files actually fetched patch from (≤ `maxFiles`).                                   |
+| `parsedStructured` | `boolean` | Whether LLM produced parseable JSON.                                                          |
 
 **Octokit.**
+
 - `GET /repos/{owner}/{repo}/pulls/{pull_number}/files` (fetch patch)
 - `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
 
@@ -206,10 +208,10 @@ lenient fence stripping + missing field tolerance. Each file's diff is truncated
 
 **Parameters.**
 
-| Field       | Type      | Required | Description               |
-| ----------- | --------- | -------- | ------------------------- |
-| `prNumber`  | `number`  | Yes      | PR number.                |
-| `body`      | `string`  | Yes      | Markdown comment body.    |
+| Field      | Type     | Required | Description            |
+| ---------- | -------- | -------- | ---------------------- |
+| `prNumber` | `number` | Yes      | PR number.             |
+| `body`     | `string` | Yes      | Markdown comment body. |
 
 **Output.** `{ id: number, htmlUrl: string }`
 
@@ -226,10 +228,10 @@ lenient fence stripping + missing field tolerance. Each file's diff is truncated
 
 **Parameters.**
 
-| Field          | Type      | Required | Description               |
-| -------------- | --------- | -------- | ------------------------- |
-| `issueNumber`  | `number`  | Yes      | Issue number.             |
-| `body`         | `string`  | Yes      | Markdown comment body.    |
+| Field         | Type     | Required | Description            |
+| ------------- | -------- | -------- | ---------------------- |
+| `issueNumber` | `number` | Yes      | Issue number.          |
+| `body`        | `string` | Yes      | Markdown comment body. |
 
 **Output.** `{ id: number, htmlUrl: string }`
 
@@ -245,15 +247,16 @@ lenient fence stripping + missing field tolerance. Each file's diff is truncated
 
 **Parameters.**
 
-| Field          | Type        | Required | Description                                           |
-| -------------- | ----------- | -------- | ----------------------------------------------------- |
-| `issueNumber`  | `number`    | Yes      | Issue or PR number.                                   |
-| `add`          | `string[]?` | No       | Labels to add (array, order irrelevant).              |
-| `remove`       | `string[]?` | No       | Labels to remove.                                     |
+| Field         | Type        | Required | Description                              |
+| ------------- | ----------- | -------- | ---------------------------------------- |
+| `issueNumber` | `number`    | Yes      | Issue or PR number.                      |
+| `add`         | `string[]?` | No       | Labels to add (array, order irrelevant). |
+| `remove`      | `string[]?` | No       | Labels to remove.                        |
 
 **Output.** `{ added: string[], removed: string[] }`
 
 **Octokit.**
+
 - If `add` is non-empty: `POST /repos/{owner}/{repo}/issues/{issue_number}/labels`
 - For each label in `remove`: `DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}`
 
@@ -267,10 +270,10 @@ lenient fence stripping + missing field tolerance. Each file's diff is truncated
 
 **Parameters.**
 
-| Field          | Type                                | Required | Description                                                      |
-| -------------- | ----------------------------------- | -------- | ---------------------------------------------------------------- |
-| `issueNumber`  | `number`                            | Yes      | Issue number.                                                    |
-| `reason`       | `"completed" \| "not_planned"?`     | No       | GitHub UI "Close as ..." option.                                  |
+| Field         | Type                            | Required | Description                      |
+| ------------- | ------------------------------- | -------- | -------------------------------- |
+| `issueNumber` | `number`                        | Yes      | Issue number.                    |
+| `reason`      | `"completed" \| "not_planned"?` | No       | GitHub UI "Close as ..." option. |
 
 **Output.** `{ number: number, state: string }`
 
@@ -286,14 +289,14 @@ lenient fence stripping + missing field tolerance. Each file's diff is truncated
 
 **Parameters.**
 
-| Field              | Type       | Required | Description                                                                  |
-| ------------------ | ---------- | -------- | ---------------------------------------------------------------------------- |
-| `tag`              | `string`   | Yes      | Release tag (e.g. `v1.2.3` or `1.2.3`). Tag must exist.                      |
-| `targetCommitish`  | `string?`  | No       | If tag doesn't exist, GitHub will create it from commitish (branch name or SHA). |
-| `name`             | `string?`  | No       | Release display name (defaults to tag).                                      |
-| `body`             | `string?`  | No       | Markdown release notes. Usually fed `generateChangelog.markdown`.            |
-| `draft`            | `boolean?` | No       | Defaults to `true` (draft, safe).                                            |
-| `prerelease`       | `boolean?` | No       | Defaults to `false`.                                                         |
+| Field             | Type       | Required | Description                                                                      |
+| ----------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| `tag`             | `string`   | Yes      | Release tag (e.g. `v1.2.3` or `1.2.3`). Tag must exist.                          |
+| `targetCommitish` | `string?`  | No       | If tag doesn't exist, GitHub will create it from commitish (branch name or SHA). |
+| `name`            | `string?`  | No       | Release display name (defaults to tag).                                          |
+| `body`            | `string?`  | No       | Markdown release notes. Usually fed `generateChangelog.markdown`.                |
+| `draft`           | `boolean?` | No       | Defaults to `true` (draft, safe).                                                |
+| `prerelease`      | `boolean?` | No       | Defaults to `false`.                                                             |
 
 **Output.** `{ id: number, htmlUrl: string, tag: string }`
 
@@ -310,23 +313,24 @@ calculate semver bump → output Markdown notes.
 
 **Parameters.**
 
-| Field              | Type      | Required | Description                                                  |
-| ------------------ | --------- | -------- | -------------------------------------------------------------|
-| `since`            | `string`  | Yes      | Starting tag or SHA (e.g. `v1.0.0`, `abc1234`).              |
-| `currentVersion`   | `string?` | No       | Current version string (for `applyBump`). Defaults to `"0.0.0"`. |
+| Field            | Type      | Required | Description                                                      |
+| ---------------- | --------- | -------- | ---------------------------------------------------------------- |
+| `since`          | `string`  | Yes      | Starting tag or SHA (e.g. `v1.0.0`, `abc1234`).                  |
+| `currentVersion` | `string?` | No       | Current version string (for `applyBump`). Defaults to `"0.0.0"`. |
 
 **Output.**
 
-| Field           | Type                                            | Description                                                                  |
-| --------------- | ----------------------------------------------- | ---------------------------------------------------------------------------- |
-| `bump`          | `"major" \| "minor" \| "patch" \| "none"`       | Determined by `feat` / `fix` / `breaking`.                                   |
-| `nextVersion`   | `string`                                        | Version after applyBump (no `v` prefix).                                     |
-| `markdown`      | `string`                                        | Categorized Markdown notes (grouped by Features / Bug Fixes / …).            |
-| `commitCount`   | `number`                                        | Number of successfully parsed commits (non-conventional ones are dropped).   |
+| Field         | Type                                      | Description                                                                |
+| ------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
+| `bump`        | `"major" \| "minor" \| "patch" \| "none"` | Determined by `feat` / `fix` / `breaking`.                                 |
+| `nextVersion` | `string`                                  | Version after applyBump (no `v` prefix).                                   |
+| `markdown`    | `string`                                  | Categorized Markdown notes (grouped by Features / Bug Fixes / …).          |
+| `commitCount` | `number`                                  | Number of successfully parsed commits (non-conventional ones are dropped). |
 
 **Octokit.** `GET /repos/{owner}/{repo}/compare/{basehead}` (basehead format: `since...HEAD`)
 
 **Conventional Commits implementation.** `lib/github/changelog.ts`. Grammar: `<type>(<scope>)!:
+
 <subject>` + optional body + `BREAKING CHANGE:` footer. `!` or footer match triggers major bump;
 `feat` → minor, `fix` → patch, others → none.
 
@@ -341,10 +345,10 @@ regex, can protect `^refs/tags/release/` style tags.
 
 **Parameters.**
 
-| Field   | Type     | Required | Description                       |
-| ------- | -------- | -------- | --------------------------------- |
-| `tag`   | `string` | Yes      | Tag name (without `refs/tags/`).  |
-| `sha`   | `string` | Yes      | Commit SHA to tag.                |
+| Field | Type     | Required | Description                      |
+| ----- | -------- | -------- | -------------------------------- |
+| `tag` | `string` | Yes      | Tag name (without `refs/tags/`). |
+| `sha` | `string` | Yes      | Commit SHA to tag.               |
 
 **Output.** `{ tag: string, sha: string }`
 
@@ -362,11 +366,11 @@ recoverable after process crash.
 
 **Parameters.**
 
-| Field              | Type                  | Required | Description                                                                  |
-| ------------------ | --------------------- | -------- | ---------------------------------------------------------------------------- |
-| `issueNumber`      | `number`              | Yes      | Triggering issue number.                                                     |
-| `worktreeMode`     | `"local" \| "e2b"`    | No       | Defaults to `local`. `e2b` requires `e2b-sandbox` plugin and API key.        |
-| `branchTemplate`   | `string?`             | No       | Defaults to `cognia/issue-{n}`, `{n}` placeholder replaced with issueNumber. |
+| Field            | Type               | Required | Description                                                                  |
+| ---------------- | ------------------ | -------- | ---------------------------------------------------------------------------- |
+| `issueNumber`    | `number`           | Yes      | Triggering issue number.                                                     |
+| `worktreeMode`   | `"local" \| "e2b"` | No       | Defaults to `local`. `e2b` requires `e2b-sandbox` plugin and API key.        |
+| `branchTemplate` | `string?`          | No       | Defaults to `cognia/issue-{n}`, `{n}` placeholder replaced with issueNumber. |
 
 **Output.** `RunIssueLoopResult`
 
@@ -398,11 +402,11 @@ node returns `{ status: "failed", reason: "No issue-loop AI driver is registered
 `guardedExecutor` internally `try / catch` records any thrown error to `step.log("error", msg)`, then **re-throws**.
 The orchestrator decides based on the node's `retryPolicy`:
 
-| retryPolicy                     | Behavior                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `none` (default)                | One failure = step error, entire run goes to error branch                 |
-| `fixed { times, delayMs }`      | Wait → retry                                                              |
-| `exponential { times, baseMs }` | Exponential backoff                                                       |
+| retryPolicy                     | Behavior                                                  |
+| ------------------------------- | --------------------------------------------------------- |
+| `none` (default)                | One failure = step error, entire run goes to error branch |
+| `fixed { times, delayMs }`      | Wait → retry                                              |
+| `exponential { times, baseMs }` | Exponential backoff                                       |
 
 Idempotent verbs (GET / HEAD / PUT / DELETE) already have up to 3 automatic retries inside Octokit. POST / PATCH
 are **not** retried by Octokit — this is to prevent duplicate `mergePr` / `createRelease` calls. If you do want
@@ -417,17 +421,17 @@ and wiring**, and cannot fully simulate "what happens after actually clicking me
 
 ## Source Index
 
-| File                                                          | Purpose                                                  |
-| ------------------------------------------------------------- | -------------------------------------------------------- |
-| `plugins/github-delivery/src/workflow/nodes.ts`               | Registration point for all 13 executors (single file)    |
-| `plugins/github-delivery/src/workflow/shared.ts`              | `guardedExecutor` factory                                |
-| `plugins/github-delivery/src/workflow/issue-loop.ts`          | `runIssueLoop` long-running task implementation          |
-| `plugins/github-delivery/src/workflow/review-pr-inline.ts`    | `runPRReviewAgent` LLM agent                             |
-| `plugins/github-delivery/src/workflow/runtime.ts`             | `GithubRuntime` singleton interface                      |
-| `plugins/github-delivery/src/index.ts`                        | Registration path (`setGithubRuntime` + `setIssueLoopDriver`) |
-| `lib/github/octokit-factory.ts`                               | Octokit instance configuration for nodes                 |
-| `lib/github/policy-gate.ts`                                   | `checkPolicy` — every node goes through this             |
-| `lib/github/changelog.ts`                                     | `generateChangelog` actual parsing and rendering         |
-| `lib/github/workspace.ts`                                     | `runIssueLoop` clone / commit / push                     |
-| `lib/workflow/runtime/long-step-runner.ts`                    | `runIssueLoop` checkpoint resume mechanism               |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`        | HITL draft bridge (merge / non-draft release)            |
+| File                                                       | Purpose                                                       |
+| ---------------------------------------------------------- | ------------------------------------------------------------- |
+| `plugins/github-delivery/src/workflow/nodes.ts`            | Registration point for all 13 executors (single file)         |
+| `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` factory                                     |
+| `plugins/github-delivery/src/workflow/issue-loop.ts`       | `runIssueLoop` long-running task implementation               |
+| `plugins/github-delivery/src/workflow/review-pr-inline.ts` | `runPRReviewAgent` LLM agent                                  |
+| `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` singleton interface                           |
+| `plugins/github-delivery/src/index.ts`                     | Registration path (`setGithubRuntime` + `setIssueLoopDriver`) |
+| `lib/github/octokit-factory.ts`                            | Octokit instance configuration for nodes                      |
+| `lib/github/policy-gate.ts`                                | `checkPolicy` — every node goes through this                  |
+| `lib/github/changelog.ts`                                  | `generateChangelog` actual parsing and rendering              |
+| `lib/github/workspace.ts`                                  | `runIssueLoop` clone / commit / push                          |
+| `lib/workflow/runtime/long-step-runner.ts`                 | `runIssueLoop` checkpoint resume mechanism                    |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`     | HITL draft bridge (merge / non-draft release)                 |

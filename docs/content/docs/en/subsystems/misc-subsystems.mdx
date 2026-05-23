@@ -8,28 +8,29 @@ description: TTS, Push, QR, Network Proxy, Connectivity Probes, Queue, Wallpaper
 This page collects several relatively small subsystems that would each be a noticeable gap if missing. Each section covers what it does, lists key files, and links to related docs. The structure is flatter than other subsystem pages — these modules are largely independent, so a single overarching model is unnecessary.
 
 <TLDR>
-  TTS (9 providers + Edge-TTS WSS bridge), Push (mobile push registration), QR (pairing QR +
-  barcode scanning), Network (proxy config), Connectivity (mDNS / LAN scan /
-  tunnel), Queue (retryable send queue with backoff), Wallpaper (user wallpaper persistence), Proxy Config (Rust-side reverse proxy state), LaTeX (KaTeX cache), Monaco (editor options +
-  workbench context), Media (plugin media landing), Time (minimal relative time).
+  TTS (9 providers + Edge-TTS WSS bridge), Push (mobile push registration), QR (pairing QR + barcode
+  scanning), Network (proxy config), Connectivity (mDNS / LAN scan / tunnel), Queue (retryable send
+  queue with backoff), Wallpaper (user wallpaper persistence), Proxy Config (Rust-side reverse proxy
+  state), LaTeX (KaTeX cache), Monaco (editor options + workbench context), Media (plugin media
+  landing), Time (minimal relative time).
 </TLDR>
 
 ## At a Glance
 
-| Subsystem | Role | Locations |
-| --------- | ---- | --------- |
-| TTS | Text-to-speech, 9 providers + Edge WSS bridge | `lib/tts/` · `src-tauri/src/tts/` |
-| Push | Mobile push notifications (APNs/FCM) | `lib/push/` |
-| QR & Barcode | Pairing QR + mobile scan | `lib/qr/` |
-| Network | Browser-side proxy config + proxy-aware fetch | `lib/network/` |
-| Proxy Config (Rust) | Process-level proxy state + reqwest/WSS integration | `src-tauri/src/proxy_config/` |
-| Connectivity | mDNS / LAN /24 probe / cloudflared tunnel | `lib/connectivity/` |
-| Queue | Mobile outbound queue + backoff + deadletter | `lib/queue/` |
-| Wallpaper | User wallpaper file persistence | `src-tauri/src/wallpaper/` |
-| LaTeX | KaTeX render LRU cache + macros | `lib/latex/` |
-| Monaco / Workbench | Canvas Monaco options + active editor registry | `lib/monaco/` · `lib/editor-workbench/` |
-| Media | Plugin-generated media landing interface | `lib/media/` |
-| Time | Minimal relative time formatter | `lib/time/` |
+| Subsystem           | Role                                                | Locations                               |
+| ------------------- | --------------------------------------------------- | --------------------------------------- |
+| TTS                 | Text-to-speech, 9 providers + Edge WSS bridge       | `lib/tts/` · `src-tauri/src/tts/`       |
+| Push                | Mobile push notifications (APNs/FCM)                | `lib/push/`                             |
+| QR & Barcode        | Pairing QR + mobile scan                            | `lib/qr/`                               |
+| Network             | Browser-side proxy config + proxy-aware fetch       | `lib/network/`                          |
+| Proxy Config (Rust) | Process-level proxy state + reqwest/WSS integration | `src-tauri/src/proxy_config/`           |
+| Connectivity        | mDNS / LAN /24 probe / cloudflared tunnel           | `lib/connectivity/`                     |
+| Queue               | Mobile outbound queue + backoff + deadletter        | `lib/queue/`                            |
+| Wallpaper           | User wallpaper file persistence                     | `src-tauri/src/wallpaper/`              |
+| LaTeX               | KaTeX render LRU cache + macros                     | `lib/latex/`                            |
+| Monaco / Workbench  | Canvas Monaco options + active editor registry      | `lib/monaco/` · `lib/editor-workbench/` |
+| Media               | Plugin-generated media landing interface            | `lib/media/`                            |
+| Time                | Minimal relative time formatter                     | `lib/time/`                             |
 
 ## TTS
 
@@ -37,18 +38,18 @@ Text-to-speech, 9 providers plus an Edge-TTS WebSocket bridge. Frontend lives in
 
 Provider overview (`lib/tts/types.ts:TTS_PROVIDERS`):
 
-| Provider | Entry File | Notes |
-| -------- | ---------- | ----- |
-| OpenAI | `providers/openai.ts` | REST, requires API key |
-| Gemini | `providers/gemini.ts` | Google AI family |
-| ElevenLabs | `providers/elevenlabs.ts` | High-quality voice |
-| LMNT | `providers/lmnt.ts` | Low latency |
-| Hume | `providers/hume.ts` | Includes emotion params |
-| Cartesia | `providers/cartesia.ts` | Sonic series |
-| Deepgram | `providers/deepgram.ts` | TTS + STT same stack |
-| Xiaomi | `providers/xiaomi.ts` | Available in mainland China |
-| Edge | `providers/edge.ts` | Microsoft free tier; goes through WSS bridge |
-| System | `providers/system.ts` | Web Speech API fallback |
+| Provider   | Entry File                | Notes                                        |
+| ---------- | ------------------------- | -------------------------------------------- |
+| OpenAI     | `providers/openai.ts`     | REST, requires API key                       |
+| Gemini     | `providers/gemini.ts`     | Google AI family                             |
+| ElevenLabs | `providers/elevenlabs.ts` | High-quality voice                           |
+| LMNT       | `providers/lmnt.ts`       | Low latency                                  |
+| Hume       | `providers/hume.ts`       | Includes emotion params                      |
+| Cartesia   | `providers/cartesia.ts`   | Sonic series                                 |
+| Deepgram   | `providers/deepgram.ts`   | TTS + STT same stack                         |
+| Xiaomi     | `providers/xiaomi.ts`     | Available in mainland China                  |
+| Edge       | `providers/edge.ts`       | Microsoft free tier; goes through WSS bridge |
+| System     | `providers/system.ts`     | Web Speech API fallback                      |
 
 `tts-orchestrator.ts` is a singleton orchestrator: receives `SpeechSettings` → selects provider → `preprocessTextForProvider` + applies pronunciation dictionary + `splitTextForTTS` chunking → checks cache (`tts-cache.ts`) for hit → calls the corresponding provider → concatenates playback queue. The `auto-play-gates.ts` function `canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading, isStreaming })` is the single "should we auto-play?" gate after a chat send completes.
 
@@ -385,13 +386,21 @@ Adjacent subsystems each section cares about:
     href="./theming-and-i18n"
     description="Wallpaper / LaTeX / Monaco affect rendering surfaces"
   />
-  <Card title="Storage" href="./storage" description="Dexie tables for wallpaper / queue / media landing" />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="Dexie tables for wallpaper / queue / media landing"
+  />
   <Card
     title="Runtime & Tauri"
     href="./runtime-and-tauri"
     description="Tauri commands for Proxy / Wallpaper / TTS"
   />
-  <Card title="Search System" href="./search-system" description="Network proxy affects all external fetch" />
+  <Card
+    title="Search System"
+    href="./search-system"
+    description="Network proxy affects all external fetch"
+  />
   <Card
     title="Chat & Skills"
     href="./chat-and-skills"
@@ -417,12 +426,12 @@ None of these need to split in the short term — keeping them on this page lets
 
 ## Where to Start
 
-| Goal | Files |
-| ---- | ----- |
-| Add a new TTS provider | `lib/tts/providers/<name>.ts` + `types.ts:TTS_PROVIDERS` registration + `tts-orchestrator.ts` switch |
-| Change proxy bypass rules | `lib/network/proxy-config.ts:shouldBypass` + `src-tauri/src/proxy_config/mod.rs:should_bypass` (sync both sides) |
-| Tune queue backoff | `lib/queue/retry-policy.ts:backoffDelayMs` |
-| Add a KaTeX macro | `lib/latex/config.ts:KATEX_MACROS` |
-| Extend media origin | `lib/media/media-ingest.ts:PluginMediaOrigin` |
-| Add a new mDNS field | `lib/connectivity/mdns-discovery.ts:DiscoveredService` + Rust broadcast side |
-| Change wallpaper size limit | `src-tauri/src/wallpaper/commands.rs:MAX_BYTES` + frontend early validation |
+| Goal                        | Files                                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Add a new TTS provider      | `lib/tts/providers/<name>.ts` + `types.ts:TTS_PROVIDERS` registration + `tts-orchestrator.ts` switch             |
+| Change proxy bypass rules   | `lib/network/proxy-config.ts:shouldBypass` + `src-tauri/src/proxy_config/mod.rs:should_bypass` (sync both sides) |
+| Tune queue backoff          | `lib/queue/retry-policy.ts:backoffDelayMs`                                                                       |
+| Add a KaTeX macro           | `lib/latex/config.ts:KATEX_MACROS`                                                                               |
+| Extend media origin         | `lib/media/media-ingest.ts:PluginMediaOrigin`                                                                    |
+| Add a new mDNS field        | `lib/connectivity/mdns-discovery.ts:DiscoveredService` + Rust broadcast side                                     |
+| Change wallpaper size limit | `src-tauri/src/wallpaper/commands.rs:MAX_BYTES` + frontend early validation                                      |

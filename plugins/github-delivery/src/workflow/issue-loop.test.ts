@@ -24,11 +24,13 @@ function installRuntime(octokit: unknown, opts: { workOrders?: jest.Mock } = {})
       effectivePolicy: DEFAULT_GH_POLICY,
     }),
     getWorkOrder: async () => null,
-    upsertWorkOrder: opts.workOrders ?? jest.fn(async (p) => ({
-      ...p,
-      createdAt: 0,
-      updatedAt: 0,
-    })),
+    upsertWorkOrder:
+      opts.workOrders ??
+      jest.fn(async (p) => ({
+        ...p,
+        createdAt: 0,
+        updatedAt: 0,
+      })),
   })
 }
 
@@ -97,12 +99,16 @@ describe("runIssueLoop", () => {
     expect(pushSpy).toHaveBeenCalled()
 
     // PR open + label call.
-    expect((octokit.request as unknown as jest.Mock).mock.calls.some((c) =>
-      String(c[0]).includes("POST /repos/{owner}/{repo}/pulls")
-    )).toBe(true)
-    expect((octokit.request as unknown as jest.Mock).mock.calls.some((c) =>
-      String(c[0]).includes("labels")
-    )).toBe(true)
+    expect(
+      (octokit.request as unknown as jest.Mock).mock.calls.some((c) =>
+        String(c[0]).includes("POST /repos/{owner}/{repo}/pulls")
+      )
+    ).toBe(true)
+    expect(
+      (octokit.request as unknown as jest.Mock).mock.calls.some((c) =>
+        String(c[0]).includes("labels")
+      )
+    ).toBe(true)
   })
 
   it("returns failed when the driver throws", async () => {
@@ -116,13 +122,15 @@ describe("runIssueLoop", () => {
     setIssueLoopDriver({ run: jest.fn(async () => Promise.reject(new Error("model died"))) })
     const result = await runIssueLoop(
       { repoFullName: "o/r", issueNumber: 1 },
-      { cloneToWorkspace: async () => ({
-        backend: "local" as const,
-        path: "/tmp",
-        repoFullName: "o/r",
-        branch: "main",
-        createdAt: 0,
-      }) }
+      {
+        cloneToWorkspace: async () => ({
+          backend: "local" as const,
+          path: "/tmp",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        }),
+      }
     )
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/model died/)

@@ -9,15 +9,15 @@ Plugins subscribe to host lifecycle events inside `onActivate()`. The hooks syst
 
 ## Available hooks
 
-| Hook | When it fires | Payload | Can cancel? |
-|------|---------------|---------|-------------|
-| `chat.before-send` | Before a user message is sent to the AI | `{ sessionId, content, characterId }` | Yes — return `{ cancel: true, reason }` |
-| `chat.after-response` | After the AI finishes streaming a response | `{ sessionId, messageId, content }` | No |
-| `twin.ingest.completed` | When a TwinSource finishes ingest | `{ sourceId, jobId, chunkCount }` | No |
-| `scheduler.job.run` | When a scheduled task runs | `{ jobId, trigger, payload }` | No |
-| `connector.inbound` | When ConnectorBus receives an event | `{ platform, conversationKey, content }` | No |
-| `plugin.activated` | When any plugin is activated | `{ pluginId }` | No |
-| `plugin.deactivated` | When any plugin is deactivated | `{ pluginId }` | No |
+| Hook                    | When it fires                              | Payload                                  | Can cancel?                             |
+| ----------------------- | ------------------------------------------ | ---------------------------------------- | --------------------------------------- |
+| `chat.before-send`      | Before a user message is sent to the AI    | `{ sessionId, content, characterId }`    | Yes — return `{ cancel: true, reason }` |
+| `chat.after-response`   | After the AI finishes streaming a response | `{ sessionId, messageId, content }`      | No                                      |
+| `twin.ingest.completed` | When a TwinSource finishes ingest          | `{ sourceId, jobId, chunkCount }`        | No                                      |
+| `scheduler.job.run`     | When a scheduled task runs                 | `{ jobId, trigger, payload }`            | No                                      |
+| `connector.inbound`     | When ConnectorBus receives an event        | `{ platform, conversationKey, content }` | No                                      |
+| `plugin.activated`      | When any plugin is activated               | `{ pluginId }`                           | No                                      |
+| `plugin.deactivated`    | When any plugin is deactivated             | `{ pluginId }`                           | No                                      |
 
 ## Subscribing
 
@@ -38,7 +38,9 @@ export async function onActivate(ctx) {
   // Twin ingest: trigger re-distill
   ctx.hooks.on("twin.ingest.completed", async (payload) => {
     if (payload.chunkCount > 100) {
-      await ctx.api.notification.toast(`Twin source ${payload.sourceId} ingested ${payload.chunkCount} chunks`)
+      await ctx.api.notification.toast(
+        `Twin source ${payload.sourceId} ingested ${payload.chunkCount} chunks`
+      )
     }
   })
 
@@ -82,6 +84,10 @@ Hooks run in registration order. If multiple plugins register the same hook, the
 ## Related
 
 <Cards>
-  <Card title="API Overview" href="./api-overview" description="APIs available inside hook handlers." />
+  <Card
+    title="API Overview"
+    href="./api-overview"
+    description="APIs available inside hook handlers."
+  />
   <Card title="Surfaces" href="./surfaces" description="UI extension points." />
 </Cards>

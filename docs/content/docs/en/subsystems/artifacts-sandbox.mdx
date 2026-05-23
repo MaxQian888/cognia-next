@@ -8,10 +8,11 @@ description: "One-shot content artifacts: iframe-isolated HTML / SVG / React pre
 <Status variant="stable" />
 
 <TLDR>
-  When the model generates HTML / SVG / React / Mermaid / Chart / Math / Jupyter, cognia-next wraps it into an
-  `Artifact` row written to the Zustand store, then renders it in the UI through one of 9 renderers. HTML / SVG / React go through iframe +
-  DOMPurify + CSP triple isolation; the rest go through a React inline renderer. `lib/sandbox/`
-  is a standalone code-execution sandbox surface — currently a stub on the Web side; the desktop Python path is implemented in [./canvas](./canvas).
+  When the model generates HTML / SVG / React / Mermaid / Chart / Math / Jupyter, cognia-next wraps
+  it into an `Artifact` row written to the Zustand store, then renders it in the UI through one of 9
+  renderers. HTML / SVG / React go through iframe + DOMPurify + CSP triple isolation; the rest go
+  through a React inline renderer. `lib/sandbox/` is a standalone code-execution sandbox surface —
+  currently a stub on the Web side; the desktop Python path is implemented in [./canvas](./canvas).
 </TLDR>
 
 <StatGrid>
@@ -29,12 +30,12 @@ description: "One-shot content artifacts: iframe-isolated HTML / SVG / React pre
 
 There are three related but distinct concepts in cognia-next. Let's clarify them first:
 
-| Concept      | Role                                        | Isolation Mechanism                               |
-| ------------ | ------------------------------------------- | ------------------------------------------------- |
-| **Artifact** | One-shot model output (HTML / React / SVG…) | iframe + CSP + DOMPurify (varies by type)         |
-| **Canvas**   | User-editable code / documents              | Monaco inside the main React tree; no isolation   |
-| **A2UI**     | Interactive declarative UI assembled by the model via MCP tools | Directory whitelist + no inline script strings |
-| **Sandbox**  | Runtime for executing code (Python / JS / …) | Web stub / real subprocess on desktop (see below) |
+| Concept      | Role                                                            | Isolation Mechanism                               |
+| ------------ | --------------------------------------------------------------- | ------------------------------------------------- |
+| **Artifact** | One-shot model output (HTML / React / SVG…)                     | iframe + CSP + DOMPurify (varies by type)         |
+| **Canvas**   | User-editable code / documents                                  | Monaco inside the main React tree; no isolation   |
+| **A2UI**     | Interactive declarative UI assembled by the model via MCP tools | Directory whitelist + no inline script strings    |
+| **Sandbox**  | Runtime for executing code (Python / JS / …)                    | Web stub / real subprocess on desktop (see below) |
 
 Artifacts and Canvas often connect: the user sees an artifact in chat, clicks "Open in Canvas", and the artifact is promoted to an editable document (`lib/artifacts/reveal.ts`). See [./canvas](./canvas) for details.
 
@@ -111,14 +112,14 @@ Authoritative table from `lib/artifacts/runtime-adapters.ts:ARTIFACT_RUNTIME_ADA
 | Type       | transport | sandbox property    | Previewable | Designable |
 | ---------- | --------- | ------------------- | :---------: | :--------: |
 | `code`     | renderer  | —                   |     No      |     No     |
-| `document` | renderer  | —                   |    Yes      |     No     |
-| `svg`      | iframe    | `allow-same-origin` |    Yes      |    Yes     |
-| `html`     | iframe    | `allow-same-origin` |    Yes      |    Yes     |
-| `react`    | iframe    | `allow-scripts`     |    Yes      |    Yes     |
-| `mermaid`  | renderer  | —                   |    Yes      |     No     |
-| `chart`    | renderer  | —                   |    Yes      |     No     |
-| `math`     | renderer  | —                   |    Yes      |     No     |
-| `jupyter`  | jupyter   | —                   |    Yes      |     No     |
+| `document` | renderer  | —                   |     Yes     |     No     |
+| `svg`      | iframe    | `allow-same-origin` |     Yes     |    Yes     |
+| `html`     | iframe    | `allow-same-origin` |     Yes     |    Yes     |
+| `react`    | iframe    | `allow-scripts`     |     Yes     |    Yes     |
+| `mermaid`  | renderer  | —                   |     Yes     |     No     |
+| `chart`    | renderer  | —                   |     Yes     |     No     |
+| `math`     | renderer  | —                   |     Yes     |     No     |
+| `jupyter`  | jupyter   | —                   |     Yes     |     No     |
 
 Note that `react` uses `allow-scripts` but **not** `allow-same-origin` — deliberately cutting off the iframe's access to the parent page's DOM; communication goes through `postMessage`.
 
@@ -306,39 +307,47 @@ interface ArtifactStoreState {
 
 ## Tests
 
-| File                                                  | Coverage                                      |
-| ----------------------------------------------------- | --------------------------------------------- |
-| `lib/artifacts/constants.test.ts`                     | Type mappings, detection regexes              |
-| `lib/artifacts/preview-utils.test.ts`                 | DOMPurify config, React shell HTML generation |
-| `lib/artifacts/diff.test.ts`                          | Version diff edge cases                       |
-| `lib/artifacts/source-metadata.test.ts`               | Fingerprint stability                         |
-| `lib/artifacts/reveal.test.ts`                        | Reveal behavior / fallback on missing id      |
+| File                                                  | Coverage                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `lib/artifacts/constants.test.ts`                     | Type mappings, detection regexes                              |
+| `lib/artifacts/preview-utils.test.ts`                 | DOMPurify config, React shell HTML generation                 |
+| `lib/artifacts/diff.test.ts`                          | Version diff edge cases                                       |
+| `lib/artifacts/source-metadata.test.ts`               | Fingerprint stability                                         |
+| `lib/artifacts/reveal.test.ts`                        | Reveal behavior / fallback on missing id                      |
 | `lib/artifacts/renderer-registry.test.ts`             | Register / unregister / priority / canRender error protection |
-| `lib/artifacts/utils.test.ts` `preview-utils.test.ts` | Pure utility function tests                   |
-| `lib/sandbox/web/index.test.ts`                       | Stub return values; executeCode error paths   |
-| `components/artifacts/artifact-preview.test.tsx`      | All 9 type renderings + error fallback        |
-| `components/artifacts/artifact-renderers.test.tsx`    | Plugin host collaboration                     |
-| `components/artifacts/jupyter-renderer.test.tsx`      | Broken JSON / empty cell / mime selection     |
+| `lib/artifacts/utils.test.ts` `preview-utils.test.ts` | Pure utility function tests                                   |
+| `lib/sandbox/web/index.test.ts`                       | Stub return values; executeCode error paths                   |
+| `components/artifacts/artifact-preview.test.tsx`      | All 9 type renderings + error fallback                        |
+| `components/artifacts/artifact-renderers.test.tsx`    | Plugin host collaboration                                     |
+| `components/artifacts/jupyter-renderer.test.tsx`      | Broken JSON / empty cell / mime selection                     |
 
 ## Where to Start
 
-| Goal                                          | Files                                                                                                            |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Add a new artifact type                       | `types/artifact/artifact.ts:ArtifactType` → `lib/artifacts/constants.ts` → `runtime-adapters.ts` → implement renderer |
-| Adjust React iframe CSP                       | `lib/artifacts/preview-utils.ts:getReactShellHtml` `meta http-equiv`                                             |
-| Change HTML/SVG to `allow-scripts`            | `runtime-adapters.ts` (strongly discouraged — removes a security layer)                                          |
-| Add new Mermaid diagram types                 | `lib/artifacts/constants.ts:MERMAID_TYPE_NAMES` + `MERMAID_TYPE_I18N_KEYS`                                       |
-| Actually implement Web sandbox                | Replace `lib/sandbox/web/index.ts` body, keep `SandboxExecutionService` interface                                |
-| Let plugins register custom renderers         | `lib/artifacts/renderer-registry.ts` + plugin API ([plugin-system](./plugin-system))                             |
+| Goal                                  | Files                                                                                                                 |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Add a new artifact type               | `types/artifact/artifact.ts:ArtifactType` → `lib/artifacts/constants.ts` → `runtime-adapters.ts` → implement renderer |
+| Adjust React iframe CSP               | `lib/artifacts/preview-utils.ts:getReactShellHtml` `meta http-equiv`                                                  |
+| Change HTML/SVG to `allow-scripts`    | `runtime-adapters.ts` (strongly discouraged — removes a security layer)                                               |
+| Add new Mermaid diagram types         | `lib/artifacts/constants.ts:MERMAID_TYPE_NAMES` + `MERMAID_TYPE_I18N_KEYS`                                            |
+| Actually implement Web sandbox        | Replace `lib/sandbox/web/index.ts` body, keep `SandboxExecutionService` interface                                     |
+| Let plugins register custom renderers | `lib/artifacts/renderer-registry.ts` + plugin API ([plugin-system](./plugin-system))                                  |
 
 ## Next
 
 <Cards>
-  <Card title="Canvas" href="./canvas" description="Editable document form; the promotion target for Artifacts" />
+  <Card
+    title="Canvas"
+    href="./canvas"
+    description="Editable document form; the promotion target for Artifacts"
+  />
   <Card
     title="Plugin System"
     href="./plugin-system"
     description="Worker sandbox + custom artifact renderer"
   />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="How the message stream drives artifact creation" />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="How the message stream drives artifact creation"
+  />
 </Cards>

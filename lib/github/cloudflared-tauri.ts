@@ -24,9 +24,7 @@ interface ShellChildLike {
 }
 
 interface ShellCommandLike {
-  spawn(): Promise<
-    ShellChildLike & { on: (e: string, cb: (p: { code: number }) => void) => void }
-  >
+  spawn(): Promise<ShellChildLike & { on: (e: string, cb: (p: { code: number }) => void) => void }>
 }
 
 interface ShellPluginLike {
@@ -39,7 +37,10 @@ async function importShellPlugin(): Promise<ShellPluginLike | null> {
     // package to be installed at type-check time. The plugin is optional —
     // its absence is handled by the caller.
     const spec = "@tauri-apps/plugin-shell"
-    const mod = (await (Function("s", "return import(s)")(spec) as Promise<unknown>)) as ShellPluginLike
+    const mod = (await (Function(
+      "s",
+      "return import(s)"
+    )(spec) as Promise<unknown>)) as ShellPluginLike
     return mod
   } catch {
     return null
@@ -50,9 +51,9 @@ async function importShellPlugin(): Promise<ShellPluginLike | null> {
  * Construct a Tauri-flavored spawn fn. The factory shape lets tests inject
  * a different binary name without monkey-patching the module export.
  */
-export function createTauriCloudflaredSpawn(opts: { binaryName?: string } = {}): (
-  args: string[]
-) => Promise<CloudflaredProcess> {
+export function createTauriCloudflaredSpawn(
+  opts: { binaryName?: string } = {}
+): (args: string[]) => Promise<CloudflaredProcess> {
   const binary = opts.binaryName ?? "cloudflared"
   return async (args: string[]) => {
     if (!isTauri()) {

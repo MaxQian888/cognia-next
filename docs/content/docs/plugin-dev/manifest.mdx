@@ -50,12 +50,8 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
       "trigger": { "type": "cron", "expression": "0 9 * * *" }
     }
   ],
-  "connectors": [
-    { "type": "custom-im", "factory": "./connectors/my-im.js" }
-  ],
-  "workflowNodes": [
-    { "kind": "action.custom.report", "factory": "./workflow/report.js" }
-  ],
+  "connectors": [{ "type": "custom-im", "factory": "./connectors/my-im.js" }],
+  "workflowNodes": [{ "kind": "action.custom.report", "factory": "./workflow/report.js" }],
   "mcpServerPresets": [
     {
       "id": "my-mcp",
@@ -84,7 +80,8 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
       required: true,
     },
     id: {
-      description: "Reverse-DNS identifier; must be unique among installed plugins. Max 64 chars. Regex: `^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`.",
+      description:
+        "Reverse-DNS identifier; must be unique among installed plugins. Max 64 chars. Regex: `^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`.",
       type: "string",
       required: true,
     },
@@ -153,18 +150,30 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
 
 Common validation errors:
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `id too long` | `id` > 64 chars | Shorten the reverse-DNS id |
-| `invalid id format` | Contains uppercase or special chars | Use lowercase, digits, dots, hyphens, underscores only |
-| `entry not found` | `entry` path does not exist in the zip | Check the file is at the root of the archive |
-| `unsupported schemaVersion` | `schemaVersion` is not `1` | Use `1` |
+| Error                       | Cause                                                 | Fix                                                                     |
+| --------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| `id too long`               | `id` > 64 chars                                       | Shorten the reverse-DNS id                                              |
+| `invalid id format`         | Contains uppercase or special chars                   | Use lowercase, digits, dots, hyphens, underscores only                  |
+| `entry not found`           | `entry` path does not exist in the zip                | Check the file is at the root of the archive                            |
+| `unsupported schemaVersion` | `schemaVersion` is not `1`                            | Use `1`                                                                 |
 | `permission format invalid` | Permission string doesn't match `domain.action:scope` | Follow the permission format documented in [Permissions](./permissions) |
 
 ## Related
 
 <Cards>
-  <Card title="Permissions" href="./permissions" description="Permission string format and scope syntax." />
-  <Card title="API Overview" href="./api-overview" description="15 API namespaces available to plugins." />
-  <Card title="Packaging" href="./packaging" description="How to build and publish a .cognia-plugin archive." />
+  <Card
+    title="Permissions"
+    href="./permissions"
+    description="Permission string format and scope syntax."
+  />
+  <Card
+    title="API Overview"
+    href="./api-overview"
+    description="15 API namespaces available to plugins."
+  />
+  <Card
+    title="Packaging"
+    href="./packaging"
+    description="How to build and publish a .cognia-plugin archive."
+  />
 </Cards>

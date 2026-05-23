@@ -10,11 +10,25 @@ jest.mock("next-intl", () => ({
 
 const revealInExplorer = jest.fn().mockResolvedValue(undefined)
 const openPath = jest.fn().mockResolvedValue(undefined)
-let isTauriValue = true
 
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriValue,
-}))
+// `stores/index.ts` calls `isTauri()` at module top-level inside a Zustand
+// `create()`; that fires during ES import hoisting, before any `let` in this
+// file initialises. Owning the toggle ref inside the factory dodges the TDZ.
+jest.mock("@/lib/tauri", () => {
+  const ref = { value: true }
+  return {
+    isTauri: () => ref.value,
+    __setIsTauri: (next: boolean) => {
+      ref.value = next
+    },
+  }
+})
+const { __setIsTauri } = jest.requireMock("@/lib/tauri") as {
+  __setIsTauri: (next: boolean) => void
+}
+function setIsTauriValue(next: boolean) {
+  __setIsTauri(next)
+}
 
 jest.mock("@/lib/tauri/opener", () => ({
   revealInExplorer: (...args: unknown[]) => revealInExplorer(...args),
@@ -33,7 +47,7 @@ beforeEach(() => {
   localStorage.clear()
   revealInExplorer.mockClear()
   openPath.mockClear()
-  isTauriValue = true
+  setIsTauriValue(true)
   useArtifactStore.setState({
     artifacts: {},
     activeArtifactId: null,
@@ -115,7 +129,7 @@ describe("useArtifactPanelState — extra coverage", () => {
   })
 
   it("handleRevealInExplorer is a no-op when not desktop", async () => {
-    isTauriValue = false
+    setIsTauriValue(false)
     makeArtifact()
     const { result } = renderHook(() => useArtifactPanelState())
     await act(async () => {

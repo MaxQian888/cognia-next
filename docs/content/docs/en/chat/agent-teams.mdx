@@ -85,29 +85,29 @@ flowchart TB
 
 ### TypeScript Business Layer
 
-| File / Module | Purpose |
-| ------------- | ------- |
-| `lib/ai/agent/agent-team.ts` | `agentTeamManager` — CRUD + lifecycle entry point on the Zustand store. `start` / `pause` / `shutdown` are thin wrappers around `runTeamLifecycle` / `abortTeam`. `configureAgentTeamRuntime(deps)` injects the real `runTeammateTask` / `runLeadPlanning` at app startup. |
-| `lib/ai/agent/agent-team-runtime.ts` | Core lifecycle: set status to executing → optional plan approval round → dispatch tasks with `maxConcurrentTeammates` concurrency → write `TeamExecutionReport`. Every exit path explicitly calls `setTeamStatus` to prevent "stuck executing". |
-| `lib/ai/agent/agent-team-runtime-deps.ts` | Default dependency factory — wires Claude SDK + ExternalAgentManager into `runTeammateTask`. |
-| `lib/ai/agent/plan-approval-bus.ts` | Pure pub/sub. Runtime calls `waitForDecision(teamId, signal)`, UI calls `approve(teamId, plan)` / `reject(teamId, feedback)`. Up to `maxPlanRevisions` rounds; exceeding the limit is treated as failed. |
-| `lib/ai/agent/agent-executor.ts` | Concretizes "one teammate runs one task" into a single send to Claude SDK / external agent. |
-| `lib/ai/agent/background-agent-manager.ts` | Runtime queue for background agents (long-running). |
-| `lib/ai/agent/sample-team.ts` | Factory behind the "Try a sample team" button — creates 1 lead + 2 teammates + 3 tasks demo. |
-| `lib/ai/agent/external/manager.ts` | `ExternalAgentManager` — unified entry for external CLI agents; selects `acp-client` or `opencode-client` by protocol. |
-| `lib/ai/agent/external/protocol-adapter.ts` | Protocol adapter registry (one each for ACP / OpenCode). |
-| `lib/ai/agent/external/canonical-contract.ts` | External agent config normalization — different CLI argument formats → one `ExternalAgentConfig`. |
-| `lib/ai/agent/external/ecosystem-adapters.ts` | "Ready" probes for each ecosystem: Claude Code / Cursor / Codex / Cline / Roo Code / Windsurf / Gemini. |
-| `lib/ai/agent/external/agent-trace-bridge.ts` | Forwards external agent trace events into the chat agent-trace view. |
-| `lib/agent-team/team-runtime-dispatcher.ts` | Routes `@<name>` in team workspace chat to the corresponding runtime. No React dependency (injected streamer + writer); streams back into a placeholder assistant message. |
-| `lib/agent-team/mention-parser.ts` | Pure function parsing the first token `@<name>`; returns `target: null` on miss. |
-| `lib/agent-team/runtime-targets.ts` | Merges team members + two reserved virtual agents (`@claude`, `@codex`) into a mentionable target list; virtual agents take priority when names collide. |
-| `lib/agent-team/runtime-streamers.ts` | Wraps Anthropic SDK / external agent streams into `RuntimeStreamEvent` sequences. |
-| `lib/agent-team/conversation-context.ts` | Converts team message lists into `ConversationTurn[]`, providing multi-turn context to the runtime. |
-| `lib/agent-team/use-runtime-availability.ts` | React hook that determines whether each runtime is available based on current API key / external agent status. |
-| `lib/agent/index.ts` | Cross-subsystem shared constants and icons (status colors, tool states, task board columns, playback events). |
-| `lib/agent-trace/cost-estimator.ts` | Estimates cost (USD) by model + tokens, used by the team token usage panel. |
-| `lib/agent-trace/log-adapter.ts` | Currently a stub — will be wired when the real agent-trace subsystem lands. |
+| File / Module                                 | Purpose                                                                                                                                                                                                                                                                    |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/ai/agent/agent-team.ts`                  | `agentTeamManager` — CRUD + lifecycle entry point on the Zustand store. `start` / `pause` / `shutdown` are thin wrappers around `runTeamLifecycle` / `abortTeam`. `configureAgentTeamRuntime(deps)` injects the real `runTeammateTask` / `runLeadPlanning` at app startup. |
+| `lib/ai/agent/agent-team-runtime.ts`          | Core lifecycle: set status to executing → optional plan approval round → dispatch tasks with `maxConcurrentTeammates` concurrency → write `TeamExecutionReport`. Every exit path explicitly calls `setTeamStatus` to prevent "stuck executing".                            |
+| `lib/ai/agent/agent-team-runtime-deps.ts`     | Default dependency factory — wires Claude SDK + ExternalAgentManager into `runTeammateTask`.                                                                                                                                                                               |
+| `lib/ai/agent/plan-approval-bus.ts`           | Pure pub/sub. Runtime calls `waitForDecision(teamId, signal)`, UI calls `approve(teamId, plan)` / `reject(teamId, feedback)`. Up to `maxPlanRevisions` rounds; exceeding the limit is treated as failed.                                                                   |
+| `lib/ai/agent/agent-executor.ts`              | Concretizes "one teammate runs one task" into a single send to Claude SDK / external agent.                                                                                                                                                                                |
+| `lib/ai/agent/background-agent-manager.ts`    | Runtime queue for background agents (long-running).                                                                                                                                                                                                                        |
+| `lib/ai/agent/sample-team.ts`                 | Factory behind the "Try a sample team" button — creates 1 lead + 2 teammates + 3 tasks demo.                                                                                                                                                                               |
+| `lib/ai/agent/external/manager.ts`            | `ExternalAgentManager` — unified entry for external CLI agents; selects `acp-client` or `opencode-client` by protocol.                                                                                                                                                     |
+| `lib/ai/agent/external/protocol-adapter.ts`   | Protocol adapter registry (one each for ACP / OpenCode).                                                                                                                                                                                                                   |
+| `lib/ai/agent/external/canonical-contract.ts` | External agent config normalization — different CLI argument formats → one `ExternalAgentConfig`.                                                                                                                                                                          |
+| `lib/ai/agent/external/ecosystem-adapters.ts` | "Ready" probes for each ecosystem: Claude Code / Cursor / Codex / Cline / Roo Code / Windsurf / Gemini.                                                                                                                                                                    |
+| `lib/ai/agent/external/agent-trace-bridge.ts` | Forwards external agent trace events into the chat agent-trace view.                                                                                                                                                                                                       |
+| `lib/agent-team/team-runtime-dispatcher.ts`   | Routes `@<name>` in team workspace chat to the corresponding runtime. No React dependency (injected streamer + writer); streams back into a placeholder assistant message.                                                                                                 |
+| `lib/agent-team/mention-parser.ts`            | Pure function parsing the first token `@<name>`; returns `target: null` on miss.                                                                                                                                                                                           |
+| `lib/agent-team/runtime-targets.ts`           | Merges team members + two reserved virtual agents (`@claude`, `@codex`) into a mentionable target list; virtual agents take priority when names collide.                                                                                                                   |
+| `lib/agent-team/runtime-streamers.ts`         | Wraps Anthropic SDK / external agent streams into `RuntimeStreamEvent` sequences.                                                                                                                                                                                          |
+| `lib/agent-team/conversation-context.ts`      | Converts team message lists into `ConversationTurn[]`, providing multi-turn context to the runtime.                                                                                                                                                                        |
+| `lib/agent-team/use-runtime-availability.ts`  | React hook that determines whether each runtime is available based on current API key / external agent status.                                                                                                                                                             |
+| `lib/agent/index.ts`                          | Cross-subsystem shared constants and icons (status colors, tool states, task board columns, playback events).                                                                                                                                                              |
+| `lib/agent-trace/cost-estimator.ts`           | Estimates cost (USD) by model + tokens, used by the team token usage panel.                                                                                                                                                                                                |
+| `lib/agent-trace/log-adapter.ts`              | Currently a stub — will be wired when the real agent-trace subsystem lands.                                                                                                                                                                                                |
 
 ### React Workbench
 
@@ -136,14 +136,14 @@ UI component matrix (`components/agent/`):
 
 ### Rust Backend
 
-| Module | Command / Purpose |
-| ------ | ----------------- |
-| `src-tauri/src/agents/mod.rs` | Multi-agent MCP config IO entry point. Reads / writes MCP config files for Claude Code / Cursor / VS Code / Codex / Gemini / Windsurf / Cline / Roo Code. |
-| `src-tauri/src/agents/paths.rs` | Resolves config paths by OS + agent, registering each format (JSON / JSONC / TOML). |
-| `src-tauri/src/agents/io.rs` | Preserves comments on read/write (`toml_edit`, etc.) and tolerates JSONC comments / trailing commas. |
-| `src-tauri/src/agents/commands.rs` | Tauri commands `read_agent_config` / `write_agent_config`, consumed by frontend adapters in `lib/claude/agents/*`. |
-| `src-tauri/src/external_agent/process.rs` | `ExternalAgentProcessManager` — tokio subprocess manager, tracks Starting / Running / Stopping / Stopped / Failed five-state machine, stdout / stderr fed back through mpsc. |
-| `src-tauri/src/external_agent/terminal.rs` | `AcpTerminalManager` — pseudo-terminal under ACP protocol: writes to stdin, receives exit code. |
+| Module                                     | Command / Purpose                                                                                                                                                                                      |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src-tauri/src/agents/mod.rs`              | Multi-agent MCP config IO entry point. Reads / writes MCP config files for Claude Code / Cursor / VS Code / Codex / Gemini / Windsurf / Cline / Roo Code.                                              |
+| `src-tauri/src/agents/paths.rs`            | Resolves config paths by OS + agent, registering each format (JSON / JSONC / TOML).                                                                                                                    |
+| `src-tauri/src/agents/io.rs`               | Preserves comments on read/write (`toml_edit`, etc.) and tolerates JSONC comments / trailing commas.                                                                                                   |
+| `src-tauri/src/agents/commands.rs`         | Tauri commands `read_agent_config` / `write_agent_config`, consumed by frontend adapters in `lib/claude/agents/*`.                                                                                     |
+| `src-tauri/src/external_agent/process.rs`  | `ExternalAgentProcessManager` — tokio subprocess manager, tracks Starting / Running / Stopping / Stopped / Failed five-state machine, stdout / stderr fed back through mpsc.                           |
+| `src-tauri/src/external_agent/terminal.rs` | `AcpTerminalManager` — pseudo-terminal under ACP protocol: writes to stdin, receives exit code.                                                                                                        |
 | `src-tauri/src/external_agent/commands.rs` | Tauri commands `spawn_external_agent` / `send_to_external_agent` / `kill_external_agent`, etc. Every state transition emits an `external-agent://state-change` event for the frontend to subscribe to. |
 
 ## Data Flow / Control Flow

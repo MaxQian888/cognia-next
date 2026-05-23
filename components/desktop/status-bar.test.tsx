@@ -35,8 +35,10 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
 
-const isTauriMock = jest.fn()
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+// `stores/index.ts` calls `isTauri()` at module top-level; declaring the
+// jest.fn inside the factory dodges the TDZ.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 jest.mock("@/lib/tauri/webview-zoom", () => {
   const actual = jest.requireActual<typeof import("@/lib/tauri/webview-zoom")>(

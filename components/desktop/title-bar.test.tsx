@@ -37,12 +37,16 @@ jest.mock("@/lib/logging", () => ({
   }),
 }))
 
-const isTauriMock = jest.fn()
-const transportCall = jest.fn().mockResolvedValue(undefined)
+// `stores/index.ts` calls `isTauri()` at module top-level (Zustand
+// `create()` factory). Declaring the jest.fn inside the factory dodges
+// the TDZ that an outer const would otherwise hit during import hoisting.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
-  transport: { call: (...args: unknown[]) => transportCall(...args) },
+  isTauri: jest.fn(),
+  transport: { call: jest.fn().mockResolvedValue(undefined) },
 }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
+const transportCall = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
+  .transport.call
 
 const setTheme = jest.fn()
 const themeRef = { value: "system" as "light" | "dark" | "system" }

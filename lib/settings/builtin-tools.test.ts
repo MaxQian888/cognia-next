@@ -17,10 +17,10 @@ describe("builtin-tools metadata", () => {
     expect(BUILTIN_SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
   })
 
-  it("registers all five expected categories", () => {
+  it("registers all six expected categories", () => {
     const ids = BUILTIN_TOOL_CATEGORIES.map((c) => c.id)
     expect(ids.sort()).toEqual(
-      ["environment", "fileExtras", "git", "process", "shellAdvanced"].sort()
+      ["environment", "fileExtras", "git", "process", "shellAdvanced", "terminalRepl"].sort()
     )
   })
 
@@ -111,6 +111,7 @@ describe("builtin-tools metadata", () => {
       "process",
       "environment",
       "shellAdvanced",
+      "terminalRepl",
     ]
     for (const id of ids) {
       const names = listToolNamesInCategory(id)

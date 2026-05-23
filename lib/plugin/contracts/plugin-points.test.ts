@@ -222,10 +222,13 @@ describe("plugin point contracts", () => {
     it("emits a contract for every VS Code UI slot with an implementation binding", () => {
       const contracts = PLUGIN_POINT_CONTRACTS.filter((c) => c.id.startsWith("vscode."))
       expect(contracts).toHaveLength(4)
+      // sidebar/webview/activity-bar are bound to the unified webview panel host;
+      // terminal.output is bound to the bridge initializer that surfaces extension
+      // terminals as tabs in <TerminalDock>.
       for (const contract of contracts) {
         expect(contract.kind).toBe("ui-slot")
         expect(contract.status).toBe("implemented")
-        expect(contract.binding).toMatch(/components\/extensions\/vscode-/)
+        expect(contract.binding).toMatch(/^components\/.*\.tsx$/)
       }
     })
 

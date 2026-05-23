@@ -19,10 +19,10 @@ CogniaDB core tables are never accessible from plugin code.
   "version": "1.0.0",
   "dexie": {
     "tables": [
-      { "name": "repos",      "schema": "++id, fullName, credentialMode" },
+      { "name": "repos", "schema": "++id, fullName, credentialMode" },
       { "name": "workOrders", "schema": "++id, [status+repoFullName], issueNumber" },
-      { "name": "events",     "schema": "deliveryId, [repoFullName+seenAt]" },
-      { "name": "audit",      "schema": "++id, [repoFullName+at], runId" }
+      { "name": "events", "schema": "deliveryId, [repoFullName+seenAt]" },
+      { "name": "audit", "schema": "++id, [repoFullName+at], runId" }
     ]
   }
 }
@@ -30,18 +30,19 @@ CogniaDB core tables are never accessible from plugin code.
 
 ### Naming rules
 
-| Rule | Detail |
-|------|--------|
-| Regex | `^[a-z][a-zA-Z0-9_]{0,30}$` |
-| Must start with lowercase letter | `repos` ✅, `Repos` ❌, `1repos` ❌ |
-| No hyphens, spaces, or colons | `work_orders` ✅, `work-orders` ❌ |
-| Maximum length | 31 characters (1 leading + 30 trailing) |
-| Maximum tables per plugin | 20 |
-| Duplicate names | Not allowed within the same plugin |
+| Rule                             | Detail                                  |
+| -------------------------------- | --------------------------------------- |
+| Regex                            | `^[a-z][a-zA-Z0-9_]{0,30}$`             |
+| Must start with lowercase letter | `repos` ✅, `Repos` ❌, `1repos` ❌     |
+| No hyphens, spaces, or colons    | `work_orders` ✅, `work-orders` ❌      |
+| Maximum length                   | 31 characters (1 leading + 30 trailing) |
+| Maximum tables per plugin        | 20                                      |
+| Duplicate names                  | Not allowed within the same plugin      |
 
 ### Schema string
 
-The `schema` value follows [Dexie's `stores()` syntax](https://dexie.org/docs/Version/Version.stores()):
+The `schema` value follows [Dexie's `stores()` syntax](<https://dexie.org/docs/Version/Version.stores()>):
+
 - `++id` — auto-increment primary key
 - `&id` — unique non-auto primary key
 - `name` — indexed non-unique field
@@ -81,10 +82,10 @@ Every table is stored in CogniaDB under the namespaced key
 creates `github-delivery:repos`. Two plugins can both declare `repos` without
 collision:
 
-| Plugin | Declared name | Stored as |
-|--------|---------------|-----------|
-| `github-delivery` | `repos` | `github-delivery:repos` |
-| `gitlab-delivery` | `repos` | `gitlab-delivery:repos` |
+| Plugin            | Declared name | Stored as               |
+| ----------------- | ------------- | ----------------------- |
+| `github-delivery` | `repos`       | `github-delivery:repos` |
+| `gitlab-delivery` | `repos`       | `gitlab-delivery:repos` |
 
 `ctx.dexie.table("repos")` always resolves to the calling plugin's own table.
 Attempting to access another plugin's table throws immediately.
@@ -107,12 +108,8 @@ For schema changes between plugin versions, declare a `migrations` array:
 ```json
 {
   "dexie": {
-    "tables": [
-      { "name": "repos", "schema": "++id, fullName, credentialMode, lastSyncAt" }
-    ],
-    "migrations": [
-      { "toVersion": 2, "upgrade": "addLastSyncAt" }
-    ]
+    "tables": [{ "name": "repos", "schema": "++id, fullName, credentialMode, lastSyncAt" }],
+    "migrations": [{ "toVersion": 2, "upgrade": "addLastSyncAt" }]
   }
 }
 ```
@@ -120,9 +117,12 @@ For schema changes between plugin versions, declare a `migrations` array:
 ```typescript title="src/index.ts"
 // Export the upgrade function by the name declared in migrations[].upgrade.
 export async function addLastSyncAt(tx: import("dexie").Transaction) {
-  await tx.table("github-delivery:repos").toCollection().modify((row) => {
-    row.lastSyncAt = 0
-  })
+  await tx
+    .table("github-delivery:repos")
+    .toCollection()
+    .modify((row) => {
+      row.lastSyncAt = 0
+    })
 }
 ```
 
@@ -139,14 +139,14 @@ Migration rules:
 
 ## Limits
 
-| Resource | Limit | Reason |
-|----------|-------|--------|
-| Tables per plugin | 20 | Keeps the IndexedDB schema bounded |
-| Table name length | 31 chars | Prevents excessively long IndexedDB object-store names |
-| Data retention | ∞ (until explicit purge) | Reinstall safety |
+| Resource          | Limit                    | Reason                                                 |
+| ----------------- | ------------------------ | ------------------------------------------------------ |
+| Tables per plugin | 20                       | Keeps the IndexedDB schema bounded                     |
+| Table name length | 31 chars                 | Prevents excessively long IndexedDB object-store names |
+| Data retention    | ∞ (until explicit purge) | Reinstall safety                                       |
 
 ## DexieDevTools visibility
 
-Plugin tables appear in the [DexieDevTools](https://dexie.org/docs/dexie-react-hooks/useLiveQuery())
+Plugin tables appear in the [DexieDevTools](<https://dexie.org/docs/dexie-react-hooks/useLiveQuery()>)
 browser extension prefixed with `<pluginId>:`, making them easy to identify
 during development.

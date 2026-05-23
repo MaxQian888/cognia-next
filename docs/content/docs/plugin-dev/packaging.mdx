@@ -30,10 +30,10 @@ cognia plugin new my-ts-plugin --kind ts
 
 What you get:
 
-| Kind | Layout |
-|---|---|
-| **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore` |
-| **ts** | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
+| Kind     | Layout                                                                                                                                              |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore`                                                               |
+| **ts**   | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
 
 Run the CLI's printed next-steps to get a green build on either kind.
 
@@ -58,9 +58,9 @@ cognia plugin build --skip-build   # repack an existing artifact without rebuild
 
 Dispatch is by `manifest.type`:
 
-| Type | Build pipeline | Output |
-|---|---|---|
-| `wasm` | `cargo component build --release` → embed `cognia:api-version` custom section → zip | `target/cognia/<id>-<version>.zip` |
+| Type       | Build pipeline                                                                                                                 | Output                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `wasm`     | `cargo component build --release` → embed `cognia:api-version` custom section → zip                                            | `target/cognia/<id>-<version>.zip` |
 | `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` → zip | `target/cognia/<id>-<version>.zip` |
 
 For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default). The cognia host loads `<plugin_path>/<main>` at runtime via dynamic `import()` — it does not transpile TypeScript on the fly.
@@ -154,10 +154,10 @@ In Cognia Settings → Plugins → Marketplace, add your feed URL.
 
 Use semantic versioning. Bumps:
 
-| Change | Bump | Example |
-|---|---|---|
-| Bug fix or non-breaking polish | Patch | `1.0.0` → `1.0.1` |
-| New capability / additive feature | Minor | `1.0.0` → `1.1.0` |
+| Change                                                                                       | Bump  | Example           |
+| -------------------------------------------------------------------------------------------- | ----- | ----------------- |
+| Bug fix or non-breaking polish                                                               | Patch | `1.0.0` → `1.0.1` |
+| New capability / additive feature                                                            | Minor | `1.0.0` → `1.1.0` |
 | Renamed node kinds, removed permissions, changed connector interfaces, contract version bump | Major | `1.0.0` → `2.0.0` |
 
 For WASM plugins, the WIT contract version lives in `wasm.apiVersion` and the CLI embeds it as a custom section in every `.wasm`. The host routes by that section, so old plugins keep loading after a host update unless the host explicitly drops the linker for their version.
@@ -175,8 +175,20 @@ export async function onDeactivate(ctx) {
 ## Related
 
 <Cards>
-  <Card title="Manifest" href="./manifest" description="plugin.json structure and validation rules." />
-  <Card title="Permissions" href="./permissions" description="What permissions to request and why." />
-  <Card title="WASM Plugins" href="./wasm-plugins" description="End-to-end Rust + cargo-component flow." />
+  <Card
+    title="Manifest"
+    href="./manifest"
+    description="plugin.json structure and validation rules."
+  />
+  <Card
+    title="Permissions"
+    href="./permissions"
+    description="What permissions to request and why."
+  />
+  <Card
+    title="WASM Plugins"
+    href="./wasm-plugins"
+    description="End-to-end Rust + cargo-component flow."
+  />
   <Card title="Devtools" href="./devtools" description="Hot reload, debugger, and dev server." />
 </Cards>

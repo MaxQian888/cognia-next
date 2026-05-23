@@ -139,49 +139,34 @@ describe("TerminalBackpressure", () => {
 
   it("flushNow drains pending immediately", () => {
     const term = fakeTerm()
-    let deferred: (() => void) | null = null
-    const bp = new TerminalBackpressure({
-      term,
-      scheduler: (cb) => {
-        deferred = cb
-      },
-    })
+    const { schedule, drain } = deferredScheduler()
+    const bp = new TerminalBackpressure({ term, scheduler: schedule })
     bp.push(new Uint8Array([1, 2]))
     expect(term.writes).toHaveLength(0)
     bp.flushNow()
     expect(term.writes).toHaveLength(1)
     // The scheduled flush still resolves, but pending is empty so it no-ops.
-    deferred?.()
+    drain()
     expect(term.writes).toHaveLength(1)
   })
 
   it("dispose drops pending without writing", () => {
     const term = fakeTerm()
-    let deferred: (() => void) | null = null
-    const bp = new TerminalBackpressure({
-      term,
-      scheduler: (cb) => {
-        deferred = cb
-      },
-    })
+    const { schedule, drain } = deferredScheduler()
+    const bp = new TerminalBackpressure({ term, scheduler: schedule })
     bp.push(new Uint8Array([1, 2]))
     bp.dispose()
-    deferred?.()
+    drain()
     expect(term.writes).toHaveLength(0)
   })
 
   it("reports inFlightBytes as pending + unacked", () => {
     const term = fakeTerm()
-    let deferred: (() => void) | null = null
-    const bp = new TerminalBackpressure({
-      term,
-      scheduler: (cb) => {
-        deferred = cb
-      },
-    })
+    const { schedule, drain } = deferredScheduler()
+    const bp = new TerminalBackpressure({ term, scheduler: schedule })
     bp.push(new Uint8Array(10))
     expect(bp.inFlightBytes).toBe(10)
-    deferred?.()
+    drain()
     expect(bp.inFlightBytes).toBe(10) // moved to unacked
     term.acks.shift()?.()
     expect(bp.inFlightBytes).toBe(0)

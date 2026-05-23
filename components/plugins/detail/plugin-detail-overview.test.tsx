@@ -28,7 +28,7 @@ let mockPluginInMemory:
       lastKnownGoodVerification?: unknown
     }
   | undefined
-jest.mock("@/stores/plugin/plugin-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   usePluginStore: (selector: (s: unknown) => unknown) =>
     selector({ plugins: mockPluginInMemory ? { alpha: mockPluginInMemory } : {} }),
 }))

@@ -18,10 +18,10 @@ This page is the practical reference. For background, see
 
 ## When to use a native tool vs a Plugin MCP tool
 
-| Surface | Use when… | Cost |
-|---|---|---|
-| **Native Anthropic tool** | Anthropic ships a pretrained shape for your domain (computer / bash / text_editor today; more in future model releases) and you want the API-level prompt boost the native shape triggers. | Requires the `anthropic-beta` header for the tool type; only the Anthropic provider supports it. |
-| **Plugin MCP tool** (the more common choice) | You're shipping a custom tool no provider knows about, or you need cross-provider compatibility (the Claude Code SDK exposes the same `cognia-plugin-tools` MCP server to every chat). | Standard MCP tool — the model sees it as `mcp__cognia-plugin-tools__<name>`. |
+| Surface                                      | Use when…                                                                                                                                                                                  | Cost                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| **Native Anthropic tool**                    | Anthropic ships a pretrained shape for your domain (computer / bash / text_editor today; more in future model releases) and you want the API-level prompt boost the native shape triggers. | Requires the `anthropic-beta` header for the tool type; only the Anthropic provider supports it. |
+| **Plugin MCP tool** (the more common choice) | You're shipping a custom tool no provider knows about, or you need cross-provider compatibility (the Claude Code SDK exposes the same `cognia-plugin-tools` MCP server to every chat).     | Standard MCP tool — the model sees it as `mcp__cognia-plugin-tools__<name>`.                     |
 
 If you're unsure, ship a Plugin MCP tool first. Promote to a native
 tool only when Anthropic publishes a pretrained shape that matches
@@ -50,24 +50,24 @@ cleanly on disable. The same shape can be created in code with
       "type": "spreadsheet_20260601",
       "betaHeader": "spreadsheet-2026-06-01",
       "executeIpc": { "invoke": "plugin_spreadsheet_execute" },
-      "permissionPolicy": "always-ask"
-    }
+      "permissionPolicy": "always-ask",
+    },
   ],
-  "permissions": ["native:input"]
+  "permissions": ["native:input"],
 }
 ```
 
 ### Field reference
 
-| Field | Required | Notes |
-|---|---|---|
-| `id` | yes | Stable id within the registry. `Character.computerUseSettings.allowedToolIds` filters by this id. |
-| `name` | yes | The name the model sees. Should match the conventional snake_case used by Anthropic's existing native tools. |
-| `type` | yes | The Anthropic native tool type tag (e.g. `computer_20251124`, `text_editor_20250728`). Drives the `anthropic-beta` header. |
-| `betaHeader` | optional | Override for the `anthropic-beta` header value when the tool type isn't one Cognia's defaults map to. |
-| `displayWidthPx` / `displayHeightPx` / `displayNumber` / `enableZoom` | optional | Display metadata for computer-style tools. Omit for non-screen tools. |
-| `executeIpc.invoke` | yes | The Tauri command name the sidecar forwards every `tool_use` to. **You implement this command** — see the next section. |
-| `permissionPolicy` | optional | `"always-ask"` (default) / `"session-allow"` / `"preauth"`. Hint to the renderer-side approval flow; the Rust permission gate runs independently. |
+| Field                                                                 | Required | Notes                                                                                                                                             |
+| --------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                  | yes      | Stable id within the registry. `Character.computerUseSettings.allowedToolIds` filters by this id.                                                 |
+| `name`                                                                | yes      | The name the model sees. Should match the conventional snake_case used by Anthropic's existing native tools.                                      |
+| `type`                                                                | yes      | The Anthropic native tool type tag (e.g. `computer_20251124`, `text_editor_20250728`). Drives the `anthropic-beta` header.                        |
+| `betaHeader`                                                          | optional | Override for the `anthropic-beta` header value when the tool type isn't one Cognia's defaults map to.                                             |
+| `displayWidthPx` / `displayHeightPx` / `displayNumber` / `enableZoom` | optional | Display metadata for computer-style tools. Omit for non-screen tools.                                                                             |
+| `executeIpc.invoke`                                                   | yes      | The Tauri command name the sidecar forwards every `tool_use` to. **You implement this command** — see the next section.                           |
+| `permissionPolicy`                                                    | optional | `"always-ask"` (default) / `"session-allow"` / `"preauth"`. Hint to the renderer-side approval flow; the Rust permission gate runs independently. |
 
 ## Tauri command contract — `executeIpc.invoke`
 

@@ -6,9 +6,11 @@
  * cognia's reuse layer maps each VS Code Terminal to:
  *
  *   - A `ctx.shell.spawn` child process (the real subprocess).
- *   - A "terminal output" panel mounted under the `vscode.terminal.output`
- *     UI extension point (Phase M1.C, see
- *     `components/extensions/vscode-terminal-panel.tsx`).
+ *   - A terminal session surfaced under the `vscode.terminal.output`
+ *     UI extension point. Wiring lives in
+ *     `components/providers/initializers/terminal-bridge-initializer.tsx`;
+ *     extension-spawned terminals appear as tabs in `<TerminalDock>`
+ *     (`components/terminal/terminal-dock.tsx`).
  *
  * cognia ships NO xterm.js TTY emulator — Cline-class extensions only
  * need RPC stdin/stdout, not a real pseudo-terminal. If a Phase 2 user

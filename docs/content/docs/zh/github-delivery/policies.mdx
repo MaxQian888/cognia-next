@@ -28,17 +28,20 @@ description: GhPolicy 字段定义、6 类 action 在 policy-gate.ts 中的判�
       default: "true",
     },
     requireHumanApproval: {
-      description: "merge / 非 draft release 必须经过人审批。被拒时返回 needsApproval: true,会路由到 HITL 草稿。",
+      description:
+        "merge / 非 draft release 必须经过人审批。被拒时返回 needsApproval: true,会路由到 HITL 草稿。",
       type: "boolean",
       default: "true",
     },
     maxDailyMerges: {
-      description: "机器人每 UTC 日 merge 最多次数。当天的计数从 audit 表 [repoFullName+at] 索引扫出来。",
+      description:
+        "机器人每 UTC 日 merge 最多次数。当天的计数从 audit 表 [repoFullName+at] 索引扫出来。",
       type: "number",
       default: "5",
     },
     quietHours: {
-      description: "安静时段窗口。复用 lib/connectors/outbound-runner 的 isInQuietHours 算法。可选。",
+      description:
+        "安静时段窗口。复用 lib/connectors/outbound-runner 的 isInQuietHours 算法。可选。",
       type: "QuietHoursWindow | undefined",
       default: "undefined",
     },
@@ -48,7 +51,8 @@ description: GhPolicy 字段定义、6 类 action 在 policy-gate.ts 中的判�
       default: '["^main$", "^master$", "^release/"]',
     },
     allowedAuthors: {
-      description: "允许机器人对其 PR/Issue 动手的作者集合。三种 kind:collaborators / members / explicit(显式 logins 数组)。",
+      description:
+        "允许机器人对其 PR/Issue 动手的作者集合。三种 kind:collaborators / members / explicit(显式 logins 数组)。",
       type: "AllowedAuthors",
       default: '{ kind: "collaborators" }',
     },
@@ -57,9 +61,9 @@ description: GhPolicy 字段定义、6 类 action 在 policy-gate.ts 中的判�
 
 ```ts title="lib/github/types.ts(节选)"
 export interface QuietHoursWindow {
-  from: string  // "HH:MM" 24h
-  to: string    // "HH:MM" 24h
-  tz: string    // IANA tz,例如 "Asia/Shanghai"
+  from: string // "HH:MM" 24h
+  to: string // "HH:MM" 24h
+  tz: string // IANA tz,例如 "Asia/Shanghai"
 }
 
 export type AllowedAuthors =
@@ -111,18 +115,18 @@ flowchart TB
 
 ### `merge`
 
-| 检查项               | 失败时                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `requireGreenCi`     | `deny("merge requires CI=success but got '<status>'")`                                  |
+| 检查项                 | 失败时                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `requireGreenCi`       | `deny("merge requires CI=success but got '<status>'")`                                    |
 | `requireHumanApproval` | `denyAwaitingApproval("merge requires explicit human approval")` —— `needsApproval: true` |
-| `maxDailyMerges`     | `deny("daily merge cap of N reached (M today)")`                                         |
-| `allowedAuthors`     | 见下                                                                                    |
+| `maxDailyMerges`       | `deny("daily merge cap of N reached (M today)")`                                          |
+| `allowedAuthors`       | 见下                                                                                      |
 
 ### `push`
 
-| 检查项                                  | 失败时                                                                                                |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `branchProtection` 正则                 | `deny("branch '<branch>' matches protection regex '<regex>'")`                                        |
+| 检查项                  | 失败时                                                         |
+| ----------------------- | -------------------------------------------------------------- |
+| `branchProtection` 正则 | `deny("branch '<branch>' matches protection regex '<regex>'")` |
 
 例:`action.github.openPr` 把 `head` 当成 push 分支,所以 `head` 命中保护正则会被拒。
 `action.github.pushTag` 把 `refs/tags/<tag>` 当成 push 分支 —— 若你想保护 `release/v*` 风格的
@@ -130,9 +134,9 @@ tag,可以加上 `^refs/tags/release/` 正则。
 
 ### `release`
 
-| 检查项                                          | 失败时                                                                                 |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `action.draft === true`                         | 总是 allow(草稿可随便建,不会被外部看到)                                              |
+| 检查项                                                           | 失败时                                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `action.draft === true`                                          | 总是 allow(草稿可随便建,不会被外部看到)                                         |
 | `requireHumanApproval && humanApproved !== true`(且 draft=false) | `denyAwaitingApproval("publishing a release requires explicit human approval")` |
 
 ### `comment` / `label` / `close`
@@ -141,10 +145,11 @@ tag,可以加上 `^refs/tags/release/` 正则。
 
 ```ts title="lib/github/policy-gate.ts"
 function pickAuthorPolicy(policy, ctx, authorLogin) {
-  if (!authorLogin) return ALLOW  // 没作者信息直接放过
+  if (!authorLogin) return ALLOW // 没作者信息直接放过
   switch (policy.allowedAuthors.kind) {
     case "explicit":
-      return logins.includes(authorLogin) ? ALLOW
+      return logins.includes(authorLogin)
+        ? ALLOW
         : deny(`author "${authorLogin}" is not in the explicit allow-list`)
     case "collaborators":
     case "members":
@@ -152,7 +157,8 @@ function pickAuthorPolicy(policy, ctx, authorLogin) {
       // 这里不再发请求,只做集合判定。
       if (!ctx.knownAllowedLogins)
         return deny(`cannot evaluate "<kind>" policy: caller did not pass knownAllowedLogins`)
-      return ctx.knownAllowedLogins.includes(authorLogin) ? ALLOW
+      return ctx.knownAllowedLogins.includes(authorLogin)
+        ? ALLOW
         : deny(`author "${authorLogin}" is not in the <kind> list`)
   }
 }
@@ -183,23 +189,23 @@ function pickAuthorPolicy(policy, ctx, authorLogin) {
   `approval.editedBody` 被 `guardedExecutor` 透传给 `run`,执行器优先用编辑后的正文。
 - `reject`:写一行"user rejected HITL approval"的 deny audit,执行器返回
   `{ output: { skipped: true, reason: "HITL rejected: ...", draftId } }`。
-</Step>
+    </Step>
 </Steps>
 
 <Callout type="info">
-**重启安全。** 草稿留在 Dexie。进程崩溃后,工作流被 `resume-controller` 重新拉起时,
-bridge 会先查 `connectorDrafts` 里是否已有 `(runId, stepId)` 的 pending 行 —— 有的话直接复用,
-不会再开一条新草稿。`runIssueLoop` 用 `long-step-runner` 也做了类似的 checkpoint 续跑。
+  **重启安全。** 草稿留在 Dexie。进程崩溃后,工作流被 `resume-controller` 重新拉起时, bridge 会先查
+  `connectorDrafts` 里是否已有 `(runId, stepId)` 的 pending 行 —— 有的话直接复用,
+  不会再开一条新草稿。`runIssueLoop` 用 `long-step-runner` 也做了类似的 checkpoint 续跑。
 </Callout>
 
 ## 安静时段算法
 
 复用 `lib/connectors/outbound-runner` 的两个工具函数:
 
-| 函数                                                   | 用途                                                                 |
-| ------------------------------------------------------ | -------------------------------------------------------------------- |
-| `isInQuietHours(nowMs, from, to, tz)`                  | 判断 nowMs 是否落在 [from, to] 区间。处理跨午夜场景。               |
-| `msUntilQuietEnd(nowMs, to, tz)`                       | 返回距离 to 的毫秒数。用于 `mustWait.until = now + msUntilQuietEnd`。 |
+| 函数                                  | 用途                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `isInQuietHours(nowMs, from, to, tz)` | 判断 nowMs 是否落在 [from, to] 区间。处理跨午夜场景。                 |
+| `msUntilQuietEnd(nowMs, to, tz)`      | 返回距离 to 的毫秒数。用于 `mustWait.until = now + msUntilQuietEnd`。 |
 
 ```ts title="lib/github/policy-gate.ts"
 function checkQuietHours(policy, now) {
@@ -238,36 +244,36 @@ export function mergePolicy(base: GhPolicy, override?: Partial<GhPolicy>): GhPol
 
 典型用法:
 
-| 场景                                          | `policyOverride` 写法                                  |
-| --------------------------------------------- | ------------------------------------------------------ |
-| 紧急 release 跳过人审批                       | `{ requireHumanApproval: false }`                      |
-| 让某节点临时绕过 quiet hours                  | `{ quietHours: undefined }`(注意:由于 ??,需在表单里清空) |
-| 仅放过 release branch                         | `{ branchProtection: ["^main$", "^master$"] }`         |
-| 允许非 collaborator 的 PR 也被自动评论        | `{ allowedAuthors: { kind: "explicit", logins: ["all"] } }`(但要谨慎)|
+| 场景                                   | `policyOverride` 写法                                                 |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| 紧急 release 跳过人审批                | `{ requireHumanApproval: false }`                                     |
+| 让某节点临时绕过 quiet hours           | `{ quietHours: undefined }`(注意:由于 ??,需在表单里清空)              |
+| 仅放过 release branch                  | `{ branchProtection: ["^main$", "^master$"] }`                        |
+| 允许非 collaborator 的 PR 也被自动评论 | `{ allowedAuthors: { kind: "explicit", logins: ["all"] } }`(但要谨慎) |
 
 ## Audit 写入
 
 每次 `checkPolicy` 调用都会被 `guardedExecutor` 写一行 audit:
 
-| 字段                                          | 值                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `repoFullName`                                | 从 action 中提取(`pr.repo` / `issue.repo` / `repo`)                                       |
-| `runId` / `stepId`                            | 当前 workflow run / step                                                                    |
-| `action`                                      | `GhAction` 判别式(原样存)                                                                 |
-| `decision`                                    | `PolicyDecision` 判别式                                                                     |
-| `reason`                                      | 决定的 reason 字段(allow 时填 "policy allowed")                                            |
-| `at`                                          | wall-clock 毫秒                                                                             |
+| 字段               | 值                                                  |
+| ------------------ | --------------------------------------------------- |
+| `repoFullName`     | 从 action 中提取(`pr.repo` / `issue.repo` / `repo`) |
+| `runId` / `stepId` | 当前 workflow run / step                            |
+| `action`           | `GhAction` 判别式(原样存)                           |
+| `decision`         | `PolicyDecision` 判别式                             |
+| `reason`           | 决定的 reason 字段(allow 时填 "policy allowed")     |
+| `at`               | wall-clock 毫秒                                     |
 
 HITL 流程会写**两行** audit(一次 deny + 一次 allow / 最终 deny),工作流编辑器的 audit Tab
 会自动把它们合并展示。详见 [audit](./audit)。
 
 ## 源码索引
 
-| 文件                                                                      | 用途                                          |
-| ------------------------------------------------------------------------- | --------------------------------------------- |
-| `lib/github/types.ts`                                                     | `GhPolicy` / `PolicyDecision` / `GhAction`     |
-| `lib/github/policy-gate.ts`                                               | `checkPolicy` + `mergePolicy` 实现             |
-| `lib/connectors/outbound-runner.ts`                                       | 共享的 `isInQuietHours` / `msUntilQuietEnd`    |
-| `plugins/github-delivery/src/workflow/shared.ts`                          | `guardedExecutor` —— 调用 policy + 写 audit    |
-| `plugins/github-delivery/src/approval/draft-bridge.ts`                    | HITL 草稿桥                                    |
-| `components/settings/github-delivery/tabs/policies-tab.tsx`               | 仓库级策略 UI                                  |
+| 文件                                                        | 用途                                        |
+| ----------------------------------------------------------- | ------------------------------------------- |
+| `lib/github/types.ts`                                       | `GhPolicy` / `PolicyDecision` / `GhAction`  |
+| `lib/github/policy-gate.ts`                                 | `checkPolicy` + `mergePolicy` 实现          |
+| `lib/connectors/outbound-runner.ts`                         | 共享的 `isInQuietHours` / `msUntilQuietEnd` |
+| `plugins/github-delivery/src/workflow/shared.ts`            | `guardedExecutor` —— 调用 policy + 写 audit |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`      | HITL 草稿桥                                 |
+| `components/settings/github-delivery/tabs/policies-tab.tsx` | 仓库级策略 UI                               |

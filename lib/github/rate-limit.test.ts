@@ -1,8 +1,4 @@
-import {
-  fetchRateLimit,
-  formatReset,
-  percentRemaining,
-} from "./rate-limit"
+import { fetchRateLimit, formatReset, percentRemaining } from "./rate-limit"
 
 function fakeOctokit(data: unknown) {
   return { request: jest.fn(async () => ({ data })) } as unknown as import("@octokit/core").Octokit

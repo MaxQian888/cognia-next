@@ -184,13 +184,16 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
 ])
 
 // VS Code extension slots are wired through `components/extensions/
-// vscode-extension-panel.tsx` and `components/extensions/vscode-terminal-panel.tsx`
-// — a direct webview-registration host pattern rather than a
-// `<PluginExtensionSlot>` JSX mount. They are fully functional at runtime,
-// so the contract reports `status: "implemented"` with their explicit
-// binding files in `IMPLEMENTED_EXTENSION_POINT_BINDINGS` below, and the
-// `REGISTRATION_HOST_EXTENSION_POINTS` set below tells the slot audit to
-// verify the binding file exists instead of counting JSX mounts.
+// vscode-extension-panel.tsx` (sidebar/webview/activity-bar) and
+// `components/providers/initializers/terminal-bridge-initializer.tsx`
+// (terminal output — surfaces extension-spawned terminals as tabs in
+// `<TerminalDock>`). Both are direct registration hosts rather than a
+// `<PluginExtensionSlot>` JSX mount. They are fully functional at
+// runtime, so the contract reports `status: "implemented"` with their
+// explicit binding files in `IMPLEMENTED_EXTENSION_POINT_BINDINGS`
+// below, and the `REGISTRATION_HOST_EXTENSION_POINTS` set below tells
+// the slot audit to verify the binding file exists instead of counting
+// JSX mounts.
 // The Set is kept empty (rather than removed) so future "register without
 // JSX mount" slots can be added by id without touching the status logic.
 const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>()
@@ -243,7 +246,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "vscode.sidebar.view": "components/extensions/vscode-extension-panel.tsx",
   "vscode.webview.panel": "components/extensions/vscode-extension-panel.tsx",
   "vscode.activity-bar": "components/extensions/vscode-extension-panel.tsx",
-  "vscode.terminal.output": "components/extensions/vscode-terminal-panel.tsx",
+  "vscode.terminal.output": "components/providers/initializers/terminal-bridge-initializer.tsx",
 }
 
 const EXTENSION_POINT_ALIASES: Record<string, CanonicalExtensionPoint> = {

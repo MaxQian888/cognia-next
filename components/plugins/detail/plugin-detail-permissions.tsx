@@ -35,7 +35,7 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const perms = usePluginPermissions()
 
   const manifest =
-    rowState.state === "ready" ? (rowState.row.manifest as PluginManifest) : undefined
+    rowState.state === "ready" ? (rowState.row.manifest as unknown as PluginManifest) : undefined
   const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
   const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
   const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])

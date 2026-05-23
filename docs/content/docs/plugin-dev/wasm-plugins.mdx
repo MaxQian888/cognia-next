@@ -72,14 +72,14 @@ approves them once during install; per-call prompts are deliberately out
 of scope (see [Capability granter](#capability-granter)). Available
 capabilities:
 
-| Capability key | What the plugin can call |
-|---|---|
-| `notification` | `cognia:plugin/notification.notify` |
+| Capability key                         | What the plugin can call                                                |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `notification`                         | `cognia:plugin/notification.notify`                                     |
 | `filesystem:read` / `filesystem:write` | WASI filesystem on preopened dirs (plugin data dir is always preopened) |
-| `network:fetch` | `wasi:http/outgoing-handler` + `cognia:plugin/ai.generate-text` |
-| `process:spawn` / `shell:execute` | `cognia:plugin/process.exec` |
-| `clipboard:read` / `clipboard:write` | `cognia:plugin/clipboard.{read,write}-text` (stubbed in v0.1) |
-| `secrets:read` / `secrets:write` | `cognia:plugin/secrets.{get,set,delete}` (per-plugin keyring) |
+| `network:fetch`                        | `wasi:http/outgoing-handler` + `cognia:plugin/ai.generate-text`         |
+| `process:spawn` / `shell:execute`      | `cognia:plugin/process.exec`                                            |
+| `clipboard:read` / `clipboard:write`   | `cognia:plugin/clipboard.{read,write}-text` (stubbed in v0.1)           |
+| `secrets:read` / `secrets:write`       | `cognia:plugin/secrets.{get,set,delete}` (per-plugin keyring)           |
 
 Declare them in the manifest:
 
@@ -90,7 +90,7 @@ Declare them in the manifest:
 }
 ```
 
-The cognia host enforces these *inside the wasmtime store* — a plugin
+The cognia host enforces these _inside the wasmtime store_ — a plugin
 without `process:spawn` cannot call `process::exec` regardless of what
 its Rust code says. There is no API-boundary check to bypass.
 
@@ -205,7 +205,7 @@ runtime prompts are out — they're noisy and well-modeled by Zed's
 approach. The grant is stored in cognia's permission guard and reapplied
 on every plugin enable.
 
-To revoke a capability after the fact: Settings → Plugins → *Your plugin*
+To revoke a capability after the fact: Settings → Plugins → _Your plugin_
 → Permissions → toggle off. The next call to that capability traps.
 
 ## Dev loop
@@ -243,15 +243,15 @@ To bump:
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `cargo-component not found` | `cargo install --locked cargo-component` |
-| `target wasm32-wasip2 not installed` | `rustup target add wasm32-wasip2` |
-| `signature verification failed` | The bundle bytes don't match the `.sig`. Re-run `cognia plugin sign` or re-download. |
-| `capability X not granted` | Add the permission to `plugin.json.permissions[]`, reinstall, and grant in the sheet — or grant it now in Settings → Plugins → Permissions. |
-| `no linker registered for v0.N.x` | Your plugin declares a contract version cognia doesn't know about. Either downgrade the plugin to v0.1 or upgrade cognia. |
-| Plugin call hangs and traps after 30 s | Your guest exceeded the call timeout. Set `wasm.callTimeoutMs` higher (or split the work into smaller calls). |
-| `MemoryOutOfBounds` trap | The plugin hit the 64 MiB linear-memory cap. Set `wasm.memoryLimitMb` higher (up to 4096). |
+| Symptom                                | Fix                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo-component not found`            | `cargo install --locked cargo-component`                                                                                                    |
+| `target wasm32-wasip2 not installed`   | `rustup target add wasm32-wasip2`                                                                                                           |
+| `signature verification failed`        | The bundle bytes don't match the `.sig`. Re-run `cognia plugin sign` or re-download.                                                        |
+| `capability X not granted`             | Add the permission to `plugin.json.permissions[]`, reinstall, and grant in the sheet — or grant it now in Settings → Plugins → Permissions. |
+| `no linker registered for v0.N.x`      | Your plugin declares a contract version cognia doesn't know about. Either downgrade the plugin to v0.1 or upgrade cognia.                   |
+| Plugin call hangs and traps after 30 s | Your guest exceeded the call timeout. Set `wasm.callTimeoutMs` higher (or split the work into smaller calls).                               |
+| `MemoryOutOfBounds` trap               | The plugin hit the 64 MiB linear-memory cap. Set `wasm.memoryLimitMb` higher (up to 4096).                                                  |
 
 ## Reference
 

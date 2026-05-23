@@ -69,7 +69,7 @@ jest.mock("../devtools/debugger", () => ({
 }))
 
 // Mock plugin store
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: () => ({
       emitEvent: jest.fn(),

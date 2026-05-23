@@ -59,12 +59,13 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         id: "test",
         name: "test",
         version: "0.0.0",
+        description: "test",
         type: "frontend",
         permissions: [],
         capabilities: [],
       } as PluginManifest
       // Setting the field to undefined exercises the index access.
-      ;(emptyManifest as Record<string, unknown>)[descriptor.manifestField] = undefined
+      ;(emptyManifest as unknown as Record<string, unknown>)[descriptor.manifestField] = undefined
       expect(descriptor.manifestField).toMatch(/^[a-zA-Z][a-zA-Z0-9]*$/)
     })
 

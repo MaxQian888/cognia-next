@@ -25,9 +25,9 @@ Every new contribution uses the same lazy-factory shape:
       "id": "baidu",
       "label": "Baidu OCR",
       "entry": "providers/baidu.js",
-      "export": "createBaiduProvider"
-    }
-  ]
+      "export": "createBaiduProvider",
+    },
+  ],
 }
 ```
 
@@ -37,14 +37,14 @@ dynamic-imports on first use.
 
 The six new manifest blocks:
 
-| Field | Drives | Permission |
-|-------|--------|------------|
-| `ocrProviders` | OCR registry contributions | `network:fetch` |
-| `workspaceBackends` | Issue-loop / sandbox runners | `process:spawn` |
-| `messageRenderers` | Custom `part.type` React components | `extension:ui` |
-| `aiProviders` | Plugin-internal LLM / embedding | `network:fetch` |
-| `modalMounts` | Declarative modal pre-registration | `extension:ui` |
-| `chatMiddlewares` | Around-style chat pipeline | `agent:control` |
+| Field               | Drives                              | Permission      |
+| ------------------- | ----------------------------------- | --------------- |
+| `ocrProviders`      | OCR registry contributions          | `network:fetch` |
+| `workspaceBackends` | Issue-loop / sandbox runners        | `process:spawn` |
+| `messageRenderers`  | Custom `part.type` React components | `extension:ui`  |
+| `aiProviders`       | Plugin-internal LLM / embedding     | `network:fetch` |
+| `modalMounts`       | Declarative modal pre-registration  | `extension:ui`  |
+| `chatMiddlewares`   | Around-style chat pipeline          | `agent:control` |
 
 Plus `configComponent?: { entry, export }` for a per-plugin custom
 settings UI panel.
@@ -80,9 +80,15 @@ ctx.workspace.registerBackend({
   id: "my-sandbox",
   label: "My Sandbox",
   backend: {
-    async clone({ repoFullName, branch, token }) { /* ... */ },
-    async commitAndPush({ workspace, message, remoteBranch }) { /* ... */ },
-    async remove(handle) { /* ... */ },
+    async clone({ repoFullName, branch, token }) {
+      /* ... */
+    },
+    async commitAndPush({ workspace, message, remoteBranch }) {
+      /* ... */
+    },
+    async remove(handle) {
+      /* ... */
+    },
   },
 })
 ```
@@ -112,9 +118,7 @@ provider. Use these calls for plugin-internal background tasks
 stores). Influence the main chat via `ctx.chat.use()` instead.
 
 ```ts
-const { text } = await ctx.ai.chat([
-  { role: "user", content: "Summarize this." }
-])
+const { text } = await ctx.ai.chat([{ role: "user", content: "Summarize this." }])
 
 const vectors = await ctx.ai.embed(["hello", "world"])
 ```
@@ -138,15 +142,18 @@ skips that middleware), 3-strike circuit breaker disables on repeated
 failure.
 
 ```ts
-const dispose = ctx.chat.use(async (req, next) => {
-  const before = Date.now()
-  const res = await next()
-  ctx.logger.info(`turn took ${Date.now() - before}ms`)
-  return res
-}, { id: "telemetry", priority: 10, timeoutMs: 3000 })
+const dispose = ctx.chat.use(
+  async (req, next) => {
+    const before = Date.now()
+    const res = await next()
+    ctx.logger.info(`turn took ${Date.now() - before}ms`)
+    return res
+  },
+  { id: "telemetry", priority: 10, timeoutMs: 3000 }
+)
 ```
 
-For a *transform-only* hook (no short-circuit, no async wrapping), use
+For a _transform-only_ hook (no short-circuit, no async wrapping), use
 the lighter `onBuildOptions` hook instead:
 
 ```ts
@@ -155,7 +162,7 @@ export const hooks: PluginHooks = {
     if (options.systemPrompt) {
       return {
         ...options,
-        systemPrompt: options.systemPrompt + "\n\nBe concise."
+        systemPrompt: options.systemPrompt + "\n\nBe concise.",
       }
     }
   },
@@ -179,20 +186,18 @@ if (ctx.capabilities.tauri) {
 ## Per-plugin custom settings UI
 
 Add `configComponent` to your manifest. The host renders your component
-in the plugin's settings tab *instead of* the auto-generated form derived
+in the plugin's settings tab _instead of_ the auto-generated form derived
 from `configSchema`:
 
 ```jsonc
 {
-  "configComponent": { "entry": "settings.js", "export": "MySettings" }
+  "configComponent": { "entry": "settings.js", "export": "MySettings" },
 }
 ```
 
 ```tsx
 export const MySettings: ConfigComponent = ({ config, onSave }) => {
-  return <button onClick={() => onSave({ ...config, enabled: true })}>
-    Enable
-  </button>
+  return <button onClick={() => onSave({ ...config, enabled: true })}>Enable</button>
 }
 ```
 
@@ -212,10 +217,10 @@ runtime (variable names are constrained to `^--[a-z][a-z0-9-]*$`, values
       "cssVariables": {
         "--background": "#0a0a0a",
         "--foreground": "#fafafa",
-        "--accent-1": "oklch(0.7 0.15 220)"
-      }
-    }
-  ]
+        "--accent-1": "oklch(0.7 0.15 220)",
+      },
+    },
+  ],
 }
 ```
 
@@ -233,10 +238,10 @@ Two previously deprecated slots are revived in v2:
 If your plugin still uses the old paths, the host accepts them under
 `@deprecated` shims. Migrate when convenient:
 
-| Old | New |
-|-----|-----|
-| `installOcrRuntime()` global | `ctx.ocr.registerProvider(...)` |
-| `setE2BBackend(impl)` | `ctx.workspace.registerBackend({ id: "e2b", ... })` |
+| Old                                       | New                                                              |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| `installOcrRuntime()` global              | `ctx.ocr.registerProvider(...)`                                  |
+| `setE2BBackend(impl)`                     | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
 | `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` or `manifest.workflows.nodes[]` |
-| `registerPluginI18n({ ... })` | `manifest.i18n` (auto-wired) |
-| Direct `isTauri()` import | `ctx.capabilities.tauri` |
+| `registerPluginI18n({ ... })`             | `manifest.i18n` (auto-wired)                                     |
+| Direct `isTauri()` import                 | `ctx.capabilities.tauri`                                         |

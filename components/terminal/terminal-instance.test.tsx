@@ -201,14 +201,14 @@ describe("TerminalInstance", () => {
   })
 
   it("wires term.onData to session.write for user input", async () => {
-    let captured: ((text: string) => void) | null = null
+    const captured: { cb: ((text: string) => void) | null } = { cb: null }
     mockTermInstance.onData = jest.fn((cb: (text: string) => void) => {
-      captured = cb
+      captured.cb = cb
       return { dispose: jest.fn() }
     })
     render(<TerminalInstance sessionId="s-1" />)
     await flushAsync()
-    captured?.("ls\n")
+    captured.cb?.("ls\n")
     expect(sessionRegistry.current!.write).toHaveBeenCalledWith("ls\n")
   })
 

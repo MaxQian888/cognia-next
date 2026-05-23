@@ -528,14 +528,20 @@ function PerPluginOverridesCard({
     let cancelled = false
     void (async () => {
       try {
-        const { usePluginStore } = await import("@/stores/plugin/plugin-store")
+        const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+        // `native:*` permissions are declared by plugins (e.g. computer-use) but
+        // smuggled past `PluginPermission` via an `as never` cast in their
+        // manifest. Compare against a string set so the union doesn't reject
+        // the lookup at compile time.
+        const NATIVE_AUTOMATION_PERMS: ReadonlySet<string> = new Set([
+          "native:input",
+          "native:screen",
+        ])
         const plugins = Object.values(usePluginStore.getState().plugins)
         const rows = plugins
           .filter((p) => p.status === "enabled")
           .filter((p) =>
-            (p.manifest.permissions ?? []).some(
-              (perm) => perm === "native:input" || perm === "native:screen"
-            )
+            (p.manifest.permissions ?? []).some((perm) => NATIVE_AUTOMATION_PERMS.has(perm))
           )
           .map((p) => ({ id: p.manifest.id, name: p.manifest.name }))
           .sort((a, b) => a.name.localeCompare(b.name))

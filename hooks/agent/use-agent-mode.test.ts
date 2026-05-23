@@ -80,7 +80,7 @@ const pluginModes: Array<{
   outputFormat?: string
 }> = []
 
-jest.mock("@/stores/plugin/plugin-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   usePluginStore: <T>(selector: (s: { getAllModes: () => typeof pluginModes }) => T): T =>
     selector({ getAllModes: () => pluginModes }),
 }))

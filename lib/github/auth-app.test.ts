@@ -6,7 +6,10 @@ import {
   getInstallationToken,
 } from "./auth-app"
 
-const CFG = { appId: 12345, privateKey: "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----" }
+const CFG = {
+  appId: 12345,
+  privateKey: "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
+}
 const INSTALL = 99999
 
 beforeEach(() => clearInstallationTokenCache())

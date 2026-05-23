@@ -125,6 +125,7 @@ describe("load", () => {
         process: false,
         environment: true,
         shellAdvanced: false,
+        terminalRepl: false,
       },
     })
   })
@@ -259,6 +260,7 @@ describe("setBuiltinToolEnabled", () => {
         process: true,
         environment: true,
         shellAdvanced: false,
+        terminalRepl: false,
       },
     })
     dbSettings.saveSettings.mockResolvedValue(after)
@@ -272,6 +274,7 @@ describe("setBuiltinToolEnabled", () => {
         process: true,
         environment: true,
         shellAdvanced: false,
+        terminalRepl: false,
       },
     })
     expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
@@ -306,6 +309,7 @@ describe("setBuiltinToolEnabled", () => {
         process: false,
         environment: true,
         shellAdvanced: true,
+        terminalRepl: false,
       },
     })
   })

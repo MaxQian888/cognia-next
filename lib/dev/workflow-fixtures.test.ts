@@ -54,11 +54,15 @@ describe("workflow-fixtures", () => {
     // sidebar but has no first-class seed yet — it's covered by the desktop
     // family specs through editor-level interaction only. The two `*.team.*`
     // kinds were added with the agent-teams workflow integration; they are
-    // exercised through the agent-team-runtime tests rather than fixtures.)
+    // exercised through the agent-team-runtime tests rather than fixtures.
+    // `action.system.terminal` is exercised via terminal-dock E2E plus the
+    // `lib/workflow/nodes/terminal.test.ts` executor spec; no seed fixture
+    // yet because the integrated terminal needs a Tauri host.)
     const skip = new Set<string>([
       "trigger.desktop.event",
       "trigger.team",
       "action.team.task.dispatch",
+      "action.system.terminal",
     ])
     const missing = WORKFLOW_NODE_KINDS.filter((k) => !seen.has(k) && !skip.has(k))
     expect(missing).toEqual([])

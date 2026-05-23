@@ -265,11 +265,11 @@ back" at events from the past few minutes.
 Axum handlers run in Rust, but the data to read / write lives in the WebView's
 Dexie. Three bridge sets solve this:
 
-| Bridge                       | Direction        | Purpose                                            |
-| ---------------------------- | ---------------- | -------------------------------------------------- |
-| `sync_bridge.rs`             | Rust → TS → Rust | `sync_pull` pulls incremental Dexie table data     |
-| `desktop_messages_bridge.rs` | Rust → TS → Rust | `message_update` / `delete` / `session_list`       |
-| `desktop_writes_bridge.rs`   | Rust → TS → Rust | Wave 2 write commands for character/skill/plugin   |
+| Bridge                       | Direction        | Purpose                                          |
+| ---------------------------- | ---------------- | ------------------------------------------------ |
+| `sync_bridge.rs`             | Rust → TS → Rust | `sync_pull` pulls incremental Dexie table data   |
+| `desktop_messages_bridge.rs` | Rust → TS → Rust | `message_update` / `delete` / `session_list`     |
+| `desktop_writes_bridge.rs`   | Rust → TS → Rust | Wave 2 write commands for character/skill/plugin |
 
 All bridges share the same protocol shape: Rust emits
 `companion://<kind>-request` with a `request_id`; the WebView processes it and
@@ -341,7 +341,10 @@ or `a2-rs`:
     title="Server status"
     description="Main toggle + bind mode (loopback / LAN) + live 'running on …' status line."
   />
-  <Card title="Pair a new device" description="Generate a one-time pair JWT → QR + 5-minute countdown." />
+  <Card
+    title="Pair a new device"
+    description="Generate a one-time pair JWT → QR + 5-minute countdown."
+  />
   <Card
     title="Paired devices"
     description="`useLiveQuery(listPairedDevices)`; each row has a revoke button that updates both Dexie and the Rust deny-list."
@@ -367,7 +370,7 @@ or `a2-rs`:
 
 - [ADR-0012 — Transport Abstraction](../adr/0012-transport-abstraction) — Why the
   frontend must have a `Transport` abstraction before Capacitor can run the same
-code.
+  code.
 - [ADR-0013 — Companion API Command Manifest](../adr/0013-command-manifest) —
   Detailed trade-off record for allowlist vs macro generation vs codegen.
 - [ADR-0014 — Capacitor Mobile Shell](../adr/0014-capacitor-mobile-shell) —

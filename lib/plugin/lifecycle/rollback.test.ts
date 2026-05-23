@@ -36,7 +36,7 @@ jest.mock("../package/marketplace", () => ({
   }),
 }))
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: (...args: unknown[]) => mockStoreGetState(...args),
     setState: (...args: unknown[]) => mockStoreSetState(...args),

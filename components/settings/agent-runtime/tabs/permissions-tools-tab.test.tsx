@@ -69,11 +69,11 @@ describe("PermissionsToolsTab", () => {
     }
   })
 
-  it("renders 5 category cards with switches", () => {
+  it("renders 6 category cards with switches", () => {
     render(<PermissionsToolsTab />)
-    // 5 category switches + 1 "always allow" Add button + AlwaysAllowList stub.
+    // 6 category switches + 1 "always allow" Add button + AlwaysAllowList stub.
     const switches = screen.getAllByRole("switch")
-    expect(switches).toHaveLength(5)
+    expect(switches).toHaveLength(6)
     expect(screen.getByTestId("always-allow-list")).toBeInTheDocument()
   })
 
@@ -150,7 +150,7 @@ describe("PermissionsToolsTab", () => {
       } as Record<string, unknown>,
     }
     render(<PermissionsToolsTab />)
-    // Five switches still render; their state defaults to false.
-    expect(screen.getAllByRole("switch")).toHaveLength(5)
+    // Six switches still render; their state defaults to false.
+    expect(screen.getAllByRole("switch")).toHaveLength(6)
   })
 })

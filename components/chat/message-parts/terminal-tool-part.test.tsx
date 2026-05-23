@@ -50,7 +50,7 @@ jest.mock("@/components/ai-elements/terminal", () => ({
 
 // Stub the dock picker + run helper so terminal-tool-part stays in
 // isolation. The full pickers have their own dedicated tests.
-const mockRunInDock = jest.fn(async () => ({
+const mockRunInDock = jest.fn(async (..._args: unknown[]) => ({
   kind: "ok" as const,
   sessionId: "s",
   exitCode: 0,
@@ -154,7 +154,7 @@ describe("TerminalToolPart", () => {
     // The picker stub fires onPick({kind:'new'}) on its container click.
     screen.getByTestId("terminal-tab-picker-stub").click()
     expect(mockRunInDock).toHaveBeenCalled()
-    const call = mockRunInDock.mock.calls[0][0] as {
+    const call = mockRunInDock.mock.calls[0]?.[0] as unknown as {
       chatSessionId: string
       command: string
     }

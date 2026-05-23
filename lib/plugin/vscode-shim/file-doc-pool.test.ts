@@ -129,14 +129,20 @@ describe("file-doc-pool", () => {
       const readFile = jest.fn(async () => ({ content: "x", language: "javascript" }))
       configureFileDocPool({ adapter, readFile, maxModels: 2 })
 
+      // The pool's LRU sort uses `Date.now()`. On Windows the clock can
+      // tick at ~15.6 ms; 1 ms waits between opens leave neighbours with
+      // the same timestamp and the eviction loop falls back to insertion
+      // order — exactly the wrong answer for "retouch keeps alive". Bump
+      // each wait above one tick so each lastTouched is strictly newer.
+      const TICK_MS = 20
       const a = await openModel("file:///a")
-      await new Promise((r) => setTimeout(r, 1))
+      await new Promise((r) => setTimeout(r, TICK_MS))
       const b = await openModel("file:///b")
       // Bump 'a' so it becomes the newer-touched of the two — now `b`
       // is the LRU victim on the next eviction.
-      await new Promise((r) => setTimeout(r, 1))
+      await new Promise((r) => setTimeout(r, TICK_MS))
       await openModel("file:///a")
-      await new Promise((r) => setTimeout(r, 1))
+      await new Promise((r) => setTimeout(r, TICK_MS))
       await openModel("file:///c")
 
       expect(a.isDisposed()).toBe(false)

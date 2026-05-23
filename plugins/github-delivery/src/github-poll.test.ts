@@ -32,7 +32,11 @@ function makeRepo(overrides: Partial<GhRepoEntry> = {}): GhRepoEntry {
   }
 }
 
-function fakeOctokit(response: { status: number; headers?: Record<string, string>; data?: unknown[] }) {
+function fakeOctokit(response: {
+  status: number
+  headers?: Record<string, string>
+  data?: unknown[]
+}) {
   return {
     request: jest.fn(async () => ({
       status: response.status,
@@ -155,7 +159,13 @@ describe("runGithubPoll", () => {
           type: "IssuesEvent",
           payload: {
             action: "opened",
-            issue: { number: 99, user: { login: "x" }, pull_request: {}, state: "open", updated_at: "" },
+            issue: {
+              number: 99,
+              user: { login: "x" },
+              pull_request: {},
+              state: "open",
+              updated_at: "",
+            },
           },
         },
       ],
@@ -213,7 +223,11 @@ describe("runGithubPoll", () => {
         },
       ],
     })
-    const results = await runGithubPoll({ reposTable, eventsTable, octokitFor: async () => octokit })
+    const results = await runGithubPoll({
+      reposTable,
+      eventsTable,
+      octokitFor: async () => octokit,
+    })
     expect(results[0].newEventCount).toBe(1)
   })
 
@@ -233,7 +247,11 @@ describe("runGithubPoll", () => {
         },
       ],
     })
-    const results = await runGithubPoll({ reposTable, eventsTable, octokitFor: async () => octokit })
+    const results = await runGithubPoll({
+      reposTable,
+      eventsTable,
+      octokitFor: async () => octokit,
+    })
     expect(results[0].newEventCount).toBe(1)
   })
 
@@ -245,7 +263,11 @@ describe("runGithubPoll", () => {
       status: 200,
       data: [{ type: "WatchEvent", payload: { action: "started" } }],
     })
-    const results = await runGithubPoll({ reposTable, eventsTable, octokitFor: async () => octokit })
+    const results = await runGithubPoll({
+      reposTable,
+      eventsTable,
+      octokitFor: async () => octokit,
+    })
     expect(results[0].newEventCount).toBe(0)
   })
 })

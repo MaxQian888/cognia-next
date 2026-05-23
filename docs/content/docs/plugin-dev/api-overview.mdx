@@ -9,30 +9,30 @@ Plugins access Cognia capabilities through 15 versioned API namespaces. Each nam
 
 ## The 15 namespaces
 
-| Namespace | File | Permission prefix | What it does |
-|-----------|------|-------------------|--------------|
-| `session.*` | `session-api.ts` | `chat.*` | Read sessions/messages, send templated messages |
-| `project.*` | `project-api.ts` | `project.*` | Read project metadata, bound workspaces and characters |
-| `vector.*` | `vector-api.ts` | `vector.*` | Query the active vector store (read-only for plugins) |
-| `theme.*` | `theme-api.ts` | `theme.*` | Read current theme tokens, register custom themes, toggle light/dark |
-| `export.*` | `export-api.ts` | `export.*` | Trigger single-session export (Markdown / JSON / Beautiful HTML / Animated HTML) |
-| `i18n.*` | `i18n-api.ts` | `i18n.*` | Read current locale, register translation keys under the plugin namespace |
-| `canvas.*` | `canvas-api.ts` | `canvas.*` | Read/write canvas documents, register canvas-side tools |
-| `artifact.*` | `artifact-api.ts` | `artifact.*` | Register new artifact renderers and preview components |
-| `notification.*` | `notification-api.ts` | `notification.*` | Show toasts, send native notifications, register bindable actions |
-| `aiProvider.*` | `ai-provider-api.ts` | `ai.*` | Register custom AI providers (OpenAI-compatible protocol or custom impl) |
-| `extension.*` | `extension-api.ts` | `extension.*` | Mount components to extension points (chat header / sidebar / toolbar / …) |
-| `permission.*` | `permission-api.ts` | — | Read current permissions, request additional ones, revoke |
-| `media.*` | `media-api.ts` | `media.*` | Register image filters, video effects, transitions, consume media pipeline |
-| `storage.*` | `storage-api.ts` | `storage.*` | Per-plugin KV storage (small, capped) |
-| `crypto.*` | `crypto-helpers.ts` | `crypto.*` | Limited SubtleCrypto bridge; no raw key handle exposure |
+| Namespace        | File                  | Permission prefix | What it does                                                                     |
+| ---------------- | --------------------- | ----------------- | -------------------------------------------------------------------------------- |
+| `session.*`      | `session-api.ts`      | `chat.*`          | Read sessions/messages, send templated messages                                  |
+| `project.*`      | `project-api.ts`      | `project.*`       | Read project metadata, bound workspaces and characters                           |
+| `vector.*`       | `vector-api.ts`       | `vector.*`        | Query the active vector store (read-only for plugins)                            |
+| `theme.*`        | `theme-api.ts`        | `theme.*`         | Read current theme tokens, register custom themes, toggle light/dark             |
+| `export.*`       | `export-api.ts`       | `export.*`        | Trigger single-session export (Markdown / JSON / Beautiful HTML / Animated HTML) |
+| `i18n.*`         | `i18n-api.ts`         | `i18n.*`          | Read current locale, register translation keys under the plugin namespace        |
+| `canvas.*`       | `canvas-api.ts`       | `canvas.*`        | Read/write canvas documents, register canvas-side tools                          |
+| `artifact.*`     | `artifact-api.ts`     | `artifact.*`      | Register new artifact renderers and preview components                           |
+| `notification.*` | `notification-api.ts` | `notification.*`  | Show toasts, send native notifications, register bindable actions                |
+| `aiProvider.*`   | `ai-provider-api.ts`  | `ai.*`            | Register custom AI providers (OpenAI-compatible protocol or custom impl)         |
+| `extension.*`    | `extension-api.ts`    | `extension.*`     | Mount components to extension points (chat header / sidebar / toolbar / …)       |
+| `permission.*`   | `permission-api.ts`   | —                 | Read current permissions, request additional ones, revoke                        |
+| `media.*`        | `media-api.ts`        | `media.*`         | Register image filters, video effects, transitions, consume media pipeline       |
+| `storage.*`      | `storage-api.ts`      | `storage.*`       | Per-plugin KV storage (small, capped)                                            |
+| `crypto.*`       | `crypto-helpers.ts`   | `crypto.*`        | Limited SubtleCrypto bridge; no raw key handle exposure                          |
 
 Plus two implicit namespaces that don't require an explicit API file:
 
-| Namespace | Permission | What it does |
-|-----------|------------|--------------|
-| `network.fetch` | `network.fetch:<origin>` | HTTP fetch through the bridge; origin-scoped |
-| `fs.*` | `fs.read:<path>`, `fs.write:<path>` | File system access; path-scoped |
+| Namespace       | Permission                          | What it does                                 |
+| --------------- | ----------------------------------- | -------------------------------------------- |
+| `network.fetch` | `network.fetch:<origin>`            | HTTP fetch through the bridge; origin-scoped |
+| `fs.*`          | `fs.read:<path>`, `fs.write:<path>` | File system access; path-scoped              |
 
 ## Usage pattern
 
@@ -55,22 +55,20 @@ export async function onActivate(ctx) {
 
 ## Permission-to-namespace mapping
 
-| If you request… | You can use… |
-|-----------------|--------------|
-| `chat.read` | `session.listRecent`, `session.getMessages` |
-| `chat.send` | `session.sendMessage` |
-| `twin.read` | `vector.query` (limited) |
-| `theme.read` + `theme.write` | `theme.getTokens`, `theme.registerCustom` |
+| If you request…                  | You can use…                                   |
+| -------------------------------- | ---------------------------------------------- |
+| `chat.read`                      | `session.listRecent`, `session.getMessages`    |
+| `chat.send`                      | `session.sendMessage`                          |
+| `twin.read`                      | `vector.query` (limited)                       |
+| `theme.read` + `theme.write`     | `theme.getTokens`, `theme.registerCustom`      |
 | `storage.read` + `storage.write` | `storage.get`, `storage.set`, `storage.delete` |
-| `network.fetch:api.example.com` | `fetch("https://api.example.com/...")` |
-| `fs.read:$DOWNLOADS` | `fs.readFile("$DOWNLOADS/...")` |
+| `network.fetch:api.example.com`  | `fetch("https://api.example.com/...")`         |
+| `fs.read:$DOWNLOADS`             | `fs.readFile("$DOWNLOADS/...")`                |
 
 ## Requesting additional permissions at runtime
 
 ```ts
-const granted = await ctx.api.permission.request([
-  "network.fetch:api.newservice.com",
-])
+const granted = await ctx.api.permission.request(["network.fetch:api.newservice.com"])
 if (granted.all) {
   // proceed
 } else {
@@ -81,7 +79,19 @@ if (granted.all) {
 ## Related
 
 <Cards>
-  <Card title="Permissions" href="./permissions" description="Permission string format and guard behavior." />
-  <Card title="Surfaces" href="./surfaces" description="UI extension points and component mounting." />
-  <Card title="Lifecycle Hooks" href="./lifecycle-hooks" description="Event subscriptions from onActivate." />
+  <Card
+    title="Permissions"
+    href="./permissions"
+    description="Permission string format and guard behavior."
+  />
+  <Card
+    title="Surfaces"
+    href="./surfaces"
+    description="UI extension points and component mounting."
+  />
+  <Card
+    title="Lifecycle Hooks"
+    href="./lifecycle-hooks"
+    description="Event subscriptions from onActivate."
+  />
 </Cards>

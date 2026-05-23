@@ -16,7 +16,7 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: () => ({
       plugins: mockPlugins,

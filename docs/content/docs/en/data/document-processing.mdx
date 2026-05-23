@@ -9,13 +9,11 @@ description: A unified parsing layer that converts user files into embeddable te
 
 <TLDR>
   Unified entry points: `processDocument()` (synchronous, text-only formats) and
-  `processDocumentAsync()` (asynchronous, covers PDF / DOCX / XLSX / PPTX / EPUB /
-  RTF). Type detection uses filename extensions (`support-matrix.ts`); the async
-  path dynamically `import`s the specific parser by type (PDF via pdfjs-dist;
-  Word via mammoth; Excel via xlsx; others via their respective libraries), then
-  normalizes the result into a `ProcessedDocument`. Optionally generates chunks
-  for the vector store; optionally exports a `parseSummary` for breadcrumb / TOC
-  display.
+  `processDocumentAsync()` (asynchronous, covers PDF / DOCX / XLSX / PPTX / EPUB / RTF). Type
+  detection uses filename extensions (`support-matrix.ts`); the async path dynamically `import`s the
+  specific parser by type (PDF via pdfjs-dist; Word via mammoth; Excel via xlsx; others via their
+  respective libraries), then normalizes the result into a `ProcessedDocument`. Optionally generates
+  chunks for the vector store; optionally exports a `parseSummary` for breadcrumb / TOC display.
 </TLDR>
 
 ## Overview
@@ -292,17 +290,21 @@ UI entry: `components/document/document-format-toolbar.tsx` is the markdown edit
     href="./employee-twin"
     description="Twin ingest reuses the parse stage from this module"
   />
-  <Card title="Artifacts Sandbox" href="./artifacts-sandbox" description="Where generated documents land" />
+  <Card
+    title="Artifacts Sandbox"
+    href="./artifacts-sandbox"
+    description="Where generated documents land"
+  />
   <Card title="Vector Store" href="./vector-store" description="Next stop for chunks" />
   <Card title="Storage" href="./storage" description="How files land in Dexie / the file system" />
 </Cards>
 
 ## Where to Start
 
-| Goal | File |
-| ---- | ---- |
-| Add a new file format | Add extension in `support-matrix.ts` → write parser in `parsers/<name>-parser.ts` → add normalize in `parse-summary.ts` → add case in `document-processor.ts` async switch |
-| Change PDF pagination strategy | `extractPDFEmbeddableContent` in `parsers/pdf-parser.ts` |
-| Adjust default chunking strategy | `ProcessingOptions.chunkingOptions` defaults + `lib/ai/embedding/chunking.ts` |
-| Add a new diagnostic type | Extend `parse-diagnostics.ts:ParseDiagnostic.code` union + i18n strings |
-| Table recognition rules | `table-extractor.ts` |
+| Goal                             | File                                                                                                                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new file format            | Add extension in `support-matrix.ts` → write parser in `parsers/<name>-parser.ts` → add normalize in `parse-summary.ts` → add case in `document-processor.ts` async switch |
+| Change PDF pagination strategy   | `extractPDFEmbeddableContent` in `parsers/pdf-parser.ts`                                                                                                                   |
+| Adjust default chunking strategy | `ProcessingOptions.chunkingOptions` defaults + `lib/ai/embedding/chunking.ts`                                                                                              |
+| Add a new diagnostic type        | Extend `parse-diagnostics.ts:ParseDiagnostic.code` union + i18n strings                                                                                                    |
+| Table recognition rules          | `table-extractor.ts`                                                                                                                                                       |

@@ -8,7 +8,11 @@ description: Capacitor 7 mobile shell reuses Next.js static export, Transport tr
 cognia-next's mobile client is **not** a standalone React Native app, nor is it a stripped-down desktop version. It is the **same** Next.js static export (`out/`), wrapped by **Capacitor 7** inside an iOS / Android native WebView, then connected back to the desktop's `/api/v1/*` via HTTP/WS. One JS bundle, three shells (Tauri, Capacitor, Web), one shared React codebase.
 
 <Callout type="info">
-  This page corresponds to ADRs: [0014 — Capacitor Mobile Shell](../adr/0014-capacitor-mobile-shell), [0015 — Mobile V2 Completion](../adr/0015-mobile-v2-completion), [0012 — Transport Abstraction](../adr/0012-transport-abstraction), [0013 — Command Manifest](../adr/0013-command-manifest).
+  This page corresponds to ADRs: [0014 — Capacitor Mobile
+  Shell](../adr/0014-capacitor-mobile-shell), [0015 — Mobile V2
+  Completion](../adr/0015-mobile-v2-completion), [0012 — Transport
+  Abstraction](../adr/0012-transport-abstraction), [0013 — Command
+  Manifest](../adr/0013-command-manifest).
 </Callout>
 
 ## TL;DR
@@ -27,11 +31,11 @@ cognia-next's mobile client is **not** a standalone React Native app, nor is it 
 
 ## Design Rationale
 
-| Option | Evaluation | Decision |
-| ------ | ---------- | -------- |
+| Option             | Evaluation                                                                                                      | Decision |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- | -------- |
 | **Tauri 2 Mobile** | Mobile lacks sidecar support (Tauri issues #11454 / #9774); Claude Agent SDK sidecar is a core desktop runtime. | Rejected |
-| **React Native** | Rewriting 57 shadcn/ui components to RN primitives would take weeks with zero functional gain. | Rejected |
-| **Capacitor 7** | Drop the existing Next.js static export into a native WebView — zero UI rewrite. | Adopted |
+| **React Native**   | Rewriting 57 shadcn/ui components to RN primitives would take weeks with zero functional gain.                  | Rejected |
+| **Capacitor 7**    | Drop the existing Next.js static export into a native WebView — zero UI rewrite.                                | Adopted  |
 
 Deeper insight: the phone is **never** a sidecar runtime. Claude Agent SDK requires Node >= 20, native extensions, and the `keyring` crate doesn't cover mobile keystores; connector webhook services can't expose a public URL from behind NAT on a phone. Accepting these five subsystems as "desktop-only" is a platform reality, not a framework legacy.
 
@@ -108,11 +112,11 @@ window.Capacitor?.isNativePlatform() === true   → CompanionTransport
 otherwise                                          → WebStubTransport
 ```
 
-| Implementation | Used In | `call` | `subscribe` |
-| -------------- | ------- | ------ | ----------- |
-| `TauriTransport` | Desktop (inside Tauri) | `@tauri-apps/api/core` `invoke` | `listen` wrapped into synchronous `unsubscribe` |
-| `CompanionTransport` | Capacitor mobile | `POST {baseUrl}/api/v1/_rpc/<name>`, Bearer JWT | `GET {baseUrl}/ws/v1/events` long-lived connection |
-| `WebStubTransport` | Browser-only (no Tauri) | Rejects with `tauri-only command from web mode: <name>` | no-op |
+| Implementation       | Used In                 | `call`                                                  | `subscribe`                                        |
+| -------------------- | ----------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| `TauriTransport`     | Desktop (inside Tauri)  | `@tauri-apps/api/core` `invoke`                         | `listen` wrapped into synchronous `unsubscribe`    |
+| `CompanionTransport` | Capacitor mobile        | `POST {baseUrl}/api/v1/_rpc/<name>`, Bearer JWT         | `GET {baseUrl}/ws/v1/events` long-lived connection |
+| `WebStubTransport`   | Browser-only (no Tauri) | Rejects with `tauri-only command from web mode: <name>` | no-op                                              |
 
 Configuration lives in `lib/tauri/transport-companion.ts` — it reads `CompanionConfig` (baseUrl + JWT + fingerprint) from `companion-storage`, adds `Authorization: Bearer <JWT>`, and POSTs to `/api/v1/_rpc/<command>` with the original Tauri argument object as the request body, returning JSON.
 
@@ -275,24 +279,24 @@ export async function withPlugin<P, R>(
 
 Benefit of this template: every wrapper file returns a **discriminated union** outcome; callers handle the `unsupported` / `error` branches and never see exceptions. Web/Tauri automatically degrades to `unsupported`, and the UI hides the entry accordingly.
 
-| File | Package | Purpose |
-| ---- | ------- | ------- |
-| `haptics.ts` | `@capacitor/haptics` | Button feedback, error vibration |
-| `toast.ts` | `@capacitor/toast` | Short toast (not Sonner) |
-| `dialog.ts` | `@capacitor/dialog` | Native alert / confirm |
-| `status-bar.ts` | `@capacitor/status-bar` | iOS status bar styling |
-| `splash-screen.ts` | `@capacitor/splash-screen` | Splash screen control |
-| `network.ts` | `@capacitor/network` | Connection status + change events |
-| `screen-orientation.ts` | `@capacitor/screen-orientation` | Lock portrait / landscape |
-| `filesystem.ts` | `@capacitor/filesystem` | Cache directory, download attachments |
-| `camera.ts` | `@capacitor/camera` | Take photo, pick from gallery |
-| `share.ts` | `@capacitor/share` | Invoke system share sheet |
-| `browser.ts` | `@capacitor/browser` | In-app browser for OAuth |
-| `deeplink.ts` | `@capacitor/app` (`appUrlOpen` event) | Parse `cognia://` URLs |
-| `local-notifications.ts` | `@capacitor/local-notifications` | Offline reminders |
-| `geolocation.ts` | `@capacitor/geolocation` | Location (opt-in subsystems only) |
-| `biometric.ts` | `capacitor-native-biometric` | Face ID / fingerprint guard for sensitive actions |
-| `barcode.ts` | `@capacitor-mlkit/barcode-scanning` | Pairing QR decoding |
+| File                     | Package                               | Purpose                                           |
+| ------------------------ | ------------------------------------- | ------------------------------------------------- |
+| `haptics.ts`             | `@capacitor/haptics`                  | Button feedback, error vibration                  |
+| `toast.ts`               | `@capacitor/toast`                    | Short toast (not Sonner)                          |
+| `dialog.ts`              | `@capacitor/dialog`                   | Native alert / confirm                            |
+| `status-bar.ts`          | `@capacitor/status-bar`               | iOS status bar styling                            |
+| `splash-screen.ts`       | `@capacitor/splash-screen`            | Splash screen control                             |
+| `network.ts`             | `@capacitor/network`                  | Connection status + change events                 |
+| `screen-orientation.ts`  | `@capacitor/screen-orientation`       | Lock portrait / landscape                         |
+| `filesystem.ts`          | `@capacitor/filesystem`               | Cache directory, download attachments             |
+| `camera.ts`              | `@capacitor/camera`                   | Take photo, pick from gallery                     |
+| `share.ts`               | `@capacitor/share`                    | Invoke system share sheet                         |
+| `browser.ts`             | `@capacitor/browser`                  | In-app browser for OAuth                          |
+| `deeplink.ts`            | `@capacitor/app` (`appUrlOpen` event) | Parse `cognia://` URLs                            |
+| `local-notifications.ts` | `@capacitor/local-notifications`      | Offline reminders                                 |
+| `geolocation.ts`         | `@capacitor/geolocation`              | Location (opt-in subsystems only)                 |
+| `biometric.ts`           | `capacitor-native-biometric`          | Face ID / fingerprint guard for sensitive actions |
+| `barcode.ts`             | `@capacitor-mlkit/barcode-scanning`   | Pairing QR decoding                               |
 
 Biometric guard is exposed by `hooks/use-biometric-guard.ts:verify()`, wrapping actions like "delete pairing", "export backup", "decrypt sensitive data"; devices without biometric authentication pass through directly (default fallthrough).
 
@@ -376,28 +380,28 @@ iOS (requires macOS + Xcode):
 
 ## Testing
 
-| Suite | Coverage |
-| ----- | -------- |
-| `companion-storage.test.ts` | `LocalStorageCompanionStorage` and SecureStorage backend switching |
-| `transport-companion.test.ts` | `CompanionTransport.call`, WS subscription, token injection |
-| `pair-onboarding-client.test.tsx` and its sub-steps | Discover / Pair / Paired three-step state machine |
-| `lib/capacitor/*.test.ts` | Each native plugin wrapper's unsupported / ok / error branches |
-| `lib/connectivity/connection-strategy.test.ts` | Three-layer candidate selection + probe |
-| `lib/qr/pair-payload.test.ts` | v2 payload encoding + backward compatibility with legacy bare JSON |
-| Rust: `companion_api/{tls,mdns,tunnel,auth}.rs#[cfg(test)]` | Self-signed cert, mDNS broadcast, tunnel spawn, JWT issuance |
+| Suite                                                       | Coverage                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| `companion-storage.test.ts`                                 | `LocalStorageCompanionStorage` and SecureStorage backend switching |
+| `transport-companion.test.ts`                               | `CompanionTransport.call`, WS subscription, token injection        |
+| `pair-onboarding-client.test.tsx` and its sub-steps         | Discover / Pair / Paired three-step state machine                  |
+| `lib/capacitor/*.test.ts`                                   | Each native plugin wrapper's unsupported / ok / error branches     |
+| `lib/connectivity/connection-strategy.test.ts`              | Three-layer candidate selection + probe                            |
+| `lib/qr/pair-payload.test.ts`                               | v2 payload encoding + backward compatibility with legacy bare JSON |
+| Rust: `companion_api/{tls,mdns,tunnel,auth}.rs#[cfg(test)]` | Self-signed cert, mDNS broadcast, tunnel spawn, JWT issuance       |
 
 Overall coverage threshold matches the main repo — every source file >= 90% (lines / branches / functions), verified with `pnpm test:coverage`.
 
 ## Where to Land Code
 
-| Target | File |
-| ------ | ---- |
-| New native plugin wrapper | `lib/capacitor/<plugin>.ts` + corresponding `.test.ts`, reuse `_shared.ts` |
-| New deep-link route kind | Extend `DeeplinkRoute` union in `lib/capacitor/deeplink.ts` |
-| New mobile-specific UI | `components/mobile/<area>/<component>.tsx` |
-| New RPC command exposed to phone | Add arm in `src-tauri/src/companion_api/commands.rs` + write docs |
-| New connection candidate source | Candidate builder in `lib/connectivity/connection-strategy.ts` |
-| New mobile tab | `components/mobile/shell/mobile-tab-bar.tsx` + corresponding route |
+| Target                           | File                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| New native plugin wrapper        | `lib/capacitor/<plugin>.ts` + corresponding `.test.ts`, reuse `_shared.ts` |
+| New deep-link route kind         | Extend `DeeplinkRoute` union in `lib/capacitor/deeplink.ts`                |
+| New mobile-specific UI           | `components/mobile/<area>/<component>.tsx`                                 |
+| New RPC command exposed to phone | Add arm in `src-tauri/src/companion_api/commands.rs` + write docs          |
+| New connection candidate source  | Candidate builder in `lib/connectivity/connection-strategy.ts`             |
+| New mobile tab                   | `components/mobile/shell/mobile-tab-bar.tsx` + corresponding route         |
 
 ## Related Pages
 

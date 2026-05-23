@@ -8,11 +8,12 @@ description: The DataAdapter abstraction — letting chat components run the sam
 `lib/data-hooks/` is the "slot" between the chat UI and the persistence layer. It extracts the pattern of components directly calling Dexie (`useLiveQuery(() => listCharacters())`) behind an interface called `DataAdapter`, injected via `<DataAdapterProvider adapter={...}>`. The desktop gets a Dexie implementation; the mobile PWA will later get a WebSocket bridge implementation — the same component code runs in both forms.
 
 <TLDR>
-  `types.ts` defines the `DataAdapter` interface (4 reactive `use*` reads + 4 one-off mutations). `context.tsx` is a
-  React Context plus a set of convenience hooks (`useCharacters / useCharacter / useSkillsByIds / usePresets`
-  etc.); consumers only need these hooks and are unaware of what sits underneath. `dexie-adapter.tsx` is the desktop
-  production implementation, directly reusing existing functions from `lib/db/*`; reactive reads use `useLiveQuery` from
-  `dexie-react-hooks`. All hooks include an SSR guard (`typeof window !== "undefined"`), making them safe to use under
+  `types.ts` defines the `DataAdapter` interface (4 reactive `use*` reads + 4 one-off mutations).
+  `context.tsx` is a React Context plus a set of convenience hooks (`useCharacters / useCharacter /
+  useSkillsByIds / usePresets` etc.); consumers only need these hooks and are unaware of what sits
+  underneath. `dexie-adapter.tsx` is the desktop production implementation, directly reusing
+  existing functions from `lib/db/*`; reactive reads use `useLiveQuery` from `dexie-react-hooks`.
+  All hooks include an SSR guard (`typeof window !== "undefined"`), making them safe to use under
   `output: "export"`.
 </TLDR>
 
@@ -217,33 +218,45 @@ Do not reserve adapter methods for data that does not yet need remote access —
 
 ## Integration with Callers
 
-| Caller | Purpose |
-| ----------------------- | -------------------------------------------------- |
-| `components/chat/*` | Reactive reads of characters / skills / presets + session state mutations |
+| Caller                  | Purpose                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `components/chat/*`     | Reactive reads of characters / skills / presets + session state mutations         |
 | `components/settings/*` | Reactive reads of the "current list" outside the editor, writing back after edits |
-| `components/skills/*` | `useSkillsByIds` for batch reads inside skill selectors |
-| `app/layout.tsx` | Mounts `<DataAdapterProvider>` |
+| `components/skills/*`   | `useSkillsByIds` for batch reads inside skill selectors                           |
+| `app/layout.tsx`        | Mounts `<DataAdapterProvider>`                                                    |
 
 Locations outside the Provider tree (such as `lib/twin/*` background workers and scheduler executors) continue to call `lib/db/*` directly — DataAdapter is a UI abstraction, not a data-layer abstraction.
 
 ## Related Documentation
 
 <Cards>
-  <Card title="Storage" href="./storage" description="Dexie schema and where each business table lives" />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="Dexie schema and where each business table lives"
+  />
   <Card
     title="Backup and Data Migration"
     href="./backup-and-data"
     description="DataAdapter does not affect the backup layer — backups read Dexie directly"
   />
-  <Card title="Architecture" href="./architecture" description="Where DataAdapter sits in the Provider chain" />
-  <Card title="Chat and Skills" href="./chat-and-skills" description="The main consumers of DataAdapter" />
+  <Card
+    title="Architecture"
+    href="./architecture"
+    description="Where DataAdapter sits in the Provider chain"
+  />
+  <Card
+    title="Chat and Skills"
+    href="./chat-and-skills"
+    description="The main consumers of DataAdapter"
+  />
 </Cards>
 
 ## Where to Start
 
-| Goal | File |
-| -------------------------------- | ------------------------------------------------------------------------------------ |
-| Add a new method to DataAdapter | Extend interface in `types.ts` → implement in `dexie-adapter.tsx` → add convenience hook in `context.tsx` |
+| Goal                                           | File                                                                                                            |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Add a new method to DataAdapter                | Extend interface in `types.ts` → implement in `dexie-adapter.tsx` → add convenience hook in `context.tsx`       |
 | Write a new adapter implementation (mobile WS) | New file `<name>-adapter.tsx` implementing `DataAdapter`; swap the Provider injection at the mobile entry point |
-| Mock in tests | Construct a partial `DataAdapter` object directly and inject it via `<DataAdapterProvider adapter={mock}>` |
-| Tune SSR fallback behavior | `isClient` guard in `dexie-adapter.tsx` |
+| Mock in tests                                  | Construct a partial `DataAdapter` object directly and inject it via `<DataAdapterProvider adapter={mock}>`      |
+| Tune SSR fallback behavior                     | `isClient` guard in `dexie-adapter.tsx`                                                                         |

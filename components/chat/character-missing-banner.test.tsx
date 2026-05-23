@@ -11,7 +11,7 @@ import type { Character } from "@/lib/claude/types"
 // Same plugin-store stub as character-picker.test.tsx — keeps the suite
 // self-contained without booting the full plugin manager.
 let pluginsState: Record<string, { id: string; manifest: { name?: string } }> = {}
-jest.mock("@/stores/plugin/plugin-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   usePluginStore: <T,>(selector: (s: { plugins: typeof pluginsState }) => T) =>
     selector({ plugins: pluginsState }),
 }))

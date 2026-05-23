@@ -8,7 +8,15 @@ description: Two kinds of MCP services running in the Node sidecar — in-proces
 <Status variant="stable">A2UI v0.9 · cognia-tools built-in tools</Status>
 
 <TLDR>
-  The `sidecar/` directory hosts two entirely different kinds of MCP services: **in-process** SDK MCP servers (mounted by `claude-host.mjs` in each Claude Agent SDK session, carrying the five categories of `builtin-tools/` plus the A2UI bridge in `a2ui-tools/`), and a **standalone stdio** `a2ui-mcp.mjs` (used to let external agents *outside* the Cognia process — Claude Code CLI / Cursor / Codex — also create A2UI surfaces). Both share the same tool schema, but communicate differently: the former goes through the SDK's `createSdkMcpServer` into an in-process message bus, while the latter uses JSON-RPC over newline-delimited stdin/stdout, forwarding dispatch events back to the Cognia renderer process's Zustand store via the `COGNIA_BRIDGE_SOCKET` Unix domain socket.
+  The `sidecar/` directory hosts two entirely different kinds of MCP services: **in-process** SDK
+  MCP servers (mounted by `claude-host.mjs` in each Claude Agent SDK session, carrying the five
+  categories of `builtin-tools/` plus the A2UI bridge in `a2ui-tools/`), and a **standalone stdio**
+  `a2ui-mcp.mjs` (used to let external agents *outside* the Cognia process — Claude Code CLI /
+  Cursor / Codex — also create A2UI surfaces). Both share the same tool schema, but communicate
+  differently: the former goes through the SDK's `createSdkMcpServer` into an in-process message
+  bus, while the latter uses JSON-RPC over newline-delimited stdin/stdout, forwarding dispatch
+  events back to the Cognia renderer process's Zustand store via the `COGNIA_BRIDGE_SOCKET` Unix
+  domain socket.
 </TLDR>
 
 ## When to Use
@@ -87,33 +95,33 @@ flowchart TB
   </Folder>
 </Files>
 
-| File / Directory                   | Responsibility                                                                                                          |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `claude-host.mjs`                  | Sidecar top-level; wraps Claude Agent SDK's `query()`; mounts builtin-tools and a2ui-tools according to settings        |
-| `a2ui-mcp.mjs`                     | Standalone stdio MCP service for external agents; dispatches back through socket                                        |
-| `builtin-tools/index.mjs`          | `buildCogniaToolsServer({ enabled })` — assembles in-process MCP server based on user's category toggles                |
-| `builtin-tools/safety.mjs`         | Path traversal guard, shell allow/blocklist, `toolText` / `toolError` response wrappers                                 |
-| `builtin-tools/file-extras.mjs`    | `file_hash` / `file_diff` / `file_search` / `content_search` / `file_copy` and 8 other file tools                       |
-| `builtin-tools/git.mjs`            | Read-only git subcommands (log, status, diff, blame), using `execFile` to avoid shell injection                         |
-| `builtin-tools/process.mjs`        | Cross-platform process list / query / terminate; Windows uses PowerShell `Get-Process`, POSIX uses `ps`                 |
-| `builtin-tools/environment.mjs`    | `list_env` / `get_env` / `system_info`, with `*KEY*/*TOKEN*` patterns redacted by default                               |
-| `builtin-tools/shell-advanced.mjs` | `shell_execute_advanced` — restricted shell with mandatory user approval, stricter than SDK Bash                        |
-| `a2ui-tools/index.mjs`             | Four A2UI MCP tools: `a2ui_create_surface` / `a2ui_update_components` / `a2ui_data_model_update` / `a2ui_delete_surface` |
+| File / Directory                   | Responsibility                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-host.mjs`                  | Sidecar top-level; wraps Claude Agent SDK's `query()`; mounts builtin-tools and a2ui-tools according to settings                |
+| `a2ui-mcp.mjs`                     | Standalone stdio MCP service for external agents; dispatches back through socket                                                |
+| `builtin-tools/index.mjs`          | `buildCogniaToolsServer({ enabled })` — assembles in-process MCP server based on user's category toggles                        |
+| `builtin-tools/safety.mjs`         | Path traversal guard, shell allow/blocklist, `toolText` / `toolError` response wrappers                                         |
+| `builtin-tools/file-extras.mjs`    | `file_hash` / `file_diff` / `file_search` / `content_search` / `file_copy` and 8 other file tools                               |
+| `builtin-tools/git.mjs`            | Read-only git subcommands (log, status, diff, blame), using `execFile` to avoid shell injection                                 |
+| `builtin-tools/process.mjs`        | Cross-platform process list / query / terminate; Windows uses PowerShell `Get-Process`, POSIX uses `ps`                         |
+| `builtin-tools/environment.mjs`    | `list_env` / `get_env` / `system_info`, with `*KEY*/*TOKEN*` patterns redacted by default                                       |
+| `builtin-tools/shell-advanced.mjs` | `shell_execute_advanced` — restricted shell with mandatory user approval, stricter than SDK Bash                                |
+| `a2ui-tools/index.mjs`             | Four A2UI MCP tools: `a2ui_create_surface` / `a2ui_update_components` / `a2ui_data_model_update` / `a2ui_delete_surface`        |
 | `dispatch/`                        | Provider-aware dispatch (anthropic goes through Claude Agent SDK, others through AI SDK); indirectly related to this page's MCP |
 
 `@modelcontextprotocol/sdk` is **not** in `sidecar/package.json` dependencies — it is a transitive dependency of `@anthropic-ai/claude-agent-sdk` (in-process MCP is exposed via `createSdkMcpServer`); `a2ui-mcp.mjs` deliberately avoids importing the SDK, hand-rolling readline + JSON-RPC to keep the standalone sidecar as small as possible.
 
 ## Two Kinds of Services Compared
 
-| Dimension          | In-process (builtin-tools / a2ui-tools)                                | Standalone (`a2ui-mcp.mjs`)                                                            |
-| ------------------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Launcher           | Constructed by `claude-host.mjs` at the start of each Claude session   | Registered in the external agent's own MCP config, spawned as a child process          |
-| Communication      | SDK in-process message bus (`createSdkMcpServer` returned instance)    | JSON-RPC 2.0 / newline-delimited stdio                                                 |
-| Tool set           | 5 builtin-tool categories + 4 A2UI tools                               | 4 A2UI tools only                                                                      |
-| Configuration      | `settings.builtinTools.<category>` toggles + per-character allowlist   | Determined by the external agent's MCP config file                                     |
-| Authentication     | Claude Agent SDK's `canUseTool` hook + user approval flow              | Full trust of local process; write-back to main process gated by `COGNIA_BRIDGE_SOCKET` reachability |
-| Dispatch path      | sidecar stdout JSON-lines → Rust → Renderer                            | Unix socket / named pipe → Rust → Renderer                                             |
-| Failure mode       | SDK error → tool returns `isError: true`                               | Socket unreachable → tool still responds OK, but `dispatched: false` for agent fallback |
+| Dimension      | In-process (builtin-tools / a2ui-tools)                              | Standalone (`a2ui-mcp.mjs`)                                                                          |
+| -------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Launcher       | Constructed by `claude-host.mjs` at the start of each Claude session | Registered in the external agent's own MCP config, spawned as a child process                        |
+| Communication  | SDK in-process message bus (`createSdkMcpServer` returned instance)  | JSON-RPC 2.0 / newline-delimited stdio                                                               |
+| Tool set       | 5 builtin-tool categories + 4 A2UI tools                             | 4 A2UI tools only                                                                                    |
+| Configuration  | `settings.builtinTools.<category>` toggles + per-character allowlist | Determined by the external agent's MCP config file                                                   |
+| Authentication | Claude Agent SDK's `canUseTool` hook + user approval flow            | Full trust of local process; write-back to main process gated by `COGNIA_BRIDGE_SOCKET` reachability |
+| Dispatch path  | sidecar stdout JSON-lines → Rust → Renderer                          | Unix socket / named pipe → Rust → Renderer                                                           |
+| Failure mode   | SDK error → tool returns `isError: true`                             | Socket unreachable → tool still responds OK, but `dispatched: false` for agent fallback              |
 
 ## Data Flow
 
@@ -156,13 +164,13 @@ flowchart TB
 
 Tool namespace is `mcp__cognia-tools__<tool>`; category toggles are in Settings → System → Tools.
 
-| Category        | Representative Tools                                                                                                                   | Risk Level                     |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Category        | Representative Tools                                                                                                                       | Risk Level                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
 | `fileExtras`    | `file_hash` · `file_diff` · `file_info` · `file_search` · `content_search` · `file_copy` · `file_rename` · `directory_create` and 5 others | Medium (write requires approval) |
-| `git`           | All read-only — `git status / log / diff / blame / show / branch / remote …`                                                           | Low                            |
-| `process`       | `list_processes` · `get_process` · `search_processes` · `start_process` · `terminate_process` (tracked PID only)                       | High (requires approval)       |
-| `environment`   | `list_env` (redacted) · `get_env` · `system_info`                                                                                      | Low                            |
-| `shellAdvanced` | `shell_execute_advanced` — allow/blocklist + restricted timeout + mandatory approval                                                   | High                           |
+| `git`           | All read-only — `git status / log / diff / blame / show / branch / remote …`                                                               | Low                              |
+| `process`       | `list_processes` · `get_process` · `search_processes` · `start_process` · `terminate_process` (tracked PID only)                           | High (requires approval)         |
+| `environment`   | `list_env` (redacted) · `get_env` · `system_info`                                                                                          | Low                              |
+| `shellAdvanced` | `shell_execute_advanced` — allow/blocklist + restricted timeout + mandatory approval                                                       | High                             |
 
 Universal constraints (defined in `safety.mjs`):
 
@@ -185,11 +193,11 @@ The two forms maintain their schemas in separate code (in-process uses zod, stan
 
 ### Sidecar startup env
 
-| Variable                     | Who Sets                              | Purpose                                                                 |
-| ---------------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
-| `COGNIA_BRIDGE_SOCKET`       | Cognia Rust at startup                | `a2ui-mcp.mjs` uses it to locate the socket for dispatch write-back     |
-| `COGNIA_BRIDGED`             | External Bridge HTTP service sidecar  | Switches to bridged mode (see [External Bridge](./external-bridge))     |
-| `COGNIA_BRIDGE_SETTINGS`     | External Bridge HTTP service sidecar  | One-shot injected `ExternalBridgeSettings` JSON at startup              |
+| Variable                 | Who Sets                             | Purpose                                                             |
+| ------------------------ | ------------------------------------ | ------------------------------------------------------------------- |
+| `COGNIA_BRIDGE_SOCKET`   | Cognia Rust at startup               | `a2ui-mcp.mjs` uses it to locate the socket for dispatch write-back |
+| `COGNIA_BRIDGED`         | External Bridge HTTP service sidecar | Switches to bridged mode (see [External Bridge](./external-bridge)) |
+| `COGNIA_BRIDGE_SETTINGS` | External Bridge HTTP service sidecar | One-shot injected `ExternalBridgeSettings` JSON at startup          |
 
 ### Extending new tools into `cognia-tools`
 

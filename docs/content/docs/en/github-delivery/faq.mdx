@@ -6,7 +6,9 @@ description: Troubleshooting paths for common errors, App vs PAT recommendations
 # FAQ
 
 <TLDR>
-This page collects common issues: webhook 401 / signature failures, silent polling, and the origin of `No issue-loop AI driver`. Questions are grouped by "symptom"; each includes a troubleshooting checklist and source code location.
+  This page collects common issues: webhook 401 / signature failures, silent polling, and the origin
+  of `No issue-loop AI driver`. Questions are grouped by "symptom"; each includes a troubleshooting
+  checklist and source code location.
 </TLDR>
 
 ## Credentials / Authentication
@@ -51,13 +53,13 @@ and the Audit Tab has no corresponding rows.
 
 <Accordion title="GitHub App vs PAT — which should I choose?">
 
-| Scenario | Recommendation | Reason |
-| -------- | -------------- | ------ |
-| Personal toy repo, automation only for yourself | **PAT** | Simplest setup: paste one token |
-| Company / organization collaborative repo | **App** | Install / uninstall granularity is independent of individuals; one installation gets a 5K/h independent bucket |
-| Multi-repo shared bot | **App** | Same as above |
-| Personal use, but worried about the 5K/h shared limit | **App** | Does not share the rate bucket with your other automations |
-| Temporary experiment or one-off task | **PAT** | Revoke when done; creating an App has relatively higher one-time cost |
+| Scenario                                              | Recommendation | Reason                                                                                                         |
+| ----------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------- |
+| Personal toy repo, automation only for yourself       | **PAT**        | Simplest setup: paste one token                                                                                |
+| Company / organization collaborative repo             | **App**        | Install / uninstall granularity is independent of individuals; one installation gets a 5K/h independent bucket |
+| Multi-repo shared bot                                 | **App**        | Same as above                                                                                                  |
+| Personal use, but worried about the 5K/h shared limit | **App**        | Does not share the rate bucket with your other automations                                                     |
+| Temporary experiment or one-off task                  | **PAT**        | Revoke when done; creating an App has relatively higher one-time cost                                          |
 
 </Accordion>
 </Accordions>
@@ -276,14 +278,14 @@ re-run from the same snapshot (the `runs/[runId]` detail page has "Re-run from s
 
 ## Source Code Index
 
-| File | Purpose |
-| ---- | ------- |
-| `lib/github/webhook-verify.ts` | Webhook signature verification (starting point for 401 troubleshooting) |
-| `lib/github/auth-app.ts` | App token cache + `evictInstallationToken` (force-clear for 401) |
-| `lib/github/octokit-factory.ts` | Throttling / retry plugins (secondary rate limit behavior) |
-| `plugins/github-delivery/src/index.ts` | Driver / adapter assembly during activation |
-| `plugins/github-delivery/src/drivers/sidecar-driver.ts` | Claude driver for Issue → PR loop |
-| `plugins/github-delivery/src/approval/draft-bridge.ts` | HITL draft bridge |
-| `lib/github/cloudflared-tauri.ts` | One-click cloudflared exposure (starting point for shell scope troubleshooting) |
-| `src-tauri/tauri.conf.json` | Shell scope configuration |
-| `src-tauri/src/workflow/triggers/webhook_router.rs` | axum receiver + `SignatureMode::Github` |
+| File                                                    | Purpose                                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `lib/github/webhook-verify.ts`                          | Webhook signature verification (starting point for 401 troubleshooting)         |
+| `lib/github/auth-app.ts`                                | App token cache + `evictInstallationToken` (force-clear for 401)                |
+| `lib/github/octokit-factory.ts`                         | Throttling / retry plugins (secondary rate limit behavior)                      |
+| `plugins/github-delivery/src/index.ts`                  | Driver / adapter assembly during activation                                     |
+| `plugins/github-delivery/src/drivers/sidecar-driver.ts` | Claude driver for Issue → PR loop                                               |
+| `plugins/github-delivery/src/approval/draft-bridge.ts`  | HITL draft bridge                                                               |
+| `lib/github/cloudflared-tauri.ts`                       | One-click cloudflared exposure (starting point for shell scope troubleshooting) |
+| `src-tauri/tauri.conf.json`                             | Shell scope configuration                                                       |
+| `src-tauri/src/workflow/triggers/webhook_router.rs`     | axum receiver + `SignatureMode::Github`                                         |

@@ -8,14 +8,19 @@ description: Local 127.0.0.1 axum HTTP listener + HMAC-signed outbound webhooks 
 <Status variant="stable" />
 
 <TLDR>
-  Tauri Rust starts an axum 0.7 HTTP server bound to 127.0.0.1:&lt;port&gt; (default 47821), exposing 3 v1
-  endpoints: health / trigger task / trigger event. Bearer + IP allowlist + rate limiting + 8 KiB body limit.
-  Outbound direction adds HMAC-SHA256 + custom headers to scheduler webhook channels. Secrets go to the OS
-  keyring (`com.cognia.remote-control`).**Off by default**, opt-in to enable.
+  Tauri Rust starts an axum 0.7 HTTP server bound to 127.0.0.1:&lt;port&gt; (default 47821),
+  exposing 3 v1 endpoints: health / trigger task / trigger event. Bearer + IP allowlist + rate
+  limiting + 8 KiB body limit. Outbound direction adds HMAC-SHA256 + custom headers to scheduler
+  webhook channels. Secrets go to the OS keyring (`com.cognia.remote-control`).**Off by default**,
+  opt-in to enable.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Inbound endpoints" value="3" hint="/api/v1/health · /api/v1/tasks/:id/run · /api/v1/events" />
+  <Stat
+    label="Inbound endpoints"
+    value="3"
+    hint="/api/v1/health · /api/v1/tasks/:id/run · /api/v1/events"
+  />
   <Stat label="Default port" value="47821" hint="127.0.0.1 binding only" />
   <Stat label="Body limit" value="8 KiB" hint="tower-http RequestBodyLimitLayer" />
   <Stat label="Default rate limit" value="60/min" hint="fixed-window per-token" />
@@ -23,13 +28,13 @@ description: Local 127.0.0.1 axum HTTP listener + HMAC-signed outbound webhooks 
 
 ## Use Cases
 
-| Scenario | Trigger |
-| -------- | ------- |
-| CI job starts a chat | `POST /api/v1/tasks/&lt;taskId&gt;/run`, cognia scheduler executes the task |
+| Scenario                              | Trigger                                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| CI job starts a chat                  | `POST /api/v1/tasks/&lt;taskId&gt;/run`, cognia scheduler executes the task               |
 | External sync completion notification | `POST /api/v1/events` with body `{ eventType: "backup:needed", eventSource: "external" }` |
-| Webhook receiver authentication | Outbound webhook carries `X-Cognia-Signature: sha256=<hex>` — receiver validates HMAC |
-| Personal script automation | curl + bearer token simple scripts |
-| Cloudflare Tunnel | (Future) axum app stays the same, only a sidecar process is added |
+| Webhook receiver authentication       | Outbound webhook carries `X-Cognia-Signature: sha256=<hex>` — receiver validates HMAC     |
+| Personal script automation            | curl + bearer token simple scripts                                                        |
+| Cloudflare Tunnel                     | (Future) axum app stays the same, only a sidecar process is added                         |
 
 **Not suitable for**: LAN direct connection (127.0.0.1 only by design), public internet exposure (out of scope this cycle), scenarios requiring bidirectional streaming (request/response only).
 
@@ -97,26 +102,26 @@ flowchart LR
 
 ### Rust Layer
 
-| File | Purpose |
-| ---- | ------- |
-| `src-tauri/src/remote_control/mod.rs` | `RemoteControlState` — Tauri-managed; holds `ServerHandle` |
-| `src-tauri/src/remote_control/server.rs` | axum app + middleware stack + 3 endpoints; graceful shutdown via `watch` |
-| `src-tauri/src/remote_control/allowlist.rs` | IPv4 CIDR matcher (bare IP / `127.0.0.1/32` / `10.0.0.0/8`) |
-| `src-tauri/src/remote_control/rate_limit.rs` | `FixedWindowRateLimiter` — per-token 60/min default |
-| `src-tauri/src/remote_control/keyring.rs` | `read_token` / `write_token` / `read_signing_secret` / `write_signing_secret` |
-| `src-tauri/src/remote_control/commands.rs` | 12 Tauri commands (status / start / stop / set/clear token / update config / ...) |
-| `src-tauri/src/remote_control/types.rs` | `RemoteControlConfig` / `RemoteControlStatus` / `RemoteControlError` |
+| File                                         | Purpose                                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------------------- |
+| `src-tauri/src/remote_control/mod.rs`        | `RemoteControlState` — Tauri-managed; holds `ServerHandle`                        |
+| `src-tauri/src/remote_control/server.rs`     | axum app + middleware stack + 3 endpoints; graceful shutdown via `watch`          |
+| `src-tauri/src/remote_control/allowlist.rs`  | IPv4 CIDR matcher (bare IP / `127.0.0.1/32` / `10.0.0.0/8`)                       |
+| `src-tauri/src/remote_control/rate_limit.rs` | `FixedWindowRateLimiter` — per-token 60/min default                               |
+| `src-tauri/src/remote_control/keyring.rs`    | `read_token` / `write_token` / `read_signing_secret` / `write_signing_secret`     |
+| `src-tauri/src/remote_control/commands.rs`   | 12 Tauri commands (status / start / stop / set/clear token / update config / ...) |
+| `src-tauri/src/remote_control/types.rs`      | `RemoteControlConfig` / `RemoteControlStatus` / `RemoteControlError`              |
 
 ### Renderer Layer
 
-| File | Purpose |
-| ---- | ------- |
-| `types/remote-control/index.ts` | Mirrored Rust types + `validateCidrOrIp` |
-| `lib/scheduler/webhook-outbound-config.ts` | `getWebhookOutboundConfig()` — reads keyring (desktop only) + Zustand |
-| `lib/scheduler/webhook-signature.ts` | Web Crypto HMAC-SHA256 (~30 lines); shared between production and tests |
-| `lib/scheduler/notification-integration.ts` | Existing `sendWebhookNotification`; added `opts: { signingSecret?, headers? }` |
-| `components/settings/remote-control/remote-control-section.tsx` | Tabbed shell; 4 tabs (Overview / Inbound / Outbound / Events) |
-| `components/providers/remote-control-receiver.tsx` | Top-level provider; listens for `remote-control://*` Tauri events |
+| File                                                            | Purpose                                                                        |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `types/remote-control/index.ts`                                 | Mirrored Rust types + `validateCidrOrIp`                                       |
+| `lib/scheduler/webhook-outbound-config.ts`                      | `getWebhookOutboundConfig()` — reads keyring (desktop only) + Zustand          |
+| `lib/scheduler/webhook-signature.ts`                            | Web Crypto HMAC-SHA256 (~30 lines); shared between production and tests        |
+| `lib/scheduler/notification-integration.ts`                     | Existing `sendWebhookNotification`; added `opts: { signingSecret?, headers? }` |
+| `components/settings/remote-control/remote-control-section.tsx` | Tabbed shell; 4 tabs (Overview / Inbound / Outbound / Events)                  |
+| `components/providers/remote-control-receiver.tsx`              | Top-level provider; listens for `remote-control://*` Tauri events              |
 
 ## Control Flow: HMAC Verification (Inbound)
 
@@ -217,11 +222,11 @@ If any middleware rejects the request, it never reaches the handler; the handler
 
 ## Endpoint Contract
 
-| Method | Path | Behavior |
-| ------ | ---- | -------- |
-| `GET` | `/api/v1/health` | Returns `{ ok: true, version }`. **Requires auth** to avoid leaking version numbers to unauthenticated scanners. |
-| `POST` | `/api/v1/tasks/:id/run` | Emits `remote-control://run-task` Tauri event; renderer calls `runTaskNow(taskId, source="remote")`; returns 202. |
-| `POST` | `/api/v1/events` | Emits `remote-control://emit-event`; renderer calls `emitSchedulerEvent(eventType, data, eventSource)`; returns 202. |
+| Method | Path                    | Behavior                                                                                                             |
+| ------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/health`        | Returns `{ ok: true, version }`. **Requires auth** to avoid leaking version numbers to unauthenticated scanners.     |
+| `POST` | `/api/v1/tasks/:id/run` | Emits `remote-control://run-task` Tauri event; renderer calls `runTaskNow(taskId, source="remote")`; returns 202.    |
+| `POST` | `/api/v1/events`        | Emits `remote-control://emit-event`; renderer calls `emitSchedulerEvent(eventType, data, eventSource)`; returns 202. |
 
 `/events` request body shape:
 
@@ -248,12 +253,12 @@ Remote control itself **does not introduce new Dexie tables**:
 
 ### Settings → Remote Control (four tabs)
 
-| Tab | Content |
-| --- | ------- |
-| `Overview` | Start/stop / bound port / call count / recent call list (ring buffer) |
-| `Inbound` | Enable toggle (guarded by `isTauri()`), `Generate token`, port, CIDR allowlist input, rate limit ceiling |
+| Tab        | Content                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `Overview` | Start/stop / bound port / call count / recent call list (ring buffer)                                           |
+| `Inbound`  | Enable toggle (guarded by `isTauri()`), `Generate token`, port, CIDR allowlist input, rate limit ceiling        |
 | `Outbound` | "Set / clear signing secret" button, custom headers list (merge order: opts.headers first, `Content-Type` last) |
-| `Events` | Event documentation + a test sender |
+| `Events`   | Event documentation + a test sender                                                                             |
 
 ### Inbound Startup Gate
 
@@ -269,7 +274,11 @@ Remote control itself **does not introduce new Dexie tables**:
 ## Related Subsystems
 
 <Cards>
-  <Card title="Scheduler" href="./scheduler" description="The engine that actually runs tasks and receives events" />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="The engine that actually runs tasks and receives events"
+  />
   <Card
     title="MCP Server in Tauri"
     href="./mcp-server-tauri"

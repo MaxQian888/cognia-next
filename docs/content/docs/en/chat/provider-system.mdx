@@ -8,10 +8,10 @@ description: A directory of 70+ built-in providers, API key persistence, dynamic
 <Status variant="stable">stable</Status>
 
 <TLDR>
-  Cognia maintains 70+ built-in providers (OpenAI / Anthropic / Google / DeepSeek / local
-  Ollama …) in a static catalog, maps them to 5 adapters across 6 protocol families;
-  plugins can dynamically register their own providers; finally, a pure-function projection
-  layer merges built-in + custom + local + plugin paths into a flat array for the UI.
+  Cognia maintains 70+ built-in providers (OpenAI / Anthropic / Google / DeepSeek / local Ollama …)
+  in a static catalog, maps them to 5 adapters across 6 protocol families; plugins can dynamically
+  register their own providers; finally, a pure-function projection layer merges built-in + custom +
+  local + plugin paths into a flat array for the UI.
 </TLDR>
 
 <StatGrid>
@@ -93,22 +93,28 @@ flowchart TB
 `types/provider/built-in-provider-catalog.ts` is the static catalog. `BUILT_IN_PROVIDER_IDS`
 is grouped by theme:
 
-| Group | Example ids |
-| ----- | ----------- |
-| Flagship | `openai` · `anthropic` · `google` |
-| Major Chinese | `deepseek` · `moonshot` · `zhipu` · `qwen` · `doubao` · `glm4` |
-| Aggregator / Proxy | `openrouter` · `siliconflow` · `aiproxy` · `ohmygpt` · `cliproxyapi` |
-| Local Inference | `ollama` · `lmstudio` · `llamacpp` · `vllm` · `localai` · `jan` |
-| Enterprise Platform | `bedrock` · `azure` · `huggingface` · `nvidia` · `replicate` |
-| Specialized | `voyage` · `jina` · `cohere` · `fal` |
+| Group               | Example ids                                                          |
+| ------------------- | -------------------------------------------------------------------- |
+| Flagship            | `openai` · `anthropic` · `google`                                    |
+| Major Chinese       | `deepseek` · `moonshot` · `zhipu` · `qwen` · `doubao` · `glm4`       |
+| Aggregator / Proxy  | `openrouter` · `siliconflow` · `aiproxy` · `ohmygpt` · `cliproxyapi` |
+| Local Inference     | `ollama` · `lmstudio` · `llamacpp` · `vllm` · `localai` · `jan`      |
+| Enterprise Platform | `bedrock` · `azure` · `huggingface` · `nvidia` · `replicate`         |
+| Specialized         | `voyage` · `jina` · `cohere` · `fal`                                 |
 
 Each `CATALOG_ENTRIES[id]` is a `BuiltInProviderCatalogEntry`. Key fields:
 
 <TypeTable
   type={{
-    id: { type: "BuiltInProviderId", description: "Stable id; used as a foreign key when writing to Dexie." },
+    id: {
+      type: "BuiltInProviderId",
+      description: "Stable id; used as a foreign key when writing to Dexie.",
+    },
     name: { type: "string", description: "Display name." },
-    type: { type: '"cloud" | "local"', description: "Determines whether LAN health checks are performed." },
+    type: {
+      type: '"cloud" | "local"',
+      description: "Determines whether LAN health checks are performed.",
+    },
     protocol: {
       type: '"openai" | "anthropic" | "gemini"',
       description: "Determines request schema / error code translation.",
@@ -121,14 +127,26 @@ Each `CATALOG_ENTRIES[id]` is a `BuiltInProviderCatalogEntry`. Key fields:
       type: "BuiltInProviderAdapterId",
       description: "One of 5 adapter ids — the HTTP client implementation.",
     },
-    apiKeyRequired: { type: "boolean", description: "When false, keyring write validation is skipped." },
-    baseURLRequired: { type: "boolean", description: "Default false — uses the vendor's official domain." },
-    defaultModel: { type: "string", description: "Default model id when this provider is first selected." },
+    apiKeyRequired: {
+      type: "boolean",
+      description: "When false, keyring write validation is skipped.",
+    },
+    baseURLRequired: {
+      type: "boolean",
+      description: "Default false — uses the vendor's official domain.",
+    },
+    defaultModel: {
+      type: "string",
+      description: "Default model id when this provider is first selected.",
+    },
     category: {
       type: '"flagship" | "aggregator" | "specialized" | "local" | "enterprise"',
       description: "UI grouping.",
     },
-    dashboardUrl: { type: "string?", description: "Target for the Settings 'Open Dashboard' button." },
+    dashboardUrl: {
+      type: "string?",
+      description: "Target for the Settings 'Open Dashboard' button.",
+    },
     docsUrl: { type: "string?", description: "Target for the Settings 'View Docs' button." },
     pricingUrl: { type: "string?", description: "Pricing page link." },
   }}
@@ -142,14 +160,14 @@ semi-finished scenarios.
 
 `provider-adapters.ts` defines five adapters, each corresponding to a set of wire-protocol behaviors:
 
-| Adapter id | Family | Protocol | Primary Consumers |
-| ---------- | ------ | -------- | ----------------- |
-| `openai-compatible` | `openai-compatible` | openai | OpenAI itself + almost all compatible endpoints |
-| `anthropic` | `anthropic-native` | anthropic | Anthropic direct (API key path) |
-| `gemini` | `gemini-native` | gemini | Google Gemini native API |
-| `openrouter` | `openrouter` | openai | OpenRouter aggregator (passes through `X-OR-*` headers) |
-| `local-openai-compatible` | `local-openai-compatible` | openai | Ollama / LM Studio / vLLM / llama.cpp … |
-| `cliproxyapi` | `proxy-openai-compatible` | openai | Local CLI proxy service (special: base URL only) |
+| Adapter id                | Family                    | Protocol  | Primary Consumers                                       |
+| ------------------------- | ------------------------- | --------- | ------------------------------------------------------- |
+| `openai-compatible`       | `openai-compatible`       | openai    | OpenAI itself + almost all compatible endpoints         |
+| `anthropic`               | `anthropic-native`        | anthropic | Anthropic direct (API key path)                         |
+| `gemini`                  | `gemini-native`           | gemini    | Google Gemini native API                                |
+| `openrouter`              | `openrouter`              | openai    | OpenRouter aggregator (passes through `X-OR-*` headers) |
+| `local-openai-compatible` | `local-openai-compatible` | openai    | Ollama / LM Studio / vLLM / llama.cpp …                 |
+| `cliproxyapi`             | `proxy-openai-compatible` | openai    | Local CLI proxy service (special: base URL only)        |
 
 Each adapter maintains two default `ProviderAdapterRequirements`:
 
@@ -188,13 +206,13 @@ embedding doesn't need chat tools / streaming / vision fields, the definition st
 
 ## Persistence — Three-layer Storage
 
-| Content | Location | Reason |
-| ------- | -------- | ------ |
-| API key | OS keyring (`api_key` Rust module) | No plaintext on disk; web mode falls back to memory |
-| Base URL / custom models / verified state | Dexie `settings.providerSettings[id]` | Used for cross-device sync |
-| Selected active provider id | Dexie `settings.activeProviderId` | Shared field with CCSwitch |
-| Custom providers list | Dexie `settings.customProviders[]` | User-added endpoints |
-| OAuth credentials (Claude) | OS keyring, independent service | See [Claude Subscription OAuth](./claude-subscription-oauth) |
+| Content                                   | Location                              | Reason                                                       |
+| ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
+| API key                                   | OS keyring (`api_key` Rust module)    | No plaintext on disk; web mode falls back to memory          |
+| Base URL / custom models / verified state | Dexie `settings.providerSettings[id]` | Used for cross-device sync                                   |
+| Selected active provider id               | Dexie `settings.activeProviderId`     | Shared field with CCSwitch                                   |
+| Custom providers list                     | Dexie `settings.customProviders[]`    | User-added endpoints                                         |
+| OAuth credentials (Claude)                | OS keyring, independent service       | See [Claude Subscription OAuth](./claude-subscription-oauth) |
 
 `provider-persistence.ts` handles four things:
 
@@ -258,16 +276,20 @@ so the add wizard, provider list, CCSwitch picker, and model selector all see a 
 <Steps>
   <Step>User pastes an API key in Settings → Provider.</Step>
   <Step>
-    `AddProviderWizard` writes the key to keyring via `lib/tauri`, and writes other preferences to Dexie `settings`.
-  </Step>
-  <Step>`SettingsSyncProvider` detects the change and triggers a new round of `buildProviderStateProjections`.</Step>
-  <Step>
-    The projection injects the new entry into UI state; meanwhile, providers with SDKs like Claude are pushed to the
-    sidecar via `setProviderEnv`.
+    `AddProviderWizard` writes the key to keyring via `lib/tauri`, and writes other preferences to
+    Dexie `settings`.
   </Step>
   <Step>
-    The first send triggers `verifyProvider`; the result is written back to `providerSettings[id].verificationStatus`, and the dot on the
-    provider list turns green.
+    `SettingsSyncProvider` detects the change and triggers a new round of
+    `buildProviderStateProjections`.
+  </Step>
+  <Step>
+    The projection injects the new entry into UI state; meanwhile, providers with SDKs like Claude
+    are pushed to the sidecar via `setProviderEnv`.
+  </Step>
+  <Step>
+    The first send triggers `verifyProvider`; the result is written back to
+    `providerSettings[id].verificationStatus`, and the dot on the provider list turns green.
   </Step>
 </Steps>
 
@@ -279,7 +301,11 @@ so the add wizard, provider list, CCSwitch picker, and model selector all see a 
     href="./claude-subscription-oauth"
     description="OAuth path — mutually exclusive with and takes priority over Anthropic API key."
   />
-  <Card title="CCSwitch" href="./ccswitch" description="One-click switching across 50+ Claude third-party endpoints." />
+  <Card
+    title="CCSwitch"
+    href="./ccswitch"
+    description="One-click switching across 50+ Claude third-party endpoints."
+  />
   <Card
     title="Chat & Skills"
     href="./chat-and-skills"

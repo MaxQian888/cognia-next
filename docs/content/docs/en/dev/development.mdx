@@ -412,13 +412,13 @@ Runs `tsc --noEmit` against the entire repo. Use this in CI; `pnpm test` does no
 
 ## Common refactoring patterns
 
-| If you want to...                            | Then...                                                                   |
-| -------------------------------------------- | ------------------------------------------------------------------------- |
-| Extract a shared hook                        | Move to `hooks/` and update imports                                       |
+| If you want to...                            | Then...                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| Extract a shared hook                        | Move to `hooks/` and update imports                                             |
 | Add a Tauri command                          | Follow [Runtime & Tauri](../core/runtime-and-tauri) §"Adding a new IPC command" |
 | Bump the Dexie schema                        | Follow [Storage](../data/storage) §"Adding a new table"                         |
-| Add an executor / importer / domain transfer | Add a registry entry; existing patterns                                   |
-| Localise a string                            | See [Theming & i18n](../ui/theming-and-i18n) §"Adding a new translation key"  |
+| Add an executor / importer / domain transfer | Add a registry entry; existing patterns                                         |
+| Localise a string                            | See [Theming & i18n](../ui/theming-and-i18n) §"Adding a new translation key"    |
 
 ## Where to start contributing
 

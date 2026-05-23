@@ -46,7 +46,7 @@ jest.mock("@/stores/a2ui", () => ({
   },
 }))
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: () => ({
       registerPluginComponent: mockRegisterPluginComponent,

@@ -117,14 +117,14 @@ Entries with `desktopOnly: true` (e.g. `subscription`, `ccswitch`, `hooks`, `too
 
 ## Group Semantics
 
-| Group           | Meaning                        | Typical sections                                                              |
-| --------------- | ------------------------------ | ----------------------------------------------------------------------------- |
-| `ai`            | Models, keys, agent behavior   | general, api-key, providers, subscription, ccswitch, agents...                |
-| `extensions`    | User-assemblable extension points | characters, skills, teams, mcp, a2ui, plugins, connections                 |
-| `interface`     | Visuals and interaction        | appearance, speech, presets, artifacts, canvas                                |
-| `data`          | Data lifecycle                 | data (backup/export), workflows, scheduled-tasks                              |
-| `observability` | Troubleshooting and monitoring | logs, diagnostics                                                             |
-| `system`        | System-level integrations      | remote-control, external-bridge, companion, network, desktop, about           |
+| Group           | Meaning                           | Typical sections                                                    |
+| --------------- | --------------------------------- | ------------------------------------------------------------------- |
+| `ai`            | Models, keys, agent behavior      | general, api-key, providers, subscription, ccswitch, agents...      |
+| `extensions`    | User-assemblable extension points | characters, skills, teams, mcp, a2ui, plugins, connections          |
+| `interface`     | Visuals and interaction           | appearance, speech, presets, artifacts, canvas                      |
+| `data`          | Data lifecycle                    | data (backup/export), workflows, scheduled-tasks                    |
+| `observability` | Troubleshooting and monitoring    | logs, diagnostics                                                   |
+| `system`        | System-level integrations         | remote-control, external-bridge, companion, network, desktop, about |
 
 Order is controlled by `SETTINGS_GROUP_ORDER`, **not** alphabetical.
 
@@ -232,14 +232,14 @@ When writing a new section, copy this 35-line template directly, changing `DATA_
 
 ### Existing Tabbed Sections
 
-| Section           | URL tab key       | tabs                                                              |
-| ----------------- | ----------------- | ----------------------------------------------------------------- |
-| `data`            | `?dataTab=`       | overview / backup / domain / maintenance                          |
-| `appearance`      | `?appearanceTab=` | theme / wallpaper / custom / import / typography / advanced       |
-| `workflows`       | `?wfTab=`         | library / runs / templates / defaults / audit                     |
-| `subscription`    | `?subTab=`        | overview / account / usage / settings                             |
-| `connections`     | (inline)          | overview / adapters / conversations / inbox / outbound / audit    |
-| `external-bridge` | (inline)          | server / scopes / setup / audit                                   |
+| Section           | URL tab key       | tabs                                                           |
+| ----------------- | ----------------- | -------------------------------------------------------------- |
+| `data`            | `?dataTab=`       | overview / backup / domain / maintenance                       |
+| `appearance`      | `?appearanceTab=` | theme / wallpaper / custom / import / typography / advanced    |
+| `workflows`       | `?wfTab=`         | library / runs / templates / defaults / audit                  |
+| `subscription`    | `?subTab=`        | overview / account / usage / settings                          |
+| `connections`     | (inline)          | overview / adapters / conversations / inbox / outbound / audit |
+| `external-bridge` | (inline)          | server / scopes / setup / audit                                |
 
 ## Search and Keyboard
 
@@ -355,23 +355,23 @@ Add a `case "my-section": return <MySection />` to the `<SectionContent>` switch
 
 ## Testing
 
-| File                          | Coverage                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------ |
+| File                          | Coverage                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------- |
 | `settings-nav-config.test.ts` | Type IDs match array members one-to-one, group order, keyword index completeness |
-| `settings-shell` indirect     | Section switching, URL validation, ScrollArea switching                  |
-| Each section `*.test.tsx`     | Form state, Dexie write path, degradation branches                       |
+| `settings-shell` indirect     | Section switching, URL validation, ScrollArea switching                          |
+| Each section `*.test.tsx`     | Form state, Dexie write path, degradation branches                               |
 
 Verify overall thresholds with `pnpm test:coverage`; CI will fail if a new section does not reach 90%.
 
 ## URL Protocol Summary
 
-| URL                                                 | Behavior                                              |
-| --------------------------------------------------- | ----------------------------------------------------- |
-| `/settings`                                         | Default section = `general`                           |
-| `/settings?section=providers`                       | Jump to Providers section                             |
-| `/settings?section=data&dataTab=backup`             | Data section's backup tab                             |
+| URL                                                 | Behavior                                                  |
+| --------------------------------------------------- | --------------------------------------------------------- |
+| `/settings`                                         | Default section = `general`                               |
+| `/settings?section=providers`                       | Jump to Providers section                                 |
+| `/settings?section=data&dataTab=backup`             | Data section's backup tab                                 |
 | `/settings?section=external-bridge`                 | External Bridge section (includes server/scopes subpages) |
-| `/settings?section=appearance&appearanceTab=custom` | Appearance custom theme tab                           |
+| `/settings?section=appearance&appearanceTab=custom` | Appearance custom theme tab                               |
 
 Any setting you want to send as a "deep link to a colleague" should use this URL protocol — it preserves both section and tab state.
 
@@ -400,22 +400,42 @@ The Settings UI is the "entry panel" for nearly every subsystem. The table below
     href="./visual-workflows"
     description="Library / runs / templates / audit under ?section=workflows"
   />
-  <Card title="Skills System" href="./skills-system" description="Skill library management under ?section=skills" />
-  <Card title="Character Management" href="./chat-and-skills" description="Character editing under ?section=characters" />
+  <Card
+    title="Skills System"
+    href="./skills-system"
+    description="Skill library management under ?section=skills"
+  />
+  <Card
+    title="Character Management"
+    href="./chat-and-skills"
+    description="Character editing under ?section=characters"
+  />
   <Card
     title="MCP Servers"
     href="./misc-subsystems"
     description="Local and remote MCP registration under ?section=mcp"
   />
   <Card title="A2UI" href="./a2ui-system" description="A2UI tool panel under ?section=a2ui" />
-  <Card title="Plugin System" href="./plugin-system" description="Local plugin installation under ?section=plugins" />
-  <Card title="Scheduler" href="./scheduler" description="Cron and history under ?section=scheduled-tasks" />
+  <Card
+    title="Plugin System"
+    href="./plugin-system"
+    description="Local plugin installation under ?section=plugins"
+  />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="Cron and history under ?section=scheduled-tasks"
+  />
   <Card
     title="External Bridge"
     href="./external-bridge"
     description="MCP server external exposure under ?section=external-bridge"
   />
-  <Card title="Remote Control" href="./remote-control" description="Device linking under ?section=remote-control" />
+  <Card
+    title="Remote Control"
+    href="./remote-control"
+    description="Device linking under ?section=remote-control"
+  />
   <Card
     title="Companion API"
     href="./companion-api"
@@ -436,7 +456,15 @@ The Settings UI is the "entry panel" for nearly every subsystem. The table below
     href="./theming-and-i18n"
     description="Theme / wallpaper / font / language under ?section=appearance"
   />
-  <Card title="Slash Commands" href="./slash-commands" description="Registry under ?section=slash-commands" />
-  <Card title="Speech" href="./misc-subsystems" description="TTS / STT configuration under ?section=speech" />
+  <Card
+    title="Slash Commands"
+    href="./slash-commands"
+    description="Registry under ?section=slash-commands"
+  />
+  <Card
+    title="Speech"
+    href="./misc-subsystems"
+    description="TTS / STT configuration under ?section=speech"
+  />
   <Card title="Logs" href="./observability" description="?section=logs and ?section=diagnostics" />
 </Cards>

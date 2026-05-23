@@ -19,43 +19,43 @@ Cognia's plugin security model is built on five principles:
 domain.action:scope
 ```
 
-| Part | Example | Meaning |
-|------|---------|---------|
-| `domain` | `fs`, `chat`, `network` | The subsystem being accessed |
-| `action` | `read`, `write`, `send`, `fetch` | The operation |
-| `scope` | `$DOWNLOADS`, `api.example.com`, `*` | The scope of access (optional for some domains) |
+| Part     | Example                              | Meaning                                         |
+| -------- | ------------------------------------ | ----------------------------------------------- |
+| `domain` | `fs`, `chat`, `network`              | The subsystem being accessed                    |
+| `action` | `read`, `write`, `send`, `fetch`     | The operation                                   |
+| `scope`  | `$DOWNLOADS`, `api.example.com`, `*` | The scope of access (optional for some domains) |
 
 ## Built-in permission domains
 
-| Domain | Actions | Scope syntax | Example |
-|--------|---------|--------------|---------|
-| `chat` | `read`, `send` | none | `chat.read`, `chat.send` |
-| `twin` | `read`, `ingest` | none | `twin.read` |
-| `fs` | `read`, `write` | Path or variable | `fs.read:$DOWNLOADS`, `fs.write:$TEMP` |
-| `network` | `fetch` | Origin (host only) | `network.fetch:api.example.com` |
-| `theme` | `read`, `write` | none | `theme.read`, `theme.write` |
-| `storage` | `read`, `write` | none | `storage.read`, `storage.write` |
-| `export` | `trigger` | none | `export.trigger` |
-| `notification` | `toast`, `native` | none | `notification.toast`, `notification.native` |
-| `ai` | `provider`, `prompt` | none | `ai.provider` |
-| `extension` | `mount` | none | `extension.mount` |
-| `scheduler` | `register` | none | `scheduler.register` |
-| `canvas` | `read`, `write` | none | `canvas.read`, `canvas.write` |
-| `artifact` | `register` | none | `artifact.register` |
-| `media` | `filter`, `effect` | none | `media.filter`, `media.effect` |
-| `crypto` | `digest`, `encrypt` | none | `crypto.digest` |
-| `permission` | `read`, `request` | none | `permission.read` (implicit, always granted) |
+| Domain         | Actions              | Scope syntax       | Example                                      |
+| -------------- | -------------------- | ------------------ | -------------------------------------------- |
+| `chat`         | `read`, `send`       | none               | `chat.read`, `chat.send`                     |
+| `twin`         | `read`, `ingest`     | none               | `twin.read`                                  |
+| `fs`           | `read`, `write`      | Path or variable   | `fs.read:$DOWNLOADS`, `fs.write:$TEMP`       |
+| `network`      | `fetch`              | Origin (host only) | `network.fetch:api.example.com`              |
+| `theme`        | `read`, `write`      | none               | `theme.read`, `theme.write`                  |
+| `storage`      | `read`, `write`      | none               | `storage.read`, `storage.write`              |
+| `export`       | `trigger`            | none               | `export.trigger`                             |
+| `notification` | `toast`, `native`    | none               | `notification.toast`, `notification.native`  |
+| `ai`           | `provider`, `prompt` | none               | `ai.provider`                                |
+| `extension`    | `mount`              | none               | `extension.mount`                            |
+| `scheduler`    | `register`           | none               | `scheduler.register`                         |
+| `canvas`       | `read`, `write`      | none               | `canvas.read`, `canvas.write`                |
+| `artifact`     | `register`           | none               | `artifact.register`                          |
+| `media`        | `filter`, `effect`   | none               | `media.filter`, `media.effect`               |
+| `crypto`       | `digest`, `encrypt`  | none               | `crypto.digest`                              |
+| `permission`   | `read`, `request`    | none               | `permission.read` (implicit, always granted) |
 
 ## Scope variables
 
-| Variable | Resolves to |
-|----------|-------------|
-| `$HOME` | User home directory |
-| `$DOWNLOADS` | Downloads folder |
-| `$DOCUMENTS` | Documents folder |
-| `$TEMP` | System temp directory |
-| `$DESKTOP` | Desktop folder |
-| `$PLUGIN` | Plugin's own data directory |
+| Variable     | Resolves to                 |
+| ------------ | --------------------------- |
+| `$HOME`      | User home directory         |
+| `$DOWNLOADS` | Downloads folder            |
+| `$DOCUMENTS` | Documents folder            |
+| `$TEMP`      | System temp directory       |
+| `$DESKTOP`   | Desktop folder              |
+| `$PLUGIN`    | Plugin's own data directory |
 
 ## Runtime behavior
 
@@ -80,5 +80,9 @@ Permission checks are synchronous and cached per call. Revoking a permission tak
 
 <Cards>
   <Card title="Manifest" href="./manifest" description="Where permissions are declared." />
-  <Card title="API Overview" href="./api-overview" description="What each API namespace requires." />
+  <Card
+    title="API Overview"
+    href="./api-overview"
+    description="What each API namespace requires."
+  />
 </Cards>

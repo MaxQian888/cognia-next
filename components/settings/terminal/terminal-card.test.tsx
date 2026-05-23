@@ -8,7 +8,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const settingsSave = jest.fn(async () => undefined)
+const settingsSave = jest.fn(async (..._args: unknown[]) => undefined)
 let settingsState: { terminal?: Record<string, unknown> } = {}
 
 jest.mock("@/stores/settings", () => ({

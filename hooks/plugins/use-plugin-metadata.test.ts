@@ -15,7 +15,7 @@ type Plugin = {
 
 let pluginsState: Record<string, Plugin> = {}
 
-jest.mock("@/stores/plugin/plugin-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   usePluginStore: <T>(selector: (s: { plugins: Record<string, Plugin> }) => T) =>
     selector({ plugins: pluginsState }),
 }))

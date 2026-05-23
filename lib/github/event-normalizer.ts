@@ -162,9 +162,7 @@ export function computePollingDeliveryId(
   repoFullName: string,
   primaryId: number | string
 ): string {
-  return createHash("sha1")
-    .update(`${kind}|${repoFullName}|${primaryId}`)
-    .digest("hex")
+  return createHash("sha1").update(`${kind}|${repoFullName}|${primaryId}`).digest("hex")
 }
 
 export function normalizePollingDiff(entry: PollingDiffEntry): NormalizedGhEvent {

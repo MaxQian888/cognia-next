@@ -6,7 +6,7 @@
 // Stub the plugin store so the picker can resolve "From <plugin name>"
 // labels without booting the real Zustand store + manager.
 let pluginsState: Record<string, { id: string; manifest: { name?: string } }> = {}
-jest.mock("@/stores/plugin/plugin-store", () => ({
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   usePluginStore: <T,>(selector: (s: { plugins: typeof pluginsState }) => T) =>
     selector({ plugins: pluginsState }),
 }))

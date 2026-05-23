@@ -107,7 +107,10 @@ the plugin. You do not need to call it manually — the `PluginManager` handles 
 For debugging you can call the bridge directly:
 
 ```ts
-import { registerPluginAdapters, unregisterPluginAdapters } from "@/lib/plugin/bridge/connectors-bridge"
+import {
+  registerPluginAdapters,
+  unregisterPluginAdapters,
+} from "@/lib/plugin/bridge/connectors-bridge"
 import manifest from "./manifest.json"
 import * as exports from "./dist/index"
 

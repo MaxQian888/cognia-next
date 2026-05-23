@@ -8,6 +8,7 @@ import userEvent from "@testing-library/user-event"
 import { PairedStep } from "./paired-step"
 
 jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn().mockReturnValue(false),
   transport: {
     call: jest.fn(),
     subscribe: jest.fn().mockReturnValue(() => {}),
