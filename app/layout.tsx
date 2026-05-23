@@ -35,8 +35,8 @@ import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provi
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { ConsentOverlay } from "@/components/automation/consent-overlay"
-import { PluginModalRoot } from "@/components/plugins/plugin-modal-root"
-import { PluginConsentOverlay } from "@/components/plugins/plugin-consent-overlay"
+import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
+import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {

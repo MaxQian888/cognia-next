@@ -5,7 +5,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface RendererErrorBoundaryProps {
   children: ReactNode

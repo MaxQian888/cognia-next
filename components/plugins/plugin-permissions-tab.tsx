@@ -1,22 +1,24 @@
 "use client"
 
-// Permissions tab — full-fidelity aggregated permission matrix replacing the
-// previous instructional placeholder. The view is split into two tables
-// (sensitive / standard) keyed on `DANGEROUS_PERMISSIONS`. Each row lists a
-// permission, the count of plugins holding it, and a chip per holder. Chips
-// click through to the existing `PluginPermissionReview` dialog via the
-// shared zustand store.
-//
-// A "Per-plugin review" panel at the top lets the user open the review
-// dialog for any installed plugin without going through the per-card menu —
-// useful as a quick-glance bulk audit surface.
+// Per-plugin permission review dialog. Replaces the read-only PermissionsTab
+// summary in the panel by giving the user a real grant / revoke surface,
+// with `manifest declared` vs `runtime granted` columns and an audit log.
+// Driven through the `usePluginPermissions` hook (no direct guard access).
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { ShieldCheckIcon, AlertTriangleIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { useLiveQuery } from "dexie-react-hooks"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
   TableBody,
@@ -25,204 +27,210 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cn } from "@/lib/utils"
-import { usePlugins, usePluginPermissions } from "@/hooks/plugins"
+import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { getPlugin } from "@/lib/db/plugins"
+import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
+import { usePluginPermissions } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
-import type { PluginPermission } from "@/types/plugin"
-import type { PluginRow } from "@/lib/db/plugin-types"
+import { AuditLogEntry } from "./audit-log-entry"
 
-interface MatrixEntry {
-  permission: PluginPermission
-  holders: PluginRow[]
+export function PluginPermissionReview() {
+  const target = usePluginsStore((s) => s.permissionReviewTarget)
+  const close = usePluginsStore((s) => s.closePermissionReview)
+  const open = target !== null
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
+        {target ? <PermissionReviewContent pluginId={target.pluginId} onClose={close} /> : null}
+      </DialogContent>
+    </Dialog>
+  )
 }
 
-function buildMatrix(
-  rows: PluginRow[],
-  getGranted: (id: string) => PluginPermission[]
-): { dangerous: MatrixEntry[]; normal: MatrixEntry[] } {
-  const holdersByPermission = new Map<PluginPermission, PluginRow[]>()
-
-  const collect = (row: PluginRow, permissions: PluginPermission[]) => {
-    for (const perm of permissions) {
-      const list = holdersByPermission.get(perm) ?? []
-      if (!list.find((existing) => existing.id === row.id)) list.push(row)
-      holdersByPermission.set(perm, list)
-    }
-  }
-
-  for (const row of rows) {
-    const declared = ((row.manifest as { permissions?: PluginPermission[] }).permissions ??
-      []) as PluginPermission[]
-    const optional = ((row.manifest as { optionalPermissions?: PluginPermission[] })
-      .optionalPermissions ?? []) as PluginPermission[]
-    const granted = getGranted(row.id)
-    collect(row, [...declared, ...optional, ...granted])
-  }
-
-  // Sort permissions alphabetically for stable rendering.
-  const entries: MatrixEntry[] = Array.from(holdersByPermission.entries())
-    .map(([permission, holders]) => ({ permission, holders }))
-    .sort((a, b) => a.permission.localeCompare(b.permission))
-
-  return { dangerous: [], normal: entries }
-}
-
-export function PluginPermissionsTab() {
-  const t = useTranslations("plugins.permissions")
-  const { all, loading } = usePlugins()
+function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onClose: () => void }) {
+  const t = useTranslations("plugins.permissionReview")
+  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
   const perms = usePluginPermissions()
-  const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
 
-  const { dangerous, normal } = useMemo(() => {
-    const dangerousSet = new Set<string>(perms.dangerous as string[])
-    const built = buildMatrix(all, perms.getGranted)
-    return {
-      dangerous: built.normal.filter((e) => dangerousSet.has(e.permission)),
-      normal: built.normal.filter((e) => !dangerousSet.has(e.permission)),
-    }
-  }, [all, perms])
+  const manifest = plugin?.manifest as PluginManifest | undefined
+  const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
+  const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
+  const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])
+  const granted = useMemo(() => new Set(perms.getGranted(pluginId)), [perms, pluginId])
+  const allListed = useMemo(() => {
+    const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
+    return Array.from(set).sort()
+  }, [declared, optional, granted])
 
-  if (loading) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
-  }
+  const auditLog = useMemo(
+    () =>
+      perms.auditLog
+        .filter((entry) => entry.pluginId === pluginId)
+        .slice(-25)
+        .reverse(),
+    [perms.auditLog, pluginId]
+  )
 
-  if (all.length === 0) {
-    return (
-      <Card className="p-6 md:p-8 text-center space-y-3">
-        <ShieldCheckIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("emptyAll")}</p>
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          {plugin ? plugin.name : pluginId}{" "}
+          <span className="text-muted-foreground text-sm font-normal">v{plugin?.version}</span>
+        </DialogTitle>
+        <DialogDescription>{t("description")}</DialogDescription>
+      </DialogHeader>
+
+      <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[8rem]">{t("colPermission")}</TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colDeclared")}
+                  </TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colOptional")}
+                  </TableHead>
+                  <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
+                  <TableHead className="min-w-[9rem]">{t("colTier")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {allListed.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      {t("empty")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  allListed.map((perm) => (
+                    <PermissionRow
+                      key={perm}
+                      perm={perm}
+                      declared={declared.includes(perm)}
+                      optional={optional.includes(perm)}
+                      granted={granted.has(perm)}
+                      dangerous={perms.isDangerous(perm)}
+                      onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                      onRevoke={() => perms.revoke(pluginId, perm)}
+                      tier={perms.getTier(pluginId, perm)}
+                      onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                    />
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </ScrollArea>
       </Card>
-    )
-  }
 
-  const totalEntries = dangerous.length + normal.length
-
-  return (
-    <div className="space-y-5">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold">{t("title")}</h3>
-        <p className="text-sm text-muted-foreground">{t("hint")}</p>
+        <h3 className="text-xs font-semibold">{t("auditLogTitle")}</h3>
+        <Card className="p-0">
+          <ScrollArea className="max-h-[20vh]">
+            {auditLog.length === 0 ? (
+              <p className="p-3 text-xs text-muted-foreground">{t("auditEmpty")}</p>
+            ) : (
+              <ul className="divide-y">
+                {auditLog.map((entry, idx) => (
+                  <AuditLogEntry key={idx} entry={entry} />
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        </Card>
       </div>
 
-      <BulkReview rows={all} onOpen={openPermissionReview} />
-
-      {totalEntries === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">{t("noPermissions")}</Card>
-      ) : (
-        <div className="space-y-5">
-          {dangerous.length > 0 && (
-            <PermissionSection
-              title={t("dangerousSection")}
-              danger
-              entries={dangerous}
-              onOpenReview={openPermissionReview}
-            />
-          )}
-          {normal.length > 0 && (
-            <PermissionSection
-              title={t("normalSection")}
-              entries={normal}
-              onOpenReview={openPermissionReview}
-            />
-          )}
-        </div>
-      )}
-    </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => perms.revokeAll(pluginId)}>
+          {t("revokeAll")}
+        </Button>
+        <Button onClick={onClose}>{t("close")}</Button>
+      </DialogFooter>
+    </>
   )
 }
 
-function BulkReview({ rows, onOpen }: { rows: PluginRow[]; onOpen: (id: string) => void }) {
-  const t = useTranslations("plugins.permissions")
-  const permissioned = rows.filter((row) => {
-    const declared = (row.manifest as { permissions?: unknown[] }).permissions ?? []
-    const optional = (row.manifest as { optionalPermissions?: unknown[] }).optionalPermissions ?? []
-    return declared.length + optional.length > 0
-  })
-  if (permissioned.length === 0) return null
-  return (
-    <Card className="p-3 space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">{t("bulkHeading")}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {permissioned.map((row) => (
-          <Button
-            key={row.id}
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => onOpen(row.id)}
-            aria-label={t("reviewAria", { name: row.name })}
-          >
-            {row.name}
-          </Button>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-function PermissionSection({
-  title,
-  entries,
-  danger,
-  onOpenReview,
+export function PermissionRow({
+  perm,
+  declared,
+  optional,
+  granted,
+  dangerous,
+  description,
+  onGrant,
+  onRevoke,
+  tier,
+  onTierChange,
 }: {
-  title: string
-  entries: MatrixEntry[]
-  danger?: boolean
-  onOpenReview: (id: string) => void
+  perm: PluginPermission
+  declared: boolean
+  optional: boolean
+  granted: boolean
+  dangerous: boolean
+  description: string
+  onGrant: () => void
+  onRevoke: () => void
+  tier: PluginPermissionTier
+  onTierChange: (tier: PluginPermissionTier) => void
 }) {
-  const t = useTranslations("plugins.permissions")
+  const t = useTranslations("plugins.permissionReview")
   return (
-    <section className="space-y-2">
-      <div className="flex items-center gap-2">
-        {danger ? (
-          <AlertTriangleIcon className="size-4 text-destructive" />
+    <TableRow>
+      <TableCell className="space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <code className="font-mono text-xs">{perm}</code>
+          {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-center">
+        {declared && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-center">
+        {optional && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
+      </TableCell>
+      <TableCell className="text-center">
+        {granted && <CheckCircle2Icon className="size-3.5 inline text-secondary-foreground" />}
+      </TableCell>
+      <TableCell>
+        <Select value={tier} onValueChange={(v) => onTierChange(v as PluginPermissionTier)}>
+          <SelectTrigger className="h-7 text-xs" aria-label={t("colTier")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="silent">{t("tierLabel.silent")}</SelectItem>
+            <SelectItem value="confirm">{t("tierLabel.confirm")}</SelectItem>
+            <SelectItem value="forbid">{t("tierLabel.forbid")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{t(`tierHint.${tier}`)}</p>
+      </TableCell>
+      <TableCell className="text-right">
+        {granted ? (
+          <Button size="sm" variant="ghost" onClick={onRevoke}>
+            {t("revoke")}
+          </Button>
         ) : (
-          <ShieldCheckIcon className="size-4 text-muted-foreground" />
+          <Button size="sm" variant="outline" onClick={onGrant}>
+            {t("grant")}
+          </Button>
         )}
-        <h4 className={cn("text-sm font-semibold", danger && "text-destructive")}>{title}</h4>
-      </div>
-      <div className={cn("rounded-md border overflow-x-auto", danger && "border-destructive/30")}>
-        <Table>
-          <TableHeader className={cn(danger && "bg-destructive/5")}>
-            <TableRow>
-              <TableHead>{t("col.permission")}</TableHead>
-              <TableHead className="hidden sm:table-cell">{t("col.holders")}</TableHead>
-              <TableHead>{t("col.plugins")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {entries.map((entry) => (
-              <TableRow key={entry.permission} className={cn(danger && "hover:bg-destructive/5")}>
-                <TableCell className="font-mono text-xs">
-                  <span className={cn(danger && "text-destructive font-semibold")}>
-                    {entry.permission}
-                  </span>
-                </TableCell>
-                <TableCell className="hidden sm:table-cell">
-                  <Badge variant={danger ? "destructive" : "outline"}>{entry.holders.length}</Badge>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {entry.holders.map((row) => (
-                      <Button
-                        key={row.id}
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => onOpenReview(row.id)}
-                        aria-label={t("reviewAria", { name: row.name })}
-                      >
-                        {row.name}
-                      </Button>
-                    ))}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+      </TableCell>
+    </TableRow>
   )
 }

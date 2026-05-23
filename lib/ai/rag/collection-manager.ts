@@ -17,7 +17,7 @@ import {
   createPersistentStorage,
   type StoredCollection as _StoredCollection,
 } from "./persistent-storage"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ai
 

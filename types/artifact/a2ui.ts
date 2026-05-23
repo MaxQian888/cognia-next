@@ -463,12 +463,22 @@ export interface A2UITableComponent extends A2UIBaseComponent {
   columns: A2UITableColumn[]
   data: Record<string, unknown>[] | A2UIPathValue<Record<string, unknown>[]>
   title?: string
+  description?: A2UIStringOrPath
   rowKey?: string
   selectable?: boolean
   selectedRows?: A2UIArrayOrPath<string>
   selectAction?: string
   rowClickAction?: string
   sortAction?: string
+  /**
+   * When set, sort column lives in dataModel at this JSON Pointer path
+   * instead of in local component state. Writes go through onDataChange.
+   * Pairs with `sortDirectionPath` for full path-bound sort control.
+   */
+  sortKeyPath?: string
+  sortDirectionPath?: string
+  /** Extra metadata merged into emitted sortAction payloads. */
+  actionMeta?: Record<string, unknown>
   pageChangeAction?: string
   emptyMessage?: string
   pageSize?: number
@@ -722,19 +732,6 @@ export interface A2UIMockupFrameComponent extends A2UIBaseComponent {
   caption?: A2UIStringOrPath
   frameStyle?: "browser" | "mobile" | "desktop"
   children: string[]
-}
-
-export interface A2UIDataExplorerComponent extends A2UIBaseComponent {
-  component: "DataExplorer"
-  title?: A2UIStringOrPath
-  description?: A2UIStringOrPath
-  columns: A2UITableColumn[]
-  data: Record<string, unknown>[] | A2UIPathValue<Record<string, unknown>[]>
-  sortKeyPath?: string
-  sortDirectionPath?: string
-  sortAction?: string
-  actionMeta?: Record<string, unknown>
-  emptyMessage?: string
 }
 
 export interface A2UISwitchComponent extends A2UIBaseComponent {
@@ -1042,7 +1039,6 @@ export type A2UIComponent =
   | A2UIComparisonCardsComponent
   | A2UIStepperShellComponent
   | A2UIMockupFrameComponent
-  | A2UIDataExplorerComponent
   | A2UIWidgetStatusComponent
   | A2UISwitchComponent
   | A2UILoadingComponent

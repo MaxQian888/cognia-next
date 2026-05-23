@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { getCharacter } from "@/lib/db/characters"
 import { getSession } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import {
   applyZoom,

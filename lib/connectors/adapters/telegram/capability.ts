@@ -65,7 +65,7 @@ export const TELEGRAM_CAPS: readonly Capability[] = [
  * free to emit them; they render via `plainTextMirror`:
  *   - Other form controls (Select / Checkbox / Radio / RadioGroup /
  *     Slider / DatePicker / TimePicker / DateTimePicker).
- *   - Data widgets (Table / Chart / DataExplorer / Pagination).
+ *   - Data widgets (Table / Chart / Pagination).
  *   - Overlay widgets (Tabs / Accordion / Dialog / Drawer / Sheet /
  *     Sidebar / Collapsible).
  */

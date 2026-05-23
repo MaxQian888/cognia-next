@@ -28,7 +28,7 @@ import type {
   PluginTeamDelegationCompletePayload,
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { loggers } from "../core/logger"
 import type {
   PluginHooksAll,

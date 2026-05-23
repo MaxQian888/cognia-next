@@ -5,7 +5,7 @@
 import { z } from "zod"
 import type { PluginTool, PluginToolDef, PluginToolContext } from "@/types/plugin"
 import type { AgentTool } from "@/lib/ai/agent/agent-executor"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { PluginRegistry } from "../core/registry"
 
 // =============================================================================

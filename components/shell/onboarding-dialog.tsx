@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { listCharacters } from "@/lib/db/characters"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Character } from "@/lib/claude/types"
 import { useSettingsStore } from "@/stores/settings"
 import { useClientLiveQuery } from "@/hooks/data"

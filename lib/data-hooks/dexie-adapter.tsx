@@ -13,7 +13,7 @@ import { listPresets, recordPresetUsage } from "@/lib/db/prompt-presets"
 import { updateSession } from "@/lib/db/sessions"
 import { clearMessages } from "@/lib/db/messages"
 import { trustWorkspace } from "@/lib/db/trusted-workspaces"
-import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { DataAdapter, SessionPatch } from "./types"
 
 const isClient = (): boolean => typeof window !== "undefined"

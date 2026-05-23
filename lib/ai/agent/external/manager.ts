@@ -35,7 +35,7 @@ import type {
   AcpConfigOption,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   type ProtocolAdapter,
   protocolAdapterRegistry,

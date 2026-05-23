@@ -6,7 +6,7 @@
 // refinements (featured carousel, install-receipt history) can land
 // without touching the panel-level router.
 
-import { PluginMarketplace } from "../plugin-marketplace"
+import { PluginMarketplace } from "../marketplace/plugin-marketplace"
 
 export function PluginDiscoverPane() {
   return (

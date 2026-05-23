@@ -26,7 +26,7 @@ import {
   GitBranch,
 } from "lucide-react"
 import type { TeamTaskStatus } from "@/types/agent/agent-team"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const agentUtilsLogger = loggers.agent.child("utils")
 

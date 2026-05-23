@@ -4,7 +4,7 @@
 import { useCustomModeStore } from "../index"
 import type { CustomModeConfig } from "../definitions"
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

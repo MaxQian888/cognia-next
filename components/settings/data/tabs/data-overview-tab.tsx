@@ -10,7 +10,7 @@
 
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"

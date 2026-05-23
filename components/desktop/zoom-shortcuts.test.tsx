@@ -28,7 +28,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 const logWarn = jest.fn()
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: { warn: (...args: unknown[]) => logWarn(...args), info: jest.fn(), error: jest.fn() },
   },

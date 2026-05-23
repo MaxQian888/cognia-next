@@ -52,11 +52,11 @@ import {
   auditPluginPointContracts,
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
-import { PluginScheduledJobs } from "@/components/plugins/plugin-scheduled-jobs"
+import { PluginScheduledJobs } from "@/components/plugins/detail/plugin-scheduled-jobs"
 import { PluginPointDiagnosticsPanel } from "@/components/plugins/plugin-point-diagnostics-panel"
 import { ScrollShadowRow } from "@/components/plugins/scroll-shadow-row"
 import { PluginDataManagement } from "@/components/settings/plugins/plugin-data-management"
-import { applyPluginPolicyToRuntime } from "@/lib/plugin/policy-runtime"
+import { applyPluginPolicyToRuntime } from "@/lib/plugin/core/policy-runtime"
 
 const PLUGINS_TAB_PARAM = "pluginsTab"
 

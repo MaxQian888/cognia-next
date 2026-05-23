@@ -70,7 +70,7 @@ import { DeleteConfirmDialog } from "@/components/a2ui/delete-confirm-dialog"
 import { TemplateCard } from "@/components/a2ui/quick-app-builder/template-card"
 import { A2UIWorkspace } from "@/components/a2ui/workspace/a2ui-workspace"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { toast } from "sonner"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 

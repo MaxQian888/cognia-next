@@ -11,7 +11,7 @@ import {
 import type { BackgroundAgent } from "@/types/agent/background-agent"
 import type { DBAgentTrace } from "@/lib/db"
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

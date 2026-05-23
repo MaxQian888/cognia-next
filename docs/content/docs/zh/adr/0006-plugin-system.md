@@ -194,7 +194,7 @@ implementation:
 1. **Stub removal** — `lib/plugin/index.ts` no longer ships a fallback
    `pluginManager` or duplicate `validatePluginManifest`. The single
    canonical validator lives at `lib/plugin/core/validation.ts` and is
-   re-exported from the package entry. `stores/plugin/plugin-store.ts`
+   re-exported from the package entry. `stores/plugin-runtime/plugin-store.ts`
    now passes the active `governanceMode`, closing a silent gap where
    runtime-synced manifests skipped contract validation.
 2. **Silent-catch policy** — 12 `catch { /* ignore */ }` sites switched

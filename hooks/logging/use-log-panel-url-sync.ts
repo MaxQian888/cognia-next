@@ -13,8 +13,8 @@
 import { useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import type { Density, LogPanelFilterState, ViewMode, PanelSource } from "./use-log-panel-filters"
-import type { LogLevel } from "@/lib/logger"
-import type { PresetTimeRange } from "@/components/logging/log-filter-presets"
+import type { LogLevel } from "@/lib/logging"
+import type { PresetTimeRange } from "@/lib/logging/filter-presets"
 
 const VALID_LEVELS = new Set<LogLevel | "all">([
   "all",

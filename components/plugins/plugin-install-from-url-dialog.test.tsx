@@ -1,141 +1,112 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-const setImportStaging = jest.fn()
-jest.mock("@/stores/plugins", () => ({
-  usePluginsStore: (selector: (s: unknown) => unknown) => selector({ setImportStaging }),
-}))
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
+}
 
-import { PluginInstallFromUrlDialog } from "./plugin-install-from-url-dialog"
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-const originalFetch = global.fetch
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-describe("PluginInstallFromUrlDialog", () => {
-  beforeEach(() => {
-    setImportStaging.mockClear()
-  })
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
 
-  afterEach(() => {
-    global.fetch = originalFetch
-  })
+  return (
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
+  )
+}
 
-  it("does not render when closed", () => {
-    render(<PluginInstallFromUrlDialog open={false} onOpenChange={() => {}} />)
-    expect(screen.queryByText("title")).not.toBeInTheDocument()
-  })
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
 
-  it("renders title, label, and submit button when open", () => {
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={() => {}} />)
-    expect(screen.getByText("title")).toBeInTheDocument()
-    expect(screen.getByText("label")).toBeInTheDocument()
-    expect(screen.getByText("submit")).toBeInTheDocument()
-  })
+interface BoundaryState {
+  hasError: boolean
+}
 
-  it("shows empty error when submitted without URL", () => {
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={() => {}} />)
-    fireEvent.click(screen.getByText("submit"))
-    expect(screen.getByRole("alert")).toHaveTextContent("emptyError")
-    expect(setImportStaging).not.toHaveBeenCalled()
-  })
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
 
-  it("submits and stages manifest on success", async () => {
-    const onOpenChange = jest.fn()
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: "p", name: "P", version: "1.0.0" }),
-    }) as unknown as typeof fetch
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={onOpenChange} />)
-    fireEvent.change(screen.getByLabelText("label"), {
-      target: { value: "https://example.com/plugin.json" },
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
     })
-    fireEvent.click(screen.getByText("submit"))
-    await waitFor(() =>
-      expect(setImportStaging).toHaveBeenCalledWith(
-        expect.objectContaining({
-          drafts: [
-            expect.objectContaining({
-              id: "p",
-              name: "P",
-              version: "1.0.0",
-              sourceLabel: "https://example.com/plugin.json",
-            }),
-          ],
-        })
-      )
-    )
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
+  }
 
-  it("falls back to URL as id/name when manifest omits them", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    }) as unknown as typeof fetch
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={jest.fn()} />)
-    fireEvent.change(screen.getByLabelText("label"), {
-      target: { value: "https://example.com/p.json" },
-    })
-    fireEvent.click(screen.getByText("submit"))
-    await waitFor(() => expect(setImportStaging).toHaveBeenCalled())
-    const [[arg]] = setImportStaging.mock.calls
-    expect(arg.drafts[0].id).toBe("https://example.com/p.json")
-    expect(arg.drafts[0].version).toBe("0.0.0")
-  })
-
-  it("renders error message on HTTP failure", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-    }) as unknown as typeof fetch
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={jest.fn()} />)
-    fireEvent.change(screen.getByLabelText("label"), {
-      target: { value: "https://example.com/missing.json" },
-    })
-    fireEvent.click(screen.getByText("submit"))
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-    expect(setImportStaging).not.toHaveBeenCalled()
-  })
-
-  it("renders error on network failure", async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error("offline")) as unknown as typeof fetch
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={jest.fn()} />)
-    fireEvent.change(screen.getByLabelText("label"), {
-      target: { value: "https://example.com/p.json" },
-    })
-    fireEvent.click(screen.getByText("submit"))
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-  })
-
-  it("Enter key submits", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: "p" }),
-    }) as unknown as typeof fetch
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={jest.fn()} />)
-    const input = screen.getByLabelText("label")
-    fireEvent.change(input, { target: { value: "https://example.com/p.json" } })
-    fireEvent.keyDown(input, { key: "Enter" })
-    await waitFor(() => expect(setImportStaging).toHaveBeenCalled())
-  })
-
-  it("cancel button closes the dialog", () => {
-    const onOpenChange = jest.fn()
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={onOpenChange} />)
-    fireEvent.click(screen.getByText("cancel"))
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    render(<PluginInstallFromUrlDialog open={true} onOpenChange={() => {}} />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-})
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}

@@ -72,7 +72,7 @@ import { useUIStore } from "@/stores/ui/ui-store"
 import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("agentTeams.list")
 

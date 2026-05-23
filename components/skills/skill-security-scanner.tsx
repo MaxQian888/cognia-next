@@ -18,7 +18,7 @@ import { skillsScanResources, skillsScanSecurity, type SkillScanIssue } from "@/
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { isTauri } from "@/lib/tauri"
 import type { Skill } from "@/lib/claude/types"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface Props {
   skill: Skill

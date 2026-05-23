@@ -10,7 +10,7 @@
  */
 
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const wasmLoaderLogger = loggers.plugin.child("wasm-loader")
 

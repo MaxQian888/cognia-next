@@ -7,7 +7,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { getPluginBackupManager, type PluginBackup } from "./backup"
 import { loggers } from "../core/logger"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { getPluginMarketplace } from "../package/marketplace"
 import { getPluginManager } from "../core/manager"
 

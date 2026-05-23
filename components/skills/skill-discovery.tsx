@@ -16,7 +16,7 @@ import { pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { useSkillsStore, type ImportStaging } from "@/stores/skills"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 type ScanState =
   | { status: "idle" }

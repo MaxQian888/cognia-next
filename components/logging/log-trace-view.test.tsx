@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 }))
 
 import { LogTraceView } from "./log-trace-view"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 function makeLog(overrides: Partial<StructuredLogEntry>): StructuredLogEntry {
   return {

@@ -87,7 +87,6 @@ export {
 
 // Data display components
 export { A2UIChart, A2UITable, A2UIList } from "./data"
-export { A2UIDataExplorer } from "./data"
 
 // Chat and tool integration
 export {
@@ -104,7 +103,7 @@ export { AcademicPaperCard, AcademicSearchResults, AcademicAnalysisPanel } from 
 // App Builder components
 export { QuickAppBuilder } from "./quick-app-builder"
 export { AppGallery } from "./app-gallery"
-export { AppCard, type AppCardProps } from "./app-card"
+export { AppCard, type AppCardProps } from "./a2ui-app-card"
 export { AppDetailDialog, type AppDetailDialogProps } from "./app-detail-dialog"
 
 // Workspace components

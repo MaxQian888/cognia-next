@@ -8,7 +8,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "../core/logger"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 
 // =============================================================================
 // Types

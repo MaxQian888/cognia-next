@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface UseCopyOptions {
   /** Milliseconds to keep `copied` true after a successful write. Defaults to 1500. */

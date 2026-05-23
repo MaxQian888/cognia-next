@@ -53,7 +53,7 @@ jest.mock("./jupyter-renderer", () => ({
 }))
 
 import { ArtifactPreview } from "./artifact-preview"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Artifact } from "@/types"
 
 const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({

@@ -5,7 +5,7 @@
  * Falls back to periodic heartbeat via localStorage for browsers without Web Locks.
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

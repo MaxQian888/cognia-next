@@ -7,7 +7,7 @@
  * keep working without changes.
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { DocumentSymbol, SymbolKind, SymbolLocation } from "@/types/canvas/symbols"
 import type { LineRange } from "@/types/canvas/collaboration"
 

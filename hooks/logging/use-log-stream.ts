@@ -6,54 +6,16 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import {
-  IndexedDBTransport,
-  getRegisteredModules,
-  type StructuredLogEntry,
-  type LogLevel,
-  type LogFilter,
-} from "@/lib/logger"
+import { IndexedDBTransport, getRegisteredModules } from "@/lib/logging"
+import type {
+  StructuredLogEntry,
+  LogLevel,
+  LogFilter,
+  LogStreamOptions,
+  LogStreamResult,
+} from "@/types/logging"
 
-export interface LogStreamOptions {
-  /** Enable auto-refresh polling */
-  autoRefresh?: boolean
-  /** Refresh interval in milliseconds */
-  refreshInterval?: number
-  /** Maximum number of logs to keep in memory */
-  maxLogs?: number
-  /** Filter by log level */
-  level?: LogLevel | "all"
-  /** Filter by module name */
-  module?: string
-  /** Filter by trace ID */
-  traceId?: string
-  /** Search query for message content */
-  searchQuery?: string
-  /** Use regex for search query */
-  useRegex?: boolean
-  /** Filter by tags */
-  tags?: string[]
-  /** Group logs by trace ID */
-  groupByTraceId?: boolean
-}
-
-export interface LogStreamResult {
-  logs: StructuredLogEntry[]
-  groupedLogs: Map<string, StructuredLogEntry[]>
-  isLoading: boolean
-  error: Error | null
-  refresh: () => Promise<void>
-  clearLogs: () => Promise<void>
-  exportLogs: (format?: "json" | "text") => string
-  stats: {
-    total: number
-    byLevel: Record<LogLevel, number>
-    byModule: Record<string, number>
-    oldestEntry?: Date
-    newestEntry?: Date
-  }
-  logRate: number
-}
+export type { LogStreamOptions, LogStreamResult } from "@/types/logging"
 
 const DEFAULT_OPTIONS: LogStreamOptions = {
   autoRefresh: false,

@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import type { SafeSearchLevel } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.safety")
 

@@ -1,127 +1,112 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
-    if (vars && typeof vars.source === "string") return `${key}:${vars.source}`
-    return key
-  },
-}))
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-const upsertPluginMock = jest.fn(async (..._args: unknown[]) => ({}) as never)
-jest.mock("@/lib/db/plugins", () => ({
-  upsertPlugin: (...args: unknown[]) => upsertPluginMock(...args),
-}))
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
+}
 
-import { PluginImportDialog } from "./plugin-import-dialog"
-import { usePluginsStore } from "@/stores/plugins"
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-beforeEach(() => {
-  upsertPluginMock.mockClear()
-  usePluginsStore.setState({ importStaging: null })
-})
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-describe("PluginImportDialog", () => {
-  it("does not render when no staging is set", () => {
-    const { container } = render(<PluginImportDialog />)
-    expect(container.querySelector("[role='dialog']")).toBeNull()
-  })
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
 
-  it("renders staged drafts and parse errors", () => {
-    usePluginsStore.setState({
-      importStaging: {
-        drafts: [
-          {
-            id: "p1",
-            name: "Plugin 1",
-            version: "1.0.0",
-            manifest: { id: "p1", type: "frontend" },
-            sourceLabel: "manifest.json",
-          },
-        ],
-        sourceLabel: "test bundle",
-        parseErrors: [{ name: "bad.json", error: "syntax" }],
-      },
+  return (
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
+  )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
     })
-    render(<PluginImportDialog />)
-    expect(screen.getByText("Plugin 1")).toBeInTheDocument()
-    expect(screen.getByText(/p1 ·/)).toBeInTheDocument()
-    expect(screen.getByText(/bad.json/)).toBeInTheDocument()
-  })
+  }
 
-  it("confirm calls upsertPlugin once per draft and clears staging", async () => {
-    usePluginsStore.setState({
-      importStaging: {
-        drafts: [
-          {
-            id: "p1",
-            name: "Plugin 1",
-            version: "1.0.0",
-            manifest: { id: "p1", type: "frontend", capabilities: ["tools"] },
-            sourceLabel: "manifest.json",
-          },
-          {
-            id: "p2",
-            name: "Plugin 2",
-            version: "0.5.0",
-            manifest: { id: "p2", type: "python" },
-            sourceLabel: "manifest.json",
-          },
-        ],
-        sourceLabel: "test bundle",
-        parseErrors: [],
-      },
-    })
-    render(<PluginImportDialog />)
-    fireEvent.click(screen.getByText(/^confirm:2/))
-    await waitFor(() => expect(usePluginsStore.getState().importStaging).toBeNull())
-    expect(upsertPluginMock).toHaveBeenCalledTimes(2)
-  })
-
-  it("cancel clears staging without calling upsertPlugin", () => {
-    usePluginsStore.setState({
-      importStaging: {
-        drafts: [
-          {
-            id: "p1",
-            name: "Plugin 1",
-            version: "1.0.0",
-            manifest: { id: "p1" },
-            sourceLabel: "manifest.json",
-          },
-        ],
-        sourceLabel: "test bundle",
-        parseErrors: [],
-      },
-    })
-    render(<PluginImportDialog />)
-    fireEvent.click(screen.getByText("cancel"))
-    expect(usePluginsStore.getState().importStaging).toBeNull()
-    expect(upsertPluginMock).not.toHaveBeenCalled()
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    usePluginsStore.setState({
-      importStaging: {
-        drafts: [
-          {
-            id: "p1",
-            name: "Plugin 1",
-            version: "1.0.0",
-            manifest: { id: "p1" },
-            sourceLabel: "manifest.json",
-          },
-        ],
-        sourceLabel: "test bundle",
-        parseErrors: [],
-      },
-    })
-    render(<PluginImportDialog />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-})
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}

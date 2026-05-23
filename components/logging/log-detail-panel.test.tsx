@@ -29,7 +29,7 @@ jest.mock("@/lib/agent-trace/cost-estimator", () => ({
 }))
 
 import { LogDetailPanel } from "./log-detail-panel"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {

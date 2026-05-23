@@ -4,7 +4,7 @@ import {
   dbAgentTraceToLogEntry,
   getAgentTraceLogData,
 } from "./log-adapter"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 describe("agent-trace adapter stubs", () => {
   it("exports the synthetic module name", () => {

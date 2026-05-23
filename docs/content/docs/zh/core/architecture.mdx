@@ -241,7 +241,7 @@ Rust 侧（`src-tauri/src/claude/sidecar.rs`）通过 `SidecarState` 持有子�
 
 ### 日志
 
-浏览器 logger（`lib/logger/`）通过 `tauri-log-bridge` 镜像到 Rust。Rust 用 `fern` 分发到：
+浏览器 logger（`lib/logging/`）通过 `tauri-log-bridge` 镜像到 Rust。Rust 用 `fern` 分发到：
 
 - Tauri 日志插件（文件 + 控制台 + webview）。
 - 原生平台日志（Windows Event Log、macOS `os_log`、Linux `systemd-journald` / `syslog`）。

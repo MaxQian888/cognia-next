@@ -14,7 +14,7 @@
 import type { ScheduledTask, TaskExecution, WikiRebuildTaskPayload } from "@/types/scheduler"
 import { runWikiRebuild, WebModeError, NoApiKeyError } from "@/lib/wiki/rebuild-runner"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

@@ -12,7 +12,7 @@ jest.mock("@/lib/agent-trace/log-adapter", () => ({
 }))
 
 import { LogPanelToolbar, type LogPanelToolbarProps } from "./log-panel-toolbar"
-import type { LogLevel } from "@/lib/logger"
+import type { LogLevel } from "@/lib/logging"
 
 function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolbarProps {
   return {

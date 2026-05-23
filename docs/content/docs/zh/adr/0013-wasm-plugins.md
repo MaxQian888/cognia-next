@@ -198,7 +198,7 @@ v0.x 阶段 **MINOR** 变更视为破坏性变更（遵循
 | 源       | Rust 命令                                    | TS 入口                                                      | 信任检查                                                          |
 | -------- | -------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- |
 | 本地文件 | `plugin_install`（已有）→ `plugin_wasm_load` | `installWasmPluginFromLocalFile` + `InstallWasmPluginButton` | 仅做 manifest 校验                                                |
-| HTTP URL | `plugin_wasm_install_from_url`               | `installFromUrl` + `InstallFromUrlDialog`                    | Ed25519 detached 签名 + `trustedPublishers` 账本                  |
+| HTTP URL | `plugin_wasm_install_from_url`               | `installFromUrl` + `PluginSignedInstallFromUrlDialog`        | Ed25519 detached 签名 + `trustedPublishers` 账本                  |
 | Git 仓库 | `plugin_wasm_install_from_git`               | `installFromGit`                                             | 运行时探测 `cargo-component`；缺失时抛 `GitToolchainMissingError` |
 
 签名包以 `<bundle>.zip` + `<bundle>.zip.sig` 形式分发。签名只覆盖 zip

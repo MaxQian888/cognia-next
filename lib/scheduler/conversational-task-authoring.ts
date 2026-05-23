@@ -27,7 +27,7 @@ import type {
 import type { SendOptions, BuiltinToolsConfig } from "@/lib/claude/types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 import { SchedulerError } from "./errors"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

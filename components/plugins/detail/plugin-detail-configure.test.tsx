@@ -4,7 +4,7 @@
 
 import { render, screen } from "@testing-library/react"
 
-jest.mock("../plugin-config-form", () => ({
+jest.mock("./plugin-config-form", () => ({
   PluginConfigFormContent: ({ pluginId, variant }: { pluginId: string; variant?: string }) => (
     <div data-testid="config-form-content" data-plugin-id={pluginId} data-variant={variant} />
   ),

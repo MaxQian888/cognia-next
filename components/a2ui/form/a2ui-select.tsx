@@ -6,6 +6,7 @@
  */
 
 import React, { useCallback, memo } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -23,6 +24,7 @@ export const A2UISelect = memo(function A2UISelect({
   component,
   onDataChange,
 }: A2UIComponentProps<A2UISelectComponent>) {
+  const t = useTranslations("a2ui")
   const { resolveString, resolveBoolean, dataModel } = useA2UIData()
 
   const value = resolveString(component.value, "")
@@ -57,7 +59,7 @@ export const A2UISelect = memo(function A2UISelect({
       )}
       <Select value={value} onValueChange={handleChange} disabled={isDisabled}>
         <SelectTrigger id={component.id} className={error ? "border-destructive" : ""}>
-          <SelectValue placeholder={component.placeholder || "Select..."} />
+          <SelectValue placeholder={component.placeholder || t("selectPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (

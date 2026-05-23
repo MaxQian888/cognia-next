@@ -4,7 +4,7 @@
  * Integrates plugins with the agent and workflow systems.
  */
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { getPluginEventHooks } from "../messaging/hooks-system"
 import type { PluginMessage } from "@/types/plugin"
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"

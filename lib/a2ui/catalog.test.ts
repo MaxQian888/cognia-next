@@ -101,7 +101,6 @@ describe("A2UI Catalog", () => {
       expect(types).toContain("ComparisonCards")
       expect(types).toContain("StepperShell")
       expect(types).toContain("MockupFrame")
-      expect(types).toContain("DataExplorer")
       expect(types).toContain("WidgetStatus")
     })
   })

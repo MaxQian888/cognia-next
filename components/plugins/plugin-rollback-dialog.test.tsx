@@ -1,157 +1,257 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
+import { useTranslations } from "next-intl"
+import { ChevronDownIcon, ChevronRightIcon, AlertCircleIcon, AlertTriangleIcon } from "lucide-react"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    if (vars) return `${key}(${JSON.stringify(vars)})`
-    return key
-  },
-}))
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
-jest.mock("@/lib/tauri", () => ({
-  isTauri: jest.fn(() => true),
-}))
+import {
+  clearAllPluginPointDiagnostics as defaultClearAll,
+  clearPluginPointDiagnostics as defaultClearForPlugin,
+  getAllPluginPointDiagnostics as defaultGetDiagnostics,
+  subscribePluginPointDiagnostics as defaultSubscribe,
+} from "@/lib/plugin/contracts/diagnostics-store"
+import type { PluginPointDiagnostic } from "@/lib/plugin/contracts/plugin-points"
 
-import { PluginRollbackDialog, __resetPluginRollbackClientForTests } from "./plugin-rollback-dialog"
-import { isTauri } from "@/lib/tauri"
+export type DiagnosticsSeverityFilter = "all" | "errors" | "warnings"
 
-beforeEach(() => {
-  __resetPluginRollbackClientForTests(null)
-  ;(isTauri as jest.Mock).mockReturnValue(true)
-})
-
-const sampleInfo = {
-  pluginId: "alpha",
-  currentVersion: "1.2.0",
-  hasBackups: true,
-  availableVersions: [
-    {
-      version: "1.0.0",
-      source: "backup" as const,
-      date: new Date("2026-04-01T00:00:00.000Z"),
-      size: 100,
-      canRollback: true,
-      reason: "before update",
-    },
-  ],
-  lastBackup: undefined,
+export interface PluginPointDiagnosticsPanelProps {
+  /** Inject for tests; falls back to the real store API. */
+  getDiagnostics?: () => Record<string, PluginPointDiagnostic[]>
+  subscribe?: (listener: () => void) => () => void
+  clearForPlugin?: (pluginId: string) => void
+  clearAll?: () => void
 }
 
-describe("PluginRollbackDialog", () => {
-  it("shows empty hint when there are no snapshots", async () => {
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => ({
-        pluginId: "alpha",
-        currentVersion: "1.0.0",
-        availableVersions: [],
-        hasBackups: false,
-      }),
-      rollback: async () => ({
-        success: true,
-        pluginId: "alpha",
-        fromVersion: "",
-        toVersion: "",
-        duration: 0,
-        migrationApplied: false,
-        requiresRestart: false,
-      }),
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
-    await waitFor(() => expect(screen.getByText("empty")).toBeInTheDocument())
-  })
+const EMPTY_SNAPSHOT: Record<string, PluginPointDiagnostic[]> = Object.freeze({})
 
-  it("renders version rows and triggers rollback on click", async () => {
-    const rollback = jest.fn(async () => ({
-      success: true,
-      pluginId: "alpha",
-      fromVersion: "1.2.0",
-      toVersion: "1.0.0",
-      duration: 1,
-      migrationApplied: false,
-      requiresRestart: false,
-    }))
-    const onClose = jest.fn()
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => sampleInfo,
-      rollback,
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={onClose} />)
-    await waitFor(() => expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument())
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText(/rollbackAria.*1\.0\.0/))
-    })
-    expect(rollback).toHaveBeenCalledWith("alpha", "1.0.0")
-    expect(onClose).toHaveBeenCalled()
-  })
+function filterBySeverity(
+  diagnostics: PluginPointDiagnostic[],
+  severity: DiagnosticsSeverityFilter
+): PluginPointDiagnostic[] {
+  if (severity === "all") return diagnostics
+  if (severity === "errors") return diagnostics.filter((d) => d.severity === "error")
+  return diagnostics.filter((d) => d.severity === "warning")
+}
 
-  it("surfaces a non-success result error", async () => {
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => sampleInfo,
-      rollback: async () => ({
-        success: false,
-        pluginId: "alpha",
-        fromVersion: "1.2.0",
-        toVersion: "1.0.0",
-        duration: 0,
-        migrationApplied: false,
-        requiresRestart: false,
-        error: "lockfile mismatch",
-      }),
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
-    await waitFor(() => expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument())
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText(/rollbackAria.*1\.0\.0/))
-    })
-    await waitFor(() => expect(screen.getByText("lockfile mismatch")).toBeInTheDocument())
-  })
+function hasAnyError(diagnostics: PluginPointDiagnostic[]): boolean {
+  return diagnostics.some((d) => d.severity === "error")
+}
 
-  it("warns when no version is rollback-able", async () => {
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => ({
-        pluginId: "alpha",
-        currentVersion: "1.0.0",
-        hasBackups: true,
-        availableVersions: [
-          {
-            version: "0.9.0",
-            source: "backup" as const,
-            date: undefined,
-            size: 0,
-            canRollback: false,
-            reason: "missing migration",
-          },
-        ],
-      }),
-      rollback: jest.fn(),
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
-    await waitFor(() => expect(screen.getByText("canNotRollback")).toBeInTheDocument())
-  })
+export function PluginPointDiagnosticsPanel({
+  getDiagnostics = defaultGetDiagnostics,
+  subscribe = defaultSubscribe,
+  clearForPlugin = defaultClearForPlugin,
+  clearAll = defaultClearAll,
+}: PluginPointDiagnosticsPanelProps = {}) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
 
-  it("disables actions and shows hint when not in Tauri", async () => {
-    ;(isTauri as jest.Mock).mockReturnValue(false)
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => sampleInfo,
-      rollback: jest.fn(),
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
-    expect(await screen.findByText("desktopOnlyHint")).toBeInTheDocument()
-    // Wait for the async getRollbackInfo to resolve so the version list mounts.
-    const button = (await screen.findByLabelText(/rollbackAria.*1\.0\.0/)) as HTMLButtonElement
-    expect(button).toBeDisabled()
-  })
+  const stableSubscribe = useCallback((listener: () => void) => subscribe(listener), [subscribe])
+  const stableGet = useCallback(() => getDiagnostics(), [getDiagnostics])
 
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    __resetPluginRollbackClientForTests({
-      getRollbackInfo: async () => sampleInfo,
-      rollback: jest.fn(),
-    })
-    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-})
+  const all = useSyncExternalStore(stableSubscribe, stableGet, () => EMPTY_SNAPSHOT)
+
+  const [severity, setSeverity] = useState<DiagnosticsSeverityFilter>("all")
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const groups = useMemo(() => {
+    return Object.entries(all)
+      .map(([pluginId, diagnostics]) => ({
+        pluginId,
+        all: diagnostics,
+        visible: filterBySeverity(diagnostics, severity),
+        defaultOpen: hasAnyError(diagnostics),
+      }))
+      .filter((g) => g.visible.length > 0)
+      .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+  }, [all, severity])
+
+  const totalCount = useMemo(() => groups.reduce((sum, g) => sum + g.visible.length, 0), [groups])
+
+  const isEmpty = totalCount === 0
+
+  const handleConfirmClearAll = () => {
+    clearAll()
+    setConfirmOpen(false)
+  }
+
+  return (
+    <Card className="p-4 space-y-4" data-testid="plugin-point-diagnostics-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">{t("title")}</h3>
+          <p className="text-xs text-muted-foreground max-w-prose">{t("hint")}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            value={severity}
+            onValueChange={(v) => {
+              if (v === "all" || v === "errors" || v === "warnings") setSeverity(v)
+            }}
+            aria-label={t("severityFilterAria")}
+          >
+            <ToggleGroupItem value="all" aria-label={t("filterAll")}>
+              {t("filterAll")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="errors" aria-label={t("filterErrors")}>
+              {t("filterErrors")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="warnings" aria-label={t("filterWarnings")}>
+              {t("filterWarnings")}
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={Object.keys(all).length === 0}
+                data-testid="diagnostics-clear-all"
+              >
+                {t("clearAll")}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("clearAllConfirmTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("clearAllConfirm")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmClearAll}>
+                  {t("confirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+
+      {isEmpty ? (
+        <p className="text-sm text-muted-foreground" data-testid="diagnostics-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {groups.map((group) => (
+            <li key={group.pluginId}>
+              <DiagnosticGroup
+                pluginId={group.pluginId}
+                diagnostics={group.visible}
+                defaultOpen={group.defaultOpen}
+                onClear={() => clearForPlugin(group.pluginId)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+interface DiagnosticGroupProps {
+  pluginId: string
+  diagnostics: PluginPointDiagnostic[]
+  defaultOpen: boolean
+  onClear: () => void
+}
+
+function DiagnosticGroup({ pluginId, diagnostics, defaultOpen, onClear }: DiagnosticGroupProps) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
+  const [open, setOpen] = useState(defaultOpen)
+  const errorCount = diagnostics.filter((d) => d.severity === "error").length
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 bg-card">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-left flex-1"
+            aria-expanded={open}
+            data-testid={`diagnostics-group-trigger-${pluginId}`}
+          >
+            {open ? (
+              <ChevronDownIcon className="size-3.5" />
+            ) : (
+              <ChevronRightIcon className="size-3.5" />
+            )}
+            <span className="font-mono text-xs">{pluginId}</span>
+            <Badge variant={errorCount > 0 ? "destructive" : "secondary"} className="text-[10px]">
+              {t("countBadge", { count: diagnostics.length })}
+            </Badge>
+          </button>
+        </CollapsibleTrigger>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClear()
+          }}
+          data-testid={`diagnostics-clear-${pluginId}`}
+        >
+          {t("clearForPlugin")}
+        </Button>
+      </div>
+      <CollapsibleContent className="px-3 py-2 space-y-1.5">
+        {diagnostics.map((d, idx) => (
+          <DiagnosticRow key={`${d.code}-${d.pointId}-${idx}`} diagnostic={d} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function DiagnosticRow({ diagnostic }: { diagnostic: PluginPointDiagnostic }) {
+  const Icon = diagnostic.severity === "error" ? AlertCircleIcon : AlertTriangleIcon
+  const iconClass =
+    diagnostic.severity === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-500"
+
+  return (
+    <div className="flex items-start gap-2 text-xs" data-testid="diagnostics-row">
+      <Icon className={`size-3.5 mt-0.5 shrink-0 ${iconClass}`} />
+      <div className="space-y-0.5 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <code className="font-mono text-[10px] bg-muted px-1 rounded">{diagnostic.code}</code>
+          <code className="font-mono text-[10px] text-muted-foreground">{diagnostic.pointId}</code>
+        </div>
+        <p className="text-foreground">
+          {diagnostic.hint ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help underline decoration-dotted underline-offset-2">
+                  {diagnostic.message}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-md">
+                <p className="text-xs">{diagnostic.hint}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            diagnostic.message
+          )}
+        </p>
+      </div>
+    </div>
+  )
+}

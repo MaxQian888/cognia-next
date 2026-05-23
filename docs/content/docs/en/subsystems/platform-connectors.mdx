@@ -351,7 +351,7 @@ interface PluginConnectorDef {
 }
 ```
 
-`lib/plugin/connectors-bridge.ts:registerPluginAdapters(pluginId, manifest, exports)` registers into ConnectorBus when the plugin is enabled; `unregisterPluginAdapters` cleans up on disable. See [Plugin System](./plugin-system) and `docs/content/docs/connectors/extending-with-plugins.md`.
+`lib/plugin/bridge/connectors-bridge.ts:registerPluginAdapters(pluginId, manifest, exports)` registers into ConnectorBus when the plugin is enabled; `unregisterPluginAdapters` cleans up on disable. See [Plugin System](./plugin-system) and `docs/content/docs/connectors/extending-with-plugins.md`.
 
 ### Scheduler Integration
 

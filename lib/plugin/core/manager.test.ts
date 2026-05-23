@@ -26,7 +26,7 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },
@@ -59,12 +59,12 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
 // IndexedDB isn't available in this unit-test environment; the bridge would
 // throw DatabaseClosedError on `applyPluginTables` / `removePluginTables`,
 // blowing up uninstallPlugin's cleanup path before the assertions run.
-jest.mock("@/lib/plugin/dexie-bridge", () => ({
+jest.mock("@/lib/plugin/dexie/bridge", () => ({
   applyPluginTables: jest.fn(async () => undefined),
   removePluginTables: jest.fn(async () => undefined),
 }))
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import {
   getSlashCommand,
   registerSlashCommand,

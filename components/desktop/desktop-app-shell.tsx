@@ -35,7 +35,7 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { whenSeeded } from "@/lib/db/schema"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { useUIStore } from "@/stores/ui/ui-store"
 
 const log = loggers.shell

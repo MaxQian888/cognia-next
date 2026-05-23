@@ -3,7 +3,7 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-jest.mock("@/components/logging/log-filter-presets", () => ({
+jest.mock("@/lib/logging/filter-presets", () => ({
   LOG_FILTER_PRESETS_STORAGE_KEY: "log-filter-presets",
   loadLogFilterPresets: (raw: string | null) => (raw ? JSON.parse(raw) : []),
   serializeLogFilterPresets: (next: unknown) => JSON.stringify(next),

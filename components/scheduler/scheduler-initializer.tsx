@@ -4,7 +4,7 @@ import { useEffect } from "react"
 
 import { stopSchedulerSystem } from "@/lib/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

@@ -46,9 +46,9 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
-import { LEVEL_THEME } from "@/lib/logger/level-theme"
-import { useThemeColors } from "@/lib/logger/use-theme-colors"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
+import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { useThemeColors } from "@/hooks/logging/use-theme-colors"
+import type { StructuredLogEntry, LogLevel } from "@/lib/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
 export interface LogStatsDashboardProps {

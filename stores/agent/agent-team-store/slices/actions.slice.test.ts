@@ -14,7 +14,7 @@ import type {
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

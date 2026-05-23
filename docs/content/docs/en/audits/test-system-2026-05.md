@@ -148,28 +148,28 @@ description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一�
 
 > 加粗 = 本次 PR 已补齐。
 
-| 路径                                                   | LOC | 用途                       |
-| ------------------------------------------------------ | --- | -------------------------- |
-| **`lib/a2ui/app-generator/component-factories.ts`** ✅ | 889 | A2UI 组件工厂              |
-| **`lib/ai/providers/local-provider-service.ts`** ✅    | 790 | 本地推理引擎统一服务       |
-| **`lib/ai/providers/api-test.ts`** ✅                  | 717 | API 连接探测               |
-| **`stores/plugin/plugin-marketplace-store.ts`** ✅     | 703 | 插件市场 Zustand store     |
-| **`lib/a2ui/app-generator/generators.ts`** ✅          | 638 | A2UI 应用生成器            |
-| `lib/ai/providers/completeness.ts`                     | 573 | Provider 能力检查          |
-| `lib/ai/providers/oauth.ts`                            | 518 | Provider OAuth             |
-| `lib/ai/rag/persistent-storage.ts`                     | 483 | 持久化 RAG 向量存储        |
-| `lib/ai/providers/provider-parameter-schemas.ts`       | 483 | Provider 参数 schema       |
-| `lib/ai/providers/openrouter.ts`                       | 471 | OpenRouter 客户端          |
-| `lib/a2ui/templates/utility.ts`                        | 436 | A2UI 工具类模板            |
-| `lib/ai/providers/projection.ts`                       | 421 | Provider projection 逻辑   |
-| `lib/ai/provider-consumption.ts`                       | 390 | Provider 用量追踪          |
-| `lib/ai/providers/local-providers.ts`                  | 388 | 本地推理 provider 目录     |
-| `lib/twin/job-worker.ts`                               | 367 | Twin 异步任务 worker       |
-| `lib/ai/icons.ts`                                      | 364 | LLM provider icon registry |
-| `lib/ai/providers/model-discovery.ts`                  | 351 | 模型发现服务               |
-| `lib/a2ui/templates/productivity.ts`                   | 325 | A2UI productivity 模板     |
-| `lib/twin/ingest/job-runner.ts`                        | 274 | Twin ingest job 编排       |
-| `lib/ai/providers/cliproxyapi.ts`                      | 274 | ClipProxyAPI 客户端        |
+| 路径                                                       | LOC | 用途                       |
+| ---------------------------------------------------------- | --- | -------------------------- |
+| **`lib/a2ui/app-generator/component-factories.ts`** ✅     | 889 | A2UI 组件工厂              |
+| **`lib/ai/providers/local-provider-service.ts`** ✅        | 790 | 本地推理引擎统一服务       |
+| **`lib/ai/providers/api-test.ts`** ✅                      | 717 | API 连接探测               |
+| **`stores/plugin-runtime/plugin-marketplace-store.ts`** ✅ | 703 | 插件市场 Zustand store     |
+| **`lib/a2ui/app-generator/generators.ts`** ✅              | 638 | A2UI 应用生成器            |
+| `lib/ai/providers/completeness.ts`                         | 573 | Provider 能力检查          |
+| `lib/ai/providers/oauth.ts`                                | 518 | Provider OAuth             |
+| `lib/ai/rag/persistent-storage.ts`                         | 483 | 持久化 RAG 向量存储        |
+| `lib/ai/providers/provider-parameter-schemas.ts`           | 483 | Provider 参数 schema       |
+| `lib/ai/providers/openrouter.ts`                           | 471 | OpenRouter 客户端          |
+| `lib/a2ui/templates/utility.ts`                            | 436 | A2UI 工具类模板            |
+| `lib/ai/providers/projection.ts`                           | 421 | Provider projection 逻辑   |
+| `lib/ai/provider-consumption.ts`                           | 390 | Provider 用量追踪          |
+| `lib/ai/providers/local-providers.ts`                      | 388 | 本地推理 provider 目录     |
+| `lib/twin/job-worker.ts`                                   | 367 | Twin 异步任务 worker       |
+| `lib/ai/icons.ts`                                          | 364 | LLM provider icon registry |
+| `lib/ai/providers/model-discovery.ts`                      | 351 | 模型发现服务               |
+| `lib/a2ui/templates/productivity.ts`                       | 325 | A2UI productivity 模板     |
+| `lib/twin/ingest/job-runner.ts`                            | 274 | Twin ingest job 编排       |
+| `lib/ai/providers/cliproxyapi.ts`                          | 274 | ClipProxyAPI 客户端        |
 
 ### C3. workflow executors 全覆盖（ADR-0011）
 
@@ -221,13 +221,13 @@ CI 本地都写。`/coverage` 已被 `.gitignore` 第 15 行覆盖。无操作�
 
 ### #3 — 5 个最大孤儿补齐 co-located 测试
 
-| 测试文件                                             | 测试数 | Coverage 实测                                                                                       |
-| ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `lib/a2ui/app-generator/component-factories.test.ts` | 43     | （合并 lib/\*\* scope 内）96.76% statements                                                         |
-| `lib/a2ui/app-generator/generators.test.ts`          | 47     | 同上                                                                                                |
-| `lib/ai/providers/api-test.test.ts`                  | 49     | 同上                                                                                                |
-| `lib/ai/providers/local-provider-service.test.ts`    | 49     | 同上                                                                                                |
-| `stores/plugin/plugin-marketplace-store.test.ts`     | 63     | **99.85% statements / 94.77% branches / 100% functions / 99.85% lines** — 远超 stores/\*\* 90% 门槛 |
+| 测试文件                                                 | 测试数 | Coverage 实测                                                                                       |
+| -------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `lib/a2ui/app-generator/component-factories.test.ts`     | 43     | （合并 lib/\*\* scope 内）96.76% statements                                                         |
+| `lib/a2ui/app-generator/generators.test.ts`              | 47     | 同上                                                                                                |
+| `lib/ai/providers/api-test.test.ts`                      | 49     | 同上                                                                                                |
+| `lib/ai/providers/local-provider-service.test.ts`        | 49     | 同上                                                                                                |
+| `stores/plugin-runtime/plugin-marketplace-store.test.ts` | 63     | **99.85% statements / 94.77% branches / 100% functions / 99.85% lines** — 远超 stores/\*\* 90% 门槛 |
 
 5 个测试文件合计 251 个 test cases。
 

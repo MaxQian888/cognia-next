@@ -1,134 +1,112 @@
 "use client"
 
-// Driven by `usePluginsStore.importStaging`, this dialog shows the manifest
-// preview + parse-error list staged by the import flow before the user
-// confirms a final install. The actual file pick / archive parse lives in
-// the import action button (one level up); this surface is the validation
-// gate plus the install dispatch.
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { useState } from "react"
-import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, FilePlusIcon } from "lucide-react"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Badge } from "@/components/ui/badge"
-import { upsertPlugin } from "@/lib/db/plugins"
-import { usePluginsStore } from "@/stores/plugins"
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-export function PluginImportDialog() {
-  const t = useTranslations("plugins.import")
-  const staging = usePluginsStore((s) => s.importStaging)
-  const setStaging = usePluginsStore((s) => s.setImportStaging)
-  const [importing, setImporting] = useState(false)
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
+}
 
-  const open = staging !== null
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-  const handleConfirm = async () => {
-    if (!staging) return
-    setImporting(true)
-    try {
-      // Persist each draft as a discovered row. The plugin manager will pick
-      // them up on next discoverPlugins() pass; we deliberately don't try to
-      // load them inline so the import path stays cheap and reversible.
-      for (const draft of staging.drafts) {
-        await upsertPlugin({
-          id: draft.id,
-          name: draft.name,
-          version: draft.version,
-          status: "discovered",
-          source: "local",
-          type: (draft.manifest as { type?: string })?.type === "python" ? "python" : "frontend",
-          path: draft.sourceLabel,
-          manifest: draft.manifest,
-          enabled: false,
-          capabilities: Array.isArray((draft.manifest as { capabilities?: string[] })?.capabilities)
-            ? (draft.manifest as { capabilities: string[] }).capabilities
-            : [],
-        })
-      }
-      setStaging(null)
-    } finally {
-      setImporting(false)
-    }
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
+
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && setStaging(null)}>
-      <DialogContent className="w-[95vw] max-w-2xl">
-        {staging ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("title")}</DialogTitle>
-              <DialogDescription>
-                {t("description", { source: staging.sourceLabel })}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-3">
-              <Card className="p-0">
-                <ScrollArea className="max-h-[40vh]">
-                  <ul className="divide-y">
-                    {staging.drafts.length === 0 ? (
-                      <li className="p-3 text-sm text-muted-foreground">{t("emptyDrafts")}</li>
-                    ) : (
-                      staging.drafts.map((draft) => (
-                        <li key={draft.id} className="px-3 py-2 flex items-center gap-2">
-                          <FilePlusIcon className="size-4 text-muted-foreground shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate">{draft.name}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {draft.id} · v{draft.version}
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            {(draft.manifest as { type?: string })?.type ?? "—"}
-                          </Badge>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                </ScrollArea>
-              </Card>
-
-              {staging.parseErrors.length > 0 && (
-                <Card className="p-3 border-destructive space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-destructive">
-                    <AlertTriangleIcon className="size-4" />
-                    <span className="text-sm font-medium">
-                      {t("errorsTitle", { count: staging.parseErrors.length })}
-                    </span>
-                  </div>
-                  <ul className="space-y-0.5 text-xs">
-                    {staging.parseErrors.map((err, idx) => (
-                      <li key={idx} className="text-muted-foreground">
-                        <code className="font-mono">{err.name}</code> — {err.error}
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setStaging(null)} disabled={importing}>
-                {t("cancel")}
-              </Button>
-              <Button onClick={handleConfirm} disabled={importing || staging.drafts.length === 0}>
-                {importing ? t("importing") : t("confirm", { count: staging.drafts.length })}
-              </Button>
-            </DialogFooter>
-          </>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

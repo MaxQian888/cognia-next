@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { ShieldAlertIcon } from "lucide-react"
 import { trustWorkspace } from "@/lib/db/trusted-workspaces"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface Props {
   /**

@@ -11,7 +11,7 @@ import {
   type UnifiedCodeExecutionResult,
 } from "@/lib/native/code-execution-strategy"
 import { useNativeStore } from "@/stores"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface ExecutionOptions {
   timeout?: number

@@ -16,7 +16,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("data-backup-schedule")
 

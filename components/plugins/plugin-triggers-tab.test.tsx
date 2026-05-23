@@ -1,131 +1,94 @@
-import { act, render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { NextIntlClientProvider } from "next-intl"
-import enMessages from "@/i18n/messages/en.json"
-import { PluginTriggersTab } from "./plugin-triggers-tab"
-import {
-  __resetTriggerMutesForTesting,
-  __resetTriggerRegistryForTesting,
-  isTriggerMuted,
-  registerPluginTrigger,
-  startPluginTriggerInstance,
-} from "@/lib/workflow/triggers/registry"
-import type { TriggerRegistration } from "@/lib/workflow/triggers/registry"
+"use client"
 
-function renderTab(pluginId: string) {
-  return render(
-    <NextIntlClientProvider locale="en" messages={enMessages}>
-      <PluginTriggersTab pluginId={pluginId} />
-    </NextIntlClientProvider>
+// Status & runtime-warning badges for an installed plugin row.
+//
+// Two pieces:
+//   • `PluginStatusPill` — single chip describing enabled / disabled /
+//     loading / error. Shared by `plugin-card.tsx` and the settings
+//     `InstalledTab` so the same status text doesn't drift between callers.
+//   • `PluginRuntimeWarnings` — amber chip per warning the loader stamped
+//     into `manifest._cogniaWarnings` (e.g. "python-runtime-unavailable" when
+//     the Tauri Python runtime isn't available in web mode).
+//
+// Both are pure presentational and i18n-driven so consumers can drop them
+// into any container.
+
+import { useTranslations } from "next-intl"
+import { AlertTriangleIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import type { PluginRow } from "@/lib/db/plugin-types"
+
+export interface PluginStatusPillProps {
+  status: string
+  enabled: boolean
+  /** Set when the manager is mid-transition (loading / enabling / updating). */
+  loading?: boolean
+  className?: string
+}
+
+export function PluginStatusPill({ status, enabled, loading, className }: PluginStatusPillProps) {
+  const t = useTranslations("plugins.card.status")
+  if (status === "error") {
+    return (
+      <Badge variant="destructive" className={cn("text-xs", className)}>
+        {t("error")}
+      </Badge>
+    )
+  }
+  if (loading) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("loading")}
+      </Badge>
+    )
+  }
+  if (!enabled) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("disabled")}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className={cn("text-xs", className)}>
+      {t("enabled")}
+    </Badge>
   )
 }
 
-function makeRegistration(pluginId: string, kind: string): TriggerRegistration {
-  return {
-    kind,
-    typeVersion: 1,
-    pluginId,
-    def: {
-      kind,
-      typeVersion: 1,
-      label: kind,
-      description: "",
-      start: jest.fn().mockResolvedValue({ stop: jest.fn() }),
-    } as unknown as TriggerRegistration["def"],
-    instances: new Map(),
-  }
+/**
+ * Read the runtime-warning markers the plugin loader stamped onto a row's
+ * manifest. Returns an empty array when the field is absent or malformed.
+ */
+export function readPluginRuntimeWarnings(plugin: Pick<PluginRow, "manifest">): string[] {
+  const raw = (plugin.manifest as { _cogniaWarnings?: unknown })._cogniaWarnings
+  if (!Array.isArray(raw)) return []
+  return raw.filter((entry): entry is string => typeof entry === "string")
 }
 
-beforeEach(() => {
-  __resetTriggerRegistryForTesting()
-  __resetTriggerMutesForTesting()
-})
+export interface PluginRuntimeWarningsProps {
+  plugin: Pick<PluginRow, "manifest">
+  className?: string
+}
 
-afterEach(() => {
-  __resetTriggerRegistryForTesting()
-  __resetTriggerMutesForTesting()
-})
-
-describe("PluginTriggersTab", () => {
-  it("shows the empty state when no workflows subscribe to the plugin's triggers", () => {
-    renderTab("foo")
-    expect(screen.getByText(/No workflows subscribe/i)).toBeInTheDocument()
-  })
-
-  it("lists every (kind, workflow) subscription owned by the plugin", async () => {
-    const reg = makeRegistration("foo", "trigger.foo.alpha")
-    registerPluginTrigger(reg)
-    await startPluginTriggerInstance("trigger.foo.alpha", 1, {
-      workflowId: "wf-1",
-      params: {},
-      emit: () => undefined,
-      signal: new AbortController().signal,
-      logger: {
-        debug: () => undefined,
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    })
-    await startPluginTriggerInstance("trigger.foo.alpha", 1, {
-      workflowId: "wf-2",
-      params: {},
-      emit: () => undefined,
-      signal: new AbortController().signal,
-      logger: {
-        debug: () => undefined,
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    })
-    renderTab("foo")
-    expect(screen.getAllByText("trigger.foo.alpha")).toHaveLength(2)
-    expect(screen.getByText("wf-1")).toBeInTheDocument()
-    expect(screen.getByText("wf-2")).toBeInTheDocument()
-  })
-
-  it("skips triggers owned by other plugins", async () => {
-    registerPluginTrigger(makeRegistration("foo", "trigger.foo.alpha"))
-    registerPluginTrigger(makeRegistration("bar", "trigger.bar.beta"))
-    await startPluginTriggerInstance("trigger.bar.beta", 1, {
-      workflowId: "wf-bar",
-      params: {},
-      emit: () => undefined,
-      signal: new AbortController().signal,
-      logger: {
-        debug: () => undefined,
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
-    })
-    renderTab("foo")
-    expect(screen.queryByText("trigger.bar.beta")).not.toBeInTheDocument()
-    expect(screen.queryByText("wf-bar")).not.toBeInTheDocument()
-  })
-
-  it("toggling mute persists via setTriggerMuted (round-trips through isTriggerMuted)", async () => {
-    const user = userEvent.setup()
-    registerPluginTrigger(makeRegistration("foo", "trigger.foo.alpha"))
-    await act(async () => {
-      await startPluginTriggerInstance("trigger.foo.alpha", 1, {
-        workflowId: "wf-1",
-        params: {},
-        emit: () => undefined,
-        signal: new AbortController().signal,
-        logger: {
-          debug: () => undefined,
-          info: () => undefined,
-          warn: () => undefined,
-          error: () => undefined,
-        },
-      })
-    })
-    renderTab("foo")
-    const toggle = screen.getByRole("switch", { name: /Mute/i })
-    expect(isTriggerMuted("foo", "trigger.foo.alpha", "wf-1")).toBe(false)
-    await user.click(toggle)
-    expect(isTriggerMuted("foo", "trigger.foo.alpha", "wf-1")).toBe(true)
-  })
-})
+export function PluginRuntimeWarnings({ plugin, className }: PluginRuntimeWarningsProps) {
+  const t = useTranslations("plugins.card.runtimeWarnings")
+  const warnings = readPluginRuntimeWarnings(plugin)
+  if (warnings.length === 0) return null
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1", className)}>
+      {warnings.map((code) => (
+        <Badge
+          key={code}
+          variant="outline"
+          className="border-amber-500/40 text-amber-700 dark:text-amber-300 text-xs gap-1"
+          data-testid={`plugin-runtime-warning-${code}`}
+        >
+          <AlertTriangleIcon className="size-3 shrink-0" />
+          <span className="truncate">{t(code as never)}</span>
+        </Badge>
+      ))}
+    </div>
+  )
+}

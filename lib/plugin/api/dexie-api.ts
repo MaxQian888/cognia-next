@@ -7,7 +7,7 @@
  */
 
 import type Dexie from "dexie"
-import { toNamespacedTableName, fromNamespacedTableName } from "@/lib/plugin/dexie-namespace"
+import { toNamespacedTableName, fromNamespacedTableName } from "@/lib/plugin/dexie/namespace"
 
 export interface PluginDexieAPI {
   /**

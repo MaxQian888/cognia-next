@@ -1,845 +1,115 @@
 "use client"
 
-// Renders `manifest.configSchema` (a JSON-Schema-shaped descriptor) into a
-// shadcn-driven form. Supports:
-//   - primitives: string / number / integer / boolean
-//   - enum (string with `enum`)
-//   - array of string  (newline-separated)
-//   - nested object    (`type: "object"`, recursively rendered)
-//   - array of object  (`type: "array"`, `items.type === "object"`)
-//   - oneOf / anyOf    (radio-switched sub-form per variant)
-//   - field validation: pattern + patternMessage, minLength / maxLength,
-//                       min / max, format: email | url | uri
-//
-// Persists through `setPluginConfig` so the manager picks up the change
-// on next activation. Schema shapes the parser can't recognise still
-// degrade to a manifest preview (the existing fallback path).
+// Left-rail category sidebar for the /plugins panel. Driven by the
+// usePlugins() view-model so the badges always match the live row counts.
+// Selecting a category writes through to `usePluginsStore.setFilters`.
 
-import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  LayersIcon,
+  WrenchIcon,
+  PaletteIcon,
+  PuzzleIcon,
+  CommandIcon,
+  ZapIcon,
+  PackageIcon,
+  ImageIcon,
+  PencilRulerIcon,
+  CalendarClockIcon,
+  ServerCogIcon,
+  BotIcon,
+  CodeIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
-import type { PluginRow } from "@/lib/db/plugin-types"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 
-type FieldType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "enum"
-  | "array"
-  | "object"
-  | "objectArray"
-  | "oneOf"
-  | "unsupported"
-
-interface FieldValidator {
-  pattern?: string
-  patternMessage?: string
-  minLength?: number
-  maxLength?: number
-  min?: number
-  max?: number
-  format?: "email" | "url" | "uri"
-}
-
-interface OneOfVariant {
-  label: string
-  fields: Record<string, SchemaField>
-}
-
-interface SchemaField {
-  type: FieldType
-  default?: unknown
-  description?: string
-  enumValues?: string[]
-  /** Populated when `type === "object"` or `type === "objectArray"`. */
-  children?: Record<string, SchemaField>
-  /** Populated when `type === "oneOf"`. */
-  variants?: OneOfVariant[]
-  validators?: FieldValidator
-  raw: Record<string, unknown>
-}
-
-interface SchemaShape {
-  fields: Record<string, SchemaField>
-  unknown: boolean
-}
-
-function parseSchema(schema: unknown): SchemaShape {
-  if (!schema || typeof schema !== "object") return { fields: {}, unknown: true }
-  const root = schema as Record<string, unknown>
-  if (root.type !== "object" || typeof root.properties !== "object") {
-    return { fields: {}, unknown: true }
-  }
-  return { fields: parseObjectProperties(root), unknown: false }
-}
-
-function parseValidators(prop: Record<string, unknown>): FieldValidator | undefined {
-  const v: FieldValidator = {}
-  if (typeof prop.pattern === "string") v.pattern = prop.pattern
-  if (typeof prop.patternMessage === "string") v.patternMessage = prop.patternMessage
-  if (typeof prop.minLength === "number") v.minLength = prop.minLength
-  if (typeof prop.maxLength === "number") v.maxLength = prop.maxLength
-  if (typeof prop.minimum === "number") v.min = prop.minimum
-  if (typeof prop.min === "number") v.min = prop.min
-  if (typeof prop.maximum === "number") v.max = prop.maximum
-  if (typeof prop.max === "number") v.max = prop.max
-  if (prop.format === "email" || prop.format === "url" || prop.format === "uri") {
-    v.format = prop.format
-  }
-  return Object.keys(v).length > 0 ? v : undefined
-}
-
-function describe(prop: Record<string, unknown>): string | undefined {
-  return typeof prop.description === "string" ? prop.description : undefined
-}
-
-function parseObjectProperties(schema: Record<string, unknown>): Record<string, SchemaField> {
-  const props = schema.properties as Record<string, Record<string, unknown>> | undefined
-  if (!props) return {}
-  const fields: Record<string, SchemaField> = {}
-  for (const [key, value] of Object.entries(props)) {
-    if (value && typeof value === "object") {
-      fields[key] = parseField(value)
-    }
-  }
-  return fields
-}
-
-function parseOneOfVariants(variantsRaw: unknown): OneOfVariant[] | undefined {
-  if (!Array.isArray(variantsRaw)) return undefined
-  const variants: OneOfVariant[] = []
-  for (let i = 0; i < variantsRaw.length; i++) {
-    const v = variantsRaw[i]
-    if (!v || typeof v !== "object") continue
-    const obj = v as Record<string, unknown>
-    if (obj.type !== "object") continue
-    const titleRaw = obj.title ?? obj.label
-    const label = typeof titleRaw === "string" ? titleRaw : `variant_${i + 1}`
-    variants.push({ label, fields: parseObjectProperties(obj) })
-  }
-  return variants.length > 0 ? variants : undefined
-}
-
-function parseField(prop: Record<string, unknown>): SchemaField {
-  // oneOf / anyOf comes first — a `{ type: "object", oneOf: [...] }`
-  // schema is meaningful as a oneOf, not as a plain object.
-  const oneOfRaw = prop.oneOf ?? prop.anyOf
-  if (Array.isArray(oneOfRaw)) {
-    const variants = parseOneOfVariants(oneOfRaw)
-    if (variants) {
-      return {
-        type: "oneOf",
-        description: describe(prop),
-        variants,
-        raw: prop,
-      }
-    }
-  }
-  if (Array.isArray(prop.enum) && prop.enum.every((v) => typeof v === "string")) {
-    return {
-      type: "enum",
-      default: prop.default,
-      description: describe(prop),
-      enumValues: prop.enum as string[],
-      validators: parseValidators(prop),
-      raw: prop,
-    }
-  }
-  if (prop.type === "string") {
-    return {
-      type: "string",
-      default: typeof prop.default === "string" ? prop.default : "",
-      description: describe(prop),
-      validators: parseValidators(prop),
-      raw: prop,
-    }
-  }
-  if (prop.type === "number" || prop.type === "integer") {
-    return {
-      type: "number",
-      default: typeof prop.default === "number" ? prop.default : 0,
-      description: describe(prop),
-      validators: parseValidators(prop),
-      raw: prop,
-    }
-  }
-  if (prop.type === "boolean") {
-    return {
-      type: "boolean",
-      default: typeof prop.default === "boolean" ? prop.default : false,
-      description: describe(prop),
-      raw: prop,
-    }
-  }
-  if (prop.type === "object" && typeof prop.properties === "object") {
-    return {
-      type: "object",
-      default: typeof prop.default === "object" && prop.default !== null ? prop.default : {},
-      description: describe(prop),
-      children: parseObjectProperties(prop),
-      raw: prop,
-    }
-  }
-  if (prop.type === "array") {
-    const items = prop.items as Record<string, unknown> | undefined
-    if (items?.type === "string") {
-      return {
-        type: "array",
-        default: Array.isArray(prop.default) ? prop.default : [],
-        description: describe(prop),
-        validators: parseValidators(prop),
-        raw: prop,
-      }
-    }
-    if (items?.type === "object" && typeof items.properties === "object") {
-      return {
-        type: "objectArray",
-        default: Array.isArray(prop.default) ? prop.default : [],
-        description: describe(prop),
-        children: parseObjectProperties(items),
-        raw: prop,
-      }
-    }
-  }
-  return { type: "unsupported", raw: prop }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Runtime validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-const FORMAT_PATTERNS: Record<NonNullable<FieldValidator["format"]>, RegExp> = {
-  // Pragmatic — these don't try to be RFC-perfect; they catch obvious
-  // typos and let the plugin do real verification server-side.
-  email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  url: /^https?:\/\/[^\s]+$/i,
-  uri: /^[a-z][a-z0-9+.-]*:[^\s]+$/i,
-}
-
-function validateField(field: SchemaField, value: unknown): string | null {
-  const v = field.validators
-  if (!v) return null
-  if (field.type === "string" || field.type === "enum") {
-    if (typeof value !== "string") return null
-    if (v.minLength !== undefined && value.length < v.minLength) {
-      return `Must be at least ${v.minLength} characters.`
-    }
-    if (v.maxLength !== undefined && value.length > v.maxLength) {
-      return `Must be at most ${v.maxLength} characters.`
-    }
-    if (v.pattern) {
-      try {
-        if (!new RegExp(v.pattern).test(value)) {
-          return v.patternMessage ?? `Must match pattern ${v.pattern}.`
-        }
-      } catch {
-        // Bad regex from the manifest — skip silently rather than crash.
-      }
-    }
-    if (v.format && !FORMAT_PATTERNS[v.format].test(value)) {
-      return `Must be a valid ${v.format}.`
-    }
-  }
-  if (field.type === "number") {
-    const n = typeof value === "number" ? value : Number(value)
-    if (Number.isNaN(n)) return "Must be a number."
-    if (v.min !== undefined && n < v.min) return `Must be ≥ ${v.min}.`
-    if (v.max !== undefined && n > v.max) return `Must be ≤ ${v.max}.`
-  }
-  if (field.type === "array") {
-    if (Array.isArray(value)) {
-      if (v.minLength !== undefined && value.length < v.minLength) {
-        return `Must have at least ${v.minLength} items.`
-      }
-      if (v.maxLength !== undefined && value.length > v.maxLength) {
-        return `Must have at most ${v.maxLength} items.`
-      }
-    }
-  }
-  return null
-}
-
-/**
- * Recursively collect per-field error messages so the form can disable
- * Save and surface inline messages. Returns a flat path → message map.
- */
-function collectErrors(
-  fields: Record<string, SchemaField>,
-  values: Record<string, unknown>,
-  pathPrefix = ""
-): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, field] of Object.entries(fields)) {
-    const path = pathPrefix ? `${pathPrefix}.${key}` : key
-    const value = values[key]
-    if (field.type === "object" && field.children) {
-      Object.assign(
-        out,
-        collectErrors(field.children, (value as Record<string, unknown>) ?? {}, path)
-      )
-      continue
-    }
-    if (field.type === "objectArray" && field.children && Array.isArray(value)) {
-      value.forEach((row, idx) => {
-        Object.assign(
-          out,
-          collectErrors(field.children!, (row as Record<string, unknown>) ?? {}, `${path}[${idx}]`)
-        )
-      })
-      continue
-    }
-    const err = validateField(field, value)
-    if (err) out[path] = err
-  }
-  return out
-}
-export function PluginConfigForm() {
-  const target = usePluginsStore((s) => s.configTarget)
-  const close = usePluginsStore((s) => s.closeConfigure)
-  const open = target !== null
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        {target ? <PluginConfigFormContent pluginId={target.pluginId} onClose={close} /> : null}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-export function PluginConfigFormContent({
-  pluginId,
-  onClose,
-  variant = "modal",
-}: {
-  pluginId: string
-  onClose: () => void
-  variant?: PluginConfigFormVariant
-}) {
-  const t = useTranslations("plugins.configForm")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
-
-  if (!plugin) {
-    return <p className="text-sm text-muted-foreground p-4">{t("loading")}</p>
-  }
-
-  return (
-    <PluginConfigFormBody
-      key={pluginId}
-      pluginId={pluginId}
-      plugin={plugin}
-      onClose={onClose}
-      variant={variant}
-    />
-  )
-}
-
-function seedValues(
-  fields: Record<string, SchemaField>,
-  persisted: Record<string, unknown>
-): Record<string, unknown> {
-  const seed: Record<string, unknown> = {}
-  for (const [key, field] of Object.entries(fields)) {
-    if (key in persisted) {
-      // Recursively merge nested objects so adding a new manifest field
-      // doesn't wipe out unrelated user values.
-      if (field.type === "object" && field.children) {
-        seed[key] = seedValues(field.children, (persisted[key] as Record<string, unknown>) ?? {})
-      } else {
-        seed[key] = persisted[key]
-      }
-    } else if (field.type === "object" && field.children) {
-      seed[key] = seedValues(field.children, {})
-    } else if (field.type === "objectArray") {
-      seed[key] = Array.isArray(field.default) ? field.default : []
-    } else if (field.default !== undefined) {
-      seed[key] = field.default
-    }
-  }
-  return seed
-}
-
-export type PluginConfigFormVariant = "modal" | "inline"
-
-/**
- * Form body for a plugin's `manifest.configSchema`.
- *
- * The same body is rendered in two contexts:
- *
- *   - **modal** — wrapped in `<Dialog>` by `PluginConfigForm`; uses Dialog
- *     primitives (`DialogHeader` / `DialogFooter`) so the modal chrome lines
- *     up with the rest of the panel's dialog hosts.
- *   - **inline** — embedded inside the right-pane detail's Configure
- *     sub-tab (`components/plugins/detail/plugin-detail-configure.tsx`).
- *     Replaces Dialog primitives with plain headings so the form blends
- *     into the surrounding pane instead of looking like a misplaced
- *     dialog. `onClose` is still wired (used as "save completed"
- *     callback) but no longer closes a host.
- *
- * Both variants share schema parsing, validation, default-seeding,
- * setPluginConfig persistence, and the saving/error state machine — only
- * the surrounding chrome differs.
- */
-export function PluginConfigFormBody({
-  pluginId,
-  plugin,
-  onClose,
-  variant = "modal",
-}: {
-  pluginId: string
-  plugin: PluginRow
-  onClose: () => void
-  variant?: PluginConfigFormVariant
-}) {
-  const t = useTranslations("plugins.configForm")
-  const schema = useMemo(
-    () =>
-      parseSchema((plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema),
-    [plugin]
-  )
-
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    seedValues(schema.fields, plugin.config ?? {})
-  )
-  const [saving, setSaving] = useState(false)
-  const errors = useMemo(() => collectErrors(schema.fields, values), [schema.fields, values])
-  const hasErrors = Object.keys(errors).length > 0
-
-  const handleSave = async () => {
-    if (hasErrors) return
-    setSaving(true)
-    try {
-      await setPluginConfig(pluginId, values)
-      onClose()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const Header = variant === "modal" ? ModalHeader : InlineHeader
-  const Footer = variant === "modal" ? ModalFooter : InlineFooter
-
-  if (schema.unknown || Object.keys(schema.fields).length === 0) {
-    return (
-      <>
-        <Header title={plugin.name} description={t("noSchema")} version={null} />
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
-            <pre className="p-3 text-xs font-mono">
-              {JSON.stringify(plugin.config ?? {}, null, 2)}
-            </pre>
-          </ScrollArea>
-        </Card>
-        <Footer>
-          <Button onClick={onClose}>{t("close")}</Button>
-        </Footer>
-      </>
-    )
-  }
-
-  return (
-    <>
-      <Header title={plugin.name} version={plugin.version} description={t("description")} />
-
-      <ScrollArea className="max-h-[60vh]">
-        <div className="space-y-4 pr-3">
-          {Object.entries(schema.fields).map(([key, field]) => (
-            <FieldRow
-              key={key}
-              fieldKey={key}
-              fieldPath={key}
-              field={field}
-              value={values[key] ?? field.default ?? ""}
-              errors={errors}
-              onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
-            />
-          ))}
-        </div>
-      </ScrollArea>
-
-      <Footer>
-        <Button variant="outline" onClick={onClose} disabled={saving}>
-          {t("cancel")}
-        </Button>
-        <Button onClick={handleSave} disabled={saving || hasErrors}>
-          {saving ? t("saving") : t("save")}
-        </Button>
-      </Footer>
-    </>
-  )
-}
-
-interface HeaderProps {
-  title: string
-  version: string | null
-  description: string
-}
-
-function ModalHeader({ title, version, description }: HeaderProps) {
-  return (
-    <DialogHeader>
-      <DialogTitle>
-        {title}
-        {version ? (
-          <>
-            {" "}
-            <span className="text-muted-foreground text-sm font-normal">v{version}</span>
-          </>
-        ) : null}
-      </DialogTitle>
-      <DialogDescription>{description}</DialogDescription>
-    </DialogHeader>
-  )
-}
-
-function InlineHeader({ title, version, description }: HeaderProps) {
-  return (
-    <header className="space-y-1 pb-2 border-b">
-      <h2 className="text-base font-semibold">
-        {title}
-        {version ? (
-          <>
-            {" "}
-            <span className="text-muted-foreground text-sm font-normal">v{version}</span>
-          </>
-        ) : null}
-      </h2>
-      <p className="text-xs text-muted-foreground">{description}</p>
-    </header>
-  )
-}
-
-function ModalFooter({ children }: { children: React.ReactNode }) {
-  return <DialogFooter>{children}</DialogFooter>
-}
-
-function InlineFooter({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center justify-end gap-2 pt-2 border-t">{children}</div>
-}
-
-function FieldRow({
-  fieldKey,
-  fieldPath,
-  field,
-  value,
-  errors,
-  onChange,
-}: {
-  fieldKey: string
-  fieldPath: string
-  field: SchemaField
-  value: unknown
-  errors: Record<string, string>
-  onChange: (v: unknown) => void
-}) {
-  const t = useTranslations("plugins.configForm")
-  const id = `plugin-config-${fieldPath.replace(/[.[\]]/g, "_")}`
-  const error = errors[fieldPath]
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-xs font-medium">
-        {fieldKey}
-      </Label>
-      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-      {renderInput({ field, fieldPath, id, value, errors, onChange, t })}
-      {error && <p className="text-[10px] text-destructive">{error}</p>}
-    </div>
-  )
-}
-
-interface RenderArgs {
-  field: SchemaField
-  fieldPath: string
+const CAPABILITY_META: Array<{
   id: string
-  value: unknown
-  errors: Record<string, string>
-  onChange: (v: unknown) => void
-  t: (key: string) => string
-}
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}> = [
+  { id: "tools", label: "tools", icon: WrenchIcon },
+  { id: "components", label: "components", icon: PuzzleIcon },
+  { id: "modes", label: "modes", icon: BotIcon },
+  { id: "themes", label: "themes", icon: PaletteIcon },
+  { id: "commands", label: "commands", icon: CommandIcon },
+  { id: "hooks", label: "hooks", icon: ZapIcon },
+  { id: "media", label: "media", icon: ImageIcon },
+  { id: "canvas", label: "canvas", icon: PencilRulerIcon },
+  { id: "ai-provider", label: "ai-provider", icon: ServerCogIcon },
+  { id: "scheduler", label: "scheduler", icon: CalendarClockIcon },
+  { id: "exporters", label: "exporters", icon: PackageIcon },
+  { id: "importers", label: "importers", icon: PackageIcon },
+  { id: "python", label: "python", icon: CodeIcon },
+  { id: "external-agent-preset", label: "agentPresets", icon: BotIcon },
+]
 
-function renderInput(args: RenderArgs) {
-  const { field, fieldPath, id, value, errors, onChange, t } = args
-  switch (field.type) {
-    case "string": {
-      const long = typeof field.raw.format === "string" && field.raw.format === "textarea"
-      const Comp = long ? Textarea : Input
-      return (
-        <Comp
-          id={id}
-          value={typeof value === "string" ? value : ""}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )
-    }
-    case "number":
-      return (
-        <Input
-          id={id}
-          type="number"
-          value={typeof value === "number" ? value : Number(value ?? 0)}
-          onChange={(e) => onChange(Number(e.target.value))}
-        />
-      )
-    case "boolean":
-      return (
-        <Switch id={id} checked={value === true} onCheckedChange={(v) => onChange(v === true)} />
-      )
-    case "enum":
-      return (
-        <Select value={typeof value === "string" ? value : ""} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={id}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(field.enumValues ?? []).map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )
-    case "array":
-      return (
-        <Textarea
-          id={id}
-          value={Array.isArray(value) ? value.join("\n") : ""}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split(/\r?\n/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            )
-          }
-          placeholder={t("arrayPlaceholder")}
-        />
-      )
-    case "object":
-      return (
-        <ObjectGroup
-          field={field}
-          fieldPath={fieldPath}
-          value={(value as Record<string, unknown>) ?? {}}
-          errors={errors}
-          onChange={onChange}
-        />
-      )
-    case "objectArray":
-      return (
-        <ObjectArray
-          field={field}
-          fieldPath={fieldPath}
-          value={Array.isArray(value) ? (value as Record<string, unknown>[]) : []}
-          errors={errors}
-          onChange={onChange}
-          t={t}
-        />
-      )
-    case "oneOf":
-      return (
-        <OneOfGroup
-          field={field}
-          fieldPath={fieldPath}
-          value={(value as Record<string, unknown>) ?? {}}
-          errors={errors}
-          onChange={onChange}
-          t={t}
-        />
-      )
-    default:
-      return <p className="text-xs text-muted-foreground italic">{t("unsupportedField")}</p>
-  }
-}
+export function PluginCategorySidebar() {
+  const t = useTranslations("plugins.categorySidebar")
+  const { totals, countsByCapability } = usePlugins()
+  const filters = usePluginsStore((s) => s.filters)
+  const setFilters = usePluginsStore((s) => s.setFilters)
+  const active = filters.capability
 
-function ObjectGroup({
-  field,
-  fieldPath,
-  value,
-  errors,
-  onChange,
-}: {
-  field: SchemaField
-  fieldPath: string
-  value: Record<string, unknown>
-  errors: Record<string, string>
-  onChange: (v: unknown) => void
-}) {
-  if (!field.children) return null
   return (
-    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3">
-      {Object.entries(field.children).map(([childKey, childField]) => (
-        <FieldRow
-          key={childKey}
-          fieldKey={childKey}
-          fieldPath={`${fieldPath}.${childKey}`}
-          field={childField}
-          value={value[childKey] ?? childField.default ?? ""}
-          errors={errors}
-          onChange={(v) => onChange({ ...value, [childKey]: v })}
-        />
-      ))}
-    </div>
+    <aside className="space-y-1 pr-2">
+      <SidebarItem
+        icon={LayersIcon}
+        active={active === "all"}
+        label={t("all")}
+        count={totals.total}
+        onClick={() => setFilters({ capability: "all" })}
+      />
+      <div className="h-px bg-border my-2" />
+      {CAPABILITY_META.map((meta) => {
+        const count = countsByCapability[meta.id] ?? 0
+        return (
+          <SidebarItem
+            key={meta.id}
+            icon={meta.icon}
+            active={active === meta.id}
+            label={t(`capability.${meta.label}` as never)}
+            count={count}
+            onClick={() => setFilters({ capability: meta.id })}
+            disabled={count === 0}
+          />
+        )
+      })}
+    </aside>
   )
 }
 
-function ObjectArray({
-  field,
-  fieldPath,
-  value,
-  errors,
-  onChange,
-  t,
+function SidebarItem({
+  icon: Icon,
+  active,
+  label,
+  count,
+  onClick,
+  disabled,
 }: {
-  field: SchemaField
-  fieldPath: string
-  value: Record<string, unknown>[]
-  errors: Record<string, string>
-  onChange: (v: unknown) => void
-  t: (key: string) => string
+  icon: React.ComponentType<{ className?: string }>
+  active: boolean
+  label: string
+  count: number
+  onClick: () => void
+  disabled?: boolean
 }) {
-  if (!field.children) return null
-  const emptyRow = (): Record<string, unknown> =>
-    seedValues(field.children!, {}) as Record<string, unknown>
   return (
-    <div className="space-y-2">
-      {value.length === 0 && (
-        <p className="text-[11px] text-muted-foreground italic">{t("emptyArray")}</p>
-      )}
-      {value.map((row, idx) => (
-        <div
-          key={idx}
-          className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3 relative"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              #{idx + 1}
-            </span>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                const next = [...value]
-                next.splice(idx, 1)
-                onChange(next)
-              }}
-            >
-              {t("arrayRemove")}
-            </Button>
-          </div>
-          {Object.entries(field.children!).map(([childKey, childField]) => (
-            <FieldRow
-              key={childKey}
-              fieldKey={childKey}
-              fieldPath={`${fieldPath}[${idx}].${childKey}`}
-              field={childField}
-              value={row[childKey] ?? childField.default ?? ""}
-              errors={errors}
-              onChange={(v) => {
-                const next = [...value]
-                next[idx] = { ...row, [childKey]: v }
-                onChange(next)
-              }}
-            />
-          ))}
-        </div>
-      ))}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => onChange([...value, emptyRow()])}
-      >
-        {t("arrayAdd")}
-      </Button>
-    </div>
-  )
-}
-
-function OneOfGroup({
-  field,
-  fieldPath,
-  value,
-  errors,
-  onChange,
-  t,
-}: {
-  field: SchemaField
-  fieldPath: string
-  value: Record<string, unknown>
-  errors: Record<string, string>
-  onChange: (v: unknown) => void
-  t: (key: string) => string
-}) {
-  const variants = field.variants ?? []
-  const variantKey =
-    typeof value.__variant === "string" && variants.some((v) => v.label === value.__variant)
-      ? (value.__variant as string)
-      : variants[0]?.label
-  if (!variantKey) return null
-  const variant = variants.find((v) => v.label === variantKey) ?? variants[0]
-  return (
-    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3">
-      <div className="space-y-1">
-        <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-          {t("oneOfVariant")}
-        </Label>
-        <Select
-          value={variantKey}
-          onValueChange={(nextVariant) =>
-            onChange({
-              ...seedValues(variants.find((v) => v.label === nextVariant)?.fields ?? {}, {}),
-              __variant: nextVariant,
-            })
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {variants.map((v) => (
-              <SelectItem key={v.label} value={v.label}>
-                {v.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {Object.entries(variant.fields).map(([childKey, childField]) => (
-        <FieldRow
-          key={childKey}
-          fieldKey={childKey}
-          fieldPath={`${fieldPath}.${childKey}`}
-          field={childField}
-          value={value[childKey] ?? childField.default ?? ""}
-          errors={errors}
-          onChange={(v) => onChange({ ...value, __variant: variantKey, [childKey]: v })}
-        />
-      ))}
-    </div>
+    <Button
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn("w-full justify-start gap-2 h-8", disabled && "opacity-50")}
+    >
+      <Icon className="size-3.5" />
+      <span className="flex-1 text-left truncate">{label}</span>
+      <Badge variant="outline" className="text-xs">
+        {count}
+      </Badge>
+    </Button>
   )
 }

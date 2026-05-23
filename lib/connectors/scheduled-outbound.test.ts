@@ -42,7 +42,7 @@ jest.mock("@/lib/scheduler/task-scheduler", () => ({
   })),
 }))
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const stub = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
   return { loggers: { scheduler: stub, app: stub }, createLogger: () => stub }
 })

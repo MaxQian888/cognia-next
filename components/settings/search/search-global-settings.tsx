@@ -36,7 +36,7 @@ import {
 } from "@/lib/search/types"
 import { SEARCH_SOURCES } from "@/lib/search/search-constants"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { SourcePill } from "./_shared/source-pill"
 
 const log = createLogger("settings.search.global")

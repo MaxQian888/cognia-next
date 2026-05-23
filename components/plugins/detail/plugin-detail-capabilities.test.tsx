@@ -19,12 +19,12 @@ jest.mock("@/lib/db/plugins", () => ({
 
 // PluginContributedTab and PluginTriggersTab pull from heavy registries —
 // stub them so this test stays narrow.
-jest.mock("../plugin-contributed-tab", () => ({
+jest.mock("./plugin-contributed-tab", () => ({
   PluginContributedTab: ({ pluginId }: { pluginId: string }) => (
     <div data-testid="contributed" data-plugin-id={pluginId} />
   ),
 }))
-jest.mock("../plugin-triggers-tab", () => ({
+jest.mock("./plugin-triggers-tab", () => ({
   PluginTriggersTab: ({ pluginId }: { pluginId: string }) => (
     <div data-testid="triggers" data-plugin-id={pluginId} />
   ),

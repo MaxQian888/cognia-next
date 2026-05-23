@@ -1,94 +1,112 @@
 "use client"
 
-/**
- * Host component that renders the current plugin modal stack.
- *
- * Mounted once near the root of the app tree (typically `app/layout.tsx`).
- * Reads from `usePluginModalStore` and renders each open entry inside a
- * shadcn `Dialog`. Stacked modals are rendered one after another so the
- * Z-order matches the open order (latest open is on top).
- *
- * Plugin-supplied components receive `{ onClose, modalId, args }` and are
- * expected to invoke `onClose()` when the user dismisses. The host also
- * pops the stack when the `Dialog`'s `onOpenChange` fires false (e.g. the
- * user clicks outside or presses Escape).
- *
- * Error boundary mirrors `<PluginExtensionSlot>` — a single broken modal
- * must not crash the rest of the UI.
- *
- * ADR-0026 §3 §A.
- */
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { Component, type ErrorInfo, type ReactNode } from "react"
-import { useTranslations } from "next-intl"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { selectAllModals, usePluginModalStore } from "@/stores/plugin/plugin-modal-store"
-import type { PluginModalEntry } from "@/types/plugin/plugin-modal"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-interface ModalBoundaryProps {
-  pluginId: string
-  modalId: string
-  children: ReactNode
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-interface ModalBoundaryState {
-  hasError: boolean
-}
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-function ModalErrorFallback(): ReactNode {
-  const t = useTranslations("plugins.modalRoot")
-  return <div className="p-6 text-sm text-destructive">{t("errorFallback")}</div>
-}
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-class PluginModalErrorBoundary extends Component<ModalBoundaryProps, ModalBoundaryState> {
-  state: ModalBoundaryState = { hasError: false }
-
-  static getDerivedStateFromError(): ModalBoundaryState {
-    return { hasError: true }
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    // The plugin-system logger is not React-aware; downgrade to console.
-
-    console.error(
-      `[plugin-modal] ${this.props.pluginId} threw rendering modal ${this.props.modalId}`,
-      error,
-      info
-    )
-  }
-
-  render(): ReactNode {
-    if (this.state.hasError) {
-      return <ModalErrorFallback />
-    }
-    return this.props.children
-  }
-}
-
-function renderEntry(entry: PluginModalEntry): ReactNode {
-  const Component = entry.component
-  const handleClose = (): void => {
-    usePluginModalStore.getState().close(entry.modalId)
-  }
   return (
-    <Dialog
-      key={entry.modalId}
-      open
-      onOpenChange={(open) => {
-        if (!open) handleClose()
-      }}
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
     >
-      <DialogContent>
-        <PluginModalErrorBoundary pluginId={entry.pluginId} modalId={entry.modalId}>
-          <Component modalId={entry.modalId} args={entry.args} onClose={handleClose} />
-        </PluginModalErrorBoundary>
-      </DialogContent>
-    </Dialog>
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
 }
 
-export function PluginModalRoot(): ReactNode {
-  const modals = usePluginModalStore(selectAllModals)
-  if (modals.length === 0) return null
-  return <>{modals.map(renderEntry)}</>
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

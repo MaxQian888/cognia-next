@@ -4,7 +4,7 @@
 
 import { PluginUpdater, getPluginUpdater, resetPluginUpdater } from "./updater"
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },
@@ -36,7 +36,7 @@ jest.mock("./backup", () => ({
   }),
 }))
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 const mockGetStoreState = usePluginStore.getState as jest.MockedFunction<
   typeof usePluginStore.getState
 >

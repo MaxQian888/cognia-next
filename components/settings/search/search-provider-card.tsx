@@ -30,7 +30,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.provider")
 

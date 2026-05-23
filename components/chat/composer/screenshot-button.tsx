@@ -11,7 +11,7 @@ import { toast } from "sonner"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { captureScreenshot } from "@/lib/ui/screenshot"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface ScreenshotButtonProps {
   disabled?: boolean

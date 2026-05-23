@@ -29,7 +29,7 @@ import {
   type MonacoNamespace,
   type MonacoWorkbenchHandle,
 } from "@/lib/editor-workbench/monaco-workbench"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface UseCanvasMonacoSetupOptions {
   documentId?: string

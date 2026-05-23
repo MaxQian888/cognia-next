@@ -25,7 +25,7 @@ import {
   type SkillDraft,
 } from "@/lib/db/skills"
 import type { ImportStaging } from "@/stores/skills"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface Props {
   staging: ImportStaging

@@ -1,325 +1,98 @@
 "use client"
 
-// Reads `pluginScheduledJobs` straight from Dexie, presents one row per
-// job with cron + next-run + last-run + status. Mirrors the scheduler
-// settings panel shape but scoped to plugin contributions only. Provides
-// a deep link to the global scheduler section for advanced configuration.
+// Shared action menu used by both PluginCard (card grid view) and the new
+// PluginLibraryRow (compact list view). Extracted from the previous inline
+// DropdownMenu in plugin-card.tsx so the two surfaces can't drift on which
+// actions are available, the order, the icons, or the i18n keys.
+//
+// Action set: open details / configure / review permissions / rollback /
+// toggle enabled / uninstall. Rollback is optional — pass an `onRollback`
+// callback only when the plugin actually has a previous version available.
 
-import { useMemo, useState } from "react"
-import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
-  ClockIcon,
-  PlayIcon,
-  PauseIcon,
-  ArrowRightIcon,
-  ArrowUpIcon,
-  ArrowDownIcon,
-  ArrowUpDownIcon,
+  MoreHorizontalIcon,
+  PowerIcon,
+  RotateCcwIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
 } from "lucide-react"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { cn } from "@/lib/utils"
-import { getDb } from "@/lib/db/schema"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
-import { FilterChips } from "@/components/scheduler/filter-chips"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
-async function listScheduledJobs(): Promise<PluginScheduledJobRow[]> {
-  return getDb().pluginScheduledJobs.orderBy("nextRunAt").toArray()
-}
-
-type SortKey = "pluginId" | "handler" | "cron" | "status" | "nextRunAt" | "lastRunAt"
-type SortDir = "asc" | "desc"
-type StatusFilter = "all" | "active" | "paused" | "error"
-
-interface SortableHeaderProps {
-  label: string
-  sortKey: SortKey
-  activeKey: SortKey
-  activeDir: SortDir
-  onClick: (key: SortKey) => void
-  className?: string
-}
-
-function SortableHeader({
-  label,
-  sortKey,
-  activeKey,
-  activeDir,
-  onClick,
-  className,
-}: SortableHeaderProps) {
-  const isActive = activeKey === sortKey
-  const Icon = !isActive ? ArrowUpDownIcon : activeDir === "asc" ? ArrowUpIcon : ArrowDownIcon
-  return (
-    <TableHead
-      className={className}
-      aria-sort={isActive ? (activeDir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <button
-        type="button"
-        onClick={() => onClick(sortKey)}
-        className={cn(
-          "inline-flex items-center gap-1 -ml-1 px-1 py-0.5 rounded text-left",
-          "hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring",
-          isActive && "text-foreground"
-        )}
-        data-testid={`plugin-jobs-sort-${sortKey}`}
-      >
-        {label}
-        <Icon className="size-3 opacity-60" aria-hidden="true" />
-      </button>
-    </TableHead>
-  )
-}
-
-interface PluginScheduledJobsProps {
-  /** Override the live data — used by tests to avoid wiring Dexie. */
-  jobsOverride?: PluginScheduledJobRow[]
+export interface PluginRowActionsMenuProps {
+  plugin: PluginRow
+  onOpen: (id: string) => void
+  onConfigure: (id: string) => void
+  onReviewPermissions: (id: string) => void
+  onToggleEnabled: (plugin: PluginRow) => void
+  onUninstall: (plugin: PluginRow) => void
+  /** Pass to expose the "Rollback" item; omit to hide it. */
+  onRollback?: (id: string) => void
   /**
-   * When set, only jobs belonging to this plugin are rendered. Used by the
-   * per-plugin detail pane (`PluginDetailData`) to filter the shared Dexie
-   * live-query to one plugin without forking the component.
+   * Size of the trigger button. The grid card uses `size-7` for visual
+   * balance; the compact list row uses `size-6` to keep rows shorter.
    */
-  pluginId?: string
+  triggerClassName?: string
 }
 
-export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJobsProps = {}) {
-  const t = useTranslations("plugins.scheduledJobs")
-  const live = useLiveQuery(
-    () => (jobsOverride ? jobsOverride : listScheduledJobs()),
-    [jobsOverride]
-  )
-  const sourceJobs = jobsOverride ?? live
-  const jobs = useMemo(() => {
-    if (!sourceJobs) return sourceJobs
-    if (!pluginId) return sourceJobs
-    return sourceJobs.filter((job) => job.pluginId === pluginId)
-  }, [sourceJobs, pluginId])
-
-  const [sortKey, setSortKey] = useState<SortKey>("nextRunAt")
-  const [sortDir, setSortDir] = useState<SortDir>("asc")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
-
-  const filteredAndSorted = useMemo(() => {
-    if (!jobs) return [] as PluginScheduledJobRow[]
-    const filtered =
-      statusFilter === "all" ? jobs : jobs.filter((job) => job.status === statusFilter)
-    const cmp = (a: PluginScheduledJobRow, b: PluginScheduledJobRow): number => {
-      const av = readKey(a, sortKey)
-      const bv = readKey(b, sortKey)
-      if (av === bv) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      return av < bv ? -1 : 1
-    }
-    const sorted = [...filtered].sort(cmp)
-    return sortDir === "desc" ? sorted.reverse() : sorted
-  }, [jobs, sortKey, sortDir, statusFilter])
-
-  const handleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"))
-    } else {
-      setSortKey(key)
-      setSortDir("asc")
-    }
-  }
-
-  if (!jobs) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
-  }
-
-  if (jobs.length === 0) {
-    return (
-      <Card className="p-6 text-center space-y-3">
-        <ClockIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        <Button asChild size="sm" variant="outline">
-          <Link href="/settings?section=scheduled-tasks">
-            {t("openScheduler")}
-            <ArrowRightIcon className="ml-1.5 size-3.5" />
-          </Link>
-        </Button>
-      </Card>
-    )
-  }
-
-  const filterChips = [
-    { key: "all", label: t("statusFilter.all") || "All", count: jobs.length },
-    {
-      key: "active",
-      label: t("status.active") || "Active",
-      count: jobs.filter((j) => j.status === "active").length,
-    },
-    {
-      key: "paused",
-      label: t("status.paused") || "Paused",
-      count: jobs.filter((j) => j.status === "paused").length,
-    },
-    {
-      key: "error",
-      label: t("status.error") || "Error",
-      count: jobs.filter((j) => j.status === "error").length,
-    },
-  ]
-
+export function PluginRowActionsMenu({
+  plugin,
+  onOpen,
+  onConfigure,
+  onReviewPermissions,
+  onToggleEnabled,
+  onUninstall,
+  onRollback,
+  triggerClassName,
+}: PluginRowActionsMenuProps) {
+  const t = useTranslations("plugins.card")
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <Badge variant="secondary" className="text-xs">
-          {t("countTotal", { count: filteredAndSorted.length })}
-        </Badge>
-        <Button asChild size="sm" variant="outline">
-          <Link href="/settings?section=scheduled-tasks">
-            {t("openScheduler")}
-            <ArrowRightIcon className="ml-1.5 size-3.5" />
-          </Link>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={triggerClassName ?? "size-7 shrink-0"}
+          aria-label={t("actionsMenuAria", { name: plugin.name })}
+        >
+          <MoreHorizontalIcon className="size-4" />
         </Button>
-      </div>
-
-      <FilterChips
-        filters={filterChips}
-        activeFilter={statusFilter}
-        onFilterChange={(k) => setStatusFilter(k as StatusFilter)}
-      />
-
-      <div className="rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader className="sticky top-0 bg-background z-10">
-            <TableRow>
-              <SortableHeader
-                label={t("colPlugin")}
-                sortKey="pluginId"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-              />
-              <SortableHeader
-                label={t("colHandler")}
-                sortKey="handler"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-                className="hidden sm:table-cell"
-              />
-              <SortableHeader
-                label={t("colCron")}
-                sortKey="cron"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-              />
-              <SortableHeader
-                label={t("colStatus")}
-                sortKey="status"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-              />
-              <SortableHeader
-                label={t("colNextRun")}
-                sortKey="nextRunAt"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-                className="hidden md:table-cell"
-              />
-              <SortableHeader
-                label={t("colLastRun")}
-                sortKey="lastRunAt"
-                activeKey={sortKey}
-                activeDir={sortDir}
-                onClick={handleSort}
-                className="hidden md:table-cell"
-              />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredAndSorted.map((job) => (
-              <TableRow key={job.id}>
-                <TableCell className="font-mono text-xs">{job.pluginId}</TableCell>
-                <TableCell className="hidden sm:table-cell font-mono text-xs">
-                  {job.handler}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{job.cron}</TableCell>
-                <TableCell>
-                  <StatusBadge status={job.status} />
-                </TableCell>
-                <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                  {job.nextRunAt
-                    ? new Date(job.nextRunAt).toISOString().replace("T", " ").slice(0, 16)
-                    : "—"}
-                </TableCell>
-                <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                  {job.lastRunAt
-                    ? new Date(job.lastRunAt).toISOString().replace("T", " ").slice(0, 16)
-                    : "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
-  )
-}
-
-function readKey(job: PluginScheduledJobRow, key: SortKey): string | number | null {
-  switch (key) {
-    case "pluginId":
-      return job.pluginId
-    case "handler":
-      return job.handler
-    case "cron":
-      return job.cron
-    case "status":
-      return job.status
-    case "nextRunAt":
-      return job.nextRunAt ?? null
-    case "lastRunAt":
-      return job.lastRunAt ?? null
-  }
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const t = useTranslations("plugins.scheduledJobs.status")
-  if (status === "active") {
-    return (
-      <Badge variant="secondary" className="text-xs gap-1">
-        <PlayIcon className="size-3" />
-        {t("active")}
-      </Badge>
-    )
-  }
-  if (status === "paused") {
-    return (
-      <Badge variant="outline" className="text-xs gap-1">
-        <PauseIcon className="size-3" />
-        {t("paused")}
-      </Badge>
-    )
-  }
-  if (status === "error") {
-    return (
-      <Badge variant="destructive" className="text-xs">
-        {t("error")}
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="outline" className="text-xs">
-      {status}
-    </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onOpen(plugin.id)}>{t("openDetails")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onConfigure(plugin.id)}>
+          <SettingsIcon className="mr-2 size-3.5" />
+          {t("configure")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onReviewPermissions(plugin.id)}>
+          <ShieldCheckIcon className="mr-2 size-3.5" />
+          {t("reviewPermissions")}
+        </DropdownMenuItem>
+        {onRollback && (
+          <DropdownMenuItem onClick={() => onRollback(plugin.id)}>
+            <RotateCcwIcon className="mr-2 size-3.5" />
+            {t("rollback")}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onToggleEnabled(plugin)}>
+          <PowerIcon className="mr-2 size-3.5" />
+          {plugin.enabled ? t("disable") : t("enable")}
+        </DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={() => onUninstall(plugin)}>
+          <Trash2Icon className="mr-2 size-3.5" />
+          {t("uninstall")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

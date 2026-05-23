@@ -90,7 +90,7 @@ import {
   type PresetEditorOutput,
 } from "./presets/preset-editor"
 import { PresetListToolbar } from "./presets/preset-list-toolbar"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.presets")
 

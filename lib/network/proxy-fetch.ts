@@ -11,7 +11,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/native/utils"
 import { useProxyStore, getActiveProxyUrl } from "@/stores/system"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.network
 

@@ -13,10 +13,10 @@ import {
   createMockPluginContext,
   validateManifestStrict,
 } from "./dev-tools"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 
 // Mock dependencies
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },

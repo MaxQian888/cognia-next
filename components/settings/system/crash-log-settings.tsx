@@ -53,7 +53,7 @@ import type {
   CrashLogItem,
   CrashLogLevelFilter,
   CrashLogSourceFilter,
-} from "@/lib/logger/crash-log"
+} from "@/lib/logging/crash-log"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
 
 /* ─── Severity helpers ─── */

@@ -1,6 +1,6 @@
 "use client"
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import { useEffect } from "react"
 

@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadBlob } from "@/lib/files/download"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface MermaidBlockProps {
   content: string

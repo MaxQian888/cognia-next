@@ -4,7 +4,7 @@
  * Bridges Rust backend logs to the frontend unified logging system.
  */
 
-import { createLogRuntimeContext, logContext, loggers, type LogLevel } from "@/lib/logger"
+import { createLogRuntimeContext, logContext, loggers, type LogLevel } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import { updateNativeLoggingReadiness } from "./native-logging-readiness"
 

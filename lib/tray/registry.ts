@@ -8,7 +8,7 @@
 // reads them via `listTrayItems()` when assembling the
 // "All Commands ▶ Plugins" submenu.
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface PluginTrayItem {
   id: string

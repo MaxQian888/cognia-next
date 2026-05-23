@@ -8,7 +8,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type {
   CreateExternalAgentInput,
   ExternalAgentBenchmarkCapabilityEntry,

@@ -20,7 +20,7 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@/lib/search/search-cache"
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@/lib/search/types"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.cache")
 

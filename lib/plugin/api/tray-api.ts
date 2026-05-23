@@ -16,7 +16,7 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { PluginCapability, PluginTrayAPI, PluginTrayItemInput } from "@/types/plugin/plugin"
 import { registerTrayItem, unregisterTrayItem } from "@/lib/tray/registry"
 import { recordSilentFailure } from "../contracts/diagnostics-store"

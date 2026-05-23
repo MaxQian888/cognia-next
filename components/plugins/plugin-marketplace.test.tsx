@@ -1,95 +1,112 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-const installedRows: Array<{ id: string }> = []
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
+}
 
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => installedRows,
-}))
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-jest.mock("@/lib/db/plugins", () => ({
-  listPlugins: jest.fn(async () => installedRows),
-}))
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
-import { PluginMarketplace } from "./plugin-marketplace"
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
 
-const ENTRIES = [
-  {
-    id: "alpha",
-    name: "Alpha",
-    version: "1.0.0",
-    type: "plugin",
-    description: "first",
-  },
-  {
-    id: "beta",
-    name: "Beta",
-    version: "0.5.0",
-    type: "plugin",
-    description: "second",
-  },
-]
+  return (
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
+  )
+}
 
-beforeEach(() => {
-  installedRows.length = 0
-  __resetPluginMarketplaceClientForTests({
-    searchPlugins: jest.fn(async () => ENTRIES),
-    getFeaturedPlugins: jest.fn(async () => ENTRIES.slice(0, 1)),
-    getPopularPlugins: jest.fn(async () => ENTRIES),
-    getRecentPlugins: jest.fn(async () => ENTRIES),
-    getPlugin: jest.fn(async () => null),
-    installPlugin: jest.fn(async () => undefined),
-    uninstallPlugin: jest.fn(async () => undefined),
-  })
-})
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
 
-describe("PluginMarketplace", () => {
-  it("renders cards from the marketplace state", async () => {
-    render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    expect(screen.getAllByText("Beta").length).toBeGreaterThan(0)
-  })
+interface BoundaryState {
+  hasError: boolean
+}
 
-  it("renders the section toggle group", async () => {
-    render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    expect(screen.getByText("sections.featured")).toBeInTheDocument()
-    expect(screen.getByText("sections.popular")).toBeInTheDocument()
-    expect(screen.getByText("sections.recent")).toBeInTheDocument()
-  })
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
 
-  it("install click invokes the marketplace install path", async () => {
-    const install = jest.fn(async () => undefined)
-    __resetPluginMarketplaceClientForTests({
-      searchPlugins: jest.fn(async () => ENTRIES),
-      getFeaturedPlugins: jest.fn(async () => ENTRIES),
-      getPopularPlugins: jest.fn(async () => ENTRIES),
-      getRecentPlugins: jest.fn(async () => ENTRIES),
-      getPlugin: jest.fn(async () => ({
-        manifest: {
-          id: "alpha",
-          name: "Alpha",
-          version: "1.0.0",
-          type: "frontend" as const,
-          capabilities: [] as never[],
-        } as never,
-        name: "Alpha",
-      })),
-      installPlugin: install,
-      uninstallPlugin: jest.fn(async () => undefined),
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
     })
-    render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    const installButtons = screen.getAllByText("install")
-    fireEvent.click(installButtons[0])
-    await waitFor(() => expect(install).toHaveBeenCalled())
-  })
-})
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}

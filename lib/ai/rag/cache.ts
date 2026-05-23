@@ -13,7 +13,7 @@
  */
 
 import type { RAGPipelineContext } from "./rag-pipeline"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ai
 

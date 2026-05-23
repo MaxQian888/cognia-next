@@ -25,7 +25,7 @@ import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   AgentMentionRow,
   filterMentionables,

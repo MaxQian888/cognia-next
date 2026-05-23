@@ -2,7 +2,7 @@
  * Plugin Loader - Handles loading plugin modules dynamically
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
 import { recordSilentFailure } from "../contracts/diagnostics-store"

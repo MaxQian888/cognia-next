@@ -16,7 +16,7 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePluginRow } from "@/hooks/plugins"
-import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { PluginVerificationSnapshot } from "@/types/plugin"
 import {
   Dialog,

@@ -34,7 +34,7 @@
  * Tauri's `@tauri-apps/plugin-fs` to write into the app's data dir.
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const workspaceLogger = loggers.plugin.child("lsp-workspace-manager")
 

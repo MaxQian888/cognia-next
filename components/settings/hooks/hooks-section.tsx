@@ -34,7 +34,7 @@ import {
 } from "@/lib/claude/settings"
 import type { HookEvent, HookGroup, HooksConfig } from "@/lib/claude/hooks"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,

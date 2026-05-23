@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   acpTerminalCreate,
   acpTerminalKill,

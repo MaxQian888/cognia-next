@@ -9290,7 +9290,30 @@
     "deleteComponent": "Delete Component",
     "duplicateComponent": "Duplicate Component",
     "noComponentSelected": "No component selected",
-    "selectComponent": "Click a component to inspect its properties"
+    "selectComponent": "Click a component to inspect its properties",
+    "surface": {
+      "loading": "Loading...",
+      "errorLoading": "Error loading surface",
+      "noContent": "No content to display",
+      "rendering": "Rendering..."
+    },
+    "errorBoundary": {
+      "renderError": "{type} render error",
+      "retry": "Retry"
+    },
+    "stepper": {
+      "previous": "Previous",
+      "next": "Next",
+      "empty": "No steps are available yet."
+    },
+    "widgetShell": {
+      "fallback": "This widget is using its fallback presentation."
+    },
+    "selectPlaceholder": "Select...",
+    "comparisonEmpty": "No comparison data available.",
+    "workspace": {
+      "headerLoading": "Loading"
+    }
   },
   "toolSettings": {
     "title": "Built-in tools",

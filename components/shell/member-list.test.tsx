@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),

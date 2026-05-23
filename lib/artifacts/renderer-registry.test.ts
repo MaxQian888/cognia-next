@@ -5,7 +5,7 @@ import {
   clearRegisteredArtifactRenderers,
   type PluginArtifactRenderer,
 } from "./renderer-registry"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Artifact } from "@/types"
 
 const dummyArtifact = (overrides: Partial<Artifact> = {}): Artifact => ({

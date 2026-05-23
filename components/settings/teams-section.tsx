@@ -49,7 +49,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.teams")
 

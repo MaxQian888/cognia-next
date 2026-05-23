@@ -68,7 +68,7 @@ import { markSessionRead } from "@/lib/db/session-state"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
 import { guildFromSession } from "@/lib/claude/guild"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Character, Team } from "@/lib/claude/types"
 
 const log = loggers.shell

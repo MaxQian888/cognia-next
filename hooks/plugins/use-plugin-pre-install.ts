@@ -22,7 +22,7 @@ import {
 import type {
   PreInstallTarget,
   PreInstallStepId,
-} from "@/components/plugins/plugin-pre-install-dialog"
+} from "@/components/plugins/dialogs/plugin-pre-install-dialog"
 
 type MarketplaceClient = RunMarketplaceInstallOpts["client"]
 

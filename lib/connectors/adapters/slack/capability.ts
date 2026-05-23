@@ -49,7 +49,7 @@ export const SLACK_CAPS: readonly Capability[] = [
  * Components NOT supported natively (`fallback`, render via plain text
  * mirror):
  *   - Slider (no native Block Kit element).
- *   - Table / Chart / DataExplorer / Pagination.
+ *   - Table / Chart / Pagination.
  *   - Tabs / Accordion / Drawer / Sheet / Sidebar / Collapsible —
  *     no native equivalent; assistant should structure content with
  *     dividers + headers instead.

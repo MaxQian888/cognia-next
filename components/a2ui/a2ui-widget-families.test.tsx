@@ -3,9 +3,27 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { A2UIComparisonCards } from "./display/a2ui-comparison-cards"
 import { A2UIStepperShell } from "./layout/a2ui-stepper-shell"
 import { A2UIMockupFrame } from "./layout/a2ui-mockup-frame"
-import { A2UIDataExplorer } from "./data/a2ui-data-explorer"
+import { A2UITable } from "./data/a2ui-table"
 import { A2UIWidgetStatus } from "./display/a2ui-widget-status"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
+
+// A2UITable reads dataModel via useA2UIData() — substitute the surrounding
+// context so the explorer-mode sort state in `tableDataModel` is what the
+// component sees.
+let tableDataModel: Record<string, unknown> = {}
+jest.mock("./a2ui-context", () => ({
+  useA2UIData: () => ({
+    surface: null,
+    dataModel: tableDataModel,
+    components: {},
+    resolveString: (v: string | { path: string }) => (typeof v === "string" ? v : ""),
+    resolveNumber: (v: number | { path: string }) => (typeof v === "number" ? v : 0),
+    resolveBoolean: (v: boolean | { path: string }) => (typeof v === "boolean" ? v : false),
+    resolveArray: <T,>(v: T[] | { path: string }, d: T[] = []) => (Array.isArray(v) ? v : d),
+  }),
+  useA2UIContext: () => ({ dataModel: tableDataModel }),
+  useA2UIActions: () => ({}),
+}))
 
 function createBaseProps(component: Record<string, unknown>): A2UIComponentProps {
   return {
@@ -97,10 +115,13 @@ describe("A2UI widget families", () => {
     expect(screen.getByTestId("child-hero")).toBeInTheDocument()
   })
 
-  it("renders data explorer rows and emits sort state changes", () => {
+  it("renders the merged Table in explorer mode and emits sort state changes", () => {
+    // After the DataExplorer → Table merge, the same path-bound sort behavior
+    // lives on A2UITable when `sortKeyPath` + `sortDirectionPath` are set.
+    tableDataModel = { sort: { key: "score", direction: "asc" } }
     const props = createBaseProps({
       id: "explorer-1",
-      component: "DataExplorer",
+      component: "Table",
       columns: [
         { key: "name", header: "Name" },
         { key: "score", header: "Score", sortable: true },
@@ -114,10 +135,11 @@ describe("A2UI widget families", () => {
       sortAction: "sort_dataset",
     })
 
-    render(
-      <A2UIDataExplorer {...(props as unknown as React.ComponentProps<typeof A2UIDataExplorer>)} />
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Score" }))
+    render(<A2UITable {...(props as unknown as React.ComponentProps<typeof A2UITable>)} />)
+
+    const scoreHeader = screen.getByText("Score").closest("th")
+    expect(scoreHeader).not.toBeNull()
+    fireEvent.click(scoreHeader as HTMLElement)
 
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()

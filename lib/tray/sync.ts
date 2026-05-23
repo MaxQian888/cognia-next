@@ -11,7 +11,7 @@
 import { useEffect, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 
 import { buildTrayPayload, type TrayTranslator } from "./builder"

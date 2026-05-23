@@ -32,7 +32,7 @@ jest.mock("./a2ui-surface", () => ({
   ),
 }))
 
-jest.mock("./app-card", () => ({
+jest.mock("./a2ui-app-card", () => ({
   AppCard: ({
     app,
     onSelect,

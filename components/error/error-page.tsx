@@ -44,8 +44,8 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
-import { exportCrashLogBundleNow } from "@/lib/logger/crash-log"
-import { loggers } from "@/lib/logger"
+import { exportCrashLogBundleNow } from "@/lib/logging/crash-log"
+import { loggers } from "@/lib/logging"
 import { cn } from "@/lib/utils"
 
 export type ErrorPageVariant = "error" | "not-found" | "global-error"

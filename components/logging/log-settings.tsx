@@ -50,7 +50,7 @@ import {
   type LogLevel,
   type LoggingTransportSettings,
   type UnifiedLoggerConfig,
-} from "@/lib/logger"
+} from "@/lib/logging"
 
 export interface LogSettingsProps {
   className?: string

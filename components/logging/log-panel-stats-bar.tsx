@@ -20,8 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { LEVEL_THEME } from "@/lib/logger/level-theme"
-import type { LogLevel, TransportHealthSnapshot } from "@/lib/logger"
+import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import type { LogLevel, TransportHealthSnapshot } from "@/lib/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
 
 const TRANSPORT_TILE_VISIBLE_LIMIT = 3

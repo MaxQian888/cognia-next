@@ -66,7 +66,6 @@ const registeredTypes = new Set([
   "Chart",
   "Table",
   "List",
-  "DataExplorer",
   "Animation",
   "InteractiveGuide",
   "AcademicAnalysis",

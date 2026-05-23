@@ -52,8 +52,8 @@ import {
 } from "@/lib/agent"
 import { formatCost } from "@/lib/agent-trace/cost-estimator"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
-import type { StructuredLogEntry } from "@/lib/logger"
-import { LEVEL_THEME } from "@/lib/logger/level-theme"
+import type { StructuredLogEntry } from "@/lib/logging"
+import { LEVEL_THEME } from "@/lib/logging/level-theme"
 
 export interface LogDetailPanelProps {
   log: StructuredLogEntry

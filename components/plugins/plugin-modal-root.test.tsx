@@ -1,126 +1,112 @@
-/**
- * Tests for `PluginModalRoot` — verifies the stack-rendering pipeline,
- * the close-via-Dialog-onOpenChange path, and the error boundary fallback
- * that ADR-0026 §3 §A requires.
- */
+"use client"
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
-import { NextIntlClientProvider } from "next-intl"
-import enMessages from "@/i18n/messages/en.json"
-import { PluginModalRoot } from "./plugin-modal-root"
-import { usePluginModalStore } from "@/stores/plugin/plugin-modal-store"
-import type { PluginModalComponent } from "@/types/plugin/plugin-modal"
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-function renderRoot() {
-  return render(
-    <NextIntlClientProvider locale="en" messages={enMessages}>
-      <PluginModalRoot />
-    </NextIntlClientProvider>
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
+}
+
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
+
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
+
+  return (
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
 }
 
-beforeEach(() => {
-  // Each test starts with a clean stack.
-  act(() => {
-    usePluginModalStore.getState().closeAll()
-  })
-})
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
 
-afterEach(() => {
-  act(() => {
-    usePluginModalStore.getState().closeAll()
-  })
-})
+interface BoundaryState {
+  hasError: boolean
+}
 
-describe("PluginModalRoot", () => {
-  it("renders nothing when the stack is empty", () => {
-    const { container } = renderRoot()
-    expect(container.firstChild).toBeNull()
-  })
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
 
-  it("renders the plugin component when a modal is opened", () => {
-    const HelloModal: PluginModalComponent = () => <div>Hello from plugin</div>
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({
-        pluginId: "p1",
-        component: HelloModal,
-        args: { greeting: "hi" },
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
       })
     })
-    expect(screen.getByText("Hello from plugin")).toBeInTheDocument()
-  })
+  }
 
-  it("passes modalId / args / onClose to the plugin component", () => {
-    let received: { modalId?: string; args?: Record<string, unknown>; close?: () => void } = {}
-    const ProbeModal: PluginModalComponent = (props) => {
-      received = { modalId: props.modalId, args: props.args, close: props.onClose }
-      return <div>probe</div>
-    }
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({
-        pluginId: "p1",
-        component: ProbeModal,
-        args: { hello: "world" },
-      })
-    })
-    expect(typeof received.modalId).toBe("string")
-    expect(received.args).toEqual({ hello: "world" })
-    expect(typeof received.close).toBe("function")
-  })
-
-  it("invoking onClose pops the modal from the stack", () => {
-    const Self: PluginModalComponent = ({ onClose }) => <button onClick={onClose}>close</button>
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({ pluginId: "p1", component: Self })
-    })
-    expect(usePluginModalStore.getState().stack).toHaveLength(1)
-    act(() => {
-      fireEvent.click(screen.getByText("close"))
-    })
-    expect(usePluginModalStore.getState().stack).toHaveLength(0)
-  })
-
-  it("renders stacked modals in open-order so the latest is on top", () => {
-    const A: PluginModalComponent = () => <div>modal-A</div>
-    const B: PluginModalComponent = () => <div>modal-B</div>
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({ pluginId: "p1", component: A })
-      usePluginModalStore.getState().open({ pluginId: "p1", component: B })
-    })
-    expect(screen.getByText("modal-A")).toBeInTheDocument()
-    expect(screen.getByText("modal-B")).toBeInTheDocument()
-  })
-
-  it("shows the i18n error fallback when the plugin component throws", () => {
-    const Broken: PluginModalComponent = () => {
-      throw new Error("plugin boom")
-    }
-    // Suppress the expected React error-boundary console noise.
-    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({ pluginId: "p1", component: Broken })
-    })
-    expect(screen.getByText(/Plugin modal failed to render/)).toBeInTheDocument()
-    consoleError.mockRestore()
-  })
-
-  it("clearByPlugin removes only that plugin's modals", () => {
-    const A: PluginModalComponent = () => <div>A-modal</div>
-    const B: PluginModalComponent = () => <div>B-modal</div>
-    renderRoot()
-    act(() => {
-      usePluginModalStore.getState().open({ pluginId: "p1", component: A })
-      usePluginModalStore.getState().open({ pluginId: "p2", component: B })
-      usePluginModalStore.getState().clearByPlugin("p1")
-    })
-    expect(usePluginModalStore.getState().stack).toHaveLength(1)
-    expect(usePluginModalStore.getState().stack[0].pluginId).toBe("p2")
-    expect(screen.queryByText("A-modal")).not.toBeInTheDocument()
-    expect(screen.getByText("B-modal")).toBeInTheDocument()
-  })
-})
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}

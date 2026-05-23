@@ -13,7 +13,7 @@
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
 import type { RerankResult } from "./reranker"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ai
 

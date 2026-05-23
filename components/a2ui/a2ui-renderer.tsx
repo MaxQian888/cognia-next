@@ -56,7 +56,6 @@ import { A2UISwitch } from "./form/a2ui-switch"
 // Import data components (Table/List are light; Chart is lazy-loaded)
 import { A2UITable } from "./data/a2ui-table"
 import { A2UIList } from "./data/a2ui-list"
-import { A2UIDataExplorer } from "./data/a2ui-data-explorer"
 
 // Import academic adapter for withA2UIContext integration
 import { A2UIAnalysisAdapter } from "./academic/a2ui-analysis-adapter"
@@ -154,7 +153,8 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["Chart", A2UIChart as A2UIComponentType],
   ["Table", A2UITable as A2UIComponentType],
   ["List", A2UIList as A2UIComponentType],
-  ["DataExplorer", A2UIDataExplorer as A2UIComponentType],
+  // Legacy "DataExplorer" surfaces are migrated to "Table" at store ingestion
+  // (see migrateLegacyComponent in stores/a2ui/a2ui-store.ts).
   // Animation and interactive components
   ["Animation", A2UIAnimation as A2UIComponentType],
   ["InteractiveGuide", A2UIInteractiveGuide as A2UIComponentType],

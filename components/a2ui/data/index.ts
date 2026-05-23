@@ -6,4 +6,3 @@
 export { A2UIChart } from "./a2ui-chart"
 export { A2UITable } from "./a2ui-table"
 export { A2UIList } from "./a2ui-list"
-export { A2UIDataExplorer } from "./a2ui-data-explorer"

@@ -18,7 +18,7 @@ jest.mock("next-intl", () => ({
 
 const mockLogInfo = jest.fn()
 const mockLogError = jest.fn()
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   createLogger: () => ({
     info: (...args: unknown[]) => mockLogInfo(...args),
     error: (...args: unknown[]) => mockLogError(...args),

@@ -5,10 +5,10 @@
 
 import { buildPluginToolsManifest, buildTerminalDockManifestEntries } from "./sidecar-tools-bridge"
 import { TERMINAL_DOCK_PLUGIN_ID } from "./terminal-dock-schemas"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { Plugin, PluginTool } from "@/types/plugin"
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },

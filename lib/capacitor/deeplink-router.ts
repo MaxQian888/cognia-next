@@ -1,7 +1,7 @@
 "use client"
 
 import type { DeeplinkRoute } from "./deeplink"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.shell
 

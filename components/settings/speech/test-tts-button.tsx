@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useTTS } from "@/hooks/media"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 /**
  * "Test voice" button. Speaks a language-aware sample using the active

@@ -25,7 +25,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),

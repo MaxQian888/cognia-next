@@ -7,7 +7,7 @@
  * so we keep it local and don't unify the two.
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import type { CursorPosition } from "@/types/canvas/collaboration"
 

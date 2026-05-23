@@ -9,7 +9,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const errorMock = jest.fn()
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const stub = () => jest.fn()
   return {
     loggers: {
@@ -21,7 +21,7 @@ jest.mock("@/lib/logger", () => {
   }
 })
 
-jest.mock("@/lib/logger/crash-log", () => ({
+jest.mock("@/lib/logging/crash-log", () => ({
   exportCrashLogBundleNow: jest.fn(),
 }))
 

@@ -15,7 +15,7 @@ import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 export interface LogTimelineProps {
   logs: StructuredLogEntry[]

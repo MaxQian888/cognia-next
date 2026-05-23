@@ -42,7 +42,7 @@ import {
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
 } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { DomainListInput } from "./_shared/domain-list-input"
 
 const log = createLogger("settings.search.verification")

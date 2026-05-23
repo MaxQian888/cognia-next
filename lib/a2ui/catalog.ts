@@ -60,7 +60,6 @@ const standardCatalogDefinition: Omit<A2UIComponentCatalog, "components"> & {
     "ComparisonCards",
     "StepperShell",
     "MockupFrame",
-    "DataExplorer",
     "WidgetStatus",
     "Switch",
     "Loading",
@@ -336,7 +335,7 @@ export const componentCategories = {
     "Collapsible",
     "ScrollArea",
   ] as A2UIComponentType[],
-  data: ["Chart", "Table", "DataExplorer", "Pagination"] as A2UIComponentType[],
+  data: ["Chart", "Table", "Pagination"] as A2UIComponentType[],
   overlay: [
     "Tooltip",
     "Popover",

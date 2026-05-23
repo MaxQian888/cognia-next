@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { onTauriEvent, TAURI_EVENTS } from "@/lib/tauri/events"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { useSettingsStore } from "@/stores/settings"
 import {
   aboutAction,

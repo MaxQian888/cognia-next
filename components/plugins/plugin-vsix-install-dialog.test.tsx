@@ -1,176 +1,94 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key} ${JSON.stringify(vars)}` : key,
-}))
+// Status & runtime-warning badges for an installed plugin row.
+//
+// Two pieces:
+//   • `PluginStatusPill` — single chip describing enabled / disabled /
+//     loading / error. Shared by `plugin-card.tsx` and the settings
+//     `InstalledTab` so the same status text doesn't drift between callers.
+//   • `PluginRuntimeWarnings` — amber chip per warning the loader stamped
+//     into `manifest._cogniaWarnings` (e.g. "python-runtime-unavailable" when
+//     the Tauri Python runtime isn't available in web mode).
+//
+// Both are pure presentational and i18n-driven so consumers can drop them
+// into any container.
 
-jest.mock("@/lib/plugin/vscode-shim/vsix-installer", () => ({
-  installVsix: jest.fn(),
-}))
+import { useTranslations } from "next-intl"
+import { AlertTriangleIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import type { PluginRow } from "@/lib/db/plugin-types"
 
-jest.mock("@/lib/db/plugins", () => ({
-  upsertPlugin: jest.fn().mockResolvedValue(undefined),
-}))
+export interface PluginStatusPillProps {
+  status: string
+  enabled: boolean
+  /** Set when the manager is mid-transition (loading / enabling / updating). */
+  loading?: boolean
+  className?: string
+}
 
-const canUseTauriInvokeMock = jest.fn(() => false)
-jest.mock("@/lib/native/utils", () => ({
-  canUseTauriInvoke: () => canUseTauriInvokeMock(),
-}))
-
-jest.mock("@/lib/logger", () => ({
-  loggers: { plugin: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
-}))
-
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { PluginVsixInstallDialog } from "./plugin-vsix-install-dialog"
-import { installVsix } from "@/lib/plugin/vscode-shim/vsix-installer"
-import { upsertPlugin } from "@/lib/db/plugins"
-
-const installVsixMock = installVsix as jest.Mock
-const upsertPluginMock = upsertPlugin as jest.Mock
-
-function fakeParsedVsix() {
-  return {
-    pkgJson: {
-      name: "rust-analyzer",
-      displayName: "rust-analyzer",
-      publisher: "rust-lang",
-      version: "0.4.0",
-      description: "Rust language server",
-      permissions: ["fs:read", "shell:spawn"],
-    },
-    files: new Map(),
-    sha256: "abcdef0123456789",
-    themes: [],
-    lspBinaryCandidates: [
-      { path: "extension/server/rust-analyzer.exe", kind: "native-exe", sha256: "x" },
-    ],
-    bundleFormat: "cjs" as const,
+export function PluginStatusPill({ status, enabled, loading, className }: PluginStatusPillProps) {
+  const t = useTranslations("plugins.card.status")
+  if (status === "error") {
+    return (
+      <Badge variant="destructive" className={cn("text-xs", className)}>
+        {t("error")}
+      </Badge>
+    )
   }
+  if (loading) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("loading")}
+      </Badge>
+    )
+  }
+  if (!enabled) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("disabled")}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className={cn("text-xs", className)}>
+      {t("enabled")}
+    </Badge>
+  )
 }
 
-beforeEach(() => {
-  installVsixMock.mockReset()
-  upsertPluginMock.mockReset()
-  canUseTauriInvokeMock.mockReturnValue(false)
-})
-
-afterEach(() => {
-  jest.restoreAllMocks()
-})
-
-let realCreateElement: typeof document.createElement
-let inputCreateCount = 0
-function installFilePicker(fileBytes = new Uint8Array([1, 2, 3])) {
-  realCreateElement = document.createElement.bind(document)
-  inputCreateCount = 0
-  jest.spyOn(document, "createElement").mockImplementation(((tag: string) => {
-    if (tag !== "input") return realCreateElement(tag)
-    inputCreateCount += 1
-    const fakeFile = new File([fileBytes as unknown as BlobPart], "fake.vsix", {
-      type: "application/octet-stream",
-    })
-    // Force arrayBuffer to resolve synchronously with the raw bytes so we
-    // don't depend on jsdom's File.arrayBuffer (which may differ across
-    // jsdom versions). The dialog reads `file.arrayBuffer()` once.
-    Object.defineProperty(fakeFile, "arrayBuffer", {
-      value: async () => fileBytes.buffer.slice(0),
-      configurable: true,
-    })
-    const fake: Record<string, unknown> = {
-      type: "",
-      accept: "",
-      files: [fakeFile],
-      onchange: null,
-      oncancel: null,
-      click() {
-        const self = this as { onchange?: (() => void) | null }
-        self.onchange?.()
-      },
-    }
-    return fake as unknown as HTMLInputElement
-  }) as typeof document.createElement)
+/**
+ * Read the runtime-warning markers the plugin loader stamped onto a row's
+ * manifest. Returns an empty array when the field is absent or malformed.
+ */
+export function readPluginRuntimeWarnings(plugin: Pick<PluginRow, "manifest">): string[] {
+  const raw = (plugin.manifest as { _cogniaWarnings?: unknown })._cogniaWarnings
+  if (!Array.isArray(raw)) return []
+  return raw.filter((entry): entry is string => typeof entry === "string")
 }
 
-describe("PluginVsixInstallDialog", () => {
-  it("opens with a Choose button when idle", () => {
-    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
-    expect(screen.getByText("choose")).toBeInTheDocument()
-  })
+export interface PluginRuntimeWarningsProps {
+  plugin: Pick<PluginRow, "manifest">
+  className?: string
+}
 
-  it("parses a picked .vsix and renders the review body", async () => {
-    installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
-    installFilePicker()
-    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
-    fireEvent.click(screen.getByText("choose"))
-    // Give the picker promise + arrayBuffer + installVsix microtasks time
-    // to resolve before asserting on rendered output.
-    await waitFor(() => expect(inputCreateCount).toBeGreaterThan(0), { timeout: 4000 })
-    await waitFor(() => expect(installVsixMock).toHaveBeenCalled(), { timeout: 4000 })
-    await waitFor(() => {
-      expect(screen.getByText("rust-analyzer")).toBeInTheDocument()
-      expect(screen.getByText("v0.4.0")).toBeInTheDocument()
-      expect(screen.getByText("extension/server/rust-analyzer.exe")).toBeInTheDocument()
-    })
-  })
-
-  it("renders an error card when installVsix throws", async () => {
-    installVsixMock.mockRejectedValueOnce(new Error("invalid zip"))
-    installFilePicker()
-    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
-    fireEvent.click(screen.getByText("choose"))
-    await waitFor(() => {
-      expect(screen.getByText("parseError")).toBeInTheDocument()
-      expect(screen.getByText("invalid zip")).toBeInTheDocument()
-    })
-  })
-
-  it("upserts the plugin and closes the dialog on successful install", async () => {
-    installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
-    const onOpenChange = jest.fn()
-    installFilePicker()
-    render(<PluginVsixInstallDialog open onOpenChange={onOpenChange} />)
-    fireEvent.click(screen.getByText("choose"))
-    await waitFor(() => screen.getByText("rust-analyzer"))
-    fireEvent.click(screen.getByText("install"))
-    await waitFor(() => {
-      expect(upsertPluginMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "rust-lang.rust-analyzer",
-          name: "rust-analyzer",
-          version: "0.4.0",
-          type: "vscode-extension",
-          status: "discovered",
-          enabled: false,
-        })
-      )
-      expect(onOpenChange).toHaveBeenCalledWith(false)
-    })
-  })
-
-  it("uses a vsix:// path stub when Tauri invoke is unavailable", async () => {
-    canUseTauriInvokeMock.mockReturnValue(false)
-    installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
-    installFilePicker()
-    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
-    fireEvent.click(screen.getByText("choose"))
-    await waitFor(() => screen.getByText("rust-analyzer"))
-    fireEvent.click(screen.getByText("install"))
-    await waitFor(() => {
-      expect(upsertPluginMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: expect.stringMatching(/^vsix:\/\/rust-lang\.rust-analyzer@/),
-        })
-      )
-    })
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-})
+export function PluginRuntimeWarnings({ plugin, className }: PluginRuntimeWarningsProps) {
+  const t = useTranslations("plugins.card.runtimeWarnings")
+  const warnings = readPluginRuntimeWarnings(plugin)
+  if (warnings.length === 0) return null
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1", className)}>
+      {warnings.map((code) => (
+        <Badge
+          key={code}
+          variant="outline"
+          className="border-amber-500/40 text-amber-700 dark:text-amber-300 text-xs gap-1"
+          data-testid={`plugin-runtime-warning-${code}`}
+        >
+          <AlertTriangleIcon className="size-3 shrink-0" />
+          <span className="truncate">{t(code as never)}</span>
+        </Badge>
+      ))}
+    </div>
+  )
+}

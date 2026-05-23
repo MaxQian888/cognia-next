@@ -55,7 +55,7 @@ import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import {
   getMessagePartRenderer,

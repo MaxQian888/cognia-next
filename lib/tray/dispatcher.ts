@@ -13,7 +13,7 @@
 
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const hasCommand = (id: string) => getCommand(id) !== undefined
 

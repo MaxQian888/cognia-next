@@ -25,3 +25,9 @@ export {
 export { useDevtoolsGate, DEVTOOLS_GATE_STORAGE_KEY } from "./use-devtools-gate"
 export { usePluginRow, type PluginRowState } from "./use-plugin-row"
 export { usePluginDiagnostics } from "./use-plugin-diagnostics"
+export {
+  useWasmCapabilityGrant,
+  type UseWasmCapabilityGrant,
+  type RequestGrantArgs,
+  type RequestGrantResult,
+} from "./use-wasm-capability-grant"

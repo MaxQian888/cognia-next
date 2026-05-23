@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFile } from "@/lib/files/download"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface CodeBlockProps {
   code: string

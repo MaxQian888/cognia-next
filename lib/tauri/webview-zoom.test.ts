@@ -11,7 +11,7 @@ jest.mock("@tauri-apps/api/webview", () => ({
 }))
 
 const logError = jest.fn()
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: { error: (...args: unknown[]) => logError(...args), info: jest.fn(), warn: jest.fn() },
   },

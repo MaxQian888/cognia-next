@@ -1,320 +1,115 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent } from "@testing-library/react"
-import type { PluginRow } from "@/lib/db/plugin-types"
+// Left-rail category sidebar for the /plugins panel. Driven by the
+// usePlugins() view-model so the badges always match the live row counts.
+// Selecting a category writes through to `usePluginsStore.setFilters`.
 
-let mockPlugin: PluginRow | undefined
-const setPluginConfigMock = jest.fn(async (_id: string, _cfg: Record<string, unknown>) => undefined)
-
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
-
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockPlugin,
-}))
-
-jest.mock("@/lib/db/plugins", () => ({
-  getPlugin: jest.fn(() => Promise.resolve(mockPlugin)),
-  setPluginConfig: (id: string, cfg: Record<string, unknown>) => setPluginConfigMock(id, cfg),
-}))
-
-import { PluginConfigForm } from "./plugin-config-form"
+import { useTranslations } from "next-intl"
+import {
+  LayersIcon,
+  WrenchIcon,
+  PaletteIcon,
+  PuzzleIcon,
+  CommandIcon,
+  ZapIcon,
+  PackageIcon,
+  ImageIcon,
+  PencilRulerIcon,
+  CalendarClockIcon,
+  ServerCogIcon,
+  BotIcon,
+  CodeIcon,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 
-const schemaPlugin: PluginRow = {
-  id: "p_conf",
-  name: "Config Plugin",
-  version: "1.0.0",
-  status: "enabled",
-  source: "marketplace",
-  type: "frontend",
-  enabled: true,
-  capabilities: [],
-  path: "/p/conf",
-  manifest: {
-    id: "p_conf",
-    configSchema: {
-      type: "object",
-      properties: {
-        token: { type: "string", default: "" },
-        maxItems: { type: "number", default: 10 },
-        privacyMode: { type: "boolean", default: false },
-        flavor: { type: "string", enum: ["sweet", "salty"], default: "sweet" },
-      },
-    },
-  },
-  config: { token: "abc", maxItems: 25 },
-  createdAt: 1,
-  updatedAt: 1,
+const CAPABILITY_META: Array<{
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}> = [
+  { id: "tools", label: "tools", icon: WrenchIcon },
+  { id: "components", label: "components", icon: PuzzleIcon },
+  { id: "modes", label: "modes", icon: BotIcon },
+  { id: "themes", label: "themes", icon: PaletteIcon },
+  { id: "commands", label: "commands", icon: CommandIcon },
+  { id: "hooks", label: "hooks", icon: ZapIcon },
+  { id: "media", label: "media", icon: ImageIcon },
+  { id: "canvas", label: "canvas", icon: PencilRulerIcon },
+  { id: "ai-provider", label: "ai-provider", icon: ServerCogIcon },
+  { id: "scheduler", label: "scheduler", icon: CalendarClockIcon },
+  { id: "exporters", label: "exporters", icon: PackageIcon },
+  { id: "importers", label: "importers", icon: PackageIcon },
+  { id: "python", label: "python", icon: CodeIcon },
+  { id: "external-agent-preset", label: "agentPresets", icon: BotIcon },
+]
+
+export function PluginCategorySidebar() {
+  const t = useTranslations("plugins.categorySidebar")
+  const { totals, countsByCapability } = usePlugins()
+  const filters = usePluginsStore((s) => s.filters)
+  const setFilters = usePluginsStore((s) => s.setFilters)
+  const active = filters.capability
+
+  return (
+    <aside className="space-y-1 pr-2">
+      <SidebarItem
+        icon={LayersIcon}
+        active={active === "all"}
+        label={t("all")}
+        count={totals.total}
+        onClick={() => setFilters({ capability: "all" })}
+      />
+      <div className="h-px bg-border my-2" />
+      {CAPABILITY_META.map((meta) => {
+        const count = countsByCapability[meta.id] ?? 0
+        return (
+          <SidebarItem
+            key={meta.id}
+            icon={meta.icon}
+            active={active === meta.id}
+            label={t(`capability.${meta.label}` as never)}
+            count={count}
+            onClick={() => setFilters({ capability: meta.id })}
+            disabled={count === 0}
+          />
+        )
+      })}
+    </aside>
+  )
 }
 
-beforeEach(() => {
-  mockPlugin = schemaPlugin
-  setPluginConfigMock.mockClear()
-  usePluginsStore.setState({ configTarget: { pluginId: "p_conf" } })
-})
-
-describe("PluginConfigForm", () => {
-  it("does not render when configTarget is null", () => {
-    usePluginsStore.setState({ configTarget: null })
-    render(<PluginConfigForm />)
-    expect(screen.queryByText("description")).not.toBeInTheDocument()
-  })
-
-  it("renders one field per declared schema property", () => {
-    render(<PluginConfigForm />)
-    expect(screen.getByText("token")).toBeInTheDocument()
-    expect(screen.getByText("maxItems")).toBeInTheDocument()
-    expect(screen.getByText("privacyMode")).toBeInTheDocument()
-    expect(screen.getByText("flavor")).toBeInTheDocument()
-  })
-
-  it("hydrates fields from existing plugin.config when present", () => {
-    render(<PluginConfigForm />)
-    const tokenInput = screen.getByLabelText("token") as HTMLInputElement
-    expect(tokenInput.value).toBe("abc")
-    const maxItemsInput = screen.getByLabelText("maxItems") as HTMLInputElement
-    expect(maxItemsInput.value).toBe("25")
-  })
-
-  it("save calls setPluginConfig with current values", () => {
-    render(<PluginConfigForm />)
-    fireEvent.click(screen.getByText("save"))
-    expect(setPluginConfigMock).toHaveBeenCalledWith(
-      "p_conf",
-      expect.objectContaining({ token: "abc", maxItems: 25 })
-    )
-  })
-
-  it("renders the noSchema fallback when manifest has no configSchema", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: { id: "p_conf" },
-    }
-    render(<PluginConfigForm />)
-    expect(screen.getByText("noSchema")).toBeInTheDocument()
-  })
-
-  it("uses the localized arrayPlaceholder for array-typed fields", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        id: "p_conf",
-        configSchema: {
-          type: "object",
-          properties: {
-            tags: { type: "array", items: { type: "string" }, default: ["a", "b"] },
-          },
-        },
-      },
-      config: {},
-    }
-    render(<PluginConfigForm />)
-    const textarea = screen.getByLabelText("tags") as HTMLTextAreaElement
-    expect(textarea.placeholder).toBe("arrayPlaceholder")
-  })
-
-  it("falls back to the localized unsupportedField message for unknown schema shapes", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        id: "p_conf",
-        configSchema: {
-          type: "object",
-          properties: {
-            payload: { type: "object" },
-          },
-        },
-      },
-      config: {},
-    }
-    render(<PluginConfigForm />)
-    expect(screen.getByText("unsupportedField")).toBeInTheDocument()
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    render(<PluginConfigForm />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-
-  it("renders nested object fields recursively", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            db: {
-              type: "object",
-              description: "Database settings",
-              properties: {
-                host: { type: "string", default: "localhost" },
-                port: { type: "number", default: 5432 },
-              },
-            },
-          },
-        },
-      },
-      config: { db: { host: "prod.db", port: 5433 } },
-    }
-    render(<PluginConfigForm />)
-    expect(screen.getByText("host")).toBeInTheDocument()
-    expect(screen.getByText("port")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("prod.db")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("5433")).toBeInTheDocument()
-  })
-
-  it("renders an objectArray with Add/Remove controls", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            servers: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  url: { type: "string", default: "" },
-                  weight: { type: "number", default: 1 },
-                },
-              },
-              default: [{ url: "https://a", weight: 1 }],
-            },
-          },
-        },
-      },
-      config: {
-        servers: [
-          { url: "https://a", weight: 1 },
-          { url: "https://b", weight: 2 },
-        ],
-      },
-    }
-    render(<PluginConfigForm />)
-    expect(screen.getAllByText("url")).toHaveLength(2)
-    expect(screen.getByDisplayValue("https://a")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("https://b")).toBeInTheDocument()
-    expect(screen.getAllByText("arrayRemove")).toHaveLength(2)
-    expect(screen.getByText("arrayAdd")).toBeInTheDocument()
-  })
-
-  it("disables Save while a validation error is present", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            email: { type: "string", format: "email", default: "" },
-          },
-        },
-      },
-      config: { email: "not-an-email" },
-    }
-    render(<PluginConfigForm />)
-    const save = screen.getByText("save").closest("button") as HTMLButtonElement
-    expect(save.disabled).toBe(true)
-  })
-
-  it("min/max bounds on a number reject out-of-range values", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            port: { type: "number", min: 1, max: 65535, default: 8080 },
-          },
-        },
-      },
-      config: { port: 70000 },
-    }
-    render(<PluginConfigForm />)
-    const save = screen.getByText("save").closest("button") as HTMLButtonElement
-    expect(save.disabled).toBe(true)
-  })
-
-  it("oneOf renders a variant selector + the chosen variant's fields", () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            auth: {
-              description: "Authentication settings",
-              oneOf: [
-                {
-                  type: "object",
-                  title: "apiKey",
-                  properties: { key: { type: "string", default: "" } },
-                },
-                {
-                  type: "object",
-                  title: "oauth",
-                  properties: {
-                    clientId: { type: "string", default: "" },
-                    secret: { type: "string", default: "" },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-      config: { auth: { __variant: "oauth", clientId: "abc", secret: "xyz" } },
-    }
-    render(<PluginConfigForm />)
-    expect(screen.getByText("oneOfVariant")).toBeInTheDocument()
-    expect(screen.getByText("clientId")).toBeInTheDocument()
-    expect(screen.getByText("secret")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("abc")).toBeInTheDocument()
-  })
-
-  it("save submits nested + array values to setPluginConfig", async () => {
-    mockPlugin = {
-      ...schemaPlugin,
-      manifest: {
-        ...schemaPlugin.manifest,
-        configSchema: {
-          type: "object",
-          properties: {
-            db: {
-              type: "object",
-              properties: { host: { type: "string", default: "localhost" } },
-            },
-            servers: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { url: { type: "string", default: "" } },
-              },
-            },
-          },
-        },
-      },
-      config: { db: { host: "x" }, servers: [{ url: "a" }] },
-    }
-    render(<PluginConfigForm />)
-    fireEvent.click(screen.getByText("save"))
-    await Promise.resolve()
-    expect(setPluginConfigMock).toHaveBeenCalledWith(
-      "p_conf",
-      expect.objectContaining({
-        db: expect.objectContaining({ host: "x" }),
-        servers: expect.arrayContaining([expect.objectContaining({ url: "a" })]),
-      })
-    )
-  })
-})
+function SidebarItem({
+  icon: Icon,
+  active,
+  label,
+  count,
+  onClick,
+  disabled,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  active: boolean
+  label: string
+  count: number
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <Button
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn("w-full justify-start gap-2 h-8", disabled && "opacity-50")}
+    >
+      <Icon className="size-3.5" />
+      <span className="flex-1 text-left truncate">{label}</span>
+      <Badge variant="outline" className="text-xs">
+        {count}
+      </Badge>
+    </Button>
+  )
+}

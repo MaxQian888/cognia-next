@@ -11,7 +11,7 @@ jest.mock("@/lib/scheduler", () => ({
 
 const logInfo = jest.fn()
 const logError = jest.fn()
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     scheduler: {
       info: (...args: unknown[]) => logInfo(...args),

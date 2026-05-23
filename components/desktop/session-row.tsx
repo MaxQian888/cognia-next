@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { ChatSession } from "@/lib/claude/types"
 import {
   HashIcon,

@@ -39,7 +39,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
 import { guildFromSession } from "@/lib/claude/guild"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.shell
 

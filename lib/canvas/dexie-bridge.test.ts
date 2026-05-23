@@ -102,7 +102,7 @@ jest.mock("@/stores/canvas/comment-store", () => ({
   useCommentStore: commentStore,
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   __esModule: true,
   loggers: {
     canvas: {

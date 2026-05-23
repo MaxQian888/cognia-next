@@ -1,368 +1,257 @@
 "use client"
 
-// Sequential dialog that walks the user through Conflict → Permission →
-// Configuration before the marketplace install actually writes anything.
-//
-// The dialog is controlled — the parent (marketplace card / detail sheet
-// via `usePluginPreInstall`) owns the target + step state and drives
-// transitions through callback props. This component only renders the
-// active step and emits Continue/Cancel.
-//
-// Three step components are rendered conditionally based on `target.step`.
-// When `target` is null the dialog stays closed.
-
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircleIcon, AlertTriangleIcon, InfoIcon } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+import { ChevronDownIcon, ChevronRightIcon, AlertCircleIcon, AlertTriangleIcon } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
-import type { PluginPermission } from "@/types/plugin"
-import type {
-  PreInstallConflict,
-  PreInstallPermissionPayload,
-  PreInstallConfigPayload,
-} from "@/lib/plugin/marketplace/install-flow"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
-export type PreInstallStepId = "conflict" | "permission" | "config"
+import {
+  clearAllPluginPointDiagnostics as defaultClearAll,
+  clearPluginPointDiagnostics as defaultClearForPlugin,
+  getAllPluginPointDiagnostics as defaultGetDiagnostics,
+  subscribePluginPointDiagnostics as defaultSubscribe,
+} from "@/lib/plugin/contracts/diagnostics-store"
+import type { PluginPointDiagnostic } from "@/lib/plugin/contracts/plugin-points"
 
-export interface PreInstallTarget {
-  pluginId: string
-  pluginName: string
-  step: PreInstallStepId
-  /** Filled when `step === "conflict"`. */
-  conflict?: PreInstallConflict
-  /** Filled when `step === "permission"`. */
-  permission?: PreInstallPermissionPayload
-  /** Filled when `step === "config"`. */
-  config?: PreInstallConfigPayload
-  /** 1-based step counter for the badge — total steps for this run. */
-  stepNumber: number
-  totalSteps: number
+export type DiagnosticsSeverityFilter = "all" | "errors" | "warnings"
+
+export interface PluginPointDiagnosticsPanelProps {
+  /** Inject for tests; falls back to the real store API. */
+  getDiagnostics?: () => Record<string, PluginPointDiagnostic[]>
+  subscribe?: (listener: () => void) => () => void
+  clearForPlugin?: (pluginId: string) => void
+  clearAll?: () => void
 }
 
-interface Props {
-  target: PreInstallTarget | null
-  onContinue: (value?: unknown) => void
-  onCancel: () => void
+const EMPTY_SNAPSHOT: Record<string, PluginPointDiagnostic[]> = Object.freeze({})
+
+function filterBySeverity(
+  diagnostics: PluginPointDiagnostic[],
+  severity: DiagnosticsSeverityFilter
+): PluginPointDiagnostic[] {
+  if (severity === "all") return diagnostics
+  if (severity === "errors") return diagnostics.filter((d) => d.severity === "error")
+  return diagnostics.filter((d) => d.severity === "warning")
 }
 
-export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) {
-  const t = useTranslations("plugins.preInstall")
-  const open = target !== null
+function hasAnyError(diagnostics: PluginPointDiagnostic[]): boolean {
+  return diagnostics.some((d) => d.severity === "error")
+}
+
+export function PluginPointDiagnosticsPanel({
+  getDiagnostics = defaultGetDiagnostics,
+  subscribe = defaultSubscribe,
+  clearForPlugin = defaultClearForPlugin,
+  clearAll = defaultClearAll,
+}: PluginPointDiagnosticsPanelProps = {}) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
+
+  const stableSubscribe = useCallback((listener: () => void) => subscribe(listener), [subscribe])
+  const stableGet = useCallback(() => getDiagnostics(), [getDiagnostics])
+
+  const all = useSyncExternalStore(stableSubscribe, stableGet, () => EMPTY_SNAPSHOT)
+
+  const [severity, setSeverity] = useState<DiagnosticsSeverityFilter>("all")
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const groups = useMemo(() => {
+    return Object.entries(all)
+      .map(([pluginId, diagnostics]) => ({
+        pluginId,
+        all: diagnostics,
+        visible: filterBySeverity(diagnostics, severity),
+        defaultOpen: hasAnyError(diagnostics),
+      }))
+      .filter((g) => g.visible.length > 0)
+      .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+  }, [all, severity])
+
+  const totalCount = useMemo(() => groups.reduce((sum, g) => sum + g.visible.length, 0), [groups])
+
+  const isEmpty = totalCount === 0
+
+  const handleConfirmClearAll = () => {
+    clearAll()
+    setConfirmOpen(false)
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="w-[95vw] max-w-xl" data-testid="plugin-pre-install-dialog">
-        {target && (
-          <>
-            <DialogHeader>
-              <div className="flex items-center justify-between gap-2">
-                <DialogTitle>{t("title", { name: target.pluginName })}</DialogTitle>
-                <Badge variant="outline" className="text-xs whitespace-nowrap">
-                  {t("stepBadge", {
-                    current: target.stepNumber,
-                    total: target.totalSteps,
-                  })}
-                </Badge>
-              </div>
-              <DialogDescription>{t("description", { name: target.pluginName })}</DialogDescription>
-            </DialogHeader>
-
-            {target.step === "conflict" && target.conflict && (
-              <ConflictStep
-                conflict={target.conflict}
-                onContinue={() => onContinue()}
-                onCancel={onCancel}
-              />
-            )}
-            {target.step === "permission" && target.permission && (
-              <PermissionStep
-                permission={target.permission}
-                onContinue={() => onContinue()}
-                onCancel={onCancel}
-              />
-            )}
-            {target.step === "config" && target.config && (
-              <ConfigStep
-                config={target.config}
-                onContinue={(value) => onContinue(value)}
-                onCancel={onCancel}
-              />
-            )}
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// =============================================================================
-// Step 1 — Conflict
-// =============================================================================
-
-function ConflictStep({
-  conflict,
-  onContinue,
-  onCancel,
-}: {
-  conflict: PreInstallConflict
-  onContinue: () => void
-  onCancel: () => void
-}) {
-  const t = useTranslations("plugins.preInstall")
-
-  return (
-    <>
-      <p className="text-sm text-muted-foreground">{t("conflictHint")}</p>
-      <Card className="p-0">
-        <ScrollArea className="max-h-[40vh]">
-          <ul className="divide-y" data-testid="pre-install-conflict-list">
-            {conflict.reasons.map((reason, idx) => {
-              // The orchestrator emits `alreadyInstalled:<version>` so the
-              // UI can localize without duplicating the message text in TS.
-              const installedPrefix = "alreadyInstalled:"
-              const isInstalledNotice = reason.message.startsWith(installedPrefix)
-              const display = isInstalledNotice
-                ? t("conflictAlreadyInstalled", {
-                    version: reason.message.slice(installedPrefix.length),
-                  })
-                : reason.message
-              return (
-                <li key={idx} className="flex items-start gap-2 px-3 py-2 text-sm">
-                  {reason.severity === "high" ? (
-                    <AlertTriangleIcon className="size-4 text-destructive mt-0.5 shrink-0" />
-                  ) : reason.severity === "medium" ? (
-                    <AlertCircleIcon className="size-4 text-orange-500 mt-0.5 shrink-0" />
-                  ) : (
-                    <InfoIcon className="size-4 text-muted-foreground mt-0.5 shrink-0" />
-                  )}
-                  <span>{display}</span>
-                </li>
-              )
-            })}
-          </ul>
-        </ScrollArea>
-      </Card>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>
-          {t("cancel")}
-        </Button>
-        <Button onClick={onContinue} data-testid="pre-install-conflict-continue">
-          {t("next")}
-        </Button>
-      </DialogFooter>
-    </>
-  )
-}
-
-// =============================================================================
-// Step 2 — Permission
-// =============================================================================
-
-function PermissionStep({
-  permission,
-  onContinue,
-  onCancel,
-}: {
-  permission: PreInstallPermissionPayload
-  onContinue: () => void
-  onCancel: () => void
-}) {
-  const t = useTranslations("plugins.preInstall")
-  const hasAny = permission.declared.length > 0 || permission.optional.length > 0
-
-  return (
-    <>
-      <p className="text-sm text-muted-foreground">{t("permissionsHint")}</p>
-      {!hasAny ? (
-        <p className="text-sm text-muted-foreground">{t("permissionsNone")}</p>
-      ) : (
-        <div className="space-y-3">
-          {permission.declared.length > 0 && (
-            <PermissionListCard title={t("permissionsDeclared")} perms={permission.declared} />
-          )}
-          {permission.optional.length > 0 && (
-            <PermissionListCard title={t("permissionsOptional")} perms={permission.optional} />
-          )}
+    <Card className="p-4 space-y-4" data-testid="plugin-point-diagnostics-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">{t("title")}</h3>
+          <p className="text-xs text-muted-foreground max-w-prose">{t("hint")}</p>
         </div>
-      )}
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>
-          {t("cancel")}
-        </Button>
-        <Button onClick={onContinue} data-testid="pre-install-permission-continue">
-          {t("next")}
-        </Button>
-      </DialogFooter>
-    </>
-  )
-}
+        <div className="flex items-center gap-2">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            value={severity}
+            onValueChange={(v) => {
+              if (v === "all" || v === "errors" || v === "warnings") setSeverity(v)
+            }}
+            aria-label={t("severityFilterAria")}
+          >
+            <ToggleGroupItem value="all" aria-label={t("filterAll")}>
+              {t("filterAll")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="errors" aria-label={t("filterErrors")}>
+              {t("filterErrors")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="warnings" aria-label={t("filterWarnings")}>
+              {t("filterWarnings")}
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={Object.keys(all).length === 0}
+                data-testid="diagnostics-clear-all"
+              >
+                {t("clearAll")}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("clearAllConfirmTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("clearAllConfirm")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmClearAll}>
+                  {t("confirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
 
-function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
-  return (
-    <Card className="p-3 space-y-2">
-      <div className="text-xs font-semibold">{title}</div>
-      <ul className="space-y-1.5">
-        {perms.map((perm) => {
-          const dangerous = DANGEROUS_PERMISSIONS.includes(perm)
-          return (
-            <li key={perm} className="flex items-center gap-2 text-xs">
-              {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
-              <code className="font-mono">{perm}</code>
+      {isEmpty ? (
+        <p className="text-sm text-muted-foreground" data-testid="diagnostics-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {groups.map((group) => (
+            <li key={group.pluginId}>
+              <DiagnosticGroup
+                pluginId={group.pluginId}
+                diagnostics={group.visible}
+                defaultOpen={group.defaultOpen}
+                onClear={() => clearForPlugin(group.pluginId)}
+              />
             </li>
-          )
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
     </Card>
   )
 }
 
-// =============================================================================
-// Step 3 — Config
-// =============================================================================
-
-interface ParsedField {
-  name: string
-  type: "string" | "number" | "boolean"
-  default: unknown
-  description?: string
+interface DiagnosticGroupProps {
+  pluginId: string
+  diagnostics: PluginPointDiagnostic[]
+  defaultOpen: boolean
+  onClear: () => void
 }
 
-function parseConfigFields(schema: Record<string, unknown>): ParsedField[] {
-  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>
-  const fields: ParsedField[] = []
-  for (const [name, prop] of Object.entries(properties)) {
-    const type = prop.type
-    if (type !== "string" && type !== "number" && type !== "boolean") continue
-    fields.push({
-      name,
-      type,
-      default: prop.default,
-      description: typeof prop.description === "string" ? prop.description : undefined,
-    })
-  }
-  return fields
-}
-
-function ConfigStep({
-  config,
-  onContinue,
-  onCancel,
-}: {
-  config: PreInstallConfigPayload
-  onContinue: (value: unknown) => void
-  onCancel: () => void
-}) {
-  const t = useTranslations("plugins.preInstall")
-  const fields = useMemo(() => parseConfigFields(config.configSchema), [config.configSchema])
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const init: Record<string, unknown> = {}
-    for (const f of fields) {
-      if (f.default !== undefined) init[f.name] = f.default
-    }
-    return init
-  })
-
-  const handleContinue = () => {
-    onContinue({ ...values })
-  }
+function DiagnosticGroup({ pluginId, diagnostics, defaultOpen, onClear }: DiagnosticGroupProps) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
+  const [open, setOpen] = useState(defaultOpen)
+  const errorCount = diagnostics.filter((d) => d.severity === "error").length
 
   return (
-    <>
-      <p className="text-sm text-muted-foreground">{t("configHint")}</p>
-      {fields.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("configNone")}</p>
-      ) : (
-        <div className="space-y-3" data-testid="pre-install-config-fields">
-          {fields.map((field) => (
-            <ConfigField
-              key={field.name}
-              field={field}
-              value={values[field.name]}
-              onChange={(v) => setValues((s) => ({ ...s, [field.name]: v }))}
-            />
-          ))}
-        </div>
-      )}
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>
-          {t("cancel")}
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 bg-card">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-left flex-1"
+            aria-expanded={open}
+            data-testid={`diagnostics-group-trigger-${pluginId}`}
+          >
+            {open ? (
+              <ChevronDownIcon className="size-3.5" />
+            ) : (
+              <ChevronRightIcon className="size-3.5" />
+            )}
+            <span className="font-mono text-xs">{pluginId}</span>
+            <Badge variant={errorCount > 0 ? "destructive" : "secondary"} className="text-[10px]">
+              {t("countBadge", { count: diagnostics.length })}
+            </Badge>
+          </button>
+        </CollapsibleTrigger>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClear()
+          }}
+          data-testid={`diagnostics-clear-${pluginId}`}
+        >
+          {t("clearForPlugin")}
         </Button>
-        <Button onClick={handleContinue} data-testid="pre-install-config-confirm">
-          {t("confirm")}
-        </Button>
-      </DialogFooter>
-    </>
+      </div>
+      <CollapsibleContent className="px-3 py-2 space-y-1.5">
+        {diagnostics.map((d, idx) => (
+          <DiagnosticRow key={`${d.code}-${d.pointId}-${idx}`} diagnostic={d} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
-function ConfigField({
-  field,
-  value,
-  onChange,
-}: {
-  field: ParsedField
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  if (field.type === "boolean") {
-    return (
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-0.5 min-w-0">
-          <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-            {field.name}
-          </Label>
-          {field.description && (
-            <p className="text-xs text-muted-foreground">{field.description}</p>
-          )}
-        </div>
-        <Switch id={`pre-install-${field.name}`} checked={!!value} onCheckedChange={onChange} />
-      </div>
-    )
-  }
-  if (field.type === "number") {
-    return (
-      <div className="space-y-1">
-        <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-          {field.name}
-        </Label>
-        <Input
-          id={`pre-install-${field.name}`}
-          type="number"
-          value={typeof value === "number" ? value : ""}
-          onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-        />
-        {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-      </div>
-    )
-  }
-  // string fallback
+function DiagnosticRow({ diagnostic }: { diagnostic: PluginPointDiagnostic }) {
+  const Icon = diagnostic.severity === "error" ? AlertCircleIcon : AlertTriangleIcon
+  const iconClass =
+    diagnostic.severity === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-500"
+
   return (
-    <div className="space-y-1">
-      <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-        {field.name}
-      </Label>
-      <Input
-        id={`pre-install-${field.name}`}
-        type="text"
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+    <div className="flex items-start gap-2 text-xs" data-testid="diagnostics-row">
+      <Icon className={`size-3.5 mt-0.5 shrink-0 ${iconClass}`} />
+      <div className="space-y-0.5 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <code className="font-mono text-[10px] bg-muted px-1 rounded">{diagnostic.code}</code>
+          <code className="font-mono text-[10px] text-muted-foreground">{diagnostic.pointId}</code>
+        </div>
+        <p className="text-foreground">
+          {diagnostic.hint ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help underline decoration-dotted underline-offset-2">
+                  {diagnostic.message}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-md">
+                <p className="text-xs">{diagnostic.hint}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            diagnostic.message
+          )}
+        </p>
+      </div>
     </div>
   )
 }

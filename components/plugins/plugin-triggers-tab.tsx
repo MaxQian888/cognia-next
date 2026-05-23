@@ -1,126 +1,94 @@
 "use client"
 
-/**
- * Plugin detail → General → Triggers sub-tab.
- *
- * Lists every workflow currently subscribed to one of this plugin's
- * triggers and lets the user toggle a per-(workflow, kind) mute flag.
- * Muted entries skip dispatch in `lib/plugin/bridge/trigger-bridge.ts`.
- */
+// Status & runtime-warning badges for an installed plugin row.
+//
+// Two pieces:
+//   • `PluginStatusPill` — single chip describing enabled / disabled /
+//     loading / error. Shared by `plugin-card.tsx` and the settings
+//     `InstalledTab` so the same status text doesn't drift between callers.
+//   • `PluginRuntimeWarnings` — amber chip per warning the loader stamped
+//     into `manifest._cogniaWarnings` (e.g. "python-runtime-unavailable" when
+//     the Tauri Python runtime isn't available in web mode).
+//
+// Both are pure presentational and i18n-driven so consumers can drop them
+// into any container.
 
-import { useMemo, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { AlertTriangleIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import type { PluginRow } from "@/lib/db/plugin-types"
 
-import { Card } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import {
-  isTriggerMuted,
-  listPluginTriggers,
-  setTriggerMuted,
-  subscribePluginTriggerRegistry,
-  subscribeTriggerMuteChanges,
-} from "@/lib/workflow/triggers/registry"
-
-interface Props {
-  pluginId: string
+export interface PluginStatusPillProps {
+  status: string
+  enabled: boolean
+  /** Set when the manager is mid-transition (loading / enabling / updating). */
+  loading?: boolean
+  className?: string
 }
 
-interface Subscription {
-  kind: string
-  workflowId: string
-}
-
-// Module-level revision counter — `useSyncExternalStore` requires a
-// snapshot function that returns the same reference between change
-// notifications. We bump on every registry or mute event so React
-// re-runs the memo + render.
-let revision = 0
-const bump = (): void => {
-  revision += 1
-}
-const snapshotKey = (): number => revision
-
-const subscribeBoth = (notify: () => void): (() => void) => {
-  const a = subscribePluginTriggerRegistry(() => {
-    bump()
-    notify()
-  })
-  const b = subscribeTriggerMuteChanges(() => {
-    bump()
-    notify()
-  })
-  return () => {
-    a()
-    b()
+export function PluginStatusPill({ status, enabled, loading, className }: PluginStatusPillProps) {
+  const t = useTranslations("plugins.card.status")
+  if (status === "error") {
+    return (
+      <Badge variant="destructive" className={cn("text-xs", className)}>
+        {t("error")}
+      </Badge>
+    )
   }
+  if (loading) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("loading")}
+      </Badge>
+    )
+  }
+  if (!enabled) {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("disabled")}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className={cn("text-xs", className)}>
+      {t("enabled")}
+    </Badge>
+  )
 }
 
-export function PluginTriggersTab({ pluginId }: Props) {
-  const t = useTranslations("plugins.triggers.detailSubscriptions")
-  const rev = useSyncExternalStore(subscribeBoth, snapshotKey, () => 0)
+/**
+ * Read the runtime-warning markers the plugin loader stamped onto a row's
+ * manifest. Returns an empty array when the field is absent or malformed.
+ */
+export function readPluginRuntimeWarnings(plugin: Pick<PluginRow, "manifest">): string[] {
+  const raw = (plugin.manifest as { _cogniaWarnings?: unknown })._cogniaWarnings
+  if (!Array.isArray(raw)) return []
+  return raw.filter((entry): entry is string => typeof entry === "string")
+}
 
-  const subscriptions = useMemo<Subscription[]>(() => {
-    const out: Subscription[] = []
-    for (const reg of listPluginTriggers()) {
-      if (reg.pluginId !== pluginId) continue
-      for (const workflowId of reg.instances.keys()) {
-        out.push({ kind: reg.kind, workflowId })
-      }
-    }
-    return out.sort((a, b) => a.kind.localeCompare(b.kind))
-  }, [pluginId, rev])
+export interface PluginRuntimeWarningsProps {
+  plugin: Pick<PluginRow, "manifest">
+  className?: string
+}
 
+export function PluginRuntimeWarnings({ plugin, className }: PluginRuntimeWarningsProps) {
+  const t = useTranslations("plugins.card.runtimeWarnings")
+  const warnings = readPluginRuntimeWarnings(plugin)
+  if (warnings.length === 0) return null
   return (
-    <Card className="p-3 space-y-3">
-      <header className="space-y-1">
-        <h3 className="text-sm font-semibold">{t("title")}</h3>
-        <p className="text-xs text-muted-foreground">{t("muteHint")}</p>
-      </header>
-      {subscriptions.length === 0 ? (
-        <p className="text-center text-xs text-muted-foreground py-6">{t("empty")}</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("colKind")}</TableHead>
-              <TableHead>{t("colWorkflow")}</TableHead>
-              <TableHead className="w-20 text-right">{t("muteToggle")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {subscriptions.map((sub) => {
-              const muted = isTriggerMuted(pluginId, sub.kind, sub.workflowId)
-              return (
-                <TableRow key={`${sub.kind}::${sub.workflowId}`}>
-                  <TableCell>
-                    <code className="font-mono text-xs">{sub.kind}</code>
-                  </TableCell>
-                  <TableCell>
-                    <code className="font-mono text-xs">{sub.workflowId}</code>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Switch
-                      checked={muted}
-                      onCheckedChange={(next) =>
-                        setTriggerMuted(pluginId, sub.kind, sub.workflowId, next)
-                      }
-                      aria-label={t("muteToggle")}
-                    />
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      )}
-    </Card>
+    <div className={cn("flex flex-wrap items-center gap-1", className)}>
+      {warnings.map((code) => (
+        <Badge
+          key={code}
+          variant="outline"
+          className="border-amber-500/40 text-amber-700 dark:text-amber-300 text-xs gap-1"
+          data-testid={`plugin-runtime-warning-${code}`}
+        >
+          <AlertTriangleIcon className="size-3 shrink-0" />
+          <span className="truncate">{t(code as never)}</span>
+        </Badge>
+      ))}
+    </div>
   )
 }

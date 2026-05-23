@@ -31,7 +31,7 @@ import {
   LEVEL_THEME,
   ALL_LEVELS,
 } from "./log-entry"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
+import type { StructuredLogEntry, LogLevel } from "@/lib/logging"
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {

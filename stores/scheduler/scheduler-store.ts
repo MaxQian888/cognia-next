@@ -24,7 +24,7 @@ import {
   getActivePluginTaskCount,
   isPluginTaskExecutionActive,
 } from "@/lib/scheduler/executors/plugin-executor"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.store
 

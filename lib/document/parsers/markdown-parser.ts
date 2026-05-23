@@ -3,7 +3,7 @@
  * Enhanced with task lists, math blocks, footnotes, and admonitions
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.app
 

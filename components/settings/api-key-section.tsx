@@ -10,7 +10,7 @@ import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 

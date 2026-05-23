@@ -32,7 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   useKeybindingStore,
   formatKeybinding,

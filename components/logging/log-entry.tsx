@@ -34,8 +34,8 @@ import {
 } from "@/components/ui/context-menu"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
-import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logger/level-theme"
-import type { StructuredLogEntry } from "@/lib/logger"
+import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logging/level-theme"
+import type { StructuredLogEntry } from "@/lib/logging"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 
 export { LEVEL_THEME, ALL_LEVELS }

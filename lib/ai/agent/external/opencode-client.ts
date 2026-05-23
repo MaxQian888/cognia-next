@@ -27,7 +27,7 @@ import type {
   Pty as OcPty,
 } from "@opencode-ai/sdk/client"
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import type {
   ExternalAgentConfig,

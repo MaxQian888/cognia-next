@@ -16,7 +16,7 @@ jest.mock("@/lib/files/file-bridge", () => ({
   pickDirectory: jest.fn(),
   saveFilesToDir: jest.fn(),
 }))
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -33,7 +33,7 @@ jest.mock("@/lib/logger", () => {
 
 import { exportSkillsToDirWithFeedback } from "./export-toast"
 import { pickDirectory, saveFilesToDir } from "@/lib/files/file-bridge"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Skill } from "@/lib/claude/types"
 
 const mockedPick = pickDirectory as unknown as jest.Mock

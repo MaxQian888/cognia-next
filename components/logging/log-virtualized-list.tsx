@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { MemoizedLogEntry, TraceGroup } from "./log-entry"
 import type { Density } from "@/hooks/logging/use-log-panel-filters"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 export const ESTIMATED_LOG_HEIGHT = 44
 

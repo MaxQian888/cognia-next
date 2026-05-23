@@ -7,19 +7,13 @@
  * Cognia hook) when an agent-trace store + Dexie persistence ship here.
  */
 
-import type { StructuredLogEntry } from "@/lib/logger"
+import type {
+  StructuredLogEntry,
+  UseAgentTraceLogsOptions,
+  UseAgentTraceLogsReturn,
+} from "@/types/logging"
 
-export interface UseAgentTraceLogsOptions {
-  enabled?: boolean
-  maxLogs?: number
-  includeHistory?: boolean
-}
-
-export interface UseAgentTraceLogsReturn {
-  logs: StructuredLogEntry[]
-  isLoading: boolean
-  error: Error | null
-}
+export type { UseAgentTraceLogsOptions, UseAgentTraceLogsReturn } from "@/types/logging"
 
 const EMPTY: StructuredLogEntry[] = []
 

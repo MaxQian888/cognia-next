@@ -4,7 +4,7 @@
  * Handles plugin version management, update checking, and installation.
  */
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { getPluginMarketplace } from "../package/marketplace"
 import { loggers } from "../core/logger"
 import { getPluginBackupManager } from "./backup"

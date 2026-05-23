@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { isTauri } from "@/lib/tauri"
 import type { AppSettings } from "@/lib/claude/types"
 import { useSettingsStore } from "@/stores/settings"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 

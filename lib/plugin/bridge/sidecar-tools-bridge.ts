@@ -21,7 +21,7 @@
  * `lib/terminal/dock-tool-handler.ts`, which writes into the live PTY
  * the user sees. The agent and the user share one shell.
  */
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 
 import {
   TERMINAL_DOCK_PLUGIN_ID,

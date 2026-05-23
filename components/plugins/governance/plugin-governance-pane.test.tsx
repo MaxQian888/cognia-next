@@ -8,13 +8,13 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("../plugin-permissions-tab", () => ({
+jest.mock("../detail/plugin-permissions-tab", () => ({
   PluginPermissionsTab: () => <div data-testid="governance-permissions" />,
 }))
-jest.mock("../plugin-scheduled-jobs", () => ({
+jest.mock("../detail/plugin-scheduled-jobs", () => ({
   PluginScheduledJobs: () => <div data-testid="governance-scheduled" />,
 }))
-jest.mock("../plugin-analytics", () => ({
+jest.mock("../detail/plugin-analytics", () => ({
   PluginAnalytics: () => <div data-testid="governance-analytics" />,
 }))
 jest.mock("./plugin-audit-log", () => ({

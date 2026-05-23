@@ -97,7 +97,7 @@ jest.mock(
   { virtual: true }
 )
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: {
       info: jest.fn(),
@@ -304,7 +304,11 @@ describe("A2UIRichOutput", () => {
     )
 
     render(<A2UIRichOutput {...props} />)
-    fireEvent.click(screen.getByRole("button", { name: "Value" }))
+    // After the DataExplorer → Table merge, the sortable header is a `<th>`
+    // with an onClick handler (shadcn Table) rather than a wrapped button.
+    const valueHeader = screen.getByText("Value").closest("th")
+    expect(valueHeader).not.toBeNull()
+    fireEvent.click(valueHeader as HTMLElement)
 
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()

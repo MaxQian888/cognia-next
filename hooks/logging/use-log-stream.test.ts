@@ -11,7 +11,7 @@ const onLogsUpdatedMock = jest.fn(
       undefined
 )
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   class FakeIndexedDBTransport {
     static onLogsUpdated = (...args: unknown[]) => onLogsUpdatedMock(...args)
     getLogs = (filter: unknown) => getLogsMock(filter)

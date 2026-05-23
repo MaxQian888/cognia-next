@@ -16,7 +16,10 @@
  */
 
 import { createPluginSystemLogger } from "../core/logger"
-import { clearModalsForPlugin, usePluginModalStore } from "@/stores/plugin/plugin-modal-store"
+import {
+  clearModalsForPlugin,
+  usePluginModalStore,
+} from "@/stores/plugin-runtime/plugin-modal-store"
 import type { PluginModalComponent, PluginModalHandle } from "@/types/plugin/plugin-modal"
 
 export interface PluginModalAPI {

@@ -1,7 +1,7 @@
 "use client"
 
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { useSettingsStore } from "@/stores/settings"
 import { useEffect, useRef } from "react"

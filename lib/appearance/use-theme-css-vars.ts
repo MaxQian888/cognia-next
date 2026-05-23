@@ -2,9 +2,9 @@
  * useThemeCssVars — generalised live reader for CSS custom properties on
  * `<html>`. Returns resolved values for each requested key and re-reads
  * whenever next-themes flips the class **or** `CustomThemeApplier` writes
- * inline styles. The previous home for this hook (`lib/logger/use-theme-colors.ts`)
+ * inline styles. The previous home for this hook (`hooks/logging/use-theme-colors.ts`)
  * only observed `class`, which made it miss every inline-style update — that
- * bug is fixed here and the logger module now delegates to this hook.
+ * bug is fixed here and the logging module now delegates to this hook.
  *
  * SSR-safe: returns the caller-supplied defaults on the server / first paint,
  * then upgrades to live values on mount. Defaults should mirror the `:root`

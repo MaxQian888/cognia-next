@@ -113,7 +113,7 @@ Outbound / Audit. Each tab is a separate component under `./tabs/`.
 ### Plugin extension API (Task 110)
 
 `PluginManifest.connectors[]` (added to `types/plugin/plugin.ts`) lets a plugin declare
-adapter factories. The `lib/plugin/connectors-bridge.ts` bridge discovers and registers them
+adapter factories. The `lib/plugin/bridge/connectors-bridge.ts` bridge discovers and registers them
 with the `ConnectorBus` on plugin enable, and unregisters on disable.
 
 ### Web-mode degradation (Task 111)

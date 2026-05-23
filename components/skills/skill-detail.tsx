@@ -21,7 +21,7 @@ import { SkillSecurityScanner } from "./skill-security-scanner"
 import { SkillValidationSection } from "./skill-validation-section"
 import { SkillSyncSection } from "./skill-sync-section"
 import { useSkillValidation } from "@/hooks/skills"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface Props {
   skill: Skill

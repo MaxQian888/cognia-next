@@ -1,154 +1,65 @@
-import { render, renderHook, act } from "@testing-library/react"
-import { useState, useEffect } from "react"
-import { useWasmCapabilityGrant } from "./use-wasm-capability-grant"
-import type { PluginManifest } from "@/types/plugin"
+"use client"
 
-jest.mock("./wasm-capability-grant-sheet", () => {
-  // Capture the props passed to the sheet so tests can drive confirm /
-  // cancel / openChange callbacks.
-  const calls: Array<Record<string, unknown>> = []
-  return {
-    __sheetCalls: calls,
-    WasmCapabilityGrantSheet: (props: Record<string, unknown>) => {
-      calls.push(props)
-      return null
-    },
-  }
-})
+// Horizontally-scrollable row with edge fade affordances. Pulled out of
+// `plugin-panel-tabs.tsx` so the same scroll-overflow treatment can wrap any
+// inline-flex strip (devtools sub-tabs, marketplace section toggles, etc.)
+// without duplicating the ResizeObserver wiring.
+//
+// The fade overlays render only when the inner scroller actually overflows,
+// matching the pattern users already see on the main plugin tab strip.
 
-jest.mock("@/lib/plugin/security/wasm-grant", () => ({
-  applyWasmCapabilityGrant: jest.fn((decision: { grantedPermissions: string[] }) => ({
-    permissions: decision.grantedPermissions,
-    preopens: ["/tmp/x"],
-  })),
-}))
+import { useRef } from "react"
+import { useOverflowState } from "@/hooks/use-overflow-state"
+import { cn } from "@/lib/utils"
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const sheetModule = require("./wasm-capability-grant-sheet") as {
-  __sheetCalls: Array<{
-    onConfirm?: (decision: unknown) => void
-    onCancel?: () => void
-    onOpenChange?: (next: boolean) => void
-    open?: boolean
-  }>
+interface Props {
+  children: React.ReactNode
+  /** Extra classes applied to the outer wrapper (relative positioning host). */
+  className?: string
+  /**
+   * Extra classes applied to the inner scroller. Callers commonly pass
+   * `-mx-1 px-1` style negative-margin tricks here.
+   */
+  scrollerClassName?: string
+  /**
+   * data-testid prefix. The scroller gets `${testId}-scroller`, fades get
+   * `${testId}-fade-left` / `${testId}-fade-right`. Defaults to "scroll-shadow-row".
+   */
+  testId?: string
 }
 
-function makeWasmManifest(): PluginManifest {
-  return {
-    id: "w1",
-    name: "Wasm One",
-    version: "1.0.0",
-    type: "wasm",
-    permissions: ["network:fetch"],
-  } as unknown as PluginManifest
+export function ScrollShadowRow({
+  children,
+  className,
+  scrollerClassName,
+  testId = "scroll-shadow-row",
+}: Props) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const { hasOverflowLeft, hasOverflowRight } = useOverflowState(scrollerRef)
+
+  return (
+    <div className={cn("relative", className)}>
+      <div
+        ref={scrollerRef}
+        className={cn("overflow-x-auto", scrollerClassName)}
+        data-testid={`${testId}-scroller`}
+      >
+        {children}
+      </div>
+      {hasOverflowLeft && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-left`}
+          className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent"
+        />
+      )}
+      {hasOverflowRight && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-right`}
+          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent"
+        />
+      )}
+    </div>
+  )
 }
-
-function makeNonWasmManifest(): PluginManifest {
-  return {
-    id: "f1",
-    name: "Frontend",
-    version: "1.0.0",
-    type: "frontend",
-    main: "index.js",
-    permissions: [],
-  } as unknown as PluginManifest
-}
-
-beforeEach(() => {
-  sheetModule.__sheetCalls.length = 0
-})
-
-/**
- * Render the hook AND its `sheet` JSX inside one tree so the mocked
- * `WasmCapabilityGrantSheet` actually mounts and captures its props.
- * Returns a ref-like object the test can drive.
- */
-function renderHostedHook(): {
-  trigger: (m: PluginManifest) => Promise<unknown>
-} {
-  const ref: { trigger: (m: PluginManifest) => Promise<unknown> } = {
-    trigger: () => Promise.reject(new Error("hook not ready")),
-  }
-  function Host(): React.ReactElement {
-    const hook = useWasmCapabilityGrant()
-    const [_, force] = useState(0)
-    useEffect(() => {
-      ref.trigger = (m) => {
-        const p = hook.requestGrant({ manifest: m })
-        force((x) => x + 1)
-        return p
-      }
-    }, [hook])
-    return <>{hook.sheet}</>
-  }
-  render(<Host />)
-  return ref
-}
-
-describe("useWasmCapabilityGrant", () => {
-  it("rejects with a clear error when called with a non-wasm manifest", async () => {
-    const { result } = renderHook(() => useWasmCapabilityGrant())
-    await expect(result.current.requestGrant({ manifest: makeNonWasmManifest() })).rejects.toThrow(
-      /manifest\.type must be "wasm"/
-    )
-  })
-
-  it("returns a `sheet` of null until requestGrant has been called", () => {
-    const { result } = renderHook(() => useWasmCapabilityGrant())
-    expect(result.current.sheet).toBeNull()
-  })
-
-  it("resolves with the decision + persisted preopens when the user confirms", async () => {
-    const host = renderHostedHook()
-    let promise!: Promise<unknown>
-    await act(async () => {
-      promise = host.trigger(makeWasmManifest())
-    })
-    expect(sheetModule.__sheetCalls.length).toBeGreaterThan(0)
-    const props = sheetModule.__sheetCalls[sheetModule.__sheetCalls.length - 1]
-    expect(props.open).toBe(true)
-
-    await act(async () => {
-      props.onConfirm?.({
-        grantedPermissions: ["network:fetch"],
-        grantedPreopens: [],
-      })
-    })
-
-    await expect(promise).resolves.toEqual(
-      expect.objectContaining({
-        preopens: ["/tmp/x"],
-        decision: expect.objectContaining({
-          grantedPermissions: ["network:fetch"],
-          grantedPreopens: ["/tmp/x"],
-        }),
-      })
-    )
-  })
-
-  it("resolves with null when the user cancels", async () => {
-    const host = renderHostedHook()
-    let promise!: Promise<unknown>
-    await act(async () => {
-      promise = host.trigger(makeWasmManifest())
-    })
-    const props = sheetModule.__sheetCalls[sheetModule.__sheetCalls.length - 1]
-    await act(async () => {
-      props.onCancel?.()
-    })
-    await expect(promise).resolves.toBeNull()
-  })
-
-  it("resolves with null when the dialog is dismissed (ESC / overlay click)", async () => {
-    const host = renderHostedHook()
-    let promise!: Promise<unknown>
-    await act(async () => {
-      promise = host.trigger(makeWasmManifest())
-    })
-    const props = sheetModule.__sheetCalls[sheetModule.__sheetCalls.length - 1]
-    await act(async () => {
-      props.onOpenChange?.(false)
-    })
-    await expect(promise).resolves.toBeNull()
-  })
-})

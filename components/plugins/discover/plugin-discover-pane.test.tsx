@@ -4,7 +4,7 @@
 
 import { render, screen } from "@testing-library/react"
 
-jest.mock("../plugin-marketplace", () => ({
+jest.mock("../marketplace/plugin-marketplace", () => ({
   PluginMarketplace: () => <div data-testid="plugin-marketplace-stub" />,
 }))
 

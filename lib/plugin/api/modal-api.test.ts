@@ -1,6 +1,6 @@
 import React from "react"
 import { createModalAPI } from "./modal-api"
-import { usePluginModalStore } from "@/stores/plugin/plugin-modal-store"
+import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 
 const FakeModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
   React.createElement("button", { onClick: onClose }, "Close")

@@ -1,122 +1,65 @@
 "use client"
 
-/**
- * React glue around `WasmCapabilityGrantSheet`. Exposes an imperative
- * `requestGrant(manifest, fingerprint?) => Promise<decision | null>` so
- * the install button (or any other entry point) can `await` the user's
- * decision without managing dialog state inline.
- *
- * Resolves with the decision the user confirmed, or `null` if they
- * cancelled. The hook automatically persists the decision via
- * `applyWasmCapabilityGrant` — callers only need to forward the returned
- * `preopens` to the Rust host.
- */
+// Horizontally-scrollable row with edge fade affordances. Pulled out of
+// `plugin-panel-tabs.tsx` so the same scroll-overflow treatment can wrap any
+// inline-flex strip (devtools sub-tabs, marketplace section toggles, etc.)
+// without duplicating the ResizeObserver wiring.
+//
+// The fade overlays render only when the inner scroller actually overflows,
+// matching the pattern users already see on the main plugin tab strip.
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import {
-  WasmCapabilityGrantSheet,
-  type WasmCapabilityGrantDecision,
-} from "./wasm-capability-grant-sheet"
-import { applyWasmCapabilityGrant } from "@/lib/plugin/security/wasm-grant"
-import type { PluginManifest } from "@/types/plugin"
+import { useRef } from "react"
+import { useOverflowState } from "@/hooks/use-overflow-state"
+import { cn } from "@/lib/utils"
 
-export interface RequestGrantArgs {
-  manifest: PluginManifest
-  authorFingerprint?: string
+interface Props {
+  children: React.ReactNode
+  /** Extra classes applied to the outer wrapper (relative positioning host). */
+  className?: string
+  /**
+   * Extra classes applied to the inner scroller. Callers commonly pass
+   * `-mx-1 px-1` style negative-margin tricks here.
+   */
+  scrollerClassName?: string
+  /**
+   * data-testid prefix. The scroller gets `${testId}-scroller`, fades get
+   * `${testId}-fade-left` / `${testId}-fade-right`. Defaults to "scroll-shadow-row".
+   */
+  testId?: string
 }
 
-export interface RequestGrantResult {
-  decision: WasmCapabilityGrantDecision
-  /** Final preopens to pass to the Rust host (post-persistence). */
-  preopens: string[]
-}
+export function ScrollShadowRow({
+  children,
+  className,
+  scrollerClassName,
+  testId = "scroll-shadow-row",
+}: Props) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const { hasOverflowLeft, hasOverflowRight } = useOverflowState(scrollerRef)
 
-export interface UseWasmCapabilityGrant {
-  /** Live JSX element to render somewhere in the tree (typically once). */
-  sheet: React.ReactNode
-  /** Mounts the dialog and resolves on confirm/cancel. */
-  requestGrant: (args: RequestGrantArgs) => Promise<RequestGrantResult | null>
-}
-
-export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
-  const [open, setOpen] = useState(false)
-  const [manifest, setManifest] = useState<PluginManifest | null>(null)
-  const [fingerprint, setFingerprint] = useState<string>("")
-  const resolverRef = useRef<((value: RequestGrantResult | null) => void) | null>(null)
-
-  const cleanup = useCallback(() => {
-    setOpen(false)
-    setManifest(null)
-    setFingerprint("")
-    resolverRef.current = null
-  }, [])
-
-  const requestGrant = useCallback<UseWasmCapabilityGrant["requestGrant"]>(
-    ({ manifest, authorFingerprint }) => {
-      if (manifest.type !== "wasm") {
-        return Promise.reject(
-          new Error(`requestGrant: manifest.type must be "wasm", got "${manifest.type}"`)
-        )
-      }
-      return new Promise<RequestGrantResult | null>((resolve) => {
-        resolverRef.current = resolve
-        setManifest(manifest)
-        setFingerprint(authorFingerprint ?? "")
-        setOpen(true)
-      })
-    },
-    []
+  return (
+    <div className={cn("relative", className)}>
+      <div
+        ref={scrollerRef}
+        className={cn("overflow-x-auto", scrollerClassName)}
+        data-testid={`${testId}-scroller`}
+      >
+        {children}
+      </div>
+      {hasOverflowLeft && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-left`}
+          className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent"
+        />
+      )}
+      {hasOverflowRight && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-right`}
+          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent"
+        />
+      )}
+    </div>
   )
-
-  const handleConfirm = useCallback(
-    (decision: WasmCapabilityGrantDecision) => {
-      const result = applyWasmCapabilityGrant(decision)
-      const value: RequestGrantResult = {
-        decision: {
-          ...decision,
-          grantedPermissions: result.permissions,
-          grantedPreopens: result.preopens,
-        },
-        preopens: result.preopens,
-      }
-      resolverRef.current?.(value)
-      cleanup()
-    },
-    [cleanup]
-  )
-
-  const handleCancel = useCallback(() => {
-    resolverRef.current?.(null)
-    cleanup()
-  }, [cleanup])
-
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (!next && resolverRef.current) {
-        // Dialog was dismissed without an explicit cancel click (e.g. ESC,
-        // overlay click). Treat as cancel so callers don't hang.
-        resolverRef.current(null)
-        cleanup()
-      } else {
-        setOpen(next)
-      }
-    },
-    [cleanup]
-  )
-
-  const sheet = useMemo(() => {
-    if (!manifest) return null
-    return (
-      <WasmCapabilityGrantSheet
-        manifest={manifest}
-        authorFingerprint={fingerprint}
-        open={open}
-        onOpenChange={handleOpenChange}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-      />
-    )
-  }, [manifest, fingerprint, open, handleOpenChange, handleConfirm, handleCancel])
-
-  return { sheet, requestGrant }
 }

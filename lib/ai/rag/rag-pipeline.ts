@@ -24,7 +24,7 @@ import {
 import { scoreLateInteraction } from "@/lib/ai/embedding/late-interaction"
 
 import { HybridSearchEngine, type HybridSearchConfig } from "./hybrid-search"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   createVectorStore,
   type IVectorStore,

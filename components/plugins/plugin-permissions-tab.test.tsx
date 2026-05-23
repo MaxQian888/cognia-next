@@ -1,209 +1,236 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent } from "@testing-library/react"
-import type { PluginRow } from "@/lib/db/plugin-types"
-import type { PluginPermission } from "@/types/plugin"
+// Per-plugin permission review dialog. Replaces the read-only PermissionsTab
+// summary in the panel by giving the user a real grant / revoke surface,
+// with `manifest declared` vs `runtime granted` columns and an audit log.
+// Driven through the `usePluginPermissions` hook (no direct guard access).
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+import { useMemo } from "react"
+import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { getPlugin } from "@/lib/db/plugins"
+import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
+import { usePluginPermissions } from "@/hooks/plugins"
+import { usePluginsStore } from "@/stores/plugins"
+import { AuditLogEntry } from "./audit-log-entry"
 
-const mockUsePlugins = jest.fn()
-const mockUsePluginPermissions = jest.fn()
-jest.mock("@/hooks/plugins", () => ({
-  usePlugins: () => mockUsePlugins(),
-  usePluginPermissions: () => mockUsePluginPermissions(),
-}))
+export function PluginPermissionReview() {
+  const target = usePluginsStore((s) => s.permissionReviewTarget)
+  const close = usePluginsStore((s) => s.closePermissionReview)
+  const open = target !== null
 
-const openPermissionReview = jest.fn()
-jest.mock("@/stores/plugins", () => ({
-  usePluginsStore: (selector: (s: unknown) => unknown) => selector({ openPermissionReview }),
-}))
-
-import { PluginPermissionsTab } from "./plugin-permissions-tab"
-
-function makeRow(overrides: Partial<PluginRow> = {}): PluginRow {
-  return {
-    id: "p1",
-    name: "Plugin One",
-    version: "1.0.0",
-    status: "enabled",
-    source: "local",
-    type: "frontend",
-    enabled: true,
-    capabilities: [],
-    path: "/plugins/p1",
-    manifest: {},
-    createdAt: 1,
-    updatedAt: 2,
-    ...overrides,
-  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
+        {target ? <PermissionReviewContent pluginId={target.pluginId} onClose={close} /> : null}
+      </DialogContent>
+    </Dialog>
+  )
 }
 
-const PERMS_API = {
-  dangerous: ["shell:execute", "filesystem:write"] as PluginPermission[],
-  groups: {},
-  descriptions: {},
-  getGranted: jest.fn<PluginPermission[], [string]>(() => []),
-  getHolders: jest.fn<string[], [PluginPermission]>(() => []),
-  auditLog: [],
-  grant: jest.fn(),
-  revoke: jest.fn(),
-  revokeAll: jest.fn(),
-  request: jest.fn(),
-  isDangerous: jest.fn(),
+function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onClose: () => void }) {
+  const t = useTranslations("plugins.permissionReview")
+  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const perms = usePluginPermissions()
+
+  const manifest = plugin?.manifest as PluginManifest | undefined
+  const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
+  const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
+  const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])
+  const granted = useMemo(() => new Set(perms.getGranted(pluginId)), [perms, pluginId])
+  const allListed = useMemo(() => {
+    const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
+    return Array.from(set).sort()
+  }, [declared, optional, granted])
+
+  const auditLog = useMemo(
+    () =>
+      perms.auditLog
+        .filter((entry) => entry.pluginId === pluginId)
+        .slice(-25)
+        .reverse(),
+    [perms.auditLog, pluginId]
+  )
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          {plugin ? plugin.name : pluginId}{" "}
+          <span className="text-muted-foreground text-sm font-normal">v{plugin?.version}</span>
+        </DialogTitle>
+        <DialogDescription>{t("description")}</DialogDescription>
+      </DialogHeader>
+
+      <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[8rem]">{t("colPermission")}</TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colDeclared")}
+                  </TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colOptional")}
+                  </TableHead>
+                  <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
+                  <TableHead className="min-w-[9rem]">{t("colTier")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {allListed.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      {t("empty")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  allListed.map((perm) => (
+                    <PermissionRow
+                      key={perm}
+                      perm={perm}
+                      declared={declared.includes(perm)}
+                      optional={optional.includes(perm)}
+                      granted={granted.has(perm)}
+                      dangerous={perms.isDangerous(perm)}
+                      onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                      onRevoke={() => perms.revoke(pluginId, perm)}
+                      tier={perms.getTier(pluginId, perm)}
+                      onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                    />
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </ScrollArea>
+      </Card>
+
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold">{t("auditLogTitle")}</h3>
+        <Card className="p-0">
+          <ScrollArea className="max-h-[20vh]">
+            {auditLog.length === 0 ? (
+              <p className="p-3 text-xs text-muted-foreground">{t("auditEmpty")}</p>
+            ) : (
+              <ul className="divide-y">
+                {auditLog.map((entry, idx) => (
+                  <AuditLogEntry key={idx} entry={entry} />
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        </Card>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={() => perms.revokeAll(pluginId)}>
+          {t("revokeAll")}
+        </Button>
+        <Button onClick={onClose}>{t("close")}</Button>
+      </DialogFooter>
+    </>
+  )
 }
 
-describe("PluginPermissionsTab", () => {
-  beforeEach(() => {
-    openPermissionReview.mockClear()
-    mockUsePlugins.mockReset()
-    mockUsePluginPermissions.mockReset()
-    PERMS_API.getGranted.mockReset()
-    PERMS_API.getGranted.mockReturnValue([])
-    mockUsePluginPermissions.mockReturnValue(PERMS_API)
-  })
-
-  it("renders loading state", () => {
-    mockUsePlugins.mockReturnValue({ all: [], loading: true })
-    render(<PluginPermissionsTab />)
-    expect(screen.getByText("loading")).toBeInTheDocument()
-  })
-
-  it("renders empty state when no plugins installed", () => {
-    mockUsePlugins.mockReturnValue({ all: [], loading: false })
-    render(<PluginPermissionsTab />)
-    expect(screen.getByText("emptyAll")).toBeInTheDocument()
-  })
-
-  it("renders no-permissions card when plugins exist but none declare permissions", () => {
-    mockUsePlugins.mockReturnValue({
-      all: [makeRow({ id: "a", name: "Alpha", manifest: {} })],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    expect(screen.getByText("noPermissions")).toBeInTheDocument()
-  })
-
-  it("groups permissions into dangerous and standard sections", () => {
-    mockUsePlugins.mockReturnValue({
-      all: [
-        makeRow({
-          id: "a",
-          name: "Alpha",
-          manifest: { permissions: ["shell:execute", "clipboard:read"] },
-        }),
-        makeRow({
-          id: "b",
-          name: "Bravo",
-          manifest: { permissions: ["clipboard:read"] },
-        }),
-      ],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    expect(screen.getByText("dangerousSection")).toBeInTheDocument()
-    expect(screen.getByText("normalSection")).toBeInTheDocument()
-    expect(screen.getByText("shell:execute")).toBeInTheDocument()
-    expect(screen.getByText("clipboard:read")).toBeInTheDocument()
-  })
-
-  it("counts holders correctly across declared, optional, and granted", () => {
-    PERMS_API.getGranted.mockImplementation((id: string) =>
-      id === "b" ? (["clipboard:read"] as PluginPermission[]) : []
-    )
-    mockUsePlugins.mockReturnValue({
-      all: [
-        makeRow({
-          id: "a",
-          name: "Alpha",
-          manifest: { permissions: ["clipboard:read"] },
-        }),
-        makeRow({
-          id: "b",
-          name: "Bravo",
-          manifest: { optionalPermissions: ["clipboard:read"] },
-        }),
-      ],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    // Alpha + Bravo both render as chips for clipboard:read
-    const alphaChips = screen.getAllByLabelText(/reviewAria.*Alpha/)
-    const bravoChips = screen.getAllByLabelText(/reviewAria.*Bravo/)
-    // Each plugin gets one chip in BulkReview + one chip per permission they hold.
-    expect(alphaChips.length).toBeGreaterThanOrEqual(2)
-    expect(bravoChips.length).toBeGreaterThanOrEqual(2)
-  })
-
-  it("clicking a plugin chip in matrix opens permission review for that plugin", () => {
-    mockUsePlugins.mockReturnValue({
-      all: [
-        makeRow({
-          id: "alpha-id",
-          name: "Alpha",
-          manifest: { permissions: ["clipboard:read"] },
-        }),
-      ],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    const chip = screen.getAllByLabelText(/reviewAria.*Alpha/)[0]
-    fireEvent.click(chip)
-    expect(openPermissionReview).toHaveBeenCalledWith("alpha-id")
-  })
-
-  it("Bulk review surface lists only plugins that declare permissions", () => {
-    mockUsePlugins.mockReturnValue({
-      all: [
-        makeRow({ id: "a", name: "Alpha", manifest: { permissions: ["clipboard:read"] } }),
-        makeRow({
-          id: "b",
-          name: "Bravo",
-          manifest: { optionalPermissions: ["clipboard:read"] },
-        }),
-        // Charlie declares nothing — should be filtered out of BulkReview.
-        makeRow({ id: "c", name: "Charlie", manifest: {} }),
-      ],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    expect(screen.getByText("bulkHeading")).toBeInTheDocument()
-    // Alpha + Bravo each render in BulkReview + once per permission cell, so >= 2 each.
-    expect(screen.getAllByLabelText(/reviewAria.*Alpha/).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByLabelText(/reviewAria.*Bravo/).length).toBeGreaterThanOrEqual(1)
-    // Charlie has no permissions, so should NOT appear in BulkReview or any matrix cell.
-    expect(screen.queryAllByLabelText(/reviewAria.*Charlie/).length).toBe(0)
-  })
-
-  it("BulkReview disappears entirely when no plugin declares permissions", () => {
-    mockUsePlugins.mockReturnValue({
-      all: [makeRow({ id: "a", name: "Alpha", manifest: {} })],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    expect(screen.queryByText("bulkHeading")).not.toBeInTheDocument()
-  })
-
-  it("does not duplicate holders if same permission appears in declared+granted", () => {
-    PERMS_API.getGranted.mockReturnValue(["clipboard:read"] as PluginPermission[])
-    mockUsePlugins.mockReturnValue({
-      all: [
-        makeRow({
-          id: "a",
-          name: "Alpha",
-          manifest: { permissions: ["clipboard:read"] },
-        }),
-      ],
-      loading: false,
-    })
-    render(<PluginPermissionsTab />)
-    // Within the matrix table cell, only one Alpha chip should appear next to clipboard:read.
-    const row = screen.getByText("clipboard:read").closest("tr")!
-    const alphaChips = row.querySelectorAll("button[aria-label*='Alpha']")
-    expect(alphaChips.length).toBe(1)
-  })
-})
+export function PermissionRow({
+  perm,
+  declared,
+  optional,
+  granted,
+  dangerous,
+  description,
+  onGrant,
+  onRevoke,
+  tier,
+  onTierChange,
+}: {
+  perm: PluginPermission
+  declared: boolean
+  optional: boolean
+  granted: boolean
+  dangerous: boolean
+  description: string
+  onGrant: () => void
+  onRevoke: () => void
+  tier: PluginPermissionTier
+  onTierChange: (tier: PluginPermissionTier) => void
+}) {
+  const t = useTranslations("plugins.permissionReview")
+  return (
+    <TableRow>
+      <TableCell className="space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <code className="font-mono text-xs">{perm}</code>
+          {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-center">
+        {declared && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
+      </TableCell>
+      <TableCell className="hidden md:table-cell text-center">
+        {optional && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
+      </TableCell>
+      <TableCell className="text-center">
+        {granted && <CheckCircle2Icon className="size-3.5 inline text-secondary-foreground" />}
+      </TableCell>
+      <TableCell>
+        <Select value={tier} onValueChange={(v) => onTierChange(v as PluginPermissionTier)}>
+          <SelectTrigger className="h-7 text-xs" aria-label={t("colTier")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="silent">{t("tierLabel.silent")}</SelectItem>
+            <SelectItem value="confirm">{t("tierLabel.confirm")}</SelectItem>
+            <SelectItem value="forbid">{t("tierLabel.forbid")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{t(`tierHint.${tier}`)}</p>
+      </TableCell>
+      <TableCell className="text-right">
+        {granted ? (
+          <Button size="sm" variant="ghost" onClick={onRevoke}>
+            {t("revoke")}
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={onGrant}>
+            {t("grant")}
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
+  )
+}

@@ -56,7 +56,7 @@ lib/db/
   plugin-bridge.ts        # plugin_bridge（宿主 ↔ 插件消息日志）
   plugin-types.ts         # 行类型
 
-components/plugin/        # 设置 UI + 市场
+components/plugins/        # 设置 UI + 市场
 ```
 
 5 张插件表在 [Dexie schema v15 引入](../data/storage#v15-插件表)，并在后续版本中无修改地保留至 v26。
@@ -267,7 +267,7 @@ stateDiagram-v2
 - 评价从目录拉取，缓存到 `plugin_reviews`。
 - 安装流：下载 → 验证签名 → 解析清单 → 显示权限对话框 → 解压 → 注册。
 
-市场 UI 在 `components/plugin/`。
+市场 UI 在 `components/plugins/`。
 
 ## Devtools
 
@@ -301,12 +301,12 @@ stateDiagram-v2
 | 加新 API 命名空间 | `lib/plugin/api/<name>.ts`，在 `api/index.ts` 加 `export`                |
 | 加新扩展点 ID     | `lib/plugin/contracts/plugin-points.ts` 的相应数组                       |
 | 改进沙箱          | `lib/plugin/security/`、`lib/plugin/core/sandbox.ts`                     |
-| 调整市场 UX       | `components/plugin/`、`lib/plugin/package/`                              |
+| 调整市场 UX       | `components/plugins/`、`lib/plugin/package/`                              |
 
 ## 测试
 
 - `lib/plugin/index.test.ts` —— 注册表与生命周期集成。
-- `lib/plugin/icon.test.ts` —— 图标解析（SVG sanitiser）。
+- `lib/plugin/utils/icon.test.ts` —— 图标解析（SVG sanitiser）。
 - 每个 API 命名空间有对应 `*-api.test.ts`，验证权限守卫与返回形态。
 - `lib/plugin/contracts/runtime-proof-audit.test.ts` —— 静态校验每条契约都有 binding / docs / tests 三要素。
 

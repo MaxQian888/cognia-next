@@ -3,7 +3,7 @@
 /**
  * LoggerProvider - React Context wrapper for the unified logging system.
  *
- * @deprecated For new code, prefer importing directly from @/lib/logger.
+ * @deprecated For new code, prefer importing directly from @/lib/logging.
  */
 
 import {
@@ -16,8 +16,8 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import type { AppLogLevel, LogEntry, LoggerConfig, LogTransport } from "@/lib/logger"
-import { LEVEL_PRIORITY as LOG_LEVEL_PRIORITY } from "@/lib/logger"
+import type { AppLogLevel, LogEntry, LoggerConfig, LogTransport } from "@/lib/logging"
+import { LEVEL_PRIORITY as LOG_LEVEL_PRIORITY } from "@/lib/logging"
 import {
   addTransport as addUnifiedTransport,
   applyLoggingSettings,
@@ -27,13 +27,13 @@ import {
   removeTransport as removeUnifiedTransport,
   type LogLevel as UnifiedLogLevel,
   type StructuredLogEntry,
-} from "@/lib/logger"
+} from "@/lib/logging"
 import { cleanupTauriLogBridge, initTauriLogBridge } from "@/lib/native/tauri-log-bridge"
 import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
 import { isTauri } from "@/lib/tauri"
 
 // Re-export types for backward compatibility.
-export type { AppLogLevel, LogEntry, LoggerConfig, LogTransport } from "@/lib/logger"
+export type { AppLogLevel, LogEntry, LoggerConfig, LogTransport } from "@/lib/logging"
 export type LogLevel = AppLogLevel
 
 interface LoggerContextValue {

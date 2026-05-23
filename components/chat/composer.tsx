@@ -82,7 +82,7 @@ import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { MentionPopover } from "@/components/mobile/chat/mention-popover"
 import {
   clearDraft as clearChatDraft,

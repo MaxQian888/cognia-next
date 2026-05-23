@@ -58,8 +58,8 @@ import {
 } from "@/components/ui/sheet"
 import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
-import type { LogFilterPreset } from "./log-filter-presets"
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { LogFilterPreset } from "@/types/logging"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 // Time range options in milliseconds
 const TIME_RANGES = {

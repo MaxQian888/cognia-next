@@ -17,7 +17,7 @@ import {
   CanvasWebSocketProvider,
   type ConnectionState,
 } from "@/lib/canvas/collaboration/websocket-provider"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.app
 

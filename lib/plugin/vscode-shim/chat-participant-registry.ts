@@ -17,7 +17,7 @@
 
 import type { Character } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const chatLogger = loggers.plugin.child("vscode-chat")
 

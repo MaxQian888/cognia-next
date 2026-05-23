@@ -8,7 +8,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
-import type { LocalRuntimeDiagnostics } from "@/lib/logger/crash-log"
+import type { LocalRuntimeDiagnostics } from "@/lib/logging/crash-log"
 
 export type { LocalRuntimeDiagnostics }
 

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { renderHTML, renderSVG, getReactShellHtml, escapeHtml } from "@/lib/artifacts"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { Artifact, PreviewErrorBoundaryProps, PreviewErrorBoundaryState } from "@/types"
 import {
   ArtifactRenderer,

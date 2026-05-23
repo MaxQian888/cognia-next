@@ -38,7 +38,7 @@ import {
   X,
 } from "lucide-react"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { A2UIInlineSurface } from "./a2ui-surface"
 import { templateCategories, type A2UIAppTemplate } from "@/lib/a2ui/templates"
@@ -49,7 +49,7 @@ import type { ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
 import type { QuickAppBuilderProps, TabValue } from "@/types/a2ui/app"
 
 import { TemplateCard } from "./quick-app-builder/template-card"
-import { QuickAppCard } from "./quick-app-builder/app-card"
+import { QuickAppCard } from "./quick-app-builder/quick-app-card"
 import { FlashAppTab } from "./quick-app-builder/flash-app-tab"
 import { DeleteConfirmDialog } from "./delete-confirm-dialog"
 

@@ -36,7 +36,7 @@ import { toast } from "sonner"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("agentTeams.tasks")
 

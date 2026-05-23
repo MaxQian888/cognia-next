@@ -11,7 +11,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { getAllWebviews } from "@tauri-apps/api/webview"
 import { isTauri } from "@/lib/tauri"
-import type { WindowDiagnosticsSnapshot } from "@/lib/logger/crash-log"
+import type { WindowDiagnosticsSnapshot } from "@/lib/logging/crash-log"
 
 export type { WindowDiagnosticsSnapshot }
 

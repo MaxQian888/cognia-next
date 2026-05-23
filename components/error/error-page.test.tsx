@@ -3,11 +3,11 @@ import userEvent from "@testing-library/user-event"
 
 import { ErrorPage } from "./error-page"
 
-jest.mock("@/lib/logger/crash-log", () => ({
+jest.mock("@/lib/logging/crash-log", () => ({
   exportCrashLogBundleNow: jest.fn(),
 }))
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const fakeLogger = () => ({
     trace: jest.fn(),
     debug: jest.fn(),
@@ -33,8 +33,8 @@ jest.mock("sonner", () => ({
   },
 }))
 
-import { exportCrashLogBundleNow } from "@/lib/logger/crash-log"
-import { loggers } from "@/lib/logger"
+import { exportCrashLogBundleNow } from "@/lib/logging/crash-log"
+import { loggers } from "@/lib/logging"
 import { toast } from "sonner"
 
 const exportMock = exportCrashLogBundleNow as jest.MockedFunction<typeof exportCrashLogBundleNow>

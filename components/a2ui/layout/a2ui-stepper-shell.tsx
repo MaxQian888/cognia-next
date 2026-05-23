@@ -1,6 +1,7 @@
 "use client"
 
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { resolveArrayOrPath, resolveNumberOrPath, resolveStringOrPath } from "@/lib/a2ui/data-model"
@@ -16,6 +17,7 @@ export function A2UIStepperShell({
   onAction,
   onDataChange,
 }: A2UIComponentProps<A2UIStepperShellComponent>) {
+  const t = useTranslations("a2ui")
   const title = resolveStringOrPath(component.title ?? "", dataModel, "")
   const description = resolveStringOrPath(component.description ?? "", dataModel, "")
   const steps = resolveArrayOrPath(component.steps, dataModel, []) as A2UIRichOutputStep[]
@@ -66,7 +68,7 @@ export function A2UIStepperShell({
               onClick={() => moveToStep(Math.max(0, safeStep - 1))}
             >
               <ChevronLeft className="h-4 w-4" />
-              {component.previousLabel || "Previous"}
+              {component.previousLabel || t("stepper.previous")}
             </Button>
             <div className="text-xs text-muted-foreground">
               {safeStep + 1}/{steps.length || 1}
@@ -79,14 +81,14 @@ export function A2UIStepperShell({
               disabled={safeStep >= steps.length - 1}
               onClick={() => moveToStep(Math.min(steps.length - 1, safeStep + 1))}
             >
-              {component.nextLabel || "Next"}
+              {component.nextLabel || t("stepper.next")}
               <ChevronRight className="h-4 w-4" />
             </Button>
           </CardContent>
         </>
       ) : (
         <CardContent className="pt-0 text-sm text-muted-foreground">
-          No steps are available yet.
+          {t("stepper.empty")}
         </CardContent>
       )}
     </Card>

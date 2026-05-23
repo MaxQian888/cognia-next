@@ -9,9 +9,9 @@ import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { A2UIWidgetShell } from "@/components/a2ui/a2ui-widget-shell"
 import { A2UIComparisonCards } from "./a2ui-comparison-cards"
 import { A2UIStepperShell } from "../layout/a2ui-stepper-shell"
-import { A2UIDataExplorer } from "../data/a2ui-data-explorer"
+import { A2UITable } from "../data/a2ui-table"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { getValueByPath, resolveArrayOrPath, resolveStringOrPath } from "@/lib/a2ui/data-model"
 import { resolveWidgetMetadata } from "@/lib/a2ui/catalog"
 import { routeRichOutputProfile } from "@/lib/a2ui/output-profiles"
@@ -318,10 +318,10 @@ export function A2UIRichOutput({
       tableRows.length > 0
     ) {
       return (
-        <A2UIDataExplorer
+        <A2UITable
           component={{
             id: `${component.id}-explorer`,
-            component: "DataExplorer",
+            component: "Table",
             columns: component.tableColumns.map((column) => ({
               ...column,
               header: column.label,

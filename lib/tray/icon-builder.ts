@@ -18,7 +18,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { TrayIconState } from "./types"
 
 /** One node in a Lucide iconNode: `[tagName, attrsByName]`. */

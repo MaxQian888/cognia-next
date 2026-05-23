@@ -10,7 +10,7 @@
 "use client"
 
 import { create } from "zustand"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { getPref, setPref } from "@/lib/tauri/store"
 
 import { DEFAULT_TRAY_ITEMS, TRAY_LAYOUT_PREF, TRAY_TOOLTIP_PREF } from "./defaults"

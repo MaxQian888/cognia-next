@@ -1,268 +1,115 @@
 "use client"
 
-// Side-by-side comparison sheet for marketplace entries that the user
-// queued via the marketplace card's "Compare" toggle. Reads / writes
-// `comparisonIds` + `comparisonOpen` on the persistent marketplace store
-// so the queue survives navigation and the sheet can be opened from any
-// surface that mounts a "Compare ({n})" trigger.
-//
-// The store caps comparison at 2 entries to keep the table readable on
-// every viewport — anything richer would crowd mobile.
+// Left-rail category sidebar for the /plugins panel. Driven by the
+// usePlugins() view-model so the badges always match the live row counts.
+// Selecting a category writes through to `usePluginsStore.setFilters`.
 
 import { useTranslations } from "next-intl"
-import { useEffect, useState } from "react"
-import { AlertTriangleIcon, CheckIcon, DownloadIcon, StarIcon, XIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import {
+  LayersIcon,
+  WrenchIcon,
+  PaletteIcon,
+  PuzzleIcon,
+  CommandIcon,
+  ZapIcon,
+  PackageIcon,
+  ImageIcon,
+  PencilRulerIcon,
+  CalendarClockIcon,
+  ServerCogIcon,
+  BotIcon,
+  CodeIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Card } from "@/components/ui/card"
-import { usePluginMarketplaceStore } from "@/stores/plugin/plugin-marketplace-store"
-import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import { usePlugins } from "@/hooks/plugins"
+import { usePluginsStore } from "@/stores/plugins"
 
-interface ResolvedEntry extends PluginMarketplaceEntry {
-  capabilities?: string[]
-  permissions?: string[]
-  signed?: boolean
-}
+const CAPABILITY_META: Array<{
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}> = [
+  { id: "tools", label: "tools", icon: WrenchIcon },
+  { id: "components", label: "components", icon: PuzzleIcon },
+  { id: "modes", label: "modes", icon: BotIcon },
+  { id: "themes", label: "themes", icon: PaletteIcon },
+  { id: "commands", label: "commands", icon: CommandIcon },
+  { id: "hooks", label: "hooks", icon: ZapIcon },
+  { id: "media", label: "media", icon: ImageIcon },
+  { id: "canvas", label: "canvas", icon: PencilRulerIcon },
+  { id: "ai-provider", label: "ai-provider", icon: ServerCogIcon },
+  { id: "scheduler", label: "scheduler", icon: CalendarClockIcon },
+  { id: "exporters", label: "exporters", icon: PackageIcon },
+  { id: "importers", label: "importers", icon: PackageIcon },
+  { id: "python", label: "python", icon: CodeIcon },
+  { id: "external-agent-preset", label: "agentPresets", icon: BotIcon },
+]
 
-interface Props {
-  /** Optional resolver — defaults to looking up entries from a passed-in map. */
-  resolveEntry?: (id: string) => ResolvedEntry | undefined
-  /** Map of entry-id → entry. Pass the marketplace results here. */
-  entries: ResolvedEntry[]
-  installedIds?: ReadonlySet<string>
-  onInstall?: (id: string, version?: string) => void
-}
-
-const DANGEROUS_PERMS = new Set([
-  "shell:execute",
-  "process:spawn",
-  "python:execute",
-  "filesystem:write",
-])
-
-export function PluginComparisonSheet({ resolveEntry, entries, installedIds, onInstall }: Props) {
-  const t = useTranslations("plugins.comparison")
-  const open = usePluginMarketplaceStore((s) => s.comparisonOpen)
-  const ids = usePluginMarketplaceStore((s) => s.comparisonIds)
-  const setOpen = usePluginMarketplaceStore((s) => s.setComparisonOpen)
-  const remove = usePluginMarketplaceStore((s) => s.removeFromComparison)
-  const clearAll = usePluginMarketplaceStore((s) => s.clearComparison)
-
-  // Auto-close once the queue empties — the sheet has nothing to show.
-  useEffect(() => {
-    if (open && ids.length === 0) setOpen(false)
-  }, [open, ids.length, setOpen])
-
-  const lookup = resolveEntry ?? ((id: string) => entries.find((e) => e.id === id))
-
-  const resolved = ids
-    .map((id) => lookup(id))
-    .filter((entry): entry is ResolvedEntry => entry !== undefined)
+export function PluginCategorySidebar() {
+  const t = useTranslations("plugins.categorySidebar")
+  const { totals, countsByCapability } = usePlugins()
+  const filters = usePluginsStore((s) => s.filters)
+  const setFilters = usePluginsStore((s) => s.setFilters)
+  const active = filters.capability
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-2xl overflow-y-auto"
-        data-testid="plugin-comparison-sheet"
-      >
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
-            {t("title")}
-            <Badge variant="outline" className="text-xs">
-              {t("count", { count: ids.length })}
-            </Badge>
-          </SheetTitle>
-        </SheetHeader>
-
-        {resolved.length === 0 ? (
-          <Card className="p-6 text-center mt-4 text-sm text-muted-foreground">{t("empty")}</Card>
-        ) : (
-          <div className="mt-4 overflow-x-auto">
-            <div
-              className="grid gap-3"
-              style={{
-                gridTemplateColumns: `repeat(${resolved.length}, minmax(14rem,1fr))`,
-              }}
-            >
-              {resolved.map((entry) => (
-                <ComparisonColumn
-                  key={entry.id}
-                  entry={entry}
-                  installed={installedIds?.has(entry.id) ?? false}
-                  onRemove={() => remove(entry.id)}
-                  onInstall={onInstall}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        <SheetFooter className="mt-4 gap-2">
-          <Button variant="outline" size="sm" onClick={() => clearAll()}>
-            {t("clearAll")}
-          </Button>
-          <Button size="sm" onClick={() => setOpen(false)}>
-            {t("close")}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-interface ColumnProps {
-  entry: ResolvedEntry
-  installed: boolean
-  onRemove: () => void
-  onInstall?: (id: string, version?: string) => void
-}
-
-function ComparisonColumn({ entry, installed, onRemove, onInstall }: ColumnProps) {
-  const t = useTranslations("plugins.comparison")
-  const dangerousCount = (entry.permissions ?? []).filter((p) => DANGEROUS_PERMS.has(p)).length
-
-  return (
-    <Card className="p-3 space-y-2 flex flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <div className="space-y-0.5 min-w-0">
-          <p className="font-medium truncate">{entry.name}</p>
-          <p className="text-xs text-muted-foreground truncate">v{entry.version}</p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0"
-          onClick={onRemove}
-          aria-label={t("removeAria", { name: entry.name })}
-          data-testid={`plugin-comparison-remove-${entry.id}`}
-        >
-          <XIcon className="size-3.5" />
-        </Button>
-      </div>
-
-      {entry.author && <Row label={t("author")} value={entry.author} />}
-      {typeof entry.rating === "number" && entry.rating > 0 && (
-        <Row
-          label={t("rating")}
-          value={
-            <span className="flex items-center gap-1">
-              <StarIcon className="size-3 fill-current" />
-              {entry.rating.toFixed(1)}
-            </span>
-          }
-        />
-      )}
-      {typeof entry.downloads === "number" && entry.downloads > 0 && (
-        <Row
-          label={t("downloads")}
-          value={
-            <span className="flex items-center gap-1">
-              <DownloadIcon className="size-3" />
-              {entry.downloads.toLocaleString()}
-            </span>
-          }
-        />
-      )}
-      <Row
-        label={t("signed")}
-        value={
-          entry.signed ? (
-            <span className="flex items-center gap-1 text-green-700 dark:text-green-400">
-              <CheckIcon className="size-3" />
-              {t("yes")}
-            </span>
-          ) : (
-            t("no")
-          )
-        }
+    <aside className="space-y-1 pr-2">
+      <SidebarItem
+        icon={LayersIcon}
+        active={active === "all"}
+        label={t("all")}
+        count={totals.total}
+        onClick={() => setFilters({ capability: "all" })}
       />
-      {(entry.capabilities ?? []).length > 0 && (
-        <Row
-          label={t("capabilities")}
-          value={
-            <div className="flex flex-wrap gap-1 justify-end">
-              {(entry.capabilities ?? []).map((cap) => (
-                <Badge key={cap} variant="outline" className="text-xs">
-                  {cap}
-                </Badge>
-              ))}
-            </div>
-          }
-        />
-      )}
-      <Row
-        label={t("permissions")}
-        value={
-          <div className="text-right">
-            <div className="text-xs">
-              {t("permissionsCount", { count: (entry.permissions ?? []).length })}
-            </div>
-            {dangerousCount > 0 && (
-              <Badge variant="destructive" className="text-xs gap-1 mt-0.5">
-                <AlertTriangleIcon className="size-3" />
-                {t("dangerousCount", { count: dangerousCount })}
-              </Badge>
-            )}
-          </div>
-        }
-      />
-
-      <div className="mt-auto pt-2">
-        {installed ? (
-          <Badge variant="secondary" className="w-full justify-center text-xs">
-            {t("installed")}
-          </Badge>
-        ) : onInstall ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full"
-            onClick={() => onInstall(entry.id, entry.version)}
-          >
-            {t("install")}
-          </Button>
-        ) : null}
-      </div>
-    </Card>
+      <div className="h-px bg-border my-2" />
+      {CAPABILITY_META.map((meta) => {
+        const count = countsByCapability[meta.id] ?? 0
+        return (
+          <SidebarItem
+            key={meta.id}
+            icon={meta.icon}
+            active={active === meta.id}
+            label={t(`capability.${meta.label}` as never)}
+            count={count}
+            onClick={() => setFilters({ capability: meta.id })}
+            disabled={count === 0}
+          />
+        )
+      })}
+    </aside>
   )
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-2 text-xs border-t pt-1.5">
-      <span className="text-muted-foreground shrink-0">{label}</span>
-      <div className="text-right min-w-0">{value}</div>
-    </div>
-  )
-}
-
-/**
- * Standalone helper component that renders a "Compare (n)" trigger button.
- * Pulled out so the marketplace and any other surface can mount it without
- * duplicating the store wiring.
- */
-export function PluginComparisonTrigger() {
-  const t = useTranslations("plugins.comparison")
-  const ids = usePluginMarketplaceStore((s) => s.comparisonIds)
-  const setOpen = usePluginMarketplaceStore((s) => s.setComparisonOpen)
-  const [hydrated, setHydrated] = useState(false)
-
-  // Avoid SSR/CSR mismatch — the persisted store hydrates after mount.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setHydrated(true), [])
-
-  if (!hydrated || ids.length === 0) return null
-
+function SidebarItem({
+  icon: Icon,
+  active,
+  label,
+  count,
+  onClick,
+  disabled,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  active: boolean
+  label: string
+  count: number
+  onClick: () => void
+  disabled?: boolean
+}) {
   return (
     <Button
-      variant="outline"
+      variant={active ? "secondary" : "ghost"}
       size="sm"
-      onClick={() => setOpen(true)}
-      data-testid="plugin-comparison-trigger"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn("w-full justify-start gap-2 h-8", disabled && "opacity-50")}
     >
-      {t("triggerLabel", { count: ids.length })}
+      <Icon className="size-3.5" />
+      <span className="flex-1 text-left truncate">{label}</span>
+      <Badge variant="outline" className="text-xs">
+        {count}
+      </Badge>
     </Button>
   )
 }

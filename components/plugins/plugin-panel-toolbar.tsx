@@ -33,9 +33,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { usePluginsStore } from "@/stores/plugins"
-import { PluginInstallFromUrlDialog } from "./plugin-install-from-url-dialog"
-import { InstallFromUrlDialog } from "./install-from-url-dialog"
-import { useInstallWasmFromLocal } from "./install-wasm-plugin-button"
+import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
+import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-install-from-url-dialog"
+import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 
 interface Props {
   /** Opens the update dialog (mounted by the parent panel). */
@@ -177,7 +177,10 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
 
       <PluginInstallFromUrlDialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen} />
       {wasmAvailable && (
-        <InstallFromUrlDialog open={signedUrlDialogOpen} onOpenChange={setSignedUrlDialogOpen} />
+        <PluginSignedInstallFromUrlDialog
+          open={signedUrlDialogOpen}
+          onOpenChange={setSignedUrlDialogOpen}
+        />
       )}
       {wasmLocal.sheet}
     </>

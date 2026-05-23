@@ -25,7 +25,7 @@ jest.mock("recharts", () => {
 })
 
 import { ChartRenderer } from "./chart-renderer"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 describe("ChartRenderer", () => {
   it("renders an alert for invalid JSON and logs a warning", () => {

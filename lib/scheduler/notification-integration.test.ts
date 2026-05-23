@@ -19,7 +19,7 @@ jest.mock("sonner", () => ({
   },
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     app: {
       info: jest.fn(),

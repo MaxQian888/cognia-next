@@ -4,7 +4,7 @@
  * Utilities for plugin development, debugging, and testing.
  */
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
 import type { FullPluginContext } from "../core/context"

@@ -23,7 +23,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@/lib/search/types"
 import type { SearchResponse } from "@/lib/search/types"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.compare")
 

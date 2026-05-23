@@ -10,7 +10,7 @@ import { listTwinChunksByTwin, updateTwinChunk } from "@/lib/db/twin-chunks"
 import { bulkCreateTwinDrafts } from "@/lib/db/twin-drafts"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
 import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   appendPlaybooks,
   appendStyleSamples,

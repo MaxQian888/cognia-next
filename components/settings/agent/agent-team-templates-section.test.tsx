@@ -71,7 +71,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     agent: {
       child: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),

@@ -84,7 +84,7 @@ jest.mock("@/lib/db/plugins", () => ({
 }))
 
 const applyPolicy = jest.fn()
-jest.mock("@/lib/plugin/policy-runtime", () => ({
+jest.mock("@/lib/plugin/core/policy-runtime", () => ({
   applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicy(...args),
 }))
 

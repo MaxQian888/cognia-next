@@ -1,7 +1,7 @@
 import type { AppSettings } from "@/lib/claude/types"
 import { ALL_PROVIDER_IDS } from "@/lib/subscription/core/types"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ui
 

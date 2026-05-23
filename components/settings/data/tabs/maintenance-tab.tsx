@@ -33,7 +33,7 @@ import {
 import { clearAll, clearTables, type ClearableTable } from "@/lib/data/clear"
 import { useSettingsStore } from "@/stores/settings"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.data.maintenance")
 import { RotateCcwIcon, ShieldAlertIcon, ShieldIcon, Trash2Icon } from "lucide-react"

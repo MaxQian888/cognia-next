@@ -19,7 +19,7 @@ import {
   validateActivationEvent,
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
-import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie-namespace"
+import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie/namespace"
 
 // =============================================================================
 // Types

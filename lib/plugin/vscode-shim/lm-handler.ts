@@ -29,7 +29,7 @@
 
 import { generateText, type ModelMessage } from "ai"
 import { getProviderModel } from "@/lib/ai/core/client"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const lmHandlerLogger = loggers.plugin.child("vscode-lm")
 

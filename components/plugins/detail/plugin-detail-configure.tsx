@@ -11,7 +11,7 @@
 // change up on next activation, and the live-query in the body reflects
 // the new persisted state.
 
-import { PluginConfigFormContent } from "../plugin-config-form"
+import { PluginConfigFormContent } from "./plugin-config-form"
 
 export function PluginDetailConfigure({ pluginId }: { pluginId: string }) {
   return (

@@ -8,7 +8,7 @@ import {
   resetPluginWorkflowIntegration,
   usePluginWorkflowIntegration,
 } from "./workflow-integration"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { PluginMessage } from "@/types/plugin"
 
 // Mock dependencies
@@ -35,7 +35,7 @@ jest.mock("../messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => mockHooksManager),
 }))
 
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(() => ({
       plugins: {

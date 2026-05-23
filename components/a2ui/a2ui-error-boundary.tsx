@@ -6,11 +6,43 @@
  */
 
 import React, { Component } from "react"
+import { useTranslations } from "next-intl"
 import { AlertTriangle, RotateCcw } from "lucide-react"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { Button } from "@/components/ui/button"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { A2UIErrorBoundaryProps, A2UIErrorBoundaryState } from "@/types/a2ui/renderer"
+
+/**
+ * Functional fallback so we can use `useTranslations()` — class components
+ * can't access hooks directly. The class boundary forwards its state here.
+ */
+function A2UIErrorFallback({
+  componentType,
+  error,
+  onRetry,
+}: {
+  componentType: string
+  error: Error | null
+  onRetry: () => void
+}) {
+  const t = useTranslations("a2ui")
+  return (
+    <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+      <div className="mb-2 flex items-center gap-2">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 truncate">
+          {t("errorBoundary.renderError", { type: componentType })}
+        </span>
+        <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs" onClick={onRetry}>
+          <RotateCcw className="mr-1 h-3 w-3" />
+          {t("errorBoundary.retry")}
+        </Button>
+      </div>
+      <ErrorTraceDetails error={error} />
+    </div>
+  )
+}
 
 export class A2UIErrorBoundary extends Component<A2UIErrorBoundaryProps, A2UIErrorBoundaryState> {
   constructor(props: A2UIErrorBoundaryProps) {
@@ -37,22 +69,11 @@ export class A2UIErrorBoundary extends Component<A2UIErrorBoundaryProps, A2UIErr
   render(): React.ReactNode {
     if (this.state.hasError) {
       return (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          <div className="mb-2 flex items-center gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 truncate">{this.props.componentType} render error</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-6 px-2 text-xs"
-              onClick={this.handleRetry}
-            >
-              <RotateCcw className="mr-1 h-3 w-3" />
-              Retry
-            </Button>
-          </div>
-          <ErrorTraceDetails error={this.state.error} />
-        </div>
+        <A2UIErrorFallback
+          componentType={this.props.componentType}
+          error={this.state.error}
+          onRetry={this.handleRetry}
+        />
       )
     }
 

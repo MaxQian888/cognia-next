@@ -10,7 +10,7 @@ import type {
   CollaborationEventType,
 } from "@/types/canvas/collaboration"
 import { CanvasCRDTStore, type CRDTOperation } from "./crdt-store"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.app
 

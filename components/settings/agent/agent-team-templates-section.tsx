@@ -50,7 +50,7 @@ import { toast } from "@/components/ui/sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeamTemplate } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import {
   getTemplateWarnings,
   listAgentTeamTemplateEntries,

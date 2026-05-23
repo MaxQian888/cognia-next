@@ -22,7 +22,7 @@ import {
 } from "@/lib/search/types"
 import { testProviderConnection } from "@/lib/search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.providers")
 

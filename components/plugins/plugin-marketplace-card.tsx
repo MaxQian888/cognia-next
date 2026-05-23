@@ -1,158 +1,112 @@
 "use client"
 
-// Compact card used in the marketplace browse grid. Mirrors the shape of
-// `components/skills/skill-marketplace-card.tsx` but adds plugin-specific
-// concerns: signature badge, danger-permission warning, capability count.
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { useTranslations } from "next-intl"
-import { DownloadIcon, StarIcon, AlertTriangleIcon, GitCompareIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
-import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
-import { usePluginMarketplaceStore } from "@/stores/plugin/plugin-marketplace-store"
-import { cn } from "@/lib/utils"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
-  entry: PluginMarketplaceEntry & {
-    /** Optional fields the registry may carry — kept loose because the entry
-     * shape is shared between Skills and Plugins marketplaces. */
-    capabilities?: string[]
-    permissions?: string[]
-    signatureState?: SignatureState
-  }
-  installed: boolean
-  installing: boolean
-  onView: (id: string) => void
-  onInstall: (id: string, version?: string) => void
-  onUninstall: (id: string) => void
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-export function PluginMarketplaceCard({
-  entry,
-  installed,
-  installing,
-  onView,
-  onInstall,
-  onUninstall,
-}: Props) {
-  const t = useTranslations("plugins.marketplaceCard")
-  const comparisonIds = usePluginMarketplaceStore((s) => s.comparisonIds)
-  const addToComparison = usePluginMarketplaceStore((s) => s.addToComparison)
-  const removeFromComparison = usePluginMarketplaceStore((s) => s.removeFromComparison)
-  const inComparison = comparisonIds.includes(entry.id)
-  const comparisonFull = !inComparison && comparisonIds.length >= 2
-  const dangerous =
-    (entry.permissions ?? []).filter(
-      (p) =>
-        p === "shell:execute" ||
-        p === "process:spawn" ||
-        p === "python:execute" ||
-        p === "filesystem:write"
-    ).length > 0
-  const sigState = entry.signatureState ?? (entry.signed ? "verified" : "unverified")
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
+
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
 
   return (
-    <Card className="p-3 space-y-2 flex flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <Button
-          asChild
-          variant="ghost"
-          className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
-        >
-          <button type="button" onClick={() => onView(entry.id)}>
-            <div className="block w-full min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="font-medium truncate">{entry.name}</span>
-                <span className="text-xs text-muted-foreground shrink-0">v{entry.version}</span>
-              </div>
-              <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.id}</div>
-            </div>
-          </button>
-        </Button>
-        <PluginSignatureBadge state={sigState} compact />
-      </div>
-
-      {entry.description && (
-        <p className="text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-1">
-        {(entry.capabilities ?? []).slice(0, 3).map((cap) => (
-          <Badge key={cap} variant="outline" className="text-xs">
-            {cap}
-          </Badge>
-        ))}
-        {(entry.capabilities ?? []).length > 3 && (
-          <Badge variant="outline" className="text-xs">
-            +{(entry.capabilities ?? []).length - 3}
-          </Badge>
-        )}
-        {dangerous && (
-          <Badge variant="destructive" className="text-xs gap-1">
-            <AlertTriangleIcon className="size-3" />
-            {t("dangerous")}
-          </Badge>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between gap-2 mt-auto pt-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
-          {typeof entry.rating === "number" && entry.rating > 0 && (
-            <span className="flex items-center gap-0.5">
-              <StarIcon className="size-3 fill-current" />
-              {entry.rating.toFixed(1)}
-            </span>
-          )}
-          {typeof entry.downloads === "number" && entry.downloads > 0 && (
-            <span className="flex items-center gap-0.5">
-              <DownloadIcon className="size-3" />
-              {entry.downloads.toLocaleString()}
-            </span>
-          )}
-          {entry.author && <span className="truncate">{entry.author}</span>}
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="icon"
-            variant="ghost"
-            className={cn("size-7", inComparison && "text-primary")}
-            onClick={() =>
-              inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
-            }
-            disabled={comparisonFull}
-            aria-label={
-              inComparison
-                ? t("removeFromCompareAria", { name: entry.name })
-                : t("addToCompareAria", { name: entry.name })
-            }
-            aria-pressed={inComparison}
-            data-testid={`plugin-marketplace-compare-toggle-${entry.id}`}
-          >
-            <GitCompareIcon className="size-3.5" />
-          </Button>
-          {installed ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onUninstall(entry.id)}
-              disabled={installing}
-            >
-              {installing ? t("uninstalling") : t("uninstall")}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onInstall(entry.id, entry.version)}
-              disabled={installing}
-            >
-              {installing ? t("installing") : t("install")}
-            </Button>
-          )}
-        </div>
-      </div>
-    </Card>
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

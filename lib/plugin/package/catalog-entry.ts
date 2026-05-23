@@ -5,7 +5,7 @@ import type {
   Plugin,
 } from "@/types/plugin"
 import type { PluginRegistryEntry } from "./marketplace"
-import { resolvePluginIcon } from "../icon"
+import { resolvePluginIcon } from "../utils/icon"
 
 interface BuildExtensionCatalogEntryOptions {
   registryEntry: PluginRegistryEntry

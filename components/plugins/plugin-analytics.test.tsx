@@ -1,80 +1,77 @@
 /**
- * @jest-environment jsdom
+ * Plugin UI barrel — 3-pane shell export surface.
+ *
+ * The legacy 7-tab layout's helper components — `PluginPanelTabs`,
+ * `PluginPanelHeader`, `PluginDetail`, `PluginDetailPanel`,
+ * `PluginConfigureTab` — were removed when the new shell became the
+ * default. The replacement surfaces live under `./library/*`,
+ * `./detail/*`, `./governance/*`, `./discover/*`, `./devtools/*`,
+ * `./marketplace/*`, and `./dialogs/*`; external consumers should
+ * depend on `PluginPanel` and the extension-slot APIs rather than
+ * reaching into individual panes.
  */
 
-import { render, screen } from "@testing-library/react"
-import type { PluginAnalyticsRow, PluginRow } from "@/lib/db/plugin-types"
+// Top-level shell / infrastructure
+export { PluginPanel } from "./plugin-panel"
+export { PluginPanelProvider, usePluginPanel } from "./plugin-panel-context"
+export { PluginPanelToolbar } from "./plugin-panel-toolbar"
+export { PluginPanelGrid } from "./plugin-panel-grid"
+export { PluginCard } from "./plugin-card"
+export { PluginCategorySidebar } from "./plugin-category-sidebar"
+export { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
+export { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+export { PluginRowActionsMenu } from "./plugin-row-actions-menu"
+export { AuditLogEntry } from "./audit-log-entry"
+export { PluginPermissionReview, PermissionRow } from "./plugin-permission-review"
+export { PluginExtensionSlot } from "./plugin-extension-slot"
+export { PluginBackupPanel, __resetPluginBackupClientForTests } from "./plugin-backup-panel"
+export { PluginDevtoolsPanel } from "./plugin-devtools-panel"
+export { PluginDiscovery } from "./plugin-discovery"
+export { PluginNavSidebar } from "./plugin-nav-sidebar"
 
-let mockAnalytics: PluginAnalyticsRow[] = []
-let mockPlugins: PluginRow[] = []
-let liveQueryCallIndex = 0
+// Marketplace browsing
+export { PluginMarketplace } from "./marketplace/plugin-marketplace"
+export { PluginMarketplaceCard } from "./marketplace/plugin-marketplace-card"
+export { PluginMarketplaceDetail } from "./marketplace/plugin-marketplace-detail"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+// Dialogs & sheets
+export { PluginCategorySheet } from "./dialogs/plugin-category-sheet"
+export { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
+export { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
+export { PluginImportDialog } from "./dialogs/plugin-import-dialog"
+export { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
+export {
+  PluginUpdateDialog,
+  __resetPluginUpdateClientForTests,
+} from "./dialogs/plugin-update-dialog"
+export {
+  PluginRollbackDialog,
+  __resetPluginRollbackClientForTests,
+} from "./dialogs/plugin-rollback-dialog"
+export { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 
-// usePluginAnalytics calls useLiveQuery first; PluginAnalytics then calls
-// useLiveQuery again for the plugins list. We sequence by render-call index
-// (reset before each test) so the right seed array is returned for each.
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => {
-    const idx = liveQueryCallIndex
-    liveQueryCallIndex += 1
-    return idx === 0 ? mockAnalytics : mockPlugins
-  },
-}))
+// Detail-pane content
+export {
+  PluginConfigForm,
+  PluginConfigFormBody,
+  PluginConfigFormContent,
+} from "./detail/plugin-config-form"
+export {
+  PluginDependencyGraph,
+  __resetPluginDependencyResolverForTests,
+} from "./detail/plugin-dependency-graph"
+export { PluginScheduledJobs } from "./detail/plugin-scheduled-jobs"
+export { PluginResourceManager } from "./detail/plugin-resource-manager"
+export { PluginAnalytics } from "./detail/plugin-analytics"
+export { PluginPermissionsTab } from "./detail/plugin-permissions-tab"
+export { PluginDetailPane } from "./detail/plugin-detail-pane"
 
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    pluginAnalytics: {
-      orderBy: () => ({ reverse: () => ({ toArray: async () => mockAnalytics }) }),
-    },
-  }),
-}))
-
-jest.mock("@/lib/db/plugins", () => ({
-  listPlugins: jest.fn(async () => mockPlugins),
-}))
-
-import { PluginAnalytics } from "./plugin-analytics"
-
-beforeEach(() => {
-  mockAnalytics = []
-  mockPlugins = []
-  liveQueryCallIndex = 0
-})
-
-describe("PluginAnalytics", () => {
-  it("renders empty state when no analytics events", () => {
-    mockAnalytics = []
-    render(<PluginAnalytics />)
-    expect(screen.getByText("empty")).toBeInTheDocument()
-  })
-
-  it("renders summary cards and the per-plugin row", () => {
-    mockAnalytics = [
-      { pluginId: "alpha", key: "tool.invoke", count: 5, lastEventAt: 100 },
-      { pluginId: "alpha", key: "hook.dispatch", count: 3, lastEventAt: 200 },
-    ]
-    mockPlugins = [
-      {
-        id: "alpha",
-        name: "Alpha plugin",
-        version: "1.0.0",
-        status: "enabled",
-        source: "builtin",
-        type: "frontend",
-        enabled: true,
-        capabilities: [],
-        path: "/",
-        manifest: { id: "alpha" },
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ]
-    render(<PluginAnalytics />)
-    expect(screen.getByText("Alpha plugin")).toBeInTheDocument()
-    // "8" appears in both the summary card and the per-plugin row.
-    expect(screen.getAllByText("8").length).toBeGreaterThan(0)
-  })
-})
+// Panes (library / governance / discover / devtools)
+export { PluginLibraryPane } from "./library/plugin-library-pane"
+export { PluginLibraryHeader } from "./library/plugin-library-header"
+export { PluginLibraryList } from "./library/plugin-library-list"
+export { PluginLibraryRow } from "./library/plugin-library-row"
+export { PluginGovernancePane } from "./governance/plugin-governance-pane"
+export { PluginAuditLog } from "./governance/plugin-audit-log"
+export { PluginDiscoverPane } from "./discover/plugin-discover-pane"
+export { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"

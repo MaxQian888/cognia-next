@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { decryptBackupPackage } from "@/lib/data/crypto"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { migrateEnvelope, isEncryptedEnvelope } from "@/lib/data/migrate"

@@ -41,7 +41,7 @@ import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"

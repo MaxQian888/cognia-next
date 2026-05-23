@@ -1,100 +1,112 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent } from "@testing-library/react"
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
-import type { PluginPermission } from "@/types/plugin"
-
-const detail = {
-  id: "p1",
-  name: "Plugin One",
-  version: "1.0.0",
-  type: "plugin",
-  description: "Test description",
-  author: "Acme",
-  license: "MIT",
-  homepage: "https://example.com",
-  repository: "https://github.com/acme/p",
-  capabilities: ["tools", "themes"],
-  permissions: ["clipboard:read", "shell:execute"] as PluginPermission[],
-  optionalPermissions: ["network:fetch"] as PluginPermission[],
-  dependencies: { "@cognia/core": "^1.0.0" },
-  readme: "## Hello\nReadme body.",
-  signed: true,
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-describe("PluginMarketplaceDetail", () => {
-  it("renders nothing when entry is null even if open=true", () => {
-    const { container } = render(
-      <PluginMarketplaceDetail
-        open
-        entry={null}
-        installed={false}
-        installing={false}
-        onClose={() => {}}
-        onInstall={() => {}}
-        onUninstall={() => {}}
-      />
-    )
-    // Sheet still mounts a portal, but the body content is empty.
-    expect(container.textContent ?? "").toBe("")
-  })
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-  it("renders entry metadata + install CTA", () => {
-    render(
-      <PluginMarketplaceDetail
-        open
-        entry={detail}
-        installed={false}
-        installing={false}
-        onClose={() => {}}
-        onInstall={() => {}}
-        onUninstall={() => {}}
-      />
-    )
-    expect(screen.getByText("Plugin One")).toBeInTheDocument()
-    expect(screen.getByText("v1.0.0")).toBeInTheDocument()
-    expect(screen.getByText("MIT")).toBeInTheDocument()
-    expect(screen.getByText("install")).toBeInTheDocument()
-  })
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-  it("install click invokes onInstall", () => {
-    const onInstall = jest.fn()
-    render(
-      <PluginMarketplaceDetail
-        open
-        entry={detail}
-        installed={false}
-        installing={false}
-        onClose={() => {}}
-        onInstall={onInstall}
-        onUninstall={() => {}}
-      />
-    )
-    fireEvent.click(screen.getByText("install"))
-    expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
-  })
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
 
-  it("when installed, uninstall click invokes onUninstall", () => {
-    const onUninstall = jest.fn()
-    render(
-      <PluginMarketplaceDetail
-        open
-        entry={detail}
-        installed
-        installing={false}
-        onClose={() => {}}
-        onInstall={() => {}}
-        onUninstall={onUninstall}
-      />
-    )
-    fireEvent.click(screen.getByText("uninstall"))
-    expect(onUninstall).toHaveBeenCalledWith("p1")
-  })
-})
+  return (
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
+  )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}

@@ -56,7 +56,7 @@ lib/db/
   plugin-bridge.ts       # plugin_bridge (host ↔ plugin message log)
   plugin-types.ts        # row types
 
-components/plugin/       # Settings UI + marketplace
+components/plugins/       # Settings UI + marketplace
 ```
 
 ## Manifest format
@@ -245,7 +245,7 @@ If the plugin is disabled or uninstalled, its jobs are tombstoned; no fire happe
 - Reviews are fetched from the catalog; cached in `plugin_reviews`.
 - Install flow: download → verify signature → parse manifest → show permission dialog → unpack → register.
 
-The marketplace UI lives in `components/plugin/`.
+The marketplace UI lives in `components/plugins/`.
 
 ## Devtools
 
@@ -276,12 +276,12 @@ Plugins subscribe in their `onActivate()`.
 | Add a new permission    | `lib/plugin/contracts/permissions.ts`, gating in the relevant API namespace |
 | Add a new API namespace | `lib/plugin/api/<name>.ts`, register in `api/index.ts`                      |
 | Improve sandbox         | `lib/plugin/security/`, `lib/plugin/bridge/`                                |
-| Tweak marketplace UX    | `components/plugin/`, `lib/plugin/index.ts` (catalog client)                |
+| Tweak marketplace UX    | `components/plugins/`, `lib/plugin/index.ts` (catalog client)                |
 
 ## Tests
 
 - `lib/plugin/index.test.ts` — registry and lifecycle integration.
-- `lib/plugin/icon.test.ts` — icon parsing (SVG sanitiser).
+- `lib/plugin/utils/icon.test.ts` — icon parsing (SVG sanitiser).
 - Schema tests in `lib/plugin/contracts/`.
 
 ## Next

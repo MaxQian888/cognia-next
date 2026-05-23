@@ -76,8 +76,8 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
-import type { LogLevel } from "@/lib/logger"
-import type { LogFilterPreset, PresetTimeRange } from "./log-filter-presets"
+import type { LogLevel } from "@/lib/logging"
+import type { LogFilterPreset, PresetTimeRange } from "@/types/logging"
 import type { Density, ViewMode, PanelSource } from "@/hooks/logging/use-log-panel-filters"
 
 export type ExportFormat = "json" | "csv" | "text"

@@ -5,7 +5,7 @@
  * Maps to shadcn/ui Table
  */
 
-import React, { useMemo, useState, useCallback, memo } from "react"
+import React, { useContext, useMemo, useState, useCallback, memo } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import {
@@ -20,17 +20,23 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react"
 import type { A2UIComponentProps, A2UITableComponent, A2UITableColumn } from "@/types/a2ui/schema"
-import { useA2UIData } from "../a2ui-context"
-import { resolveArrayOrPath } from "@/lib/a2ui/data-model"
+import { A2UIDataCtx } from "@/hooks/a2ui/use-a2ui-context"
+import { resolveArrayOrPath, resolveStringOrPath, getValueByPath } from "@/lib/a2ui/data-model"
 
 type SortDirection = "asc" | "desc" | null
 
 export const A2UITable = memo(function A2UITable({
   component,
+  dataModel: dataModelProp,
   onAction,
   onDataChange,
 }: A2UIComponentProps<A2UITableComponent>) {
-  const { dataModel } = useA2UIData()
+  // Prefer the context dataModel when wrapped in an A2UIProvider; fall back to
+  // the prop so this table can also be synthesized standalone (e.g. by the
+  // RichOutput dispatcher's `data-exploration` profile, which projects its own
+  // dataModel through props without a surrounding surface).
+  const contextData = useContext(A2UIDataCtx)
+  const dataModel = contextData?.dataModel ?? dataModelProp ?? {}
   const t = useTranslations("a2ui")
 
   // Resolve data - can be static array or data-bound
@@ -42,8 +48,23 @@ export const A2UITable = memo(function A2UITable({
   }, [component.data, dataModel])
 
   const columns = component.columns || []
-  const [sortColumn, setSortColumn] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
+  // Sort state — when `sortKeyPath` / `sortDirectionPath` are set the dataModel
+  // is authoritative (explorer mode). Otherwise local state owns sort (paginated
+  // table mode).
+  const isPathSorted = Boolean(component.sortKeyPath || component.sortDirectionPath)
+  const [localSortColumn, setLocalSortColumn] = useState<string | null>(null)
+  const [localSortDirection, setLocalSortDirection] = useState<SortDirection>(null)
+  const pathSortColumn = component.sortKeyPath
+    ? (getValueByPath<string>(dataModel, component.sortKeyPath) ?? null)
+    : null
+  const pathSortDirection = component.sortDirectionPath
+    ? ((getValueByPath<string>(dataModel, component.sortDirectionPath) as SortDirection) ?? null)
+    : null
+  const sortColumn = isPathSorted ? pathSortColumn : localSortColumn
+  const sortDirection = isPathSorted ? pathSortDirection : localSortDirection
+  const description = component.description
+    ? resolveStringOrPath(component.description, dataModel, "")
+    : ""
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
   const pageSize = component.pageSize || 10
@@ -54,6 +75,20 @@ export const A2UITable = memo(function A2UITable({
   // Sort data
   const sortedData = useMemo(() => {
     if (!sortColumn || !sortDirection) return data
+
+    if (isPathSorted) {
+      // Explorer-mode: numeric-aware locale compare (matches former DataExplorer
+      // behavior so callers get the same ordering after the merge).
+      return [...data].sort((left, right) => {
+        const leftValue = String(left[sortColumn] ?? "")
+        const rightValue = String(right[sortColumn] ?? "")
+        const comparison = leftValue.localeCompare(rightValue, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+        return sortDirection === "desc" ? -comparison : comparison
+      })
+    }
 
     return [...data].sort((a, b) => {
       const aVal = a[sortColumn]
@@ -66,7 +101,7 @@ export const A2UITable = memo(function A2UITable({
       const comparison = aVal < bVal ? -1 : 1
       return sortDirection === "asc" ? comparison : -comparison
     })
-  }, [data, sortColumn, sortDirection])
+  }, [data, sortColumn, sortDirection, isPathSorted])
 
   // Paginate data
   const paginatedData = useMemo(() => {
@@ -91,14 +126,43 @@ export const A2UITable = memo(function A2UITable({
         }
       }
 
-      setSortColumn(nextSortColumn)
-      setSortDirection(nextSortDirection)
+      if (isPathSorted) {
+        // Explorer mode: dataModel is authoritative; never touch local state.
+        if (component.sortKeyPath) {
+          onDataChange(component.sortKeyPath, nextSortColumn ?? "")
+        }
+        if (component.sortDirectionPath) {
+          onDataChange(component.sortDirectionPath, nextSortDirection ?? "asc")
+        }
+      } else {
+        setLocalSortColumn(nextSortColumn)
+        setLocalSortDirection(nextSortDirection)
+      }
 
       if (component.sortAction) {
-        onAction(component.sortAction, { column: columnKey, direction: nextSortDirection })
+        // Preserve per-mode payload shape so callers don't see a breaking
+        // change after the DataExplorer → Table merge: explorer-mode emits
+        // `{ key, direction, ...actionMeta }`, paginated-mode emits
+        // `{ column, direction }`.
+        onAction(
+          component.sortAction,
+          isPathSorted
+            ? { ...component.actionMeta, key: columnKey, direction: nextSortDirection }
+            : { column: columnKey, direction: nextSortDirection }
+        )
       }
     },
-    [sortColumn, sortDirection, component.sortAction, onAction]
+    [
+      sortColumn,
+      sortDirection,
+      isPathSorted,
+      component.sortAction,
+      component.sortKeyPath,
+      component.sortDirectionPath,
+      component.actionMeta,
+      onAction,
+      onDataChange,
+    ]
   )
 
   const handleRowClick = useCallback(
@@ -236,7 +300,8 @@ export const A2UITable = memo(function A2UITable({
       className={cn("w-full", component.className)}
       style={component.style as React.CSSProperties}
     >
-      {component.title && <h3 className="mb-2 text-sm font-medium">{component.title}</h3>}
+      {component.title && <h3 className="mb-1 text-sm font-medium">{component.title}</h3>}
+      {description ? <p className="mb-2 text-xs text-muted-foreground">{description}</p> : null}
       <div className="rounded-md border">
         <Table>
           <TableHeader>

@@ -16,7 +16,7 @@ import { loggers } from "../core/logger"
 import { buildExtensionDescriptor } from "../core/descriptor"
 import { validatePluginManifest } from "../core/validation"
 import { compareVersions, satisfiesConstraint } from "./dependency-resolver"
-import { resolvePluginIcon } from "../icon"
+import { resolvePluginIcon } from "../utils/icon"
 import { getPluginSignatureVerifier } from "../security/signature"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 

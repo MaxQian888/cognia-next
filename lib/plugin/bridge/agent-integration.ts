@@ -3,7 +3,7 @@
  * Integrates plugin-provided modes, tools, and capabilities with the agent system
  */
 
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import type { PluginTool, Plugin } from "@/types/plugin"
 import { trackPluginEvent } from "../utils/analytics"

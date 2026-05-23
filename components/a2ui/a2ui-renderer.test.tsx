@@ -235,14 +235,6 @@ jest.mock("./data/a2ui-list", () => ({
   A2UIList: () => <ul data-testid="a2ui-list" />,
 }))
 
-jest.mock("./data/a2ui-data-explorer", () => ({
-  A2UIDataExplorer: ({ component }: A2UIComponentProps) => (
-    <div data-testid="a2ui-data-explorer" data-component-id={component.id}>
-      Data Explorer
-    </div>
-  ),
-}))
-
 jest.mock("./layout/a2ui-stepper-shell", () => ({
   A2UIStepperShell: ({ component }: A2UIComponentProps) => (
     <div data-testid="a2ui-stepper-shell" data-component-id={component.id}>
@@ -299,7 +291,6 @@ describe("A2UIRenderer", () => {
       { id: "comparison-1", component: "ComparisonCards", testId: "a2ui-comparison-cards" },
       { id: "stepper-1", component: "StepperShell", testId: "a2ui-stepper-shell" },
       { id: "mockup-1", component: "MockupFrame", testId: "a2ui-mockup-frame" },
-      { id: "explorer-1", component: "DataExplorer", testId: "a2ui-data-explorer" },
       { id: "status-1", component: "WidgetStatus", testId: "a2ui-widget-status" },
     ]
 
@@ -462,7 +453,6 @@ describe("getRegisteredComponentTypes", () => {
     expect(types).toContain("ComparisonCards")
     expect(types).toContain("StepperShell")
     expect(types).toContain("MockupFrame")
-    expect(types).toContain("DataExplorer")
     expect(types).toContain("WidgetStatus")
   })
 

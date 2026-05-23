@@ -1,6 +1,6 @@
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { type CustomModeConfig } from "../definitions"
 import { analyzeModeDescription } from "../helpers"
 import { initialState } from "../initial-state"

@@ -12,7 +12,7 @@
  * plugin store don't ripple into every consumer.
  */
 
-import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
 export interface PluginMetadata {
   id: string

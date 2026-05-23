@@ -6,7 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type {
   ExtensionCompatibilityDiagnostic,
   ExtensionDescriptor,
@@ -39,7 +39,7 @@ import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/brid
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie-bridge"
+import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { purgeMessagePartRenderersForPlugin } from "@/lib/plugin/api/message-part-api"

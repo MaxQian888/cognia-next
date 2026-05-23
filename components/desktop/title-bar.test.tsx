@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),

@@ -214,7 +214,7 @@ Three commands cover the three sources:
 | Source     | Rust command                                     | TS entry                                                     | Trust check                                                                              |
 | ---------- | ------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
 | Local file | `plugin_install` (existing) → `plugin_wasm_load` | `installWasmPluginFromLocalFile` + `InstallWasmPluginButton` | manifest validation only                                                                 |
-| HTTP URL   | `plugin_wasm_install_from_url`                   | `installFromUrl` + `InstallFromUrlDialog`                    | Ed25519 detached signature + `trustedPublishers` ledger                                  |
+| HTTP URL   | `plugin_wasm_install_from_url`                   | `installFromUrl` + `PluginSignedInstallFromUrlDialog`        | Ed25519 detached signature + `trustedPublishers` ledger                                  |
 | Git repo   | `plugin_wasm_install_from_git`                   | `installFromGit`                                             | runtime detection of `cargo-component` toolchain; surfaced as `GitToolchainMissingError` |
 
 Signed bundles ship as `<bundle>.zip` + `<bundle>.zip.sig`. The signature

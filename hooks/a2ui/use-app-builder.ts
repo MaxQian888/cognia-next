@@ -20,7 +20,6 @@ import {
   searchTemplates,
   createAppFromTemplate,
   generateTemplateId,
-  type A2UIAppTemplate,
 } from "@/lib/a2ui/templates"
 import type {
   A2UIComponent,
@@ -366,5 +365,3 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     setActiveApp: a2ui.setActiveSurface,
   }
 }
-
-export type { A2UIAppTemplate }

@@ -6,7 +6,7 @@ description: How to write a cognia-next plugin that contributes a new messaging-
 # Extending Platform Connectors with Plugins
 
 cognia-next ships five built-in platform adapters (Telegram, Discord, Slack, Lark, OneBot). The
-**Plugin Connector Bridge** (`lib/plugin/connectors-bridge.ts`) lets any installed plugin
+**Plugin Connector Bridge** (`lib/plugin/bridge/connectors-bridge.ts`) lets any installed plugin
 contribute additional adapters—like Mastodon, Bluesky, Matrix, or any internal messaging system—
 without touching the cognia-next source.
 
@@ -57,7 +57,7 @@ without touching the cognia-next source.
 ```ts
 // dist/index.ts (plugin main entry)
 import type { PlatformAdapter } from "@/types/connectors"
-import type { PluginAdapterContext } from "@/lib/plugin/connectors-bridge"
+import type { PluginAdapterContext } from "@/lib/plugin/bridge/connectors-bridge"
 
 export function createMastodonAdapter(ctx: PluginAdapterContext): PlatformAdapter {
   const { connectorDef } = ctx
@@ -107,7 +107,10 @@ the plugin. You do not need to call it manually — the `PluginManager` handles 
 For debugging you can call the bridge directly:
 
 ```ts
-import { registerPluginAdapters, unregisterPluginAdapters } from "@/lib/plugin/connectors-bridge"
+import {
+  registerPluginAdapters,
+  unregisterPluginAdapters,
+} from "@/lib/plugin/bridge/connectors-bridge"
 import manifest from "./manifest.json"
 import * as exports from "./dist/index"
 
@@ -156,7 +159,7 @@ convention.
 ## Reference
 
 - `types/plugin/plugin.ts` — `PluginConnectorDef`, `PluginCapability`
-- `lib/plugin/connectors-bridge.ts` — `registerPluginAdapters`, `unregisterPluginAdapters`
+- `lib/plugin/bridge/connectors-bridge.ts` — `registerPluginAdapters`, `unregisterPluginAdapters`
 - `types/connectors/adapter.ts` — `PlatformAdapter` interface
 - `lib/connectors/bus.ts` — `ConnectorBus` (singleton)
 - ADR-0009 (`docs/content/docs/adr/0009-platform-connectors.md`) — full architecture decision

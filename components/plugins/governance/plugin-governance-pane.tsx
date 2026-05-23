@@ -14,9 +14,9 @@
 
 import { useTranslations } from "next-intl"
 import { usePluginsStore } from "@/stores/plugins"
-import { PluginPermissionsTab } from "../plugin-permissions-tab"
-import { PluginScheduledJobs } from "../plugin-scheduled-jobs"
-import { PluginAnalytics } from "../plugin-analytics"
+import { PluginPermissionsTab } from "../detail/plugin-permissions-tab"
+import { PluginScheduledJobs } from "../detail/plugin-scheduled-jobs"
+import { PluginAnalytics } from "../detail/plugin-analytics"
 import { PluginAuditLog } from "./plugin-audit-log"
 
 export function PluginGovernancePane() {

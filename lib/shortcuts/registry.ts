@@ -10,7 +10,7 @@
 
 import { create } from "zustand"
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 
 import { findConflicts } from "./conflict"

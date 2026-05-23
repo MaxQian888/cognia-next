@@ -5,7 +5,7 @@ description: 统一日志栈、OpenTelemetry 薄壳、原生平台日志桥（Wi
 
 # 可观测性
 
-Cognia 把"日志能去哪里、查得到哪条"这件事抽成一条统一管线：浏览器侧 `lib/logger/` 是单一入口，几路 transport（console / IndexedDB / remote / native / OTel / Langfuse）按运行时按需挂载；Rust 侧 `src-tauri/src/logging/` 接管 fern 分发 + tauri-plugin-log，把记录再镜像到 OS 平台日志器。这页讲清楚谁负责哪一层、日志怎么从一次 `logger.info(...)` 走到 Windows 事件查看器。
+Cognia 把"日志能去哪里、查得到哪条"这件事抽成一条统一管线：浏览器侧 `lib/logging/` 是单一入口，几路 transport（console / IndexedDB / remote / native / OTel / Langfuse）按运行时按需挂载；Rust 侧 `src-tauri/src/logging/` 接管 fern 分发 + tauri-plugin-log，把记录再镜像到 OS 平台日志器。这页讲清楚谁负责哪一层、日志怎么从一次 `logger.info(...)` 走到 Windows 事件查看器。
 
 <TLDR>
   浏览器侧：`createLogger("module")` 拿到 `Logger`；调 `logger.info / warn / error / fatal` 时进入
@@ -46,20 +46,20 @@ flowchart TB
 
 ## 浏览器侧入口
 
-`lib/logger/index.ts` 暴露三组消费方式：
+`lib/logging/index.ts` 暴露三组消费方式：
 
-```ts title="lib/logger/index.ts"
+```ts title="lib/logging/index.ts"
 // 1) 默认 app logger
-import { logger } from "@/lib/logger"
+import { logger } from "@/lib/logging"
 logger.info("ready")
 
 // 2) 模块化 logger（25 个常用模块预创建）
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 loggers.chat.warn("retry", { attempt: 2 })
 loggers.tts.error("synthesis failed", err)
 
 // 3) 自定义模块
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 const log = createLogger("my-feature")
 ```
 
@@ -71,7 +71,7 @@ const log = createLogger("my-feature")
 
 `StructuredLogEntry` 是统一对象，traced 后通过 transport 链：
 
-```ts title="lib/logger/types.ts"
+```ts title="lib/logging/types.ts"
 export interface StructuredLogEntry {
   id: string // 唯一 id
   timestamp: string // ISO
@@ -93,9 +93,9 @@ export interface StructuredLogEntry {
 
 ## 上下文 / Trace ID
 
-`lib/logger/context.ts` 维护一个隐式上下文：
+`lib/logging/context.ts` 维护一个隐式上下文：
 
-```ts title="lib/logger/context.ts"
+```ts title="lib/logging/context.ts"
 logContext.newTraceId()
 logContext.set({ userId: "u_123" })
 logger.info("processing") // 自动带上 traceId + userId
@@ -108,7 +108,7 @@ await traced(async () => {
 
 `generateTraceId()` 用 base36 短 id，足够开发期看清"哪几条日志属于同一次 send"。
 
-`lib/logger/runtime.ts` 推断当前运行时（`browser / server / tauri / mcp / plugin / internal / unknown`），自动塞进每条 entry，便于在面板上按 origin 着色。
+`lib/logging/runtime.ts` 推断当前运行时（`browser / server / tauri / mcp / plugin / internal / unknown`），自动塞进每条 entry，便于在面板上按 origin 着色。
 
 ## 采样
 
@@ -177,7 +177,7 @@ interface Transport {
 
 ### LangfuseTransport
 
-`transports/langfuse-transport.ts` —— 专门为 LLM 调用准备的可观测层；把 traceId 关联的 `ai / chat / agent` 模块日志映射成 Langfuse trace + observation。`lib/logger/loggers.ai` 通常配 Langfuse。
+`transports/langfuse-transport.ts` —— 专门为 LLM 调用准备的可观测层；把 traceId 关联的 `ai / chat / agent` 模块日志映射成 Langfuse trace + observation。`lib/logging/loggers.ai` 通常配 Langfuse。
 
 ## Rust 侧分发
 
@@ -231,7 +231,7 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 - `chart-config.ts` —— Recharts 图表用的颜色 / 边距常量（不是 OTel，但和监控 UI 同一域）。
 - `format-utils.ts` —— `formatTimestamp / formatBytesCompact / formatRate / formatTokens` 几个面板用的格式化工具。
 
-完整 metrics / traces 通过 `lib/logger/transports/otel-transport.ts` 提交。AI provider 调用、Twin 流水线、调度器执行都会 emit span，dev 控制台可见。这一层目前是占位形态，留待接入完整 OTLP backend 后扩展。
+完整 metrics / traces 通过 `lib/logging/transports/otel-transport.ts` 提交。AI provider 调用、Twin 流水线、调度器执行都会 emit span，dev 控制台可见。这一层目前是占位形态，留待接入完整 OTLP backend 后扩展。
 
 ## 日志面板 UI
 
@@ -256,7 +256,7 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
 `bootstrap.ts` 在 `LoggerProvider`（`app/layout.tsx` 中）启动期调用：
 
-```ts title="lib/logger/bootstrap.ts"
+```ts title="lib/logging/bootstrap.ts"
 export function bootstrapLogger(settings: AppSettings) {
   // 1. applyLoggingSettings → 同步 minLevel / sampling / 启用的 transport
   // 2. 注册 transport：console 总开，indexeddb 默认开，其余按设置
@@ -301,9 +301,9 @@ export function bootstrapLogger(settings: AppSettings) {
 
 | 目标                 | 文件                                                                                                                             |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 加新 transport       | 在 `lib/logger/transports/<name>-transport.ts` 实现 `Transport` → 在 `transports/index.ts` 导出 → 在 `bootstrap.ts` 注册路径添加 |
-| 调默认采样率         | `lib/logger/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                 |
-| 新增脱敏字段         | `lib/logger/redaction.ts` 的字段名表 + 正则表                                                                                    |
+| 加新 transport       | 在 `lib/logging/transports/<name>-transport.ts` 实现 `Transport` → 在 `transports/index.ts` 导出 → 在 `bootstrap.ts` 注册路径添加 |
+| 调默认采样率         | `lib/logging/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                 |
+| 新增脱敏字段         | `lib/logging/redaction.ts` 的字段名表 + 正则表                                                                                    |
 | 改 Rust → 平台日志桥 | `src-tauri/src/logging/platform/<os>.rs`                                                                                         |
-| 日志面板新过滤维度   | `components/logging/log-filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                            |
-| OTLP collector 配置  | `lib/logger/transports/otel-transport.ts` + 启动期 env                                                                           |
+| 日志面板新过滤维度   | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                            |
+| OTLP collector 配置  | `lib/logging/transports/otel-transport.ts` + 启动期 env                                                                           |

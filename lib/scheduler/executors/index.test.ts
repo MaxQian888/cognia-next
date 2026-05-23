@@ -116,7 +116,7 @@ jest.mock("../task-scheduler", () => ({
   registerTaskExecutor: (...args: unknown[]) => registerTaskExecutorMock(...args),
 }))
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const stub: Record<string, unknown> = {
     info: jest.fn(),
     warn: jest.fn(),

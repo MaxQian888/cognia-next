@@ -40,13 +40,13 @@ import {
   SortAsc,
   SortDesc,
 } from "lucide-react"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { useA2UIAppBuilder, type A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import { useAppGalleryFilter } from "@/hooks/a2ui/use-app-gallery-filter"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import type { SortField } from "@/hooks/a2ui/use-app-gallery-filter"
 import { A2UIInlineSurface } from "./a2ui-surface"
-import { AppCard } from "./app-card"
+import { AppCard } from "./a2ui-app-card"
 import { AppDetailDialog } from "./app-detail-dialog"
 import { captureSurfaceThumbnail } from "@/lib/a2ui/thumbnail"
 import type { AppGalleryProps } from "@/types/a2ui/app"

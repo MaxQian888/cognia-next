@@ -5,7 +5,7 @@ description: Unified logging pipeline, OpenTelemetry thin wrapper, native platfo
 
 # Observability
 
-Cognia abstracts "where logs go and which entry you can find" into a single unified pipeline: on the browser side, `lib/logger/` is the single entry point, with several transports (console / IndexedDB / remote / native / OTel / Langfuse) mounted on demand at runtime; on the Rust side, `src-tauri/src/logging/` takes over fern dispatch + tauri-plugin-log, mirroring records into the OS platform logger. This page explains who owns which layer and how a single `logger.info(...)` call travels all the way to the Windows Event Viewer.
+Cognia abstracts "where logs go and which entry you can find" into a single unified pipeline: on the browser side, `lib/logging/` is the single entry point, with several transports (console / IndexedDB / remote / native / OTel / Langfuse) mounted on demand at runtime; on the Rust side, `src-tauri/src/logging/` takes over fern dispatch + tauri-plugin-log, mirroring records into the OS platform logger. This page explains who owns which layer and how a single `logger.info(...)` call travels all the way to the Windows Event Viewer.
 
 <TLDR>
   Browser side: `createLogger("module")` returns a `Logger`; calling `logger.info / warn / error / fatal` enters the unified pipeline in `core.ts`, which performs module registration, sampling, PII redaction, source location capture, then fans out to registered transports. Transports include console, IndexedDB (persistent in browser), remote (with retry queue), native (Tauri event bridge), OTel (OpenTelemetry), and Langfuse. The Rust side uses `fern` + `tauri-plugin-log` to dispatch the same record to stdout / file / webview (back to frontend) / platform logger. The settings UI toggles transports and sampling rates in real time; the log panel `components/logging/log-panel.tsx` aggregates multi-source records and supports filtering, grouping, and export.
@@ -40,20 +40,20 @@ flowchart TB
 
 ## Browser-Side Entry Point
 
-`lib/logger/index.ts` exposes three consumption patterns:
+`lib/logging/index.ts` exposes three consumption patterns:
 
-```ts title="lib/logger/index.ts"
+```ts title="lib/logging/index.ts"
 // 1) Default app logger
-import { logger } from "@/lib/logger"
+import { logger } from "@/lib/logging"
 logger.info("ready")
 
 // 2) Modular loggers (25 common modules pre-created)
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 loggers.chat.warn("retry", { attempt: 2 })
 loggers.tts.error("synthesis failed", err)
 
 // 3) Custom module
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 const log = createLogger("my-feature")
 ```
 
@@ -65,7 +65,7 @@ The `loggers` pre-created modules: `app · ai · chat · agent · mcp · plugin 
 
 `StructuredLogEntry` is the unified object, traced and then passed through the transport chain:
 
-```ts title="lib/logger/types.ts"
+```ts title="lib/logging/types.ts"
 export interface StructuredLogEntry {
   id: string // unique id
   timestamp: string // ISO
@@ -87,9 +87,9 @@ export interface StructuredLogEntry {
 
 ## Context / Trace ID
 
-`lib/logger/context.ts` maintains an implicit context:
+`lib/logging/context.ts` maintains an implicit context:
 
-```ts title="lib/logger/context.ts"
+```ts title="lib/logging/context.ts"
 logContext.newTraceId()
 logContext.set({ userId: "u_123" })
 logger.info("processing") // automatically carries traceId + userId
@@ -102,7 +102,7 @@ await traced(async () => {
 
 `generateTraceId()` uses base36 short ids, sufficient for development to see "which log entries belong to the same send".
 
-`lib/logger/runtime.ts` infers the current runtime (`browser / server / tauri / mcp / plugin / internal / unknown`) and automatically injects it into every entry, enabling origin-based coloring in the panel.
+`lib/logging/runtime.ts` infers the current runtime (`browser / server / tauri / mcp / plugin / internal / unknown`) and automatically injects it into every entry, enabling origin-based coloring in the panel.
 
 ## Sampling
 
@@ -171,7 +171,7 @@ interface Transport {
 
 ### LangfuseTransport
 
-`transports/langfuse-transport.ts` — an observability layer purpose-built for LLM calls; maps traceId-correlated `ai / chat / agent` module logs into Langfuse trace + observation. `lib/logger/loggers.ai` is typically paired with Langfuse.
+`transports/langfuse-transport.ts` — an observability layer purpose-built for LLM calls; maps traceId-correlated `ai / chat / agent` module logs into Langfuse trace + observation. `lib/logging/loggers.ai` is typically paired with Langfuse.
 
 ## Rust-Side Dispatch
 
@@ -225,7 +225,7 @@ The `webview` target of `tauri-plugin-log` sends Rust-side records (including su
 - `chart-config.ts` — color / margin constants for Recharts charts (not OTel itself, but in the same monitoring UI domain).
 - `format-utils.ts` — formatting utilities for the panel: `formatTimestamp / formatBytesCompact / formatRate / formatTokens`.
 
-Full metrics / traces are submitted via `lib/logger/transports/otel-transport.ts`. AI provider calls, Twin pipeline stages, and scheduler executions all emit spans, visible in the dev console. This layer is currently placeholder-shaped, ready to expand once a full OTLP backend is connected.
+Full metrics / traces are submitted via `lib/logging/transports/otel-transport.ts`. AI provider calls, Twin pipeline stages, and scheduler executions all emit spans, visible in the dev console. This layer is currently placeholder-shaped, ready to expand once a full OTLP backend is connected.
 
 ## Log Panel UI
 
@@ -250,7 +250,7 @@ Time range presets: `15m / 1h / 6h / 24h / 7d`, defined by the `TIME_RANGES` con
 
 `bootstrap.ts` is called during `LoggerProvider` startup (inside `app/layout.tsx`):
 
-```ts title="lib/logger/bootstrap.ts"
+```ts title="lib/logging/bootstrap.ts"
 export function bootstrapLogger(settings: AppSettings) {
   // 1. applyLoggingSettings → sync minLevel / sampling / enabled transports
   // 2. Register transports: console always on, indexeddb on by default, others per settings
@@ -295,9 +295,9 @@ Each transport can expose a `TransportHealthSnapshot`:
 
 | Goal                        | File                                                                                                                            |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new transport         | Implement `Transport` in `lib/logger/transports/<name>-transport.ts` → export in `transports/index.ts` → add registration path in `bootstrap.ts` |
-| Adjust default sampling rate| `lib/logger/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                |
-| Add new redaction fields    | Field name list + regex list in `lib/logger/redaction.ts`                                                                       |
+| Add a new transport         | Implement `Transport` in `lib/logging/transports/<name>-transport.ts` → export in `transports/index.ts` → add registration path in `bootstrap.ts` |
+| Adjust default sampling rate| `lib/logging/sampling.ts:DEFAULT_SAMPLING_CONFIG`                                                                                |
+| Add new redaction fields    | Field name list + regex list in `lib/logging/redaction.ts`                                                                       |
 | Modify Rust → platform log bridge | `src-tauri/src/logging/platform/<os>.rs`                                                                                  |
-| New log panel filter dimension | `components/logging/log-filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                       |
-| OTLP collector configuration| `lib/logger/transports/otel-transport.ts` + startup env                                                                         |
+| New log panel filter dimension | `lib/logging/filter-presets.ts` + `hooks/logging/use-log-panel-filters.ts`                                       |
+| OTLP collector configuration| `lib/logging/transports/otel-transport.ts` + startup env                                                                         |

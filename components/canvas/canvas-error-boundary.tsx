@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface ErrorBoundaryProps {
   children: ReactNode

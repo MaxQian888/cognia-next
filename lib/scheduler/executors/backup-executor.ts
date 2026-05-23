@@ -32,7 +32,7 @@ import { appendBackupHistory } from "@/lib/db/backup-history"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

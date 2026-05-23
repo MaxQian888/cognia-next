@@ -2,7 +2,7 @@
  * Snippet Registry - Code snippets for quick insertion in Canvas
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface CodeSnippet {
   id: string

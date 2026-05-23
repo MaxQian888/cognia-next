@@ -33,7 +33,7 @@ import { runGithubPoll, type GhTable } from "./github-poll"
 import { setIssueLoopDriver } from "./workflow/issue-loop"
 import { SidecarIssueLoopDriver } from "./drivers/sidecar-driver"
 import { GithubAdapter } from "./adapter/github-adapter"
-import type { PluginAdapterContext } from "@/lib/plugin/connectors-bridge"
+import type { PluginAdapterContext } from "@/lib/plugin/bridge/connectors-bridge"
 // Post-ADR-0026 migration: nodes are no longer registered via top-level
 // side effects. The module collects descriptors at load time; we call
 // `registerGithubNodes()` in activate / `unregisterGithubNodes()` in

@@ -28,7 +28,7 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.shell
 

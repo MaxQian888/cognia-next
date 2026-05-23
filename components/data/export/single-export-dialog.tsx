@@ -31,7 +31,7 @@ import { useCustomThemeStore } from "@/stores/theme"
 import type { ChatSession } from "@/lib/claude/types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("data-export")
 

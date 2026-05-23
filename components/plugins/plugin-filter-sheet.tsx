@@ -1,237 +1,112 @@
 "use client"
 
-// Right-side filter sheet that drives the shared `usePluginsStore.filters`.
-// Mirrors `components/skills/skill-filter-sheet.tsx` but exposes plugin-
-// specific axes: capability / permission / source / status / signed-only /
-// hasUpdate / sort.
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { useTranslations } from "next-intl"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from "@/components/ui/sheet"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { usePluginsStore } from "@/stores/plugins"
-import { PERMISSION_GROUPS } from "@/lib/plugin/security/permission-guard"
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
-const CAPABILITY_OPTIONS = [
-  "tools",
-  "components",
-  "modes",
-  "skills",
-  "media",
-  "canvas",
-  "ai-provider",
-  "themes",
-  "commands",
-  "hooks",
-  "processors",
-  "providers",
-  "exporters",
-  "importers",
-  "a2ui",
-  "python",
-  "scheduler",
-  "external-agent-preset",
-] as const
-
-const STATUS_OPTIONS = [
-  "discovered",
-  "installed",
-  "loading",
-  "loaded",
-  "enabling",
-  "enabled",
-  "disabling",
-  "disabled",
-  "unloading",
-  "error",
-  "updating",
-] as const
-
-const SOURCE_OPTIONS = ["builtin", "local", "marketplace", "git", "dev"] as const
-
-const SORT_OPTIONS = ["name", "updated", "usage", "rating"] as const
-
-export function PluginFilterSheet() {
-  const t = useTranslations("plugins.filterSheet")
-  const open = usePluginsStore((s) => s.filterSheetOpen)
-  const setOpen = usePluginsStore((s) => s.setFilterSheetOpen)
-  const filters = usePluginsStore((s) => s.filters)
-  const setFilters = usePluginsStore((s) => s.setFilters)
-  const resetFilters = usePluginsStore((s) => s.resetFilters)
-
-  const allPermissions = Object.values(PERMISSION_GROUPS).flat()
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>{t("title")}</SheetTitle>
-          <SheetDescription>{t("description")}</SheetDescription>
-        </SheetHeader>
-
-        <div className="space-y-4 mt-4">
-          <FilterField label={t("query")}>
-            <Input
-              value={filters.query}
-              onChange={(e) => setFilters({ query: e.target.value })}
-              placeholder={t("queryPlaceholder")}
-            />
-          </FilterField>
-
-          <FilterField label={t("capability")}>
-            <Select value={filters.capability} onValueChange={(v) => setFilters({ capability: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("any")}</SelectItem>
-                {CAPABILITY_OPTIONS.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
-
-          <FilterField label={t("permission")}>
-            <Select value={filters.permission} onValueChange={(v) => setFilters({ permission: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("any")}</SelectItem>
-                {allPermissions.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
-
-          <FilterField label={t("source")}>
-            <Select value={filters.source} onValueChange={(v) => setFilters({ source: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("any")}</SelectItem>
-                {SOURCE_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
-
-          <FilterField label={t("status")}>
-            <Select value={filters.status} onValueChange={(v) => setFilters({ status: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("any")}</SelectItem>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
-
-          <Separator />
-
-          <ToggleField
-            id="filter-signed-only"
-            label={t("signedOnly")}
-            checked={filters.signedOnly}
-            onCheckedChange={(v) => setFilters({ signedOnly: v })}
-          />
-          <ToggleField
-            id="filter-has-update"
-            label={t("hasUpdate")}
-            checked={filters.hasUpdate}
-            onCheckedChange={(v) => setFilters({ hasUpdate: v })}
-          />
-
-          <Separator />
-
-          <FilterField label={t("sort")}>
-            <Select
-              value={filters.sort}
-              onValueChange={(v) => setFilters({ sort: v as (typeof SORT_OPTIONS)[number] })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {t(`sortMode.${s}` as never)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FilterField>
-        </div>
-
-        <SheetFooter className="mt-4">
-          <Button variant="outline" onClick={() => resetFilters()}>
-            {t("reset")}
-          </Button>
-          <Button onClick={() => setOpen(false)}>{t("apply")}</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  )
+interface Props {
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
+
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
+  }
+
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      {children}
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
+    >
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
     </div>
   )
 }
 
-function ToggleField({
-  id,
-  label,
-  checked,
-  onCheckedChange,
-}: {
-  id: string
-  label: string
-  checked: boolean
-  onCheckedChange: (v: boolean) => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Label htmlFor={id} className="text-xs">
-        {label}
-      </Label>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  )
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

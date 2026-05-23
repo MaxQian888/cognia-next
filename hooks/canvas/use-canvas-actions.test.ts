@@ -29,7 +29,7 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: settingsRef.current }),
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 

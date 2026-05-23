@@ -111,7 +111,7 @@ jest.mock("@/lib/ui/avatar", () => ({
   avatarGlyph: () => "A",
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     chat: { error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
   },

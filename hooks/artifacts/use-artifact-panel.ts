@@ -20,7 +20,7 @@ import { isTauri } from "@/lib/tauri"
 import { revealInExplorer, openPath } from "@/lib/tauri/opener"
 import { downloadFile } from "@/lib/files/download"
 import { getArtifactExtension, canPreview } from "@/lib/artifacts"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import {
   getArtifactRuntimeAdapter,
   getPreferredArtifactExportFormat,

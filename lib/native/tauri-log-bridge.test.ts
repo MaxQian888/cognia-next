@@ -31,7 +31,7 @@ const nativeChildLoggerStub = {
 nativeLoggerStub.info = jest.fn()
 const childMock = jest.fn((..._args: unknown[]) => nativeChildLoggerStub)
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const stub = {
     trace: jest.fn(),
     debug: jest.fn(),

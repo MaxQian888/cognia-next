@@ -15,7 +15,7 @@ jest.mock("next-intl", () => ({
 jest.mock("../plugin-panel-toolbar", () => ({
   PluginPanelToolbar: () => <div data-testid="plugin-panel-toolbar" />,
 }))
-jest.mock("../plugin-category-sheet", () => ({
+jest.mock("../dialogs/plugin-category-sheet", () => ({
   PluginCategorySheet: ({ className }: { className?: string }) => (
     <div data-testid="plugin-category-sheet" className={className} />
   ),

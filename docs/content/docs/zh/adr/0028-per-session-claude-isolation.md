@@ -71,7 +71,7 @@ T1 拦截路径：新建 in-tree 插件 `plugins/cognia-sandboxed-tools/`，注�
 
 #### T3 —— 纯 WASM 插件走 Wasmtime + WASI
 
-新建 `lib/plugin/wasm-runtime.ts`，通过 `@bytecodealliance/jco`（或 `wasmtime` 的 Node binding）跑 WASM 插件；host import 限定在 `lib/plugin/security/wasm-grant.ts` 已有的 preopens。现有 `wasm-grant` 账本原样复用。
+新建 `lib/plugin/core/wasm-runtime.ts`，通过 `@bytecodealliance/jco`（或 `wasmtime` 的 Node binding）跑 WASM 插件；host import 限定在 `lib/plugin/security/wasm-grant.ts` 已有的 preopens。现有 `wasm-grant` 账本原样复用。
 
 #### T4 —— e2b Firecracker microVM 作为 opt-in 强隔离层
 

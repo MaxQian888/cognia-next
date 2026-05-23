@@ -9,11 +9,11 @@ import {
   mergeWithBuiltinModes,
   type PluginAgentTool,
 } from "./agent-integration"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 // Mock the plugin store
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },

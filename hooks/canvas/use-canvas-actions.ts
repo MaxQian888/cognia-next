@@ -18,7 +18,7 @@ import {
 } from "@/lib/ai/generation/canvas-actions"
 import { getProviderModel } from "@/lib/ai/core/client"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export interface CanvasActionInvocation {
   actionType: CanvasActionType

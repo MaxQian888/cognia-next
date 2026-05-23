@@ -13,7 +13,7 @@ import { initialState } from "./initial-state"
 import * as barrel from "./index"
 import { useCustomModeStore } from "./store"
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

@@ -58,7 +58,7 @@ import {
   LOCAL_PACK_PLUGIN_ID,
 } from "@/lib/plugin/character-pack/local-pack-store"
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
-import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
 import {
   Accordion,
@@ -85,7 +85,7 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
 

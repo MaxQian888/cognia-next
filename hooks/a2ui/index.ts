@@ -3,7 +3,7 @@
  * React hooks for A2UI app building and management
  */
 
-export { useA2UIAppBuilder, type A2UIAppInstance, type A2UIAppTemplate } from "./use-app-builder"
+export { useA2UIAppBuilder, type A2UIAppInstance } from "./use-app-builder"
 export { useA2UI } from "./use-a2ui"
 
 // Context hooks (extracted from components/a2ui/a2ui-context.tsx)

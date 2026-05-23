@@ -35,8 +35,8 @@ const RUNTIME_RISK_AUDITS: readonly PluginRuntimeRiskAudit[] = [
     description:
       "Marketplace discovery can still enter a fallback-mock source mode that risks presenting non-verified inventory as available.",
     codePaths: [
-      "stores/plugin/plugin-marketplace-store.ts",
-      "components/plugin/marketplace/plugin-marketplace.tsx",
+      "stores/plugin-runtime/plugin-marketplace-store.ts",
+      "components/plugins/marketplace/plugin-marketplace.tsx",
     ],
     evidence: [
       "openspec/changes/improve-existing-plugin-system-end-to-end-validity/specs/plugin-marketplace-experience/spec.md",

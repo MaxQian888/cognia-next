@@ -5,12 +5,12 @@
 
 import { z } from "zod"
 import { PluginToolsBridge, createPluginToolsBridge } from "./tools-bridge"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import type { PluginRegistry } from "../core/registry"
 import type { PluginTool, PluginToolDef } from "@/types/plugin"
 
 // Mock plugin store
-jest.mock("@/stores/plugin", () => ({
+jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: jest.fn(),
   },

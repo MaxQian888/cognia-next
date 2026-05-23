@@ -54,7 +54,7 @@ export const DISCORD_CAPS: readonly Capability[] = [
  *     only through Modals — modals are interaction-launched, not
  *     assistant-pushed, so a surface-as-message projection can't host
  *     them.
- *   - DatePicker / TimePicker / Slider / Table / Chart / DataExplorer.
+ *   - DatePicker / TimePicker / Slider / Table / Chart.
  *   - Tabs / Accordion / Dialog / Drawer / Sheet / Sidebar / Collapsible.
  */
 export const DISCORD_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({

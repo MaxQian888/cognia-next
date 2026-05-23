@@ -39,14 +39,14 @@ import { useTranslations } from "next-intl"
 
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
-import { PluginFilterSheet } from "./plugin-filter-sheet"
-import { PluginDeleteDialog } from "./plugin-delete-dialog"
+import { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
+import { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
 import { PluginPermissionReview } from "./plugin-permission-review"
-import { PluginConfigForm } from "./plugin-config-form"
-import { PluginImportDialog } from "./plugin-import-dialog"
-import { PluginConflictDialog } from "./plugin-conflict-dialog"
-import { PluginUpdateDialog } from "./plugin-update-dialog"
-import { PluginRollbackDialog } from "./plugin-rollback-dialog"
+import { PluginConfigForm } from "./detail/plugin-config-form"
+import { PluginImportDialog } from "./dialogs/plugin-import-dialog"
+import { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
+import { PluginUpdateDialog } from "./dialogs/plugin-update-dialog"
+import { PluginRollbackDialog } from "./dialogs/plugin-rollback-dialog"
 import { PluginExtensionSlot } from "./plugin-extension-slot"
 
 // 3-pane shell pieces.

@@ -13,7 +13,7 @@ import {
   createDefaultSearchUsageStats,
   type SearchProviderType,
 } from "@/lib/search/types"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.usage")
 

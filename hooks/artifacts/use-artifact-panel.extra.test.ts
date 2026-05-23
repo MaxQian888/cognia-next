@@ -27,7 +27,7 @@ jest.mock("@tauri-apps/api/path", () => ({
 
 import { useArtifactPanelState } from "./use-artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 beforeEach(() => {
   localStorage.clear()

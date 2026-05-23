@@ -10,7 +10,7 @@ import { deleteSkill, listSkillsByIds, setSkillStatus } from "@/lib/db/skills"
 import { useSkillsStore } from "@/stores/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 /**
  * Floating action bar shown when the user has selected one or more skills.

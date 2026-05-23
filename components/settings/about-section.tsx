@@ -9,7 +9,7 @@ import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { toast } from "sonner"
 import { DownloadIcon, RefreshCwIcon, RocketIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export function AboutSection() {
   const t = useTranslations("settings.about")

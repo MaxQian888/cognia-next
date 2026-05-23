@@ -4,7 +4,7 @@
  */
 
 import { useCallback } from "react"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { A2UIAppInstance } from "./types"
 
 const log = loggers.app

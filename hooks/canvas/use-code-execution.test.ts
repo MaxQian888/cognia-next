@@ -14,7 +14,7 @@ jest.mock("@/stores", () => ({
     selector({ isDesktop: isDesktopRef.current }),
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 

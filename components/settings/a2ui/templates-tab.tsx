@@ -16,7 +16,7 @@ import { toast } from "sonner"
 import { listTemplates, upsertTemplate, deleteTemplate } from "@/lib/db/a2ui-templates"
 import { appTemplates } from "@/lib/a2ui/templates"
 import type { A2UITemplateRow } from "@/lib/db/a2ui-types"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export function TemplatesTab() {
   const t = useTranslations("settings.a2ui.templates")

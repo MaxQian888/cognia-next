@@ -7,7 +7,7 @@
  * panel's trace view will light up.
  */
 
-import type { StructuredLogEntry } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logging"
 
 /** Synthetic module name used by the panel's "agent trace only" filter. */
 export const AGENT_TRACE_MODULE = "agent.trace"

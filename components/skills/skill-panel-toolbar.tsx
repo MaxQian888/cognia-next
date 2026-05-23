@@ -36,7 +36,7 @@ import { useSkillsStore } from "@/stores/skills"
 import type { ImportStaging } from "@/stores/skills"
 import { useSkillSync } from "@/hooks/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const SKILL_FILE_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }]
 

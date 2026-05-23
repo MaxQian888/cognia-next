@@ -6,6 +6,7 @@
  */
 
 import React, { useCallback, useEffect } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import type {
   A2UIComponent,
@@ -31,12 +32,14 @@ export function A2UISurface({
   onAction,
   onDataChange,
   showLoading = true,
-  loadingText = "Loading...",
+  loadingText,
 }: A2UISurfaceContainerProps) {
+  const t = useTranslations("a2ui")
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
   const isLoading = useA2UIStore((state) => surfaceId in state.loadingSurfaces)
   const isStreaming = useA2UIStore((state) => surfaceId in state.streamingSurfaces)
   const error = useA2UIStore((state) => state.errors[surfaceId])
+  const resolvedLoadingText = loadingText ?? t("surface.loading")
 
   // Subscribe to events
   useEffect(() => {
@@ -79,7 +82,9 @@ export function A2UISurface({
     return (
       <div className={cn("flex items-center justify-center p-8", className)}>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        {loadingText && <span className="ml-2 text-sm text-muted-foreground">{loadingText}</span>}
+        {resolvedLoadingText && (
+          <span className="ml-2 text-sm text-muted-foreground">{resolvedLoadingText}</span>
+        )}
       </div>
     )
   }
@@ -88,7 +93,7 @@ export function A2UISurface({
   if (error) {
     return (
       <div className={cn("p-4 text-destructive", className)}>
-        <p className="font-medium">Error loading surface</p>
+        <p className="font-medium">{t("surface.errorLoading")}</p>
         <p className="text-sm">{error}</p>
       </div>
     )
@@ -108,7 +113,7 @@ export function A2UISurface({
   if (!rootComponent) {
     return (
       <div className={cn("p-4 text-muted-foreground", className)}>
-        <p className="text-sm">No content to display</p>
+        <p className="text-sm">{t("surface.noContent")}</p>
       </div>
     )
   }
@@ -127,7 +132,7 @@ export function A2UISurface({
           {isStreaming && (
             <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Rendering...</span>
+              <span>{t("surface.rendering")}</span>
             </div>
           )}
         </A2UIProvider>

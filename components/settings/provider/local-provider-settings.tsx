@@ -22,7 +22,7 @@ import {
   Zap,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"

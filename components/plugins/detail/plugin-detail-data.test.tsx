@@ -24,12 +24,12 @@ jest.mock("@/components/settings/plugins/plugin-data-management", () => ({
     <div data-testid="data-mgmt" data-plugin-id={pluginId} />
   ),
 }))
-jest.mock("../plugin-scheduled-jobs", () => ({
+jest.mock("./plugin-scheduled-jobs", () => ({
   PluginScheduledJobs: ({ pluginId }: { pluginId?: string }) => (
     <div data-testid="scheduled-jobs" data-plugin-id={pluginId} />
   ),
 }))
-jest.mock("../plugin-analytics", () => ({
+jest.mock("./plugin-analytics", () => ({
   PluginAnalytics: ({ pluginId }: { pluginId?: string }) => (
     <div data-testid="analytics" data-plugin-id={pluginId} />
   ),
@@ -39,12 +39,12 @@ jest.mock("../plugin-backup-panel", () => ({
     <div data-testid="backup-panel" data-plugin-id={pluginId} />
   ),
 }))
-jest.mock("../plugin-resource-manager", () => ({
+jest.mock("./plugin-resource-manager", () => ({
   PluginResourceManager: ({ pluginId }: { pluginId: string }) => (
     <div data-testid="resource-manager" data-plugin-id={pluginId} />
   ),
 }))
-jest.mock("../plugin-dependency-graph", () => ({
+jest.mock("./plugin-dependency-graph", () => ({
   PluginDependencyGraph: ({ manifest }: { manifest: { id: string } }) => (
     <div data-testid="dep-graph" data-plugin-id={manifest.id} />
   ),

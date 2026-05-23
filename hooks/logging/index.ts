@@ -28,3 +28,9 @@ export {
   type PanelSource,
 } from "./use-log-panel-filters"
 export { useCrashLogs, type UseCrashLogsResult } from "./use-crash-logs"
+export {
+  useThemeColors,
+  DEFAULT_THEME_COLORS,
+  THEME_KEYS,
+  type ThemeColors,
+} from "./use-theme-colors"

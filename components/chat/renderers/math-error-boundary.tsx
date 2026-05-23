@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 interface MathErrorBoundaryProps {
   children: React.ReactNode

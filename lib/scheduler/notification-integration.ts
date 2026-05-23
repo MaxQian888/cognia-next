@@ -6,7 +6,7 @@
 import type { ScheduledTask, TaskExecution, NotificationChannel } from "@/types/scheduler"
 import { notify } from "@/lib/tauri/notification"
 import { toast } from "sonner"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { SchedulerError } from "./errors"
 import { formatDuration } from "./format-utils"
 

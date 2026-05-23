@@ -9,7 +9,7 @@
 
 import type { LanguageModel } from "ai"
 import type { DocumentChunk } from "../embedding/chunking"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ai
 

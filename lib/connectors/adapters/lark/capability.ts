@@ -73,7 +73,7 @@ export const LARK_CAPS: readonly Capability[] = [
  *     payload back as `actionType: "submit"`.
  *
  * Fallback (renders via plain text mirror):
- *   - Slider / Table / Chart / DataExplorer / Pagination.
+ *   - Slider / Table / Chart / Pagination.
  *   - Tabs / Accordion / Sidebar / Collapsible.
  */
 export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({

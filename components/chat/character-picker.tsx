@@ -14,7 +14,7 @@ import { useCharacters } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { isOverlayCharacterId } from "@/lib/plugin/registries/character-pack-registry"
 import { LOCAL_PACK_PLUGIN_ID } from "@/lib/plugin/character-pack/local-pack-store"
-import { usePluginStore } from "@/stores/plugin/plugin-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
 interface Props {
   open: boolean

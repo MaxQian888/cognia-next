@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { A2UIWidgetHostStrategy, A2UIWidgetStatus } from "@/types/a2ui/schema"
@@ -28,6 +29,7 @@ export function A2UIWidgetShell({
   className,
   children,
 }: A2UIWidgetShellProps) {
+  const t = useTranslations("a2ui")
   const showFallback = status === "fallback" || status === "error"
 
   return (
@@ -58,7 +60,7 @@ export function A2UIWidgetShell({
 
       {showFallback ? (
         <div className="rounded-lg border border-dashed border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          {fallbackText || "This widget is using its fallback presentation."}
+          {fallbackText || t("widgetShell.fallback")}
         </div>
       ) : (
         children

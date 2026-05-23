@@ -4,7 +4,7 @@
  * Centralized logging for the plugin system using the unified logger.
  */
 
-import { createLogger, type Logger } from "@/lib/logger"
+import { createLogger, type Logger } from "@/lib/logging"
 import type { PluginLogger } from "@/types/plugin"
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal"
@@ -29,7 +29,7 @@ type PluginLoggerExtended = PluginLogger & {
 // (notably `stores/agent/agent-team-store/slices/actions.slice` →
 // `agent-team-compat` → orchestrator → hooks-system → plugin store →
 // plugin index → validation → THIS file) re-enter the module graph
-// while `@/lib/logger` is still being evaluated under Jest's CJS loader.
+// while `@/lib/logging` is still being evaluated under Jest's CJS loader.
 // Calling `createLogger("plugin")` at module-init time during that
 // window resolves to an empty namespace and throws
 // `createLogger is not a function`. Resolving lazily on first use keeps
@@ -133,7 +133,7 @@ export function createPluginSystemLogger(
  * `Object.defineProperty` getters. Each entry is then a stable plain object
  * (so `jest.spyOn(loggers.manager, "info")` works as expected) while
  * module-init importers don't trigger `createLogger("plugin")` against the
- * still-evaluating `@/lib/logger` barrel.
+ * still-evaluating `@/lib/logging` barrel.
  */
 function makeLazyLoggers<K extends string>(...modules: K[]): Record<K, PluginLoggerExtended> {
   const cache: Partial<Record<K, PluginLoggerExtended>> = {}

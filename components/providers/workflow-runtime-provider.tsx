@@ -8,7 +8,7 @@ import {
 } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

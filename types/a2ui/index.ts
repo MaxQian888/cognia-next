@@ -3,6 +3,10 @@
  * Centralized types for the A2UI module
  */
 
+// Core protocol schema (A2UI v0.9): surfaces, components, messages, catalog
+export type * from "./schema"
+export { isPathValue } from "./schema"
+
 // Context types
 export type {
   A2UIActionsContextValue,

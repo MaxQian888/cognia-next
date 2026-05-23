@@ -1,159 +1,98 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-import { render, screen, fireEvent, within } from "@testing-library/react"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
+// Shared action menu used by both PluginCard (card grid view) and the new
+// PluginLibraryRow (compact list view). Extracted from the previous inline
+// DropdownMenu in plugin-card.tsx so the two surfaces can't drift on which
+// actions are available, the order, the icons, or the i18n keys.
+//
+// Action set: open details / configure / review permissions / rollback /
+// toggle enabled / uninstall. Rollback is optional — pass an `onRollback`
+// callback only when the plugin actually has a previous version available.
 
-let mockJobs: PluginScheduledJobRow[] | undefined
+import { useTranslations } from "next-intl"
+import {
+  MoreHorizontalIcon,
+  PowerIcon,
+  RotateCcwIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from "lucide-react"
+import type { PluginRow } from "@/lib/db/plugin-types"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
-    return key
-  },
-}))
-
-jest.mock("next/link", () => ({
-  __esModule: true,
-  default: ({ children, ...props }: { children: React.ReactNode }) => <a {...props}>{children}</a>,
-}))
-
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockJobs,
-}))
-
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    pluginScheduledJobs: {
-      orderBy: () => ({ toArray: async () => mockJobs ?? [] }),
-    },
-  }),
-}))
-
-import { PluginScheduledJobs } from "./plugin-scheduled-jobs"
-
-function makeJob(overrides: Partial<PluginScheduledJobRow> = {}): PluginScheduledJobRow {
-  return {
-    id: "job-1",
-    pluginId: "plugin-a",
-    cron: "*/5 * * * *",
-    handler: "doThing",
-    args: {},
-    status: "active",
-    nextRunAt: 1_700_000_000_000,
-    lastRunAt: 1_699_000_000_000,
-    createdAt: 1_698_000_000_000,
-    updatedAt: 1_698_000_000_000,
-    ...overrides,
-  }
+export interface PluginRowActionsMenuProps {
+  plugin: PluginRow
+  onOpen: (id: string) => void
+  onConfigure: (id: string) => void
+  onReviewPermissions: (id: string) => void
+  onToggleEnabled: (plugin: PluginRow) => void
+  onUninstall: (plugin: PluginRow) => void
+  /** Pass to expose the "Rollback" item; omit to hide it. */
+  onRollback?: (id: string) => void
+  /**
+   * Size of the trigger button. The grid card uses `size-7` for visual
+   * balance; the compact list row uses `size-6` to keep rows shorter.
+   */
+  triggerClassName?: string
 }
 
-beforeEach(() => {
-  mockJobs = undefined
-})
-
-describe("PluginScheduledJobs", () => {
-  it("shows loading hint while jobs are undefined", () => {
-    mockJobs = undefined
-    render(<PluginScheduledJobs />)
-    expect(screen.getByText("loading")).toBeInTheDocument()
-  })
-
-  it("renders empty state with deep link when no jobs", () => {
-    mockJobs = []
-    render(<PluginScheduledJobs />)
-    expect(screen.getByText("empty")).toBeInTheDocument()
-    const link = screen.getByText("openScheduler").closest("a")
-    expect(link).toHaveAttribute("href", "/settings?section=scheduled-tasks")
-  })
-
-  it("renders one row per job", () => {
-    mockJobs = [
-      makeJob({
-        id: "job1",
-        pluginId: "plugin_a",
-        cron: "0 * * * *",
-        handler: "myHandler",
-        status: "active",
-      }),
-      makeJob({
-        id: "job2",
-        pluginId: "plugin_b",
-        cron: "@daily",
-        handler: "dailyHandler",
-        status: "paused",
-        nextRunAt: undefined,
-        lastRunAt: undefined,
-      }),
-    ]
-    render(<PluginScheduledJobs />)
-    expect(screen.getByText("plugin_a")).toBeInTheDocument()
-    expect(screen.getByText("0 * * * *")).toBeInTheDocument()
-    expect(screen.getByText("myHandler")).toBeInTheDocument()
-    expect(screen.getByText("plugin_b")).toBeInTheDocument()
-  })
-
-  it("sorts by pluginId ascending then descending when the header is clicked", () => {
-    mockJobs = [
-      makeJob({ id: "1", pluginId: "zeta" }),
-      makeJob({ id: "2", pluginId: "alpha" }),
-      makeJob({ id: "3", pluginId: "mike" }),
-    ]
-    render(<PluginScheduledJobs />)
-    const headerBtn = screen.getByTestId("plugin-jobs-sort-pluginId")
-    fireEvent.click(headerBtn)
-    let rows = screen.getAllByRole("row").slice(1)
-    expect(within(rows[0]).getByText("alpha")).toBeInTheDocument()
-    expect(within(rows[2]).getByText("zeta")).toBeInTheDocument()
-
-    fireEvent.click(headerBtn)
-    rows = screen.getAllByRole("row").slice(1)
-    expect(within(rows[0]).getByText("zeta")).toBeInTheDocument()
-    expect(within(rows[2]).getByText("alpha")).toBeInTheDocument()
-  })
-
-  it("filters by status when a chip is clicked", () => {
-    mockJobs = [
-      makeJob({ id: "1", pluginId: "alpha", status: "active" }),
-      makeJob({ id: "2", pluginId: "beta", status: "paused" }),
-      makeJob({ id: "3", pluginId: "gamma", status: "error" }),
-    ]
-    render(<PluginScheduledJobs />)
-    expect(screen.getByText("alpha")).toBeInTheDocument()
-    expect(screen.getByText("beta")).toBeInTheDocument()
-    expect(screen.getByText("gamma")).toBeInTheDocument()
-
-    // The mock i18n translator returns the raw key. Click the paused chip
-    // (label = "status.paused") and confirm only the paused row remains.
-    fireEvent.click(screen.getByRole("button", { name: /status\.paused/i }))
-    expect(screen.queryByText("alpha")).not.toBeInTheDocument()
-    expect(screen.getByText("beta")).toBeInTheDocument()
-    expect(screen.queryByText("gamma")).not.toBeInTheDocument()
-  })
-
-  it("hides the handler column on narrow viewports via hidden sm:table-cell", () => {
-    mockJobs = [makeJob({ pluginId: "plugin_x", handler: "myHandler", cron: "0 * * * *" })]
-    render(<PluginScheduledJobs />)
-    const handlerCell = screen.getByText("myHandler").closest("td")
-    expect(handlerCell?.className).toContain("hidden")
-    expect(handlerCell?.className).toContain("sm:table-cell")
-  })
-
-  it("filters to a single plugin when pluginId is set", () => {
-    mockJobs = [
-      makeJob({ id: "1", pluginId: "alpha", cron: "0 * * * *" }),
-      makeJob({ id: "2", pluginId: "beta", cron: "*/5 * * * *" }),
-      makeJob({ id: "3", pluginId: "alpha", cron: "@daily" }),
-    ]
-    render(<PluginScheduledJobs pluginId="alpha" />)
-    expect(screen.getAllByText("alpha")).toHaveLength(2)
-    expect(screen.queryByText("beta")).not.toBeInTheDocument()
-  })
-
-  it("renders the empty state when pluginId has no jobs", () => {
-    mockJobs = [makeJob({ pluginId: "other", cron: "0 * * * *" })]
-    render(<PluginScheduledJobs pluginId="alpha" />)
-    expect(screen.getByText("empty")).toBeInTheDocument()
-  })
-})
+export function PluginRowActionsMenu({
+  plugin,
+  onOpen,
+  onConfigure,
+  onReviewPermissions,
+  onToggleEnabled,
+  onUninstall,
+  onRollback,
+  triggerClassName,
+}: PluginRowActionsMenuProps) {
+  const t = useTranslations("plugins.card")
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={triggerClassName ?? "size-7 shrink-0"}
+          aria-label={t("actionsMenuAria", { name: plugin.name })}
+        >
+          <MoreHorizontalIcon className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onOpen(plugin.id)}>{t("openDetails")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onConfigure(plugin.id)}>
+          <SettingsIcon className="mr-2 size-3.5" />
+          {t("configure")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onReviewPermissions(plugin.id)}>
+          <ShieldCheckIcon className="mr-2 size-3.5" />
+          {t("reviewPermissions")}
+        </DropdownMenuItem>
+        {onRollback && (
+          <DropdownMenuItem onClick={() => onRollback(plugin.id)}>
+            <RotateCcwIcon className="mr-2 size-3.5" />
+            {t("rollback")}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onToggleEnabled(plugin)}>
+          <PowerIcon className="mr-2 size-3.5" />
+          {plugin.enabled ? t("disable") : t("enable")}
+        </DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={() => onUninstall(plugin)}>
+          <Trash2Icon className="mr-2 size-3.5" />
+          {t("uninstall")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}

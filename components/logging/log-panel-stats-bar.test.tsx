@@ -12,7 +12,7 @@ import {
   NativeLoggingDetail,
   type LogPanelStatsBarProps,
 } from "./log-panel-stats-bar"
-import type { LogLevel, TransportHealthSnapshot } from "@/lib/logger"
+import type { LogLevel, TransportHealthSnapshot } from "@/lib/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
 
 function zeroByLevel(overrides: Partial<Record<LogLevel, number>> = {}) {

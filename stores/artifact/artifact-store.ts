@@ -16,7 +16,7 @@ import { persist } from "zustand/middleware"
 import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
 import {
   buildArtifactSourceMetadata,

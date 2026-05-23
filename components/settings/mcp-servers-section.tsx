@@ -69,7 +69,7 @@ import {
 } from "@/components/settings/common/related-sections-strip"
 import { getDetectedWritableAgents } from "@/hooks/agent"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 type TransportFilter = "all" | McpTransport
 type StatusFilter = "all" | "enabled" | "disabled"

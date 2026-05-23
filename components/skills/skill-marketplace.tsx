@@ -16,7 +16,7 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { SkillMarketplaceCard } from "./skill-marketplace-card"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
 import { SkillMarketplaceEmpty } from "./skill-marketplace-empty"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export function SkillMarketplace() {
   const t = useTranslations("skills.marketplace")

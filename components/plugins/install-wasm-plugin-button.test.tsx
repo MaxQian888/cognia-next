@@ -1,166 +1,77 @@
 /**
- * @jest-environment jsdom
+ * Plugin UI barrel — 3-pane shell export surface.
+ *
+ * The legacy 7-tab layout's helper components — `PluginPanelTabs`,
+ * `PluginPanelHeader`, `PluginDetail`, `PluginDetailPanel`,
+ * `PluginConfigureTab` — were removed when the new shell became the
+ * default. The replacement surfaces live under `./library/*`,
+ * `./detail/*`, `./governance/*`, `./discover/*`, `./devtools/*`,
+ * `./marketplace/*`, and `./dialogs/*`; external consumers should
+ * depend on `PluginPanel` and the extension-slot APIs rather than
+ * reaching into individual panes.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+// Top-level shell / infrastructure
+export { PluginPanel } from "./plugin-panel"
+export { PluginPanelProvider, usePluginPanel } from "./plugin-panel-context"
+export { PluginPanelToolbar } from "./plugin-panel-toolbar"
+export { PluginPanelGrid } from "./plugin-panel-grid"
+export { PluginCard } from "./plugin-card"
+export { PluginCategorySidebar } from "./plugin-category-sidebar"
+export { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
+export { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+export { PluginRowActionsMenu } from "./plugin-row-actions-menu"
+export { AuditLogEntry } from "./audit-log-entry"
+export { PluginPermissionReview, PermissionRow } from "./plugin-permission-review"
+export { PluginExtensionSlot } from "./plugin-extension-slot"
+export { PluginBackupPanel, __resetPluginBackupClientForTests } from "./plugin-backup-panel"
+export { PluginDevtoolsPanel } from "./plugin-devtools-panel"
+export { PluginDiscovery } from "./plugin-discovery"
+export { PluginNavSidebar } from "./plugin-nav-sidebar"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+// Marketplace browsing
+export { PluginMarketplace } from "./marketplace/plugin-marketplace"
+export { PluginMarketplaceCard } from "./marketplace/plugin-marketplace-card"
+export { PluginMarketplaceDetail } from "./marketplace/plugin-marketplace-detail"
 
-const installFromLocalMock = jest.fn()
-const previewBundleManifestMock = jest.fn()
-const dialogOpenMock = jest.fn()
-const canUseTauriInvokeMock = jest.fn()
+// Dialogs & sheets
+export { PluginCategorySheet } from "./dialogs/plugin-category-sheet"
+export { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
+export { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
+export { PluginImportDialog } from "./dialogs/plugin-import-dialog"
+export { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
+export {
+  PluginUpdateDialog,
+  __resetPluginUpdateClientForTests,
+} from "./dialogs/plugin-update-dialog"
+export {
+  PluginRollbackDialog,
+  __resetPluginRollbackClientForTests,
+} from "./dialogs/plugin-rollback-dialog"
+export { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 
-jest.mock("@/lib/native/utils", () => ({
-  canUseTauriInvoke: () => canUseTauriInvokeMock(),
-}))
+// Detail-pane content
+export {
+  PluginConfigForm,
+  PluginConfigFormBody,
+  PluginConfigFormContent,
+} from "./detail/plugin-config-form"
+export {
+  PluginDependencyGraph,
+  __resetPluginDependencyResolverForTests,
+} from "./detail/plugin-dependency-graph"
+export { PluginScheduledJobs } from "./detail/plugin-scheduled-jobs"
+export { PluginResourceManager } from "./detail/plugin-resource-manager"
+export { PluginAnalytics } from "./detail/plugin-analytics"
+export { PluginPermissionsTab } from "./detail/plugin-permissions-tab"
+export { PluginDetailPane } from "./detail/plugin-detail-pane"
 
-jest.mock("@tauri-apps/plugin-dialog", () => ({
-  open: (...args: unknown[]) => dialogOpenMock(...args),
-}))
-
-jest.mock("@/lib/plugin/core/manager", () => ({
-  getPluginManager: () => ({
-    installWasmPluginFromLocalFile: (...args: unknown[]) => installFromLocalMock(...args),
-  }),
-}))
-
-jest.mock("@/lib/plugin/package/http-installer", () => ({
-  previewBundleManifest: (...args: unknown[]) => previewBundleManifestMock(...args),
-}))
-
-import { InstallWasmPluginButton } from "./install-wasm-plugin-button"
-
-const baseManifest = {
-  id: "demo.wasm",
-  name: "Demo WASM",
-  version: "0.1.0",
-  description: "x",
-  type: "wasm" as const,
-  capabilities: [],
-  wasmMain: "main.wasm",
-  wasm: { apiVersion: "0.1.0" },
-  permissions: ["notification" as const],
-  author: { name: "Alice", publicKey: "AAA=" },
-}
-
-beforeEach(() => {
-  installFromLocalMock.mockReset()
-  previewBundleManifestMock.mockReset()
-  dialogOpenMock.mockReset()
-  canUseTauriInvokeMock.mockReset()
-  canUseTauriInvokeMock.mockReturnValue(true)
-})
-
-describe("InstallWasmPluginButton", () => {
-  it("renders the button", () => {
-    render(<InstallWasmPluginButton />)
-    expect(screen.getByTestId("install-wasm-plugin-button")).toBeInTheDocument()
-  })
-
-  it("shows an error in browser mode and skips the file picker", async () => {
-    canUseTauriInvokeMock.mockReturnValue(false)
-    render(<InstallWasmPluginButton />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("tauriRequiredError"))
-    expect(dialogOpenMock).not.toHaveBeenCalled()
-  })
-
-  it("aborts cleanly when the user dismisses the file picker", async () => {
-    dialogOpenMock.mockResolvedValue(null)
-    render(<InstallWasmPluginButton />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() => expect(dialogOpenMock).toHaveBeenCalled())
-    expect(installFromLocalMock).not.toHaveBeenCalled()
-  })
-
-  it("aborts when the user picks a .zip and cancels the grant sheet", async () => {
-    dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
-      manifest: baseManifest,
-      path: "/tmp/demo.zip",
-      signatureVerified: false,
-      authorPublicKey: "AAA=",
-      authorFingerprint: "9f3a",
-    })
-    render(<InstallWasmPluginButton />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByTestId("wasm-capability-grant-sheet")).toBeInTheDocument()
-    )
-    fireEvent.click(screen.getByTestId("wasm-grant-cancel"))
-    await waitFor(() => expect(installFromLocalMock).not.toHaveBeenCalled())
-  })
-
-  it("invokes installWasmPluginFromLocalFile after grant confirmation", async () => {
-    const onInstalled = jest.fn()
-    dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
-      manifest: baseManifest,
-      path: "/tmp/demo.zip",
-      signatureVerified: false,
-      authorPublicKey: undefined,
-      authorFingerprint: undefined,
-    })
-    installFromLocalMock.mockResolvedValue({
-      manifest: baseManifest,
-      status: "installed",
-      source: "local",
-      path: "/plugins/demo.wasm",
-      config: {},
-    })
-    render(<InstallWasmPluginButton onInstalled={onInstalled} />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByTestId("wasm-capability-grant-sheet")).toBeInTheDocument()
-    )
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    await waitFor(() => expect(installFromLocalMock).toHaveBeenCalled())
-    expect(installFromLocalMock.mock.calls[0][0]).toBe("/tmp/demo.zip")
-    const grantDecision = installFromLocalMock.mock.calls[0][1]
-    expect(grantDecision.pluginId).toBe("demo.wasm")
-    expect(onInstalled).toHaveBeenCalledWith("demo.wasm")
-  })
-
-  it("uses a synthetic manifest for bare .wasm sideloads (no preview)", async () => {
-    dialogOpenMock.mockResolvedValue("/tmp/my-plugin.wasm")
-    installFromLocalMock.mockResolvedValue({
-      manifest: { ...baseManifest, id: "my-plugin" },
-      status: "installed",
-      source: "local",
-      path: "/plugins/my-plugin",
-      config: {},
-    })
-    render(<InstallWasmPluginButton />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByTestId("wasm-capability-grant-sheet")).toBeInTheDocument()
-    )
-    // No preview should have been requested for bare .wasm.
-    expect(previewBundleManifestMock).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    await waitFor(() => expect(installFromLocalMock).toHaveBeenCalled())
-  })
-
-  it("surfaces install errors in the alert region", async () => {
-    dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
-      manifest: baseManifest,
-      path: "/tmp/demo.zip",
-      signatureVerified: false,
-    })
-    installFromLocalMock.mockRejectedValue(new Error("boom"))
-    render(<InstallWasmPluginButton />)
-    fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByTestId("wasm-capability-grant-sheet")).toBeInTheDocument()
-    )
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("boom")
-    })
-  })
-})
+// Panes (library / governance / discover / devtools)
+export { PluginLibraryPane } from "./library/plugin-library-pane"
+export { PluginLibraryHeader } from "./library/plugin-library-header"
+export { PluginLibraryList } from "./library/plugin-library-list"
+export { PluginLibraryRow } from "./library/plugin-library-row"
+export { PluginGovernancePane } from "./governance/plugin-governance-pane"
+export { PluginAuditLog } from "./governance/plugin-audit-log"
+export { PluginDiscoverPane } from "./discover/plugin-discover-pane"
+export { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"

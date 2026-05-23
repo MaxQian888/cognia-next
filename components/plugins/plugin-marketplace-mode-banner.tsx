@@ -1,68 +1,112 @@
 "use client"
 
-// Banner that signals the marketplace's current source mode. Reads directly
-// from `usePluginMarketplaceStore.sourceState.mode` so the UI reflects the
-// runtime fallback decisions made by the marketplace client (network
-// failures → degraded; explicit demo flag → demo).
-//
-// Renders nothing for the "remote" mode — the happy path stays visually
-// quiet so the banner's presence carries information.
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, FlaskConicalIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
-import { usePluginMarketplaceStore } from "@/stores/plugin/plugin-marketplace-store"
-import type { MarketplaceSourceMode } from "@/stores/plugin/plugin-marketplace-store"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
+import {
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
-  /** Override the mode for tests / preview surfaces. */
-  mode?: MarketplaceSourceMode
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
   className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-export function PluginMarketplaceModeBanner({ mode: override, className }: Props) {
-  const t = useTranslations("plugins.marketplace.modeBanner")
-  const storeMode = usePluginMarketplaceStore((s) => s.sourceState.mode)
-  const mode = override ?? storeMode
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-  if (mode === "remote") return null
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-  if (mode === "demo") {
-    return (
-      <Card
-        role="status"
-        className={cn("p-3 flex items-start gap-2 border-blue-500/40 bg-blue-500/5", className)}
-        data-testid="plugin-marketplace-mode-banner-demo"
-      >
-        <FlaskConicalIcon
-          className="size-4 mt-0.5 shrink-0 text-blue-700 dark:text-blue-300"
-          aria-hidden
-        />
-        <div className="space-y-0.5 min-w-0">
-          <p className="text-sm font-medium text-blue-900 dark:text-blue-100">{t("demoTitle")}</p>
-          <p className="text-xs text-blue-800/80 dark:text-blue-200/80">{t("demoHint")}</p>
-        </div>
-      </Card>
-    )
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
   }
 
   return (
-    <Card
-      role="status"
-      className={cn("p-3 flex items-start gap-2 border-amber-500/40 bg-amber-500/5", className)}
-      data-testid="plugin-marketplace-mode-banner-degraded"
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
     >
-      <AlertTriangleIcon
-        className="size-4 mt-0.5 shrink-0 text-amber-700 dark:text-amber-300"
-        aria-hidden
-      />
-      <div className="space-y-0.5 min-w-0">
-        <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-          {t("degradedTitle")}
-        </p>
-        <p className="text-xs text-amber-800/80 dark:text-amber-200/80">{t("degradedHint")}</p>
-      </div>
-    </Card>
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

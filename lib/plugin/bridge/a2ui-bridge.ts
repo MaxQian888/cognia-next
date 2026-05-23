@@ -11,7 +11,7 @@ import type {
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { useA2UIStore } from "@/stores/a2ui"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { registerComponent, unregisterComponent } from "@/lib/a2ui/catalog"
 import { globalEventEmitter } from "@/lib/a2ui/events"
 import type { PluginRegistry } from "../core/registry"

@@ -29,7 +29,7 @@
  * integration).
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { PluginLspServerDef } from "@/types/plugin"
 import {
   evaluateLspBinary,

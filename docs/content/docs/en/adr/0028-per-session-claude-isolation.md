@@ -71,7 +71,7 @@ A new `lib/plugin/launcher/launchPluginJs.ts` re-execs each plugin JS entry as `
 
 #### T3 — Wasmtime + WASI for plugin WASM
 
-A new `lib/plugin/wasm-runtime.ts` runs WASM plugins via `@bytecodealliance/jco` (or the `wasmtime` Node binding); host imports are limited to the preopens already managed by `lib/plugin/security/wasm-grant.ts`. The existing `wasm-grant` ledger is reused as-is.
+A new `lib/plugin/core/wasm-runtime.ts` runs WASM plugins via `@bytecodealliance/jco` (or the `wasmtime` Node binding); host imports are limited to the preopens already managed by `lib/plugin/security/wasm-grant.ts`. The existing `wasm-grant` ledger is reused as-is.
 
 #### T4 — e2b Firecracker microVM as opt-in tier
 

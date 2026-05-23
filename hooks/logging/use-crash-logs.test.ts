@@ -22,7 +22,7 @@ const serializeBundleMock = jest.fn(
   })
 )
 
-jest.mock("@/lib/logger/crash-log", () => ({
+jest.mock("@/lib/logging/crash-log", () => ({
   buildCrashLogExportBundle: (...a: unknown[]) => buildBundleMock(...a),
   buildCrashLogItems: (...a: unknown[]) => buildItemsMock(...a),
   isCrashRelevantLogEntry: (...a: unknown[]) => isCrashRelevantMock(...a),
@@ -35,14 +35,14 @@ const fakeTransport = {
   deleteEntries: (ids: string[]) => transportDeleteMock(ids),
   clear: jest.fn(async () => undefined),
 }
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   getIndexedDBTransport: () => fakeTransport,
 }))
 
 const recentSubscribers: Array<() => void> = []
 const recentLogs: unknown[] = []
 const clearRecentMock = jest.fn(() => recentLogs.splice(0))
-jest.mock("@/lib/logger/recent-errors", () => ({
+jest.mock("@/lib/logging/recent-errors", () => ({
   clearRecentErrorLogs: () => clearRecentMock(),
   getRecentErrorLogs: () => recentLogs,
   subscribeRecentErrorLogs: (fn: () => void) => {

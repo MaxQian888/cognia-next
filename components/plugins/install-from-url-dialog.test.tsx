@@ -1,158 +1,77 @@
 /**
- * @jest-environment jsdom
+ * Plugin UI barrel — 3-pane shell export surface.
+ *
+ * The legacy 7-tab layout's helper components — `PluginPanelTabs`,
+ * `PluginPanelHeader`, `PluginDetail`, `PluginDetailPanel`,
+ * `PluginConfigureTab` — were removed when the new shell became the
+ * default. The replacement surfaces live under `./library/*`,
+ * `./detail/*`, `./governance/*`, `./discover/*`, `./devtools/*`,
+ * `./marketplace/*`, and `./dialogs/*`; external consumers should
+ * depend on `PluginPanel` and the extension-slot APIs rather than
+ * reaching into individual panes.
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+// Top-level shell / infrastructure
+export { PluginPanel } from "./plugin-panel"
+export { PluginPanelProvider, usePluginPanel } from "./plugin-panel-context"
+export { PluginPanelToolbar } from "./plugin-panel-toolbar"
+export { PluginPanelGrid } from "./plugin-panel-grid"
+export { PluginCard } from "./plugin-card"
+export { PluginCategorySidebar } from "./plugin-category-sidebar"
+export { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
+export { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+export { PluginRowActionsMenu } from "./plugin-row-actions-menu"
+export { AuditLogEntry } from "./audit-log-entry"
+export { PluginPermissionReview, PermissionRow } from "./plugin-permission-review"
+export { PluginExtensionSlot } from "./plugin-extension-slot"
+export { PluginBackupPanel, __resetPluginBackupClientForTests } from "./plugin-backup-panel"
+export { PluginDevtoolsPanel } from "./plugin-devtools-panel"
+export { PluginDiscovery } from "./plugin-discovery"
+export { PluginNavSidebar } from "./plugin-nav-sidebar"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+// Marketplace browsing
+export { PluginMarketplace } from "./marketplace/plugin-marketplace"
+export { PluginMarketplaceCard } from "./marketplace/plugin-marketplace-card"
+export { PluginMarketplaceDetail } from "./marketplace/plugin-marketplace-detail"
 
-const previewMock = jest.fn()
-const installMock = jest.fn()
-const isPublisherKeyTrustedMock = jest.fn()
+// Dialogs & sheets
+export { PluginCategorySheet } from "./dialogs/plugin-category-sheet"
+export { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
+export { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
+export { PluginImportDialog } from "./dialogs/plugin-import-dialog"
+export { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
+export {
+  PluginUpdateDialog,
+  __resetPluginUpdateClientForTests,
+} from "./dialogs/plugin-update-dialog"
+export {
+  PluginRollbackDialog,
+  __resetPluginRollbackClientForTests,
+} from "./dialogs/plugin-rollback-dialog"
+export { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 
-jest.mock("@/lib/plugin/package/http-installer", () => ({
-  previewBundleManifest: (...args: unknown[]) => previewMock(...args),
-  installFromUrl: (...args: unknown[]) => installMock(...args),
-  isPublisherKeyTrusted: (...args: unknown[]) => isPublisherKeyTrustedMock(...args),
-}))
+// Detail-pane content
+export {
+  PluginConfigForm,
+  PluginConfigFormBody,
+  PluginConfigFormContent,
+} from "./detail/plugin-config-form"
+export {
+  PluginDependencyGraph,
+  __resetPluginDependencyResolverForTests,
+} from "./detail/plugin-dependency-graph"
+export { PluginScheduledJobs } from "./detail/plugin-scheduled-jobs"
+export { PluginResourceManager } from "./detail/plugin-resource-manager"
+export { PluginAnalytics } from "./detail/plugin-analytics"
+export { PluginPermissionsTab } from "./detail/plugin-permissions-tab"
+export { PluginDetailPane } from "./detail/plugin-detail-pane"
 
-import { InstallFromUrlDialog } from "./install-from-url-dialog"
-
-const baseManifest = {
-  id: "demo.wasm",
-  name: "Demo",
-  version: "0.1.0",
-  description: "x",
-  type: "wasm" as const,
-  capabilities: [],
-  wasmMain: "main.wasm",
-  wasm: { apiVersion: "0.1.0" },
-  permissions: ["notification" as const],
-  author: { name: "Alice", publicKey: "AAA=" },
-}
-
-beforeEach(() => {
-  previewMock.mockReset()
-  installMock.mockReset()
-  isPublisherKeyTrustedMock.mockReset()
-  isPublisherKeyTrustedMock.mockResolvedValue(false)
-})
-
-describe("InstallFromUrlDialog", () => {
-  it("renders the URL input + preview button initially", () => {
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    expect(screen.getByLabelText("bundleUrlLabel")).toBeInTheDocument()
-    const previewBtn = screen.getByTestId("install-from-url-preview-button")
-    expect(previewBtn).toBeDisabled()
-  })
-
-  it("enables Preview when a URL is entered", () => {
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    expect(screen.getByTestId("install-from-url-preview-button")).toBeEnabled()
-  })
-
-  it("disables Preview when signature URL set but public key missing", () => {
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    fireEvent.change(screen.getByLabelText("signatureUrlLabel"), {
-      target: { value: "https://example.com/p.zip.sig" },
-    })
-    expect(screen.getByTestId("install-from-url-preview-button")).toBeDisabled()
-  })
-
-  it("shows the manifest preview after a successful peek", async () => {
-    previewMock.mockResolvedValueOnce({
-      manifest: baseManifest,
-      path: "/plugins/demo.wasm",
-      signatureVerified: true,
-      authorPublicKey: "AAA=",
-      authorFingerprint: "9f3a112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-    })
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
-    await waitFor(() => {
-      expect(screen.getByTestId("install-from-url-preview")).toBeInTheDocument()
-    })
-    expect(screen.getByText(/Demo/)).toBeInTheDocument()
-    expect(screen.getByText("signatureVerified")).toBeInTheDocument()
-  })
-
-  it("renders 'already trusted' when the publisher key is known", async () => {
-    previewMock.mockResolvedValueOnce({
-      manifest: baseManifest,
-      path: "/plugins/demo.wasm",
-      signatureVerified: true,
-      authorPublicKey: "AAA=",
-      authorFingerprint: "deadbeef",
-    })
-    isPublisherKeyTrustedMock.mockResolvedValueOnce(true)
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
-    await waitFor(() => {
-      expect(screen.getByText("alreadyTrusted")).toBeInTheDocument()
-    })
-  })
-
-  it("surfaces preview errors in an alert", async () => {
-    previewMock.mockRejectedValueOnce(new Error("download failed: 404"))
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("download failed: 404")
-    })
-  })
-
-  it("Cancel closes the dialog without calling install", () => {
-    const onOpenChange = jest.fn()
-    render(<InstallFromUrlDialog open onOpenChange={onOpenChange} />)
-    fireEvent.click(screen.getByTestId("install-from-url-cancel"))
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-    expect(installMock).not.toHaveBeenCalled()
-  })
-
-  it("blocks Install when signed and the user has not confirmed trust", async () => {
-    previewMock.mockResolvedValueOnce({
-      manifest: baseManifest,
-      path: "/plugins/demo.wasm",
-      signatureVerified: true,
-      authorPublicKey: "AAA=",
-      authorFingerprint: "9f3a",
-    })
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
-      target: { value: "https://example.com/p.zip" },
-    })
-    fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
-    await waitFor(() => {
-      expect(screen.getByTestId("install-from-url-confirm-button")).toBeInTheDocument()
-    })
-    fireEvent.click(screen.getByTestId("install-from-url-confirm-button"))
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("trustRequiredError")
-    })
-    expect(installMock).not.toHaveBeenCalled()
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
-  })
-})
+// Panes (library / governance / discover / devtools)
+export { PluginLibraryPane } from "./library/plugin-library-pane"
+export { PluginLibraryHeader } from "./library/plugin-library-header"
+export { PluginLibraryList } from "./library/plugin-library-list"
+export { PluginLibraryRow } from "./library/plugin-library-row"
+export { PluginGovernancePane } from "./governance/plugin-governance-pane"
+export { PluginAuditLog } from "./governance/plugin-audit-log"
+export { PluginDiscoverPane } from "./discover/plugin-discover-pane"
+export { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"

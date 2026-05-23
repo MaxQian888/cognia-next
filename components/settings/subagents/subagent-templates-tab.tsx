@@ -60,7 +60,7 @@ import {
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent"
 import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
-import { createLogger } from "@/lib/logger"
+import { createLogger } from "@/lib/logging"
 import { SubagentImportDialog } from "./subagent-import-dialog"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 

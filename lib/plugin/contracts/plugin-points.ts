@@ -264,7 +264,7 @@ const UI_POINT_DOCS = "docs/features/plugin-development.md#ui-extension-points"
 const HOOK_POINT_DOCS = "docs/features/plugin-development.md#canonical-plugin-point-contract"
 const ACTIVATION_POINT_DOCS = "docs/features/plugin-development.md#activation-events"
 const UI_POINT_TESTS = [
-  "components/plugin/extension/extension-point.test.tsx",
+  "components/plugins/plugin-extension-slot.test.tsx",
   "lib/plugin/contracts/plugin-points.test.ts",
 ] as const
 const HOOK_POINT_TESTS = [

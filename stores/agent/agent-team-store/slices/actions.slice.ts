@@ -10,7 +10,7 @@ import {
   type TeamDelegationRecord,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
 

@@ -1,187 +1,257 @@
 "use client"
 
-// Rollback dialog — surfaces `lib/plugin/lifecycle/rollback.ts` so the user
-// can move a plugin back to a previous version (backup, marketplace, or
-// local). The dialog reads the live `RollbackInfo` for the active plugin
-// and renders one row per `VersionInfo`. Tauri runtime is required for the
-// actual rollback call (`invoke` under the hood); outside Tauri we still
-// surface the version list but disable the action with a hint.
-
-import { useEffect, useState } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
-import { HistoryIcon, RotateCcwIcon } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { ChevronDownIcon, ChevronRightIcon, AlertCircleIcon, AlertTriangleIcon } from "lucide-react"
+
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
-  getPluginRollbackManager,
-  type RollbackInfo,
-  type RollbackResult,
-} from "@/lib/plugin/lifecycle/rollback"
-import { isTauri } from "@/lib/tauri"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
-interface RollbackClient {
-  getRollbackInfo: (pluginId: string) => Promise<RollbackInfo>
-  rollback: (pluginId: string, targetVersion: string) => Promise<RollbackResult>
+import {
+  clearAllPluginPointDiagnostics as defaultClearAll,
+  clearPluginPointDiagnostics as defaultClearForPlugin,
+  getAllPluginPointDiagnostics as defaultGetDiagnostics,
+  subscribePluginPointDiagnostics as defaultSubscribe,
+} from "@/lib/plugin/contracts/diagnostics-store"
+import type { PluginPointDiagnostic } from "@/lib/plugin/contracts/plugin-points"
+
+export type DiagnosticsSeverityFilter = "all" | "errors" | "warnings"
+
+export interface PluginPointDiagnosticsPanelProps {
+  /** Inject for tests; falls back to the real store API. */
+  getDiagnostics?: () => Record<string, PluginPointDiagnostic[]>
+  subscribe?: (listener: () => void) => () => void
+  clearForPlugin?: (pluginId: string) => void
+  clearAll?: () => void
 }
 
-let cachedClient: RollbackClient | null = null
+const EMPTY_SNAPSHOT: Record<string, PluginPointDiagnostic[]> = Object.freeze({})
 
-function getClient(): RollbackClient {
-  if (cachedClient) return cachedClient
-  const mgr = getPluginRollbackManager()
-  cachedClient = {
-    getRollbackInfo: (pluginId) => mgr.getRollbackInfo(pluginId),
-    rollback: (pluginId, version) => mgr.rollback(pluginId, version),
+function filterBySeverity(
+  diagnostics: PluginPointDiagnostic[],
+  severity: DiagnosticsSeverityFilter
+): PluginPointDiagnostic[] {
+  if (severity === "all") return diagnostics
+  if (severity === "errors") return diagnostics.filter((d) => d.severity === "error")
+  return diagnostics.filter((d) => d.severity === "warning")
+}
+
+function hasAnyError(diagnostics: PluginPointDiagnostic[]): boolean {
+  return diagnostics.some((d) => d.severity === "error")
+}
+
+export function PluginPointDiagnosticsPanel({
+  getDiagnostics = defaultGetDiagnostics,
+  subscribe = defaultSubscribe,
+  clearForPlugin = defaultClearForPlugin,
+  clearAll = defaultClearAll,
+}: PluginPointDiagnosticsPanelProps = {}) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
+
+  const stableSubscribe = useCallback((listener: () => void) => subscribe(listener), [subscribe])
+  const stableGet = useCallback(() => getDiagnostics(), [getDiagnostics])
+
+  const all = useSyncExternalStore(stableSubscribe, stableGet, () => EMPTY_SNAPSHOT)
+
+  const [severity, setSeverity] = useState<DiagnosticsSeverityFilter>("all")
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const groups = useMemo(() => {
+    return Object.entries(all)
+      .map(([pluginId, diagnostics]) => ({
+        pluginId,
+        all: diagnostics,
+        visible: filterBySeverity(diagnostics, severity),
+        defaultOpen: hasAnyError(diagnostics),
+      }))
+      .filter((g) => g.visible.length > 0)
+      .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+  }, [all, severity])
+
+  const totalCount = useMemo(() => groups.reduce((sum, g) => sum + g.visible.length, 0), [groups])
+
+  const isEmpty = totalCount === 0
+
+  const handleConfirmClearAll = () => {
+    clearAll()
+    setConfirmOpen(false)
   }
-  return cachedClient
-}
-
-export function __resetPluginRollbackClientForTests(client: RollbackClient | null) {
-  cachedClient = client
-}
-
-interface Props {
-  open: boolean
-  pluginId: string | null
-  onClose: () => void
-}
-
-export function PluginRollbackDialog({ open, pluginId, onClose }: Props) {
-  const t = useTranslations("plugins.rollback")
-  const [info, setInfo] = useState<RollbackInfo | null>(null)
-  const [busyVersion, setBusyVersion] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const tauri = isTauri()
-
-  useEffect(() => {
-    if (!open || !pluginId) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setError(null)
-    void (async () => {
-      try {
-        const next = await getClient().getRollbackInfo(pluginId)
-        setInfo(next)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    })()
-  }, [open, pluginId])
-
-  const apply = async (version: string) => {
-    if (!pluginId) return
-    setBusyVersion(version)
-    setError(null)
-    try {
-      const result = await getClient().rollback(pluginId, version)
-      if (!result.success) {
-        setError(result.error ?? t("rollbackFailed"))
-        return
-      }
-      onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyVersion(null)
-    }
-  }
-
-  const versions = info?.availableVersions ?? []
-  const rollbackable = versions.filter((v) => v.canRollback)
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
+    <Card className="p-4 space-y-4" data-testid="plugin-point-diagnostics-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">{t("title")}</h3>
+          <p className="text-xs text-muted-foreground max-w-prose">{t("hint")}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            value={severity}
+            onValueChange={(v) => {
+              if (v === "all" || v === "errors" || v === "warnings") setSeverity(v)
+            }}
+            aria-label={t("severityFilterAria")}
+          >
+            <ToggleGroupItem value="all" aria-label={t("filterAll")}>
+              {t("filterAll")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="errors" aria-label={t("filterErrors")}>
+              {t("filterErrors")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="warnings" aria-label={t("filterWarnings")}>
+              {t("filterWarnings")}
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={Object.keys(all).length === 0}
+                data-testid="diagnostics-clear-all"
+              >
+                {t("clearAll")}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("clearAllConfirmTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("clearAllConfirm")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmClearAll}>
+                  {t("confirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
 
-        {info && (
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="secondary">
-              {t("currentVersion", { version: info.currentVersion })}
-            </Badge>
-            {info.hasBackups && (
-              <Badge variant="outline">{t("hasBackups", { count: versions.length })}</Badge>
-            )}
-          </div>
-        )}
+      {isEmpty ? (
+        <p className="text-sm text-muted-foreground" data-testid="diagnostics-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {groups.map((group) => (
+            <li key={group.pluginId}>
+              <DiagnosticGroup
+                pluginId={group.pluginId}
+                diagnostics={group.visible}
+                defaultOpen={group.defaultOpen}
+                onClear={() => clearForPlugin(group.pluginId)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
 
-        {error && <p className="text-xs text-destructive break-words">{error}</p>}
+interface DiagnosticGroupProps {
+  pluginId: string
+  diagnostics: PluginPointDiagnostic[]
+  defaultOpen: boolean
+  onClear: () => void
+}
 
-        {!tauri && (
-          <Card className="p-3 border-amber-500/50">
-            <p className="text-xs text-muted-foreground">{t("desktopOnlyHint")}</p>
-          </Card>
-        )}
+function DiagnosticGroup({ pluginId, diagnostics, defaultOpen, onClear }: DiagnosticGroupProps) {
+  const t = useTranslations("settings.plugins.audit.diagnostics")
+  const [open, setOpen] = useState(defaultOpen)
+  const errorCount = diagnostics.filter((d) => d.severity === "error").length
 
-        {versions.length > 0 && rollbackable.length === 0 && (
-          <Card className="p-3 border-destructive/50">
-            <p className="text-xs text-destructive">{t("canNotRollback")}</p>
-          </Card>
-        )}
-
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
-            {versions.length === 0 ? (
-              <p className="p-4 text-sm text-muted-foreground text-center">{t("empty")}</p>
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 bg-card">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-left flex-1"
+            aria-expanded={open}
+            data-testid={`diagnostics-group-trigger-${pluginId}`}
+          >
+            {open ? (
+              <ChevronDownIcon className="size-3.5" />
             ) : (
-              <ul className="divide-y">
-                {versions.map((version) => (
-                  <li
-                    key={`${version.source}-${version.version}`}
-                    className="flex items-start gap-2 px-3 py-2"
-                  >
-                    <HistoryIcon className="size-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="text-xs">
-                          v{version.version}
-                        </Badge>
-                        <Badge variant="secondary" className="text-xs">
-                          {version.source}
-                        </Badge>
-                        {version.date && (
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(version.date).toISOString().split("T")[0]}
-                          </span>
-                        )}
-                      </div>
-                      {version.reason && (
-                        <p className="text-xs text-muted-foreground">{version.reason}</p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void apply(version.version)}
-                      disabled={!version.canRollback || busyVersion !== null || !tauri}
-                      aria-label={t("rollbackAria", { version: version.version })}
-                    >
-                      <RotateCcwIcon className="size-3.5 mr-1.5" />
-                      {busyVersion === version.version ? t("rollingBack") : t("rollback")}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <ChevronRightIcon className="size-3.5" />
             )}
-          </ScrollArea>
-        </Card>
+            <span className="font-mono text-xs">{pluginId}</span>
+            <Badge variant={errorCount > 0 ? "destructive" : "secondary"} className="text-[10px]">
+              {t("countBadge", { count: diagnostics.length })}
+            </Badge>
+          </button>
+        </CollapsibleTrigger>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClear()
+          }}
+          data-testid={`diagnostics-clear-${pluginId}`}
+        >
+          {t("clearForPlugin")}
+        </Button>
+      </div>
+      <CollapsibleContent className="px-3 py-2 space-y-1.5">
+        {diagnostics.map((d, idx) => (
+          <DiagnosticRow key={`${d.code}-${d.pointId}-${idx}`} diagnostic={d} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
 
-        <DialogFooter>
-          <Button onClick={onClose}>{t("close")}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+function DiagnosticRow({ diagnostic }: { diagnostic: PluginPointDiagnostic }) {
+  const Icon = diagnostic.severity === "error" ? AlertCircleIcon : AlertTriangleIcon
+  const iconClass =
+    diagnostic.severity === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-500"
+
+  return (
+    <div className="flex items-start gap-2 text-xs" data-testid="diagnostics-row">
+      <Icon className={`size-3.5 mt-0.5 shrink-0 ${iconClass}`} />
+      <div className="space-y-0.5 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <code className="font-mono text-[10px] bg-muted px-1 rounded">{diagnostic.code}</code>
+          <code className="font-mono text-[10px] text-muted-foreground">{diagnostic.pointId}</code>
+        </div>
+        <p className="text-foreground">
+          {diagnostic.hint ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help underline decoration-dotted underline-offset-2">
+                  {diagnostic.message}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-md">
+                <p className="text-xs">{diagnostic.hint}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            diagnostic.message
+          )}
+        </p>
+      </div>
+    </div>
   )
 }

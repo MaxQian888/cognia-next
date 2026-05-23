@@ -10,7 +10,7 @@ const mockConfigureSampling = jest.fn()
 const mockGetBootstrap = jest.fn()
 const mockUseTransportHealth = jest.fn()
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   applyLoggingSettings: (...args: unknown[]) => mockApplyLoggingSettings(...args),
   getLoggingBootstrapState: () => mockGetBootstrap(),
   configureSampling: (...args: unknown[]) => mockConfigureSampling(...args),

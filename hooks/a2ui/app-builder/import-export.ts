@@ -6,7 +6,7 @@
 import { useCallback } from "react"
 import type { A2UIComponent, A2UISurfaceState, A2UISurfaceType } from "@/types/a2ui/schema"
 import { generateTemplateId } from "@/lib/a2ui/templates"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type { A2UIAppInstance } from "./types"
 import { getAppInstancesCache, saveAppInstances } from "./persistence"
 

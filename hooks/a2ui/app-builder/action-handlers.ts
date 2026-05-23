@@ -5,7 +5,7 @@
 
 import { useCallback, useRef } from "react"
 import type { A2UIUserAction } from "@/types/a2ui/schema"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.app
 

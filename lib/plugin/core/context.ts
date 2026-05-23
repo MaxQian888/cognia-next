@@ -79,7 +79,7 @@ import {
 } from "@/lib/workflow/triggers/registry"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/artifact/a2ui"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
-import { usePluginStore } from "@/stores/plugin"
+import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useSettingsStore } from "@/stores/settings"
 import type { PluginManager } from "./manager"

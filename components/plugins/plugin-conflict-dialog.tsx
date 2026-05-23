@@ -1,118 +1,115 @@
 "use client"
 
-// Surfaces the conflict-detector output before completing an install.
-// Severity buckets the rows so the user knows what to triage; Continue
-// proceeds with the install (caller wires the install dispatch), Abort
-// closes without changes.
+// Left-rail category sidebar for the /plugins panel. Driven by the
+// usePlugins() view-model so the badges always match the live row counts.
+// Selecting a category writes through to `usePluginsStore.setFilters`.
 
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, AlertCircleIcon, InfoIcon } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  LayersIcon,
+  WrenchIcon,
+  PaletteIcon,
+  PuzzleIcon,
+  CommandIcon,
+  ZapIcon,
+  PackageIcon,
+  ImageIcon,
+  PencilRulerIcon,
+  CalendarClockIcon,
+  ServerCogIcon,
+  BotIcon,
+  CodeIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
+import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 
-interface Props {
-  /** Optional callback fired when the user chooses to continue despite
-   * conflicts. The store target is cleared in either branch. */
-  onContinue?: (pluginId: string) => void
-}
+const CAPABILITY_META: Array<{
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}> = [
+  { id: "tools", label: "tools", icon: WrenchIcon },
+  { id: "components", label: "components", icon: PuzzleIcon },
+  { id: "modes", label: "modes", icon: BotIcon },
+  { id: "themes", label: "themes", icon: PaletteIcon },
+  { id: "commands", label: "commands", icon: CommandIcon },
+  { id: "hooks", label: "hooks", icon: ZapIcon },
+  { id: "media", label: "media", icon: ImageIcon },
+  { id: "canvas", label: "canvas", icon: PencilRulerIcon },
+  { id: "ai-provider", label: "ai-provider", icon: ServerCogIcon },
+  { id: "scheduler", label: "scheduler", icon: CalendarClockIcon },
+  { id: "exporters", label: "exporters", icon: PackageIcon },
+  { id: "importers", label: "importers", icon: PackageIcon },
+  { id: "python", label: "python", icon: CodeIcon },
+  { id: "external-agent-preset", label: "agentPresets", icon: BotIcon },
+]
 
-export function PluginConflictDialog({ onContinue }: Props = {}) {
-  const t = useTranslations("plugins.conflict")
-  const target = usePluginsStore((s) => s.conflictDialogTarget)
-  const setTarget = usePluginsStore((s) => s.setConflictDialogTarget)
-  const open = target !== null
-
-  if (!target) {
-    return (
-      <Dialog open={false} onOpenChange={() => setTarget(null)}>
-        <DialogContent>{null}</DialogContent>
-      </Dialog>
-    )
-  }
-
-  const { pluginId, conflicts } = target
-  const high = conflicts.filter((c) => c.severity === "high")
-  const medium = conflicts.filter((c) => c.severity === "medium")
-  const low = conflicts.filter((c) => c.severity === "low")
+export function PluginCategorySidebar() {
+  const t = useTranslations("plugins.categorySidebar")
+  const { totals, countsByCapability } = usePlugins()
+  const filters = usePluginsStore((s) => s.filters)
+  const setFilters = usePluginsStore((s) => s.setFilters)
+  const active = filters.capability
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && setTarget(null)}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{t("title", { id: pluginId })}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
+    <aside className="space-y-1 pr-2">
+      <SidebarItem
+        icon={LayersIcon}
+        active={active === "all"}
+        label={t("all")}
+        count={totals.total}
+        onClick={() => setFilters({ capability: "all" })}
+      />
+      <div className="h-px bg-border my-2" />
+      {CAPABILITY_META.map((meta) => {
+        const count = countsByCapability[meta.id] ?? 0
+        return (
+          <SidebarItem
+            key={meta.id}
+            icon={meta.icon}
+            active={active === meta.id}
+            label={t(`capability.${meta.label}` as never)}
+            count={count}
+            onClick={() => setFilters({ capability: meta.id })}
+            disabled={count === 0}
+          />
+        )
+      })}
+    </aside>
+  )
+}
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {high.length > 0 && (
-            <Badge variant="destructive" className="text-xs">
-              {t("highCount", { count: high.length })}
-            </Badge>
-          )}
-          {medium.length > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {t("mediumCount", { count: medium.length })}
-            </Badge>
-          )}
-          {low.length > 0 && (
-            <Badge variant="outline" className="text-xs">
-              {t("lowCount", { count: low.length })}
-            </Badge>
-          )}
-        </div>
-
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
-            <ul className="divide-y">
-              {conflicts.map((c, idx) => (
-                <li key={idx} className="flex items-start gap-2 px-3 py-2">
-                  {c.severity === "high" ? (
-                    <AlertTriangleIcon className="size-4 text-destructive mt-0.5 shrink-0" />
-                  ) : c.severity === "medium" ? (
-                    <AlertCircleIcon className="size-4 text-orange-500 mt-0.5 shrink-0" />
-                  ) : (
-                    <InfoIcon className="size-4 text-muted-foreground mt-0.5 shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="text-sm">{c.message}</div>
-                    {c.relatedPluginId && (
-                      <div className="text-xs text-muted-foreground">
-                        {t("relatedPlugin")} <code className="font-mono">{c.relatedPluginId}</code>
-                      </div>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-        </Card>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setTarget(null)}>
-            {t("abort")}
-          </Button>
-          <Button
-            variant={high.length > 0 ? "destructive" : "default"}
-            onClick={() => {
-              setTarget(null)
-              onContinue?.(pluginId)
-            }}
-          >
-            {t("continue")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+function SidebarItem({
+  icon: Icon,
+  active,
+  label,
+  count,
+  onClick,
+  disabled,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  active: boolean
+  label: string
+  count: number
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <Button
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn("w-full justify-start gap-2 h-8", disabled && "opacity-50")}
+    >
+      <Icon className="size-3.5" />
+      <span className="flex-1 text-left truncate">{label}</span>
+      <Badge variant="outline" className="text-xs">
+        {count}
+      </Badge>
+    </Button>
   )
 }

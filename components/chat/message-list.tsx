@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import { downloadBlob } from "@/lib/files/download"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { PerfBoundary } from "@/lib/perf"
 
 interface Props {

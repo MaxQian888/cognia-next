@@ -77,7 +77,7 @@ The AI-provider bridge adapts the new `PluginLlmProvider` / `PluginEmbeddingProv
 
 ### Phase 3 · UI surface
 
-- **Modal stack** — `stores/plugin/plugin-modal-store.ts` (Zustand LIFO), `lib/plugin/api/modal-api.ts` (`ctx.modal.openModal()`), `components/plugins/plugin-modal-root.tsx` mounted once in `app/layout.tsx`. Per-modal error boundary mirrors `<PluginExtensionSlot>`.
+- **Modal stack** — `stores/plugin-runtime/plugin-modal-store.ts` (Zustand LIFO), `lib/plugin/api/modal-api.ts` (`ctx.modal.openModal()`), `components/plugins/plugin-modal-root.tsx` mounted once in `app/layout.tsx`. Per-modal error boundary mirrors `<PluginExtensionSlot>`.
 - **Per-plugin settings UI** — `manifest.configComponent` + `lib/plugin/bridge/config-component-bridge.ts` (lazy load + per-pluginId cache).
 - **Composer dropdown groups** — `chat.input.menu` canonical extension point; mount in `components/chat/composer/bottom-toolbar.tsx` next to the existing `chat.input.actions` slot.
 - **Theme CSS variables** — third `PluginThemeContribution` union variant `{ cssVariables: Record<string, string> }`; `themes-bridge` sanitizes names to `^--[a-z][a-z0-9-]*$`, values to ≤200 chars, rejects `</style>`.

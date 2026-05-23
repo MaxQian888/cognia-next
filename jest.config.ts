@@ -32,11 +32,6 @@ const config: Config = {
     "!lib/claude/hooks.ts",
     "!lib/data/importers/types.ts",
     "!lib/skills/marketplace-types.ts",
-    // lib/logger/types.ts is mostly type aliases plus a handful of constant
-    // objects; V8 reports 0% branches on it because the only branches are
-    // `process.env.NODE_ENV === "production" ? ... : ...` ternaries that
-    // evaluate to a constant in the test runtime.
-    "!lib/logger/types.ts",
     // Pure type/interface modules — TS strips them at runtime, so V8 always
     // reports 0%. Same exemption pattern as the four entries above.
     "!lib/storage/persistence/types.ts",

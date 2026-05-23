@@ -21,7 +21,7 @@ import { isTauri } from "@/lib/tauri"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import type {
   EmitEventRequest,
   RemoteControlInboundCallLog,

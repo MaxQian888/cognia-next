@@ -25,7 +25,7 @@ import { ORDERED_TTS_PROVIDERS, TTS_PROVIDERS, type TTSProvider } from "@/lib/tt
 import { generateSSML } from "@/lib/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 // -- SSML Preview (Edge / System) --------------------------------------------
 

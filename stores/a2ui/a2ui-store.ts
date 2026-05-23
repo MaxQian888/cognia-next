@@ -134,6 +134,36 @@ const initialState: A2UIState = {
   redoStacks: {},
 }
 
+/**
+ * Schema v3 migration (2026-05): merge legacy `DataExplorer` component into
+ * the unified `Table` component. The Table schema now accepts the same
+ * `sortKeyPath` / `sortDirectionPath` / `actionMeta` fields the DataExplorer
+ * carried, so the migration is a field-preserving rename. Applied to incoming
+ * messages (`updateComponents`) and rehydrated state alike.
+ */
+function migrateLegacyComponent(component: A2UIComponent): A2UIComponent {
+  if (component && (component as { component?: string }).component === "DataExplorer") {
+    const { component: _legacyType, ...rest } = component as A2UIComponent & {
+      component: "DataExplorer"
+    }
+    return { ...rest, component: "Table" } as A2UIComponent
+  }
+  return component
+}
+
+function migrateComponentMap(
+  components: Record<string, A2UIComponent>
+): Record<string, A2UIComponent> {
+  let mutated = false
+  const next: Record<string, A2UIComponent> = {}
+  for (const [id, value] of Object.entries(components)) {
+    const migrated = migrateLegacyComponent(value)
+    next[id] = migrated
+    if (migrated !== value) mutated = true
+  }
+  return mutated ? next : components
+}
+
 function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, A2UISurfaceState> {
   if (!persistedSurfaces || typeof persistedSurfaces !== "object") {
     return {}
@@ -146,10 +176,11 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
     }
 
     const surface = value as Partial<A2UISurfaceState>
-    const components =
+    const rawComponents =
       surface.components && typeof surface.components === "object"
         ? (surface.components as Record<string, A2UIComponent>)
         : {}
+    const components = migrateComponentMap(rawComponents)
     const dataModel =
       surface.dataModel && typeof surface.dataModel === "object"
         ? (surface.dataModel as Record<string, unknown>)
@@ -242,7 +273,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
             const updatedComponents = { ...surface.components }
             for (const component of components) {
-              updatedComponents[component.id] = component
+              updatedComponents[component.id] = migrateLegacyComponent(component)
             }
 
             return {
@@ -609,7 +640,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
       }),
       {
         name: "cognia-a2ui-surfaces",
-        version: 2,
+        version: 3,
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== "object") {
             return persistedState as A2UIState & A2UIActions

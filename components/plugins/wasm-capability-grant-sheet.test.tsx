@@ -1,173 +1,65 @@
-/**
- * @jest-environment jsdom
- */
+"use client"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+// Horizontally-scrollable row with edge fade affordances. Pulled out of
+// `plugin-panel-tabs.tsx` so the same scroll-overflow treatment can wrap any
+// inline-flex strip (devtools sub-tabs, marketplace section toggles, etc.)
+// without duplicating the ResizeObserver wiring.
+//
+// The fade overlays render only when the inner scroller actually overflows,
+// matching the pattern users already see on the main plugin tab strip.
 
-import { render, screen, fireEvent } from "@testing-library/react"
-import { WasmCapabilityGrantSheet } from "./wasm-capability-grant-sheet"
-import type { PluginManifest } from "@/types/plugin"
+import { useRef } from "react"
+import { useOverflowState } from "@/hooks/use-overflow-state"
+import { cn } from "@/lib/utils"
 
-const baseManifest: PluginManifest = {
-  id: "demo.wasm",
-  name: "Demo WASM Plugin",
-  version: "0.1.0",
-  description: "A test plugin",
-  type: "wasm",
-  capabilities: [],
-  wasmMain: "main.wasm",
-  wasm: { apiVersion: "0.1.0" },
-  permissions: ["notification", "filesystem:read", "process:spawn"],
-  optionalPermissions: ["clipboard:write"],
-  author: { name: "Alice", publicKey: "QUJD" }, // base64("ABC")
+interface Props {
+  children: React.ReactNode
+  /** Extra classes applied to the outer wrapper (relative positioning host). */
+  className?: string
+  /**
+   * Extra classes applied to the inner scroller. Callers commonly pass
+   * `-mx-1 px-1` style negative-margin tricks here.
+   */
+  scrollerClassName?: string
+  /**
+   * data-testid prefix. The scroller gets `${testId}-scroller`, fades get
+   * `${testId}-fade-left` / `${testId}-fade-right`. Defaults to "scroll-shadow-row".
+   */
+  testId?: string
 }
 
-describe("WasmCapabilityGrantSheet", () => {
-  it("renders requested permissions grouped by category", () => {
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={baseManifest}
-        authorFingerprint="ed25519:9f:3a:11:22:33:44:55:66"
-        open
-        onOpenChange={() => {}}
-        onConfirm={() => {}}
-      />
-    )
-    expect(screen.getByText('title:{"name":"Demo WASM Plugin"}')).toBeInTheDocument()
-    expect(screen.getByText("groups.notifications")).toBeInTheDocument()
-    expect(screen.getByText("groups.filesystem")).toBeInTheDocument()
-    expect(screen.getByText("groups.osProcess")).toBeInTheDocument()
-    expect(screen.getByText("optionalPermissions")).toBeInTheDocument()
-    expect(screen.getByText("ed25519:9f:3a:11:22:33:44:55:66")).toBeInTheDocument()
-  })
+export function ScrollShadowRow({
+  children,
+  className,
+  scrollerClassName,
+  testId = "scroll-shadow-row",
+}: Props) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const { hasOverflowLeft, hasOverflowRight } = useOverflowState(scrollerRef)
 
-  it("starts with required perms checked and optional unchecked", () => {
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={baseManifest}
-        authorFingerprint=""
-        open
-        onOpenChange={() => {}}
-        onConfirm={() => {}}
-      />
-    )
-    const reqCheckbox = screen.getByRole("checkbox", {
-      name: 'togglePermissionAriaLabel:{"permission":"notification"}',
-    })
-    expect(reqCheckbox).toHaveAttribute("data-state", "checked")
-    const optCheckbox = screen.getByRole("checkbox", {
-      name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
-    })
-    expect(optCheckbox).toHaveAttribute("data-state", "unchecked")
-  })
-
-  it("emits the user's selection when confirmed", () => {
-    const onConfirm = jest.fn()
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={baseManifest}
-        authorFingerprint=""
-        open
-        onOpenChange={() => {}}
-        onConfirm={onConfirm}
-      />
-    )
-    // Untick filesystem:read; tick clipboard:write.
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: 'togglePermissionAriaLabel:{"permission":"filesystem:read"}',
-      })
-    )
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
-      })
-    )
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    expect(onConfirm).toHaveBeenCalledTimes(1)
-    const decision = onConfirm.mock.calls[0][0]
-    expect(decision.pluginId).toBe("demo.wasm")
-    expect(decision.grantedPermissions).toEqual(
-      expect.arrayContaining(["notification", "process:spawn", "clipboard:write"])
-    )
-    expect(decision.grantedPermissions).not.toContain("filesystem:read")
-  })
-
-  it("surfaces the dangerous-permissions warning when sensitive caps are granted", () => {
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={baseManifest}
-        authorFingerprint=""
-        open
-        onOpenChange={() => {}}
-        onConfirm={() => {}}
-      />
-    )
-    // baseManifest grants `process:spawn` by default → dangerous count = 1.
-    expect(screen.getByText(/^dangerousWarning:/)).toBeInTheDocument()
-  })
-
-  it("renders preopens checklist when manifest declares fs.preopens", () => {
-    const onConfirm = jest.fn()
-    const manifest: PluginManifest = {
-      ...baseManifest,
-      permissions: ["filesystem:read"],
-      optionalPermissions: [],
-      wasm: { apiVersion: "0.1.0", fs: { preopens: ["~/Documents/cognia"] } },
-    }
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={manifest}
-        authorFingerprint=""
-        open
-        onOpenChange={() => {}}
-        onConfirm={onConfirm}
-      />
-    )
-    expect(screen.getByText("extraFilesystem")).toBeInTheDocument()
-    expect(screen.getByText("~/Documents/cognia")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    expect(onConfirm.mock.calls[0][0].grantedPreopens).toEqual(["~/Documents/cognia"])
-  })
-
-  it("renders a 'no permissions' message when the manifest declares none", () => {
-    const empty: PluginManifest = {
-      ...baseManifest,
-      permissions: [],
-      optionalPermissions: [],
-    }
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={empty}
-        authorFingerprint=""
-        open
-        onOpenChange={() => {}}
-        onConfirm={() => {}}
-      />
-    )
-    expect(screen.getByText("noSensitivePermissions")).toBeInTheDocument()
-    // No dangerous warning card.
-    expect(screen.queryByText(/^dangerousWarning:/)).not.toBeInTheDocument()
-  })
-
-  it("calls onCancel and closes when the user backs out", () => {
-    const onCancel = jest.fn()
-    const onOpenChange = jest.fn()
-    render(
-      <WasmCapabilityGrantSheet
-        manifest={baseManifest}
-        authorFingerprint=""
-        open
-        onOpenChange={onOpenChange}
-        onCancel={onCancel}
-        onConfirm={() => {}}
-      />
-    )
-    fireEvent.click(screen.getByTestId("wasm-grant-cancel"))
-    expect(onCancel).toHaveBeenCalled()
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
-})
+  return (
+    <div className={cn("relative", className)}>
+      <div
+        ref={scrollerRef}
+        className={cn("overflow-x-auto", scrollerClassName)}
+        data-testid={`${testId}-scroller`}
+      >
+        {children}
+      </div>
+      {hasOverflowLeft && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-left`}
+          className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent"
+        />
+      )}
+      {hasOverflowRight && (
+        <span
+          aria-hidden
+          data-testid={`${testId}-fade-right`}
+          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent"
+        />
+      )}
+    </div>
+  )
+}

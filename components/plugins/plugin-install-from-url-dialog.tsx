@@ -1,131 +1,112 @@
 "use client"
 
-// Replaces the previous `window.prompt()`-driven URL install flow with a
-// proper modal dialog: input + submit + inline error + cancel. On success
-// the parsed manifest gets staged through `usePluginsStore.setImportStaging`
-// so the existing `PluginImportDialog` confirmation path takes over from
-// there.
+// Generic UI slot renderer for the 27 implemented `CanonicalExtensionPoint`s
+// declared in `lib/plugin/contracts/plugin-points.ts`. Host code drops one of
+// these in the right region (chat.input.above, settings.plugins, etc.) and
+// every plugin that registered a component for that point gets rendered in
+// `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
+// throwing extension can't take down the host UI.
 
-import { useState } from "react"
-import { useTranslations } from "next-intl"
-import { GlobeIcon, AlertTriangleIcon, Loader2Icon } from "lucide-react"
+import { Component, useSyncExternalStore, type ReactNode } from "react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { usePluginsStore } from "@/stores/plugins"
+  getExtensionsForPoint,
+  getExtensionRevision,
+  subscribeExtensionChanges,
+} from "@/lib/plugin/api"
+import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  point: CanonicalExtensionPoint
+  /** Optional className applied to the wrapper around all rendered extensions. */
+  className?: string
+  /** Cap the number of extensions rendered (e.g., toolbar slots take 3 + overflow). */
+  limit?: number
+  /** Fallback rendered when no extensions are registered for the point. */
+  fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
-  const t = useTranslations("plugins.toolbar.fromUrlDialog")
-  const setImportStaging = usePluginsStore((s) => s.setImportStaging)
-  const [url, setUrl] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
+  // Re-render whenever the registry mutates. Snapshot is the revision number
+  // (a primitive — stable identity), not the registration array, so React's
+  // "snapshot should be cached" check passes.
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
 
-  const reset = () => {
-    setUrl("")
-    setBusy(false)
-    setError(null)
-  }
+  const all = getExtensionsForPoint(point)
+  const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
+  const visible = typeof limit === "number" ? ordered.slice(0, limit) : ordered
 
-  const handleSubmit = async () => {
-    const trimmed = url.trim()
-    if (!trimmed) {
-      setError(t("emptyError"))
-      return
-    }
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await fetch(trimmed, { credentials: "omit" })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const manifest = (await res.json()) as Record<string, unknown>
-      setImportStaging({
-        drafts: [
-          {
-            id: String(manifest.id ?? trimmed),
-            name: String(manifest.name ?? trimmed),
-            version: String(manifest.version ?? "0.0.0"),
-            manifest,
-            sourceLabel: trimmed,
-          },
-        ],
-        sourceLabel: trimmed,
-        parseErrors: [],
-      })
-      reset()
-      onOpenChange(false)
-    } catch (err) {
-      setError(
-        t("error", {
-          message: err instanceof Error ? err.message : String(err),
-        })
-      )
-    } finally {
-      setBusy(false)
-    }
+  if (visible.length === 0) {
+    return fallback ? <>{fallback}</> : null
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) reset()
-        onOpenChange(next)
-      }}
+    <div
+      className={className}
+      data-plugin-extension-slot={point}
+      data-extension-count={visible.length}
     >
-      <DialogContent className="w-[95vw] sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GlobeIcon className="size-4" />
-            {t("title")}
-          </DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-2">
-          <Label htmlFor="plugin-install-url">{t("label")}</Label>
-          <Input
-            id="plugin-install-url"
-            type="url"
-            placeholder={t("placeholder")}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !busy) void handleSubmit()
-            }}
-            disabled={busy}
-          />
-          {error && (
-            <p role="alert" className="flex items-center gap-1.5 text-sm text-destructive">
-              <AlertTriangleIcon className="size-3.5" />
-              {error}
-            </p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            {t("cancel")}
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={busy}>
-            {busy ? <Loader2Icon className="size-3.5 mr-1.5 animate-spin" /> : null}
-            {t("submit")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
+    </div>
   )
+}
+
+interface BoundaryProps {
+  pluginId: string
+  extensionId: string
+  children: ReactNode
+}
+
+interface BoundaryState {
+  hasError: boolean
+}
+
+class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): BoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    // Plug into the analytics event stream rather than console.error so the
+    // /plugins panel can surface the failure later. Importing analytics lazily
+    // avoids pulling that module into every host page.
+    void import("@/lib/plugin/utils/analytics").then((mod) => {
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }

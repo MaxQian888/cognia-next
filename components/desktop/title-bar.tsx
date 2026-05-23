@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/menubar"
 import { getCharacter } from "@/lib/db/characters"
 import { getSession, listSessions } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import {

@@ -11,7 +11,7 @@
 
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.ai
 

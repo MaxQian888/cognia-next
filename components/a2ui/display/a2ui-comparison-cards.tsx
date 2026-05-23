@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { resolveArrayOrPath, resolveStringOrPath } from "@/lib/a2ui/data-model"
@@ -14,6 +15,7 @@ export function A2UIComparisonCards({
   dataModel,
   onAction,
 }: A2UIComponentProps<A2UIComparisonCardsComponent>) {
+  const t = useTranslations("a2ui")
   const title = resolveStringOrPath(component.title ?? "", dataModel, "")
   const description = resolveStringOrPath(component.description ?? "", dataModel, "")
   const items = resolveArrayOrPath(component.items, dataModel, []) as A2UIComparisonCardItem[]
@@ -21,7 +23,7 @@ export function A2UIComparisonCards({
   if (items.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-        {component.emptyText || "No comparison data available."}
+        {component.emptyText || t("comparisonEmpty")}
       </div>
     )
   }

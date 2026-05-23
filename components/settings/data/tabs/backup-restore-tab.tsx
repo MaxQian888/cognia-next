@@ -32,7 +32,7 @@ import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dia
 import { useFullBackup } from "@/hooks/data/use-full-backup"
 import { useScheduler } from "@/hooks/scheduler"
 import { rotateBackupKey } from "@/lib/data/backup-key"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 export function BackupRestoreTab() {
   return (

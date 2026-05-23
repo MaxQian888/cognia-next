@@ -19,7 +19,7 @@ import { enqueueDistillJob } from "@/lib/twin/distill"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { listTwinSourcesByTwinAndStatus } from "@/lib/db/twin-sources"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
 

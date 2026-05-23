@@ -18,7 +18,7 @@ interface MockFns {
   withContext: jest.Mock
 }
 
-jest.mock("@/lib/logger", () => {
+jest.mock("@/lib/logging", () => {
   const fns: MockFns = {
     trace: jest.fn(),
     debug: jest.fn(),

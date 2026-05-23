@@ -10,8 +10,8 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePluginRow } from "@/hooks/plugins"
-import { PluginContributedTab } from "../plugin-contributed-tab"
-import { PluginTriggersTab } from "../plugin-triggers-tab"
+import { PluginContributedTab } from "./plugin-contributed-tab"
+import { PluginTriggersTab } from "./plugin-triggers-tab"
 
 export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")

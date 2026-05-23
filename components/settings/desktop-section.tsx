@@ -15,7 +15,7 @@ import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { getPref, setPref } from "@/lib/tauri/store"
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { TraySection } from "./tray-section"
 import { ShortcutsSection } from "./shortcuts-section"
 

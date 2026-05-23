@@ -6,18 +6,21 @@ import {
   isCrashRelevantLogEntry,
   serializeCrashLogBundle,
   summarizeCrashLogItems,
-  type CrashDiagnosticsSnapshot,
-  type CrashLogItem,
-  type CrashLogLevelFilter,
-  type CrashLogSourceFilter,
-} from "@/lib/logger/crash-log"
+} from "@/lib/logging/crash-log"
+import type {
+  CrashDiagnosticsSnapshot,
+  CrashLogItem,
+  CrashLogLevelFilter,
+  CrashLogSourceFilter,
+  UseCrashLogsResult,
+} from "@/types/logging"
 import { downloadFile } from "@/lib/files/download"
-import { getIndexedDBTransport } from "@/lib/logger"
+import { getIndexedDBTransport } from "@/lib/logging"
 import {
   clearRecentErrorLogs,
   getRecentErrorLogs,
   subscribeRecentErrorLogs,
-} from "@/lib/logger/recent-errors"
+} from "@/lib/logging/recent-errors"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import {
   getNativeLogDirectory,
@@ -53,33 +56,7 @@ function deriveRelatedLogs(items: CrashLogItem[], selectedItem: CrashLogItem | n
     .slice(0, 10)
 }
 
-export interface UseCrashLogsResult {
-  isLoading: boolean
-  isRefreshing: boolean
-  error: Error | null
-  autoRefresh: boolean
-  setAutoRefresh: (value: boolean) => void
-  lastUpdatedAt: string | null
-  filters: {
-    source: CrashLogSourceFilter
-    level: CrashLogLevelFilter
-    search: string
-  }
-  setSourceFilter: (value: CrashLogSourceFilter) => void
-  setLevelFilter: (value: CrashLogLevelFilter) => void
-  setSearchQuery: (value: string) => void
-  items: CrashLogItem[]
-  selectedItem: CrashLogItem | null
-  relatedLogs: NonNullable<CrashLogItem["logEntry"]>[]
-  selectItem: (itemId: string) => void
-  refresh: () => Promise<void>
-  clearRecent: () => void
-  clearPersisted: () => Promise<void>
-  copySelected: () => Promise<boolean>
-  exportBundle: (format?: "bundle" | "json" | "text") => void
-  openNativeLogDirectory: () => Promise<boolean>
-  summary: ReturnType<typeof summarizeCrashLogItems>
-}
+export type { UseCrashLogsResult } from "@/types/logging"
 
 export function useCrashLogs(): UseCrashLogsResult {
   const [autoRefresh, setAutoRefresh] = useState(true)

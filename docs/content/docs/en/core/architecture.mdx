@@ -138,7 +138,7 @@ The Rust side (`src-tauri/src/claude/sidecar.rs`) owns the child process handle 
 
 ### Logging
 
-Browser logger (`lib/logger/`) is mirrored into Rust via the `tauri-log-bridge`. Rust uses `fern` to dispatch into:
+Browser logger (`lib/logging/`) is mirrored into Rust via the `tauri-log-bridge`. Rust uses `fern` to dispatch into:
 
 - The Tauri log plugin (file + console).
 - The native platform logger (Windows Event Log, macOS `os_log`, Linux `systemd-journald` / `syslog`).

@@ -71,7 +71,7 @@ import { ContextGauge } from "@/components/chat/context-gauge"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { toast } from "sonner"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const MODEL_PRESETS: {

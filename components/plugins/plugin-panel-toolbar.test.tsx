@@ -20,7 +20,7 @@ jest.mock("@/lib/native/utils", () => ({
 }))
 
 const wasmTriggerMock = jest.fn()
-jest.mock("./install-wasm-plugin-button", () => ({
+jest.mock("./dialogs/install-wasm-plugin-button", () => ({
   useInstallWasmFromLocal: () => ({
     trigger: wasmTriggerMock,
     busy: false,
@@ -29,8 +29,8 @@ jest.mock("./install-wasm-plugin-button", () => ({
   }),
 }))
 
-jest.mock("./install-from-url-dialog", () => ({
-  InstallFromUrlDialog: ({
+jest.mock("./dialogs/plugin-signed-install-from-url-dialog", () => ({
+  PluginSignedInstallFromUrlDialog: ({
     open,
     onOpenChange,
   }: {
@@ -73,7 +73,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
 }))
 
 // Stub the inner URL dialog — its behavior has its own dedicated test file.
-jest.mock("./plugin-install-from-url-dialog", () => ({
+jest.mock("./dialogs/plugin-install-from-url-dialog", () => ({
   PluginInstallFromUrlDialog: ({
     open,
     onOpenChange,

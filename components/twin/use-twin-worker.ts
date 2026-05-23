@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@/lib/vector/store"
 import { observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { getTwinSource } from "@/lib/db/twin-sources"

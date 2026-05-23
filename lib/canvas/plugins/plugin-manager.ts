@@ -3,7 +3,7 @@
  * Integrates with the main plugin system at lib/plugin
  */
 
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 
 const log = loggers.plugin

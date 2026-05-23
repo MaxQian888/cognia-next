@@ -55,7 +55,7 @@ jest.mock("sonner", () => ({
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: {
     shell: {
       info: (...args: unknown[]) => logInfo(...args),

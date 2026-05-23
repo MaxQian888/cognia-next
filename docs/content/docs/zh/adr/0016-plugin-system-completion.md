@@ -125,7 +125,7 @@ Every T1.1 site starts with `expected: !isTauri()`. As each T3 batch ships its m
 | Hook dispatcher          | `lib/plugin/messaging/hooks-system.ts`                                         | one `HookDispatcher`; two dispatcher classes (`PluginLifecycleHooks` + `PluginEventHooks`) |
 | Permission gate          | `lib/plugin/security/permission-guard.ts` + `lib/plugin/api/permission-api.ts` | route every check through `requestPluginPermission`                                        |
 | Theme bridge             | `lib/plugin/api/theme-api.ts:createThemeAPI`                                   | manifest.themes auto-discovered on enable                                                  |
-| Connector bridge         | `lib/plugin/connectors-bridge.ts:registerPluginAdapters`                       | one call per plugin enable; cleans up on disable                                           |
+| Connector bridge         | `lib/plugin/bridge/connectors-bridge.ts:registerPluginAdapters`                | one call per plugin enable; cleans up on disable                                           |
 | Slash-command channel    | `lib/slash-commands/registry.ts` with `source: "plugin"`                       | tagging by `pluginId` enables bulk-removal on disable                                      |
 | Diagnostics store        | `lib/plugin/contracts/diagnostics-store.ts:recordSilentFailure`                | `expected: !isTauri()` until Rust handler ships, then flip to `false`                      |
 

@@ -90,7 +90,6 @@ export const A2UI_COMPONENT_KINDS = [
   // Data
   "Table",
   "Chart",
-  "DataExplorer",
   "Pagination",
   // Misc
   "Progress",

@@ -17,7 +17,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { isTauri } from "@/lib/tauri"
 import {
   remoteControlGetStatus,

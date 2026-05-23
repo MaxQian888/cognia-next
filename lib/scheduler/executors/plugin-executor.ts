@@ -15,7 +15,7 @@
  */
 
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { loggers } from "@/lib/logger"
+import { loggers } from "@/lib/logging"
 import { getPluginTaskHandler } from "@/lib/plugin/scheduler/scheduler-plugin-executor"
 import type { PluginTaskContext } from "@/types/plugin/plugin-scheduler"
 

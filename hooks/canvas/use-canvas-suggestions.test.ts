@@ -24,7 +24,7 @@ jest.mock("@/lib/ai/core/client", () => ({
   getProviderModel: () => ({ provider: "anthropic" }),
 }))
 
-jest.mock("@/lib/logger", () => ({
+jest.mock("@/lib/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
