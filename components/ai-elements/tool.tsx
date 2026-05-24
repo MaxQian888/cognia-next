@@ -20,13 +20,18 @@ import { isValidElement, useState } from "react"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { DiffBlock } from "@/components/chat/renderers/diff-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { ErrorParsedView } from "@/components/chat/error-parsed-view"
 
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
     className={cn(
-      "group not-prose mb-4 w-full rounded-md border bg-card/80 backdrop-blur-sm",
+      // No backdrop-filter: a tool-call-dense reply stacks dozens of these
+      // cards in the scroll list, and each backdrop-filter layer is re-sampled
+      // every scroll frame (catastrophic in WebView2). Solid bg-card paints
+      // once and removes the per-card compositing cost.
+      "group not-prose mb-4 w-full rounded-md border bg-card",
       className
     )}
     {...props}
@@ -320,6 +325,8 @@ export const ToolReadPreview = ({ input, output }: ToolReadPreviewProps) => {
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolPart["output"]
   errorText: ToolPart["errorText"]
+  /** Tool type (e.g. `tool-Bash`) used to resolve a tool-specific error preset. */
+  toolType?: string
 }
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
@@ -337,7 +344,13 @@ function looksLikeJson(s: string): boolean {
   )
 }
 
-export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
+export const ToolOutput = ({
+  className,
+  output,
+  errorText,
+  toolType,
+  ...props
+}: ToolOutputProps) => {
   if (!(output || errorText)) {
     return null
   }
@@ -376,8 +389,7 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
           errorText ? "bg-destructive/10 text-destructive p-3" : "text-foreground"
         )}
       >
-        {errorText && <pre className="whitespace-pre-wrap break-words font-mono">{errorText}</pre>}
-        {!errorText && Output}
+        {errorText ? <ErrorParsedView rawError={errorText} toolType={toolType} /> : Output}
       </div>
     </div>
   )
@@ -416,7 +428,7 @@ export const ToolBody = ({ part }: ToolBodyProps) => {
           {isReadTool && !part.errorText ? (
             <ToolReadPreview input={part.input} output={part.output} />
           ) : (
-            <ToolOutput output={part.output} errorText={part.errorText} />
+            <ToolOutput output={part.output} errorText={part.errorText} toolType={part.type} />
           )}
         </>
       )}

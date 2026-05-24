@@ -27,6 +27,8 @@ import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
+import { ExitConfirmationDialog } from "@/components/desktop/exit-confirmation-dialog"
+import { CrashReportDialog } from "@/components/desktop/crash-report-dialog"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
@@ -161,6 +163,12 @@ export default async function RootLayout({
                       </CompanionEventBridgeProvider>
                     </BackupSchedulerProvider>
                     <ConsentOverlay />
+                    {/* Exit-confirmation prompt — opens when the close button is
+                     * pressed and the user's close behavior is "ask". */}
+                    <ExitConfirmationDialog />
+                    {/* Surfaces an abnormal previous exit (crash) once per launch
+                     * with a link to the saved report. No-op on web. */}
+                    <CrashReportDialog />
                     {/* Renders any modal a plugin opens via ctx.modal.openModal(). */}
                     {/* See ADR-0026 §3 §A. */}
                     <PluginModalRoot />

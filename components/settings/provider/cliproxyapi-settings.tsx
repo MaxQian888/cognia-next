@@ -41,7 +41,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useSettingsStore } from "@/stores"
-import type { CLIProxyAPIExtendedSettings, ProviderModelDiscoveryEntry } from "@/types/provider"
+import type { CLIProxyAPIProviderSettings, ProviderModelDiscoveryEntry } from "@/types/provider"
 import { testConnection, getWebUIURL, getAPIURL } from "@/lib/ai/providers/cliproxyapi"
 import { discoverCLIProxyAPIModels } from "@/lib/ai/providers/model-discovery"
 
@@ -86,7 +86,7 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
   )
 
   const updateCLIProxyAPISettings = useCallback(
-    (updates: Partial<CLIProxyAPIExtendedSettings>) => {
+    (updates: Partial<CLIProxyAPIProviderSettings>) => {
       updateProviderSettings("cliproxyapi", {
         cliProxyAPISettings: {
           ...cliProxyAPISettings,

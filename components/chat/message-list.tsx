@@ -23,7 +23,7 @@ import { MessageActionSheet } from "@/components/mobile/chat/message-action-shee
 import { useChatStore } from "@/stores/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
-import type { Character } from "@/lib/claude/types"
+import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
@@ -50,12 +50,13 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollParentRef = useRef<HTMLDivElement>(null)
 
+  // `useCharacters()` (useLiveQuery) hands back a fresh array reference on
+  // every Dexie write even when the character set is unchanged. Building the
+  // map with a naive `useMemo([charactersList])` would therefore rebuild it on
+  // unrelated writes and bust the `MessageRenderer` memo for EVERY row. The
+  // stable hook only rebuilds when the id-set actually changes.
   const charactersList = useCharacters()
-  const characterById = useMemo(() => {
-    const map = new Map<string, Character>()
-    for (const c of charactersList ?? []) map.set(c.id, c)
-    return map
-  }, [charactersList])
+  const characterById = useStableCharacterById(charactersList)
 
   const handleExport = useCallback(() => {
     if (messages.length === 0) {
@@ -114,7 +115,11 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
     // text length. Without this skip, every token would trigger a
     // getBoundingClientRect on the streaming row → ResizeObserver pump →
     // virtualizer re-publish → jitter.
-    measureElement: (el) => el?.getBoundingClientRect().height ?? 0,
+    // Round to whole pixels. Feeding fractional getBoundingClientRect heights
+    // back into the virtualizer (which positions rows via transform) lets
+    // sub-pixel deltas retrigger the ResizeObserver → re-measure → re-publish
+    // loop, which spins the list even when nothing is happening.
+    measureElement: (el) => Math.round(el?.getBoundingClientRect().height ?? 0),
   })
 
   // Re-measure every row when the streaming row finalises. Stage 4 will

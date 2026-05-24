@@ -100,7 +100,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
         role="math"
         aria-label={t("expressionLabel")}
       >
-        <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 backdrop-blur-sm rounded-lg p-0.5">
+        <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
           <TooltipIconButton
             variant="ghost"
             size="icon"

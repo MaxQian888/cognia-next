@@ -37,7 +37,6 @@ export type {
   PostChatReceiveResult,
   // Umbrella hook collections
   PluginHooksAll,
-  ExtendedPluginHooks,
   // Registration options & sandbox result
   HookPriority,
   HookRegistrationOptions,

@@ -18,9 +18,9 @@ import { z, type ZodType } from "zod"
 export { tool }
 
 /**
- * Tool definition with enhanced options
+ * Configuration object passed to {@link createTool}.
  */
-export interface EnhancedToolDefinition<TInput extends ZodType, TOutput> {
+export interface ToolConfig<TInput extends ZodType, TOutput> {
   /** Tool description for the LLM */
   description: string
   /** Zod schema for input validation */
@@ -36,10 +36,10 @@ export interface EnhancedToolDefinition<TInput extends ZodType, TOutput> {
 }
 
 /**
- * Create an enhanced tool with all options
+ * Create a tool with all options
  */
 export function createTool<TInput extends ZodType, TOutput>(
-  definition: EnhancedToolDefinition<TInput, TOutput>
+  definition: ToolConfig<TInput, TOutput>
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const toolConfig: any = {
@@ -186,7 +186,7 @@ export class ToolRegistry {
    */
   register<TInput extends ZodType, TOutput>(
     name: string,
-    definition: EnhancedToolDefinition<TInput, TOutput>,
+    definition: ToolConfig<TInput, TOutput>,
     metadata: Omit<ToolMetadata, "name">
   ) {
     const createdTool = createTool(definition)
@@ -371,7 +371,7 @@ export function combineTools(
  * Create a tool that wraps another with rate limiting
  */
 export function withRateLimit<TInput extends ZodType, TOutput>(
-  definition: EnhancedToolDefinition<TInput, TOutput>,
+  definition: ToolConfig<TInput, TOutput>,
   options: {
     maxCalls: number
     windowMs: number
@@ -404,7 +404,7 @@ export function withRateLimit<TInput extends ZodType, TOutput>(
  * Create a tool that caches results
  */
 export function withCache<TInput extends ZodType, TOutput>(
-  definition: EnhancedToolDefinition<TInput, TOutput>,
+  definition: ToolConfig<TInput, TOutput>,
   options?: {
     ttlMs?: number
     maxSize?: number

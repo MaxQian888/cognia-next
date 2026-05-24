@@ -9,7 +9,7 @@
  * Partitioning rules — see `../manifest/index.ts`. This module owns:
  *  - `PluginContext` itself
  *  - Every `PluginXxxAPI` interface plus its companion option/result types
- *  - The extended-context aliases (`ExtendedPluginContext` / `PluginContextAPI`)
+ *  - The extended-context API (`PluginContextAPI`)
  */
 
 // =============================================================================
@@ -138,5 +138,4 @@ export type {
   PluginExtensionAPI,
   PluginPermissionAPI,
   PluginContextAPI,
-  ExtendedPluginContext,
 } from "@/types/plugin/plugin-extended"

@@ -46,7 +46,7 @@ import { useSettingsStore } from "@/stores"
 import type {
   BYOKKeyEntry,
   BYOKProvider,
-  OpenRouterExtendedSettings,
+  OpenRouterProviderSettings,
   ProviderModelDiscoveryEntry,
 } from "@/types/provider"
 import {
@@ -97,7 +97,7 @@ export function OpenRouterSettings({ className }: OpenRouterSettingsProps) {
   )
 
   const updateOpenRouterSettings = useCallback(
-    (updates: Partial<OpenRouterExtendedSettings>) => {
+    (updates: Partial<OpenRouterProviderSettings>) => {
       updateProviderSettings("openrouter", {
         openRouterSettings: {
           ...openRouterSettings,

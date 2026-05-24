@@ -374,7 +374,7 @@ builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
 | `app.deep_link()`                 | Linux / dev-Windows 上运行时注册 `cognia://`；emit `deep-link://received` 到前端。                                                     |
 | CLI matches 转发                  | 把第一次启动的 CLI 参数 emit 为 `cli://matches`。                                                                                      |
 | `menu::install` / `tray::install` | 构建应用菜单与系统托盘，事件通过 `tray://*` emit。                                                                                     |
-| 窗口关闭拦截                      | 若 `WindowBehavior::tray_on_close()` 为 true，拦截 `CloseRequested` 并改为 `hide()`。                                                  |
+| 窗口关闭拦截                      | 按 `WindowBehavior::close_behavior()`：`Quit` 放行关闭；`Tray` 拦截 `CloseRequested` 并 `hide()`；`Ask` 拦截并 emit `app://close-requested`，由前端弹出退出确认框。 |
 | `a2ui_bridge::spawn`              | 启动 A2UI 桥 socket 监听器；详见 [A2UI 系统](../subsystems/a2ui-system)。                                                              |
 | `remote_control` 自启动           | 若用户启用过入站监听且 keyring 还有令牌，就 spawn 监听器。详见 [远程控制](../subsystems/remote-control)。                              |
 | Companion push 凭证恢复           | 重新挂载用户上次上传过的 FCM/APNs dispatcher。详见 [Companion API](../subsystems/companion-api)。                                      |

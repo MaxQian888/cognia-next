@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import type { ThemeColors } from "@/types/plugin/plugin-extended"
 import { themeKeyToCssVar, CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
+import { ensureForegroundContrast } from "./ensure-contrast"
 import { highContrastOverride } from "./high-contrast-presets"
 import {
   COLORBLIND_EXTRA_VAR_KEYS,
@@ -89,7 +90,12 @@ export function CustomThemeApplier(): null {
       return
     }
 
-    applyTokens(root, tokens)
+    // Harden legibility before writing: any preset / custom / imported theme
+    // whose foreground clashes with its surface (notably secondary buttons in
+    // dark mode) gets its foreground nudged to WCAG AA. The default theme
+    // short-circuits above and is governed by `globals.css`, so this only
+    // touches inline-applied palettes.
+    applyTokens(root, ensureForegroundContrast(tokens))
     lastApplied.current = true
 
     // Extra categorical vars (chart + wf) live outside ThemeColors.

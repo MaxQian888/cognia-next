@@ -59,7 +59,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores"
-import type { OpenRouterExtendedSettings } from "@/types/provider"
+import type { OpenRouterProviderSettings } from "@/types/provider"
 import type { OpenRouterApiKey, LimitResetPeriod } from "@/types/provider/openrouter"
 import {
   listApiKeys,
@@ -98,7 +98,7 @@ export function OpenRouterKeyManagement({ className }: OpenRouterKeyManagementPr
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null)
 
   const updateOpenRouterSettings = useCallback(
-    (updates: Partial<OpenRouterExtendedSettings>) => {
+    (updates: Partial<OpenRouterProviderSettings>) => {
       updateProviderSettings("openrouter", {
         openRouterSettings: {
           ...openRouterSettings,

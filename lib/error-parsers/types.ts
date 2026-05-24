@@ -8,10 +8,20 @@ export interface AnsiSegment {
 }
 
 export interface ParsedNode {
-  kind: "json" | "log" | "stack" | "path" | "url" | "text" | "exitCode" | "statusCode" | "ansi"
+  kind:
+    | "json"
+    | "log"
+    | "stack"
+    | "path"
+    | "url"
+    | "text"
+    | "exitCode"
+    | "statusCode"
+    | "ansi"
+    | "category"
   content: string
-  /** JSON-specific: children for collapsible tree. */
-  children?: ParsedNode[]
+  /** JSON-specific: the parsed value, rendered as a collapsible tree. */
+  value?: unknown
   /** Log-specific: extracted level. */
   level?: "trace" | "debug" | "info" | "warn" | "error" | "fatal"
   /** Path/URL-specific: the raw href/path value. */
@@ -28,6 +38,13 @@ export interface ParsedNode {
   status?: number
   /** ANSI-specific: coloured text runs (escape codes already stripped). */
   segments?: AnsiSegment[]
+  /**
+   * Category-specific (also attachable to a `statusCode` node): a stable id —
+   * e.g. `connectionRefused`, `rateLimited`, `sidecarExited` — that the
+   * renderer maps to a localized label + actionable hint. Keeping it as an id
+   * (not pre-rendered text) keeps the parsers i18n-free and pure.
+   */
+  category?: string
 }
 
 export interface ParsedError {

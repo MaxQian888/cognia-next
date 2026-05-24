@@ -41,3 +41,10 @@ opt-level = 3
 
 [profile.dev.package.rten-imageproc]
 opt-level = 3
+
+# Keep line-table debug info in release so the crash-report subsystem's
+# minidumps (`crash::monitor`) are symbolicable offline via `minidump-stackwalk`
+# without shipping full debuginfo. Profile overrides must live at the workspace
+# root — package-level `[profile.*]` in members is ignored by Cargo.
+[profile.release]
+debug = "line-tables-only"

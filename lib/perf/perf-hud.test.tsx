@@ -2,8 +2,21 @@ import { act, render, screen } from "@testing-library/react"
 import { PERF_NAMESPACE } from "./perf-marker"
 import { PerfHud, __test__ } from "./perf-hud"
 
-const { isHudEnabledForRuntime, aggregate, percentile, HUD_LOCALSTORAGE_KEY, reset, ingest } =
-  __test__
+const {
+  isHudEnabledForRuntime,
+  aggregate,
+  percentile,
+  drainEntries,
+  peek,
+  MAX_ENTRIES_PER_NAME,
+  HUD_LOCALSTORAGE_KEY,
+  reset,
+  ingest,
+} = __test__
+
+function makeEntry(name: string, duration: number) {
+  return { name, duration, startTime: 0 }
+}
 
 // jsdom's PerformanceObserver is non-standard; the HUD's observer is started
 // lazily and the in-memory store is the source of truth for the table. Tests
@@ -59,6 +72,36 @@ describe("PerfHud helpers", () => {
       map.set(`${PERF_NAMESPACE}empty`, [])
       const stats = aggregate(map)
       expect(stats).toHaveLength(0)
+    })
+  })
+
+  describe("drainEntries", () => {
+    beforeEach(() => {
+      reset()
+    })
+
+    it("copies namespaced entry durations into the bounded store", () => {
+      const name = `${PERF_NAMESPACE}react:chat:message`
+      const mutated = drainEntries([makeEntry(name, 4), makeEntry(name, 6)])
+      expect(mutated).toBe(true)
+      expect(peek(name).map((e) => e.duration)).toEqual([4, 6])
+    })
+
+    it("ignores entries outside the workflow-ai namespace", () => {
+      const mutated = drainEntries([makeEntry("paint", 9), makeEntry("layout-shift", 3)])
+      expect(mutated).toBe(false)
+      expect(peek("paint")).toEqual([])
+    })
+
+    it("caps each name at MAX_ENTRIES_PER_NAME, keeping the newest", () => {
+      const name = `${PERF_NAMESPACE}react:chat:list`
+      const overflow = MAX_ENTRIES_PER_NAME + 5
+      drainEntries(Array.from({ length: overflow }, (_, i) => makeEntry(name, i)))
+      const kept = peek(name)
+      expect(kept).toHaveLength(MAX_ENTRIES_PER_NAME)
+      // The oldest 5 fell off the front; the newest entry is the last pushed.
+      expect(kept[0].duration).toBe(5)
+      expect(kept[kept.length - 1].duration).toBe(overflow - 1)
     })
   })
 

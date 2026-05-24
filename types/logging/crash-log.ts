@@ -6,10 +6,10 @@ import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readine
 import type { LogLevel } from "./log-level"
 import type { StructuredLogEntry } from "./log-entry"
 
-// cognia-next has no window-diagnostics or local-runtime subsystems yet, so
-// the crash bundle treats these as semi-opaque shapes. They keep a small
-// known-shape so downstream summary code can reason about them; everything
-// else is preserved via the index signature for forward-compatibility.
+// Window-diagnostics and local-runtime snapshots come from `lib/native/*` at
+// crash-export time. They keep a small known shape so downstream summary code
+// can reason about them; everything else is preserved via the index signature
+// for forward-compatibility.
 export interface WindowDiagnosticsSnapshot {
   timestamp?: number
   totalWindows?: number
@@ -66,6 +66,52 @@ export interface CrashLogSummary {
   byLevel: Record<LogLevel, number>
   bySource: Record<CrashLogSource, number>
   nativeLoggingStatus: NativeLoggingReadiness["status"] | "unavailable"
+}
+
+/**
+ * Native crash-report (`.json` sidecar) written by the Rust crash subsystem —
+ * mirrors `crash::report::CrashReport`'s serde output. Distinct from the
+ * frontend on-demand {@link CrashLogExportBundle}: these are self-contained
+ * reports produced by the panic hook / out-of-process minidump monitor and
+ * surfaced read-only in the diagnostics panel.
+ */
+export interface NativeCrashReportSystem {
+  os: string
+  osVersion?: string | null
+  kernelVersion?: string | null
+  arch: string
+  family: string
+  hostname?: string | null
+  cpu?: string | null
+  cpuCount: number
+  totalMemoryBytes: number
+  usedMemoryBytes: number
+  appVersion: string
+  tauriVersion: string
+  profile: string
+  enabledFeatures: string[]
+}
+
+export interface NativeCrashBreadcrumb {
+  at: string
+  level: string
+  message: string
+}
+
+export interface NativeCrashReport {
+  kind: "panic" | "native"
+  capturedAt: string
+  thread?: string | null
+  message: string
+  location?: string | null
+  backtrace?: string
+  dumpPath?: string
+  system: NativeCrashReportSystem
+  context: {
+    config: unknown
+    breadcrumbs: NativeCrashBreadcrumb[]
+  }
+  extra: unknown
 }
 
 export type CrashLogExportFormat = "bundle" | "json" | "text"

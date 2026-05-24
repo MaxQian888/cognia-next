@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
-import { PERF_NAMESPACE } from "./perf-marker"
+import { PERF_NAMESPACE, clearMeasuresByName, clearPerfEntries } from "./perf-marker"
 import { cn } from "@/lib/utils"
 
 const HUD_LOCALSTORAGE_KEY = "cogniaPerfHud"
@@ -44,26 +44,48 @@ const perfStore: StoreShape = {
 
 let snapshotVersion = 0
 
+/**
+ * Copy the durations off each consumed `workflow-ai:` entry into the bounded
+ * in-memory store, then drain the raw entries from the global User Timing
+ * buffer so it can't grow without bound — one measure lands per React commit
+ * per `<PerfBoundary>`, and `PerformanceObserver` does NOT remove the entries
+ * it delivers. Returns true when at least one namespaced entry was ingested,
+ * so the caller can bump the snapshot and notify subscribers.
+ */
+function drainEntries(
+  entries: ArrayLike<{ name: string; duration: number; startTime: number }>
+): boolean {
+  let mutated = false
+  const seen = new Set<string>()
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]
+    if (!entry.name.startsWith(PERF_NAMESPACE)) continue
+    const slot = perfStore.byName.get(entry.name) ?? []
+    slot.push({ duration: entry.duration, startTime: entry.startTime })
+    if (slot.length > MAX_ENTRIES_PER_NAME) slot.shift()
+    perfStore.byName.set(entry.name, slot)
+    seen.add(entry.name)
+    mutated = true
+  }
+  for (const name of seen) clearMeasuresByName(name)
+  return mutated
+}
+
 function startObserver(): void {
   if (perfStore.started) return
   if (typeof PerformanceObserver === "undefined") return
   perfStore.started = true
   perfStore.observer = new PerformanceObserver((list) => {
-    let mutated = false
-    for (const entry of list.getEntries()) {
-      if (!entry.name.startsWith(PERF_NAMESPACE)) continue
-      const slot = perfStore.byName.get(entry.name) ?? []
-      slot.push({ duration: entry.duration, startTime: entry.startTime })
-      if (slot.length > MAX_ENTRIES_PER_NAME) slot.shift()
-      perfStore.byName.set(entry.name, slot)
-      mutated = true
-    }
-    if (mutated) {
+    if (drainEntries(list.getEntries())) {
       snapshotVersion++
       for (const sub of perfStore.subscribers) sub()
     }
   })
   try {
+    // Drop anything that accumulated before the observer attached — those
+    // entries are unobservable (non-buffered) and would otherwise linger on
+    // the timeline for the life of the session.
+    clearPerfEntries()
     perfStore.observer.observe({ entryTypes: ["measure"] })
   } catch {
     perfStore.started = false
@@ -265,7 +287,10 @@ export const __test__ = {
   isHudEnabledForRuntime,
   aggregate,
   percentile,
+  drainEntries,
   HUD_LOCALSTORAGE_KEY,
+  MAX_ENTRIES_PER_NAME,
+  peek: (name: string): Entry[] => (perfStore.byName.get(name) ?? []).slice(),
   reset: () => {
     perfStore.byName.clear()
     perfStore.observer?.disconnect()

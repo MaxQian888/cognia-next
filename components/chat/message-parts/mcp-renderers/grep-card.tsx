@@ -65,7 +65,7 @@ export function GrepCard({ part }: { part: ToolUIPart }) {
             <p className="text-muted-foreground">{t("noMatches")}</p>
           ) : (
             <ul
-              className="mt-1 max-h-60 overflow-auto rounded border bg-muted/50 px-2 py-1 font-mono text-[11px] backdrop-blur-sm"
+              className="mt-1 max-h-60 overflow-auto rounded border bg-muted/50 px-2 py-1 font-mono text-[11px]"
               data-testid="mcp-grep-list"
             >
               {lines.map((m, i) => (

@@ -9,6 +9,7 @@ mod claude;
 mod cli_bridge;
 mod commands;
 mod connectors;
+pub mod crash;
 mod external_agent;
 mod files;
 mod fs_atomic;
@@ -322,8 +323,9 @@ pub fn run() {
             claude_has_oauth_bearer,
             claude_restart_sidecar,
             canvas::python_exec::canvas_run_python,
-            window_behavior::set_tray_on_close,
-            window_behavior::get_tray_on_close,
+            window_behavior::set_close_behavior,
+            window_behavior::get_close_behavior,
+            window_behavior::resolve_close_request,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,
@@ -413,6 +415,13 @@ pub fn run() {
             logging::commands::platform_logging_get_status,
             logging::commands::platform_logging_set_config,
             logging::commands::platform_logging_forward,
+            crash::commands::crash_set_context,
+            crash::commands::crash_push_breadcrumb,
+            crash::commands::crash_list_reports,
+            crash::commands::crash_read_report,
+            crash::commands::crash_open_report_dir,
+            crash::commands::crash_delete_report,
+            crash::commands::crash_take_pending,
             scheduler::commands::scheduler_get_capabilities,
             scheduler::commands::scheduler_is_available,
             scheduler::commands::scheduler_is_elevated,
@@ -702,6 +711,20 @@ pub fn run() {
                 log::warn!("native_logging bootstrap failed: {error}");
             }
 
+            // Crash subsystem. Register the app handle so capture paths can emit
+            // `crash://captured` to the webview; detect an abnormal previous
+            // exit (BEFORE writing this session's sentinel) and stash it for the
+            // next-launch dialog; then mark this session running. Finally push
+            // an initial meta snapshot to the out-of-process monitor so an
+            // immediate native crash still carries app state.
+            {
+                crash::install_app_handle(app.handle().clone());
+                let pending = crash::sentinel::take_pending();
+                crash::sentinel::mark_start();
+                app.manage(crash::commands::PendingCrashState::new(pending));
+                crash::context::publish_to_monitor();
+            }
+
             // ADR-0024 — install the OCR native backends. Each enabled
             // Cargo feature (`ocr-tesseract`, `ocr-windows`, `ocr-apple`)
             // contributes its backend; absent features land a placeholder
@@ -823,20 +846,30 @@ pub fn run() {
                 }
             }
 
-            // Honor the user's "minimize to tray on close" preference. When the
-            // flag is on, intercept the close request and hide the window instead
-            // of letting the runtime tear it down — the tray menu's "Quit" still
-            // exits cleanly.
+            // Honor the user's window close-button preference. `Quit` lets the
+            // runtime tear the window down (the app exits); `Tray` hides the
+            // window so the app keeps living in the system tray; `Ask`
+            // intercepts the close and asks the frontend to show the
+            // exit-confirmation dialog. The tray menu's "Quit" always exits
+            // cleanly regardless, since it routes through PredefinedMenuItem.
             #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
+                use window_behavior::CloseBehavior;
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         let behavior = handle.state::<WindowBehavior>();
-                        if behavior.tray_on_close() {
-                            api.prevent_close();
-                            if let Some(w) = handle.get_webview_window("main") {
-                                let _ = w.hide();
+                        match behavior.close_behavior() {
+                            CloseBehavior::Quit => {}
+                            CloseBehavior::Tray => {
+                                api.prevent_close();
+                                if let Some(w) = handle.get_webview_window("main") {
+                                    let _ = w.hide();
+                                }
+                            }
+                            CloseBehavior::Ask => {
+                                api.prevent_close();
+                                let _ = handle.emit("app://close-requested", ());
                             }
                         }
                     }
@@ -900,6 +933,9 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
                 cli_bridge::shutdown(state.inner());
+                // Graceful shutdown — clear the crash sentinel so the next
+                // launch doesn't mistake this clean exit for a crash.
+                crash::sentinel::mark_clean_exit();
             }
         });
 }

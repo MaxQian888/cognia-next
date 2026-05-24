@@ -1,15 +1,15 @@
 "use client"
 
 import { useEffect } from "react"
-import { invoke } from "@tauri-apps/api/core"
 import { useTheme } from "next-themes"
+import { useLocale } from "next-intl"
 import { toast } from "sonner"
 import { useSessionNotifications } from "@/hooks/chat"
 import { useTauriEvents } from "@/hooks/system"
 import { ensureNotificationPermission } from "@/lib/tauri/notification"
 import { getLaunchCli } from "@/lib/tauri/cli"
 import { getLaunchDeepLink } from "@/lib/tauri/deep-link"
-import { getPref } from "@/lib/tauri/store"
+import { getCloseBehavior, pushCloseBehaviorToRust } from "@/lib/tauri/close-behavior"
 import { setWindowBackgroundColor } from "@/lib/tauri/shell-window"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { isTauri } from "@/lib/tauri"
@@ -20,8 +20,7 @@ import { useTrayStore } from "@/lib/tray/store"
 import { useSyncTrayToRust } from "@/lib/tray/sync"
 import { useSyncShortcutsToRust } from "@/lib/shortcuts/sync"
 import { rasterizeAndRegisterTrayIcons } from "@/lib/tray/icon-builder"
-
-const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
+import { pushCrashContext } from "@/lib/native/crash-context"
 
 /**
  * Single mount point for desktop-runtime concerns:
@@ -43,9 +42,25 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   useSyncShortcutsToRust()
 
   const { resolvedTheme } = useTheme()
+  const locale = useLocale()
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+
+  // Feed the crash-report subsystem a redacted config snapshot so a later Rust
+  // panic / native crash report reflects the current app state. Change-driven
+  // (theme / locale) — these are the meaningful signals and don't churn. No-op
+  // on web; `pushCrashContext` short-circuits when not under Tauri.
+  useEffect(() => {
+    if (!isTauri()) return
+    void pushCrashContext({
+      runtime: "tauri",
+      colorTheme: appearanceColorTheme,
+      activeCustomThemeId: appearanceActiveCustomThemeId,
+      resolvedTheme,
+      locale,
+    })
+  }, [appearanceColorTheme, appearanceActiveCustomThemeId, resolvedTheme, locale])
 
   // Push the appearance background colour into the native Tauri window so
   // the custom titlebar (decorations=false on Windows) repaints in lockstep
@@ -81,14 +96,13 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
     void rasterizeAndRegisterTrayIcons()
 
     void (async () => {
-      // Push the saved tray-on-close preference into Rust so the window's
+      // Push the saved close behavior into Rust so the window's
       // close-requested handler reflects user intent from the very first
       // close event, not just after they visit Settings → Desktop.
       try {
-        const tray = await getPref<boolean>(PREF_TRAY_ON_CLOSE)
-        await invoke("set_tray_on_close", { enabled: Boolean(tray) })
+        await pushCloseBehaviorToRust(await getCloseBehavior())
       } catch (err) {
-        console.warn("hydrate tray-on-close failed", err)
+        console.warn("hydrate close-behavior failed", err)
       }
 
       // CLI args from this launch — `cognia <path>` opens that workspace,

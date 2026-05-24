@@ -56,10 +56,18 @@ jest.mock("@/components/ai-elements/tool", () => ({
 }))
 
 jest.mock("@/components/ai-elements/error-trace", () => ({
-  ErrorTraceDetails: ({ error, title }: { error: { message: string } | null; title?: string }) =>
+  ErrorTraceDetails: ({
+    error,
+    title,
+    body,
+  }: {
+    error: { message: string } | null
+    title?: string
+    body?: ReactForMocks.ReactNode
+  }) =>
     ReactForMocks.createElement(
       "div",
-      { "data-test": "error-trace", "data-title": title },
+      { "data-test": "error-trace", "data-title": title, "data-has-body": body ? "true" : "false" },
       error?.message ?? ""
     ),
 }))
@@ -294,6 +302,8 @@ describe("tool parts", () => {
     expect(trace).toBeTruthy()
     expect(trace?.textContent).toBe("Command failed with exit code 1")
     expect(trace?.getAttribute("data-title")).toBe("toolCallFailed")
+    // The structured parsed body is wired into the alert.
+    expect(trace?.getAttribute("data-has-body")).toBe("true")
     // The input section is preserved so users still see the failing call.
     expect(document.querySelector("[data-test='tool-input']")).toBeTruthy()
   })

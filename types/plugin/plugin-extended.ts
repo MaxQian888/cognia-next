@@ -1273,17 +1273,3 @@ export interface PluginContextAPI {
    */
   messagePart?: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
 }
-
-// =============================================================================
-// Backward Compatibility Aliases (Deprecated)
-// =============================================================================
-
-/**
- * @deprecated Use `PluginContextAPI` instead
- */
-export type ExtendedPluginContext = PluginContextAPI
-
-/**
- * @deprecated Use `PluginAPIPermission` instead
- */
-export type ExtendedPluginPermission = PluginAPIPermission

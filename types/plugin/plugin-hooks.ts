@@ -699,12 +699,3 @@ export interface HookSandboxExecutionResult<T = unknown> {
   /** Whether hook was skipped */
   skipped?: boolean
 }
-
-// =============================================================================
-// Backward Compatibility Aliases (Deprecated)
-// =============================================================================
-
-/**
- * @deprecated Use `PluginHooksAll` instead
- */
-export type ExtendedPluginHooks = PluginHooksAll

@@ -604,6 +604,17 @@ export interface PPTSlide {
   /** Legacy transition string (deprecated) */
   transitionLegacy?: string
   metadata?: PPTSlideMetadata
+  // Image generation
+  imagePrompt?: string
+  generatedImageUrl?: string
+  generatedImageBase64?: string
+  imageStyle?: PPTImageStyle
+  sourceReferences?: string[]
+  aiGeneratedContent?: {
+    originalContent: string
+    enhancedContent: string
+    suggestions: string[]
+  }
 }
 
 /**
@@ -616,6 +627,30 @@ export interface PPTOutlineItem {
   suggestedLayout: PPTSlideLayout
   keyPoints?: string[]
   order: number
+  // Material/image enrichment
+  sourceReferences?: Array<{
+    materialId: string
+    excerpt: string
+    relevance: number
+  }>
+  imageNeeded?: boolean
+  imageSuggestion?: string
+  imageStyle?: string
+  dataVisualization?: {
+    type:
+      | "bar-chart"
+      | "line-chart"
+      | "pie-chart"
+      | "table"
+      | "timeline"
+      | "flowchart"
+      | "comparison"
+    data?: Record<string, unknown>
+    description?: string
+  }
+  speakerNotes?: string
+  estimatedDuration?: number
+  transitionNote?: string
 }
 
 /**
@@ -657,6 +692,17 @@ export interface PPTGenerationOptions {
   language?: string
   theme?: Partial<PPTTheme>
   customInstructions?: string
+  // Material-based generation
+  materials?: PPTMaterial[]
+  materialUrls?: string[]
+  generateImages?: boolean
+  imageProvider?: PPTImageProvider
+  imageStyle?: PPTImageStyle
+  imageQuality?: "draft" | "standard" | "high"
+  maxImagesPerSlide?: number
+  summarizationDepth?: "brief" | "standard" | "detailed"
+  outlineApprovalRequired?: boolean
+  preserveSourceStructure?: boolean
 }
 
 /**
@@ -1230,51 +1276,6 @@ export interface PPTMaterialAnalysis {
   language: string
 }
 
-/**
- * Enhanced outline item with material references
- */
-export interface PPTEnhancedOutlineItem extends PPTOutlineItem {
-  sourceReferences?: Array<{
-    materialId: string
-    excerpt: string
-    relevance: number
-  }>
-  imageNeeded: boolean
-  imageSuggestion?: string
-  imageStyle?: string
-  dataVisualization?: {
-    type:
-      | "bar-chart"
-      | "line-chart"
-      | "pie-chart"
-      | "table"
-      | "timeline"
-      | "flowchart"
-      | "comparison"
-    data?: Record<string, unknown>
-    description?: string
-  }
-  speakerNotes: string
-  estimatedDuration?: number
-  transitionNote?: string
-}
-
-/**
- * Enhanced slide with image generation
- */
-export interface PPTEnhancedSlide extends PPTSlide {
-  imagePrompt?: string
-  generatedImageUrl?: string
-  generatedImageBase64?: string
-  imageStyle?: PPTImageStyle
-  sourceReferences?: string[]
-  aiGeneratedContent?: {
-    originalContent: string
-    enhancedContent: string
-    suggestions: string[]
-  }
-}
-
 // =====================
 // Image Generation Types
 // =====================
@@ -1341,26 +1342,6 @@ export interface PPTSlideImageResult {
 }
 
 // =====================
-// Enhanced Generation Options
-// =====================
-
-/**
- * Enhanced PPT generation options with material support
- */
-export interface PPTEnhancedGenerationOptions extends PPTGenerationOptions {
-  materials?: PPTMaterial[]
-  materialUrls?: string[]
-  generateImages?: boolean
-  imageProvider?: PPTImageProvider
-  imageStyle?: PPTImageStyle
-  imageQuality?: "draft" | "standard" | "high"
-  maxImagesPerSlide?: number
-  summarizationDepth?: "brief" | "standard" | "detailed"
-  outlineApprovalRequired?: boolean
-  preserveSourceStructure?: boolean
-}
-
-// =====================
 // Workflow Execution Types
 // =====================
 
@@ -1395,7 +1376,7 @@ export interface PPTWorkflowProgress {
 export interface PPTWorkflowResult {
   success: boolean
   presentation?: PPTPresentation
-  outline?: PPTEnhancedOutlineItem[]
+  outline?: PPTOutlineItem[]
   materialAnalysis?: PPTMaterialAnalysis[]
   generatedImages?: PPTSlideImageResult[]
   marpContent?: string

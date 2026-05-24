@@ -46,4 +46,16 @@ describe("ErrorTraceDetails", () => {
     render(<ErrorTraceDetails error={new Error("oops")} pluginId="cognia-x" title="Plugin error" />)
     expect(screen.getByText(/Plugin error — cognia-x/)).toBeInTheDocument()
   })
+
+  it("renders the body slot in place of the plain message when provided", () => {
+    render(
+      <ErrorTraceDetails
+        error={{ message: "raw message" }}
+        body={<div data-testid="rich-body">structured</div>}
+      />
+    )
+    expect(screen.getByTestId("rich-body")).toBeInTheDocument()
+    // The plain message paragraph is replaced by the body.
+    expect(screen.queryByText("raw message")).not.toBeInTheDocument()
+  })
 })

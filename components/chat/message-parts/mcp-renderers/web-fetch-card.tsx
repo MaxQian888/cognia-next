@@ -62,7 +62,7 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
           )}
           {preview ? (
             <pre
-              className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded border bg-muted/50 px-2 py-1 text-[11px] leading-relaxed backdrop-blur-sm"
+              className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded border bg-muted/50 px-2 py-1 text-[11px] leading-relaxed"
               data-testid="mcp-webfetch-content"
             >
               {preview}

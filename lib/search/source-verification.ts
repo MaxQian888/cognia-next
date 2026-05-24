@@ -538,36 +538,6 @@ export function generateVerificationReport(
   }
 }
 
-export interface EnhancedSearchResult extends SearchResult {
-  verification: SourceVerificationResult
-}
-
-export interface EnhancedSearchResponse extends SearchResponse {
-  results: EnhancedSearchResult[]
-  verificationReport?: VerificationReport
-}
-
-export function enhanceSearchResponse(
-  response: SearchResponse,
-  options: { includeReport?: boolean; claim?: string } = {}
-): EnhancedSearchResponse {
-  const enhancedResults: EnhancedSearchResult[] = response.results.map((result) => ({
-    ...result,
-    verification: verifySource(result.url),
-  }))
-
-  const enhanced: EnhancedSearchResponse = {
-    ...response,
-    results: enhancedResults,
-  }
-
-  if (options.includeReport) {
-    enhanced.verificationReport = generateVerificationReport(response, options.claim)
-  }
-
-  return enhanced
-}
-
 export function filterByCredibility(
   results: SearchResult[],
   minLevel: CredibilityLevel

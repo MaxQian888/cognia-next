@@ -12,6 +12,7 @@ import { getTeam } from "@/lib/db/teams"
 import { loggers } from "@/lib/logging"
 import { avatarColor } from "@/lib/ui/avatar"
 import { useUIStore } from "@/stores/ui"
+import { PerfBoundary } from "@/lib/perf"
 import type { Character, ChatSession, Team } from "@/lib/claude/types"
 import { MailIcon, MenuIcon, PlusIcon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -53,10 +54,19 @@ export function ChannelList(props: Props) {
   const isNarrow = useIsNarrow()
   const [openMobile, setOpenMobile] = useState(false)
 
-  const handleSelect = (id: string) => {
-    props.onSelect(id)
-    if (isNarrow) setOpenMobile(false)
-  }
+  // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
+  // (a useCallback that lists it as a dep). An inline function here changed
+  // every render → busted EVERY memoized <SessionRow> on any sidebar
+  // re-render (a full history-list re-render). useCallback keeps the rows'
+  // memo effective so a re-render touches only the rows that actually changed.
+  const { onSelect } = props
+  const handleSelect = useCallback(
+    (id: string) => {
+      onSelect(id)
+      if (isNarrow) setOpenMobile(false)
+    },
+    [onSelect, isNarrow]
+  )
 
   const handleSheetChange = (next: boolean) => {
     log.info("channel-list sheet toggle", { open: next })
@@ -288,65 +298,70 @@ function ChannelListBody({
     return null
   }
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full flex-col outline-none"
-      tabIndex={0}
-      onKeyDown={handleContainerKeyDown}
-    >
-      <Header
-        selectedGuild={chatGuild}
-        team={team ?? null}
-        onNewDirect={handleNewDirect}
-        onNewTeamConversation={handleNewTeamConversation}
-      />
-      {toolbarVisible ? (
-        <ChannelListBulkToolbar
-          count={selected.size}
-          onDelete={handleBulkDeleteClick}
-          onPin={() => handleBulkSetPinnedClick(true)}
-          onUnpin={() => handleBulkSetPinnedClick(false)}
-          onClear={clear}
+    // Diagnostic: surfaces sidebar re-renders as `react:sidebar:channel-list`
+    // in the PerfHud so we can confirm whether the history list churns.
+    // Revert this PerfBoundary once the question is settled.
+    <PerfBoundary id="sidebar:channel-list">
+      <div
+        ref={containerRef}
+        className="flex h-full flex-col outline-none"
+        tabIndex={0}
+        onKeyDown={handleContainerKeyDown}
+      >
+        <Header
+          selectedGuild={chatGuild}
+          team={team ?? null}
+          onNewDirect={handleNewDirect}
+          onNewTeamConversation={handleNewTeamConversation}
         />
-      ) : null}
-      <Separator />
-      <ScrollArea className="flex-1">
-        {filtered.length === 0 ? (
-          <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-            {chatGuild.kind === "team" ? t("emptyTeam") : t("emptyDm")}
-          </p>
-        ) : chatGuild.kind === "team" ? (
-          <ul className="flex flex-col gap-0.5 p-2">
-            {sortedTeamSessions.map((s) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                active={s.id === activeSessionId}
-                selected={isSelected(s.id)}
-                accentColor={team ? avatarColor(team) : undefined}
-                unread={unreadById.get(s.id)}
-                onSelect={handleSessionSelect}
-                onDelete={onDelete}
-                onRename={onRename}
-                onTogglePinned={onTogglePinned}
-              />
-            ))}
-          </ul>
-        ) : (
-          <DmGroupedList
-            groups={dmGroups!}
-            characterById={characterById}
-            activeSessionId={activeSessionId}
-            unreadById={unreadById}
-            isSelected={isSelected}
-            onSelect={handleSessionSelect}
-            onDelete={onDelete}
-            onRename={onRename}
-            onTogglePinned={onTogglePinned}
+        {toolbarVisible ? (
+          <ChannelListBulkToolbar
+            count={selected.size}
+            onDelete={handleBulkDeleteClick}
+            onPin={() => handleBulkSetPinnedClick(true)}
+            onUnpin={() => handleBulkSetPinnedClick(false)}
+            onClear={clear}
           />
-        )}
-      </ScrollArea>
-    </div>
+        ) : null}
+        <Separator />
+        <ScrollArea className="flex-1">
+          {filtered.length === 0 ? (
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+              {chatGuild.kind === "team" ? t("emptyTeam") : t("emptyDm")}
+            </p>
+          ) : chatGuild.kind === "team" ? (
+            <ul className="flex flex-col gap-0.5 p-2">
+              {sortedTeamSessions.map((s) => (
+                <SessionRow
+                  key={s.id}
+                  session={s}
+                  active={s.id === activeSessionId}
+                  selected={isSelected(s.id)}
+                  accentColor={team ? avatarColor(team) : undefined}
+                  unread={unreadById.get(s.id)}
+                  onSelect={handleSessionSelect}
+                  onDelete={onDelete}
+                  onRename={onRename}
+                  onTogglePinned={onTogglePinned}
+                />
+              ))}
+            </ul>
+          ) : (
+            <DmGroupedList
+              groups={dmGroups!}
+              characterById={characterById}
+              activeSessionId={activeSessionId}
+              unreadById={unreadById}
+              isSelected={isSelected}
+              onSelect={handleSessionSelect}
+              onDelete={onDelete}
+              onRename={onRename}
+              onTogglePinned={onTogglePinned}
+            />
+          )}
+        </ScrollArea>
+      </div>
+    </PerfBoundary>
   )
 }
 

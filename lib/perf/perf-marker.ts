@@ -82,3 +82,22 @@ export function clearPerfEntries(): void {
     // ignore
   }
 }
+
+/**
+ * Clear every measure entry sharing `name` off the global User Timing buffer.
+ *
+ * `<PerfBoundary>` writes one `performance.measure` per React commit, and a
+ * `PerformanceObserver` does NOT remove the entries it delivers. Left alone,
+ * `performance.getEntriesByType("measure")` therefore grows without bound over
+ * a long session (steady heap growth → worsening GC pauses). The HUD observer
+ * calls this right after copying the durations it needs into its own bounded
+ * store, so the timeline stays drained. No-op when the perf API is missing.
+ */
+export function clearMeasuresByName(name: string): void {
+  if (!hasPerfApi()) return
+  try {
+    performance.clearMeasures(name)
+  } catch {
+    // ignore
+  }
+}

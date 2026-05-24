@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { ErrorParsedView } from "@/components/chat/error-parsed-view"
 import { AlertCircleIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
 
 interface Props {
@@ -24,7 +25,7 @@ export function InlineError({ message, onRetry, onOpenSettings, onDismiss }: Pro
       <AlertCircleIcon className="size-4" />
       <AlertTitle className="text-sm">{t("title")}</AlertTitle>
       <AlertDescription className="space-y-2 text-xs">
-        <p className="break-words">{message}</p>
+        <ErrorParsedView rawError={message} fallback={message} />
         <div className="flex flex-wrap gap-2 pt-1">
           {onRetry && (
             <Button variant="outline" size="sm" onClick={() => void onRetry()}>

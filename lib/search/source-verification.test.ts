@@ -12,7 +12,6 @@ import {
   extractKeyClaims,
   crossValidateContent,
   generateVerificationReport,
-  enhanceSearchResponse,
   filterByCredibility,
   sortByCredibility,
   calculateSourceDiversity,
@@ -318,31 +317,6 @@ describe("generateVerificationReport", () => {
   it("returns 0 score when no results", () => {
     const report = generateVerificationReport(makeResponse({ results: [] }))
     expect(report.overallCredibilityScore).toBe(0)
-  })
-})
-
-describe("enhanceSearchResponse", () => {
-  it("attaches verification per result", () => {
-    const response: SearchResponse = {
-      provider: "tavily",
-      query: "x",
-      results: [makeResult({ url: "https://wikipedia.org/wiki/x" })],
-      responseTime: 1,
-    }
-    const enhanced = enhanceSearchResponse(response)
-    expect(enhanced.results[0].verification.domain).toBe("wikipedia.org")
-    expect(enhanced.verificationReport).toBeUndefined()
-  })
-
-  it("includes report when requested", () => {
-    const response: SearchResponse = {
-      provider: "tavily",
-      query: "x",
-      results: [makeResult({ url: "https://wikipedia.org/x" })],
-      responseTime: 1,
-    }
-    const enhanced = enhanceSearchResponse(response, { includeReport: true, claim: "x" })
-    expect(enhanced.verificationReport).toBeDefined()
   })
 })
 

@@ -152,7 +152,7 @@ export const ImageBlock = memo(function ImageBlock({
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            className="h-7 w-7 bg-background/80"
             onClick={() => setIsOpen(true)}
             aria-label={t("viewFullscreen")}
             tooltip={t("viewFullscreen")}
@@ -163,7 +163,7 @@ export const ImageBlock = memo(function ImageBlock({
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            className="h-7 w-7 bg-background/80"
             onClick={handleDownload}
             aria-label={t("download")}
             tooltip={t("download")}
@@ -174,7 +174,7 @@ export const ImageBlock = memo(function ImageBlock({
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            className="h-7 w-7 bg-background/80"
             onClick={handleCopyUrl}
             aria-label={t("copyUrl")}
             tooltip={t("copyUrl")}

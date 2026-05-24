@@ -198,9 +198,9 @@ export interface UserProviderSettings {
   quotaLimit?: number
   rateLimitRemaining?: number
   // OpenRouter-specific settings
-  openRouterSettings?: OpenRouterExtendedSettings
+  openRouterSettings?: OpenRouterProviderSettings
   // CLIProxyAPI-specific settings
-  cliProxyAPISettings?: CLIProxyAPIExtendedSettings
+  cliProxyAPISettings?: CLIProxyAPIProviderSettings
   // Provider-specific parameter configuration
   /** Provider-level inference parameter defaults */
   inferenceDefaults?: ProviderInferenceDefaults
@@ -213,7 +213,7 @@ export interface UserProviderSettings {
 }
 
 // CLIProxyAPI-specific extended settings
-export interface CLIProxyAPIExtendedSettings {
+export interface CLIProxyAPIProviderSettings {
   // Server configuration
   host?: string
   port?: number
@@ -246,7 +246,7 @@ export interface CLIProxyAPIExtendedSettings {
 }
 
 // OpenRouter-specific extended settings
-export interface OpenRouterExtendedSettings {
+export interface OpenRouterProviderSettings {
   // Provisioning API key for key management
   provisioningApiKey?: string
   // BYOK (Bring Your Own Key) configurations
@@ -1784,14 +1784,6 @@ export interface ProviderHealth {
   latency?: number
   errorRate?: number
   lastError?: string
-}
-
-// Provider with metadata and health
-export interface EnhancedProvider {
-  settings: UserProviderSettings
-  metadata: ProviderMetadata
-  health: ProviderHealth
-  isCustom: boolean
 }
 
 export function getModelConfig(providerId: string, modelId: string): ModelConfig | undefined {

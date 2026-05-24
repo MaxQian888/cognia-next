@@ -2,6 +2,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // If we were relaunched as the out-of-process crash monitor, run that
+    // server loop and exit — never boot the app.
+    if app_lib::crash::monitor::maybe_run_monitor() {
+        return;
+    }
+
+    // Install crash capture as early as possible so faults during boot are
+    // still reported: the native handler spawns the monitor child + attaches
+    // the platform exception handler, and the panic hook covers Rust panics.
+    app_lib::crash::monitor::install_client();
+    app_lib::crash::install_panic_hook();
+
     // rustls 0.23.x requires an explicit crypto provider; multiple crates pull
     // in both `aws-lc-rs` and `ring`, so auto-detection fails. Pick `ring` to
     // match axum-server's `tls-rustls` feature.

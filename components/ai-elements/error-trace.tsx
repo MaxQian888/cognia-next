@@ -6,7 +6,7 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -32,6 +32,13 @@ export interface ErrorTraceDetailsProps {
   pluginName?: string
   /** When provided, renders a "Disable plugin" button that invokes this callback. */
   onDisablePlugin?: (pluginId: string) => void
+  /**
+   * Optional rich body rendered in place of the plain `{message}` paragraph —
+   * lets callers (e.g. the chat tool-error path) drop in a parsed/structured
+   * view while keeping the shared alert chrome. `message` is still used for the
+   * headline fallback and as the accessible text when no body is supplied.
+   */
+  body?: ReactNode
 }
 
 export function ErrorTraceDetails({
@@ -42,6 +49,7 @@ export function ErrorTraceDetails({
   pluginId,
   pluginName,
   onDisablePlugin,
+  body,
 }: ErrorTraceDetailsProps) {
   const [open, setOpen] = useState(false)
   if (!error) return null
@@ -54,7 +62,7 @@ export function ErrorTraceDetails({
       <AlertCircle className="h-4 w-4" />
       <AlertTitle>{headline}</AlertTitle>
       <AlertDescription className="space-y-2">
-        <p className="text-sm">{message}</p>
+        {body ?? <p className="text-sm">{message}</p>}
         {(stack || componentStack) && (
           <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger asChild>

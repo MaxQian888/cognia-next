@@ -1,7 +1,7 @@
 // Zustand store holding the user's customised tray layout + tooltip in
 // memory. Persistence rides on `lib/tauri/store.ts:1-66` (Tauri Store
 // plugin) so the layout survives restarts in the same `cognia.store.json`
-// file as `tray.minimize-on-close`.
+// file as `exit.close-behavior`.
 //
 // `useTrayStore` is the renderer's source of truth; `lib/tray/sync.ts`
 // observes it (plus the state snapshots referenced by `when` expressions)

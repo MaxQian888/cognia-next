@@ -10,6 +10,8 @@ import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-e
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
 import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
+import { ErrorParsedView } from "@/components/chat/error-parsed-view"
+import { normalizeErrorText } from "@/lib/error-parsers"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
@@ -224,7 +226,12 @@ function MessageRendererInner({
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
-    <PerfBoundary id="chat:message">
+    // Diagnostic: per-message boundary id so the PerfHud lists one row per
+    // message — `clear` the HUD, stream a turn, and watch which `chat:msg:*`
+    // rows reappear to see whether only the streaming row re-renders (memo
+    // holding) or every row does (memo busted). Revert to a stable
+    // `id="chat:message"` once the repeated-render question is settled.
+    <PerfBoundary id={`chat:msg:${message.id.slice(-6)}`}>
       <Message from={message.role}>
         {speaker &&
           message.role === "assistant" &&
@@ -287,17 +294,18 @@ function MessageRendererInner({
               if (!inboundA2UI) return null
               return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
             })()}
-            {message.parts.map((part, i) =>
-              renderPart(
-                part,
-                `${message.id}-${i}`,
-                isStreaming,
-                message.role === "user" ? mentionPattern : null,
-                characterById,
-                message.id,
-                t
-              )
-            )}
+            {message.parts.map((part, i) => (
+              <MessagePart
+                key={`${message.id}-${i}`}
+                part={part}
+                partKey={`${message.id}-${i}`}
+                isStreaming={isStreaming}
+                mentionPattern={message.role === "user" ? mentionPattern : null}
+                characterById={characterById}
+                messageId={message.id}
+                t={t}
+              />
+            ))}
           </MessageContent>
         )}
 
@@ -513,6 +521,38 @@ function TodoStatusGlyph({ status }: { status: TodoEntry["status"] }) {
   return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
 }
 
+/**
+ * Memoized boundary around a single message part. Parts inside a finalized
+ * message keep stable references (the adapter only replaces the changed
+ * message object, not its parts), so when `MessageRenderer` re-renders for an
+ * unrelated reason this lets React skip re-reconciling every part subtree —
+ * the expensive ones being `<Tool>` cards and `<MarkdownRenderer>`. Without
+ * this, each re-render rebuilt the whole part tree (the ~11ms/row cost the
+ * PerfHud surfaced). The default shallow prop compare is exactly right here:
+ * `part` / `mentionPattern` / `characterById` / `t` are all reference-stable
+ * while the message is unchanged.
+ */
+const MessagePart = memo(function MessagePart({
+  part,
+  partKey,
+  isStreaming,
+  mentionPattern,
+  characterById,
+  messageId,
+  t,
+}: {
+  part: UIMessage["parts"][number]
+  partKey: string
+  isStreaming: boolean
+  mentionPattern: RegExp | null
+  characterById: Map<string, Character> | undefined
+  messageId: string | undefined
+  t: ReturnType<typeof useTranslations>
+}) {
+  return renderPart(part, partKey, isStreaming, mentionPattern, characterById, messageId, t)
+})
+MessagePart.displayName = "MessagePart"
+
 function renderPart(
   part: UIMessage["parts"][number],
   key: string,
@@ -696,19 +736,23 @@ function renderPart(
     // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
     // section so the user can still see what was called.
     if (tp.state === "output-error") {
-      const errorText =
-        typeof (tp as { errorText?: unknown }).errorText === "string"
-          ? ((tp as { errorText?: string }).errorText as string)
-          : t("toolCallFailed")
+      const rawError = (tp as { errorText?: unknown }).errorText
       return (
         <Tool key={key} defaultOpen>
           <ToolHeader type={tp.type} state={tp.state} />
           <ToolContent>
             {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
             <ErrorTraceDetails
-              error={{ message: errorText }}
+              error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
               title={t("toolCallFailed")}
               className="mt-2"
+              body={
+                <ErrorParsedView
+                  rawError={rawError}
+                  toolType={tp.type}
+                  fallback={t("toolCallFailed")}
+                />
+              }
             />
           </ToolContent>
         </Tool>

@@ -8,7 +8,14 @@
  * can be exercised against a real timing implementation.
  */
 
-import { PERF_NAMESPACE, mark, measure, measureRange, clearPerfEntries } from "./perf-marker"
+import {
+  PERF_NAMESPACE,
+  mark,
+  measure,
+  measureRange,
+  clearPerfEntries,
+  clearMeasuresByName,
+} from "./perf-marker"
 
 describe("perf-marker", () => {
   beforeEach(() => {
@@ -69,5 +76,20 @@ describe("perf-marker", () => {
     expect(performance.getEntriesByName(`${PERF_NAMESPACE}after-clear`)).toHaveLength(0)
     expect(performance.getEntriesByName("unrelated-mark")).toHaveLength(1)
     performance.clearMarks("unrelated-mark")
+  })
+
+  it("clearMeasuresByName() drains every entry of one name, leaving others", () => {
+    // Two commits of the same boundary share a single measure name — the
+    // exact shape that grows unbounded in a long session.
+    measureRange("react:chat:message", 0, 4)
+    measureRange("react:chat:message", 0, 6)
+    measureRange("react:chat:list", 0, 2)
+    expect(performance.getEntriesByName(`${PERF_NAMESPACE}react:chat:message`)).toHaveLength(2)
+
+    clearMeasuresByName(`${PERF_NAMESPACE}react:chat:message`)
+
+    expect(performance.getEntriesByName(`${PERF_NAMESPACE}react:chat:message`)).toHaveLength(0)
+    // Unrelated boundary's entry is untouched.
+    expect(performance.getEntriesByName(`${PERF_NAMESPACE}react:chat:list`)).toHaveLength(1)
   })
 })

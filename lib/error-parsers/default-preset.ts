@@ -8,6 +8,9 @@ import { rustPanicParser } from "./parsers/rust-panic-parser"
 import { anthropicErrorParser } from "./parsers/anthropic-error-parser"
 import { ansiParser } from "./parsers/ansi-parser"
 import { compileErrorParser } from "./parsers/compile-error-parser"
+import { networkErrorParser } from "./parsers/network-error-parser"
+import { apiStatusErrorParser } from "./parsers/api-status-error-parser"
+import { runtimeErrorParser } from "./parsers/runtime-error-parser"
 
 function processTextNodes(
   nodes: ParsedNode[],
@@ -43,6 +46,9 @@ export const defaultPreset: ErrorPreset = {
     rustPanicParser,
     stackTraceParser,
     compileErrorParser,
+    networkErrorParser,
+    apiStatusErrorParser,
+    runtimeErrorParser,
     logParser,
     pathUrlParser,
   ],
@@ -54,24 +60,25 @@ export const defaultPreset: ErrorPreset = {
       return apiResult
     }
 
-    // Try JSON next — if the whole text is valid JSON, treat it as such
-    const jsonResult = jsonParser.parse(text)
-    if (jsonResult && jsonResult.parsed) {
-      return jsonResult
-    }
-
-    // Otherwise start with a single text node and run remaining parsers.
-    // Python/Rust run before the generic stack/path parsers so their
-    // structured frames/locations win over raw path matching.
+    // Otherwise start with a single text node and run the parser chain.
+    // `jsonParser` runs first so an embedded JSON payload (e.g. a CLI's
+    // `Exit code 1\nerror: …\n{ … }`) is lifted into a tree before the log
+    // parser would otherwise swallow it line-by-line. Python/Rust run before
+    // the generic stack/path parsers so their structured frames/locations win
+    // over raw path matching.
     let nodes: ParsedNode[] = [{ kind: "text", content: text }]
     let parsed = false
 
     for (const parser of [
+      jsonParser,
       ansiParser,
       pythonTracebackParser,
       rustPanicParser,
       stackTraceParser,
       compileErrorParser,
+      networkErrorParser,
+      apiStatusErrorParser,
+      runtimeErrorParser,
       pathUrlParser,
       logParser,
     ]) {

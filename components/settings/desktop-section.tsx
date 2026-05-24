@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { CopyIcon, ExternalLinkIcon, LaptopIcon, PowerIcon } from "lucide-react"
@@ -13,13 +14,11 @@ import { isAutostartEnabled, setAutostart } from "@/lib/tauri/autostart"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
-import { getPref, setPref } from "@/lib/tauri/store"
+import { getCloseBehavior, setCloseBehavior, type CloseBehavior } from "@/lib/tauri/close-behavior"
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@/lib/logging"
 import { TraySection } from "./tray-section"
 import { ShortcutsSection } from "./shortcuts-section"
-
-const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
 
 /**
  * Desktop-only preferences. Combined surface for autostart, system info, and
@@ -32,7 +31,7 @@ export function DesktopSection() {
   const t = useTranslations("settings.desktop")
   const [osInfo, setOsInfo] = useState<OsInfo | null>(null)
   const [autostart, setAutostartState] = useState<boolean>(false)
-  const [trayOnClose, setTrayOnClose] = useState<boolean>(false)
+  const [closeBehavior, setCloseBehaviorState] = useState<CloseBehavior>("ask")
   const [loaded, setLoaded] = useState(false)
   const [appDataDir, setAppDataDir] = useState<string | null>(null)
 
@@ -45,24 +44,17 @@ export function DesktopSection() {
     let cancelled = false
     void (async () => {
       try {
-        const [info, auto, tray, dir] = await Promise.all([
+        const [info, auto, behavior, dir] = await Promise.all([
           getOsInfo(),
           isAutostartEnabled(),
-          getPref<boolean>(PREF_TRAY_ON_CLOSE),
+          getCloseBehavior(),
           import("@tauri-apps/api/path").then((m) => m.appDataDir()),
         ])
         if (cancelled) return
         setOsInfo(info)
         setAutostartState(auto)
-        setTrayOnClose(Boolean(tray))
+        setCloseBehaviorState(behavior)
         setAppDataDir(dir)
-        // Re-push the saved preference into Rust in case TauriProvider hadn't
-        // reached the store yet — keeps the close handler in sync.
-        try {
-          await invoke("set_tray_on_close", { enabled: Boolean(tray) })
-        } catch {
-          // Non-fatal — Rust may not have the command on web/dev mode.
-        }
       } catch (err) {
         loggers.app.warn("desktop.loadFailed", { err: String(err) })
       } finally {
@@ -104,16 +96,15 @@ export function DesktopSection() {
     }
   }
 
-  const handleTrayOnClose = async (checked: boolean) => {
-    setTrayOnClose(checked)
-    await setPref(PREF_TRAY_ON_CLOSE, checked)
+  const handleCloseBehavior = async (value: CloseBehavior) => {
+    setCloseBehaviorState(value)
     try {
-      await invoke("set_tray_on_close", { enabled: checked })
-      loggers.app.info("desktop.trayOnClose", { enabled: checked })
+      await setCloseBehavior(value)
+      loggers.app.info("desktop.closeBehavior", { behavior: value })
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err)
-      loggers.app.error("desktop.trayOnCloseFailed", err)
-      toast.error(t("trayOnCloseFailed", { error: errorText }))
+      loggers.app.error("desktop.closeBehaviorFailed", err)
+      toast.error(t("closeBehaviorFailed", { error: errorText }))
     }
   }
 
@@ -210,17 +201,30 @@ export function DesktopSection() {
           />
         </div>
 
-        <div className="flex items-start justify-between gap-4 border-t pt-3">
+        <div className="space-y-2 border-t pt-3">
           <div className="space-y-1">
-            <Label className="text-sm">{t("trayOnClose")}</Label>
-            <p className="text-xs text-muted-foreground">{t("trayOnCloseHint")}</p>
+            <Label className="text-sm">{t("closeBehavior")}</Label>
+            <p className="text-xs text-muted-foreground">{t("closeBehaviorHint")}</p>
           </div>
-          <Switch
-            checked={trayOnClose}
-            onCheckedChange={(c) => void handleTrayOnClose(c)}
+          <RadioGroup
+            value={closeBehavior}
+            onValueChange={(v) => void handleCloseBehavior(v as CloseBehavior)}
             disabled={!loaded}
-            aria-label={t("trayOnCloseToggle")}
-          />
+            aria-label={t("closeBehavior")}
+          >
+            <Label className="flex cursor-pointer items-center gap-2 text-sm font-normal">
+              <RadioGroupItem value="ask" />
+              {t("closeBehaviorAsk")}
+            </Label>
+            <Label className="flex cursor-pointer items-center gap-2 text-sm font-normal">
+              <RadioGroupItem value="tray" />
+              {t("closeBehaviorTray")}
+            </Label>
+            <Label className="flex cursor-pointer items-center gap-2 text-sm font-normal">
+              <RadioGroupItem value="quit" />
+              {t("closeBehaviorQuit")}
+            </Label>
+          </RadioGroup>
         </div>
       </section>
 

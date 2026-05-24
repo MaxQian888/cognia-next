@@ -5,6 +5,7 @@ import { CrashLogSettings } from "@/components/settings/system/crash-log-setting
 import { SandboxAuditCard } from "./sandbox-audit-card"
 import { SidecarRestartCard } from "./sidecar-restart-card"
 import { InboxTelemetryCard } from "./inbox-telemetry-card"
+import { NativeCrashReportsCard } from "./native-crash-reports-card"
 
 /**
  * Settings → Observability → Diagnostics.
@@ -18,6 +19,7 @@ export function DiagnosticsSection() {
   return (
     <div className="space-y-4">
       <CrashLogSettings />
+      <NativeCrashReportsCard />
       <SandboxAuditCard />
       <SidecarRestartCard />
       <InboxTelemetryCard />

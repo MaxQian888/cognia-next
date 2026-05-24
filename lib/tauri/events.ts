@@ -22,6 +22,12 @@ export const TAURI_EVENTS = {
   cliMatches: "cli://matches",
   cliSecondInstance: "cli://second-instance",
   deepLink: "deep-link://received",
+  /**
+   * Emitted by the main window's `CloseRequested` handler when the user's
+   * close behavior is `ask`. Frontend listener opens the exit-confirmation
+   * dialog; the close has already been prevented Rust-side.
+   */
+  appCloseRequested: "app://close-requested",
 } as const
 
 /**
