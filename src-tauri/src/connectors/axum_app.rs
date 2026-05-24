@@ -425,7 +425,7 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
         type HmacSha256 = Hmac<Sha256>;
 
@@ -530,7 +530,7 @@ mod tests {
         if !keyring_available() {
             return;
         }
-        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+        use aes::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
         use rand::RngCore;
         use sha2::{Digest, Sha256};
@@ -545,10 +545,11 @@ mod tests {
 
         let plaintext = br#"{"schema":"2.0","header":{"token":"vtok-2"}}"#;
         let key_bytes = Sha256::digest(b"the-encrypt-key");
+        let key_arr: [u8; 32] = key_bytes.as_slice().try_into().unwrap();
         let mut iv = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut iv);
-        let ciphertext = Aes256CbcEnc::new(key_bytes.as_slice().into(), &iv.into())
-            .encrypt_padded_vec_mut::<Pkcs7>(plaintext);
+        let ciphertext = Aes256CbcEnc::new(&key_arr.into(), &iv.into())
+            .encrypt_padded_vec::<Pkcs7>(plaintext);
         let mut combined = iv.to_vec();
         combined.extend_from_slice(&ciphertext);
         let encoded = BASE64.encode(combined);

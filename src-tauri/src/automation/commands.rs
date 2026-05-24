@@ -186,6 +186,21 @@ impl CallContext {
     fn surface(&self) -> Surface {
         self.surface.unwrap_or(Surface::Workflow)
     }
+
+    /// Project the renderer-supplied context into the borrow-tied
+    /// [`ActionFacts`](super::policy::ActionFacts) the policy engine matches
+    /// against. Mirrors `dispatcher::GateContext::facts`; production gating
+    /// runs on the converted `GateContext`, so this helper is test-only.
+    #[cfg(test)]
+    fn facts(&self) -> super::policy::ActionFacts<'_> {
+        super::policy::ActionFacts {
+            process_name: self.process_name.as_deref(),
+            window_title: self.window_title.as_deref(),
+            target_url: self.target_url.as_deref(),
+            click_x: self.click_x,
+            click_y: self.click_y,
+        }
+    }
 }
 
 

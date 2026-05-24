@@ -151,7 +151,16 @@ pub async fn spawn_server(
         // `into_make_service_with_connect_info::<SocketAddr>()` so the
         // `pre_auth_rate_limit` middleware can extract the peer IP for its
         // per-source-IP token bucket (see `middleware::pre_auth_rate_limit`).
-        let result = axum_server::from_tcp_rustls(std_listener, rustls_config)
+        // axum-server 0.8 made `from_tcp_rustls` fallible (it now builds the
+        // rustls acceptor eagerly), so unwrap the `Result` before chaining.
+        let server = match axum_server::from_tcp_rustls(std_listener, rustls_config) {
+            Ok(server) => server,
+            Err(e) => {
+                log::warn!("companion-api server failed to build TLS acceptor: {e}");
+                return;
+            }
+        };
+        let result = server
             .handle(serve_handle)
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await;

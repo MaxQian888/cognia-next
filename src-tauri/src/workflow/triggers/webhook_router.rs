@@ -35,7 +35,7 @@ use axum::{
     routing::any,
     Router,
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use parking_lot::RwLock;
 use serde::Serialize;
 use sha2::Sha256;
@@ -419,7 +419,7 @@ fn verify_hmac_signature(
     let Ok(provided) = decode_hex(hex_part) else {
         return false;
     };
-    let mut mac = match <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()) {
+    let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()) {
         Ok(m) => m,
         Err(_) => return false,
     };
@@ -581,7 +581,7 @@ mod tests {
         use axum::http::HeaderValue;
         let secret = "shh";
         let body = Bytes::from_static(b"{\"hello\":\"world\"}");
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(&body);
         let hex: String = mac
             .finalize()
@@ -662,7 +662,7 @@ mod tests {
         use axum::http::HeaderValue;
         let secret = "ghs";
         let body = Bytes::from_static(b"{\"action\":\"opened\"}");
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(&body);
         let hex: String = mac
             .finalize()
@@ -686,7 +686,7 @@ mod tests {
         use axum::http::HeaderValue;
         let secret = "ghs";
         let body = Bytes::from_static(b"x");
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(&body);
         let hex: String = mac
             .finalize()
@@ -733,7 +733,7 @@ mod tests {
         let bound = router.start(recorder.clone(), 0).await.unwrap();
 
         let body = "{\"a\":1}";
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(b"shh").unwrap();
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(b"shh").unwrap();
         mac.update(body.as_bytes());
         let hex: String = mac
             .finalize()
