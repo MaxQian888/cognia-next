@@ -148,6 +148,18 @@ export function DesktopChatWorkspace() {
     [sessions, activeSessionId]
   )
 
+  // Recent sessions for the welcome-page "Continue" group (newest first,
+  // excluding the one already open).
+  const recentSessions = useMemo(
+    () =>
+      [...sessions]
+        .filter((s) => s.id !== activeSessionId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 4)
+        .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),
+    [sessions, activeSessionId]
+  )
+
   const openSettings = useCallback(
     (tab?: string) => {
       log.info("open settings", { tab: tab ?? "general" })
@@ -353,6 +365,9 @@ export function DesktopChatWorkspace() {
                 onCreate={handleNewDirect}
                 onUseSample={handleUseSample}
                 onOpenSettings={openSettings}
+                onNavigate={(href) => router.push(href)}
+                recentSessions={recentSessions}
+                onResumeSession={handleSwitchToSession}
                 composerRef={composerRef}
               />
             )}

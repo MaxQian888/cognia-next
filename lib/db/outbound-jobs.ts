@@ -41,6 +41,45 @@ function newId(): string {
   return "oqj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+// ── Enqueue wake signal ────────────────────────────────────────────────────
+//
+// The outbound runner used to busy-poll `pickNextDue` every 200ms. It now
+// sleeps until either the next retry deadline or a fresh enqueue. This bus is
+// the "fresh enqueue" wake: `enqueueOutbound` fires it from the single
+// chokepoint that every enqueue path (ai-run, manual, workflow, draft) flows
+// through, so the runner wakes for all of them without each call-site knowing
+// about the runner. Built on `EventTarget` exactly like
+// `lib/connectors/credentials-events.ts` — works in the browser shell and the
+// Tauri webview alike, and keeps the connector→db dependency direction intact
+// (the runner imports this; this module imports nothing from lib/connectors).
+
+const OUTBOUND_ENQUEUED_EVENT = "connectors:outbound:enqueued"
+const outboundBus: EventTarget = new EventTarget()
+
+/**
+ * Subscribe to "an outbound job was enqueued" notifications. Returns an
+ * unsubscribe function. The handler receives no payload — it's a pure wake
+ * signal; the runner re-queries the table to decide what to do.
+ */
+export function subscribeOutboundEnqueued(handler: () => void): () => void {
+  const listener = () => {
+    try {
+      handler()
+    } catch (err) {
+      console.error(
+        "[outbound-jobs] enqueue subscriber threw:",
+        err instanceof Error ? err.message : String(err)
+      )
+    }
+  }
+  outboundBus.addEventListener(OUTBOUND_ENQUEUED_EVENT, listener)
+  return () => outboundBus.removeEventListener(OUTBOUND_ENQUEUED_EVENT, listener)
+}
+
+function emitOutboundEnqueued(): void {
+  outboundBus.dispatchEvent(new Event(OUTBOUND_ENQUEUED_EVENT))
+}
+
 export interface EnqueueInput {
   adapterId: string
   conversationKey: string
@@ -82,6 +121,9 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
   }
   await getDb().outboundQueue.add(row)
   await enforceQueueSoftCap(now)
+  // Wake the runner — `row.nextAttemptAt` defaults to `now`, so this is
+  // immediately actionable unless the caller scheduled it for the future.
+  emitOutboundEnqueued()
   return row
 }
 
@@ -137,16 +179,65 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
  * if nothing is due. Picks both "pending" (first attempt) and "failed"
  * (scheduled retry) rows. Does not mutate the row — caller must call
  * `markSending`.
+ *
+ * Uses the `[status+nextAttemptAt]` compound index (v51): two bounded range
+ * scans (`pending` + `failed`, each `nextAttemptAt <= now`) instead of a
+ * full-table `.filter()`. In steady state most rows are `sent`/`deadlettered`
+ * and never enter either range, so the query cost tracks the number of *due*
+ * jobs, not the table size.
  */
 export async function pickNextDue(): Promise<OutboundJobRow | undefined> {
+  return (await listDueNow())[0]
+}
+
+/**
+ * All actionable rows (`pending` or `failed`, `nextAttemptAt <= now`) ordered
+ * oldest-first by `createdAt`. The event-driven runner drains this batch into
+ * per-conversation lanes in one pass per wake, instead of re-querying for one
+ * job per poll tick. Same `[status+nextAttemptAt]` index as `pickNextDue`.
+ */
+export async function listDueNow(): Promise<OutboundJobRow[]> {
   const now = Date.now()
-  const candidates = await getDb()
-    .outboundQueue.filter(
-      (r) => (r.status === "pending" || r.status === "failed") && r.nextAttemptAt <= now
-    )
-    .toArray()
-  if (candidates.length === 0) return undefined
-  return candidates.sort((a, b) => a.createdAt - b.createdAt)[0]
+  const db = getDb()
+  const [pending, failed] = await Promise.all([
+    db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["pending", -Infinity], ["pending", now], true, true)
+      .toArray(),
+    db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["failed", -Infinity], ["failed", now], true, true)
+      .toArray(),
+  ])
+  return [...pending, ...failed].sort((a, b) => a.createdAt - b.createdAt)
+}
+
+/**
+ * The earliest future `nextAttemptAt` across all `pending`/`failed` rows
+ * (strictly after `now`), or undefined when nothing is scheduled. The
+ * event-driven runner sleeps until exactly this instant so a deferred retry
+ * (rate-limit / quiet-hours / backoff) fires on time without polling.
+ *
+ * Rows due at-or-before `now` are intentionally excluded — those are handled
+ * by `pickNextDue`; this answers only "when is the next *future* wake?".
+ */
+export async function peekNextWakeAt(): Promise<number | undefined> {
+  const now = Date.now()
+  const db = getDb()
+  const [pending, failed] = await Promise.all([
+    db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["pending", now], ["pending", Infinity], false, true)
+      .first(),
+    db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["failed", now], ["failed", Infinity], false, true)
+      .first(),
+  ])
+  const times = [pending?.nextAttemptAt, failed?.nextAttemptAt].filter(
+    (t): t is number => typeof t === "number"
+  )
+  return times.length === 0 ? undefined : Math.min(...times)
 }
 
 /**

@@ -5,21 +5,20 @@
  * the Health Tab's "Reconnect now" button can call `requeueAdapter(id)`
  * without juggling React refs across distant components.
  *
- * The entry holds the adapter handle, the abort signal that gates the
- * inbound transport, and the heartbeat disposer. `requeueAdapter` ends
- * the entry (stop + dispose heartbeat) and re-runs a starter function
- * the provider hands in. All operations are best-effort: a failing
- * stop() must not block a restart attempt.
+ * The entry holds the adapter handle and the abort signal that gates the
+ * inbound transport. Heartbeats are driven by a single bus-scope sweep
+ * (v51, `health/heartbeat-sweep.ts`), not per entry. `requeueAdapter` ends
+ * the entry (stop + abort) and re-runs a starter function the provider
+ * hands in. All operations are best-effort: a failing stop() must not
+ * block a restart attempt.
  */
 
 import type { PlatformAdapter } from "@/types/connectors/adapter"
-import type { HeartbeatHandle } from "@/lib/connectors/health/heartbeat"
 import { onCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { appendAudit } from "@/lib/connectors/audit"
 
 export interface AdapterRuntimeEntry {
   adapter: PlatformAdapter
-  heartbeat: HeartbeatHandle
   abortController: AbortController
   /** Starter the registry calls on `requeueAdapter`. */
   restart: () => Promise<void>
@@ -35,7 +34,6 @@ export function unregisterRunningAdapter(adapterId: string): void {
   const entry = entries.get(adapterId)
   entries.delete(adapterId)
   if (!entry) return
-  entry.heartbeat.dispose()
   entry.abortController.abort()
   // Stop is best-effort — the caller may already be in teardown — but
   // log on rejection so operators see why a transport is leaking.
@@ -61,9 +59,10 @@ export function listRunningAdapters(): AdapterRuntimeEntry[] {
  * the adapter was not in the registry. Used by the Health Tab's
  * "Reconnect now" affordance.
  *
- * The current entry's resources (heartbeat, abort signal, transport)
- * are torn down first. The provider-supplied `restart` callback then
- * builds a fresh entry and re-registers it.
+ * The current entry's resources (abort signal, transport) are torn down
+ * first. The provider-supplied `restart` callback then builds a fresh entry,
+ * re-registers it, and fires an immediate heartbeat (v51; heartbeats are no
+ * longer owned per entry — the bus-scope sweep drives the periodic ones).
  */
 export async function requeueAdapter(adapterId: string): Promise<boolean> {
   const entry = entries.get(adapterId)
@@ -114,7 +113,6 @@ export function subscribeCredentialsRotatedToLifecycle(): () => void {
 /** Test helper — clears all entries (production code must not call this). */
 export function __resetLifecycleForTesting(): void {
   for (const entry of entries.values()) {
-    entry.heartbeat.dispose()
     entry.abortController.abort()
   }
   entries.clear()

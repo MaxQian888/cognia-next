@@ -5,6 +5,29 @@
 
 import "fake-indexeddb/auto"
 import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import type { OutboundJobRow } from "./connector-types"
+
+/** Minimal valid `outboundQueue` row for index-behaviour tests. */
+function makeOutboundRow(
+  id: string,
+  over: Partial<OutboundJobRow> & Pick<OutboundJobRow, "status" | "nextAttemptAt">
+): OutboundJobRow {
+  return {
+    id,
+    adapterId: "tg-v51",
+    conversationKey: "telegram:tg-v51:1",
+    request: {
+      conversationRef: { platform: "telegram", adapterId: "tg-v51" },
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: id },
+    },
+    attempts: 0,
+    createdAt: Date.now(),
+    idempotencyKey: id,
+    source: "ai-run",
+    ...over,
+  }
+}
 
 describe("getDb", () => {
   beforeEach(async () => {
@@ -52,6 +75,8 @@ describe("getDb", () => {
     expect(db.connectorAudit).toBeDefined()
     expect(db.connectorDrafts).toBeDefined()
     expect(db.connectorAttachments).toBeDefined()
+    // v51 — Heartbeats split out of connectorAudit into their own table.
+    expect(db.connectorHeartbeats).toBeDefined()
     // v27 — Plugin Dexie table registry (M0 platform feature).
     expect(db.pluginDexieMeta).toBeDefined()
     // v49 — Inbox telemetry ring buffer.
@@ -376,6 +401,71 @@ describe("getDb", () => {
     const nonHeartbeat = await db.connectorAudit.where("kind").equals("adapter.started").toArray()
     expect(nonHeartbeat).toHaveLength(1)
     expect(nonHeartbeat[0].kind).toBe("adapter.started")
+  })
+
+  // v51 — the new compound indexes and the dedicated heartbeat table.
+  it("v51 outboundQueue [status+nextAttemptAt] index drives a due-job range query", async () => {
+    const db = getDb()
+    await db.open()
+    const now = Date.now()
+    await db.outboundQueue.bulkPut([
+      makeOutboundRow("due-pending", { status: "pending", nextAttemptAt: now - 1_000 }),
+      makeOutboundRow("future-pending", { status: "pending", nextAttemptAt: now + 60_000 }),
+      makeOutboundRow("due-failed", { status: "failed", nextAttemptAt: now - 500 }),
+      makeOutboundRow("sent", { status: "sent", nextAttemptAt: now - 5_000 }),
+    ])
+
+    const duePending = await db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["pending", -Infinity], ["pending", now])
+      .toArray()
+    expect(duePending.map((r) => r.id)).toEqual(["due-pending"])
+
+    const dueFailed = await db.outboundQueue
+      .where("[status+nextAttemptAt]")
+      .between(["failed", -Infinity], ["failed", now])
+      .toArray()
+    expect(dueFailed.map((r) => r.id)).toEqual(["due-failed"])
+  })
+
+  it("v51 connectorAudit [adapterId+kind+at] index isolates one adapter+kind stream", async () => {
+    const db = getDb()
+    await db.open()
+    const now = Date.now()
+    await db.connectorAudit.bulkPut([
+      { id: "i-1", adapterId: "lark-v51", kind: "inbound.received", at: now - 10_000 },
+      { id: "i-2", adapterId: "lark-v51", kind: "inbound.received", at: now - 5_000 },
+      { id: "i-3", adapterId: "lark-v51", kind: "delivery.success", at: now - 1_000 },
+      { id: "i-4", adapterId: "other-v51", kind: "inbound.received", at: now - 2_000 },
+    ])
+
+    const lastInbound = await db.connectorAudit
+      .where("[adapterId+kind+at]")
+      .between(
+        ["lark-v51", "inbound.received", -Infinity],
+        ["lark-v51", "inbound.received", Infinity]
+      )
+      .last()
+    expect(lastInbound?.id).toBe("i-2")
+  })
+
+  it("v51 connectorHeartbeats round-trips and prunes by [adapterId+at]", async () => {
+    const db = getDb()
+    await db.open()
+    const now = Date.now()
+    await db.connectorHeartbeats.bulkPut([
+      { id: "hb-1", adapterId: "lark-v51", kind: "adapter.heartbeat", at: now - 90_000 },
+      { id: "hb-2", adapterId: "lark-v51", kind: "adapter.heartbeat", at: now - 1_000 },
+      { id: "hb-3", adapterId: "other-v51", kind: "adapter.heartbeat", at: now - 90_000 },
+    ])
+
+    await db.connectorHeartbeats
+      .where("[adapterId+at]")
+      .between(["lark-v51", -Infinity], ["lark-v51", now - 60_000])
+      .delete()
+
+    const remaining = await db.connectorHeartbeats.toArray()
+    expect(remaining.map((r) => r.id).sort()).toEqual(["hb-2", "hb-3"])
   })
 
   // v43 — Built-in skills tier + lark-cli bridge (ADR-0026). All changes

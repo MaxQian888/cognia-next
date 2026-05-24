@@ -189,12 +189,11 @@ export function AuditTab({ initialTimeRange = "24h", adapterId }: AuditTabProps 
     if (selectedKinds.length > 0) {
       if (!selectedKinds.includes(e.kind)) return false
     } else {
-      // Default view excludes `adapter.heartbeat` — see the comment on the
-      // AuditKind union (types/connectors/audit.ts): heartbeats are noisy by
-      // design and flood the 500-row Dexie limit. Users opt back in by
-      // toggling the kind explicitly (note: heartbeat is intentionally not
-      // in ALL_AUDIT_KINDS so it has no toggle; this gate also catches any
-      // future "noisy by default" kinds that share the same naming pattern).
+      // Default view excludes `adapter.heartbeat`. As of v51 heartbeats live
+      // in their own `connectorHeartbeats` table and no longer land here, so
+      // this now only hides legacy heartbeat rows written to `connectorAudit`
+      // before the migration (they age out under the 5 000-row cap). The
+      // guard is cheap and also catches any future "noisy by default" kinds.
       if (e.kind === "adapter.heartbeat") return false
     }
     if (trimmedConversationKey) {

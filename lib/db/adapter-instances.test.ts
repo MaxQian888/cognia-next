@@ -97,6 +97,24 @@ describe("adapter-instances", () => {
     expect(await getAdapterInstance(row.id)).toBeUndefined()
   })
 
+  it("deleteAdapterInstance reaps the adapter's connectorHeartbeats but leaves other adapters' rows", async () => {
+    const row = await createAdapterInstance(baseInput())
+    const other = await createAdapterInstance(baseInput())
+    const now = Date.now()
+    await getDb().connectorHeartbeats.bulkPut([
+      { id: "hb-del-1", adapterId: row.id, kind: "adapter.heartbeat", at: now - 1_000 },
+      { id: "hb-del-2", adapterId: row.id, kind: "adapter.heartbeat", at: now - 2_000 },
+      { id: "hb-keep", adapterId: other.id, kind: "adapter.heartbeat", at: now - 1_000 },
+    ])
+
+    await deleteAdapterInstance(row.id)
+
+    expect(await getDb().connectorHeartbeats.where("adapterId").equals(row.id).count()).toBe(0)
+    // The other adapter's heartbeats are untouched.
+    const remaining = await getDb().connectorHeartbeats.toArray()
+    expect(remaining.map((r) => r.id)).toEqual(["hb-keep"])
+  })
+
   it("optional fields (defaultCharacterId, webhookPath, publicUrl, quietHours, muted) round-trip", async () => {
     const row = await createAdapterInstance({
       ...baseInput(),

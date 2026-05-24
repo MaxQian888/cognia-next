@@ -3,9 +3,13 @@
 /**
  * Per-adapter health hook (im-refactored-crayon).
  *
- * Subscribes to the `connectorAudit` table filtered by `adapterId` over
- * the last `windowMs` (default 24h) and returns a derived view ready for
- * the Settings → Adapters → Health detail tab:
+ * Subscribes to BOTH `connectorAudit` (real events) and `connectorHeartbeats`
+ * (the periodic filler split out at v51) for `adapterId` over the last
+ * `windowMs` (default 24h), merges them, and returns a derived view ready for
+ * the Settings → Adapters → Health detail tab. The dot grid interleaves
+ * heartbeat "filler" with real delivery/error events, so both streams feed
+ * the same `derive-history` helpers — heartbeat rows are structurally
+ * `AuditEntry`-compatible so the merge is a plain concat:
  *
  *   - `current`  — latest heartbeat snapshot or classify(latest event)
  *   - `buckets`  — 48 × 30min cells coloured by predominant event
@@ -94,17 +98,24 @@ export function useAdapterHealth(
 
   const entries = useLiveQuery<AuditEntry[]>(() => {
     if (typeof window === "undefined" || !adapterId) return Promise.resolve([])
-    return getDb()
-      .connectorAudit.where("[adapterId+at]")
-      .between([adapterId, since], [adapterId, Number.MAX_SAFE_INTEGER])
-      .toArray()
+    const db = getDb()
+    const range: [start: [string, number], end: [string, number]] = [
+      [adapterId, since],
+      [adapterId, Number.MAX_SAFE_INTEGER],
+    ]
+    return Promise.all([
+      db.connectorAudit.where("[adapterId+at]").between(range[0], range[1]).toArray(),
+      db.connectorHeartbeats.where("[adapterId+at]").between(range[0], range[1]).toArray(),
+    ]).then(([audit, heartbeats]) => [...audit, ...heartbeats])
   }, [adapterId, since])
 
   return useMemo(() => {
     const list = entries ?? []
     const buckets = deriveHistory(list, { now, windowMs, bucketMs: options.bucketMs })
     const current = deriveCurrentState(list)
-    const pending = typeof current.lastActivityAt === "number" ? 0 : 0 // placeholder; the actual pending count lives in the latest heartbeat row's `fields.pendingOutboundCount`
+    // Fallback only — the real count comes from the latest heartbeat row's
+    // `fields.pendingOutboundCount` below; 0 when no heartbeat has fired yet.
+    const pending = 0
     const latestHeartbeat = [...list]
       .filter((e) => e.kind === "adapter.heartbeat")
       .sort((a, b) => b.at - a.at)[0]

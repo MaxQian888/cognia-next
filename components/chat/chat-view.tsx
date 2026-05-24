@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, type Ref } from "react"
+import { useCallback, useRef, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
-import { EmptyChatState } from "./empty-state"
+import { EmptyChatState, type RecentSessionEntry } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
@@ -13,6 +13,18 @@ import { useChatStore } from "@/stores/chat"
 import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { mobileTransition } from "@/lib/ui/motion"
+
+/**
+ * Attach `node` to a (possibly absent) callback or object ref. Defined at
+ * module scope so merging the external composer ref doesn't read as mutating a
+ * prop during render (React Compiler `immutability` rule).
+ */
+function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
+  if (typeof ref === "function") ref(node)
+  else if (ref) (ref as { current: T | null }).current = node
+}
 
 interface ChatPaneProps {
   activeSession: ChatSession | null
@@ -23,6 +35,12 @@ interface ChatPaneProps {
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
+  /** Navigate to a capability surface from the welcome page (settings deep-link). */
+  onNavigate?: (href: string) => void
+  /** Recent sessions for the welcome page "Continue" group. */
+  recentSessions?: readonly RecentSessionEntry[]
+  /** Resume a recent session by id from the welcome page. */
+  onResumeSession?: (id: string) => void
   /**
    * Imperative handle on the Composer. The desktop shell uses it to insert
    * `@CharacterName` mentions when the user clicks a row in the team
@@ -57,6 +75,9 @@ export function ChatPane({
   onCreate,
   onUseSample,
   onOpenSettings,
+  onNavigate,
+  recentSessions,
+  onResumeSession,
   composerRef,
   mobileMentionMembers,
   showHeader = true,
@@ -65,6 +86,22 @@ export function ChatPane({
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const errorMessage = useChatStore((s) => s.errorMessage)
+  const reduce = useReducedMotion()
+
+  // The composer remounts when the layout swaps from the centered empty state
+  // to the docked chat state (the two motion branches mount it at different
+  // tree positions). We hold our own ref to the live instance — forwarding to
+  // the optional external `composerRef` too — so we can restore keyboard focus
+  // once the new instance has mounted (see `onExitComplete` below). Without
+  // this, sending the first message of a session drops focus.
+  const internalComposerRef = useRef<ComposerHandle | null>(null)
+  const setComposerRef = useCallback(
+    (node: ComposerHandle | null) => {
+      internalComposerRef.current = node
+      attachRef(composerRef, node)
+    },
+    [composerRef]
+  )
 
   const handleCopySuccess = useCallback(() => {
     toast.success(tCopy("success"))
@@ -94,8 +131,53 @@ export function ChatPane({
   }, [onRegenerate])
 
   if (!activeSession) {
-    return <EmptyChatState onCreate={onCreate} onUseSample={(text) => onUseSample(text)} />
+    return (
+      <EmptyChatState
+        onCreate={onCreate}
+        onUseSample={(text) => onUseSample(text)}
+        onNavigate={onNavigate}
+        recentSessions={recentSessions}
+        onResumeSession={onResumeSession}
+      />
+    )
   }
+
+  // One composer instance, placed either centered inside the empty state
+  // (no messages yet) or docked at the bottom once the conversation starts.
+  // It remounts across that transition; `setComposerRef` re-attaches our ref
+  // (and the external one) to the new instance, and `onExitComplete` restores
+  // focus to it so the first send doesn't drop the keyboard.
+  const composerEl = (
+    <Composer
+      ref={setComposerRef}
+      session={activeSession}
+      onStartNewSession={() => onCreate()}
+      onOpenSettings={(tab) => onOpenSettings(tab)}
+      onSend={handleSend}
+      onStop={() => void onStop()}
+      disabled={status === "awaiting_approval"}
+      mobileMentionMembers={mobileMentionMembers}
+    />
+  )
+
+  // Error banner + footer plugin slot — identical in both layouts, sitting
+  // just above the composer. Only one layout branch mounts at a time.
+  const errorAndFooter = (
+    <>
+      {errorMessage && (
+        <InlineError
+          message={errorMessage}
+          onRetry={messages.length > 0 ? handleRetry : undefined}
+          onOpenSettings={() => onOpenSettings("api-key")}
+          onDismiss={() => useChatStore.getState().setError(null)}
+        />
+      )}
+      <PluginExtensionSlot
+        point="chat.footer"
+        className="flex items-center justify-center gap-2 px-3 empty:hidden"
+      />
+    </>
+  )
 
   return (
     <>
@@ -112,43 +194,54 @@ export function ChatPane({
           row that's simply missing. */}
       <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
       <ExternalAgentSessionPanel />
-      {messages.length === 0 ? (
-        <EmptyChatState
-          onCreate={onCreate}
-          onUseSample={(text) => onUseSample(text)}
-          variant="inline"
-        />
-      ) : (
-        <MessageList
-          messages={messages}
-          status={status}
-          onCopy={handleCopySuccess}
-          onRegenerate={handleRegenerate}
-          onEditResend={handleEditResend}
-        />
-      )}
-      {errorMessage && (
-        <InlineError
-          message={errorMessage}
-          onRetry={messages.length > 0 ? handleRetry : undefined}
-          onOpenSettings={() => onOpenSettings("api-key")}
-          onDismiss={() => useChatStore.getState().setError(null)}
-        />
-      )}
-      <PluginExtensionSlot
-        point="chat.footer"
-        className="flex items-center justify-center gap-2 px-3 empty:hidden"
-      />
-      <Composer
-        ref={composerRef}
-        session={activeSession}
-        onStartNewSession={() => onCreate()}
-        onOpenSettings={(tab) => onOpenSettings(tab)}
-        onSend={handleSend}
-        onStop={() => void onStop()}
-        disabled={status === "awaiting_approval"}
-        mobileMentionMembers={mobileMentionMembers}
-      />
+      <AnimatePresence
+        mode="wait"
+        initial={false}
+        onExitComplete={() => {
+          // After the centered→docked swap completes the new composer is
+          // mounted; pull focus back to it. Only when entering the chat layout
+          // (messages present) — not when returning to the empty welcome.
+          if (messages.length > 0) internalComposerRef.current?.focus()
+        }}
+      >
+        {messages.length === 0 ? (
+          <motion.div
+            key="empty"
+            className="flex min-h-0 flex-1 flex-col"
+            exit={reduce ? undefined : { opacity: 0, y: 16 }}
+            transition={mobileTransition("normal")}
+          >
+            <EmptyChatState
+              onCreate={onCreate}
+              onUseSample={(text) => onUseSample(text)}
+              variant="inline"
+              composerSlot={composerEl}
+              onNavigate={onNavigate}
+              recentSessions={recentSessions}
+              onResumeSession={onResumeSession}
+            />
+            {errorAndFooter}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="chat"
+            className="flex min-h-0 flex-1 flex-col"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={mobileTransition("normal")}
+          >
+            <MessageList
+              messages={messages}
+              status={status}
+              onCopy={handleCopySuccess}
+              onRegenerate={handleRegenerate}
+              onEditResend={handleEditResend}
+            />
+            {errorAndFooter}
+            {composerEl}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   )
 }

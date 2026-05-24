@@ -231,6 +231,18 @@ export function AppShellMobile() {
     setNavOpen(false)
   }
 
+  // Recent sessions for the welcome-page "Continue" group (newest first,
+  // excluding the one already open).
+  const recentSessions = useMemo(
+    () =>
+      [...sessions]
+        .filter((s) => s.id !== activeSessionId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 4)
+        .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),
+    [sessions, activeSessionId]
+  )
+
   const headerTitle = activeSession?.title ?? t("emptyTitle", { default: "cognia" })
 
   return (
@@ -371,6 +383,9 @@ export function AppShellMobile() {
             onCreate={handleNewDirect}
             onUseSample={(text) => void send(text)}
             onOpenSettings={openSettings}
+            onNavigate={(href) => router.push(href)}
+            recentSessions={recentSessions}
+            onResumeSession={handleSwitchToSession}
             composerRef={composerRef}
             mobileMentionMembers={isTeamSession ? teamMembers : undefined}
           />

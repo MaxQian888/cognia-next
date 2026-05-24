@@ -31,7 +31,6 @@
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { AdapterHealthState } from "@/types/connectors/adapter"
 import { getDb } from "@/lib/db/schema"
-import { appendAudit } from "@/lib/connectors/audit"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import {
   connectorsHttpRequest,
@@ -42,27 +41,6 @@ import { getTenantAccessToken } from "@/lib/connectors/adapters/lark/auth"
 
 export const PASSIVE_HEARTBEAT_INTERVAL_MS = 60_000
 export const IDLE_THRESHOLD_MS = 5 * 60 * 1000
-
-export interface PassiveHeartbeatHandle {
-  dispose(): void
-}
-
-export interface StartPassiveHeartbeatOptions {
-  row: AdapterInstanceRow
-  /** Override the interval (tests use a small value). */
-  intervalMs?: number
-  /** Override the idle threshold (tests). */
-  idleThresholdMs?: number
-  /** Override the clock (tests). */
-  now?: () => number
-  /** Override the scheduler (tests). */
-  scheduler?: {
-    setInterval: (cb: () => void, ms: number) => unknown
-    clearInterval: (handle: unknown) => void
-  }
-  /** Pre-resolved probe overrides (tests). */
-  probeOverrides?: PassiveProbeOverrides
-}
 
 export interface PassiveProbeOverrides {
   lastInboundAt?: (adapterId: string) => Promise<number | null>
@@ -87,12 +65,16 @@ export function isPassiveTransport(row: AdapterInstanceRow): boolean {
 
 async function fetchLastInboundAt(adapterId: string): Promise<number | null> {
   try {
+    // `[adapterId+kind+at]` (v51) makes this a pure index lookup: the range is
+    // exactly this adapter's `inbound.received` rows ordered by `at`, so
+    // `.last()` is the newest without a table scan + JS `kind` filter.
     const newest = await getDb()
-      .connectorAudit.where("at")
-      .above(0)
-      .filter((row) => row.adapterId === adapterId && row.kind === "inbound.received")
-      .reverse()
-      .first()
+      .connectorAudit.where("[adapterId+kind+at]")
+      .between(
+        [adapterId, "inbound.received", -Infinity],
+        [adapterId, "inbound.received", Infinity]
+      )
+      .last()
     return newest?.at ?? null
   } catch {
     return null
@@ -209,67 +191,21 @@ export async function recordPassiveProbe(
   probeOverrides?: PassiveProbeOverrides
 ): Promise<void> {
   const derived = await deriveHeartbeat(row, { now, idleThresholdMs, probeOverrides })
-  await appendAudit({
-    adapterId: row.id,
-    kind: "adapter.heartbeat",
-    at: now,
-    reason: derived.reason,
-    fields: {
-      state: derived.state,
+  await getDb()
+    .connectorHeartbeats.put({
+      id: crypto.randomUUID(),
+      adapterId: row.id,
+      kind: "adapter.heartbeat",
+      at: now,
       reason: derived.reason,
-      source: "passive_probe",
-      lastInboundAt: derived.lastInboundAt,
-      pingOk: derived.pingOk,
-      idleThresholdMs,
-    },
-  }).catch(() => undefined)
-}
-
-/**
- * Start a 60s probe loop for a passive-transport adapter. Returns a
- * disposer the caller must invoke on adapter teardown. The first probe
- * fires immediately so the Health view has data without waiting one
- * full interval.
- *
- * No-op for non-passive transports — the caller is expected to gate on
- * `isPassiveTransport(row)`, but the guard is defensive and the
- * function exits cleanly if a non-passive row sneaks in.
- */
-export function startPassiveHeartbeat(
-  options: StartPassiveHeartbeatOptions
-): PassiveHeartbeatHandle {
-  const {
-    row,
-    intervalMs = PASSIVE_HEARTBEAT_INTERVAL_MS,
-    idleThresholdMs = IDLE_THRESHOLD_MS,
-    now,
-    scheduler = {
-      setInterval: (cb, ms) => setInterval(cb, ms),
-      clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
-    },
-    probeOverrides,
-  } = options
-
-  if (!isPassiveTransport(row)) {
-    return { dispose: () => undefined }
-  }
-
-  let disposed = false
-  const clock = now ?? Date.now
-
-  const tick = () => {
-    if (disposed) return
-    void recordPassiveProbe(row, clock(), idleThresholdMs, probeOverrides).catch(() => undefined)
-  }
-
-  tick()
-  const handle = scheduler.setInterval(tick, intervalMs)
-
-  return {
-    dispose() {
-      if (disposed) return
-      disposed = true
-      scheduler.clearInterval(handle)
-    },
-  }
+      fields: {
+        state: derived.state,
+        reason: derived.reason,
+        source: "passive_probe",
+        lastInboundAt: derived.lastInboundAt,
+        pingOk: derived.pingOk,
+        idleThresholdMs,
+      },
+    })
+    .catch(() => undefined)
 }

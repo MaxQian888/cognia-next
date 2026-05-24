@@ -31,7 +31,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import type {
   AdapterInstanceRow,
-  ConnectorAuditRow,
+  ConnectorHeartbeatRow,
   OutboundJobRow,
   OutboundJobStatus,
 } from "@/lib/db/connector-types"
@@ -217,14 +217,11 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
 
   // Latest heartbeat per adapter — used to read the breaker state snapshot
   // that the runner writes alongside each heartbeat row (Task 2.1).
-  const recentHeartbeats = useLiveQuery<ConnectorAuditRow[]>(() => {
+  const recentHeartbeats = useLiveQuery<ConnectorHeartbeatRow[]>(() => {
     if (typeof window === "undefined") return Promise.resolve([])
     const since = Date.now() - 60 * 60 * 1000 // last hour is plenty
-    return getDb()
-      .connectorAudit.where("at")
-      .above(since)
-      .filter((r) => r.kind === "adapter.heartbeat")
-      .toArray()
+    // Dedicated heartbeat table (v51) — every row is a heartbeat, no filter.
+    return getDb().connectorHeartbeats.where("at").above(since).toArray()
   }, [])
   const breakerStateById = new Map<string, "closed" | "open" | "half_open">()
   // Keep the newest heartbeat per adapter so the derived badge tracks the

@@ -15,7 +15,6 @@ import {
 } from "./lifecycle"
 import { emitCredentialsRotated } from "./credentials-events"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
-import type { HeartbeatHandle } from "@/lib/connectors/health/heartbeat"
 
 jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: jest.fn().mockResolvedValue(undefined),
@@ -24,7 +23,6 @@ jest.mock("@/lib/connectors/audit", () => ({
 function makeEntry(id: string, overrides: Partial<AdapterRuntimeEntry> = {}): AdapterRuntimeEntry {
   return {
     adapter: { id, stop: jest.fn().mockResolvedValue(undefined) } as unknown as PlatformAdapter,
-    heartbeat: { dispose: jest.fn() } as HeartbeatHandle,
     abortController: new AbortController(),
     restart: jest.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -60,11 +58,10 @@ describe("registerRunningAdapter / getRunningAdapter / listRunningAdapters", () 
 })
 
 describe("unregisterRunningAdapter", () => {
-  it("disposes heartbeat, aborts the signal, and calls adapter.stop()", async () => {
+  it("aborts the signal and calls adapter.stop()", async () => {
     const entry = makeEntry("x")
     registerRunningAdapter("x", entry)
     unregisterRunningAdapter("x")
-    expect(entry.heartbeat.dispose).toHaveBeenCalledTimes(1)
     expect(entry.abortController.signal.aborted).toBe(true)
     // adapter.stop is fire-and-forget; await one microtask
     await new Promise((r) => setTimeout(r, 0))
@@ -101,7 +98,6 @@ describe("requeueAdapter", () => {
     registerRunningAdapter("r1", entry)
     const result = await requeueAdapter("r1")
     expect(result).toBe(true)
-    expect(entry.heartbeat.dispose).toHaveBeenCalledTimes(1)
     expect(entry.abortController.signal.aborted).toBe(true)
     expect(restart).toHaveBeenCalledTimes(1)
     // The registry is empty after unregister; the restart callback is
@@ -114,7 +110,7 @@ describe("requeueAdapter", () => {
     const entry = makeEntry("r2", { restart })
     registerRunningAdapter("r2", entry)
     await expect(requeueAdapter("r2")).rejects.toThrow(/restart bombed/)
-    expect(entry.heartbeat.dispose).toHaveBeenCalledTimes(1)
+    expect(entry.abortController.signal.aborted).toBe(true)
   })
 })
 
@@ -126,8 +122,6 @@ describe("__resetLifecycleForTesting", () => {
     registerRunningAdapter("b", e2)
     __resetLifecycleForTesting()
     expect(listRunningAdapters()).toHaveLength(0)
-    expect(e1.heartbeat.dispose).toHaveBeenCalledTimes(1)
-    expect(e2.heartbeat.dispose).toHaveBeenCalledTimes(1)
     expect(e1.abortController.signal.aborted).toBe(true)
     expect(e2.abortController.signal.aborted).toBe(true)
   })

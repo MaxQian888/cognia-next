@@ -158,4 +158,46 @@ describe("useAdapterHealth", () => {
       expect(result.current.rateBucket).toBeNull()
     })
   })
+
+  it("merges heartbeats from the dedicated table with real audit events (v51)", async () => {
+    // Heartbeat snapshot lives in connectorHeartbeats; a real error event lives
+    // in connectorAudit. The hook must merge both: surface the breaker snapshot
+    // from the heartbeat AND the error from the audit stream.
+    await getDb().connectorHeartbeats.put({
+      id: "hb-merge",
+      adapterId: "lark-merge",
+      kind: "adapter.heartbeat",
+      at: NOW - 1000,
+      fields: {
+        state: "running",
+        pendingOutboundCount: 3,
+        breakerState: "open",
+        breakerOpenedAt: NOW - 2000,
+        breakerFailureRate: 90,
+        breakerEventCount: 7,
+      },
+    })
+    await getDb().connectorAudit.put({
+      id: "aud-merge-err",
+      adapterId: "lark-merge",
+      kind: "delivery.error",
+      at: NOW - 500,
+      reason: "network",
+      message: "boom",
+    })
+
+    const { result } = renderHook(() => useAdapterHealth("lark-merge", { now: () => NOW }))
+    await waitFor(() => {
+      // From the dedicated heartbeat table:
+      expect(result.current.pendingOutboundCount).toBe(3)
+      expect(result.current.breaker).toEqual({
+        state: "open",
+        openedAt: NOW - 2000,
+        failureRate: 90,
+        eventCount: 7,
+      })
+      // From the audit table:
+      expect(result.current.lastError?.id).toBe("aud-merge-err")
+    })
+  })
 })

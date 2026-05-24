@@ -1,29 +1,23 @@
-import {
-  deriveHeartbeat,
-  isPassiveTransport,
-  recordPassiveProbe,
-  startPassiveHeartbeat,
-} from "./passive-heartbeat"
+import { deriveHeartbeat, isPassiveTransport, recordPassiveProbe } from "./passive-heartbeat"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+
+// Heartbeats now write to the dedicated `connectorHeartbeats` table (v51);
+// `fetchLastInboundAt` reads `connectorAudit` via `[adapterId+kind+at]`.
+const mockHeartbeatPut = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: jest.fn(() => ({
     connectorAudit: {
       where: () => ({
-        above: () => ({
-          filter: () => ({
-            reverse: () => ({
-              first: () => Promise.resolve(undefined),
-            }),
-          }),
+        between: () => ({
+          last: () => Promise.resolve(undefined),
         }),
       }),
     },
+    connectorHeartbeats: {
+      put: (...args: unknown[]) => mockHeartbeatPut(...args),
+    },
   })),
-}))
-
-jest.mock("@/lib/connectors/audit", () => ({
-  appendAudit: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/lib/connectors/outbound-runner", () => ({
@@ -174,10 +168,7 @@ describe("deriveHeartbeat", () => {
 
 describe("recordPassiveProbe", () => {
   it("writes one adapter.heartbeat row with the derived state + source", async () => {
-    const { appendAudit } = jest.requireMock("@/lib/connectors/audit") as {
-      appendAudit: jest.Mock
-    }
-    appendAudit.mockClear()
+    mockHeartbeatPut.mockClear()
     const row = makeRow({ type: "lark", settings: { transport: "webhook" } })
     // now = 1_000_000_000 (1B ms past epoch) so lastInboundAt below is
     // strictly less than now, giving a clean positive ageMs that is
@@ -186,8 +177,8 @@ describe("recordPassiveProbe", () => {
       lastInboundAt: async () => 999_999_900, // 100 ms ago
       larkPing: async () => true,
     })
-    expect(appendAudit).toHaveBeenCalledTimes(1)
-    const call = appendAudit.mock.calls[0][0] as {
+    expect(mockHeartbeatPut).toHaveBeenCalledTimes(1)
+    const call = mockHeartbeatPut.mock.calls[0][0] as {
       adapterId: string
       kind: string
       fields: { source: string; state: string }
@@ -199,63 +190,18 @@ describe("recordPassiveProbe", () => {
   })
 
   it("writes degraded with derived reason when ping fails on idle", async () => {
-    const { appendAudit } = jest.requireMock("@/lib/connectors/audit") as {
-      appendAudit: jest.Mock
-    }
-    appendAudit.mockClear()
+    mockHeartbeatPut.mockClear()
     const row = makeRow({ type: "lark", settings: { transport: "webhook" } })
     await recordPassiveProbe(row, 1_000_000_000, 5 * 60_000, {
       lastInboundAt: async () => 1_000_000_000 - 10 * 60_000, // 10 min ago
       larkPing: async () => false,
       isInQuietHours: () => false,
     })
-    expect(appendAudit).toHaveBeenCalledTimes(1)
-    const call = appendAudit.mock.calls[0][0] as {
+    expect(mockHeartbeatPut).toHaveBeenCalledTimes(1)
+    const call = mockHeartbeatPut.mock.calls[0][0] as {
       fields: { state: string; reason: string }
     }
     expect(call.fields.state).toBe("degraded")
     expect(call.fields.reason).toBe("lark_ping_failed")
-  })
-})
-
-describe("startPassiveHeartbeat", () => {
-  beforeEach(() => {
-    const { appendAudit } = jest.requireMock("@/lib/connectors/audit") as {
-      appendAudit: jest.Mock
-    }
-    appendAudit.mockClear()
-  })
-
-  it("registers an interval and dispose clears it", () => {
-    const setInterval = jest.fn(() => 42 as unknown)
-    const clearInterval = jest.fn()
-    const row = makeRow({ type: "lark", settings: { transport: "webhook" } })
-    const handle = startPassiveHeartbeat({
-      row,
-      intervalMs: 1000,
-      scheduler: { setInterval, clearInterval },
-      probeOverrides: {
-        lastInboundAt: async () => Date.now(),
-      },
-    })
-    expect(setInterval).toHaveBeenCalledTimes(1)
-    handle.dispose()
-    expect(clearInterval).toHaveBeenCalledWith(42)
-    // Idempotent — second dispose is a no-op.
-    handle.dispose()
-    expect(clearInterval).toHaveBeenCalledTimes(1)
-  })
-
-  it("is a no-op for non-passive transports", () => {
-    const fakeScheduler = {
-      setInterval: jest.fn(),
-      clearInterval: jest.fn(),
-    }
-    const handle = startPassiveHeartbeat({
-      row: makeRow({ type: "telegram", settings: {} }),
-      scheduler: fakeScheduler as never,
-    })
-    expect(fakeScheduler.setInterval).not.toHaveBeenCalled()
-    handle.dispose() // safe, idempotent
   })
 })

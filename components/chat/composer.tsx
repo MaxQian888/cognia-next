@@ -138,6 +138,9 @@ interface Props {
  */
 export interface ComposerHandle {
   insertMention: (name: string) => void
+  /** Move keyboard focus to the textarea. The chat pane calls this after the
+   *  empty→chat layout swap remounts the composer so focus isn't dropped. */
+  focus: () => void
 }
 
 const SUPPORTED_IMAGE_PREFIX = "image/"
@@ -687,6 +690,9 @@ function ComposerInner(props: InnerProps) {
           }
         })
         setCaret(caret)
+      },
+      focus: () => {
+        textareaRef.current?.focus()
       },
     }),
     [controller.textInput]

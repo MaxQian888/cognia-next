@@ -33,12 +33,11 @@ import { buildAdapterContext } from "@/lib/connectors/adapter-context"
 import { appendAudit } from "@/lib/connectors/audit"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { defaultConnectorCallbackHandler } from "@/lib/a2ui/connector-callback-handler"
-import { startAdapterHeartbeat } from "@/lib/connectors/health/heartbeat"
 import {
-  isPassiveTransport,
-  startPassiveHeartbeat,
-  type PassiveHeartbeatHandle,
-} from "@/lib/connectors/health/passive-heartbeat"
+  startHeartbeatSweep,
+  type HeartbeatSweepHandle,
+} from "@/lib/connectors/health/heartbeat-sweep"
+import { recordHeartbeatNow } from "@/lib/connectors/health/heartbeat"
 import {
   listRunningAdapters,
   registerRunningAdapter,
@@ -59,14 +58,19 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     let cancelled = false
     const startedAdapters: PlatformAdapter[] = []
     let cleanupHandle: CallbackBindingCleanupHandle | null = null
-    const passiveProbes = new Map<string, PassiveHeartbeatHandle>()
+    let heartbeatSweep: HeartbeatSweepHandle | null = null
 
     /**
      * Boot a single adapter through the full lifecycle: build its
      * production AdapterContext, call `adapter.start(ctx)`, register it
-     * with the lifecycle registry, and start the heartbeat probe so the
-     * Health Tab has a continuous signal. Returns true on success.
-     * Failures are isolated — they audit `adapter.error` and swallow.
+     * with the lifecycle registry, and fire one immediate heartbeat so the
+     * Health Tab reflects this (re)boot without waiting up to one sweep
+     * interval. Continuous heartbeats are driven by the bus-scope sweep
+     * (v51); this immediate probe restores the pre-v51 "first heartbeat
+     * fires on every boot" behaviour, which the sweep alone can't give a
+     * `requeueAdapter` ("Reconnect now" / credential rotation) that lands
+     * mid-interval. Returns true on success. Failures are isolated — they
+     * audit `adapter.error` and swallow.
      */
     const bootAdapter = async (
       adapter: PlatformAdapter,
@@ -95,21 +99,10 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         perAdapterAc.abort()
         return false
       }
-      const heartbeat = startAdapterHeartbeat({ adapter })
-      // Passive transports (Lark webhook, OneBot reverse-WS) get an
-      // additional 60s probe so the Health view sees derived
-      // idle/degraded states based on inbound recency + external ping.
-      const previousProbe = passiveProbes.get(row.id)
-      if (previousProbe) {
-        previousProbe.dispose()
-        passiveProbes.delete(row.id)
-      }
-      if (isPassiveTransport(row)) {
-        passiveProbes.set(row.id, startPassiveHeartbeat({ row }))
-      }
+      // Heartbeats (active + passive-transport probe) are driven by a single
+      // bus-scope sweep started after the boot loop — no per-adapter timers.
       registerRunningAdapter(row.id, {
         adapter,
-        heartbeat,
         abortController: perAdapterAc,
         restart: async () => {
           // Rebuild the adapter from the persisted row so a credential
@@ -143,6 +136,10 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         kind: "adapter.started",
         at: Date.now(),
       }).catch(() => undefined)
+      // Immediate heartbeat so the Health view has a fresh snapshot for this
+      // (re)boot now, not in up to one sweep interval. Fire-and-forget — a
+      // write failure must never fail the boot.
+      void recordHeartbeatNow(adapter).catch(() => undefined)
       return true
     }
 
@@ -205,9 +202,10 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         }
 
         // im-refactored-crayon — boot the adapter's inbound transport
-        // through the production AdapterContext + start the heartbeat
-        // loop + register with the lifecycle registry (so the Health Tab
-        // can drive a manual "Reconnect now").
+        // through the production AdapterContext + register with the
+        // lifecycle registry (so the Health Tab can drive a manual
+        // "Reconnect now"). Heartbeats are driven by the bus-scope sweep
+        // started below, not per adapter.
         await bootAdapter(adapter, row, bus)
       }
 
@@ -216,6 +214,15 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       // Build the adapter map for the outbound runner.
       const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
       void startOutboundRunner({ adapters, signal: ac.signal })
+
+      // Single consolidated heartbeat sweep (v51) — one timer services every
+      // running adapter (active heartbeat each tick + passive probe every
+      // 2nd tick for passive transports) instead of up to 2N per-adapter
+      // timers. Reads `listRunningAdapters()` live, so it covers adapters
+      // added by a later requeue too.
+      if (!cancelled) {
+        heartbeatSweep = startHeartbeatSweep()
+      }
 
       // Cross-adapter housekeeping: prune expired callback bindings daily so
       // the connectorCallbackBindings table stops growing without bound.
@@ -244,13 +251,11 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       ac.abort()
       cleanupHandle?.dispose()
       cleanupHandle = null
-      for (const probe of passiveProbes.values()) {
-        probe.dispose()
-      }
-      passiveProbes.clear()
+      heartbeatSweep?.dispose()
+      heartbeatSweep = null
       // Tear down every running adapter through the lifecycle registry so
-      // the heartbeat handles + per-adapter abort signals get cleaned up
-      // too. Swallow per-adapter errors so a bad stop() can't crash the
+      // the per-adapter abort signals get cleaned up too. Swallow
+      // per-adapter errors so a bad stop() can't crash the
       // React teardown; the registry's `unregisterRunningAdapter` already
       // catches the stop() rejection. We still audit `adapter.stopped` on
       // best-effort.

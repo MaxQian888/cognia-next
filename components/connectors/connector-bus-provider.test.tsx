@@ -78,19 +78,22 @@ jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
 }))
 
-// ── Mock the heartbeat (writes to Dexie; jsdom has no IDB) ───────────────
-const mockHeartbeatDispose = jest.fn()
-const mockStartAdapterHeartbeat = jest
-  .fn()
-  .mockImplementation(() => ({ dispose: mockHeartbeatDispose }))
+// ── Mock the consolidated heartbeat sweep (writes to Dexie; jsdom has no IDB) ─
+const mockSweepDispose = jest.fn()
+const mockStartHeartbeatSweep = jest.fn().mockImplementation(() => ({ dispose: mockSweepDispose }))
+jest.mock("@/lib/connectors/health/heartbeat-sweep", () => ({
+  startHeartbeatSweep: (...args: unknown[]) => mockStartHeartbeatSweep(...args),
+}))
+
+// ── Mock the immediate per-boot heartbeat (writes to Dexie; jsdom has no IDB) ─
+const mockRecordHeartbeatNow = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/health/heartbeat", () => ({
-  startAdapterHeartbeat: (...args: unknown[]) => mockStartAdapterHeartbeat(...args),
+  recordHeartbeatNow: (...args: unknown[]) => mockRecordHeartbeatNow(...args),
 }))
 
 // ── Mock the lifecycle registry so we can assert registration calls ──────
 interface MockLifecycleEntry {
   adapter: { id: string; stop: jest.Mock }
-  heartbeat: { dispose: jest.Mock }
   abortController: AbortController
   restart: jest.Mock
 }
@@ -102,7 +105,6 @@ const mockUnregisterRunning = jest.fn((id: string) => {
   const entry = lifecycleRegistry.get(id)
   lifecycleRegistry.delete(id)
   if (!entry) return
-  entry.heartbeat.dispose()
   entry.abortController.abort()
   // Same fire-and-forget shape as the production implementation,
   // including the error log so the "swallows adapter.stop()" test passes.
@@ -170,7 +172,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockListAdapters.mockReturnValue([])
   lifecycleRegistry.clear()
-  mockStartAdapterHeartbeat.mockImplementation(() => ({ dispose: mockHeartbeatDispose }))
+  mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
 })
 
 describe("ConnectorBusProvider", () => {
@@ -440,9 +442,9 @@ describe("ConnectorBusProvider", () => {
     errSpy.mockRestore()
   })
 
-  // im-refactored-crayon — heartbeat + lifecycle registry wiring.
+  // v51 — consolidated heartbeat sweep + lifecycle registry wiring.
 
-  it("starts a heartbeat probe per adapter", async () => {
+  it("starts a single consolidated heartbeat sweep after booting adapters", async () => {
     mockedIsTauri.mockReturnValue(true)
     const row = makeTelegramRow("cai_hb")
     const adapter = makeFakeAdapter(row.id)
@@ -456,7 +458,32 @@ describe("ConnectorBusProvider", () => {
       </ConnectorBusProvider>
     )
     await waitFor(() => {
-      expect(mockStartAdapterHeartbeat).toHaveBeenCalledWith(expect.objectContaining({ adapter }))
+      expect(mockStartHeartbeatSweep).toHaveBeenCalledTimes(1)
+    })
+    // Each booted adapter also gets one immediate heartbeat so the Health
+    // view reflects the (re)boot without waiting a full sweep interval.
+    expect(mockRecordHeartbeatNow).toHaveBeenCalledWith(adapter)
+  })
+
+  it("disposes the heartbeat sweep on unmount", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_hb_dispose")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.start.mockResolvedValue(undefined)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const { unmount } = render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+    await waitFor(() => {
+      expect(mockStartHeartbeatSweep).toHaveBeenCalledTimes(1)
+    })
+    unmount()
+    await waitFor(() => {
+      expect(mockSweepDispose).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -496,7 +523,8 @@ describe("ConnectorBusProvider", () => {
       expect(adapter.start).toHaveBeenCalledTimes(1)
     })
     expect(mockRegisterRunning).not.toHaveBeenCalled()
-    expect(mockStartAdapterHeartbeat).not.toHaveBeenCalled()
+    // A failed start short-circuits before the register/audit/heartbeat tail.
+    expect(mockRecordHeartbeatNow).not.toHaveBeenCalled()
     errSpy.mockRestore()
   })
 })

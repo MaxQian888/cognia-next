@@ -999,9 +999,22 @@
       "shiftTabHint": "按 Shift+Tab 可循环切换。"
     },
     "empty": {
-      "title": "Claude 能怎么帮你？",
-      "subtitle": "随便问点什么，或试试下面这些。把图片拖入输入框即可作为提示一起发送。",
+      "title": "今天想完成点什么？",
+      "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
       "newChat": "新建会话",
+      "sections": {
+        "quickStart": "快速开始",
+        "tryPrompt": "试试这些",
+        "continue": "最近"
+      },
+      "capabilities": {
+        "workflows": "工作流",
+        "agentTeams": "智能体团队",
+        "connectors": "连接器",
+        "twin": "数字分身",
+        "computerUse": "计算机操作",
+        "ocr": "OCR"
+      },
       "samples": {
         "exploreTitle": "探索项目",
         "explorePrompt": "列出工作目录里的顶层文件，并用 3 句话总结这个项目是做什么的。",

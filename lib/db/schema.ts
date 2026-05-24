@@ -44,6 +44,7 @@ import type {
   ConnectorDraftRow,
   ConnectorAttachmentRow,
   ConnectorCallbackBindingRow,
+  ConnectorHeartbeatRow,
 } from "./connector-types"
 import type {
   WorkflowRow,
@@ -113,6 +114,10 @@ export class CogniaDB extends Dexie {
   connectorDrafts!: Table<ConnectorDraftRow, string>
   connectorAttachments!: Table<ConnectorAttachmentRow, string>
   connectorCallbackBindings!: Table<ConnectorCallbackBindingRow, string>
+  // v51 — Heartbeats split out of `connectorAudit`. Capped per-adapter by
+  // the heartbeat sweep (`lib/connectors/health/heartbeat.ts`), not by the
+  // audit writer, so heartbeat churn no longer evicts real audit events.
+  connectorHeartbeats!: Table<ConnectorHeartbeatRow, string>
   // v20 — Claude subscription usage table. One row per `anthropic-ratelimit-
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
@@ -1408,6 +1413,23 @@ export class CogniaDB extends Dexie {
             row.packVersionAtClone = "1.0.0"
           })
       })
+
+    // v51 — Connector recurring-work performance hardening. Pure additions
+    // (two compound indexes + one table); no upgrade hook because existing
+    // rows already carry the indexed fields, mirroring the v19/v21 pattern.
+    //   • outboundQueue [status+nextAttemptAt] — lets the runner pick the
+    //     next due job (and peek the next retry deadline) via an index range
+    //     instead of a full-table `.filter()` scan.
+    //   • connectorAudit [adapterId+kind+at] — lets the passive heartbeat
+    //     read "last inbound.received for this adapter" as a pure index
+    //     lookup instead of an `at`-range scan + JS `kind` filter.
+    //   • connectorHeartbeats — dedicated heartbeat table (see field doc).
+    this.version(51).stores({
+      outboundQueue:
+        "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt]",
+      connectorAudit: "&id, adapterId, kind, at, [adapterId+at], [adapterId+kind+at]",
+      connectorHeartbeats: "&id, adapterId, [adapterId+at], at",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

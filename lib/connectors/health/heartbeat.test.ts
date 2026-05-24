@@ -1,7 +1,8 @@
 /**
  * Coverage for the heartbeat loop:
- *   - recordHeartbeatNow writes one connectorAudit row with kind=adapter.heartbeat
+ *   - recordHeartbeatNow writes one connectorHeartbeats row (v51 dedicated table)
  *   - older heartbeat rows for the same adapter are pruned past `retentionMs`
+ *     without touching the connectorAudit table
  *   - pendingOutboundCount reads the [adapterId+status] index
  *   - the loop is idempotent on dispose, and a thrown adapter.health() degrades
  *     the snapshot to {state: "degraded", reason: <message>}
@@ -10,12 +11,7 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
-import {
-  HEARTBEAT_INTERVAL_MS,
-  HEARTBEAT_RETENTION_MS,
-  recordHeartbeatNow,
-  startAdapterHeartbeat,
-} from "./heartbeat"
+import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_RETENTION_MS, recordHeartbeatNow } from "./heartbeat"
 
 const mockGetAdapterRuntimeStateSnapshot = jest.fn()
 
@@ -66,7 +62,7 @@ describe("recordHeartbeatNow", () => {
     expect(result.state).toBe("running")
 
     const rows = await getDb()
-      .connectorAudit.where("[adapterId+at]")
+      .connectorHeartbeats.where("[adapterId+at]")
       .between(["lark-hb-1", 0], ["lark-hb-1", 11_000_000])
       .toArray()
     expect(rows).toHaveLength(1)
@@ -135,7 +131,7 @@ describe("recordHeartbeatNow", () => {
     const adapter = makeAdapter("lark-pend")
     await recordHeartbeatNow(adapter, { now: () => now })
 
-    const row = await getDb().connectorAudit.where("adapterId").equals("lark-pend").first()
+    const row = await getDb().connectorHeartbeats.where("adapterId").equals("lark-pend").first()
     expect(row?.fields?.pendingOutboundCount).toBe(2)
   })
 
@@ -146,7 +142,7 @@ describe("recordHeartbeatNow", () => {
     const result = await recordHeartbeatNow(adapter, { now: () => 1 })
     expect(result.state).toBe("degraded")
     expect(result.reason).toBe("transport offline")
-    const row = await getDb().connectorAudit.where("adapterId").equals("lark-throw").first()
+    const row = await getDb().connectorHeartbeats.where("adapterId").equals("lark-throw").first()
     expect(row?.fields?.state).toBe("degraded")
     expect(row?.fields?.reason).toBe("transport offline")
   })
@@ -171,7 +167,7 @@ describe("recordHeartbeatNow", () => {
     const adapter = makeAdapter("lark-runtime")
     await recordHeartbeatNow(adapter, { now: () => 10_000_000 })
 
-    const row = await getDb().connectorAudit.where("adapterId").equals("lark-runtime").first()
+    const row = await getDb().connectorHeartbeats.where("adapterId").equals("lark-runtime").first()
     expect(row?.fields).toMatchObject({
       breakerState: "half_open",
       breakerOpenedAt: 9_500_000,
@@ -188,7 +184,10 @@ describe("recordHeartbeatNow", () => {
     mockGetAdapterRuntimeStateSnapshot.mockReturnValue(null)
     const adapter = makeAdapter("lark-no-runtime")
     await recordHeartbeatNow(adapter, { now: () => 1 })
-    const row = await getDb().connectorAudit.where("adapterId").equals("lark-no-runtime").first()
+    const row = await getDb()
+      .connectorHeartbeats.where("adapterId")
+      .equals("lark-no-runtime")
+      .first()
     expect(row?.fields).toMatchObject({
       breakerState: null,
       breakerOpenedAt: null,
@@ -197,131 +196,46 @@ describe("recordHeartbeatNow", () => {
     })
   })
 
-  it("prunes older heartbeats past retentionMs but keeps other audit kinds", async () => {
+  it("prunes older heartbeats past retentionMs without touching connectorAudit", async () => {
     const now = 100_000_000
-    const ancientHeartbeat = {
-      id: "aud-ancient-hb",
+    // Ancient heartbeat lives in the dedicated table and should be pruned.
+    await getDb().connectorHeartbeats.put({
+      id: "hb-ancient",
       adapterId: "lark-prune",
-      kind: "adapter.heartbeat" as const,
+      kind: "adapter.heartbeat",
       at: now - 200_000_000, // 200M ms ago
-    }
-    const ancientError = {
+    })
+    // A real audit event of the SAME adapter must be left completely alone —
+    // the prune operates only on connectorHeartbeats now.
+    await getDb().connectorAudit.put({
       id: "aud-ancient-err",
       adapterId: "lark-prune",
-      kind: "adapter.error" as const,
+      kind: "adapter.error",
       at: now - 200_000_000,
       reason: "do-not-delete-me",
-    }
-    await getDb().connectorAudit.bulkPut([ancientHeartbeat, ancientError])
+    })
 
     const adapter = makeAdapter("lark-prune")
     await recordHeartbeatNow(adapter, { now: () => now, retentionMs: 60_000 })
 
-    const remaining = await getDb().connectorAudit.where("adapterId").equals("lark-prune").toArray()
-    const ids = remaining.map((r) => r.id)
-    expect(ids).toContain("aud-ancient-err")
-    expect(ids).not.toContain("aud-ancient-hb")
-    // And the fresh heartbeat is there too.
-    expect(remaining.some((r) => r.kind === "adapter.heartbeat" && r.at === now)).toBe(true)
+    const heartbeats = await getDb()
+      .connectorHeartbeats.where("adapterId")
+      .equals("lark-prune")
+      .toArray()
+    const hbIds = heartbeats.map((r) => r.id)
+    expect(hbIds).not.toContain("hb-ancient")
+    // The fresh heartbeat is present.
+    expect(heartbeats.some((r) => r.at === now)).toBe(true)
+
+    // The audit table is untouched by the heartbeat prune.
+    const audit = await getDb().connectorAudit.where("adapterId").equals("lark-prune").toArray()
+    expect(audit.map((r) => r.id)).toContain("aud-ancient-err")
   })
 })
 
-describe("startAdapterHeartbeat", () => {
-  it("fires the first heartbeat immediately and then on every interval", async () => {
-    const adapter = makeAdapter("lark-loop")
-    const handles: Array<() => void> = []
-    const scheduler = {
-      setInterval: jest.fn((cb: () => void, _ms: number) => {
-        handles.push(cb)
-        return handles.length
-      }),
-      clearInterval: jest.fn(),
-    }
-    const handle = startAdapterHeartbeat({
-      adapter,
-      intervalMs: 50,
-      scheduler,
-    })
-    // The immediate fire is a fire-and-forget Promise — wait for the Dexie
-    // put + audit append to settle. Polling lets fake-indexeddb flush.
-    const waitFor = async (predicate: () => Promise<boolean>) => {
-      for (let i = 0; i < 50; i++) {
-        if (await predicate()) return
-        await new Promise((r) => setTimeout(r, 20))
-      }
-      throw new Error("waitFor predicate never resolved")
-    }
-    await waitFor(async () => {
-      const rows = await getDb().connectorAudit.where("adapterId").equals("lark-loop").toArray()
-      return rows.length >= 1
-    })
-    // simulate scheduler ticks
-    handles[0]()
-    handles[0]()
-    await waitFor(async () => {
-      const rows = await getDb().connectorAudit.where("adapterId").equals("lark-loop").toArray()
-      return rows.length >= 3
-    })
-    handle.dispose()
-    expect(scheduler.clearInterval).toHaveBeenCalledTimes(1)
-  })
-
-  it("dispose() is idempotent", () => {
-    const adapter = makeAdapter("lark-dispose")
-    const scheduler = {
-      setInterval: jest.fn(() => 42),
-      clearInterval: jest.fn(),
-    }
-    const handle = startAdapterHeartbeat({ adapter, intervalMs: 100, scheduler })
-    handle.dispose()
-    handle.dispose()
-    expect(scheduler.clearInterval).toHaveBeenCalledTimes(1)
-  })
-
+describe("heartbeat constants", () => {
   it("uses 30s default interval and 48h default retention", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(30_000)
     expect(HEARTBEAT_RETENTION_MS).toBe(48 * 60 * 60 * 1000)
-  })
-
-  it("post-dispose scheduler callbacks are no-ops", async () => {
-    const adapter = makeAdapter("lark-post-dispose")
-    // Use a ref-style holder so TS narrowing doesn't collapse the type to
-    // `never` after assignment inside the mock body.
-    const cbRef: { current: (() => void) | null } = { current: null }
-    const scheduler = {
-      setInterval: jest.fn((cb: () => void) => {
-        cbRef.current = cb
-        return 1
-      }),
-      clearInterval: jest.fn(),
-    }
-    const handle = startAdapterHeartbeat({ adapter, intervalMs: 1000, scheduler })
-    // Wait for the immediate fire to settle before measuring the baseline,
-    // otherwise the immediate write races with the post-dispose check.
-    const waitFor = async (predicate: () => Promise<boolean>) => {
-      for (let i = 0; i < 50; i++) {
-        if (await predicate()) return
-        await new Promise((r) => setTimeout(r, 20))
-      }
-    }
-    await waitFor(async () => {
-      const rows = await getDb()
-        .connectorAudit.where("adapterId")
-        .equals("lark-post-dispose")
-        .toArray()
-      return rows.length >= 1
-    })
-    handle.dispose()
-    const countBefore = (
-      await getDb().connectorAudit.where("adapterId").equals("lark-post-dispose").toArray()
-    ).length
-    cbRef.current?.()
-    // Give the (no-op) callback time to NOT do anything — long enough that a
-    // real write would have landed if the disposer were broken.
-    await new Promise((r) => setTimeout(r, 100))
-    const countAfter = (
-      await getDb().connectorAudit.where("adapterId").equals("lark-post-dispose").toArray()
-    ).length
-    expect(countAfter).toBe(countBefore)
   })
 })

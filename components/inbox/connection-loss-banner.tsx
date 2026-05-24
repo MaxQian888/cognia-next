@@ -4,8 +4,8 @@
  * Inbox top banner that surfaces adapters in `degraded` or `down` state
  * so operators don't have to open Settings to notice a transport failure.
  *
- * Reads recent `adapter.heartbeat` rows from `connectorAudit` (last 5 min)
- * and groups by adapterId, keeping only the newest snapshot. Adapters
+ * Reads recent heartbeat rows from the dedicated `connectorHeartbeats` table
+ * (v51; last 5 min) and groups by adapterId, keeping only the newest snapshot. Adapters
  * whose latest heartbeat state is `running` or `starting` are filtered
  * out — only the truly stuck ones surface.
  *
@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { getDb } from "@/lib/db/schema"
 import { requeueAdapter } from "@/lib/connectors/lifecycle"
 import { isTauri } from "@/lib/tauri"
-import type { ConnectorAuditRow } from "@/lib/db/connector-types"
+import type { ConnectorHeartbeatRow } from "@/lib/db/connector-types"
 
 const RECENT_WINDOW_MS = 5 * 60 * 1000
 const DISMISS_KEY = "inbox.connectionLossBanner.dismiss"
@@ -100,15 +100,14 @@ export function ConnectionLossBanner() {
   const [reconnecting, setReconnecting] = useState<Set<string>>(() => new Set())
   const [dismissed, setDismissed] = useState<PersistedDismiss | null>(() => readDismiss())
 
-  // Live read of recent heartbeats. Filter + group in JS — the window is
-  // small (5 min × N adapters, N ≤ 10), so an index scan + map is faster
-  // than a per-adapter live-query fan-out.
-  const recent = useLiveQuery<ConnectorAuditRow[]>(() => {
+  // Live read of recent heartbeats from the dedicated table (v51) — the whole
+  // table is heartbeats, so the `at`-range scan needs no `kind` filter. The
+  // window is small (5 min × N adapters, N ≤ 10), so group in JS.
+  const recent = useLiveQuery<ConnectorHeartbeatRow[]>(() => {
     if (typeof window === "undefined") return Promise.resolve([])
     return getDb()
-      .connectorAudit.where("at")
+      .connectorHeartbeats.where("at")
       .above(Date.now() - RECENT_WINDOW_MS)
-      .filter((row) => row.kind === "adapter.heartbeat")
       .toArray()
   }, [])
 

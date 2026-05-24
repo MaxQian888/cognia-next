@@ -23,7 +23,9 @@
 
 import type { PlatformAdapter } from "@/types/connectors"
 import {
-  pickNextDue,
+  listDueNow,
+  peekNextWakeAt,
+  subscribeOutboundEnqueued,
   markSending,
   markSent,
   markFailed,
@@ -136,6 +138,13 @@ const MAX_ATTEMPTS = 5
 const BASE_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 60_000
 const IDEMPOTENCY_LRU_CAP = 1_000
+/**
+ * Safety-net ceiling on how long the wake-driven loop sleeps when nothing is
+ * scheduled. The loop is normally woken precisely (enqueue event or the next
+ * retry deadline), so this only bounds the worst case if a wake is ever
+ * missed — it is NOT a poll interval. Overridable via `pollIntervalMs`.
+ */
+const DEFAULT_IDLE_CAP_MS = 60_000
 
 // ── LRU map (insertion-order, capped) ────────────────────────────────────────
 
@@ -196,7 +205,13 @@ export class ConversationLane {
 export interface OutboundRunnerOptions {
   /** All registered platform adapters keyed by adapterId. */
   adapters: Map<string, PlatformAdapter>
-  /** Poll interval in ms. Default 200 ms. */
+  /**
+   * Idle-sleep ceiling in ms (default 60 000). The loop is event-driven —
+   * it wakes on enqueue and at each retry deadline — so this only caps the
+   * worst-case sleep if a wake is missed; it is not a poll interval. Named
+   * `pollIntervalMs` for backwards compatibility with existing call-sites
+   * and tests (which pass a tiny value to tighten the safety net).
+   */
   pollIntervalMs?: number
   /** Cancellation signal — runner exits when this aborts. */
   signal: AbortSignal
@@ -267,7 +282,7 @@ export function __resetAdapterRuntimeStateForTesting(): void {
  * Never rejects — all delivery errors are surfaced via audit log.
  */
 export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<void> {
-  const pollIntervalMs = opts.pollIntervalMs ?? 200
+  const idleCapMs = opts.pollIntervalMs ?? DEFAULT_IDLE_CAP_MS
   const clock = opts.now ?? (() => Date.now())
   const jitter = opts.jitter ?? (() => Math.random() * 500)
 
@@ -279,6 +294,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   const idempotencyCache = new LruMap<string, string>(IDEMPOTENCY_LRU_CAP)
   // Task 39: per-conversation FIFO lanes
   const lanes = new Map<string, ConversationLane>()
+  // Jobs currently enqueued into a lane but not yet terminal. `markSending`
+  // happens late (after the muted/quiet/idempotency/breaker/rate gates), so
+  // without this guard a tight drain would re-pick a job that is still
+  // `pending` in the DB and double-enqueue it. The lane closure clears the
+  // id in a `finally`.
+  const inFlight = new Set<string>()
 
   function getAdapterState(adapterId: string): AdapterState {
     if (!adapterState.has(adapterId)) {
@@ -414,7 +435,8 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     // ── Rate limit ────────────────────────────────────────────────────────
     if (!bucket.tryAcquire()) {
-      // Defer retry by 1 second (runner will re-pick on next poll)
+      // Defer retry by 1 second (the lane-completion wake re-tightens the
+      // loop's sleep so the runner re-picks once the deferral elapses).
       const nextAt = now + 1_000
       await markFailed(job.id, "rate_limited", "Token bucket exhausted", nextAt)
       await appendAudit({
@@ -544,33 +566,96 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     }
   }
 
-  // ── Poll loop ─────────────────────────────────────────────────────────────
+  // ── Wake coordination ───────────────────────────────────────────────────
+  //
+  // The loop sleeps until the next thing that could change what's actionable:
+  // a fresh enqueue (external event) or the next retry deadline (timeout). A
+  // completed lane also wakes it so a job rescheduled to a sooner deadline
+  // (rate-limit 1s defer, etc.) re-tightens the sleep. `pendingWake` guards
+  // against a wake that lands between two waits (lost-wakeup). This mirrors
+  // the `Notify` + sleep-until-next-deadline shape of the Rust cron daemon.
+  let pendingWake = false
+  let wakeResolver: (() => void) | null = null
+  const wake = (): void => {
+    pendingWake = true
+    const r = wakeResolver
+    wakeResolver = null
+    if (r) r()
+  }
+  const waitForWakeOrTimeout = (ms: number): Promise<void> =>
+    new Promise<void>((resolve) => {
+      if (pendingWake || opts.signal.aborted) {
+        pendingWake = false
+        resolve()
+        return
+      }
+      let settled = false
+      const settle = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        opts.signal.removeEventListener("abort", settle)
+        wakeResolver = null
+        pendingWake = false
+        resolve()
+      }
+      const timer = setTimeout(settle, ms)
+      wakeResolver = settle
+      opts.signal.addEventListener("abort", settle, { once: true })
+    })
+
+  // Wake on every enqueue (any of the ai-run / manual / workflow / draft
+  // paths). Unsubscribed in the `finally` below.
+  const unsubscribeEnqueue = subscribeOutboundEnqueued(wake)
+
+  // ── Wake-driven loop ──────────────────────────────────────────────────────
   try {
     while (!opts.signal.aborted) {
+      // Drain everything currently due into per-conversation lanes in one
+      // pass. Lanes run concurrently across conversations and FIFO within
+      // one; the `inFlight` guard prevents re-enqueuing a job that is still
+      // `pending` while its lane spins up.
       try {
-        const job = await pickNextDue()
-        if (job) {
-          // Task 39: enqueue into the conversation lane for FIFO ordering
-          const lane = getLane(job.conversationKey)
-          // Capture job id and adapterId for the lane closure
-          const { id: jobId, adapterId } = job
-          lane.enqueue(() => processJob(jobId, adapterId))
+        const due = await listDueNow()
+        for (const job of due) {
+          if (inFlight.has(job.id)) continue
+          inFlight.add(job.id)
+          const { id: jobId, adapterId, conversationKey } = job
+          getLane(conversationKey).enqueue(async () => {
+            try {
+              await processJob(jobId, adapterId)
+            } finally {
+              inFlight.delete(jobId)
+              // Re-evaluate: the job may have been rescheduled to a sooner
+              // deadline than the loop is currently sleeping for.
+              wake()
+            }
+          })
         }
       } catch {
-        // Transient DB errors: ignore and retry next poll
+        // Transient DB errors: ignore and re-evaluate after the idle cap.
       }
 
       if (opts.signal.aborted) break
 
-      await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, pollIntervalMs)
-        opts.signal.addEventListener("abort", () => {
-          clearTimeout(t)
-          resolve()
-        })
-      })
+      // Sleep until the next future retry deadline, capped by the idle
+      // ceiling. `undefined` means nothing is scheduled — sleep the full cap
+      // and rely on the enqueue/lane wake to fire sooner.
+      let sleepMs = idleCapMs
+      try {
+        const nextAt = await peekNextWakeAt()
+        if (typeof nextAt === "number") {
+          sleepMs = Math.max(0, Math.min(idleCapMs, nextAt - clock()))
+        }
+      } catch {
+        // Fall back to the idle cap on a transient read error.
+      }
+
+      if (opts.signal.aborted) break
+      await waitForWakeOrTimeout(sleepMs)
     }
   } finally {
+    unsubscribeEnqueue()
     // Surrender ownership of the runtime-state registry only if we still own
     // it. A second runner instance (test scenarios) may have replaced us
     // while we were running; in that case the registry already points at

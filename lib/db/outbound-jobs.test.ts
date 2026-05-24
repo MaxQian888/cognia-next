@@ -6,6 +6,8 @@ import "fake-indexeddb/auto"
 import {
   enqueueOutbound,
   pickNextDue,
+  peekNextWakeAt,
+  subscribeOutboundEnqueued,
   listPendingForConversation,
   markSending,
   markSent,
@@ -76,6 +78,80 @@ describe("outbound-jobs", () => {
       nextAttemptAt: Date.now() + 60_000,
     })
     expect(await pickNextDue()).toBeUndefined()
+  })
+
+  it("pickNextDue picks the oldest due row across pending and failed, skipping sent", async () => {
+    // Oldest is a failed (retry) row, then a pending one; a sent row that is
+    // also "due in the past" must never be returned.
+    const failedOld = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_A",
+      request: makeRequest("k_failed"),
+    })
+    await new Promise((r) => setTimeout(r, 2))
+    const pendingNewer = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_B",
+      request: makeRequest("k_pending"),
+    })
+    await new Promise((r) => setTimeout(r, 2))
+    const sentRow = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_C",
+      request: makeRequest("k_sent"),
+    })
+    await markFailed(failedOld.id, "network", "retry", Date.now() - 1_000)
+    await markSent(sentRow.id, "pm_sent")
+
+    const picked = await pickNextDue()
+    expect(picked?.id).toBe(failedOld.id)
+    expect(picked?.status).toBe("failed")
+
+    // Once the failed one is in flight, the pending row is next.
+    await markSending(failedOld.id)
+    const next = await pickNextDue()
+    expect(next?.id).toBe(pendingNewer.id)
+  })
+
+  it("peekNextWakeAt returns the earliest future retry deadline, ignoring due-now rows", async () => {
+    expect(await peekNextWakeAt()).toBeUndefined()
+
+    // A row due now contributes nothing to the *future* wake.
+    await enqueue({ adapterId: "adp_1", conversationKey: "conv_now", request: makeRequest() })
+    expect(await peekNextWakeAt()).toBeUndefined()
+
+    const soon = Date.now() + 5_000
+    const later = Date.now() + 60_000
+    await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_later",
+      request: makeRequest("k_later"),
+      nextAttemptAt: later,
+    })
+    await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_soon",
+      request: makeRequest("k_soon"),
+      nextAttemptAt: soon,
+    })
+    expect(await peekNextWakeAt()).toBe(soon)
+  })
+
+  it("enqueueOutbound fires the enqueued wake signal", async () => {
+    let hits = 0
+    const unsubscribe = subscribeOutboundEnqueued(() => {
+      hits++
+    })
+    try {
+      await enqueue({ adapterId: "adp_1", conversationKey: "conv_1", request: makeRequest() })
+      await enqueue({ adapterId: "adp_1", conversationKey: "conv_2", request: makeRequest() })
+      expect(hits).toBe(2)
+    } finally {
+      unsubscribe()
+    }
+    // After unsubscribe the handler must stop firing.
+    await enqueue({ adapterId: "adp_1", conversationKey: "conv_3", request: makeRequest() })
+    expect(hits).toBe(2)
   })
 
   it("listPendingForConversation returns FIFO order for conversation A", async () => {

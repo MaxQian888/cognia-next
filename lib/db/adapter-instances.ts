@@ -83,5 +83,17 @@ export async function updateAdapterInstance(
 }
 
 export async function deleteAdapterInstance(id: string): Promise<void> {
-  await getDb().adapterInstances.delete(id)
+  const db = getDb()
+  await db.adapterInstances.delete(id)
+  // v51 — Heartbeats live in their own `connectorHeartbeats` table whose only
+  // bound is the per-adapter 48h retention sweep inside `recordHeartbeatNow`,
+  // which runs ONLY while the adapter is running. A deleted adapter never
+  // heartbeats again, so without this reap its rows leak forever (the old
+  // global 5000-row audit cap that used to evict them is gone). Best-effort:
+  // a cleanup failure must not block the delete itself.
+  try {
+    await db.connectorHeartbeats.where("adapterId").equals(id).delete()
+  } catch {
+    // Stale schema (table missing) or transient error — ignore.
+  }
 }

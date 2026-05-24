@@ -505,3 +505,114 @@ describe("getAdapterRuntimeStateSnapshot", () => {
     expect(getAdapterRuntimeStateSnapshot("tg-cleanup")).toBeNull()
   })
 })
+
+// ── Event-driven loop (v51 performance hardening) ──────────────────────────────
+describe("outbound-runner — event-driven loop", () => {
+  it("fires a deferred retry near its deadline, not at the idle cap", async () => {
+    // First attempt fails retryably → backoff = BASE(1000ms) * 2^0 + jitter(0)
+    // = 1000 ms. With a 60 s idle cap, a poll-based loop woken only every 60 s
+    // could not retry for up to a minute; the deadline-driven sleep retries
+    // ~1 s later. The retry landing well under the cap proves peekNextWakeAt
+    // drives the sleep, i.e. the loop is event-driven, not polling.
+    let attempts = 0
+    const send = jest.fn<Promise<OutboundResult>, []>(async () => {
+      attempts++
+      if (attempts === 1) {
+        return { ok: false, error: { code: "network", message: "boom", retryable: true } }
+      }
+      return { ok: true }
+    })
+    const adapters = new Map<string, PlatformAdapter>([["tg-retry", makeAdapter("tg-retry", send)]])
+    await enqueue("tg-retry", "telegram:tg-retry:c1", "k_retry")
+    const controller = new AbortController()
+    const start = Date.now()
+    const promise = startOutboundRunner({
+      adapters,
+      pollIntervalMs: 60_000,
+      signal: controller.signal,
+      jitter: () => 0,
+    })
+    let secondAt = 0
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      if (send.mock.calls.length >= 2) {
+        secondAt = Date.now()
+        break
+      }
+    }
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(secondAt - start).toBeLessThan(10_000)
+    controller.abort()
+    await promise
+  })
+
+  it("wakes and delivers promptly on enqueue despite a long idle cap", async () => {
+    const send = jest.fn<Promise<OutboundResult>, []>(async () => ({ ok: true }))
+    const adapters = new Map<string, PlatformAdapter>([["tg-wake", makeAdapter("tg-wake", send)]])
+    const controller = new AbortController()
+    const promise = startOutboundRunner({
+      adapters,
+      pollIntervalMs: 60_000, // would never poll within the test window
+      signal: controller.signal,
+      jitter: () => 0,
+    })
+    // Let the runner reach its idle sleep with an empty queue first.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(send).not.toHaveBeenCalled()
+
+    // Enqueueing must wake the runner out of its 60 s sleep.
+    await enqueue("tg-wake", "telegram:tg-wake:c1")
+    let delivered = false
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      if (send.mock.calls.length > 0) {
+        delivered = true
+        break
+      }
+    }
+    expect(delivered).toBe(true)
+    controller.abort()
+    await promise
+  })
+
+  it("processes a single job exactly once under aggressive re-draining (in-flight guard)", async () => {
+    // A slow send keeps the job in flight while the 1 ms idle cap re-drains
+    // the queue many times. The in-flight guard must keep it from being
+    // re-enqueued, so the job is sent exactly once.
+    // Ref holder (not a bare `let`) so TS doesn't narrow the closure-assigned
+    // resolver back to `null` at the call site below.
+    const resolveRef: { fn: (() => void) | null } = { fn: null }
+    const send = jest.fn<Promise<OutboundResult>, []>(
+      () =>
+        new Promise<OutboundResult>((resolve) => {
+          resolveRef.fn = () => resolve({ ok: true })
+        })
+    )
+    const adapters = new Map<string, PlatformAdapter>([
+      ["tg-inflight", makeAdapter("tg-inflight", send)],
+    ])
+    await enqueue("tg-inflight", "telegram:tg-inflight:c1", "k_inflight")
+    const controller = new AbortController()
+    const promise = startOutboundRunner({
+      adapters,
+      pollIntervalMs: 1, // aggressive re-draining
+      signal: controller.signal,
+      jitter: () => 0,
+    })
+    // Hold the send open across many drain passes.
+    await new Promise((r) => setTimeout(r, 80))
+    expect(send).toHaveBeenCalledTimes(1)
+    resolveRef.fn?.()
+    // Let the job settle to "sent".
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      const job = (await getDb().outboundQueue.toArray())[0]
+      if (job?.status === "sent") break
+    }
+    const job = (await getDb().outboundQueue.toArray())[0]
+    expect(job?.status).toBe("sent")
+    expect(send).toHaveBeenCalledTimes(1)
+    controller.abort()
+    await promise
+  })
+})

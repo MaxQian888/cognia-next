@@ -999,9 +999,22 @@
       "shiftTabHint": "Shift+Tab to cycle."
     },
     "empty": {
-      "title": "How can Claude help?",
-      "subtitle": "Ask anything, or start with one of these. Drop images into the composer to include them in your prompt.",
+      "title": "What do you want to get done?",
+      "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
       "newChat": "New chat",
+      "sections": {
+        "quickStart": "Quick start",
+        "tryPrompt": "Try a prompt",
+        "continue": "Continue"
+      },
+      "capabilities": {
+        "workflows": "Workflows",
+        "agentTeams": "Agent teams",
+        "connectors": "Connectors",
+        "twin": "Digital twin",
+        "computerUse": "Computer use",
+        "ocr": "OCR"
+      },
       "samples": {
         "exploreTitle": "Explore the project",
         "explorePrompt": "List the top-level files in the working directory and summarize what this project does in 3 sentences.",

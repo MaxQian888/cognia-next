@@ -385,6 +385,29 @@ export interface ConversationOverrideRow {
  */
 export type ConnectorAuditRow = AuditEntry
 
+/**
+ * Heartbeat row (schema v51). Heartbeats used to live in `connectorAudit`
+ * but at 2 880 rows/day/adapter they churned the global 5000-row audit cap
+ * (every append triggered `pruneOldest`) and evicted operator-visible
+ * events. They now have a dedicated table so the audit log stays a record
+ * of real events while the Health view still gets its continuous signal.
+ *
+ * The shape is a structural subset of `AuditEntry` with `kind` pinned to
+ * `"adapter.heartbeat"`, so a `ConnectorHeartbeatRow` is assignable to
+ * `AuditEntry` and can be merged with audit rows before feeding the shared
+ * `derive-history` helpers unchanged (the 24h dot grid interleaves
+ * heartbeat "filler" with real delivery/error events).
+ */
+export interface ConnectorHeartbeatRow {
+  id: string
+  adapterId: string
+  kind: "adapter.heartbeat"
+  at: number
+  reason?: string
+  /** Same free-form snapshot the heartbeat writer used to put in the audit row. */
+  fields?: Record<string, unknown>
+}
+
 export type ConnectorDraftStatus = "pending" | "approved" | "rejected" | "expired"
 
 /**
