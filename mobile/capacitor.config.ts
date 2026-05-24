@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli"
 
 /**
- * Capacitor 7 mobile shell configuration.
+ * Capacitor 8 mobile shell configuration.
  *
  * - `webDir: "../out"` shares the Next.js static export with the Tauri build.
  * - URL scheme `cognia://` is registered for OAuth deep-link callbacks

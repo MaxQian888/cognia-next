@@ -3,7 +3,8 @@
 import { makeDefaultLoader, withPlugin, type ValueOutcome } from "./_shared"
 
 /**
- * `capacitor-native-biometric` wrapper. Used by app-level unlock and by
+ * `@capgo/capacitor-native-biometric` wrapper (Capacitor 8 maintained fork of
+ * the unmaintained `capacitor-native-biometric`). Used by app-level unlock and by
  * sensitive ops (delete pairing, export backup). Default off — opt-in via
  * Settings → Me → 应用安全.
  *
@@ -37,7 +38,7 @@ interface BiometricShape {
 export type BiometricLoader = () => Promise<BiometricShape>
 
 const defaultLoader: BiometricLoader = makeDefaultLoader<BiometricShape>(
-  "capacitor-native-biometric",
+  "@capgo/capacitor-native-biometric",
   "NativeBiometric"
 )
 
