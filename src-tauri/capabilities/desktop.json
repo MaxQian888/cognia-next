@@ -4,5 +4,5 @@
   "description": "Desktop-only permissions. Uncomment entries below as you adopt plugins (e.g., clipboard-manager, fs, dialog). Keep default.json minimal; put feature-scoped permissions here.",
   "platforms": ["linux", "macOS", "windows"],
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["fs:allow-appdata-read-recursive", "fs:allow-appdata-write-recursive"]
 }
