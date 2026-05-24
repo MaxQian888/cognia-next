@@ -6,12 +6,17 @@ import { invoke } from "@tauri-apps/api/core"
 import {
   PluginManager,
   PluginEnableError,
+  PluginDependencyError,
   resolveGovernanceMode,
   createPluginManager,
   getPluginManager,
   initializePluginManager,
   __resetPluginManagerForTesting,
 } from "./manager"
+import {
+  getPluginPointDiagnostics,
+  __resetDiagnosticsStoreForTesting,
+} from "@/lib/plugin/contracts/diagnostics-store"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
@@ -1493,6 +1498,64 @@ describe("PluginManager", () => {
 
       expect(enableSpy).toHaveBeenCalledWith("legacy-tool-plugin", "activation:onTool:docker_ps")
     })
+
+    it("should activate plugin for an onView activation event (exact + wildcard)", async () => {
+      const exactView: Plugin = {
+        manifest: {
+          ...createManifest("view-plugin"),
+          activationEvents: ["onView:settings.plugins"],
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/view-plugin",
+        config: {},
+      }
+      const wildcardView: Plugin = {
+        manifest: {
+          ...createManifest("inbox-view-plugin"),
+          activationEvents: ["onView:inbox.*"],
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/inbox-view-plugin",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "view-plugin": exactView, "inbox-view-plugin": wildcardView },
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onView:settings.plugins")
+      expect(enableSpy).toHaveBeenCalledWith("view-plugin", "activation:onView:settings.plugins")
+
+      await manager.handleActivationEvent("onView:inbox.sidebar.section")
+      expect(enableSpy).toHaveBeenCalledWith(
+        "inbox-view-plugin",
+        "activation:onView:inbox.sidebar.section"
+      )
+    })
+
+    it("does not cross-activate: an onView event never matches an onCommand/onTool plugin", async () => {
+      // Regression for the old fall-through bug where any non-startup/
+      // non-onCommand event was sliced as `onTool:` and could mis-match.
+      const cmdPlugin: Plugin = {
+        manifest: {
+          ...createManifest("cmd-only-plugin"),
+          activationEvents: ["onCommand:settings.plugins"],
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/cmd-only-plugin",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "cmd-only-plugin": cmdPlugin } })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onView:settings.plugins")
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
   })
 
   describe("plugin slash command integration", () => {
@@ -1837,6 +1900,105 @@ describe("PluginManager", () => {
       // Callers can branch on err.name === "PluginEnableError" or use
       // `err instanceof PluginEnableError` interchangeably.
       expect(err.name).toBe("PluginEnableError")
+    })
+  })
+
+  describe("required-dependency gate (load-order)", () => {
+    // The gate runs before any load work, so a minimal store (just the
+    // dependent + whatever deps the scenario needs) is enough; we never reach
+    // loadPlugin on the blocked paths.
+    const mkPlugin = (
+      id: string,
+      overrides: Partial<PluginManifest> = {},
+      status: Plugin["status"] = "installed"
+    ): Plugin => ({
+      manifest: { ...createManifest(id), ...overrides },
+      status,
+      source: "local" as never,
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
+    beforeEach(() => {
+      __resetDiagnosticsStoreForTesting()
+    })
+
+    it("blocks enable when a required dependency is missing + records a diagnostic", async () => {
+      const store = {
+        plugins: { b: mkPlugin("b", { dependencies: { a: "^1.0.0" } }) },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.enablePlugin("b")).rejects.toBeInstanceOf(PluginDependencyError)
+      expect(store.enablePlugin).not.toHaveBeenCalled()
+      expect(
+        getPluginPointDiagnostics("b").some((d) => d.code === "plugin.dependency.missing")
+      ).toBe(true)
+    })
+
+    it("blocks enable when a required dependency is disabled", async () => {
+      const store = {
+        plugins: {
+          a: mkPlugin("a", {}, "disabled"),
+          b: mkPlugin("b", { dependencies: { a: "*" } }),
+        },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.enablePlugin("b")).rejects.toBeInstanceOf(PluginDependencyError)
+      expect(
+        getPluginPointDiagnostics("b").some((d) => d.code === "plugin.dependency.disabled")
+      ).toBe(true)
+    })
+
+    it("blocks enable on a required-dependency version mismatch", async () => {
+      const store = {
+        plugins: {
+          a: mkPlugin("a", { version: "1.0.0" }),
+          b: mkPlugin("b", { dependencies: { a: "^2.0.0" } }),
+        },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.enablePlugin("b")).rejects.toBeInstanceOf(PluginDependencyError)
+      expect(
+        getPluginPointDiagnostics("b").some((d) => d.code === "plugin.dependency.version-mismatch")
+      ).toBe(true)
+    })
+
+    it("blocks enable when the plugin is part of a dependency cycle", async () => {
+      const store = {
+        plugins: {
+          a: mkPlugin("a", { dependencies: { b: "*" } }),
+          b: mkPlugin("b", { dependencies: { a: "*" } }),
+        },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.enablePlugin("a")).rejects.toBeInstanceOf(PluginDependencyError)
+      expect(getPluginPointDiagnostics("a").some((d) => d.code === "plugin.dependency.cycle")).toBe(
+        true
+      )
+    })
+
+    it("returns early without a dependency check when the plugin is already enabled", async () => {
+      const store = {
+        plugins: { b: mkPlugin("b", { dependencies: { a: "*" } }, "enabled") },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      // Already enabled → no throw even though `a` is missing.
+      await expect(manager.enablePlugin("b")).resolves.toBeUndefined()
     })
   })
 })

@@ -68,6 +68,11 @@ import {
   recordPluginPointDiagnostic,
   recordSilentFailure,
 } from "@/lib/plugin/contracts/diagnostics-store"
+import {
+  resolveLoadOrder,
+  type LoadOrderPluginInput,
+  type LoadOrderBlockReason,
+} from "@/lib/plugin/core/load-order"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
@@ -145,7 +150,11 @@ interface RuntimePluginSnapshotEntry {
   grantedPermissions?: string[]
 }
 
-type PluginActivationRuntimeEvent = "startup" | `onCommand:${string}` | `onTool:${string}`
+type PluginActivationRuntimeEvent =
+  | "startup"
+  | `onCommand:${string}`
+  | `onTool:${string}`
+  | `onView:${string}`
 
 interface PluginDiscoveryProjection {
   source: PluginSource
@@ -158,6 +167,7 @@ interface ParsedActivationSpec {
   startup: boolean
   commandEvents: string[]
   toolEvents: string[]
+  viewEvents: string[]
   rawEvents: PluginActivationEvent[]
 }
 
@@ -216,6 +226,27 @@ export class PluginEnableError extends Error {
       { cause: originalError }
     )
     this.name = "PluginEnableError"
+  }
+}
+
+/**
+ * Thrown when a plugin can't be enabled because a *required* dependency is
+ * missing, disabled, version-mismatched, or part of a dependency cycle (see
+ * `lib/plugin/core/load-order.ts`). Distinct from `PluginEnableError` so UI
+ * callers can show "install/enable the missing dependency" rather than a
+ * generic retry. The unmet reasons are carried for messaging.
+ */
+export class PluginDependencyError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly reasons: readonly LoadOrderBlockReason[]
+  ) {
+    super(
+      `Cannot enable plugin "${pluginId}": unmet required dependencies — ${reasons
+        .map((r) => `${r.dependencyId} (${r.kind})`)
+        .join(", ")}`
+    )
+    this.name = "PluginDependencyError"
   }
 }
 
@@ -673,20 +704,126 @@ export class PluginManager {
     return { blocked: false, diagnostics: result.diagnostics }
   }
 
+  /** Snapshot the live plugin set as load-order resolver inputs. */
+  private buildLoadOrderInputs(): LoadOrderPluginInput[] {
+    const store = usePluginStore.getState()
+    return Object.values(store.plugins).map((p) => ({
+      id: p.manifest.id,
+      version: p.manifest.version,
+      dependencies: p.manifest.dependencies,
+      optionalDependencies: p.manifest.optionalDependencies,
+      status: p.status,
+    }))
+  }
+
+  /** Record `plugin.dependency.*` runtime diagnostics for unmet required deps. */
+  private recordDependencyDiagnostics(
+    pluginId: string,
+    reasons: readonly LoadOrderBlockReason[]
+  ): void {
+    const codeByKind = {
+      missing: "plugin.dependency.missing",
+      disabled: "plugin.dependency.disabled",
+      "version-mismatch": "plugin.dependency.version-mismatch",
+      cycle: "plugin.dependency.cycle",
+    } as const
+    for (const reason of reasons) {
+      const found = reason.kind === "version-mismatch" ? ` (found ${reason.found})` : ""
+      const hint =
+        reason.kind === "missing"
+          ? `Install the "${reason.dependencyId}" plugin, then re-enable this one.`
+          : reason.kind === "disabled"
+            ? `Enable the "${reason.dependencyId}" plugin first.`
+            : reason.kind === "cycle"
+              ? `"${reason.dependencyId}" and this plugin require each other — break the cycle.`
+              : `Install a "${reason.dependencyId}" version matching "${reason.constraint}".`
+      recordPluginPointDiagnostic(pluginId, {
+        code: codeByKind[reason.kind],
+        severity: "error",
+        pointKind: "runtime",
+        pointId: reason.dependencyId,
+        message: `Required dependency "${reason.dependencyId}" ${reason.kind.replace("-", " ")}${found}; needs "${reason.constraint}".`,
+        hint,
+      })
+    }
+  }
+
+  /**
+   * Throw `PluginDependencyError` (after recording diagnostics) when a plugin's
+   * required dependencies can't be satisfied. Evaluated against the live store
+   * snapshot, so a dependency that is merely "installed" (and will be enabled)
+   * does NOT block — only missing / disabled / version-mismatched / cyclic deps do.
+   */
+  private assertRequiredDependenciesSatisfied(pluginId: string): void {
+    const { blocked, cycles } = resolveLoadOrder(this.buildLoadOrderInputs())
+    const reasons = blocked.get(pluginId)
+    if (reasons && reasons.length > 0) {
+      this.recordDependencyDiagnostics(pluginId, reasons)
+      throw new PluginDependencyError(pluginId, reasons)
+    }
+    const cycle = cycles.find((c) => c.includes(pluginId))
+    if (cycle) {
+      const cycleReasons: LoadOrderBlockReason[] = cycle
+        .filter((id) => id !== pluginId)
+        .map((id) => ({ kind: "cycle", dependencyId: id, constraint: "*" }))
+      this.recordDependencyDiagnostics(pluginId, cycleReasons)
+      throw new PluginDependencyError(pluginId, cycleReasons)
+    }
+  }
+
   private async restorePluginStates(): Promise<void> {
     const store = usePluginStore.getState()
     const plugins = Object.values(store.plugins)
 
-    for (const plugin of plugins) {
-      if (
-        plugin.status === "installed" &&
-        (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest))
-      ) {
-        try {
-          await this.enablePlugin(plugin.manifest.id)
-        } catch (error) {
-          loggers.manager.error(`Failed to restore plugin ${plugin.manifest.id}:`, error)
-        }
+    const candidateIds = new Set(
+      plugins
+        .filter(
+          (plugin) =>
+            plugin.status === "installed" &&
+            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest))
+        )
+        .map((plugin) => plugin.manifest.id)
+    )
+    if (candidateIds.size === 0) return
+
+    // Resolve a dependency-respecting enable order over the whole known set so a
+    // candidate's required dependency is enabled before it. Blocked / cyclic
+    // candidates are surfaced as diagnostics and skipped.
+    const { order, blocked, cycles, degraded } = resolveLoadOrder(this.buildLoadOrderInputs())
+
+    for (const [id, reasons] of blocked) {
+      if (candidateIds.has(id)) this.recordDependencyDiagnostics(id, reasons)
+    }
+    for (const cycle of cycles) {
+      for (const id of cycle) {
+        if (!candidateIds.has(id)) continue
+        this.recordDependencyDiagnostics(
+          id,
+          cycle
+            .filter((other) => other !== id)
+            .map((other) => ({ kind: "cycle", dependencyId: other, constraint: "*" }))
+        )
+      }
+    }
+    for (const [id, unmet] of degraded) {
+      if (!candidateIds.has(id)) continue
+      for (const depId of unmet) {
+        recordPluginPointDiagnostic(id, {
+          code: "plugin.dependency.optional-degraded",
+          severity: "warning",
+          pointKind: "runtime",
+          pointId: depId,
+          message: `Optional dependency "${depId}" is unavailable; "${id}" runs with reduced functionality.`,
+        })
+      }
+    }
+
+    for (const id of order) {
+      if (!candidateIds.has(id)) continue
+      try {
+        await this.enablePlugin(id)
+      } catch (error) {
+        loggers.manager.error(`Failed to restore plugin ${id}:`, error)
       }
     }
   }
@@ -1109,6 +1246,23 @@ export class PluginManager {
       return
     }
 
+    // Required-dependency gate (load-order, ADR-0017/0032 parity): reject a
+    // missing / disabled / version-mismatched / cyclic required dependency
+    // before doing any load work. Runs outside the try below so the typed
+    // `PluginDependencyError` surfaces to callers instead of being wrapped.
+    this.assertRequiredDependenciesSatisfied(pluginId)
+
+    // Auto-enable required dependencies first so this plugin can rely on them
+    // at activate() time. The gate above already rejected missing / cyclic
+    // deps, so this recursion is bounded and only descends into satisfiable,
+    // not-yet-enabled dependencies (each call early-returns once enabled).
+    for (const depId of Object.keys(plugin.manifest.dependencies ?? {})) {
+      const dep = store.plugins[depId]
+      if (dep && dep.status !== "enabled") {
+        await this.enablePlugin(depId, "dependency")
+      }
+    }
+
     try {
       // Load first when not currently active in runtime.
       if (
@@ -1310,6 +1464,17 @@ export class PluginManager {
         await this.unregisterPluginContributions(pluginId)
       }
 
+      // Terminal isolation cleanup — runs on EVERY unload path so a plugin
+      // returning to "installed" never leaks permission-guard registration,
+      // i18n bundles, or WASM capability grants. `disablePlugin` already drops
+      // i18n + revokes grants on the enabled→unload path; these calls are
+      // idempotent and additionally cover the loaded→unload / disabled→unload
+      // paths (and clear guard tiers + denials, which previously only happened
+      // on uninstall).
+      getPermissionGuard().unregisterPlugin(pluginId)
+      unregisterPluginI18n(pluginId)
+      clearWasmCapabilityGrant(pluginId)
+
       // Unregister hooks
       this.hooksManager.unregisterHooks(pluginId)
 
@@ -1485,6 +1650,11 @@ export class PluginManager {
       )
       .filter(Boolean)
 
+    const viewEvents = rawEvents
+      .filter((event) => event.startsWith("onView:"))
+      .map((event) => event.slice("onView:".length))
+      .filter(Boolean)
+
     for (const event of rawEvents) {
       const validation = validateActivationEvent(event, {
         governanceMode: this.pluginPointGovernanceMode,
@@ -1516,6 +1686,7 @@ export class PluginManager {
       startup,
       commandEvents,
       toolEvents,
+      viewEvents,
       rawEvents,
     }
   }
@@ -1557,8 +1728,19 @@ export class PluginManager {
       return spec.commandEvents.some((pattern) => this.matchesActivation(pattern, command))
     }
 
-    const tool = event.slice("onTool:".length)
-    return spec.toolEvents.some((pattern) => this.matchesActivation(pattern, tool))
+    if (event.startsWith("onTool:")) {
+      const tool = event.slice("onTool:".length)
+      return spec.toolEvents.some((pattern) => this.matchesActivation(pattern, tool))
+    }
+
+    if (event.startsWith("onView:")) {
+      const view = event.slice("onView:".length)
+      return spec.viewEvents.some((pattern) => this.matchesActivation(pattern, view))
+    }
+
+    // Unknown runtime event prefix — never activate (previously this fell
+    // through to an `onTool:` slice, mis-matching non-tool events).
+    return false
   }
 
   async handleActivationEvent(event: PluginActivationRuntimeEvent): Promise<void> {

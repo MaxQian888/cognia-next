@@ -23,6 +23,10 @@ import { RuntimeQueryCard } from "./mcp-renderers/runtime-query-card"
 import { PlanCard } from "./mcp-renderers/plan-card"
 import { ReadCard } from "./mcp-renderers/read-card"
 import { GlobCard } from "./mcp-renderers/glob-card"
+import { GrepCard } from "./mcp-renderers/grep-card"
+import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
+import { WebSearchCard } from "./mcp-renderers/web-search-card"
+import { NotebookEditCard } from "./mcp-renderers/notebook-edit-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
@@ -38,6 +42,10 @@ const REGISTRY: Record<string, CardComponent> = {
   Plan: PlanCard,
   Read: ReadCard,
   Glob: GlobCard,
+  Grep: GrepCard,
+  WebFetch: WebFetchCard,
+  WebSearch: WebSearchCard,
+  NotebookEdit: NotebookEditCard,
   // Workflow Copilot — proposal card (wf_propose_batch + wf_apply_template
   // share the same payload shape: { proposalId, summary, opCount, ... }).
   wf_propose_batch: WorkflowProposalCard,

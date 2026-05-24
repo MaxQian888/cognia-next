@@ -28,76 +28,38 @@ import type {
   PluginCharacterPackDef,
   PluginCharacterDef,
 } from "@/types/plugin/plugin-character-pack"
-import { createOverlayRegistry } from "./createOverlayRegistry"
+import { createValidatingOverlayRegistry } from "./createValidatingOverlayRegistry"
 import {
   validatePackRequires,
   type PluginCharacterPackWarning,
 } from "@/lib/plugin/character-pack/validate-requires"
 
-const registry = createOverlayRegistry<PluginCharacterPackDef>({
+const registry = createValidatingOverlayRegistry<
+  PluginCharacterPackDef,
+  PluginCharacterPackWarning
+>({
   name: "character-pack",
+  validate: (pack) => validatePackRequires(pack).warnings,
 })
-
-/**
- * Sidecar map keyed by pack id, storing `requires`-validation warnings
- * collected at register time. Kept separate from the overlay registry's
- * Map so the warning surface can be cleared / refreshed without
- * unregistering the pack itself (e.g., when a dependent plugin enables
- * later and a missing dep becomes available).
- */
-const warningsByPackId = new Map<string, readonly PluginCharacterPackWarning[]>()
 
 /**
  * Register a plugin-contributed character pack and stamp `requires`
  * warnings (ADR-0030 §B.6). Warnings are non-blocking — the pack is
  * registered regardless; consumers (Settings UI) read the warnings via
- * `getPackWarnings(packId)` and surface them as chips on the affected
- * rows.
+ * `getPackWarnings(packId)` and surface them as chips on the affected rows.
  */
-export function registerCharacterPack(
-  id: string,
-  pack: PluginCharacterPackDef,
-  opts?: { pluginId?: string }
-): { entry: PluginCharacterPackDef; pluginId?: string } | undefined {
-  const previous = registry.register(id, pack, opts)
-  const result = validatePackRequires(pack)
-  if (result.warnings.length > 0) {
-    warningsByPackId.set(id, Object.freeze(result.warnings))
-  } else {
-    warningsByPackId.delete(id)
-  }
-  return previous
-}
-
+export const registerCharacterPack = registry.register
 /**
  * Re-run `requires` validation for every registered pack. Called when
  * sibling overlay registries (skill / mcp / native-tool) mutate, so a
  * pack that previously had a missing-dep warning clears it once the
  * dependency arrives.
  */
-export function refreshAllPackWarnings(): void {
-  for (const { id, entry } of registry.entries()) {
-    const result = validatePackRequires(entry)
-    if (result.warnings.length > 0) {
-      warningsByPackId.set(id, Object.freeze(result.warnings))
-    } else {
-      warningsByPackId.delete(id)
-    }
-  }
-}
-
+export const refreshAllPackWarnings = registry.refreshAllWarnings
 /** Drop a single dynamically-registered pack by id. */
-export function unregisterCharacterPackById(id: string): boolean {
-  warningsByPackId.delete(id)
-  return registry.unregisterById(id)
-}
+export const unregisterCharacterPackById = registry.unregisterById
 /** Drop every pack contributed by `pluginId`. Returns the number removed. */
-export function unregisterCharacterPacksByPlugin(pluginId: string): number {
-  for (const { id, pluginId: tag } of registry.entries()) {
-    if (tag === pluginId) warningsByPackId.delete(id)
-  }
-  return registry.unregisterByPlugin(pluginId)
-}
+export const unregisterCharacterPacksByPlugin = registry.unregisterByPlugin
 /** Get a pack by id. Returns undefined when not registered. */
 export const getCharacterPack = registry.get
 /** Get the full registry entry (pack + pluginId tag) for an id. */
@@ -106,15 +68,14 @@ export const getCharacterPackEntry = registry.getEntry
 export const listCharacterPackIds = registry.list
 /** List every registered entry (id + pack + pluginId) in registration order. */
 export const listCharacterPackEntries = registry.entries
-
 /**
  * Return the warnings collected at register time for a pack. Returns
  * an empty array (not undefined) for clean packs so consumers can map
  * without null checks.
  */
-export function getPackWarnings(packId: string): readonly PluginCharacterPackWarning[] {
-  return warningsByPackId.get(packId) ?? []
-}
+export const getPackWarnings = registry.getWarnings
+/** Test-only: clear every dynamically registered pack and its warnings. */
+export const __resetCharacterPacksForTesting = registry.__resetForTesting
 
 /**
  * Return warnings that apply to a specific overlay character within its
@@ -125,15 +86,9 @@ export function getPackCharacterWarnings(
   packId: string,
   localId: string
 ): readonly PluginCharacterPackWarning[] {
-  const all = warningsByPackId.get(packId)
-  if (!all) return []
-  return all.filter((w) => !w.characterLocalId || w.characterLocalId === localId)
-}
-
-/** Test-only: clear every dynamically registered pack and its warnings. */
-export function __resetCharacterPacksForTesting(): void {
-  warningsByPackId.clear()
-  registry.__resetForTesting()
+  return registry
+    .getWarnings(packId)
+    .filter((w) => !w.characterLocalId || w.characterLocalId === localId)
 }
 
 /** Flattened view: every character contributed by every pack. */

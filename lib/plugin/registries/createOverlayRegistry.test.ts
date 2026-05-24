@@ -125,6 +125,87 @@ describe("createOverlayRegistry", () => {
     })
   })
 
+  describe("keyFn", () => {
+    it("derives the storage key from the registration arguments", () => {
+      const reg = createOverlayRegistry<TestEntry>({
+        keyFn: (id, _entry, opts) => `${opts?.pluginId}:${id}`,
+      })
+      reg.register("t1", { value: "one" }, { pluginId: "p1" })
+      reg.register("t1", { value: "two" }, { pluginId: "p2" })
+
+      // Same logical id but different pluginId → distinct composite keys.
+      expect(reg.list()).toEqual(["p1:t1", "p2:t1"])
+      expect(reg.get("p1:t1")).toEqual({ value: "one" })
+      expect(reg.get("p2:t1")).toEqual({ value: "two" })
+      // Lookup by the bare logical id misses (caller must use derived key).
+      expect(reg.get("t1")).toBeUndefined()
+    })
+  })
+
+  describe("conflictPolicy: first-wins-cross-plugin", () => {
+    it("keeps the incumbent when a different plugin re-uses a key and fires onConflict", () => {
+      const conflicts: Array<{ key: string; existing?: string; incoming?: string }> = []
+      const reg = createOverlayRegistry<TestEntry>({
+        name: "tools",
+        conflictPolicy: "first-wins-cross-plugin",
+        onConflict: (info) =>
+          conflicts.push({
+            key: info.key,
+            existing: info.existingPluginId,
+            incoming: info.incomingPluginId,
+          }),
+      })
+
+      const first = reg.register("a", { value: "one" }, { pluginId: "p1" })
+      expect(first).toBeUndefined()
+
+      // p2 tries to take "a" — rejected, p1 keeps it.
+      const rejected = reg.register("a", { value: "two" }, { pluginId: "p2" })
+      expect(rejected?.entry.value).toBe("one")
+      expect(reg.get("a")).toEqual({ value: "one" })
+      expect(reg.getEntry("a")?.pluginId).toBe("p1")
+      expect(conflicts).toEqual([{ key: "a", existing: "p1", incoming: "p2" }])
+    })
+
+    it("lets the same plugin refresh its own entry (hot-reload / snapshot restore)", () => {
+      const onConflict = jest.fn()
+      const reg = createOverlayRegistry<TestEntry>({
+        conflictPolicy: "first-wins-cross-plugin",
+        onConflict,
+      })
+
+      reg.register("a", { value: "one" }, { pluginId: "p1" })
+      reg.register("a", { value: "refreshed" }, { pluginId: "p1" })
+
+      expect(reg.get("a")).toEqual({ value: "refreshed" })
+      expect(onConflict).not.toHaveBeenCalled()
+    })
+
+    it("does not fire onConflict for the default last-wins policy", () => {
+      const onConflict = jest.fn()
+      const reg = createOverlayRegistry<TestEntry>({ onConflict })
+      reg.register("a", { value: "one" }, { pluginId: "p1" })
+      reg.register("a", { value: "two" }, { pluginId: "p2" })
+      // last-wins overwrites and never reports.
+      expect(reg.get("a")).toEqual({ value: "two" })
+      expect(onConflict).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("metadata", () => {
+    it("stamps metadata onto stored entries surfaced via getEntry / entries", () => {
+      let n = 0
+      const reg = createOverlayRegistry<TestEntry>({
+        metadata: () => ({ order: ++n }),
+      })
+      reg.register("a", { value: "one" }, { pluginId: "p1" })
+      reg.register("b", { value: "two" }, { pluginId: "p2" })
+
+      expect(reg.getEntry("a")?.meta).toEqual({ order: 1 })
+      expect(reg.entries().map((e) => e.meta)).toEqual([{ order: 1 }, { order: 2 }])
+    })
+  })
+
   describe("isolation between instances", () => {
     it("two registries created from the factory share no state", () => {
       const a = createOverlayRegistry<TestEntry>()

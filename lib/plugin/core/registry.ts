@@ -1,5 +1,20 @@
 /**
- * Plugin Registry - Central registry for plugin contributions
+ * Plugin Registry - Central registry for plugin contributions.
+ *
+ * Thin facade over five `createOverlayRegistry` instances (one per
+ * contribution kind). The public method surface is unchanged so the ~13
+ * call sites (tools-bridge, plugin-tool-ipc, manager, stores) keep working;
+ * internally the hand-rolled Maps are gone and every registration flows
+ * through the single shared factory.
+ *
+ * Conflict policy: `first-wins-cross-plugin`. When two *different* plugins
+ * contribute the same key (tool name, component type, …) the first registrant
+ * wins and the later one is rejected + reported as a `plugin.conflict.rejected`
+ * diagnostic — no more silent last-wins overwrite. A plugin re-registering its
+ * OWN key still refreshes (so hot-reload / snapshot-restore keep working).
+ * Modes / commands / templates are namespaced by the manager before they reach
+ * here, so cross-plugin collisions only realistically happen for tools and
+ * components.
  */
 
 import type {
@@ -9,16 +24,27 @@ import type {
   A2UITemplateDef,
 } from "@/types/plugin"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import {
+  createOverlayRegistry,
+  type OverlayConflictInfo,
+} from "@/lib/plugin/registries/createOverlayRegistry"
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 import { loggers } from "./logger"
 
-// =============================================================================
-// Registry Types
-// =============================================================================
-
-interface RegistryEntry<T> {
-  pluginId: string
-  item: T
-  registeredAt: Date
+// Build a first-wins-cross-plugin conflict handler that both logs (dev
+// console) and records a diagnostic (plugins panel) for a given registry label.
+function makeConflictHandler(label: string): (info: OverlayConflictInfo) => void {
+  return (info) => {
+    loggers.registry.warn(
+      `${label} "${info.key}" already provided by "${info.existingPluginId ?? "?"}"; rejected "${info.incomingPluginId ?? "?"}"`
+    )
+    reportRegistryConflict({
+      pluginId: info.incomingPluginId ?? "unknown",
+      attemptedId: info.key,
+      registry: label,
+      winnerPluginId: info.existingPluginId,
+    })
+  }
 }
 
 // =============================================================================
@@ -26,61 +52,61 @@ interface RegistryEntry<T> {
 // =============================================================================
 
 export class PluginRegistry {
-  // Tools registry
-  private tools: Map<string, RegistryEntry<PluginTool>> = new Map()
-
-  // A2UI components registry
-  private components: Map<string, RegistryEntry<PluginA2UIComponent>> = new Map()
-
-  // A2UI templates registry
-  private templates: Map<string, RegistryEntry<A2UITemplateDef>> = new Map()
-
-  // Agent modes registry
-  private modes: Map<string, RegistryEntry<AgentModeConfig>> = new Map()
-
-  // Commands registry
-  private commands: Map<string, RegistryEntry<PluginCommand>> = new Map()
+  private tools = createOverlayRegistry<PluginTool>({
+    name: "tools",
+    conflictPolicy: "first-wins-cross-plugin",
+    onConflict: makeConflictHandler("tool"),
+  })
+  private components = createOverlayRegistry<PluginA2UIComponent>({
+    name: "components",
+    conflictPolicy: "first-wins-cross-plugin",
+    onConflict: makeConflictHandler("component"),
+  })
+  private templates = createOverlayRegistry<A2UITemplateDef>({
+    name: "templates",
+    conflictPolicy: "first-wins-cross-plugin",
+    onConflict: makeConflictHandler("template"),
+  })
+  private modes = createOverlayRegistry<AgentModeConfig>({
+    name: "modes",
+    conflictPolicy: "first-wins-cross-plugin",
+    onConflict: makeConflictHandler("mode"),
+  })
+  private commands = createOverlayRegistry<PluginCommand>({
+    name: "commands",
+    conflictPolicy: "first-wins-cross-plugin",
+    onConflict: makeConflictHandler("command"),
+  })
 
   // ===========================================================================
   // Tools
   // ===========================================================================
 
   registerTool(pluginId: string, tool: PluginTool): void {
-    const key = tool.name
-    if (this.tools.has(key)) {
-      loggers.registry.warn(`Tool ${key} already registered, overwriting`)
-    }
-    this.tools.set(key, {
-      pluginId,
-      item: tool,
-      registeredAt: new Date(),
-    })
+    this.tools.register(tool.name, tool, { pluginId })
   }
 
   unregisterTool(toolName: string): boolean {
-    return this.tools.delete(toolName)
+    return this.tools.unregisterById(toolName)
   }
 
   unregisterPluginTools(pluginId: string): void {
-    for (const [key, entry] of this.tools.entries()) {
-      if (entry.pluginId === pluginId) {
-        this.tools.delete(key)
-      }
-    }
+    this.tools.unregisterByPlugin(pluginId)
   }
 
   getTool(toolName: string): PluginTool | undefined {
-    return this.tools.get(toolName)?.item
+    return this.tools.get(toolName)
   }
 
   getAllTools(): PluginTool[] {
-    return Array.from(this.tools.values()).map((e) => e.item)
+    return this.tools.entries().map((e) => e.entry)
   }
 
   getToolsByPlugin(pluginId: string): PluginTool[] {
-    return Array.from(this.tools.values())
+    return this.tools
+      .entries()
       .filter((e) => e.pluginId === pluginId)
-      .map((e) => e.item)
+      .map((e) => e.entry)
   }
 
   // ===========================================================================
@@ -88,41 +114,30 @@ export class PluginRegistry {
   // ===========================================================================
 
   registerComponent(pluginId: string, component: PluginA2UIComponent): void {
-    const key = component.type
-    if (this.components.has(key)) {
-      loggers.registry.warn(`Component ${key} already registered, overwriting`)
-    }
-    this.components.set(key, {
-      pluginId,
-      item: component,
-      registeredAt: new Date(),
-    })
+    this.components.register(component.type, component, { pluginId })
   }
 
   unregisterComponent(componentType: string): boolean {
-    return this.components.delete(componentType)
+    return this.components.unregisterById(componentType)
   }
 
   unregisterPluginComponents(pluginId: string): void {
-    for (const [key, entry] of this.components.entries()) {
-      if (entry.pluginId === pluginId) {
-        this.components.delete(key)
-      }
-    }
+    this.components.unregisterByPlugin(pluginId)
   }
 
   getComponent(componentType: string): PluginA2UIComponent | undefined {
-    return this.components.get(componentType)?.item
+    return this.components.get(componentType)
   }
 
   getAllComponents(): PluginA2UIComponent[] {
-    return Array.from(this.components.values()).map((e) => e.item)
+    return this.components.entries().map((e) => e.entry)
   }
 
   getComponentsByPlugin(pluginId: string): PluginA2UIComponent[] {
-    return Array.from(this.components.values())
+    return this.components
+      .entries()
       .filter((e) => e.pluginId === pluginId)
-      .map((e) => e.item)
+      .map((e) => e.entry)
   }
 
   // ===========================================================================
@@ -130,47 +145,39 @@ export class PluginRegistry {
   // ===========================================================================
 
   registerTemplate(pluginId: string, template: A2UITemplateDef): void {
-    const key = `${pluginId}:${template.id}`
-    if (this.templates.has(key)) {
-      loggers.registry.warn(`Template ${key} already registered, overwriting`)
-    }
-    this.templates.set(key, {
-      pluginId,
-      item: template,
-      registeredAt: new Date(),
-    })
+    // Templates are keyed `<pluginId>:<templateId>` (preserves the original
+    // composite key, so cross-plugin collisions can't occur).
+    this.templates.register(`${pluginId}:${template.id}`, template, { pluginId })
   }
 
   unregisterTemplate(templateId: string): boolean {
-    return this.templates.delete(templateId)
+    return this.templates.unregisterById(templateId)
   }
 
   unregisterPluginTemplates(pluginId: string): void {
-    for (const [key, entry] of this.templates.entries()) {
-      if (entry.pluginId === pluginId) {
-        this.templates.delete(key)
-      }
-    }
+    this.templates.unregisterByPlugin(pluginId)
   }
 
   getTemplate(templateId: string): A2UITemplateDef | undefined {
-    return this.templates.get(templateId)?.item
+    return this.templates.get(templateId)
   }
 
   getAllTemplates(): A2UITemplateDef[] {
-    return Array.from(this.templates.values()).map((e) => e.item)
+    return this.templates.entries().map((e) => e.entry)
   }
 
   getTemplatesByPlugin(pluginId: string): A2UITemplateDef[] {
-    return Array.from(this.templates.values())
+    return this.templates
+      .entries()
       .filter((e) => e.pluginId === pluginId)
-      .map((e) => e.item)
+      .map((e) => e.entry)
   }
 
   getTemplatesByCategory(category: string): A2UITemplateDef[] {
-    return Array.from(this.templates.values())
-      .filter((e) => e.item.category === category)
-      .map((e) => e.item)
+    return this.templates
+      .entries()
+      .map((e) => e.entry)
+      .filter((item) => item.category === category)
   }
 
   // ===========================================================================
@@ -178,41 +185,30 @@ export class PluginRegistry {
   // ===========================================================================
 
   registerMode(pluginId: string, mode: AgentModeConfig): void {
-    const key = mode.id
-    if (this.modes.has(key)) {
-      loggers.registry.warn(`Mode ${key} already registered, overwriting`)
-    }
-    this.modes.set(key, {
-      pluginId,
-      item: mode,
-      registeredAt: new Date(),
-    })
+    this.modes.register(mode.id, mode, { pluginId })
   }
 
   unregisterMode(modeId: string): boolean {
-    return this.modes.delete(modeId)
+    return this.modes.unregisterById(modeId)
   }
 
   unregisterPluginModes(pluginId: string): void {
-    for (const [key, entry] of this.modes.entries()) {
-      if (entry.pluginId === pluginId) {
-        this.modes.delete(key)
-      }
-    }
+    this.modes.unregisterByPlugin(pluginId)
   }
 
   getMode(modeId: string): AgentModeConfig | undefined {
-    return this.modes.get(modeId)?.item
+    return this.modes.get(modeId)
   }
 
   getAllModes(): AgentModeConfig[] {
-    return Array.from(this.modes.values()).map((e) => e.item)
+    return this.modes.entries().map((e) => e.entry)
   }
 
   getModesByPlugin(pluginId: string): AgentModeConfig[] {
-    return Array.from(this.modes.values())
+    return this.modes
+      .entries()
       .filter((e) => e.pluginId === pluginId)
-      .map((e) => e.item)
+      .map((e) => e.entry)
   }
 
   // ===========================================================================
@@ -220,41 +216,30 @@ export class PluginRegistry {
   // ===========================================================================
 
   registerCommand(pluginId: string, command: PluginCommand): void {
-    const key = command.id
-    if (this.commands.has(key)) {
-      loggers.registry.warn(`Command ${key} already registered, overwriting`)
-    }
-    this.commands.set(key, {
-      pluginId,
-      item: command,
-      registeredAt: new Date(),
-    })
+    this.commands.register(command.id, command, { pluginId })
   }
 
   unregisterCommand(commandId: string): boolean {
-    return this.commands.delete(commandId)
+    return this.commands.unregisterById(commandId)
   }
 
   unregisterPluginCommands(pluginId: string): void {
-    for (const [key, entry] of this.commands.entries()) {
-      if (entry.pluginId === pluginId) {
-        this.commands.delete(key)
-      }
-    }
+    this.commands.unregisterByPlugin(pluginId)
   }
 
   getCommand(commandId: string): PluginCommand | undefined {
-    return this.commands.get(commandId)?.item
+    return this.commands.get(commandId)
   }
 
   getAllCommands(): PluginCommand[] {
-    return Array.from(this.commands.values()).map((e) => e.item)
+    return this.commands.entries().map((e) => e.entry)
   }
 
   getCommandsByPlugin(pluginId: string): PluginCommand[] {
-    return Array.from(this.commands.values())
+    return this.commands
+      .entries()
       .filter((e) => e.pluginId === pluginId)
-      .map((e) => e.item)
+      .map((e) => e.entry)
   }
 
   // ===========================================================================
@@ -282,19 +267,18 @@ export class PluginRegistry {
     plugins: number
   } {
     const pluginIds = new Set<string>()
-
-    for (const entry of this.tools.values()) pluginIds.add(entry.pluginId)
-    for (const entry of this.components.values()) pluginIds.add(entry.pluginId)
-    for (const entry of this.templates.values()) pluginIds.add(entry.pluginId)
-    for (const entry of this.modes.values()) pluginIds.add(entry.pluginId)
-    for (const entry of this.commands.values()) pluginIds.add(entry.pluginId)
+    for (const reg of [this.tools, this.components, this.templates, this.modes, this.commands]) {
+      for (const entry of reg.entries()) {
+        if (entry.pluginId) pluginIds.add(entry.pluginId)
+      }
+    }
 
     return {
-      tools: this.tools.size,
-      components: this.components.size,
-      templates: this.templates.size,
-      modes: this.modes.size,
-      commands: this.commands.size,
+      tools: this.tools.list().length,
+      components: this.components.list().length,
+      templates: this.templates.list().length,
+      modes: this.modes.list().length,
+      commands: this.commands.list().length,
       plugins: pluginIds.size,
     }
   }
@@ -304,10 +288,10 @@ export class PluginRegistry {
   // ===========================================================================
 
   clear(): void {
-    this.tools.clear()
-    this.components.clear()
-    this.templates.clear()
-    this.modes.clear()
-    this.commands.clear()
+    this.tools.__resetForTesting()
+    this.components.__resetForTesting()
+    this.templates.__resetForTesting()
+    this.modes.__resetForTesting()
+    this.commands.__resetForTesting()
   }
 }

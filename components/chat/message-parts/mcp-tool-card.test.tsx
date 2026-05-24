@@ -191,3 +191,117 @@ describe("MCPToolCard — Glob", () => {
     expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(2)
   })
 })
+
+describe("MCPToolCard — Grep", () => {
+  it("is recognised as a structured tool", () => {
+    expect(isStructuredMcpToolType("tool-Grep")).toBe(true)
+  })
+
+  it("renders matched content lines from a plain-string output", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-Grep", "a.ts:1:const x = 1\nb.ts:2:const y = 2\n", {
+          pattern: "const",
+          glob: "*.ts",
+          output_mode: "content",
+        })}
+      />
+    )
+    expect(screen.getByTestId("mcp-grep-pattern")).toHaveTextContent("const")
+    expect(screen.getByTestId("mcp-grep-pattern")).toHaveTextContent("*.ts")
+    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(2)
+  })
+
+  it("renders files from a JSON { files: [...] } output", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-Grep", JSON.stringify({ files: ["a.ts", "b.ts", "c.ts"] }), {
+          pattern: "TODO",
+        })}
+      />
+    )
+    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(3)
+  })
+
+  it("shows the empty state when there are no matches", () => {
+    render(
+      <MCPToolCard part={part("tool-Grep", JSON.stringify({ matches: [] }), { pattern: "zzz" })} />
+    )
+    expect(screen.getByTestId("mcp-grep-card")).toHaveTextContent("No matches")
+  })
+
+  it("falls back to ToolBody when there is neither a pattern nor matches", () => {
+    render(<MCPToolCard part={part("tool-Grep", "")} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+})
+
+describe("MCPToolCard — WebFetch", () => {
+  it("renders the URL + content preview", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-WebFetch", "Fetched page body text", {
+          url: "https://example.com/docs",
+          prompt: "summarise",
+        })}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-url")).toHaveTextContent("https://example.com/docs")
+    expect(screen.getByTestId("mcp-webfetch-card")).toHaveTextContent("example.com")
+    expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("Fetched page body text")
+  })
+
+  it("falls back to ToolBody without a URL", () => {
+    render(<MCPToolCard part={part("tool-WebFetch", "x")} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+})
+
+describe("MCPToolCard — WebSearch", () => {
+  it("renders result rows from a JSON results array", () => {
+    const output = JSON.stringify({
+      results: [
+        { title: "First", url: "https://a.com/x", snippet: "hello" },
+        { title: "Second", url: "https://b.com/y" },
+      ],
+    })
+    render(<MCPToolCard part={part("tool-WebSearch", output, { query: "test query" })} />)
+    expect(screen.getByTestId("mcp-websearch-query")).toHaveTextContent("test query")
+    expect(screen.getAllByTestId("mcp-websearch-result")).toHaveLength(2)
+  })
+
+  it("shows the empty state with a query but no results", () => {
+    render(
+      <MCPToolCard part={part("tool-WebSearch", JSON.stringify({ results: [] }), { query: "q" })} />
+    )
+    expect(screen.getByTestId("mcp-websearch-card")).toHaveTextContent("No results")
+  })
+
+  it("falls back to ToolBody without query or results", () => {
+    render(<MCPToolCard part={part("tool-WebSearch", "raw")} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+})
+
+describe("MCPToolCard — NotebookEdit", () => {
+  it("renders the notebook path, meta and the cell source", () => {
+    render(
+      <MCPToolCard
+        part={part("tool-NotebookEdit", "ok", {
+          notebook_path: "/work/analysis.ipynb",
+          cell_type: "python",
+          edit_mode: "replace",
+          new_source: "print(1)",
+        })}
+      />
+    )
+    expect(screen.getByTestId("mcp-notebookedit-path")).toHaveTextContent("/work/analysis.ipynb")
+    expect(screen.getByTestId("mcp-notebookedit-card")).toHaveTextContent("analysis.ipynb")
+    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "python")
+  })
+
+  it("falls back to ToolBody without a notebook path", () => {
+    render(<MCPToolCard part={part("tool-NotebookEdit", "ok", { new_source: "x" })} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+})

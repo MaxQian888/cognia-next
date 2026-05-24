@@ -19,7 +19,7 @@
  */
 
 import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
-import { createOverlayRegistry } from "./createOverlayRegistry"
+import { createValidatingOverlayRegistry } from "./createValidatingOverlayRegistry"
 import { listSkillIds } from "./skill-registry"
 import { listMcpServerPresetIds } from "./mcp-server-preset-registry"
 import { listNativeAnthropicToolIds } from "./native-anthropic-tool-registry"
@@ -59,17 +59,13 @@ export interface AgentTeamTemplateValidationResult {
   ok: boolean
 }
 
-const registry = createOverlayRegistry<PluginAgentTeamTemplateDef>({
+const registry = createValidatingOverlayRegistry<
+  PluginAgentTeamTemplateDef,
+  PluginAgentTeamTemplateWarning
+>({
   name: "agent-team-template",
+  validate: (template) => validateTemplateRequires(template).warnings,
 })
-
-/**
- * Sidecar map keyed by template id, storing `requires`-validation warnings
- * collected at register time. Kept separate from the overlay registry's
- * Map so the warning surface can be cleared / refreshed without
- * unregistering the template itself.
- */
-const warningsByTemplateId = new Map<string, readonly PluginAgentTeamTemplateWarning[]>()
 
 /**
  * Resolve a plugin subagent id (bare `<id>` or namespaced `<pluginId>:<id>`).
@@ -133,55 +129,18 @@ export function validateTemplateRequires(
  * regardless; consumers read the warnings via `getTemplateWarnings(id)`
  * and surface them as chips on the affected rows.
  */
-export function registerAgentTeamTemplate(
-  id: string,
-  template: PluginAgentTeamTemplateDef,
-  opts?: { pluginId?: string }
-): { entry: PluginAgentTeamTemplateDef; pluginId?: string } | undefined {
-  const previous = registry.register(id, template, opts)
-  const result = validateTemplateRequires(template)
-  if (result.warnings.length > 0) {
-    warningsByTemplateId.set(id, Object.freeze(result.warnings))
-  } else {
-    warningsByTemplateId.delete(id)
-  }
-  return previous
-}
-
+export const registerAgentTeamTemplate = registry.register
 /**
  * Re-run `requires` validation for every registered template. Called when
  * sibling overlay registries (skill / mcp / native-tool / character-pack /
  * subagent) mutate so a template that previously had a missing-dep
  * warning clears it once the dependency arrives.
  */
-export function refreshAllTemplateWarnings(): void {
-  for (const { id, entry } of registry.entries()) {
-    const result = validateTemplateRequires(entry)
-    if (result.warnings.length > 0) {
-      warningsByTemplateId.set(id, Object.freeze(result.warnings))
-    } else {
-      warningsByTemplateId.delete(id)
-    }
-  }
-}
-
+export const refreshAllTemplateWarnings = registry.refreshAllWarnings
 /** Drop a single dynamically-registered template by id. */
-export function unregisterAgentTeamTemplateById(id: string): boolean {
-  warningsByTemplateId.delete(id)
-  return registry.unregisterById(id)
-}
-
-/**
- * Drop every template contributed by `pluginId`. Returns the number
- * removed.
- */
-export function unregisterAgentTeamTemplatesByPlugin(pluginId: string): number {
-  for (const { id, pluginId: tag } of registry.entries()) {
-    if (tag === pluginId) warningsByTemplateId.delete(id)
-  }
-  return registry.unregisterByPlugin(pluginId)
-}
-
+export const unregisterAgentTeamTemplateById = registry.unregisterById
+/** Drop every template contributed by `pluginId`. Returns the number removed. */
+export const unregisterAgentTeamTemplatesByPlugin = registry.unregisterByPlugin
 /** Get a template by id. Returns undefined when not registered. */
 export const getAgentTeamTemplate = registry.get
 /** Get the full registry entry (template + pluginId tag) for an id. */
@@ -194,18 +153,11 @@ export const listAgentTeamTemplateIds = registry.list
  * and `validateTemplateRequires` callers.
  */
 export const listAgentTeamTemplateEntries = registry.entries
-
 /**
  * Return the warnings collected at register time for a template. Returns
  * an empty array (not undefined) for clean templates so consumers can
  * map without null checks.
  */
-export function getTemplateWarnings(templateId: string): readonly PluginAgentTeamTemplateWarning[] {
-  return warningsByTemplateId.get(templateId) ?? []
-}
-
+export const getTemplateWarnings = registry.getWarnings
 /** Test-only: clear every dynamically registered template and its warnings. */
-export function __resetAgentTeamTemplatesForTesting(): void {
-  warningsByTemplateId.clear()
-  registry.__resetForTesting()
-}
+export const __resetAgentTeamTemplatesForTesting = registry.__resetForTesting

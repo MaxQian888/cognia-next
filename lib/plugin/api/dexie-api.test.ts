@@ -24,10 +24,30 @@ describe("createDexieAPI", () => {
     expect(table.name).toBe("github-delivery:repos")
   })
 
-  it("rawDb() returns the underlying Dexie instance", () => {
+  it("rawDb() forwards non-table members to the underlying Dexie instance", () => {
     db = makePluginDb("github-delivery", "repos")
     const api = createDexieAPI(db, "github-delivery")
-    expect(api.rawDb()).toBe(db)
+    // The proxy forwards everything except the namespace-guarded table/
+    // transaction members, so identity-ish reads still reflect the real db.
+    expect(api.rawDb().name).toBe(db.name)
+  })
+
+  it("rawDb().table() auto-namespaces a bare name", () => {
+    db = makePluginDb("github-delivery", "repos")
+    const api = createDexieAPI(db, "github-delivery")
+    expect(api.rawDb().table("repos").name).toBe("github-delivery:repos")
+  })
+
+  it("rawDb().table() passes through a name already prefixed to this plugin", () => {
+    db = makePluginDb("github-delivery", "repos")
+    const api = createDexieAPI(db, "github-delivery")
+    expect(api.rawDb().table("github-delivery:repos").name).toBe("github-delivery:repos")
+  })
+
+  it("rawDb().table() rejects a name prefixed to a different plugin (escape hatch closed)", () => {
+    db = makePluginDb("github-delivery", "repos")
+    const api = createDexieAPI(db, "github-delivery")
+    expect(() => api.rawDb().table("other-plugin:secret")).toThrow(/not in its namespace/)
   })
 
   it("table() with another plugin prefix embedded in the name is caught by namespace check", () => {

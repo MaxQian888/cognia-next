@@ -1,6 +1,15 @@
 ---
 name: ai-elements
-description: Build AI chat interfaces using ai-elements components — conversations, messages, tool displays, prompt inputs, and more. Use when the user wants to build a chatbot, AI assistant UI, or any AI-powered chat interface.
+description: >
+  Make sure to use this skill whenever the user wants to build or modify AI
+  chat interfaces using ai-elements components — conversations, messages, tool
+  displays, prompt inputs, chain-of-thought, reasoning blocks, attachments,
+  audio players, and more. Trigger when they mention building a chatbot, AI
+  assistant UI, AI-powered chat interface, or any ai-elements component. Also
+  use when they want to style, customize, theme, or extend existing ai-elements
+  components like Conversation, Message, PromptInput, ToolCall, ChainOfThought,
+  Reasoning, Attachment, or AudioPlayer. Covers installing ai-elements, using
+  the ai-elements CLI, or working with the ai-elements registry.
 ---
 
 # AI Elements

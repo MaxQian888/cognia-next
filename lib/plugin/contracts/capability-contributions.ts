@@ -22,7 +22,7 @@ export interface CapabilityContribution {
   count: number
 }
 
-interface ManifestShape {
+interface ContributionManifestShape {
   tools?: Array<{ id?: string; name?: string }>
   nativeAnthropicTools?: Array<{ name?: string; type?: string }>
   skills?: Array<{ id?: string; name?: string }>
@@ -75,7 +75,7 @@ export function getContributionsForCapability(
   manifest: unknown,
   capability: PluginCapability | string
 ): CapabilityEntry[] {
-  const m = (manifest ?? {}) as ManifestShape
+  const m = (manifest ?? {}) as ContributionManifestShape
   switch (capability) {
     case "tools":
       return compact(asArray(m.tools).map((t) => entry(t.id, t.name)))

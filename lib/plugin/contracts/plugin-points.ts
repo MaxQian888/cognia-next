@@ -67,6 +67,16 @@ export interface PluginPointDiagnostic {
     | "plugin.point.virtual"
     | "plugin.point.permission_denied"
     | "plugin.silent-failure"
+    // A later plugin's contribution was rejected because an earlier plugin
+    // already owns the same tool/command/component key (first-wins policy).
+    | "plugin.conflict.rejected"
+    // Required/optional dependency resolution outcomes surfaced at enable time
+    // (see lib/plugin/core/load-order.ts).
+    | "plugin.dependency.missing"
+    | "plugin.dependency.disabled"
+    | "plugin.dependency.version-mismatch"
+    | "plugin.dependency.cycle"
+    | "plugin.dependency.optional-degraded"
   severity: "warning" | "error"
   message: string
   pointKind: PluginPointKind

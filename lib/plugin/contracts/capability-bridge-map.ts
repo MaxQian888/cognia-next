@@ -29,7 +29,19 @@
  *     drops a registry export fails loudly.
  */
 
-import type { PluginCapability, PluginManifest } from "@/types/plugin"
+import type {
+  PluginCapability,
+  PluginManifest,
+  PluginSkillDef,
+  PluginMcpServerPresetDef,
+  PluginNativeAnthropicToolDef,
+  PluginExternalAgentPresetDef,
+  PluginSubagentDef,
+  PluginAgentTeamTemplateDef,
+} from "@/types/plugin"
+import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
+import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
 import {
   registerMcpServerPreset,
   unregisterMcpServerPresetsByPlugin,
@@ -77,6 +89,12 @@ export interface OverlayContributionEntry {
   [key: string]: unknown
 }
 
+/**
+ * The descriptor as the dispatch loop (`PluginManager.registerPluginContributions`)
+ * sees it: `registerEntry` takes the structural lower bound every overlay
+ * entry shares (`{ id: string }`), because the loop reads the manifest field
+ * generically and can only prove `id` is present.
+ */
 export interface OverlayCapabilityDescriptor {
   /** PluginManifest array field the entries live on. */
   manifestField: keyof PluginManifest
@@ -100,13 +118,43 @@ export interface OverlayCapabilityDescriptor {
 }
 
 /**
+ * The descriptor as each capability AUTHORS it: `registerEntry` is typed to
+ * the concrete contribution shape `E` (e.g. `PluginSkillDef`), so the closure
+ * body forwards `def` to its registry with no cast.
+ */
+interface TypedOverlayCapabilityDescriptor<E extends { id: string }> {
+  manifestField: keyof PluginManifest
+  registerEntry: (entry: E, ctx: { pluginId: string }) => void
+  unregisterAllByPlugin: (pluginId: string) => number
+  virtual?: true
+}
+
+/**
+ * Capture the concrete contribution type `E` for one capability and widen the
+ * descriptor to the loop-facing shape.
+ *
+ * This is the SINGLE variance bridge in the overlay-registry wiring (it
+ * replaced eight scattered `as unknown as never` casts at the individual
+ * register call sites). It is sound: the dispatch loop only ever calls
+ * `registerEntry` with elements of `plugin.manifest[manifestField]`, whose
+ * element type is exactly `E` — TypeScript just can't carry that link through
+ * a `keyof PluginManifest` index, so we assert it once, here, with the link
+ * documented, instead of at every call site.
+ */
+function defineOverlayCapability<E extends { id: string }>(
+  descriptor: TypedOverlayCapabilityDescriptor<E>
+): OverlayCapabilityDescriptor {
+  return descriptor as unknown as OverlayCapabilityDescriptor
+}
+
+/**
  * The 5 capabilities whose enable/disable dispatch follows the
  * uniform overlay-registry shape. Adding a 6th overlay-registry
  * capability is a single map entry away from being picked up by the
  * dispatch loop — no manager surgery required.
  */
 export const OVERLAY_REGISTRY_CAPABILITIES = {
-  skills: {
+  skills: defineOverlayCapability<PluginSkillDef>({
     manifestField: "skills",
     registerEntry: (def, ctx) => {
       // Skill defs pass through verbatim — the registry stores the
@@ -114,7 +162,7 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       // character-pack `requires` warnings (ADR-0030): a pack that was
       // previously missing this skill id now has the dep available.
       // Also refresh agent-team-template warnings for the same reason.
-      registerSkill(def.id, def as unknown as never, ctx)
+      registerSkill(def.id, def, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -126,11 +174,11 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllWorkflowTemplateWarnings()
       return n
     },
-  },
-  "mcp-server-preset": {
+  }),
+  "mcp-server-preset": defineOverlayCapability<PluginMcpServerPresetDef>({
     manifestField: "mcpServerPresets",
     registerEntry: (def, ctx) => {
-      registerMcpServerPreset(def.id, def as unknown as never, ctx)
+      registerMcpServerPreset(def.id, def, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -142,11 +190,11 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllWorkflowTemplateWarnings()
       return n
     },
-  },
-  "native-anthropic-tool": {
+  }),
+  "native-anthropic-tool": defineOverlayCapability<PluginNativeAnthropicToolDef>({
     manifestField: "nativeAnthropicTools",
     registerEntry: (def, ctx) => {
-      registerNativeAnthropicTool(def.id, def as unknown as never, ctx)
+      registerNativeAnthropicTool(def.id, def, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -158,15 +206,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllWorkflowTemplateWarnings()
       return n
     },
-  },
-  "external-agent-preset": {
+  }),
+  "external-agent-preset": defineOverlayCapability<PluginExternalAgentPresetDef>({
     manifestField: "externalAgentPresets",
     registerEntry: (def, ctx) => {
       // External-agent presets historically destructured `id` out of
       // the def before forwarding — preserving that for a true
-      // behaviour-preserving refactor.
+      // behaviour-preserving refactor. `PluginExternalAgentPresetDef`
+      // extends `ExternalAgentPresetConfig` with just `id`, so the rest
+      // is exactly the config the overlay expects (no cast needed).
       const { id, ...config } = def
-      registerExternalAgentPresetOverlay(id, config as unknown as never, ctx)
+      registerExternalAgentPresetOverlay(id, config, ctx)
       refreshAllTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
@@ -174,8 +224,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllTemplateWarnings()
       return n
     },
-  },
-  "character-pack": {
+  }),
+  "character-pack": defineOverlayCapability<PluginCharacterPackDef>({
     // ADR-0030. Plugin contributes ready-to-use character bundles. Pack
     // defs flow through verbatim — the registry stores the entire entry
     // under its `id` (the pack id). Pack-local character ids are
@@ -184,7 +234,7 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // synthetic id into a `Character` row.
     manifestField: "characterPacks",
     registerEntry: (def, ctx) => {
-      registerCharacterPack(def.id, def as unknown as never, ctx)
+      registerCharacterPack(def.id, def, ctx)
       refreshAllTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
@@ -192,8 +242,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllTemplateWarnings()
       return n
     },
-  },
-  subagent: {
+  }),
+  subagent: defineOverlayCapability<PluginSubagentDef>({
     // Plugin contributes Claude SDK subagents callable by teams and the
     // workflow editor. Each entry mirrors the AgentDefinition shape; the
     // runtime resolution loop unions overlay entries with the 4 host-bundled
@@ -202,7 +252,7 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // `requires.subagentIds[]` dependencies, so we refresh those warnings.
     manifestField: "subagents",
     registerEntry: (def, ctx) => {
-      registerSubagent(def.id, def as unknown as never, ctx)
+      registerSubagent(def.id, def, ctx)
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
     },
@@ -212,8 +262,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       refreshAllWorkflowTemplateWarnings()
       return n
     },
-  },
-  "agent-team-template": {
+  }),
+  "agent-team-template": defineOverlayCapability<PluginAgentTeamTemplateDef>({
     // Plugin contributes complete agent-team blueprints — roster, tasks,
     // config overrides, plus a `requires` block declaring cross-capability
     // dependencies. `registerAgentTeamTemplate` runs `validateTemplateRequires`
@@ -221,11 +271,11 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // The team-templates settings UI reads them via `getTemplateWarnings`.
     manifestField: "agentTeamTemplates",
     registerEntry: (def, ctx) => {
-      registerAgentTeamTemplate(def.id, def as unknown as never, ctx)
+      registerAgentTeamTemplate(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterAgentTeamTemplatesByPlugin,
-  },
-  "shared-memory-adapter": {
+  }),
+  "shared-memory-adapter": defineOverlayCapability<PluginSharedMemoryAdapterDef>({
     // Plugin contributes a bidirectional backing store for agent-team shared
     // memory. Registered verbatim under its `id`; a team opts in via
     // `team.config.sharedMemoryAdapterId`. Registering/dropping one may flip a
@@ -234,11 +284,11 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // is needed here.
     manifestField: "sharedMemoryAdapters",
     registerEntry: (def, ctx) => {
-      registerSharedMemoryAdapter(def.id, def as unknown as never, ctx)
+      registerSharedMemoryAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
-  },
-  "workflow-template": {
+  }),
+  "workflow-template": defineOverlayCapability<PluginWorkflowTemplateDef>({
     // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —
     // nodes + edges + settings + a `requires` block declaring cross-capability
     // dependencies. `registerWorkflowTemplate` runs `validateWorkflowTemplateRequires`
@@ -246,10 +296,10 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // them via `getWorkflowTemplateWarnings`.
     manifestField: "workflowTemplates",
     registerEntry: (def, ctx) => {
-      registerWorkflowTemplate(def.id, def as unknown as never, ctx)
+      registerWorkflowTemplate(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterWorkflowTemplatesByPlugin,
-  },
+  }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 
 export type OverlayRegistryCapability = keyof typeof OVERLAY_REGISTRY_CAPABILITIES

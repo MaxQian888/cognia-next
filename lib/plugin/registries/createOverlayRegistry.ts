@@ -14,9 +14,9 @@
  *    shadowed ids).
  *  - The map is the only mutable state held by the closure; the factory is
  *    a true leaf module with no external imports.
- *  - Registration is idempotent: re-registering the same id replaces the
- *    previous entry. The previous entry is returned so callers can detect
- *    collisions.
+ *  - Registration is idempotent under the default `last-wins` policy:
+ *    re-registering the same key replaces the previous entry. The previous
+ *    entry is returned so callers can detect collisions.
  *  - Every entry carries an optional `pluginId` tag so the plugin manager
  *    can clean up all of one plugin's contributions in a single call via
  *    `unregisterByPlugin`.
@@ -29,20 +29,33 @@
  *
  * All four are one-line instantiations of this factory so they share one
  * tested implementation rather than each duplicating the same Map +
- * register/unregister boilerplate.
+ * register/unregister boilerplate. The optional `keyFn` / `conflictPolicy` /
+ * `onConflict` / `metadata` options additionally let the host's bespoke
+ * `PluginRegistry` (tools/components/modes/commands/templates) ride the same
+ * factory instead of a hand-rolled Map.
  */
 
 export interface OverlayRegistry<T> {
   /**
    * Register an entry. Returns the previously registered entry (if any) so
-   * callers can detect collisions. Re-registering the same id replaces the
-   * previous entry — registration is idempotent.
+   * callers can detect collisions.
+   *
+   * Conflict behaviour depends on `conflictPolicy` (factory option):
+   *  - `"last-wins"` (default): re-registering the same key replaces the
+   *    previous entry — registration is idempotent.
+   *  - `"first-wins-cross-plugin"`: a key already held by a *different*
+   *    pluginId is NOT overwritten (the incumbent wins); `onConflict` fires
+   *    and the incumbent is returned. A re-register by the *same* pluginId
+   *    still refreshes (so hot-reload / snapshot-restore keep working).
+   *
+   * When a `keyFn` is configured, the storage key is `keyFn(id, entry, opts)`;
+   * `get` / `getEntry` / `unregisterById` then expect that derived key.
    */
   register(
     id: string,
     entry: T,
     opts?: { pluginId?: string }
-  ): { entry: T; pluginId?: string } | undefined
+  ): { entry: T; pluginId?: string; meta?: Record<string, unknown> } | undefined
 
   /** Drop a single dynamic entry. Returns true if removed. */
   unregisterById(id: string): boolean
@@ -58,13 +71,13 @@ export interface OverlayRegistry<T> {
   get(id: string): T | undefined
 
   /** Returns the full registry entry including pluginId tag. */
-  getEntry(id: string): { entry: T; pluginId?: string } | undefined
+  getEntry(id: string): { entry: T; pluginId?: string; meta?: Record<string, unknown> } | undefined
 
   /** Returns all registered ids. */
   list(): string[]
 
   /** Returns every entry (id + value + pluginId) in registration order. */
-  entries(): Array<{ id: string; entry: T; pluginId?: string }>
+  entries(): Array<{ id: string; entry: T; pluginId?: string; meta?: Record<string, unknown> }>
 
   /**
    * Test-only escape hatch: clear every dynamic entry so test isolation can
@@ -74,14 +87,54 @@ export interface OverlayRegistry<T> {
   __resetForTesting(): void
 }
 
-export interface CreateOverlayRegistryOptions {
+/** Information passed to `onConflict` when a registration is rejected. */
+export interface OverlayConflictInfo {
+  /** Registry name (the `name` option), for diagnostics. */
+  name?: string
+  /** The storage key that collided. */
+  key: string
+  /** pluginId that already holds the key (the winner). */
+  existingPluginId?: string
+  /** pluginId whose registration was rejected. */
+  incomingPluginId?: string
+}
+
+export interface CreateOverlayRegistryOptions<T> {
   /** Optional registry name for diagnostics (used in error messages). */
   name?: string
+  /**
+   * Derive the storage key from the registration arguments. Defaults to the
+   * `id` verbatim. Lets one factory model the per-domain keying the old
+   * bespoke `PluginRegistry` used (e.g. templates key by
+   * `${pluginId}:${id}`). `get` / `getEntry` / `unregisterById` expect the
+   * derived key, so callers that configure a non-identity `keyFn` must look
+   * up by the same derived key.
+   */
+  keyFn?: (id: string, entry: T, opts?: { pluginId?: string }) => string
+  /**
+   * Collision resolution. Defaults to `"last-wins"` (preserves the original
+   * overlay-registry semantics). `"first-wins-cross-plugin"` keeps the
+   * incumbent when a *different* plugin re-uses a key, but still lets the
+   * *same* plugin refresh its own entry.
+   */
+  conflictPolicy?: "last-wins" | "first-wins-cross-plugin"
+  /**
+   * Invoked when `first-wins-cross-plugin` rejects an incoming registration.
+   * Injected (not imported) so this stays a leaf module with no logger/
+   * diagnostics dependency — wrappers pass their own reporter.
+   */
+  onConflict?: (info: OverlayConflictInfo) => void
+  /**
+   * Optional metadata stamped onto each stored entry (e.g. `registeredAt`).
+   * Surfaced on `getEntry` / `entries` as `meta`.
+   */
+  metadata?: (entry: T, opts?: { pluginId?: string }) => Record<string, unknown>
 }
 
 interface InternalEntry<T> {
   entry: T
   pluginId?: string
+  meta?: Record<string, unknown>
 }
 
 /**
@@ -89,21 +142,43 @@ interface InternalEntry<T> {
  * closure — two registries created by this factory share no state.
  */
 export function createOverlayRegistry<T>(
-  options?: CreateOverlayRegistryOptions
+  options?: CreateOverlayRegistryOptions<T>
 ): OverlayRegistry<T> {
   // Map preserves insertion order, which `entries()` and `list()` rely on
   // so callers see registrations in the order they happened.
   const store = new Map<string, InternalEntry<T>>()
-  // `name` is reserved for future diagnostics (e.g., richer error messages
-  // when registering against a closed-union registry). It is intentionally
-  // read but not used in this minimal implementation; touching `options`
-  // here documents the contract without producing dead-import warnings.
-  void options?.name
+  const keyFn = options?.keyFn
+  const conflictPolicy = options?.conflictPolicy ?? "last-wins"
+  const onConflict = options?.onConflict
+  const metadata = options?.metadata
 
   return {
     register(id, entry, opts) {
-      const previous = store.get(id)
-      store.set(id, { entry, pluginId: opts?.pluginId })
+      const key = keyFn ? keyFn(id, entry, opts) : id
+      const previous = store.get(key)
+
+      if (
+        previous &&
+        conflictPolicy === "first-wins-cross-plugin" &&
+        previous.pluginId !== opts?.pluginId
+      ) {
+        // A different plugin already owns this key — the incumbent wins.
+        // Report and leave the store untouched; the caller gets the
+        // incumbent back as the collision signal.
+        onConflict?.({
+          name: options?.name,
+          key,
+          existingPluginId: previous.pluginId,
+          incomingPluginId: opts?.pluginId,
+        })
+        return previous
+      }
+
+      store.set(key, {
+        entry,
+        pluginId: opts?.pluginId,
+        meta: metadata?.(entry, opts),
+      })
       return previous
     },
 
@@ -139,6 +214,7 @@ export function createOverlayRegistry<T>(
         id,
         entry: value.entry,
         pluginId: value.pluginId,
+        meta: value.meta,
       }))
     },
 

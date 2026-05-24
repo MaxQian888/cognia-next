@@ -403,8 +403,19 @@ export interface PluginManifest {
   styles?: string
 
   // Dependencies
-  /** Plugin dependencies */
+  /**
+   * Required plugin dependencies (`pluginId` → semver constraint). A missing,
+   * disabled, or version-mismatched required dependency BLOCKS this plugin
+   * from enabling (see `lib/plugin/core/load-order.ts`).
+   */
   dependencies?: Record<string, string>
+
+  /**
+   * Optional plugin dependencies (`pluginId` → semver constraint). An unmet
+   * optional dependency does NOT block enabling — the plugin loads in a
+   * degraded mode and is expected to feature-gate internally.
+   */
+  optionalDependencies?: Record<string, string>
 
   /** Host application version requirements */
   engines?: {

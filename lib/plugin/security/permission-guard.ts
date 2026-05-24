@@ -63,6 +63,13 @@ export interface PermissionGuardConfig {
   maxAuditEntries: number
   allowRuntimeGrants: boolean
   defaultDenyMessage: string
+  /**
+   * When true, any `DANGEROUS_PERMISSIONS` a plugin declares are stamped with
+   * the "confirm" tier at registration time, so they prompt for consent
+   * instead of being silently allowed. Default false to preserve the
+   * historical silent-grant behavior — opt in for a hardened posture (C4).
+   */
+  confirmDangerousByDefault: boolean
 }
 
 type PermissionRequestHandler = (request: PermissionRequest) => Promise<boolean>
@@ -160,6 +167,7 @@ export class PermissionGuard {
       maxAuditEntries: 1000,
       allowRuntimeGrants: true,
       defaultDenyMessage: "Permission denied",
+      confirmDangerousByDefault: false,
       ...config,
     }
   }
@@ -182,6 +190,18 @@ export class PermissionGuard {
 
     this.grants.set(pluginId, grantMap)
     this.denials.set(pluginId, [])
+
+    // Hardened posture (opt-in): force declared dangerous permissions to the
+    // "confirm" tier so they prompt rather than being implicitly silent.
+    if (this.config.confirmDangerousByDefault) {
+      const tierRow = new Map<PluginPermission, PluginPermissionTier>()
+      for (const permission of permissions) {
+        if (DANGEROUS_PERMISSIONS.includes(permission)) {
+          tierRow.set(permission, "confirm")
+        }
+      }
+      if (tierRow.size > 0) this.tiers.set(pluginId, tierRow)
+    }
   }
 
   unregisterPlugin(pluginId: string): void {

@@ -7,7 +7,7 @@
 // `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
 // throwing extension can't take down the host UI.
 
-import { Component, useSyncExternalStore, type ReactNode } from "react"
+import { Component, useEffect, useSyncExternalStore, type ReactNode } from "react"
 import {
   getExtensionsForPoint,
   getExtensionRevision,
@@ -39,6 +39,26 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   // (a primitive — stable identity), not the registration array, so React's
   // "snapshot should be cached" check passes.
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+
+  // Lazy activation: a plugin gated on `onView:<point>` activates the first
+  // time a slot for that point mounts. Fire-and-forget — the manager dedups
+  // in-flight activations, so re-mounts are harmless. The dynamic import keeps
+  // the manager out of every host page's bundle and tolerates the web profile
+  // / an uninitialized manager.
+  useEffect(() => {
+    let cancelled = false
+    void import("@/lib/plugin/core/manager")
+      .then(({ getPluginManager }) => {
+        if (cancelled) return undefined
+        return getPluginManager().handleActivationEvent(`onView:${point}`)
+      })
+      .catch(() => {
+        // Plugin manager not initialized — nothing to activate.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [point])
 
   const all = getExtensionsForPoint(point)
   const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
@@ -91,6 +111,7 @@ class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
   }
 
   componentDidCatch(error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
     // Plug into the analytics event stream rather than console.error so the
     // /plugins panel can surface the failure later. Importing analytics lazily
     // avoids pulling that module into every host page.
@@ -99,8 +120,21 @@ class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
         pluginId: this.props.pluginId,
         eventType: "error",
         success: false,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage,
         metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
+      })
+    })
+    // Also record a runtime diagnostic so the render failure shows up in the
+    // plugin diagnostics panel + per-plugin badge alongside load/conflict/
+    // dependency failures — not only in the analytics stream (C4).
+    void import("@/lib/plugin/contracts/diagnostics-store").then((mod) => {
+      mod.recordPluginPointDiagnostic(this.props.pluginId, {
+        code: "plugin.silent-failure",
+        severity: "error",
+        pointKind: "ui-slot",
+        pointId: this.props.extensionId,
+        message: `Extension "${this.props.extensionId}" crashed while rendering and was removed from its slot: ${errorMessage}`,
+        hint: "The rest of the UI is unaffected. Check the plugin's component for a runtime error.",
       })
     })
   }

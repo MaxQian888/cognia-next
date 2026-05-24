@@ -1259,6 +1259,15 @@
     "mcp": {
       "wikiSearch": {
         "noResults": "无结果"
+      },
+      "grep": {
+        "noMatches": "无匹配"
+      },
+      "webSearch": {
+        "noResults": "无结果"
+      },
+      "webFetch": {
+        "empty": "无返回内容"
       }
     }
   },

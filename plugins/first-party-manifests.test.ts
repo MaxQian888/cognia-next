@@ -60,29 +60,12 @@ function discoverFirstPartyPlugins(): Array<{ dir: string; manifestPath: string 
 
 const plugins = discoverFirstPartyPlugins()
 
-/**
- * Plugins whose `validatePluginManifest` assertion is intentionally
- * relaxed because they exercise a `PluginCapability` value that's in
- * the type union but not yet in `CANONICAL_PLUGIN_CAPABILITIES`
- * (`lib/plugin/contracts/plugin-capabilities.ts`). The drift is real
- * — adding the missing contracts (`connectors`, `workflow`,
- * `workflow-trigger`, `tray`, `theme-pack`, `fonts`, `wallpapers`)
- * is tracked in `plans/noble-hatching-mango.md` backlog as
- * "Plugin capability contract drift". When that ships, drop the
- * matching entry here.
- */
-const KNOWN_CAPABILITY_CONTRACT_DRIFT = new Set<string>([
-  // Declares `"workflow"` — present in `PluginCapability` type union,
-  // missing from CANONICAL_PLUGIN_CAPABILITIES contracts list.
-  "wasm-example-formatter",
-])
-
 describe("first-party plugin manifest sweep", () => {
   it("discovers at least one plugin (sanity check)", () => {
     expect(plugins.length).toBeGreaterThan(0)
   })
 
-  describe.each(plugins)("$dir", ({ dir, manifestPath }) => {
+  describe.each(plugins)("$dir", ({ manifestPath }) => {
     let manifest: PluginManifest
 
     beforeAll(() => {
@@ -101,23 +84,6 @@ describe("first-party plugin manifest sweep", () => {
 
     it("passes validatePluginManifest in warn mode", () => {
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
-      // Known capability-contract drift is tolerated (see
-      // KNOWN_CAPABILITY_CONTRACT_DRIFT above). We still assert the
-      // overall validation didn't crash + downgrade strict equality
-      // to "no errors *except* the capability drift" so future
-      // unrelated regressions still surface.
-      if (KNOWN_CAPABILITY_CONTRACT_DRIFT.has(dir)) {
-        // Allow capability-related errors only; flag anything else.
-        const otherErrors = result.errors.filter((e) => !e.toLowerCase().includes("capability"))
-        if (otherErrors.length > 0) {
-          throw new Error(
-            `[${manifest.id}] validatePluginManifest reported unexpected non-capability errors:\n` +
-              `  errors: ${JSON.stringify(otherErrors, null, 2)}\n` +
-              `  warnings: ${JSON.stringify(result.warnings, null, 2)}`
-          )
-        }
-        return
-      }
       // First-party plugins are the source of truth for "valid". Any
       // error here is real drift — diff the failure context into the
       // assertion message so a future failure tells the human what

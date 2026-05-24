@@ -11,9 +11,14 @@ import {
 } from "./registry"
 import * as canonical from "./registry"
 import * as reExport from "@/lib/chat/slash-command-registry"
+import {
+  getPluginPointDiagnostics,
+  __resetDiagnosticsStoreForTesting,
+} from "@/lib/plugin/contracts/diagnostics-store"
 
 afterEach(() => {
   __resetSlashCommandsForTesting()
+  __resetDiagnosticsStoreForTesting()
 })
 
 describe("slash-command registry (lib/slash-commands/registry)", () => {
@@ -42,6 +47,47 @@ describe("slash-command registry (lib/slash-commands/registry)", () => {
     const result = registerSlashCommand({ id: "x", name: "second", handler: () => ({}) })
     expect(result.replaced).toBe(true)
     expect(getSlashCommand("x")?.name).toBe("second")
+  })
+
+  it("rejects a cross-plugin command-id collision (first-wins) and reports it", () => {
+    registerSlashCommand({
+      id: "shared",
+      name: "first",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "p1",
+    })
+    const result = registerSlashCommand({
+      id: "shared",
+      name: "second",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "p2",
+    })
+    expect(result.replaced).toBe(false)
+    expect(getSlashCommand("shared")?.name).toBe("first")
+    expect(getPluginPointDiagnostics("p2").some((d) => d.code === "plugin.conflict.rejected")).toBe(
+      true
+    )
+  })
+
+  it("lets the same plugin refresh its own command id", () => {
+    registerSlashCommand({
+      id: "own",
+      name: "v1",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "p1",
+    })
+    const result = registerSlashCommand({
+      id: "own",
+      name: "v2",
+      handler: () => ({}),
+      source: "plugin",
+      pluginId: "p1",
+    })
+    expect(result.replaced).toBe(true)
+    expect(getSlashCommand("own")?.name).toBe("v2")
   })
 
   it("unregisterSlashCommand drops a single entry", () => {

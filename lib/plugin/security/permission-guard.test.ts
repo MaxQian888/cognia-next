@@ -288,6 +288,29 @@ describe("PermissionGuard", () => {
     })
   })
 
+  describe("confirmDangerousByDefault (C4 hardening flag)", () => {
+    it("defaults off: dangerous declared permissions stay 'silent'", () => {
+      const g = new PermissionGuard()
+      g.registerPlugin("p1", ["shell:execute", "network:fetch"])
+      expect(g.getTier("p1", "shell:execute")).toBe("silent")
+    })
+
+    it("when on: dangerous declared permissions register at the 'confirm' tier", () => {
+      const g = new PermissionGuard({ confirmDangerousByDefault: true })
+      g.registerPlugin("p1", ["shell:execute", "terminal:write", "network:fetch"])
+      expect(g.getTier("p1", "shell:execute")).toBe("confirm")
+      expect(g.getTier("p1", "terminal:write")).toBe("confirm")
+      // Non-dangerous permissions are untouched.
+      expect(g.getTier("p1", "network:fetch")).toBe("silent")
+    })
+
+    it("when on but no dangerous permissions declared: no tier rows are created", () => {
+      const g = new PermissionGuard({ confirmDangerousByDefault: true })
+      g.registerPlugin("p1", ["network:fetch", "clipboard:read"])
+      expect(g.getTiersForPlugin("p1")).toEqual([])
+    })
+  })
+
   describe("checkWithConsent (tier-aware enforcement)", () => {
     const stubBroker = (response: boolean) => ({
       request: jest.fn(async () => response),

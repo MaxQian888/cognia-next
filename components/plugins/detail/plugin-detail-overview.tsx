@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { usePluginsStore } from "@/stores/plugins"
 
-interface ManifestShape {
+interface OverviewManifestMeta {
   description?: string
   author?: string | { name: string }
   homepage?: string
@@ -62,7 +62,7 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
     return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
   }
   const plugin = rowState.row
-  const manifest = plugin.manifest as ManifestShape
+  const manifest = plugin.manifest as OverviewManifestMeta
   const author =
     typeof manifest.author === "string" ? manifest.author : (manifest.author?.name ?? "")
 

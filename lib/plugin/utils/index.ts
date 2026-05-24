@@ -25,7 +25,7 @@ export {
   type PluginLocale,
   type I18nConfig,
   type TranslationOptions,
-  type PluginI18nAPI,
+  type PluginI18nLoaderAPI,
 } from "./i18n-loader"
 
 export {

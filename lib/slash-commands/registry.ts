@@ -19,6 +19,8 @@
 // (`source: "builtin"`) with a stub handler that nudges the caller back to
 // the composer. See `seedBuiltinSlashCommands()` below.
 
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
+
 export interface SlashCommandHandler {
   (args: string, ctx?: SlashCommandContext): Promise<SlashCommandResult> | SlashCommandResult
 }
@@ -75,7 +77,28 @@ export function registerSlashCommand(def: SlashCommandDefinition): RegisterSlash
   if (typeof def.handler !== "function") {
     throw new Error(`registerSlashCommand: handler for "${def.id}" must be a function`)
   }
-  const replaced = registry.has(def.id)
+  const existing = registry.get(def.id)
+
+  // First-wins across DIFFERENT plugins: when a plugin tries to register a
+  // command id another plugin already owns, the incumbent wins and the later
+  // registration is rejected + reported. Builtin (re)seeding and a plugin
+  // refreshing its OWN id keep last-wins so hot-reload / re-seed still work.
+  if (
+    existing &&
+    def.source === "plugin" &&
+    existing.source === "plugin" &&
+    existing.pluginId !== def.pluginId
+  ) {
+    reportRegistryConflict({
+      pluginId: def.pluginId ?? "unknown",
+      attemptedId: def.id,
+      registry: "slash command",
+      winnerPluginId: existing.pluginId,
+    })
+    return { replaced: false }
+  }
+
+  const replaced = existing !== undefined
   registry.set(def.id, def)
   return { replaced }
 }
@@ -126,8 +149,21 @@ export async function dispatchSlashCommand(
   const space = trimmed.indexOf(" ")
   const id = (space === -1 ? trimmed.slice(1) : trimmed.slice(1, space)).trim()
   const args = space === -1 ? "" : trimmed.slice(space + 1)
-  const def = registry.get(id)
-  if (!def) return null
+  let def = registry.get(id)
+  if (!def) {
+    // Lazy activation: a plugin gated on `onCommand:<id>` is not enabled until
+    // its command is first invoked. Fire the activation event, then re-resolve.
+    // Dynamic import avoids a static cycle (manager → this registry); the
+    // try/catch tolerates an uninitialized manager (SSR / tests / web profile).
+    try {
+      const { getPluginManager } = await import("@/lib/plugin/core/manager")
+      await getPluginManager().handleActivationEvent(`onCommand:${id}`)
+      def = registry.get(id)
+    } catch {
+      // Plugin manager not available — fall through to "not registered".
+    }
+    if (!def) return null
+  }
   return def.handler(args, ctx)
 }
 

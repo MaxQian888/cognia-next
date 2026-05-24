@@ -634,6 +634,59 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/contracts/capability-bridge-map.test.ts",
     ],
   },
+  {
+    // Platform Connector adapters (ADR-0009). Runtime-wired through the
+    // connectors bridge + ConnectorBus, but without a dedicated SDK package
+    // surface yet — hence `partial` rather than `supported`.
+    id: "connectors",
+    support: "partial",
+    manifestFields: ["connectors"],
+    runtimeBinding:
+      "Connector adapter factories registered via the connectors bridge into ConnectorBus",
+    hostBindings: ["lib/plugin/bridge/connectors-bridge.ts", "lib/plugin/core/manager.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/bridge/connectors-bridge.test.ts"],
+  },
+  {
+    // Custom Visual-Workflow node executors (ADR-0017). Wired through the
+    // workflow integration bridge into the editor catalog; no full SDK
+    // package parity yet.
+    id: "workflow",
+    support: "partial",
+    manifestFields: ["workflows"],
+    runtimeBinding:
+      "Plugin node executors registered into the workflow catalog via the workflow integration bridge",
+    hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/bridge/workflow-integration.test.ts"],
+  },
+  {
+    // Custom Visual-Workflow trigger sources (ADR-0017). Same bridge as
+    // `workflow`; partial for the same reason.
+    id: "workflow-trigger",
+    support: "partial",
+    manifestFields: ["workflows"],
+    runtimeBinding:
+      "Plugin trigger sources registered into the workflow catalog via the workflow integration bridge",
+    hostBindings: ["lib/plugin/bridge/workflow-integration.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/bridge/workflow-integration.test.ts"],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

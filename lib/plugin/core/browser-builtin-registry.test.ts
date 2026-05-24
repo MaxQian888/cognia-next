@@ -8,10 +8,11 @@ import {
 } from "./browser-builtin-registry"
 
 describe("browser-builtin-registry", () => {
-  it("exposes the eight built-in plugin entries", () => {
+  it("exposes the nine built-in plugin entries", () => {
     const entries = getBrowserBuiltinRegistry()
     const ids = entries.map((e) => e.manifest.id).sort()
     expect(ids).toEqual([
+      "cognia-agent-team-examples",
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
       "cognia-prompt-templates",

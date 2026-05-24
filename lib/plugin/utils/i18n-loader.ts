@@ -262,7 +262,7 @@ export class PluginI18nLoader {
   // Plugin API Factory
   // ===========================================================================
 
-  createPluginAPI(pluginId: string): PluginI18nAPI {
+  createPluginAPI(pluginId: string): PluginI18nLoaderAPI {
     return {
       t: (key: string, options?: TranslationOptions) => this.translate(pluginId, key, options),
 
@@ -294,10 +294,17 @@ export class PluginI18nLoader {
 }
 
 // =============================================================================
-// Plugin i18n API Type
+// Plugin i18n Loader API Type
 // =============================================================================
 
-export interface PluginI18nAPI {
+/**
+ * The loader-internal i18n surface produced by `PluginI18nLoader.createPluginAPI`.
+ * Distinct from the richer context-level `PluginI18nAPI` in
+ * `types/plugin/plugin-extended.ts` (which adds `getAvailableLocales`,
+ * `getLocaleName`, `registerTranslations`, `hasTranslation`, …). Named
+ * `*LoaderAPI` so the two no longer collide under one identifier.
+ */
+export interface PluginI18nLoaderAPI {
   t: (key: string, options?: TranslationOptions) => string
   getLocale: () => string
   hasKey: (key: string) => boolean

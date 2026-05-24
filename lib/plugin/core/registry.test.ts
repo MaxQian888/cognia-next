@@ -5,12 +5,17 @@
 import { PluginRegistry } from "./registry"
 import type { PluginTool, PluginA2UIComponent, A2UITemplateDef } from "@/types/plugin"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import {
+  getPluginPointDiagnostics,
+  __resetDiagnosticsStoreForTesting,
+} from "@/lib/plugin/contracts/diagnostics-store"
 
 describe("PluginRegistry", () => {
   let registry: PluginRegistry
 
   beforeEach(() => {
     registry = new PluginRegistry()
+    __resetDiagnosticsStoreForTesting()
   })
 
   describe("tool registration", () => {
@@ -65,15 +70,37 @@ describe("PluginRegistry", () => {
       expect(plugin1Tools.map((t) => t.name)).toContain("tool3")
     })
 
-    it("should overwrite tool with same name", () => {
+    it("keeps the first registrant on a cross-plugin name conflict (first-wins) + reports it", () => {
       const tool1 = createMockTool("test_tool", "plugin-1")
       const tool2 = createMockTool("test_tool", "plugin-2")
 
       registry.registerTool("plugin-1", tool1)
       registry.registerTool("plugin-2", tool2)
 
-      const tool = registry.getTool("test_tool")
-      expect(tool?.pluginId).toBe("plugin-2")
+      // plugin-1 registered first → it wins; plugin-2's contribution is rejected.
+      expect(registry.getTool("test_tool")?.pluginId).toBe("plugin-1")
+      // The rejected plugin gets a conflict diagnostic.
+      const diagnostics = getPluginPointDiagnostics("plugin-2")
+      expect(diagnostics.some((d) => d.code === "plugin.conflict.rejected")).toBe(true)
+    })
+
+    it("lets the same plugin refresh its own tool (hot-reload / snapshot restore)", () => {
+      const v1 = createMockTool("test_tool", "plugin-1")
+      const v2: PluginTool = {
+        ...createMockTool("test_tool", "plugin-1"),
+        definition: {
+          name: "test_tool",
+          description: "v2",
+          parametersSchema: { type: "object", properties: {} },
+        },
+      }
+
+      registry.registerTool("plugin-1", v1)
+      registry.registerTool("plugin-1", v2)
+
+      // Same plugin → refresh (not a conflict).
+      expect(registry.getTool("test_tool")?.definition.description).toBe("v2")
+      expect(getPluginPointDiagnostics("plugin-1")).toEqual([])
     })
   })
 
