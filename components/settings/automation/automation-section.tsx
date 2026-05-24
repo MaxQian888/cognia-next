@@ -50,6 +50,7 @@ import { listAuditRows } from "@/lib/automation/audit"
 import { AutomationAuditTable } from "./automation-audit-table"
 import { WhitelistTab } from "./whitelist-tab"
 import { InspectorTab } from "./inspector-tab"
+import { ScreenOffCard } from "./screen-off-card"
 
 interface BackendInitFailure {
   platform: string
@@ -266,6 +267,8 @@ function OverviewTab() {
       )}
 
       <OverviewMetricsCard />
+
+      <ScreenOffCard platform={caps?.platform} />
 
       <Card>
         <CardHeader>

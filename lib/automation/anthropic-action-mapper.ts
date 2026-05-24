@@ -102,6 +102,17 @@ export async function dispatchAnthropicAction(
   ctx: CallContext
 ): Promise<ComputerActionResult> {
   try {
+    // Screen-off mode ENTER hook (live chat path). When the active character
+    // opted in, ensure the bundled virtual display is active + primary before
+    // dispatching so capture/clicks stay coordinate-consistent with the
+    // monitor off. Strict: a missing driver returns an error to the model
+    // rather than letting capture fall through to a black frame.
+    if (ctx.screenOffMode) {
+      const arm = await desktop.virtualDisplayArm()
+      if (arm.status === "unavailable") {
+        return { ok: false, error: `screen-off mode unavailable: ${arm.error}` }
+      }
+    }
     switch (action.action) {
       case "screenshot": {
         const shot = await desktop.screenshot({}, ctx)

@@ -39,6 +39,12 @@ const COMPUTER_USE_PLUGIN_TOOL_NAMES = new Set([
 function isComputerUsePluginToolName(name: string): boolean {
   return COMPUTER_USE_PLUGIN_TOOL_NAMES.has(name)
 }
+import {
+  armApprovalBackstop,
+  clearApprovalBackstops,
+  isSessionAttached,
+} from "@/lib/companion/remote-attach-registry"
+import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
@@ -662,6 +668,9 @@ async function handleEvent(
       return
     }
     case "session_ended": {
+      // The turn is over — cancel any backstop deny still pending for a
+      // remote-routed approval on this session (Remote Session Control).
+      clearApprovalBackstops(evt.sessionId)
       const isActive = evt.sessionId === activeRef.current
       if (isActive) {
         if (evt.error) {
@@ -694,7 +703,32 @@ async function handleEvent(
       }
       const isActive = evt.sessionId === activeRef.current
       if (!isActive) {
-        // For non-active sessions, default-deny rather than block silently.
+        // Remote Session Control: if a remote device is watching this
+        // (non-foreground) session, route the approval to it instead of
+        // auto-denying. The remote already received this permission_request
+        // frame over /ws/v1/events and will resolve it via claude_approve.
+        // The sidecar's canUseTool has no timeout of its own, so arm a
+        // backstop deny that fires only if the remote never answers — the
+        // next SDK event for this session (the turn proceeding) cancels it.
+        if (isSessionAttached(evt.sessionId)) {
+          armApprovalBackstop(evt.sessionId, evt.requestId, () => {
+            void approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "deny",
+              "auto-denied: remote approval timed out"
+            ).catch((err) => console.error("remote backstop deny failed", err))
+          })
+          // Notify a backgrounded (WS-closed) watcher via push so it can come
+          // back and decide before the backstop denies.
+          void notifyRemoteNeedsInput({
+            sessionId: evt.sessionId,
+            requestId: evt.requestId,
+            toolName: evt.toolName,
+          })
+          return
+        }
+        // No remote watcher — default-deny rather than block silently.
         try {
           await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not active")
         } catch (err) {
@@ -720,6 +754,10 @@ async function handleEvent(
     case "event": {
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
+      // A proceeding SDK event means any approval that was routed to a remote
+      // device for this session has been answered (or the turn moved past
+      // it) — cancel its backstop deny (Remote Session Control).
+      clearApprovalBackstops(sessionId)
       const isActive = sessionId === activeRef.current
 
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.

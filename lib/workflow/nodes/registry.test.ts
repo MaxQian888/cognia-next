@@ -133,3 +133,41 @@ describe("subscribeNodeRegistry", () => {
     expect(listener).not.toHaveBeenCalled()
   })
 })
+
+describe("owner / conflict policy", () => {
+  const a: NodeExecuteFn = async () => ({ output: "a" })
+  const b: NodeExecuteFn = async () => ({ output: "b" })
+
+  beforeEach(() => {
+    __resetRegistryForTesting()
+  })
+
+  it("protects a built-in (no pluginId) from being overwritten by a plugin", () => {
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: a })
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: b, pluginId: "p1" })
+    // The host built-in (registered first, sentinel owner) wins.
+    expect(getExecutor("ai.prompt", 1)?.execute).toBe(a)
+  })
+
+  it("keeps the incumbent when a different plugin claims the same kind@version", () => {
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: a, pluginId: "p1" })
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: b, pluginId: "p2" })
+    expect(getExecutor("ai.prompt", 1)?.execute).toBe(a)
+  })
+
+  it("lets a plugin refresh its OWN registration (same owner)", () => {
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: a, pluginId: "p1" })
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: b, pluginId: "p1" })
+    expect(getExecutor("ai.prompt", 1)?.execute).toBe(b)
+  })
+
+  it("does not emit a register event for a rejected cross-plugin collision", async () => {
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: a, pluginId: "p1" })
+    await Promise.resolve()
+    const listener = jest.fn() as jest.Mock<void, [NodeRegistryEvent]>
+    subscribeNodeRegistry(listener)
+    registerNodeExecutor({ kind: "ai.prompt", typeVersion: 1, execute: b, pluginId: "p2" })
+    await Promise.resolve()
+    expect(listener).not.toHaveBeenCalled()
+  })
+})

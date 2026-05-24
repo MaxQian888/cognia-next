@@ -20,6 +20,8 @@
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
+import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@/lib/claude/types"
@@ -130,9 +132,61 @@ export async function dispatchCommand(
       return workflowTriggerManual(payload)
     case "twin_ingest_source":
       return twinIngestSource(payload)
+    // Remote Session Control — attach / detach a remote watcher to a host
+    // session so non-foreground `permission_request`s route to the phone
+    // instead of being auto-denied. State lives in
+    // `lib/companion/remote-attach-registry.ts`.
+    case "session_attach":
+      return sessionAttach(payload)
+    case "session_detach":
+      return sessionDetach(payload)
+    // Remote Session Control — steer a host /goal self-driving loop. Routes
+    // to the existing GoalRuntime transitions (which rotate generationId,
+    // fire the turn-driver abort, append the audit event, and emit
+    // `goal://status` for remote observers).
+    case "goal_pause":
+      return goalTransition(payload, "pause")
+    case "goal_resume":
+      return goalTransition(payload, "resume")
+    case "goal_stop":
+      return goalTransition(payload, "stop")
     default:
       throw new Error(`unknown desktop-write command: ${command}`)
   }
+}
+
+function sessionAttach(payload: Record<string, unknown>): null {
+  const sessionId = payload.sessionId as string | undefined
+  const deviceId = payload.deviceId as string | undefined
+  if (!sessionId) throw new Error("session_attach.sessionId is required")
+  if (!deviceId) throw new Error("session_attach.deviceId is required")
+  attachSession(sessionId, deviceId)
+  return null
+}
+
+function sessionDetach(payload: Record<string, unknown>): null {
+  const sessionId = payload.sessionId as string | undefined
+  const deviceId = payload.deviceId as string | undefined
+  if (!sessionId) throw new Error("session_detach.sessionId is required")
+  if (!deviceId) throw new Error("session_detach.deviceId is required")
+  detachSession(sessionId, deviceId)
+  return null
+}
+
+async function goalTransition(
+  payload: Record<string, unknown>,
+  action: "pause" | "resume" | "stop"
+): Promise<{ goal: unknown }> {
+  const goalId = payload.goalId as string | undefined
+  if (!goalId) throw new Error(`goal_${action}.goalId is required`)
+  const runtime = getGoalRuntime()
+  const goal =
+    action === "pause"
+      ? await runtime.pauseGoal(goalId)
+      : action === "resume"
+        ? await runtime.resumeGoal(goalId)
+        : await runtime.stopGoal(goalId)
+  return { goal }
 }
 
 async function characterUpsert(payload: Record<string, unknown>): Promise<{ character: unknown }> {

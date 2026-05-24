@@ -18,10 +18,14 @@ pub mod audit;
 pub mod backend;
 pub mod commands;
 pub mod consent;
+pub mod dispatcher;
 pub mod permission;
+pub mod persist;
 pub mod platform;
 pub mod policy;
+pub mod tool_exec;
 pub mod types;
+pub mod virtual_display;
 pub mod worker;
 
 use parking_lot::Mutex;
@@ -36,6 +40,7 @@ pub use backend::AutomationBackend;
 pub use consent::ConsentBroker;
 pub use permission::PermissionGate;
 pub use types::Platform;
+pub use virtual_display::VirtualDisplayController;
 pub use worker::Worker;
 
 /// ADR-0020 W1 — when `make_default_backend_with_app` falls back to the

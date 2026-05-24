@@ -20,14 +20,14 @@ use tauri::{Emitter, State};
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
 use super::consent::ConsentBroker;
-use super::permission::{
-    maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
-};
-use super::policy::{
-    ActionFacts, Decision as PolicyDecision, Policy, PolicyState,
-};
+use super::permission::{PermissionGate, Surface, TargetMeta, Tier};
+use super::policy::{Policy, PolicyState};
+use super::dispatcher;
 use super::types::*;
 use super::worker::AutomationHandle;
+use super::virtual_display::{
+    self, ArmOutcome, ReleaseReason, VirtualDisplayController, VirtualDisplayHealth,
+};
 
 /// Bundled state that every automation command pulls from `tauri::State`.
 pub struct AutomationState {
@@ -45,6 +45,10 @@ pub struct AutomationState {
     /// (the default) is a fast-path no-op so installs that never edit
     /// the policy pay zero overhead.
     pub policy: PolicyState,
+    /// Screen-off Computer Use — owns the bundled virtual-display lifecycle.
+    /// `arm()`-ed by the plugin before a screen-off `computer` action;
+    /// `force_release()`-ed by the kill switch / session close.
+    pub virtual_display: VirtualDisplayController,
 }
 
 impl AutomationState {
@@ -54,6 +58,7 @@ impl AutomationState {
         audit: AuditRing,
         consent: ConsentBroker,
         policy: PolicyState,
+        virtual_display: VirtualDisplayController,
     ) -> Self {
         Self {
             handle,
@@ -61,13 +66,14 @@ impl AutomationState {
             audit,
             consent,
             policy,
+            virtual_display,
         }
     }
 }
 
 /// Mirror of `AuditDecision` for the wire — uses the same SCREAMING_SNAKE_CASE
 /// reason tagging as `AutomationError` so the renderer can deserialize either.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
@@ -75,13 +81,13 @@ fn now_ms() -> i64 {
 /// requires `Result<T, E: Serialize>`; serializing the enum directly is
 /// preferable but the existing codebase returns String for compatibility.
 /// We serialize as JSON so the TS side can `JSON.parse` to recover the tag.
-fn err_to_string(err: &AutomationError) -> String {
+pub(crate) fn err_to_string(err: &AutomationError) -> String {
     serde_json::to_string(err).unwrap_or_else(|_| format!("{err}"))
 }
 
 /// Common path: turn a `Decision::Deny` into the recorded audit + final
 /// stringified error. Returns the AuditEntry for emit.
-fn record_deny(
+pub(crate) fn record_deny(
     audit: &AuditRing,
     command: &str,
     surface: Surface,
@@ -105,7 +111,7 @@ fn record_deny(
     })
 }
 
-fn record_allow<T>(
+pub(crate) fn record_allow<T>(
     audit: &AuditRing,
     command: &str,
     surface: Surface,
@@ -133,7 +139,7 @@ fn record_allow<T>(
     })
 }
 
-fn emit_audit(app: &tauri::AppHandle, entry: &AuditEntry) {
+pub(crate) fn emit_audit(app: &tauri::AppHandle, entry: &AuditEntry) {
     if let Err(err) = app.emit("automation:event", entry) {
         log::warn!("automation:event emit failed: {err}");
     }
@@ -180,29 +186,12 @@ impl CallContext {
     fn surface(&self) -> Surface {
         self.surface.unwrap_or(Surface::Workflow)
     }
-    fn target(&self) -> TargetMeta {
-        TargetMeta {
-            process_name: self.process_name.clone(),
-            window_title: self.window_title.clone(),
-        }
-    }
-    /// Build the T5 ActionFacts from this context. Borrows the context's
-    /// owned strings so the resulting facts live as long as the context.
-    fn facts(&self) -> ActionFacts<'_> {
-        ActionFacts {
-            process_name: self.process_name.as_deref(),
-            window_title: self.window_title.as_deref(),
-            target_url: self.target_url.as_deref(),
-            click_x: self.click_x,
-            click_y: self.click_y,
-        }
-    }
 }
 
 
 /// Record a T5 policy-deny audit row and emit it. Returns the typed
 /// `AutomationError` so the caller can stringify for the Tauri Result.
-fn record_policy_deny(
+pub(crate) fn record_policy_deny(
     audit: &AuditRing,
     command: &str,
     surface: Surface,
@@ -230,149 +219,36 @@ fn record_policy_deny(
     (entry, err)
 }
 
+/// Thin shim over the shared `dispatcher::run_gated` pipeline. Kept as a macro
+/// so each `desktop_*` command can pass its `state.handle.METHOD(..).await`
+/// expression inline (the args are `.clone()`d, so the wrapping closure borrows
+/// rather than moves). The gate → consent → T5 policy → audit logic lives once
+/// in `dispatcher::run_gated`; this just adapts the renderer `CallContext` into
+/// a `GateContext` and stringifies the typed error for the Tauri boundary.
 macro_rules! command_body {
     (
         $app:ident, $state:ident, $ctx:ident, $cmd_name:expr,
         $do_call:expr
     ) => {{
-        let started = Instant::now();
-        let surface = $ctx.surface();
-        let plugin_id = $ctx.plugin_id.clone();
-        let target = $ctx.target();
-        let call = Call {
-            command: $cmd_name,
-            surface,
-            plugin_id: plugin_id.as_deref(),
-            target: target.clone(),
+        let gctx = $crate::automation::dispatcher::GateContext {
+            surface: $ctx.surface(),
+            plugin_id: $ctx.plugin_id.clone(),
+            process_name: $ctx.process_name.clone(),
+            window_title: $ctx.window_title.clone(),
+            target_url: $ctx.target_url.clone(),
+            click_x: $ctx.click_x,
+            click_y: $ctx.click_y,
+            force_tier: $ctx.force_tier,
         };
-        // T5 closure — runs after the permission gate (and consent, if
-        // any) clears, but ONLY for the ComputerUse surface. Empty
-        // policies fast-path through `PolicyState::is_empty`. Returns
-        // `Some(reason)` on Deny so the caller records a uniform
-        // `policy_deny` audit row.
-        let policy_check = || -> Option<String> {
-            if surface != Surface::ComputerUse || $state.policy.is_empty() {
-                return None;
-            }
-            match $state.policy.evaluate(&$ctx.facts()) {
-                PolicyDecision::Allow => None,
-                PolicyDecision::Deny { reason } => Some(reason),
-            }
-        };
-        // ADR-0020 W1 — apply per-call tier upgrade *before* dispatching
-        // the decision. Today only `force_tier == Some(PerCall)` has a
-        // real effect (Allow → RequireConsent for driving calls);
-        // `maybe_upgrade_to_consent` is the single defence point so we
-        // can never silently weaken a Deny here.
-        let initial_decision = $state.gate.evaluate(&call);
-        let decision = maybe_upgrade_to_consent(initial_decision, $ctx.force_tier, &call);
-        match decision {
-            Decision::Deny(err) => {
-                let entry = record_deny(
-                    &$state.audit,
-                    $cmd_name,
-                    surface,
-                    plugin_id.as_deref(),
-                    &target,
-                    &err,
-                    started,
-                );
-                emit_audit(&$app, &entry);
-                Err(err_to_string(&err))
-            }
-            Decision::RequireConsent { prompt } => {
-                // Renderer-side HITL handshake. The broker:
-                //  - returns true immediately if the user previously chose
-                //    "Always allow this session" for the same tuple;
-                //  - else emits `automation:consent-request` and awaits the
-                //    overlay's `automation_consent_respond` call (with a
-                //    30s timeout, after which we treat as decline).
-                let app_clone = $app.clone();
-                let allow = $state.consent.request(app_clone, prompt.clone()).await;
-                if allow {
-                    // T5 policy still applies after consent — explicit
-                    // consent does not bypass the per-action allowlist.
-                    if let Some(reason) = policy_check() {
-                        let (entry, typed) = record_policy_deny(
-                            &$state.audit,
-                            $cmd_name,
-                            surface,
-                            plugin_id.as_deref(),
-                            &target,
-                            &reason,
-                            started,
-                        );
-                        emit_audit(&$app, &entry);
-                        return Err(err_to_string(&typed));
-                    }
-                    let result = $do_call;
-                    let entry = AuditEntry {
-                        id: String::new(),
-                        ts: now_ms(),
-                        surface,
-                        plugin_id: plugin_id.clone(),
-                        command: $cmd_name.to_string(),
-                        process_name: target.process_name.clone(),
-                        window_title: target.window_title.clone(),
-                        decision: AuditDecision::Consent,
-                        reason: Some("user consented".into()),
-                        duration_ms: started.elapsed().as_millis() as u64,
-                        error: result
-                            .as_ref()
-                            .err()
-                            .map(|e: &AutomationError| err_to_string(e)),
-                    };
-                    let recorded = $state.audit.record(entry);
-                    emit_audit(&$app, &recorded);
-                    result.map_err(|e| err_to_string(&e))
-                } else {
-                    let err = AutomationError::UserDeclined;
-                    let entry = AuditEntry {
-                        id: String::new(),
-                        ts: now_ms(),
-                        surface,
-                        plugin_id: plugin_id.clone(),
-                        command: $cmd_name.to_string(),
-                        process_name: target.process_name.clone(),
-                        window_title: target.window_title.clone(),
-                        decision: AuditDecision::Deny,
-                        reason: Some("user declined or timed out".into()),
-                        duration_ms: started.elapsed().as_millis() as u64,
-                        error: Some(err_to_string(&err)),
-                    };
-                    let recorded = $state.audit.record(entry);
-                    emit_audit(&$app, &recorded);
-                    Err(err_to_string(&err))
-                }
-            }
-            Decision::Allow => {
-                if let Some(reason) = policy_check() {
-                    let (entry, typed) = record_policy_deny(
-                        &$state.audit,
-                        $cmd_name,
-                        surface,
-                        plugin_id.as_deref(),
-                        &target,
-                        &reason,
-                        started,
-                    );
-                    emit_audit(&$app, &entry);
-                    return Err(err_to_string(&typed));
-                }
-                let result = $do_call;
-                let entry = record_allow(
-                    &$state.audit,
-                    $cmd_name,
-                    surface,
-                    plugin_id.as_deref(),
-                    &target,
-                    started,
-                    &result,
-                );
-                emit_audit(&$app, &entry);
-                result.map_err(|e| err_to_string(&e))
-            }
-        }
+        $crate::automation::dispatcher::run_gated(
+            Some(&$app),
+            $state.inner(),
+            gctx,
+            $cmd_name,
+            || async { $do_call },
+        )
+        .await
+        .map_err(|e| err_to_string(&e))
     }};
 }
 
@@ -590,6 +466,43 @@ pub async fn desktop_invoke_pattern(
     )
 }
 
+/// Canonical single-envelope entry point. Every wire format that carries a
+/// serialized [`Action`] — the External Bridge MCP proxy and the renderer's
+/// `desktop.*` client — routes through here so the gate / consent / policy /
+/// audit pipeline and the backend dispatch live in exactly one place. The
+/// granular `desktop_*` commands remain for the inspector/workflow callers
+/// that build typed args; both ultimately reach `dispatcher::execute_action`.
+#[tauri::command]
+pub async fn automation_execute(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    action: Action,
+    ctx: Option<CallContext>,
+) -> std::result::Result<ActionOutput, String> {
+    let ctx = ctx.unwrap_or_default();
+    // Derive click coords from the action's target so the T5 policy's
+    // forbidden-region check fires without the renderer passing them; fall
+    // back to any explicit ctx coords for element-targeted actions.
+    let point = action.point();
+    let command = action.command();
+    let handle = state.handle.clone();
+    let gctx = dispatcher::GateContext {
+        surface: ctx.surface(),
+        plugin_id: ctx.plugin_id.clone(),
+        process_name: ctx.process_name.clone(),
+        window_title: ctx.window_title.clone(),
+        target_url: ctx.target_url.clone(),
+        click_x: point.map(|p| p.x).or(ctx.click_x),
+        click_y: point.map(|p| p.y).or(ctx.click_y),
+        force_tier: ctx.force_tier,
+    };
+    dispatcher::run_gated(Some(&app), state.inner(), gctx, command, move || async move {
+        dispatcher::execute_action(&handle, action).await
+    })
+    .await
+    .map_err(|e| err_to_string(&e))
+}
+
 #[tauri::command]
 pub async fn automation_audit_snapshot(
     state: State<'_, AutomationState>,
@@ -609,6 +522,9 @@ pub async fn automation_settings_set(
     state: State<'_, AutomationState>,
     settings: super::permission::AutomationSettings,
 ) -> std::result::Result<(), String> {
+    // Persist before mutating the in-memory gate so a configured tier survives
+    // a restart (ADR-0020). Best-effort: a disk failure is logged, not fatal.
+    super::persist::save_settings(&settings);
     state.gate.update(|s| *s = settings);
     Ok(())
 }
@@ -621,6 +537,190 @@ pub async fn automation_kill_switch(
     // The kill switch also clears any "Always allow this session" grants —
     // engaging the switch should drop ALL trust, not just freeze the engine.
     state.consent.clear_session_grants();
+    // Drop the screen-off virtual display too (restores the prior topology) —
+    // engaging the switch should hand the screen back immediately.
+    state.virtual_display.force_release(ReleaseReason::KillSwitch);
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen-off Computer Use — virtual display commands (ADR-0020 follow-up).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Read-only health snapshot for the Settings → Automation → Screen-off card.
+/// Overlays the live controller status (active monitor / last error) onto the
+/// platform + driver-install probe. Cheap; safe to poll.
+#[tauri::command]
+pub async fn virtual_display_health_probe(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<VirtualDisplayHealth, String> {
+    let mut health = virtual_display::probe_health();
+    let status = state.virtual_display.status();
+    if let Some(monitor) = status.active_monitor {
+        health.active_monitor = monitor;
+    }
+    if let Some(err) = status.last_error {
+        if !err.is_empty() {
+            health.last_error = err;
+        }
+    }
+    Ok(health)
+}
+
+/// Trigger the UAC-elevated bundled virtual-display driver install. The setup
+/// binary's manifest requests administrator, so launching it surfaces the UAC
+/// prompt. Mirrors the sandbox `first_time_setup` shape.
+#[tauri::command]
+pub async fn virtual_display_setup() -> std::result::Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("cognia-vdd-setup.exe")))
+            .unwrap_or_else(|| std::path::PathBuf::from("cognia-vdd-setup.exe"));
+        // Elevate via `Start-Process -Verb RunAs` — surfaces the UAC prompt
+        // (mirrors how the sandbox setup binary is elevated). We treat marker
+        // presence as the source of truth for success rather than trusting the
+        // PowerShell wrapper's exit code.
+        let ps = format!(
+            "Start-Process -FilePath '{}' -ArgumentList '--install' -Verb RunAs -Wait",
+            exe.to_string_lossy().replace('\'', "''")
+        );
+        Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .status()
+            .map_err(|e| format!("elevation launch failed: {e}"))?;
+        let installed = virtual_display::marker_path()
+            .map(|p| p.exists())
+            .unwrap_or(false);
+        if !installed {
+            return Err(
+                "virtual display setup did not complete — the UAC prompt may have been denied"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Screen-off mode is Windows-only.".into())
+    }
+}
+
+/// Probe summary for the "Test screen-off capture" button.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualDisplayProbeResult {
+    pub width: u32,
+    pub height: u32,
+    pub non_black: bool,
+    pub monitor: String,
+}
+
+/// One-shot capture probe: ensure a virtual display, screenshot it,
+/// heuristically check the frame isn't uniformly black, then release. Returns
+/// a summary — NOT the image bytes (no 4K PNG over IPC for a health check).
+#[tauri::command]
+pub async fn virtual_display_probe(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<VirtualDisplayProbeResult, String> {
+    // `arm()` blocks on the controller thread (it acquires + sets primary);
+    // keep it off the async runtime.
+    let controller = state.virtual_display.clone();
+    let outcome = tokio::task::spawn_blocking(move || controller.arm())
+        .await
+        .map_err(|e| format!("arm task join failed: {e}"))?;
+    let monitor = match outcome {
+        ArmOutcome::Acquired { monitor } => monitor,
+        ArmOutcome::AlreadyActive => {
+            state.virtual_display.status().active_monitor.unwrap_or_default()
+        }
+        ArmOutcome::Unavailable(reason) => return Err(reason),
+    };
+    let shot = state
+        .handle
+        .screenshot(super::types::ScreenshotOpts::default())
+        .await
+        .map_err(|e| format!("screenshot failed: {e}"));
+    // Always release after the probe regardless of the capture result.
+    state.virtual_display.force_release(ReleaseReason::Manual);
+    let shot = shot?;
+    // Lightweight non-black heuristic: a uniformly black PNG compresses to a
+    // few hundred bytes; a real desktop frame is far larger. We avoid decoding
+    // (the `image` crate is feature-gated off by default) — the rigorous black
+    // check is the on-hardware acceptance step in the plan.
+    let approx_bytes = shot.bytes.len() * 3 / 4;
+    Ok(VirtualDisplayProbeResult {
+        width: shot.width,
+        height: shot.height,
+        non_black: approx_bytes > 8_192,
+        monitor,
+    })
+}
+
+/// Outcome of arming the virtual display before a screen-off action.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualDisplayArmResult {
+    /// `"acquired"` | `"alreadyActive"` | `"unavailable"`.
+    pub status: String,
+    pub monitor: String,
+    pub error: String,
+}
+
+/// ENTER hook for the live chat path (`dispatchAnthropicAction`): ensure the
+/// virtual display is active + primary before a screen-off `computer` action.
+/// Idempotent — re-arms the idle timer when already active. Returns
+/// `status: "unavailable"` (with a reason) so the renderer fails strictly
+/// rather than capturing a black frame.
+#[tauri::command]
+pub async fn virtual_display_arm(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<VirtualDisplayArmResult, String> {
+    let controller = state.virtual_display.clone();
+    let outcome = tokio::task::spawn_blocking(move || controller.arm())
+        .await
+        .map_err(|e| format!("arm task join failed: {e}"))?;
+    Ok(match outcome {
+        ArmOutcome::Acquired { monitor } => VirtualDisplayArmResult {
+            status: "acquired".into(),
+            monitor,
+            error: String::new(),
+        },
+        ArmOutcome::AlreadyActive => VirtualDisplayArmResult {
+            status: "alreadyActive".into(),
+            monitor: state.virtual_display.status().active_monitor.unwrap_or_default(),
+            error: String::new(),
+        },
+        ArmOutcome::Unavailable(reason) => VirtualDisplayArmResult {
+            status: "unavailable".into(),
+            monitor: String::new(),
+            error: reason,
+        },
+    })
+}
+
+/// Release args — `session_id` is accepted for forward-compatibility with
+/// per-session displays (Phase 2); the controller is process-global today.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualDisplayReleaseArgs {
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+/// Release the virtual display when a chat session closes — the EXIT signal
+/// piggybacked on the renderer's session-close path.
+#[tauri::command]
+pub async fn virtual_display_release(
+    state: State<'_, AutomationState>,
+    args: VirtualDisplayReleaseArgs,
+) -> std::result::Result<(), String> {
+    let _ = args.session_id;
+    state
+        .virtual_display
+        .force_release(ReleaseReason::SessionClosed);
     Ok(())
 }
 
@@ -887,8 +987,11 @@ pub async fn automation_policy_set(
     // a compile failure to the same JSON-error shape used elsewhere
     // (the renderer's policy editor displays it inline so the operator
     // can correct the offending row instead of every action silently
-    // failing later).
-    state.policy.set(policy).map_err(|e| e.to_string())
+    // failing later). Only persist once the in-memory set succeeds, so a
+    // bad regex never lands on disk to brick the next boot.
+    state.policy.set(policy.clone()).map_err(|e| e.to_string())?;
+    super::persist::save_policy(&policy);
+    Ok(())
 }
 
 /// ADR-0020 W1 — pick-session lifecycle commands.
@@ -1077,6 +1180,7 @@ mod tests {
         let ctx: CallContext = serde_json::from_value(raw).unwrap();
         assert!(ctx.force_tier.is_none());
     }
+
 
     #[test]
     fn call_context_defaults_surface_to_workflow() {

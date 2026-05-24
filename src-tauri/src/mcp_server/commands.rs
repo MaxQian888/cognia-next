@@ -37,7 +37,10 @@ pub async fn mcp_server_start(
             token,
             settings_json,
             sidecar_path,
-            Some(automation.handle.clone()),
+            Some((
+                automation.handle.clone(),
+                crate::automation::dispatcher::Enforcement::from_state(&automation),
+            )),
         )
         .await
 }
@@ -69,7 +72,10 @@ pub async fn mcp_server_restart(
             token,
             settings_json,
             sidecar_path,
-            Some(automation.handle.clone()),
+            Some((
+                automation.handle.clone(),
+                crate::automation::dispatcher::Enforcement::from_state(&automation),
+            )),
         )
         .await
 }

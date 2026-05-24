@@ -27,6 +27,7 @@ jest.mock("@/lib/automation/client", () => ({
     settingsGet: jest.fn(),
     settingsSet: jest.fn(),
     killSwitch: jest.fn(),
+    virtualDisplayArm: jest.fn(),
   },
 }))
 
@@ -59,6 +60,50 @@ describe("dispatchAnthropicAction", () => {
       display_width_px: 1280,
       display_height_px: 800,
     })
+  })
+
+  it("screen-off mode arms the virtual display before dispatching", async () => {
+    mockedDesktop.virtualDisplayArm.mockResolvedValueOnce({
+      status: "acquired",
+      monitor: "\\\\.\\DISPLAY3",
+      error: "",
+    })
+    mockedDesktop.click.mockResolvedValueOnce(undefined)
+    const result = await dispatchAnthropicAction(
+      { action: "left_click", coordinate: [5, 6] },
+      { surface: "computerUse", screenOffMode: true }
+    )
+    expect(mockedDesktop.virtualDisplayArm).toHaveBeenCalledTimes(1)
+    expect(mockedDesktop.click).toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+  })
+
+  it("screen-off mode fails strictly when the driver is unavailable", async () => {
+    mockedDesktop.virtualDisplayArm.mockResolvedValueOnce({
+      status: "unavailable",
+      monitor: "",
+      error: "driver not installed",
+    })
+    const result = await dispatchAnthropicAction(
+      { action: "screenshot" },
+      { surface: "computerUse", screenOffMode: true }
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("screen-off mode unavailable")
+    // Strict: no capture is attempted on an unavailable driver.
+    expect(mockedDesktop.screenshot).not.toHaveBeenCalled()
+  })
+
+  it("does not arm the virtual display when screen-off mode is off", async () => {
+    mockedDesktop.screenshot.mockResolvedValueOnce({
+      bytes: "X",
+      width: 1,
+      height: 1,
+      capturedAt: 0,
+      format: "png",
+    })
+    await dispatchAnthropicAction({ action: "screenshot" }, ctx)
+    expect(mockedDesktop.virtualDisplayArm).not.toHaveBeenCalled()
   })
 
   it("left_click forwards left button, count 1", async () => {

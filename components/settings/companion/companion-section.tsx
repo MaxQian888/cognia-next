@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { isTauri, transport } from "@/lib/tauri"
+import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
@@ -87,10 +88,29 @@ async function fetchStatus(): Promise<CompanionServerStatus> {
 }
 
 async function startServer(bindMode: BindMode): Promise<number> {
-  return transport.call<number>("companion_server_start", {
+  const port = await transport.call<number>("companion_server_start", {
     port: DEFAULT_PORT,
     bindLoopbackOnly: bindMode === "loopback",
   })
+  // Re-seed the Rust remote-control allow list from the persisted Dexie
+  // grants so the elevated capability survives a desktop restart. Replace
+  // semantics — a grant revoked while the desktop was down is not retained.
+  // Best-effort: a failure here only means a granted phone must re-toggle.
+  await seedRemoteControlAllowList()
+  return port
+}
+
+async function seedRemoteControlAllowList(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const devices = await listPairedDevices()
+    const allowed = devices
+      .filter((d) => d.allowRemoteControl === true && d.revokedAt === undefined)
+      .map((d) => d.deviceId)
+    await transport.call<void>("companion_seed_remote_control", { deviceIds: allowed })
+  } catch (err) {
+    console.warn("seedRemoteControlAllowList failed", err)
+  }
 }
 
 async function stopServer(): Promise<void> {

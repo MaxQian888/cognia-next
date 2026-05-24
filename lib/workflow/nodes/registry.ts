@@ -20,6 +20,17 @@ import type {
   StepExecutionResult,
   WorkflowNodeKind,
 } from "@/types/workflow/visual"
+import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
+import { loggers } from "@/lib/logging"
+
+/**
+ * Sentinel owner id for host-bundled executors. Built-ins register under this
+ * id so the `first-wins-cross-plugin` policy protects them: a plugin trying to
+ * register a built-in `kind@version` is rejected (the incumbent host executor
+ * wins) and the collision is logged. A plugin can still refresh its OWN
+ * registration (same owner id).
+ */
+export const BUILTIN_PLUGIN_ID = "__builtin__"
 
 export type NodeExecuteFn = (ctx: StepExecutionContext) => Promise<StepExecutionResult>
 
@@ -31,6 +42,12 @@ export interface NodeExecutorRegistration {
   retryable?: boolean
   /** Maximum runtime in ms; the orchestrator aborts after. Default uses workflow setting. */
   timeoutMs?: number
+  /**
+   * Owning plugin id. Absent for host built-ins (treated as
+   * `BUILTIN_PLUGIN_ID`). Set by `ctx.workflow.registerNode` so cross-plugin
+   * collisions are detected and built-ins protected.
+   */
+  pluginId?: string
 }
 
 export type NodeRegistryEventType = "register" | "unregister"
@@ -43,12 +60,33 @@ export interface NodeRegistryEvent {
 
 export type NodeRegistryListener = (event: NodeRegistryEvent) => void
 
-const registry = new Map<string, NodeExecutorRegistration>()
 const listeners = new Set<NodeRegistryListener>()
 
 function key(kind: WorkflowNodeKind, version: number): string {
   return `${kind}@${version}`
 }
+
+/**
+ * Storage backend. Reuses the shared overlay-registry — the same factory the
+ * plugin manager uses for skills / mcp-server-presets / subagents / … — so
+ * node executors get pluginId tagging, conflict diagnostics, and
+ * unregister-by-plugin for free instead of a bespoke `Map` with silent
+ * last-wins overwrites. Keyed by `kind@typeVersion`; built-ins win over
+ * plugins via `first-wins-cross-plugin`.
+ */
+const registry = createOverlayRegistry<NodeExecutorRegistration>({
+  name: "workflow-node-executor",
+  keyFn: (_id, entry) => key(entry.kind, entry.typeVersion),
+  conflictPolicy: "first-wins-cross-plugin",
+  onConflict: (info) => {
+    loggers.plugin.warn(
+      `[workflow] node executor "${info.key}" is owned by ` +
+        `${info.existingPluginId ?? BUILTIN_PLUGIN_ID}; rejected registration from ` +
+        `${info.incomingPluginId ?? BUILTIN_PLUGIN_ID}. Built-in and incumbent ` +
+        `executors are not overwritten by other plugins.`
+    )
+  },
+})
 
 function emit(event: NodeRegistryEvent): void {
   // Defer dispatch so listeners that subscribe immediately after import-time
@@ -68,8 +106,15 @@ function emit(event: NodeRegistryEvent): void {
 }
 
 export function registerNodeExecutor(reg: NodeExecutorRegistration): void {
-  registry.set(key(reg.kind, reg.typeVersion), reg)
-  emit({ type: "register", kind: reg.kind, typeVersion: reg.typeVersion })
+  const owner = reg.pluginId ?? BUILTIN_PLUGIN_ID
+  const k = key(reg.kind, reg.typeVersion)
+  registry.register(reg.kind, reg, { pluginId: owner })
+  // `first-wins-cross-plugin` may reject a cross-owner collision (onConflict
+  // already logged it). Only emit a register event when the incoming entry
+  // actually took effect, so listeners don't think a rejected node appeared.
+  if (registry.get(k) === reg) {
+    emit({ type: "register", kind: reg.kind, typeVersion: reg.typeVersion })
+  }
 }
 
 /**
@@ -79,10 +124,8 @@ export function registerNodeExecutor(reg: NodeExecutorRegistration): void {
  * (kind, version) pair is not registered.
  */
 export function unregisterNodeExecutor(kind: WorkflowNodeKind, version: number): void {
-  const k = key(kind, version)
-  if (!registry.has(k)) return
-  registry.delete(k)
-  emit({ type: "unregister", kind, typeVersion: version })
+  const removed = registry.unregisterById(key(kind, version))
+  if (removed) emit({ type: "unregister", kind, typeVersion: version })
 }
 
 export function getExecutor(
@@ -94,7 +137,7 @@ export function getExecutor(
 
 export function listRegisteredKinds(): WorkflowNodeKind[] {
   const kinds = new Set<WorkflowNodeKind>()
-  for (const reg of registry.values()) kinds.add(reg.kind)
+  for (const { entry } of registry.entries()) kinds.add(entry.kind)
   return [...kinds]
 }
 
@@ -113,6 +156,6 @@ export function subscribeNodeRegistry(fn: NodeRegistryListener): () => void {
 
 /** Test-only: clear the registry. Production code should never call this. */
 export function __resetRegistryForTesting(): void {
-  registry.clear()
+  registry.__resetForTesting()
   listeners.clear()
 }

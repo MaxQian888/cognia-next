@@ -20,18 +20,10 @@
  */
 
 import type { PluginTool } from "@/types/plugin"
-import type { WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
 import { formatToolError, resolveStore } from "../store-bridge"
 import { useProposalStore, type ProposalPayload } from "@/lib/workflow/editor/proposal-store"
-import {
-  summarizeOps,
-  type ProposalOp,
-  type ProposalOpAddNode,
-  type ProposalOpConfigureNode,
-  type ProposalOpConnectEdge,
-  type ProposalOpDisconnectEdge,
-  type ProposalOpRemoveNode,
-} from "@/lib/workflow/editor/proposal-types"
+import { summarizeOps, type ProposalOp } from "@/lib/workflow/editor/proposal-types"
+import { coerceProposalOp } from "@/lib/workflow/editor/proposal-schema"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -70,95 +62,6 @@ export interface ProposeBatchToolResult {
     ops: ReadonlyArray<ProposalOp>
     opCount: ReturnType<typeof summarizeOps>
   }>
-}
-
-/**
- * Convert raw agent input into a typed ProposalOp. Returns a string error
- * message instead of throwing so the caller can surface a structured
- * error to the agent.
- */
-function coerceOp(raw: unknown, index: number): ProposalOp | string {
-  if (!raw || typeof raw !== "object") return `op ${index}: must be an object`
-  const obj = raw as Record<string, unknown>
-  const type = obj.type
-  switch (type) {
-    case "add_node": {
-      const nodeId = obj.nodeId
-      const kind = obj.kind
-      const position = obj.position
-      if (typeof nodeId !== "string" || nodeId.length === 0)
-        return `op ${index}: add_node requires a non-empty 'nodeId'`
-      if (typeof kind !== "string" || kind.length === 0)
-        return `op ${index}: add_node requires a 'kind' string`
-      if (
-        !position ||
-        typeof position !== "object" ||
-        typeof (position as { x?: unknown }).x !== "number" ||
-        typeof (position as { y?: unknown }).y !== "number"
-      ) {
-        return `op ${index}: add_node requires position: { x: number, y: number }`
-      }
-      const op: ProposalOpAddNode = {
-        type: "add_node",
-        nodeId,
-        kind: kind as WorkflowNodeKind,
-        position: position as { x: number; y: number },
-        data: (obj.data as Partial<WorkflowNodeData> | undefined) ?? undefined,
-      }
-      return op
-    }
-    case "remove_node": {
-      const nodeId = obj.nodeId
-      if (typeof nodeId !== "string" || nodeId.length === 0)
-        return `op ${index}: remove_node requires a 'nodeId' string`
-      const op: ProposalOpRemoveNode = { type: "remove_node", nodeId }
-      return op
-    }
-    case "connect_edge": {
-      const edgeId = obj.edgeId
-      const source = obj.source
-      const target = obj.target
-      if (typeof edgeId !== "string" || edgeId.length === 0)
-        return `op ${index}: connect_edge requires a non-empty 'edgeId'`
-      if (typeof source !== "string" || source.length === 0)
-        return `op ${index}: connect_edge requires a 'source' node id`
-      if (typeof target !== "string" || target.length === 0)
-        return `op ${index}: connect_edge requires a 'target' node id`
-      const op: ProposalOpConnectEdge = {
-        type: "connect_edge",
-        edgeId,
-        source,
-        target,
-        sourceHandle: obj.sourceHandle as string | undefined,
-        targetHandle: obj.targetHandle as string | undefined,
-        label: obj.label as string | undefined,
-      }
-      return op
-    }
-    case "disconnect_edge": {
-      const edgeId = obj.edgeId
-      if (typeof edgeId !== "string" || edgeId.length === 0)
-        return `op ${index}: disconnect_edge requires an 'edgeId' string`
-      const op: ProposalOpDisconnectEdge = { type: "disconnect_edge", edgeId }
-      return op
-    }
-    case "configure_node": {
-      const nodeId = obj.nodeId
-      const patch = obj.patch
-      if (typeof nodeId !== "string" || nodeId.length === 0)
-        return `op ${index}: configure_node requires a 'nodeId' string`
-      if (!patch || typeof patch !== "object")
-        return `op ${index}: configure_node requires a 'patch' object`
-      const op: ProposalOpConfigureNode = {
-        type: "configure_node",
-        nodeId,
-        patch: patch as Partial<WorkflowNodeData>,
-      }
-      return op
-    }
-    default:
-      return `op ${index}: unknown op type "${String(type)}"`
-  }
 }
 
 /**
@@ -290,7 +193,7 @@ export function buildProposeTools(): PluginTool[] {
           }
           const ops: ProposalOp[] = []
           for (let i = 0; i < rawOps.length; i++) {
-            const coerced = coerceOp(rawOps[i], i)
+            const coerced = coerceProposalOp(rawOps[i], i)
             if (typeof coerced === "string") {
               return {
                 ok: false,

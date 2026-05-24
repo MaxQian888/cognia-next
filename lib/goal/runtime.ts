@@ -315,7 +315,9 @@ class GoalRuntime {
       kind: "user_paused",
       payload: { kind: "user_paused" },
     })
-    return (await getGoal(goalId)) ?? null
+    const updated = (await getGoal(goalId)) ?? null
+    void emitGoalStatus(updated)
+    return updated
   }
 
   /**
@@ -333,7 +335,9 @@ class GoalRuntime {
       kind: "user_resumed",
       payload: { kind: "user_resumed" },
     })
-    return (await getGoal(goalId)) ?? null
+    const updated = (await getGoal(goalId)) ?? null
+    void emitGoalStatus(updated)
+    return updated
   }
 
   /**
@@ -351,7 +355,9 @@ class GoalRuntime {
       kind: "user_stopped",
       payload: { kind: "user_stopped" },
     })
-    return (await getGoal(goalId)) ?? null
+    const updated = (await getGoal(goalId)) ?? null
+    void emitGoalStatus(updated)
+    return updated
   }
 
   /**
@@ -374,7 +380,9 @@ class GoalRuntime {
         reason: "user sent a fresh message while the loop was running",
       },
     })
-    return (await getGoal(goalId)) ?? null
+    const updated = (await getGoal(goalId)) ?? null
+    void emitGoalStatus(updated)
+    return updated
   }
 
   /**
@@ -394,7 +402,9 @@ class GoalRuntime {
       kind: "config_updated",
       payload: { kind: "config_updated", before, after },
     })
-    return (await getGoal(goalId)) ?? null
+    const updated = (await getGoal(goalId)) ?? null
+    void emitGoalStatus(updated)
+    return updated
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -417,6 +427,31 @@ class GoalRuntime {
   async deleteGoal(goalId: string): Promise<void> {
     this.fireAbort(goalId)
     await deleteGoal(goalId)
+  }
+}
+
+/**
+ * Broadcast a goal status snapshot to companion WebSocket subscribers
+ * (mobile) as a `goal://status` Tauri event so a remote watcher sees
+ * pause / resume / stop transitions live. Mirrors `emitMessageEvent` in
+ * `lib/db/plugin-bridge.ts`: lazy Tauri import so the web build stays
+ * decoupled; failures are swallowed (the Dexie write already succeeded).
+ */
+async function emitGoalStatus(goal: Goal | null): Promise<void> {
+  if (!goal) return
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return
+  try {
+    const moduleId = "@tauri-apps/api/event"
+    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
+      emit: (event: string, payload: unknown) => Promise<void>
+    }
+    await mod.emit("goal://status", {
+      goalId: goal.id,
+      sessionId: goal.sessionId,
+      status: goal.status,
+    })
+  } catch {
+    // Tauri unavailable or transport hiccup — best effort.
   }
 }
 

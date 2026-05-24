@@ -7,6 +7,7 @@ import { WorkflowRuntimeProvider } from "./workflow-runtime-provider"
 const installTriggerBridgeMock = jest.fn()
 const listWorkflowsMock = jest.fn()
 const syncWorkflowTriggersMock = jest.fn()
+const resumeInFlightRunsMock = jest.fn()
 
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   __esModule: true,
@@ -23,10 +24,18 @@ jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
   syncWorkflowTriggers: (...args: unknown[]) => syncWorkflowTriggersMock(...args),
 }))
 
+jest.mock("@/lib/workflow/runtime/resume-controller", () => ({
+  __esModule: true,
+  resumeInFlightRuns: (...args: unknown[]) => resumeInFlightRunsMock(...args),
+}))
+
 beforeEach(() => {
   installTriggerBridgeMock.mockReset()
   listWorkflowsMock.mockReset()
   syncWorkflowTriggersMock.mockReset()
+  resumeInFlightRunsMock.mockReset()
+  // Default: nothing in-flight. Individual tests can override.
+  resumeInFlightRunsMock.mockResolvedValue({ attempted: 0, succeeded: 0, failed: 0, skipped: 0 })
 })
 
 describe("WorkflowRuntimeProvider", () => {
@@ -53,6 +62,50 @@ describe("WorkflowRuntimeProvider", () => {
 
     unmount()
     expect(disposer).toHaveBeenCalledTimes(1)
+  })
+
+  it("resumes in-flight runs on mount, after syncing triggers", async () => {
+    const disposer = jest.fn()
+    installTriggerBridgeMock.mockResolvedValue(disposer)
+    listWorkflowsMock.mockResolvedValue([])
+    syncWorkflowTriggersMock.mockResolvedValue(undefined)
+    resumeInFlightRunsMock.mockResolvedValue({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+      skipped: 0,
+    })
+
+    const { unmount } = render(
+      <WorkflowRuntimeProvider>
+        <div />
+      </WorkflowRuntimeProvider>
+    )
+
+    await waitFor(() => expect(resumeInFlightRunsMock).toHaveBeenCalledTimes(1))
+    // Resume must run after the initial trigger sync so a replayed run sees a
+    // fully wired runtime.
+    expect(listWorkflowsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      resumeInFlightRunsMock.mock.invocationCallOrder[0]
+    )
+
+    unmount()
+  })
+
+  it("survives a failing resume without crashing children", async () => {
+    installTriggerBridgeMock.mockResolvedValue(jest.fn())
+    listWorkflowsMock.mockResolvedValue([])
+    syncWorkflowTriggersMock.mockResolvedValue(undefined)
+    resumeInFlightRunsMock.mockRejectedValue(new Error("mirror unavailable"))
+
+    const { getByTestId } = render(
+      <WorkflowRuntimeProvider>
+        <div data-testid="child">ok</div>
+      </WorkflowRuntimeProvider>
+    )
+
+    await waitFor(() => expect(resumeInFlightRunsMock).toHaveBeenCalled())
+    expect(getByTestId("child")).toBeInTheDocument()
   })
 
   it("survives a failing installTriggerBridge without crashing children", async () => {

@@ -305,6 +305,228 @@ pub enum AutomationError {
 
 pub type Result<T> = std::result::Result<T, AutomationError>;
 
+// =============================================================================
+// Bash / text-editor payloads (canonical home)
+//
+// These moved down from `plugins/computer-use/rust/src/types.rs` so the
+// canonical `Action` below can fold the `bash_20250124` and
+// `text_editor_20250728` tools into the same enum the dispatcher matches on.
+// The plugin re-exports them, so its `use super::types::*` keeps compiling.
+// =============================================================================
+
+/// Input for the `bash_20250124` tool. Field names already match the wire
+/// shape Anthropic emits (`command` / `timeout` / `restart`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BashAction {
+    pub command: String,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default)]
+    pub restart: bool,
+}
+
+/// Field names stay snake_case (`exit_code` / `duration_ms`) to preserve the
+/// exact wire shape the model + sidecar already consume — do not camelCase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BashResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub duration_ms: u64,
+}
+
+/// Input for the `text_editor_20250728` tool. Retains Anthropic's
+/// `action`-tagged snake_case wire shape; nesting it inside the canonical
+/// `Action::TextEditor` variant yields `{ "kind": "textEditor", "action":
+/// "view", .. }` which deserializes cleanly (serde flattens the newtype
+/// content of an internally-tagged enum).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "action")]
+pub enum TextEditorAction {
+    View { path: String },
+    Create { path: String, file_text: String },
+    StrReplace { path: String, old_str: String, new_str: String },
+    Insert { path: String, insert_line: usize, new_str: String },
+    UndoEdit { path: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextEditorResult {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// =============================================================================
+// Canonical Action
+//
+// The single internal representation every wire format converts INTO:
+//   - Anthropic `computer_20251124` (`ComputerAction`, snake_case) → via the
+//     adapter's `TryFrom` (see `automation/adapters/anthropic.rs`).
+//   - External Bridge MCP (`ComputerUseInput`) → via `toCanonicalAction`.
+//   - `desktop.*` renderer client → builds an `Action` directly.
+//
+// The unified dispatcher matches on this enum exactly once. Payloads reuse the
+// existing structs above — no duplicate shapes. Anthropic's left/right/middle/
+// double/triple click variants collapse into `Click { target, opts }` via
+// `opts.button` + `opts.count`, exactly as the legacy translator did.
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Action {
+    // --- screenshot / pointer / keyboard (computer-tool family) ---
+    Screenshot {
+        #[serde(default)]
+        opts: ScreenshotOpts,
+    },
+    Click {
+        target: ClickTarget,
+        #[serde(default)]
+        opts: ClickOpts,
+    },
+    MouseMove {
+        point: Point,
+    },
+    Drag {
+        from: Point,
+        to: Point,
+        #[serde(default)]
+        opts: DragOpts,
+    },
+    MouseButton {
+        button: MouseButton,
+        transition: ButtonTransition,
+    },
+    Scroll {
+        target: ScrollTarget,
+        #[serde(default)]
+        opts: ScrollOpts,
+    },
+    Type {
+        text: String,
+        #[serde(default)]
+        opts: TypeOpts,
+    },
+    Keys {
+        chord: KeyChord,
+    },
+    HoldKey {
+        chord: KeyChord,
+        duration_ms: u32,
+    },
+    Wait {
+        duration_ms: u32,
+    },
+    CursorPosition,
+    // --- accessibility tree / element / window ---
+    Capabilities,
+    GetFocus,
+    ReadTree {
+        #[serde(default)]
+        root: Option<ElementRef>,
+        #[serde(default)]
+        opts: TreeOpts,
+    },
+    Find {
+        locator: Locator,
+    },
+    InvokePattern {
+        target: ElementRef,
+        pattern: PatternKind,
+        #[serde(default)]
+        args: serde_json::Value,
+    },
+    WindowOp {
+        target: ElementRef,
+        op: WindowOp,
+    },
+    PickAtPoint {
+        point: Point,
+    },
+    PickSessionStart,
+    PickSessionCancel,
+    // --- other native tools ---
+    Bash(BashAction),
+    TextEditor(TextEditorAction),
+}
+
+impl Action {
+    /// Stable command string used for permission gating + audit rows. Matches
+    /// the legacy per-command strings so audit history stays consistent.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Action::Screenshot { .. } => "screenshot",
+            Action::Click { .. } => "click",
+            Action::MouseMove { .. } => "mouse_move",
+            Action::Drag { .. } => "drag",
+            Action::MouseButton { .. } => "mouse_button",
+            Action::Scroll { .. } => "scroll",
+            Action::Type { .. } => "type",
+            Action::Keys { .. } => "keys",
+            Action::HoldKey { .. } => "hold_key",
+            Action::Wait { .. } => "wait",
+            Action::CursorPosition => "cursor_position",
+            Action::Capabilities => "capabilities",
+            Action::GetFocus => "get_focus",
+            Action::ReadTree { .. } => "read_tree",
+            Action::Find { .. } => "find",
+            Action::InvokePattern { .. } => "invoke_pattern",
+            Action::WindowOp { .. } => "window_op",
+            Action::PickAtPoint { .. } => "pick_at_point",
+            Action::PickSessionStart => "pick_session_start",
+            Action::PickSessionCancel => "pick_session_cancel",
+            Action::Bash(_) => "bash",
+            Action::TextEditor(_) => "text_editor",
+        }
+    }
+
+    /// The target coordinate of a pointer action, if any. The dispatcher uses
+    /// this to stamp `clickX`/`clickY` on policy facts without the renderer
+    /// having to pass them separately.
+    pub fn point(&self) -> Option<Point> {
+        match self {
+            Action::MouseMove { point }
+            | Action::PickAtPoint { point } => Some(*point),
+            Action::Click {
+                target: ClickTarget::Point { x, y },
+                ..
+            } => Some(Point { x: *x, y: *y }),
+            Action::Scroll {
+                target: ScrollTarget::Point { x, y },
+                ..
+            } => Some(Point { x: *x, y: *y }),
+            Action::Drag { from, .. } => Some(*from),
+            _ => None,
+        }
+    }
+}
+
+/// Canonical output union. Each edge adapter projects this back into its own
+/// wire result (`ComputerResult` / `BashResult` / `TextEditorResult` / the
+/// `desktop.*` typed returns).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ActionOutput {
+    Void,
+    Screenshot(Screenshot),
+    Cursor(Point),
+    Capabilities(Capabilities),
+    Element(ElementInfo),
+    Tree(Vec<ElementInfo>),
+    Found {
+        #[serde(default)]
+        element_ref: Option<ElementRef>,
+    },
+    Pattern(serde_json::Value),
+    Bash(BashResult),
+    TextEditor(TextEditorResult),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,5 +716,131 @@ mod tests {
             let v = roundtrip(&k);
             assert_eq!(v, k);
         }
+    }
+
+    #[test]
+    fn action_click_roundtrips_with_kind_tag() {
+        let a = Action::Click {
+            target: ClickTarget::Point { x: 10, y: 20 },
+            opts: ClickOpts {
+                button: Some(MouseButton::Right),
+                count: Some(2),
+                ..Default::default()
+            },
+        };
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"kind\":\"click\""));
+        let back: Action = serde_json::from_str(&json).unwrap();
+        match back {
+            Action::Click { target, opts } => {
+                assert!(matches!(target, ClickTarget::Point { x: 10, y: 20 }));
+                assert_eq!(opts.button, Some(MouseButton::Right));
+                assert_eq!(opts.count, Some(2));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn action_omitted_opts_default() {
+        // The renderer may send only `{ "kind": "screenshot" }`.
+        let a: Action = serde_json::from_str(r#"{"kind":"screenshot"}"#).unwrap();
+        assert!(matches!(a, Action::Screenshot { .. }));
+        let a: Action = serde_json::from_str(r#"{"kind":"cursorPosition"}"#).unwrap();
+        assert!(matches!(a, Action::CursorPosition));
+    }
+
+    #[test]
+    fn action_bash_newtype_flattens_under_kind_tag() {
+        let a = Action::Bash(BashAction {
+            command: "echo hi".into(),
+            timeout: Some(5000),
+            restart: false,
+        });
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"kind\":\"bash\""));
+        assert!(json.contains("\"command\":\"echo hi\""));
+        let back: Action = serde_json::from_str(&json).unwrap();
+        match back {
+            Action::Bash(b) => {
+                assert_eq!(b.command, "echo hi");
+                assert_eq!(b.timeout, Some(5000));
+                assert!(!b.restart);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn action_text_editor_double_tag_roundtrips() {
+        let a = Action::TextEditor(TextEditorAction::StrReplace {
+            path: "/tmp/a.txt".into(),
+            old_str: "x".into(),
+            new_str: "y".into(),
+        });
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"kind\":\"textEditor\""));
+        assert!(json.contains("\"action\":\"str_replace\""));
+        let back: Action = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            back,
+            Action::TextEditor(TextEditorAction::StrReplace { .. })
+        ));
+    }
+
+    #[test]
+    fn action_command_strings_match_legacy() {
+        assert_eq!(
+            Action::Click {
+                target: ClickTarget::Point { x: 0, y: 0 },
+                opts: ClickOpts::default(),
+            }
+            .command(),
+            "click"
+        );
+        assert_eq!(
+            Action::Bash(BashAction {
+                command: "x".into(),
+                timeout: None,
+                restart: false,
+            })
+            .command(),
+            "bash"
+        );
+        assert_eq!(Action::CursorPosition.command(), "cursor_position");
+        assert_eq!(Action::GetFocus.command(), "get_focus");
+    }
+
+    #[test]
+    fn action_point_derivation() {
+        let click = Action::Click {
+            target: ClickTarget::Point { x: 7, y: 9 },
+            opts: ClickOpts::default(),
+        };
+        assert_eq!(click.point(), Some(Point { x: 7, y: 9 }));
+        // Element-targeted clicks have no coordinate.
+        let elt_click = Action::Click {
+            target: ClickTarget::Element {
+                element_ref: ElementRef("ff".into()),
+            },
+            opts: ClickOpts::default(),
+        };
+        assert_eq!(elt_click.point(), None);
+        assert_eq!(Action::Screenshot { opts: ScreenshotOpts::default() }.point(), None);
+    }
+
+    #[test]
+    fn action_output_variants_roundtrip() {
+        let out = ActionOutput::Cursor(Point { x: 1, y: 2 });
+        let json = serde_json::to_string(&out).unwrap();
+        assert!(json.contains("\"kind\":\"cursor\""));
+        let _back: ActionOutput = serde_json::from_str(&json).unwrap();
+
+        let found = ActionOutput::Found {
+            element_ref: Some(ElementRef("abc".into())),
+        };
+        let json = serde_json::to_string(&found).unwrap();
+        assert!(json.contains("\"kind\":\"found\""));
+        let _back: ActionOutput = serde_json::from_str(&json).unwrap();
     }
 }

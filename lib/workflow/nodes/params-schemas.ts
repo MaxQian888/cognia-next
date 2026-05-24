@@ -362,7 +362,7 @@ const GroupAnnotationParams = z.object({
 
 // ── Registry ───────────────────────────────────────────────────────────────
 
-export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
+export const PARAMS_SCHEMAS = {
   // Triggers
   "trigger.manual": ManualTriggerParams,
   "trigger.cron": CronParams,
@@ -447,7 +447,17 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,
-}
+} satisfies Record<WorkflowNodeKind, z.ZodTypeAny>
+
+/**
+ * Precise per-kind schema map type. Because `PARAMS_SCHEMAS` uses `satisfies`
+ * (not a `Record<…>` annotation), each key keeps its specific zod type instead
+ * of being widened to `z.ZodTypeAny`. That lets `WorkflowNodeParamsFor<K>`
+ * (see `./typed-params`) infer the params shape per kind. The `satisfies`
+ * clause still enforces exhaustiveness against `WorkflowNodeKind` at compile
+ * time — a missing or extra key fails the build.
+ */
+export type ParamsSchemas = typeof PARAMS_SCHEMAS
 
 /** Test-only export so the matrix test can iterate every kind. */
 export const KNOWN_KINDS: readonly WorkflowNodeKind[] = WORKFLOW_NODE_KINDS

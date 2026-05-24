@@ -99,6 +99,74 @@ describe("<PairedDevicesCard />", () => {
     expect(rows[0]?.revokedAt).toBeDefined()
   })
 
+  it("enabling remote control calls Dexie + the Rust allow list and persists the bit", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-rc",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+
+    const calls: Array<{ deviceId: string; allowed: boolean }> = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "companion_set_remote_control") {
+        calls.push(args as { deviceId: string; allowed: boolean })
+      }
+      return undefined as unknown as never
+    })
+
+    render(<PairedDevicesCard />)
+    const toggle = await screen.findByRole("switch", {
+      name: /Toggle remote control for Phone/i,
+    })
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(calls).toEqual([{ deviceId: "dev-rc", allowed: true }])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.allowRemoteControl).toBe(true)
+  })
+
+  it("disabling remote control records an explicit false without a biometric prompt", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-rc2",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+    {
+      const { setRemoteControlAllowed } = await import("@/lib/db/paired-devices")
+      await setRemoteControlAllowed("dev-rc2", true)
+    }
+
+    const calls: Array<{ deviceId: string; allowed: boolean }> = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "companion_set_remote_control") {
+        calls.push(args as { deviceId: string; allowed: boolean })
+      }
+      return undefined as unknown as never
+    })
+
+    render(<PairedDevicesCard />)
+    const toggle = await screen.findByRole("switch", {
+      name: /Toggle remote control for Phone/i,
+    })
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(calls).toEqual([{ deviceId: "dev-rc2", allowed: false }])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.allowRemoteControl).toBe(false)
+  })
+
   it("resuming a paused device clears the deny-list entry", async () => {
     const user = userEvent.setup()
     await addPairedDevice({

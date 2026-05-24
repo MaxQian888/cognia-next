@@ -480,6 +480,8 @@ pub fn run() {
             companion_api::commands::companion_seed_deny_list,
             companion_api::commands::companion_revoke_device,
             companion_api::commands::companion_unrevoke_device,
+            companion_api::commands::companion_set_remote_control,
+            companion_api::commands::companion_seed_remote_control,
             companion_api::commands::companion_sync_pull_response,
             companion_api::commands::companion_message_response,
             companion_api::commands::companion_desktop_write_response,
@@ -618,6 +620,7 @@ pub fn run() {
             automation::commands::desktop_window_op,
             automation::commands::desktop_cursor_position,
             automation::commands::desktop_pick_at_point,
+            automation::commands::automation_execute,
             automation::commands::automation_audit_snapshot,
             automation::commands::automation_policy_get,
             automation::commands::automation_policy_set,
@@ -628,6 +631,11 @@ pub fn run() {
             automation::commands::automation_drain_init_failure,
             automation::commands::desktop_pick_session_start,
             automation::commands::desktop_pick_session_cancel,
+            automation::commands::virtual_display_health_probe,
+            automation::commands::virtual_display_setup,
+            automation::commands::virtual_display_probe,
+            automation::commands::virtual_display_release,
+            automation::commands::virtual_display_arm,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
@@ -656,20 +664,32 @@ pub fn run() {
                 // backend several times after a panic) can keep emitting
                 // `automation:backend-init-failed` if reinit fails too.
                 let app_handle_for_builder = app_handle.clone();
+                let app_handle_for_vdd = app_handle.clone();
                 let worker = automation::Worker::spawn_with_app(
                     Some(app_handle),
                     move || automation::make_default_backend_with_app(
                         Some(app_handle_for_builder.clone()),
                     ),
                 );
-                let gate = automation::PermissionGate::new(
-                    automation::permission::AutomationSettings::default(),
-                );
+                // ADR-0020 — hydrate the gate + policy from disk so a
+                // configured tier / whitelist / per-action policy survives a
+                // restart (previously this booted to `default()`, silently
+                // dropping every persisted setting on every launch).
+                let gate = automation::PermissionGate::new(automation::persist::load_settings());
                 let audit = automation::AuditRing::new();
                 let consent = automation::ConsentBroker::new();
-                let policy = automation::policy::PolicyState::default();
+                let policy = automation::persist::load_policy_state();
+                // Screen-off Computer Use (ADR-0020 follow-up). Dedicated
+                // thread owns the bundled parsec-vdd device + 100ms keep-alive
+                // ping; the audit ring + app handle let it emit
+                // `automation:event` rows on virtual-display enter / release.
+                let virtual_display = automation::VirtualDisplayController::spawn(
+                    automation::virtual_display::build_driver,
+                    Some(audit.clone()),
+                    Some(app_handle_for_vdd),
+                );
                 app.manage(automation::commands::AutomationState::new(
-                    worker, gate, audit, consent, policy,
+                    worker, gate, audit, consent, policy, virtual_display,
                 ));
             }
 

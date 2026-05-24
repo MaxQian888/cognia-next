@@ -15,6 +15,21 @@ describe("PARAMS_SCHEMAS coverage", () => {
   })
 })
 
+describe("WORKFLOW_NODE_KINDS ↔ PARAMS_SCHEMAS parity", () => {
+  // `PARAMS_SCHEMAS` is declared with `satisfies Record<WorkflowNodeKind, …>`,
+  // so its key set is compile-enforced to equal the `WorkflowNodeKind` union
+  // exactly. Asserting the hand-maintained `WORKFLOW_NODE_KINDS` array matches
+  // those keys transitively pins the array to the union — closing the one drift
+  // the type system can't catch on its own: a kind added to the union (and thus
+  // forced into the schema map + catalog) but forgotten in the array, or a stale
+  // entry left in the array.
+  it("the kinds array lists exactly the schema-mapped kinds", () => {
+    const arrayKinds = [...new Set<string>(KNOWN_KINDS)].sort()
+    const schemaKinds = [...new Set<string>(Object.keys(PARAMS_SCHEMAS))].sort()
+    expect(arrayKinds).toEqual(schemaKinds)
+  })
+})
+
 describe("trigger schemas", () => {
   it("trigger.cron requires a 5-field expression", () => {
     expect(PARAMS_SCHEMAS["trigger.cron"].safeParse({ cron: "" }).success).toBe(false)

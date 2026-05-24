@@ -8,6 +8,7 @@ import {
   resumePairedDevice,
   revokePairedDevice,
   setPushToken,
+  setRemoteControlAllowed,
   touchPairedDevice,
 } from "./paired-devices"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -350,5 +351,54 @@ describe("setPushToken", () => {
   it("returns false for an unknown deviceId", async () => {
     const ok = await setPushToken("does-not-exist", "tok")
     expect(ok).toBe(false)
+  })
+})
+
+describe("setRemoteControlAllowed", () => {
+  it("defaults to undefined for a freshly-paired device (deny by default)", async () => {
+    await addPairedDevice({
+      deviceId: "dev-rc1",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const row = await getPairedDevice("dev-rc1")
+    expect(row?.allowRemoteControl).toBeUndefined()
+  })
+
+  it("grants the capability and returns true", async () => {
+    await addPairedDevice({
+      deviceId: "dev-rc2",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const ok = await setRemoteControlAllowed("dev-rc2", true)
+    expect(ok).toBe(true)
+    const row = await getPairedDevice("dev-rc2")
+    expect(row?.allowRemoteControl).toBe(true)
+  })
+
+  it("records an explicit false when revoked (not deleted)", async () => {
+    await addPairedDevice({
+      deviceId: "dev-rc3",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await setRemoteControlAllowed("dev-rc3", true)
+    await setRemoteControlAllowed("dev-rc3", false)
+    const row = await getPairedDevice("dev-rc3")
+    expect(row?.allowRemoteControl).toBe(false)
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await setRemoteControlAllowed("does-not-exist", true)).toBe(false)
   })
 })

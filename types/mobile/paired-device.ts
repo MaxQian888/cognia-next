@@ -56,6 +56,20 @@ export interface PairedDeviceRow {
   pushToken?: string
 
   /**
+   * Remote Session Control capability gate. When `true`, this device may
+   * issue *control* RPCs (claude_send / claude_interrupt / claude_approve,
+   * goal_*, automation_consent_respond, session_attach/detach) — i.e. drive
+   * and steer live agent sessions, not just read-only sync. Defaults to
+   * absent/`false`: a freshly-paired device can observe + sync but cannot
+   * control until the owner explicitly enables this from the desktop
+   * paired-devices card (biometric-gated). The Rust `ControlAllowList`
+   * mirrors this bit so the per-command gate in `rpc.rs` is an O(1) lookup
+   * with no Dexie round-trip. Mirrors the deny-list pattern (ADR remote
+   * session control).
+   */
+  allowRemoteControl?: boolean
+
+  /**
    * Phone app version reported in the pair payload — surfaced in the
    * paired-devices table so the owner can spot stale clients.
    */

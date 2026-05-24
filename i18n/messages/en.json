@@ -3556,6 +3556,10 @@
             "label": "Always ask before each call",
             "description": "Force every driving Computer Use call to the consent overlay for this character, regardless of Settings → Automation → Permissions. Useful for new characters whose behaviour you're still learning."
           },
+          "screenOffMode": {
+            "label": "Screen-off mode (Windows)",
+            "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked) by routing capture through a bundled virtual display. Requires the virtual-display driver — set it up under Settings → Automation. Off by default."
+          },
           "chatConsentMode": {
             "label": "Chat-side prompt behaviour",
             "description": "How the in-chat canUseTool modal behaves. Independent of the Rust gate — both can prompt.",
@@ -11667,6 +11671,37 @@
         "deviceInfoDescription": "Permissions, app build, and platform details."
       }
     },
+    "remoteSessions": {
+      "title": "Remote sessions",
+      "back": "Back to sessions",
+      "list": {
+        "loading": "Loading sessions…",
+        "empty": "No sessions on the connected desktop yet.",
+        "error": "Couldn't load sessions ({reason}).",
+        "untitled": "Untitled session",
+        "openAria": "Open {title}"
+      },
+      "detail": {
+        "title": "Live session",
+        "streaming": "Streaming",
+        "observeOnly": "Observe only",
+        "empty": "No messages yet.",
+        "composerPlaceholder": "Send a follow-up…",
+        "composerAria": "Follow-up message",
+        "sendAria": "Send",
+        "interruptAria": "Interrupt the current turn"
+      },
+      "approval": {
+        "heading": "Allow {tool}?",
+        "reason": "Confirm allowing the {tool} tool on the desktop",
+        "title": "Approve tool use",
+        "description": "The host agent wants to run a tool. Allowing lets it execute on the connected desktop.",
+        "blocked": "Approval not completed ({reason}).",
+        "allow": "Allow once",
+        "allowAlways": "Always this session",
+        "deny": "Deny"
+      }
+    },
     "companion": {
       "tunnel": {
         "title": "Cloudflared tunnel",
@@ -11704,6 +11739,16 @@
         "title": "Resume device",
         "description": "The device's JWT is removed from the deny-list and regains access.",
         "blocked": "Resume not completed ({reason})."
+      },
+      "remoteControl": {
+        "col": "Remote control",
+        "toggleAria": "Toggle remote control for {label}",
+        "reason": "Confirm granting remote control to {label}",
+        "title": "Allow remote control",
+        "description": "Lets this device drive and steer live agent sessions on this desktop, and approve computer-use prompts. Read-only sync stays available either way.",
+        "blocked": "Remote control not enabled ({reason}).",
+        "enabledToast": "Remote control enabled for {label}.",
+        "disabledToast": "Remote control disabled for {label}."
       },
       "webrtc": {
         "title": "WebRTC remote access",
@@ -14664,6 +14709,37 @@
       "whitelist": "Whitelist",
       "audit": "Audit",
       "inspector": "Inspector"
+    },
+    "screenOff": {
+      "title": "Screen-off mode",
+      "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked). Uses a bundled virtual display so screenshots never go black.",
+      "howItWorks": "When a screen-off character drives the computer, a virtual display is created and made primary; it is released after 5 minutes idle, on the kill switch, or when the session closes.",
+      "windowsOnlyNote": "Screen-off mode is Windows-only. On this platform Computer Use uses the physical display.",
+      "status": {
+        "ok": "Ready",
+        "setup": "Setup required",
+        "down": "Unavailable"
+      },
+      "driverVersion": {
+        "label": "Driver"
+      },
+      "activeMonitor": {
+        "label": "Virtual monitor"
+      },
+      "lastError": {
+        "label": "Last error"
+      },
+      "ipcError": {
+        "label": "Error"
+      },
+      "setupButton": "Set up driver",
+      "setupRunning": "Installing…",
+      "setupNote": "Until the driver is installed, screen-off turns error instead of capturing a black screen.",
+      "probeButton": "Test screen-off capture",
+      "probeRunning": "Testing…",
+      "probeOk": "Captured {width}×{height} via {monitor} — not black.",
+      "probeBlack": "Capture returned a black frame — check the driver.",
+      "enabledHint": "Enable per character under Computer Use settings (screen-off mode)."
     },
     "overview": {
       "yes": "Yes",

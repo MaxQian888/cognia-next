@@ -65,6 +65,43 @@ export interface CallContext {
    * `lib/claude/computer-use-active-settings.ts`).
    */
   forceTier?: "off" | "whitelist" | "perCall"
+  /**
+   * Screen-off mode opt-in for this call. Stamped by the computer-use plugin
+   * from the active character's `computerUseSettings.screenOffMode`. When
+   * true, the Rust plugin command ensures the bundled virtual display is
+   * active + primary before dispatching the action so capture stays
+   * non-black with the physical monitor off. Deserialized into
+   * `automation::commands::CallContext.screen_off_mode`.
+   */
+  screenOffMode?: boolean
+}
+
+/**
+ * Health snapshot for the screen-off virtual display. Mirrors Rust
+ * `automation::virtual_display::VirtualDisplayHealth` (serde camelCase).
+ */
+export interface VirtualDisplayHealth {
+  available: boolean
+  installed: boolean
+  backend: string
+  driverVersion: string
+  activeMonitor: string
+  lastError: string
+}
+
+/** Result of the settings "Test screen-off capture" probe. */
+export interface VirtualDisplayProbeResult {
+  width: number
+  height: number
+  nonBlack: boolean
+  monitor: string
+}
+
+/** Outcome of arming the virtual display before a screen-off action. */
+export interface VirtualDisplayArmResult {
+  status: "acquired" | "alreadyActive" | "unavailable"
+  monitor: string
+  error: string
 }
 
 export const desktop = {
@@ -249,6 +286,46 @@ export const desktop = {
   /** Engage the global kill switch — every in-flight call rejects with KILL_SWITCH_ACTIVE. */
   killSwitch(): Promise<void> {
     return transport.call<void>("automation_kill_switch", {})
+  },
+
+  /**
+   * Screen-off (virtual display) — read-only health snapshot for the Settings
+   * card status badge. Cheap; safe to poll.
+   */
+  virtualDisplayHealthProbe(): Promise<VirtualDisplayHealth> {
+    return transport.call<VirtualDisplayHealth>("virtual_display_health_probe", {})
+  },
+
+  /** Trigger the UAC-elevated bundled virtual-display driver install. */
+  virtualDisplaySetup(): Promise<void> {
+    return transport.call<void>("virtual_display_setup", {})
+  },
+
+  /**
+   * One-shot capture probe through the virtual display ("Test screen-off
+   * capture" button): acquires, screenshots, checks non-black, releases.
+   * Returns a summary — not the image bytes.
+   */
+  virtualDisplayProbe(): Promise<VirtualDisplayProbeResult> {
+    return transport.call<VirtualDisplayProbeResult>("virtual_display_probe", {})
+  },
+
+  /**
+   * Release the virtual display for a closed chat session (the EXIT signal
+   * piggybacked on the session-close path). No-op when nothing is active.
+   */
+  virtualDisplayRelease(sessionId?: string): Promise<void> {
+    return transport.call<void>("virtual_display_release", { args: { sessionId } })
+  },
+
+  /**
+   * ENTER hook for the live chat path: ensure the virtual display is active +
+   * primary before a screen-off computer action. Idempotent (re-arms the idle
+   * timer when already active). `status: "unavailable"` means the driver is
+   * missing — the caller fails strictly instead of capturing a black frame.
+   */
+  virtualDisplayArm(): Promise<VirtualDisplayArmResult> {
+    return transport.call<VirtualDisplayArmResult>("virtual_display_arm", {})
   },
 }
 

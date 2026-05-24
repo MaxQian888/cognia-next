@@ -33,7 +33,10 @@ import type {
 } from "@/types/plugin"
 import { PluginLoader } from "@/lib/plugin/core/loader"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
-import { createFullPluginContext } from "@/lib/plugin/core/context"
+import {
+  createFullPluginContext,
+  teardownPluginWorkflowRegistrations,
+} from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
@@ -2369,6 +2372,12 @@ export class PluginManager {
       if (cap === "skills") continue
       OVERLAY_REGISTRY_CAPABILITIES[cap].unregisterAllByPlugin(pluginId)
     }
+    // Workflow node executors + plugin triggers are a bespoke (non-overlay)
+    // capability registered through `ctx.workflow.registerNode/registerTrigger`.
+    // Tear them down here so a disabled plugin's node kinds disappear from the
+    // editor + runtime. Previously this was never called from the disable flow,
+    // leaking executors (a disabled plugin's code kept running on its kinds).
+    await teardownPluginWorkflowRegistrations(pluginId)
     // Tear down any LSP servers this plugin contributed. The registry's
     // adapter handles the actual sidecar stop; failures are logged but
     // never block the disable flow.

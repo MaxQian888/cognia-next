@@ -71,47 +71,7 @@ pub struct CursorPositionPayload {
     pub y: i32,
 }
 
-// =============================================================================
-// Bash tool (bash_20250124)
-// =============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BashAction {
-    pub command: String,
-    #[serde(default)]
-    pub timeout: Option<u64>,
-    #[serde(default)]
-    pub restart: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BashResult {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
-    pub duration_ms: u64,
-}
-
-// =============================================================================
-// Text Editor tool (text_editor_20250728)
-// =============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "action")]
-pub enum TextEditorAction {
-    View { path: String },
-    Create { path: String, file_text: String },
-    StrReplace { path: String, old_str: String, new_str: String },
-    Insert { path: String, insert_line: usize, new_str: String },
-    UndoEdit { path: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TextEditorResult {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
+// Bash (`bash_20250124`) + Text Editor (`text_editor_20250728`) payloads now
+// live in `automation::types` (the canonical home) so the unified `Action`
+// enum can fold those tools into the same dispatcher path. Call sites import
+// them directly from `crate::automation::types`.

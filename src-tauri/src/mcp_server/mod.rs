@@ -43,6 +43,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 
 use automation_proxy::AutomationProxy;
+use crate::automation::dispatcher::Enforcement;
 use http_server::{spawn_server, ServerHandle};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
@@ -110,7 +111,7 @@ impl McpServerState {
         token: String,
         settings_json: String,
         sidecar_path: String,
-        automation: Option<AutomationHandle>,
+        automation: Option<(AutomationHandle, Enforcement)>,
     ) -> Result<u16, McpServerError> {
         // Guard: reject empty token before attempting any I/O.
         if token.is_empty() {
@@ -138,8 +139,8 @@ impl McpServerState {
         // port and aborts the listener task.
         let (proxy, proxy_env): (Option<Arc<AutomationProxy>>, Vec<(String, String)>) =
             match automation {
-                Some(handle) => {
-                    let proxy = AutomationProxy::spawn(handle)
+                Some((handle, enforcement)) => {
+                    let proxy = AutomationProxy::spawn(handle, enforcement)
                         .await
                         .map_err(|e| McpServerError::SidecarSpawn(format!(
                             "automation_proxy bind failed: {e}"

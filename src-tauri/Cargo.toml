@@ -46,6 +46,15 @@ name = "cognia-sandbox-runner"
 path = "src/bin/cognia-sandbox-runner.rs"
 required-features = []
 
+# ADR-0020 follow-up — screen-off Computer Use virtual-display driver
+# installer. UAC-elevated (launched via Start-Process -Verb RunAs by the
+# renderer's `virtual_display_setup` command). `pnputil /add-driver` the
+# bundled, Microsoft-signed parsec-vdd payload; writes a success marker.
+[[bin]]
+name = "cognia-vdd-setup"
+path = "src/bin/cognia-vdd-setup.rs"
+required-features = []
+
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 
@@ -303,6 +312,14 @@ windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    # Screen-off Computer Use (virtual display): parsec-vdd device IOCTLs +
+    # display-topology set-primary/restore + system-sleep keepalive.
+    "Win32_Storage_FileSystem",        # CreateFileW, FILE_SHARE_*, OPEN_EXISTING
+    "Win32_System_IO",                 # DeviceIoControl, OVERLAPPED, GetOverlappedResult
+    "Win32_System_Threading",          # CreateEventW, WaitForSingleObject
+    "Win32_System_Power",              # SetThreadExecutionState, ES_*
+    "Win32_Devices_Display",           # (reserved) QueryDisplayConfig family
+    "Win32_Graphics_Gdi",              # ChangeDisplaySettingsExW, EnumDisplay*, DEVMODEW
 ] }
 
 [target."cfg(target_os = \"macos\")".dependencies]

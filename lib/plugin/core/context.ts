@@ -1946,6 +1946,9 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         execute: def.execute,
         retryable: def.retryable,
         timeoutMs: def.timeoutMs,
+        // Tag the owner so the registry's first-wins-cross-plugin policy can
+        // protect built-ins and reject a second plugin claiming the same kind.
+        pluginId,
       })
       const catalogEntry: NodeCatalogEntry = {
         kind: prefixed as never,

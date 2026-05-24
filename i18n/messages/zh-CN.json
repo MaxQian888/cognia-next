@@ -3556,6 +3556,10 @@
             "label": "每次调用前都征求同意",
             "description": "无论「设置 → 自动化 → 权限」如何配置，本角色发出的每条 Computer Use 驱动调用都强制走同意浮层。对行为还不熟悉的新角色尤其有用。"
           },
+          "screenOffMode": {
+            "label": "熄屏模式（Windows）",
+            "description": "在显示器关闭或休眠（会话需保持解锁）时，通过捆绑的虚拟显示器路由截图，让 Computer Use 持续可用。需要先在「设置 → 自动化」中安装虚拟显示器驱动。默认关闭。"
+          },
           "chatConsentMode": {
             "label": "聊天侧弹窗策略",
             "description": "聊天内 canUseTool 弹窗的行为。与 Rust 网关相互独立，两端都可能弹。",
@@ -11667,6 +11671,37 @@
         "deviceInfoDescription": "权限、构建号、平台细节。"
       }
     },
+    "remoteSessions": {
+      "title": "远程会话",
+      "back": "返回会话列表",
+      "list": {
+        "loading": "正在加载会话…",
+        "empty": "已连接的桌面上还没有会话。",
+        "error": "加载会话失败（{reason}）。",
+        "untitled": "未命名会话",
+        "openAria": "打开 {title}"
+      },
+      "detail": {
+        "title": "实时会话",
+        "streaming": "流式输出中",
+        "observeOnly": "仅观察",
+        "empty": "还没有消息。",
+        "composerPlaceholder": "发送追问…",
+        "composerAria": "追问消息",
+        "sendAria": "发送",
+        "interruptAria": "打断当前回合"
+      },
+      "approval": {
+        "heading": "允许使用 {tool}？",
+        "reason": "确认允许在桌面上使用 {tool} 工具",
+        "title": "批准工具调用",
+        "description": "宿主 agent 想要运行一个工具。允许后它将在已连接的桌面上执行。",
+        "blocked": "批准未完成（{reason}）。",
+        "allow": "允许一次",
+        "allowAlways": "本会话始终允许",
+        "deny": "拒绝"
+      }
+    },
     "companion": {
       "tunnel": {
         "title": "Cloudflared 隧道",
@@ -11704,6 +11739,16 @@
         "title": "恢复设备",
         "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",
         "blocked": "恢复未完成（{reason}）。"
+      },
+      "remoteControl": {
+        "col": "远程控制",
+        "toggleAria": "切换 {label} 的远程控制",
+        "reason": "确认授予 {label} 远程控制权限",
+        "title": "允许远程控制",
+        "description": "允许此设备驱动并操控本桌面上的实时会话，并批准 computer-use 提示。无论是否开启，只读同步始终可用。",
+        "blocked": "远程控制未启用（{reason}）。",
+        "enabledToast": "已为 {label} 启用远程控制。",
+        "disabledToast": "已为 {label} 关闭远程控制。"
       },
       "webrtc": {
         "title": "WebRTC 远程访问",
@@ -14664,6 +14709,37 @@
       "whitelist": "白名单",
       "audit": "审计",
       "inspector": "检查器"
+    },
+    "screenOff": {
+      "title": "熄屏模式",
+      "description": "在显示器关闭或休眠（会话需保持解锁）时让 Computer Use 持续可用。通过捆绑的虚拟显示器保证截图不会黑屏。",
+      "howItWorks": "当启用熄屏模式的角色驱动电脑时，会创建一块虚拟显示器并置为主显示；空闲 5 分钟、触发 kill switch 或会话关闭时自动释放。",
+      "windowsOnlyNote": "熄屏模式仅支持 Windows。在当前平台上 Computer Use 使用物理显示器。",
+      "status": {
+        "ok": "就绪",
+        "setup": "需要安装",
+        "down": "不可用"
+      },
+      "driverVersion": {
+        "label": "驱动"
+      },
+      "activeMonitor": {
+        "label": "虚拟显示器"
+      },
+      "lastError": {
+        "label": "最近错误"
+      },
+      "ipcError": {
+        "label": "错误"
+      },
+      "setupButton": "安装驱动",
+      "setupRunning": "安装中…",
+      "setupNote": "驱动未安装前，熄屏动作会直接报错，而不会拍出黑屏。",
+      "probeButton": "测试熄屏截图",
+      "probeRunning": "测试中…",
+      "probeOk": "已通过 {monitor} 截取 {width}×{height} —— 非黑屏。",
+      "probeBlack": "截图返回黑帧 —— 请检查驱动。",
+      "enabledHint": "在角色的 Computer Use 设置中按角色开启（熄屏模式）。"
     },
     "overview": {
       "yes": "是",

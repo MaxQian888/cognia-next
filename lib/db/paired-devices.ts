@@ -174,3 +174,30 @@ export async function setPushToken(
   const updated = await getDb().pairedDevices.update(deviceId, { pushToken })
   return updated > 0
 }
+
+/**
+ * Grant or revoke the Remote Session Control capability for a device. When
+ * `true`, the device may issue control RPCs (drive / steer / approve live
+ * agent sessions); when `false` it is limited to read-only sync + observe.
+ *
+ * Pairs with the Rust `companion_set_remote_control` command (called by the
+ * caller — the paired-devices card — behind the biometric guard) which
+ * mirrors the bit into the `ControlAllowList` the per-command gate in
+ * `rpc.rs` consults. This Dexie write is the persisted source of truth that
+ * re-seeds the Rust mirror on the next desktop boot.
+ *
+ * Stored as an explicit boolean (never deleted) so a disabled device reads
+ * back `false` rather than `undefined` — the gate treats both as "deny", but
+ * an explicit `false` records that the owner made a deliberate choice.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function setRemoteControlAllowed(
+  deviceId: string,
+  allowed: boolean
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowRemoteControl: allowed,
+  })
+  return updated > 0
+}

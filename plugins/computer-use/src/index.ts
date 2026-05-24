@@ -59,6 +59,13 @@ function buildChatCallContext(): CallContext {
     if (settings?.requireConsent === true) {
       ctx.forceTier = "perCall"
     }
+    // Screen-off mode: stamp the flag so the Rust plugin command ensures the
+    // bundled virtual display is active + primary before driving the action
+    // (capture stays non-black with the monitor off). Strict — the command
+    // errors with `vdd_unavailable` when the driver isn't installed.
+    if (settings?.screenOffMode === true) {
+      ctx.screenOffMode = true
+    }
   }
   return ctx
 }

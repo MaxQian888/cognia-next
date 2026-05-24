@@ -28,16 +28,31 @@ jest.mock("@/lib/i18n/plugin-i18n-registry", () => ({
   unregisterPluginI18n: jest.fn(),
 }))
 
+// `buildChatCallContext` reads the active session id from the chat store and
+// the per-session computer-use settings. Default to "no active session" so the
+// existing executor tests see a bare ctx; individual tests override.
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { getState: jest.fn(() => ({ activeSessionId: undefined })) },
+}))
+
+jest.mock("@/lib/claude/computer-use-active-settings", () => ({
+  getActiveComputerUseSettings: jest.fn(() => null),
+}))
+
 import definition from "./index"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { dispatchAnthropicAction } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
+import { useChatStore } from "@/stores/chat/chat-store"
+import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
 import type { PluginTool } from "@/types/plugin/plugin"
 
 const mockedDispatchAction = dispatchAnthropicAction as jest.Mock
 const mockedBash = pluginComputerUseBash as jest.Mock
 const mockedTextEditor = pluginComputerUseTextEditor as jest.Mock
+const mockedGetState = (useChatStore as unknown as { getState: jest.Mock }).getState
+const mockedGetSettings = getActiveComputerUseSettings as jest.Mock
 
 type ToolArg = PluginTool
 
@@ -160,6 +175,37 @@ describe("computer-use plugin activate()", () => {
       await tool!.execute({ action: "view", path: "/tmp/x" }, { config: {} })
       expect(mockedTextEditor).toHaveBeenCalledWith(
         { action: "view", path: "/tmp/x" },
+        { surface: "computerUse", pluginId: "cognia-computer-use" }
+      )
+    })
+
+    it("computer_use stamps screenOffMode + forceTier from active settings", async () => {
+      const tool = await getTool("computer_use")
+      // Only the executor reads the session/settings, so single-shot
+      // overrides line up with the one dispatch below.
+      mockedGetState.mockReturnValueOnce({ activeSessionId: "sess-1" })
+      mockedGetSettings.mockReturnValueOnce({ screenOffMode: true, requireConsent: true })
+      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
+      await tool!.execute({ action: "screenshot" }, { config: {} })
+      expect(mockedDispatchAction).toHaveBeenCalledWith(
+        { action: "screenshot" },
+        {
+          surface: "computerUse",
+          pluginId: "cognia-computer-use",
+          forceTier: "perCall",
+          screenOffMode: true,
+        }
+      )
+    })
+
+    it("computer_use omits screenOffMode when the setting is off", async () => {
+      const tool = await getTool("computer_use")
+      mockedGetState.mockReturnValueOnce({ activeSessionId: "sess-2" })
+      mockedGetSettings.mockReturnValueOnce({ screenOffMode: false })
+      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
+      await tool!.execute({ action: "screenshot" }, { config: {} })
+      expect(mockedDispatchAction).toHaveBeenCalledWith(
+        { action: "screenshot" },
         { surface: "computerUse", pluginId: "cognia-computer-use" }
       )
     })

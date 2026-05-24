@@ -1684,6 +1684,15 @@ export interface Character {
      *   decides. Use sparingly — best paired with `Tier::Whitelist`.
      */
     chatConsentMode?: "always-ask" | "session-grant" | "auto"
+    /**
+     * Screen-off mode (ADR-0020 follow-up). When `true`, computer-use turns on
+     * this character ensure the bundled virtual display is active and primary
+     * so screen capture keeps working while the physical monitor is off /
+     * asleep (the Windows session must stay unlocked). Windows-only; default
+     * `false`. Strict: when the driver isn't installed the turn errors with
+     * `vdd_unavailable` rather than capturing a black screen.
+     */
+    screenOffMode?: boolean
   }
   /**
    * Set ONLY when this row is a user-cloned copy of a plugin-overlay character

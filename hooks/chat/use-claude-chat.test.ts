@@ -549,6 +549,33 @@ describe("useClaudeChat — actions", () => {
     chatState.activeSessionId = "sess-1"
   })
 
+  it("permission_request for a non-active but remotely-attached session is not auto-denied", async () => {
+    const registry = await import("@/lib/companion/remote-attach-registry")
+    registry.__resetRemoteAttachForTests()
+    registry.attachSession("sess-1", "dev-remote")
+
+    chatState.activeSessionId = "sess-other"
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-remote",
+        toolUseID: "tu-r",
+        toolName: "write",
+        input: {},
+      })
+    })
+    // Routed to the remote device — no auto-deny, and a backstop is armed.
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(registry.hasArmedBackstop("sess-1")).toBe(true)
+
+    registry.__resetRemoteAttachForTests()
+    chatState.activeSessionId = "sess-1"
+  })
+
   it("incoming permission_request for the active session pushes an approval", async () => {
     renderHook(() => useClaudeChat())
     await flush()

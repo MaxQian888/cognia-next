@@ -153,6 +153,7 @@ use crate::automation::types::{
     AutomationError, ButtonTransition, ClickOpts, ClickTarget, DragOpts, KeyChord, Locator,
     MouseButton, Point, ScreenshotOpts, ScrollOpts, ScrollTarget, TreeOpts, TypeOpts, WindowOp,
 };
+use crate::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
 use crate::automation::worker::AutomationHandle;
 
 /// Live proxy handle. Drop aborts the listener task; closing the listener
@@ -173,12 +174,20 @@ impl AutomationProxy {
     /// Each accepted connection runs in its own task and is fed a clone of
     /// the shared `AutomationHandle`; the worker thread underneath
     /// serialises every call so concurrent client connections are safe.
-    pub async fn spawn(handle: AutomationHandle) -> std::io::Result<Self> {
+    pub async fn spawn(
+        handle: AutomationHandle,
+        enforcement: Enforcement,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let token = generate_token();
         let expected = Arc::new(token.clone());
         let handle = Arc::new(handle);
+        // ADR-0020 — the proxy now routes every (non-probe) call through the
+        // shared `dispatcher::run_gated_enf` so the External Bridge MCP surface
+        // is gated + audited like every other surface. Previously this socket
+        // called the worker handle directly, bypassing the permission gate.
+        let enforcement = Arc::new(enforcement);
         // ADR-0020 W3 — per-peer rate limiter shared across every
         // accepted connection. One bucket per IP, cleaned on lockout
         // expiry. Keeps `automation_proxy` from being a DoS amplifier
@@ -196,12 +205,14 @@ impl AutomationProxy {
                     }
                 };
                 let handle = Arc::clone(&handle);
+                let enforcement = Arc::clone(&enforcement);
                 let expected = Arc::clone(&expected);
                 let rate_limiter = Arc::clone(&rate_limiter);
                 let peer_ip = peer_addr.ip();
                 tokio::spawn(async move {
                     if let Err(err) =
-                        serve_connection(stream, handle, expected, rate_limiter, peer_ip).await
+                        serve_connection(stream, handle, enforcement, expected, rate_limiter, peer_ip)
+                            .await
                     {
                         eprintln!("[automation_proxy] connection error: {err}");
                     }
@@ -232,6 +243,7 @@ impl Drop for AutomationProxy {
 async fn serve_connection(
     stream: tokio::net::TcpStream,
     handle: Arc<AutomationHandle>,
+    enforcement: Arc<Enforcement>,
     expected_token: Arc<String>,
     rate_limiter: Arc<RateLimiter>,
     peer_ip: IpAddr,
@@ -315,9 +327,10 @@ async fn serve_connection(
         // Dispatch in a separate task so a slow request can't block the
         // read loop — the worker thread underneath serialises calls anyway.
         let handle = Arc::clone(&handle);
+        let enforcement = Arc::clone(&enforcement);
         let writer = Arc::clone(&writer);
         tokio::spawn(async move {
-            let resp = dispatch(req, &handle).await;
+            let resp = dispatch(req, &handle, &enforcement).await;
             if let Err(err) = write_response(&writer, &resp).await {
                 eprintln!("[automation_proxy] write failed: {err}");
             }
@@ -387,13 +400,61 @@ struct ProxyResponse {
 // return type.
 // ---------------------------------------------------------------------------
 
-async fn dispatch(req: ProxyRequest, handle: &AutomationHandle) -> ProxyResponse {
+async fn dispatch(
+    req: ProxyRequest,
+    handle: &AutomationHandle,
+    enforcement: &Enforcement,
+) -> ProxyResponse {
     let id = req.id.clone();
-    // Every request forces `surface: "mcp"` regardless of what the client
-    // sent — defence in depth so an external agent can't promote itself to
-    // a less-restricted surface.
-    let _surface = Surface::Mcp;
-    match run(req, handle).await {
+
+    // `desktop_capabilities` is a harmless probe (mirrors the ungated
+    // `desktop_capabilities` Tauri command) — let it through without a gate so
+    // an MCP client can always discover what the backend supports.
+    if req.command == "desktop_capabilities" {
+        return match run(req, handle).await {
+            Ok(value) => ProxyResponse {
+                id,
+                ok: true,
+                result: Some(value),
+                error: None,
+            },
+            Err(err) => ProxyResponse {
+                id,
+                ok: false,
+                result: None,
+                error: Some(err),
+            },
+        };
+    }
+
+    // Every other call is forced onto the MCP surface and routed through the
+    // shared `dispatcher::run_gated_enf` pipeline (gate → consent → audit) —
+    // this is what closes the historical bypass where the proxy called the
+    // worker handle directly. Headless: there is no overlay, so a `PerCall`
+    // tier resolves to deny. The gate matches on the un-prefixed command name
+    // ("click", "screenshot", …), exactly like the renderer `desktop_*` path.
+    let gate_command = req
+        .command
+        .strip_prefix("desktop_")
+        .unwrap_or(&req.command)
+        .to_string();
+    let gctx = GateContext {
+        surface: Surface::Mcp,
+        plugin_id: None,
+        process_name: None,
+        window_title: None,
+        target_url: None,
+        click_x: None,
+        click_y: None,
+        force_tier: None,
+    };
+    let result = run_gated_enf(None, enforcement, gctx, &gate_command, move || async move {
+        run(req, handle)
+            .await
+            .map_err(|message| AutomationError::Internal { message })
+    })
+    .await;
+    match result {
         Ok(value) => ProxyResponse {
             id,
             ok: true,
@@ -404,7 +465,7 @@ async fn dispatch(req: ProxyRequest, handle: &AutomationHandle) -> ProxyResponse
             id,
             ok: false,
             result: None,
-            error: Some(err),
+            error: Some(format!("{err}")),
         },
     }
 }
@@ -622,7 +683,11 @@ struct WindowOpArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automation::audit::AuditRing;
     use crate::automation::backend::StubBackend;
+    use crate::automation::consent::ConsentBroker;
+    use crate::automation::permission::{AutomationSettings, PermissionGate, Tier};
+    use crate::automation::policy::PolicyState;
     use crate::automation::types::Platform;
     use crate::automation::worker::Worker;
     use tokio::io::AsyncWriteExt;
@@ -634,6 +699,25 @@ mod tests {
                 platform: Platform::Unsupported,
             })
         })
+    }
+
+    fn stub_enf_with(mcp_tier: Tier) -> Enforcement {
+        let mut settings = AutomationSettings::default();
+        settings.per_surface.mcp.tier = mcp_tier;
+        Enforcement {
+            gate: PermissionGate::new(settings),
+            audit: AuditRing::new(),
+            consent: ConsentBroker::default(),
+            policy: PolicyState::default(),
+        }
+    }
+
+    /// Permissive enforcement for the round-trip tests: the MCP surface uses
+    /// the (empty) whitelist tier, which the gate treats as allow-all, so gated
+    /// calls reach the worker the same way the pre-gate tests expected. The
+    /// `denied_*` test flips this to `Off` to prove the gate now blocks.
+    fn stub_enf() -> Enforcement {
+        stub_enf_with(Tier::Whitelist)
     }
 
     async fn write_line(stream: &mut TcpStream, line: &str) {
@@ -650,7 +734,7 @@ mod tests {
 
     #[tokio::test]
     async fn capabilities_round_trip_with_stub_backend() {
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = format!(
             r#"{{"id":"req-1","token":"{}","command":"desktop_capabilities","args":{{}}}}"#,
@@ -668,7 +752,7 @@ mod tests {
 
     #[tokio::test]
     async fn unauthorized_request_returns_unauthorized() {
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = r#"{"id":"req-2","token":"WRONG","command":"desktop_capabilities","args":{}}"#;
         write_line(&mut stream, req).await;
@@ -682,7 +766,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_returns_error() {
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         let req = format!(
             r#"{{"id":"req-3","token":"{}","command":"desktop_bogus","args":{{}}}}"#,
@@ -698,7 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_json_is_reported_per_line() {
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
         write_line(&mut stream, "not json").await;
         let mut reader = BufReader::new(&mut stream);
@@ -706,6 +790,42 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&resp_text).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("invalid JSON"));
+    }
+
+    #[tokio::test]
+    async fn denied_mcp_surface_blocks_driving_call_and_audits() {
+        // Regression guard for the historical bypass: with the MCP surface tier
+        // set to Off, a driving call must be denied by the shared gate AND the
+        // denial must land in the audit ring (the old proxy called the worker
+        // directly, recording nothing and enforcing nothing).
+        let audit = AuditRing::new();
+        let mut settings = AutomationSettings::default();
+        settings.per_surface.mcp.tier = Tier::Off;
+        let enf = Enforcement {
+            gate: PermissionGate::new(settings),
+            audit: audit.clone(),
+            consent: ConsentBroker::default(),
+            policy: PolicyState::default(),
+        };
+        let proxy = AutomationProxy::spawn(stub_handle(), enf).await.unwrap();
+        let mut stream = TcpStream::connect(proxy.addr).await.unwrap();
+        let req = format!(
+            r#"{{"id":"req-deny","token":"{}","command":"desktop_click","args":{{"target":{{"kind":"point","x":1,"y":2}}}}}}"#,
+            proxy.token
+        );
+        write_line(&mut stream, &req).await;
+        let mut reader = BufReader::new(&mut stream);
+        let resp_text = read_line(&mut reader).await;
+        let resp: serde_json::Value = serde_json::from_str(&resp_text).unwrap();
+        assert_eq!(resp["id"], "req-deny");
+        assert_eq!(resp["ok"], false, "tier Off must deny the click");
+        // The denial was recorded in the shared audit ring under the
+        // un-prefixed command name.
+        let entries = audit.snapshot();
+        assert!(
+            entries.iter().any(|e| e.command == "click"),
+            "expected an audited 'click' deny row"
+        );
     }
 
     #[tokio::test]
@@ -790,7 +910,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_proxy_aborts_listener_task() {
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         let addr = proxy.addr;
         drop(proxy);
         // Give tokio a moment to actually release the port.
@@ -801,7 +921,7 @@ mod tests {
         // gone (tested implicitly: a new spawn on a fresh ephemeral port
         // works without resource leaks).
         let _ = addr;
-        let proxy = AutomationProxy::spawn(stub_handle()).await.unwrap();
+        let proxy = AutomationProxy::spawn(stub_handle(), stub_enf()).await.unwrap();
         assert_ne!(proxy.addr.port(), 0);
     }
 }

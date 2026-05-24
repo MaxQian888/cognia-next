@@ -139,6 +139,18 @@ impl RpcError {
         )
     }
 
+    /// Remote session control gate (Remote Session Control). The device is
+    /// paired and authenticated but has not been granted the elevated
+    /// remote-control capability — `allowRemoteControl` is off for it. The
+    /// owner enables it per-device from the desktop paired-devices settings
+    /// (biometric-gated).
+    fn forbidden(detail: impl Into<String>) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::FORBIDDEN,
+            Json(Self::new("remote_control_forbidden", detail)),
+        )
+    }
+
     /// Wave 3.3 — 429 Too Many Requests with the wait time embedded in
     /// the message (`retry_after_seconds=N`). The flat envelope keeps
     /// the contract simple; phones can parse the integer.
@@ -228,6 +240,17 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connector_reject_draft",
     "workflow_trigger_manual",
     "twin_ingest_source",
+    // Remote Session Control — attach/detach a remote watcher + steer host
+    // goal loops. All round-trip through desktop_writes_bridge. Gated by the
+    // remote-control capability (see CONTROL_COMMANDS).
+    "session_attach",
+    "session_detach",
+    "goal_pause",
+    "goal_resume",
+    "goal_stop",
+    // Resolve a host computer-use consent prompt from a remote device.
+    // Calls the automation ConsentBroker directly (not via writes-bridge).
+    "automation_consent_respond",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -265,6 +288,43 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
 ];
+
+// ---------------------------------------------------------------------------
+// Remote-control command gate (Remote Session Control)
+// ---------------------------------------------------------------------------
+
+/// Commands that require the elevated **remote-control** capability — the
+/// device must be present in [`super::control_allow_list`]. These attach to
+/// and steer host-owned agent sessions, control host goal loops, or resolve
+/// host computer-use consent.
+///
+/// Baseline paired chat (`claude_send` / `claude_interrupt` /
+/// `claude_approve`) is deliberately **absent**: that is the phone's own chat
+/// path and predates this capability, so gating it would break existing
+/// mobile clients. Read-only sync/observe is likewise ungated.
+///
+/// Command arms are added by their respective milestones; the gate fires for a
+/// name as soon as it appears here (it runs before the dispatch `match`).
+const CONTROL_COMMANDS: &[&str] = &[
+    "session_attach",
+    "session_detach",
+    "goal_pause",
+    "goal_resume",
+    "goal_stop",
+    "automation_consent_respond",
+];
+
+/// True when `name` requires the remote-control capability.
+fn is_control_command(name: &str) -> bool {
+    CONTROL_COMMANDS.contains(&name)
+}
+
+/// Public read-only accessor for the remote-control command set. Used by
+/// in-file tests to assert the gate covers the intended surfaces.
+#[allow(dead_code)] // referenced from tests only.
+pub fn control_commands() -> &'static [&'static str] {
+    CONTROL_COMMANDS
+}
 
 /// Allowlisted patch keys for `app_settings_update`. The mobile client may
 /// only mutate user-facing preferences; transport, sidecar, and provider
@@ -343,6 +403,19 @@ pub async fn rpc_handler(
     // the 503 path for genuinely unknown commands.
     if !KNOWN_COMMANDS.contains(&name.as_str()) {
         return Err(RpcError::unknown_command(&name));
+    }
+
+    // Remote Session Control capability gate (fast-fail). Also enforced at the
+    // top of `dispatch` so the WebRTC `signaling::dispatch` path — which calls
+    // `dispatch` directly, bypassing this handler — stays gated too. Failing
+    // here means an unauthorized device never burns a rate-limit token or
+    // touches the sidecar.
+    if is_control_command(&name)
+        && !super::control_allow_list::global().is_allowed(&ctx.device_id)
+    {
+        return Err(RpcError::forbidden(
+            "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
+        ));
     }
 
     // Wave 3.3 — per-device rate limiter sits after the JWT verifier
@@ -458,6 +531,16 @@ pub(super) async fn dispatch(
     device_id: &str,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
+
+    // Remote Session Control gate. Runs for both the HTTP `rpc_handler` and
+    // the WebRTC `signaling::dispatch` path (both funnel through here), so the
+    // elevated capability is enforced regardless of transport. Baseline chat
+    // and read-only sync are not in `CONTROL_COMMANDS`, so they pass through.
+    if is_control_command(name) && !super::control_allow_list::global().is_allowed(device_id) {
+        return Err(RpcError::forbidden(
+            "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
+        ));
+    }
 
     match name {
         // ── Chat session ─────────────────────────────────────────────────────
@@ -879,7 +962,15 @@ pub(super) async fn dispatch(
         | "connector_approve_draft"
         | "connector_reject_draft"
         | "workflow_trigger_manual"
-        | "twin_ingest_source" => {
+        | "twin_ingest_source"
+        // Remote Session Control — attach/detach a remote watcher + steer
+        // host goal loops. Same generic bridge; TS-side dispatch arms live in
+        // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
+        | "session_attach"
+        | "session_detach"
+        | "goal_pause"
+        | "goal_resume"
+        | "goal_stop" => {
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             bridge
                 .dispatch(
@@ -889,6 +980,26 @@ pub(super) async fn dispatch(
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
+                .map_err(RpcError::internal)
+        }
+
+        // Remote Session Control — resolve a host computer-use HITL consent
+        // prompt from a remote device. The prompt streams to the phone over
+        // `/ws/v1/events` as the `automation:consent-request` frame; the phone
+        // renders it and calls this to allow/deny. First-responder wins —
+        // `ConsentBroker::resolve` removes the pending oneshot, so a duplicate
+        // (desktop overlay + phone) is harmless. Distinct HITL channel from
+        // `claude_approve` (which resolves Claude SDK tool-use prompts).
+        "automation_consent_respond" => {
+            let respond_args: crate::automation::commands::ConsentRespondArgs =
+                serde_json::from_value(args).map_err(|e| {
+                    RpcError::malformed(format!("automation_consent_respond args: {e}"))
+                })?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            crate::automation::commands::automation_consent_respond(automation_state, respond_args)
+                .await
+                .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
 
@@ -1055,6 +1166,62 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 404);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "unknown_command");
+    }
+
+    // ── Remote Session Control gate ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn control_command_forbidden_when_device_not_allowed() {
+        // Unique device id so the process-global allow list (shared across
+        // parallel tests) can't be left in an allowed state by another test.
+        let device = "dev-gate-denied-001";
+        super::super::control_allow_list::global().disallow(device);
+
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(router, "session_attach", json!({ "sessionId": "s1" }), &jwt, None).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "remote_control_forbidden");
+    }
+
+    #[tokio::test]
+    async fn control_command_passes_gate_when_device_allowed() {
+        let device = "dev-gate-allowed-001";
+        super::super::control_allow_list::global().allow(device.to_string());
+
+        let state = test_state(); // app_handle None → 503 once past the gate
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(router, "session_attach", json!({ "sessionId": "s1" }), &jwt, None).await;
+        // Past the capability gate: not 403. In test mode the missing
+        // app_handle yields 503 — the point is the gate let it through.
+        assert_ne!(resp.status().as_u16(), 403);
+        super::super::control_allow_list::global().disallow(device);
+    }
+
+    #[tokio::test]
+    async fn baseline_chat_command_is_not_gated() {
+        // claude_send is NOT in CONTROL_COMMANDS — a paired device with no
+        // remote-control grant must still be able to use baseline chat.
+        let device = "dev-baseline-001";
+        super::super::control_allow_list::global().disallow(device);
+
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(
+            router,
+            "claude_send",
+            json!({ "session_id": "s1", "prompt": "hi" }),
+            &jwt,
+            None,
+        )
+        .await;
+        // Not forbidden — baseline chat bypasses the capability gate (it
+        // 503s in test mode for lack of an app_handle, which is fine).
+        assert_ne!(resp.status().as_u16(), 403);
     }
 
     // ── Missing Authorization → 401 (middleware) ──────────────────────────────

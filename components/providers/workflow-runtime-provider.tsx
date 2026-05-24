@@ -8,6 +8,7 @@ import {
 } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
+import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.scheduler
@@ -74,6 +75,24 @@ export function WorkflowRuntimeProvider({ children }: { children: React.ReactNod
         })
       } catch (err) {
         log.warn?.("workflow runtime: initial trigger sync failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Replay any runs the Rust mirror still holds in-flight — e.g. after a
+      // webview crash / reload. Runs AFTER trigger sync so a resumed run sees a
+      // fully wired runtime. No-op in web mode (the mirror call returns []), so
+      // this is safe on all three shells. Previously `resumeInFlightRuns` was
+      // dead code (zero callers), so durable runs never actually resumed.
+      try {
+        if (!cancelled) {
+          const summary = await resumeInFlightRuns()
+          if (summary.attempted > 0) {
+            log.info?.("workflow runtime: resumed in-flight runs", { ...summary })
+          }
+        }
+      } catch (err) {
+        log.warn?.("workflow runtime: resumeInFlightRuns failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }

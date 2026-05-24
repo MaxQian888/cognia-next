@@ -21,6 +21,9 @@ import {
   listSessions as dbListSessions,
   updateSession as dbUpdateSession,
 } from "@/lib/db/sessions"
+import { clearActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import { desktop } from "@/lib/automation/client"
+import { isTauri } from "@/lib/tauri"
 import type { Session, CreateSessionInput, UpdateSessionInput } from "@/types/plugin/_compat"
 
 interface SessionStoreState {
@@ -134,6 +137,14 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       activeSessionId: state.activeSessionId === id ? null : state.activeSessionId,
     }))
     void dbDeleteSession(id).catch((err) => console.warn("dbDeleteSession failed", err))
+    // Screen-off Computer Use — releasing a closed session drops its cached
+    // settings and tears down any virtual display it was holding (immediate
+    // EXIT signal; the controller's 5-min idle release + kill switch remain as
+    // safety nets). Fire-and-forget — desktop-only.
+    clearActiveComputerUseSettings(id)
+    if (isTauri()) {
+      void desktop.virtualDisplayRelease(id).catch(() => {})
+    }
   },
 
   setActiveSession: (id) => {

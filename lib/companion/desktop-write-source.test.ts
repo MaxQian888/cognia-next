@@ -31,8 +31,18 @@ jest.mock("@/lib/twin/ingest", () => ({
   })),
 }))
 
+// Stub the goal runtime so goal_* dispatch arms exercise the wiring without
+// spinning up real goal lifecycle (Dexie rows, abort controllers).
+jest.mock("@/lib/goal/runtime", () => {
+  const pauseGoal = jest.fn().mockResolvedValue({ id: "g1", status: "paused" })
+  const resumeGoal = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
+  const stopGoal = jest.fn().mockResolvedValue({ id: "g1", status: "stopped" })
+  return { getGoalRuntime: () => ({ pauseGoal, resumeGoal, stopGoal }) }
+})
+
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
+import { getGoalRuntime } from "@/lib/goal/runtime"
 
 beforeEach(async () => {
   jest.clearAllMocks()
@@ -198,6 +208,70 @@ describe("dispatchCommand: twin_ingest_source", () => {
 
   it("rejects without a twinId", async () => {
     await expect(dispatchCommand("twin_ingest_source", {})).rejects.toThrow(/twinId is required/)
+  })
+})
+
+describe("dispatchCommand: session_attach / session_detach", () => {
+  it("attach marks the session watched, detach clears it", async () => {
+    const { isSessionAttached, __resetRemoteAttachForTests } =
+      await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    const attachResult = await dispatchCommand("session_attach", {
+      sessionId: "s-att",
+      deviceId: "dev-1",
+    })
+    expect(attachResult).toBe(null)
+    expect(isSessionAttached("s-att")).toBe(true)
+
+    const detachResult = await dispatchCommand("session_detach", {
+      sessionId: "s-att",
+      deviceId: "dev-1",
+    })
+    expect(detachResult).toBe(null)
+    expect(isSessionAttached("s-att")).toBe(false)
+    __resetRemoteAttachForTests()
+  })
+
+  it("attach rejects without sessionId or deviceId", async () => {
+    await expect(dispatchCommand("session_attach", { deviceId: "d" })).rejects.toThrow(
+      /sessionId is required/
+    )
+    await expect(dispatchCommand("session_attach", { sessionId: "s" })).rejects.toThrow(
+      /deviceId is required/
+    )
+  })
+
+  it("detach rejects without sessionId or deviceId", async () => {
+    await expect(dispatchCommand("session_detach", { deviceId: "d" })).rejects.toThrow(
+      /sessionId is required/
+    )
+    await expect(dispatchCommand("session_detach", { sessionId: "s" })).rejects.toThrow(
+      /deviceId is required/
+    )
+  })
+})
+
+describe("dispatchCommand: goal_pause / goal_resume / goal_stop", () => {
+  it("goal_pause routes to GoalRuntime.pauseGoal and returns the goal", async () => {
+    const result = (await dispatchCommand("goal_pause", { goalId: "g1" })) as { goal: unknown }
+    expect(getGoalRuntime().pauseGoal).toHaveBeenCalledWith("g1")
+    expect(result.goal).toEqual({ id: "g1", status: "paused" })
+  })
+
+  it("goal_resume routes to GoalRuntime.resumeGoal", async () => {
+    await dispatchCommand("goal_resume", { goalId: "g1" })
+    expect(getGoalRuntime().resumeGoal).toHaveBeenCalledWith("g1")
+  })
+
+  it("goal_stop routes to GoalRuntime.stopGoal", async () => {
+    await dispatchCommand("goal_stop", { goalId: "g1" })
+    expect(getGoalRuntime().stopGoal).toHaveBeenCalledWith("g1")
+  })
+
+  it("rejects when goalId is missing", async () => {
+    await expect(dispatchCommand("goal_pause", {})).rejects.toThrow(/goal_pause.goalId is required/)
+    await expect(dispatchCommand("goal_stop", {})).rejects.toThrow(/goal_stop.goalId is required/)
   })
 })
 

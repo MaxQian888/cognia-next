@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -30,6 +31,7 @@ import {
   pausePairedDevice,
   resumePairedDevice,
   revokePairedDevice,
+  setRemoteControlAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { formatRelative } from "@/lib/time/relative"
@@ -45,6 +47,11 @@ async function unrevokeDeviceRustSide(deviceId: string): Promise<void> {
   await transport.call<void>("companion_unrevoke_device", { deviceId })
 }
 
+async function setRemoteControlRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_remote_control", { deviceId, allowed })
+}
+
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
@@ -52,6 +59,7 @@ export function PairedDevicesCard() {
   const tRev = useTranslations("mobile.companion.revoke")
   const tPause = useTranslations("mobile.companion.pause")
   const tResume = useTranslations("mobile.companion.resume")
+  const tRc = useTranslations("mobile.companion.remoteControl")
 
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
@@ -103,6 +111,39 @@ export function PairedDevicesCard() {
     [guard, t, tPause]
   )
 
+  const onToggleRemoteControl = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      // Enabling is the sensitive direction — it grants the device the power
+      // to drive and steer host-owned agent sessions and approve host
+      // computer-use, so gate it on the biometric. Disabling reduces
+      // privilege and applies immediately without a prompt.
+      if (!next) {
+        await setRemoteControlAllowed(deviceId, false)
+        await setRemoteControlRustSide(deviceId, false)
+        toast.success(tRc("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tRc("reason", { label }),
+          title: tRc("title"),
+          description: tRc("description"),
+        },
+        async () => {
+          await setRemoteControlAllowed(deviceId, true)
+          await setRemoteControlRustSide(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tRc("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tRc("enabledToast", { label }))
+    },
+    [guard, tRc]
+  )
+
   const onResume = useCallback(
     async (deviceId: string, label: string) => {
       // Resume undoes the deny-list entry pause put in place — gate it on
@@ -148,6 +189,7 @@ export function PairedDevicesCard() {
                   <TableHead>{t("colFingerprint")}</TableHead>
                   <TableHead>{t("colPaired")}</TableHead>
                   <TableHead>{t("colLastSeen")}</TableHead>
+                  <TableHead className="text-center">{tRc("col")}</TableHead>
                   <TableHead className="w-[80px] text-right">{t("colActions")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -193,6 +235,17 @@ export function PairedDevicesCard() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatRelative(row.lastSeenAt)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowRemoteControl === true}
+                        disabled={row.revokedAt !== undefined}
+                        onCheckedChange={(next) =>
+                          onToggleRemoteControl(row.deviceId, row.label, next)
+                        }
+                        aria-label={tRc("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-remote-control-${row.deviceId}`}
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">

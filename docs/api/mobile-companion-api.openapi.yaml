@@ -568,6 +568,232 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — remote session control (requires the allowRemoteControl capability)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/session_attach:
+    post:
+      operationId: rpcSessionAttach
+      tags: [rpc-remote-control]
+      summary: Attach this device as a live watcher of a host session.
+      description: |
+        Marks the device as watching `session_id` so a `permission_request`
+        for that session (when it is not the desktop's foreground session) is
+        routed to this device for approval instead of being auto-denied.
+        Requires the `allowRemoteControl` capability — a device without it
+        gets `403 remote_control_forbidden`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, deviceId]
+              properties:
+                sessionId: { type: string }
+                deviceId:
+                  {
+                    type: string,
+                    description: "This device's id, so the host can refcount watchers.",
+                  }
+      responses:
+        "200":
+          { description: Attached., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/session_detach:
+    post:
+      operationId: rpcSessionDetach
+      tags: [rpc-remote-control]
+      summary: Stop watching a host session.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, deviceId]
+              properties:
+                sessionId: { type: string }
+                deviceId: { type: string }
+      responses:
+        "200":
+          { description: Detached., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/goal_pause:
+    post:
+      operationId: rpcGoalPause
+      tags: [rpc-remote-control]
+      summary: Pause a host /goal self-driving loop.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goalId]
+              properties:
+                goalId: { type: string }
+      responses:
+        "200":
+          description: The updated goal (or null when unknown).
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { oneOf: [{ type: object, additionalProperties: true }, { type: "null" }] },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/goal_resume:
+    post:
+      operationId: rpcGoalResume
+      tags: [rpc-remote-control]
+      summary: Resume a paused host /goal loop.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goalId]
+              properties:
+                goalId: { type: string }
+      responses:
+        "200":
+          description: The updated goal (or null when unknown).
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { oneOf: [{ type: object, additionalProperties: true }, { type: "null" }] },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/goal_stop:
+    post:
+      operationId: rpcGoalStop
+      tags: [rpc-remote-control]
+      summary: Stop a host /goal loop (terminal).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goalId]
+              properties:
+                goalId: { type: string }
+      responses:
+        "200":
+          description: The updated goal (or null when unknown).
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { oneOf: [{ type: object, additionalProperties: true }, { type: "null" }] },
+                },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/automation_consent_respond:
+    post:
+      operationId: rpcAutomationConsentRespond
+      tags: [rpc-remote-control]
+      summary: Resolve a host computer-use consent prompt from this device.
+      description: |
+        Resolves the pending automation ConsentBroker request whose
+        `automation:consent-request` frame streamed over `/ws/v1/events`.
+        First-responder wins (desktop overlay or any attached device).
+        Distinct from `claude_approve`, which resolves Claude SDK tool-use
+        prompts. Requires the `allowRemoteControl` capability.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, allow]
+              properties:
+                id:
+                  { type: string, description: "Broker request id from the consent-request frame." }
+                allow: { type: boolean }
+                persist:
+                  {
+                    type: boolean,
+                    description: "Remember the allow/deny for this session's matching tuple.",
+                  }
+                prompt:
+                  description: "Optional prompt echo so a persisted grant keys on the right tuple."
+                  oneOf:
+                    - type: object
+                      additionalProperties: true
+                    - type: "null"
+      responses:
+        "200":
+          { description: Resolved., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: malformed args,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/claude_sidecar_status:
     post:
       operationId: rpcClaudeSidecarStatus
@@ -1480,6 +1706,22 @@ components:
           examples:
             tooLarge:
               value: { code: payload_too_large, message: "request body exceeded 65536 bytes" }
+    RemoteControlForbidden:
+      description: |
+        The device is paired and authenticated but lacks the elevated
+        remote-control capability (`allowRemoteControl` is off for it). The
+        owner grants it per-device from the desktop paired-devices settings
+        (biometric-gated). `code` is `remote_control_forbidden`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RpcError" }
+          examples:
+            forbidden:
+              value:
+                {
+                  code: remote_control_forbidden,
+                  message: "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
+                }
 
   schemas:
     # ── Auth wire shapes ─────────────────────────────────────────────────────

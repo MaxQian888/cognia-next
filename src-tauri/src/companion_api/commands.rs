@@ -299,6 +299,32 @@ pub async fn companion_unrevoke_device(
     Ok(())
 }
 
+/// Grant or revoke a device's **remote-control** capability (Remote Session
+/// Control). Mirrors the Dexie `pairedDevices.allowRemoteControl` flag into
+/// the process-global [`super::control_allow_list`] consulted by the
+/// per-command gate in [`super::rpc`]. Takes effect immediately for in-flight
+/// requests after this command returns. Driven by the paired-devices card
+/// behind the biometric guard.
+#[tauri::command]
+pub async fn companion_set_remote_control(device_id: String, allowed: bool) -> Result<(), String> {
+    let acl = super::control_allow_list::global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed the remote-control allow list at desktop boot from the persisted
+/// Dexie rows where `allowRemoteControl === true`. Replace semantics (not
+/// union) so a capability revoked while the process was down is not retained.
+#[tauri::command]
+pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::global().reseed(device_ids);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Event-channel registration (M2.6)
 // ---------------------------------------------------------------------------
@@ -318,6 +344,12 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
     register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
+    // Remote Session Control — /goal lifecycle status so a remote watcher
+    // sees pause / resume / stop / completion transitions live.
+    register_tauri_event(app, Arc::clone(&bus), "goal://status");
+    // Remote Session Control — host computer-use HITL consent prompts so a
+    // remote watcher can render and resolve them via `automation_consent_respond`.
+    register_tauri_event(app, Arc::clone(&bus), "automation:consent-request");
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
@@ -325,6 +357,11 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // Phase B4 — push fan-out for events worth notifying about while the
     // phone is offline (WS not subscribed).
     register_push_trigger(app, "claude://message-added");
+    // Remote Session Control — a watched host session needs a tool-use
+    // approval decision; notify a backgrounded watcher so it doesn't wait
+    // out the renderer-side backstop. Emitted by
+    // `lib/companion/needs-input-notifier.ts`.
+    register_push_trigger(app, "companion://needs-input");
 }
 
 /// Subscribe to `channel` and, on each emit, broadcast a push payload to
@@ -352,7 +389,11 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
                     .unwrap_or_default();
             let payload = super::push::PushPayload {
                 title: Some("cognia".into()),
-                body: Some(channel_name.replace("claude://", "")),
+                body: Some(
+                    channel_name
+                        .replace("claude://", "")
+                        .replace("companion://", ""),
+                ),
                 data,
             };
 

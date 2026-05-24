@@ -104,7 +104,8 @@ const COLOR_PALETTE = [
 
 export function CharactersSection() {
   const t = useTranslations("settings.characters")
-  const characters = useLiveQuery(() => listCharacters(), []) ?? []
+  const charactersRaw = useLiveQuery(() => listCharacters(), [])
+  const characters = useMemo(() => charactersRaw ?? [], [charactersRaw])
   const skills = useLiveQuery(() => listSkills(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
   const [editing, setEditing] = useState<Character | null>(null)
@@ -1604,6 +1605,18 @@ function ComputerUseSubSettings({ value, onChange }: ComputerUseSubSettingsProps
           checked={requireConsent}
           onCheckedChange={(b) => update({ requireConsent: b })}
           aria-label={t("requireConsent.label")}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label className="cursor-pointer text-xs">{t("screenOffMode.label")}</Label>
+          <p className="text-[10px] text-muted-foreground">{t("screenOffMode.description")}</p>
+        </div>
+        <Switch
+          checked={Boolean(v.screenOffMode)}
+          onCheckedChange={(b) => update({ screenOffMode: b })}
+          aria-label={t("screenOffMode.label")}
         />
       </div>
 
