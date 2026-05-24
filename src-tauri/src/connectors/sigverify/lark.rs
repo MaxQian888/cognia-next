@@ -1,4 +1,4 @@
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use sha2::{Digest, Sha256};
 
@@ -49,7 +49,11 @@ pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigErr
 /// The decrypted plaintext bytes on success, or a `SigError` on failure.
 pub fn decrypt_body(encrypted_b64: &str, encrypt_key: &str) -> Result<Vec<u8>, SigError> {
     // Derive 32-byte AES key from the encrypt_key string via SHA-256
-    let key_bytes = Sha256::digest(encrypt_key.as_bytes());
+    let digest = Sha256::digest(encrypt_key.as_bytes());
+    let key_arr: [u8; 32] = digest
+        .as_slice()
+        .try_into()
+        .map_err(|_| SigError::Mismatch)?;
 
     // Base64-decode the ciphertext
     let raw = BASE64
@@ -65,33 +69,33 @@ pub fn decrypt_body(encrypted_b64: &str, encrypt_key: &str) -> Result<Vec<u8>, S
 
     let iv_arr: [u8; 16] = iv.try_into().map_err(|_| SigError::Mismatch)?;
 
-    // Decrypt in-place
-    let mut buf = ciphertext.to_vec();
-    let decryptor = Aes256CbcDec::new(key_bytes.as_slice().into(), &iv_arr.into());
+    // Decrypt with PKCS#7 unpadding (cbc 0.2 / cipher 0.5 API)
+    let decryptor = Aes256CbcDec::new(&key_arr.into(), &iv_arr.into());
     let plaintext = decryptor
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .decrypt_padded_vec::<Pkcs7>(ciphertext)
         .map_err(|_| SigError::Mismatch)?;
 
-    Ok(plaintext.to_vec())
+    Ok(plaintext)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::{BlockEncryptMut, KeyIvInit};
+    use aes::cipher::{BlockModeEncrypt, KeyIvInit};
     use rand::RngCore;
 
     type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 
     fn encrypt_body(plaintext: &[u8], encrypt_key: &str) -> String {
-        let key_bytes = Sha256::digest(encrypt_key.as_bytes());
+        let digest = Sha256::digest(encrypt_key.as_bytes());
+        let key_arr: [u8; 32] = digest.as_slice().try_into().unwrap();
 
         // Random IV
         let mut iv = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut iv);
 
-        let ciphertext = Aes256CbcEnc::new(key_bytes.as_slice().into(), &iv.into())
-            .encrypt_padded_vec_mut::<Pkcs7>(plaintext);
+        let ciphertext = Aes256CbcEnc::new(&key_arr.into(), &iv.into())
+            .encrypt_padded_vec::<Pkcs7>(plaintext);
 
         // Prepend IV to ciphertext, then base64-encode
         let mut combined = iv.to_vec();

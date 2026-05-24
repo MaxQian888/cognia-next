@@ -3,7 +3,7 @@
 // chat sidecar commands because they're sync, simple, and have no shared
 // state beyond the filesystem.
 
-use gray_matter::{engine::YAML, Matter};
+use gray_matter::{engine::YAML, Matter, Pod};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -329,7 +329,13 @@ fn collect_command_files(root: &Path, scope: &str, out: &mut Vec<SlashCommandFil
             Err(_) => continue,
         };
         let name = rel.to_string_lossy().replace('\\', "/");
-        let parsed = matter.parse(&raw);
+        // gray_matter 0.3 made `parse` generic + fallible; `Pod` keeps the
+        // dynamic front-matter access this loop relies on. Skip files whose
+        // front matter fails to parse (a malformed command file is unusable).
+        let parsed = match matter.parse::<Pod>(&raw) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
         let body = parsed.content.trim_start().to_string();
         let mut description: Option<String> = None;
         let mut argument_hint: Option<String> = None;

@@ -121,7 +121,7 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 # (the `bundled` feature does).
 sqlite-vec = "0.1"
 
-gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
+gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 # Cross-platform PTY backend for the integrated terminal (`src-tauri/src/terminal/`).
 # Uses ConPTY on Windows (Win10 1809+), forkpty on macOS/Linux. wezterm's
@@ -157,25 +157,25 @@ base64 = "0.22"
 # firing via a small tokio loop in `src-tauri/src/workflow/triggers/cron_daemon.rs`
 # rather than pull in `tokio-cron-scheduler` (which is heavier and has its
 # own runtime semantics that conflict with our existing scheduler module).
-cron = "0.12"
+cron = "0.16"
 
 # MCP HTTP server — axum for the inbound listener, subtle for constant-time
 # bearer-token comparison, tower-http for body-size limits.
 axum = { version = "0.8", features = ["macros", "ws"] }
 # axum-server (M2.9) — TLS termination for the companion API. `tls-rustls`
 # pulls in rustls + ring; matches the project's existing tokio-rustls path.
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 subtle = "2"
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 ed25519-dalek = "2"
 hex = "0.4"
 url = "2"
 aes-gcm = { version = "0.10", features = ["aes"] }
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
 rand = "0.8"
 jsonwebtoken = "9"
 serde_urlencoded = "0.7"
