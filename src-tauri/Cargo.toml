@@ -241,7 +241,7 @@ zip = { version = "2", default-features = false, features = ["deflate", "bzip2"]
 # stable wit-bindgen surface (0.34) until we revisit ABI in v0.2.
 # Re-verified 2026-05-18: latest is 44.0.1 — ABI revisit per ADR-0013 still pending.
 wasmtime = { version = "26", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "26"
+wasmtime-wasi = "45"
 wasmparser = "0.221"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
