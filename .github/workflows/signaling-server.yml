@@ -1,0 +1,77 @@
+name: Signaling Server
+
+# ============================================================================
+# signaling-server (Rust) — test + coverage gate
+# ============================================================================
+# The standalone WebRTC signaling rendezvous (ADR-0021) is a separate Cargo
+# crate, not part of the pnpm workspace, so the Node test workflow never ran
+# it. This workflow runs its unit + integration tests and enforces a >=90%
+# line-coverage gate via cargo-llvm-cov.
+# ============================================================================
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "signaling-server/**"
+      - ".github/workflows/signaling-server.yml"
+  pull_request:
+    paths:
+      - "signaling-server/**"
+      - ".github/workflows/signaling-server.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: signaling-server-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: signaling-server
+
+jobs:
+  test:
+    name: Test + Coverage
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            signaling-server/target
+          key: ${{ runner.os }}-signaling-${{ hashFiles('signaling-server/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-signaling-
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test with coverage (>=90% lines)
+        run: cargo llvm-cov --all-targets --fail-under-lines 90 --summary-only
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## signaling-server coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo llvm-cov report >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

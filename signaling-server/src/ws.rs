@@ -41,6 +41,18 @@ use crate::{
 const RATE_REFILL_PER_SEC: u32 = 10;
 const RATE_CAPACITY: u32 = 20;
 
+/// Soft per-frame cap. Frames above this get a graceful `frame_too_large`
+/// error and the connection stays open — SDP/ICE envelopes sit well under
+/// this. `RequestBodyLimitLayer` only bounds the *pre-upgrade* HTTP body, so
+/// this is where the documented 8 KiB cap is actually enforced on WS frames.
+const MAX_FRAME_BYTES: usize = 8 * 1024;
+
+/// Hard memory backstop handed to tungstenite via the WS upgrade. Sized 8×
+/// above the soft cap so the graceful path above fires for ordinary overages
+/// while still bounding a single message far below tungstenite's MiB default.
+/// A frame above this is closed by the protocol layer (stream error → break).
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+
 /// How long the server waits between idle keepalive pings sent down the WS
 /// frame layer. WebSocket pings are separate from `ClientFrame::Ping` —
 /// these are what `axum::extract::ws` calls "control frame" pings.
@@ -68,7 +80,10 @@ pub async fn ws_upgrade(
             return Err((StatusCode::TOO_MANY_REQUESTS, "per-ip connection cap"));
         }
     };
-    Ok(ws.on_upgrade(move |socket| handle_socket(state, socket, acquired)))
+    Ok(ws
+        .max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| handle_socket(state, socket, acquired)))
 }
 
 async fn handle_socket(state: AppState, socket: WebSocket, _ip_guard: Acquired) {
@@ -122,6 +137,22 @@ async fn handle_socket(state: AppState, socket: WebSocket, _ip_guard: Acquired) 
         };
         match msg {
             Message::Text(text) => {
+                if text.len() > MAX_FRAME_BYTES {
+                    warn!(
+                        target: "signaling",
+                        peer_id,
+                        len = text.len(),
+                        "frame exceeds soft cap"
+                    );
+                    state.metrics.frame_rejected(RejectReason::TooLarge);
+                    let _ = tx
+                        .send(ServerFrame::Error {
+                            code: "frame_too_large".into(),
+                            message: "frame exceeds 8 KiB".into(),
+                        })
+                        .await;
+                    continue;
+                }
                 if !bucket.try_take() {
                     warn!(target: "signaling", peer_id, "rate limited");
                     state.metrics.frame_rejected(RejectReason::Rate);
@@ -319,4 +350,251 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ip_limits::IpLimits,
+        metrics::Metrics,
+        room::{RoomRegistry, PEER_OUTBOUND_BUFFER},
+    };
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    fn state() -> AppState {
+        AppState {
+            registry: Arc::new(RoomRegistry::new()),
+            metrics: Arc::new(Metrics::new()),
+            ip_limits: IpLimits::new(50),
+        }
+    }
+
+    /// Pre-seed a peer already sitting in `room` so its receiver can observe
+    /// the fan-out (`PeerJoined` / `PeerLeft` / `Relay`) the handler emits.
+    fn seed_peer(state: &AppState, room: &str, role: PeerRole) -> mpsc::Receiver<ServerFrame> {
+        let (tx, rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        state.registry.join(
+            room,
+            PeerHandle {
+                peer_id,
+                role,
+                joined_at_ms: 1,
+                tx,
+            },
+        );
+        rx
+    }
+
+    fn subscribe(rid: &str, role: PeerRole) -> ClientFrame {
+        ClientFrame::Subscribe {
+            rendezvous_id: rid.into(),
+            role,
+            client_nonce: "nonce".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn subscribe_into_empty_room_replies_with_no_peers() {
+        let state = state();
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Desktop), &tx, &mut rooms).await;
+
+        match rx.try_recv().expect("subscribed frame") {
+            ServerFrame::Subscribed {
+                rendezvous_id,
+                peers,
+            } => {
+                assert_eq!(rendezvous_id, "r");
+                assert!(peers.is_empty());
+            }
+            other => panic!("expected Subscribed, got {other:?}"),
+        }
+        assert_eq!(state.registry.stats().peers, 1);
+        assert_eq!(rooms, vec![("r".to_string(), PeerRole::Desktop)]);
+    }
+
+    #[tokio::test]
+    async fn subscribe_with_existing_peer_announces_join() {
+        let state = state();
+        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Mobile), &tx, &mut rooms).await;
+
+        match rx.try_recv().expect("subscribed") {
+            ServerFrame::Subscribed { peers, .. } => {
+                assert_eq!(peers.len(), 1);
+                assert_eq!(peers[0].role, PeerRole::Desktop);
+            }
+            other => panic!("expected Subscribed, got {other:?}"),
+        }
+        match other_rx.try_recv().expect("peer joined") {
+            ServerFrame::PeerJoined { role, .. } => assert_eq!(role, PeerRole::Mobile),
+            other => panic!("expected PeerJoined, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_subscribe_is_idempotent() {
+        let state = state();
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Desktop), &tx, &mut rooms).await;
+        let _ = rx.try_recv().expect("first subscribed");
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Desktop), &tx, &mut rooms).await;
+
+        assert!(rx.try_recv().is_err(), "duplicate subscribe emits nothing");
+        assert_eq!(state.registry.stats().peers, 1);
+        assert_eq!(rooms.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_announces_peer_left() {
+        let state = state();
+        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let (tx, _rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Mobile), &tx, &mut rooms).await;
+        let _ = other_rx.try_recv(); // drain PeerJoined
+
+        handle_frame(
+            &state,
+            peer_id,
+            ClientFrame::Unsubscribe {
+                rendezvous_id: "r".into(),
+            },
+            &tx,
+            &mut rooms,
+        )
+        .await;
+
+        match other_rx.try_recv().expect("peer left") {
+            ServerFrame::PeerLeft { role, .. } => assert_eq!(role, PeerRole::Mobile),
+            other => panic!("expected PeerLeft, got {other:?}"),
+        }
+        assert!(rooms.is_empty());
+        assert_eq!(state.registry.stats().peers, 1, "only the seeded desktop remains");
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_unknown_room_is_noop() {
+        let state = state();
+        let (tx, _rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(
+            &state,
+            peer_id,
+            ClientFrame::Unsubscribe {
+                rendezvous_id: "ghost".into(),
+            },
+            &tx,
+            &mut rooms,
+        )
+        .await;
+
+        assert!(rooms.is_empty());
+        assert_eq!(state.registry.stats().rooms, 0);
+    }
+
+    #[tokio::test]
+    async fn relay_fans_out_to_other_peers_and_counts() {
+        let state = state();
+        let mut other_rx = seed_peer(&state, "r", PeerRole::Desktop);
+        let (tx, _rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Mobile), &tx, &mut rooms).await;
+        let _ = other_rx.try_recv(); // PeerJoined
+
+        handle_frame(
+            &state,
+            peer_id,
+            ClientFrame::Relay {
+                rendezvous_id: "r".into(),
+                payload: "AAAA".into(),
+            },
+            &tx,
+            &mut rooms,
+        )
+        .await;
+
+        match other_rx.try_recv().expect("relay") {
+            ServerFrame::Relay {
+                from_role, payload, ..
+            } => {
+                assert_eq!(from_role, PeerRole::Mobile);
+                assert_eq!(payload, "AAAA");
+            }
+            other => panic!("expected Relay, got {other:?}"),
+        }
+        assert_eq!(state.metrics.frames_relayed_total.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn relay_without_subscription_errors() {
+        let state = state();
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(
+            &state,
+            peer_id,
+            ClientFrame::Relay {
+                rendezvous_id: "r".into(),
+                payload: "x".into(),
+            },
+            &tx,
+            &mut rooms,
+        )
+        .await;
+
+        match rx.try_recv().expect("error") {
+            ServerFrame::Error { code, .. } => assert_eq!(code, "not_subscribed"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert_eq!(
+            state
+                .metrics
+                .frames_rejected_not_subscribed
+                .load(Ordering::Relaxed),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn ping_replies_pong() {
+        let state = state();
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, ClientFrame::Ping, &tx, &mut rooms).await;
+
+        assert!(matches!(rx.try_recv(), Ok(ServerFrame::Pong)));
+    }
+
+    #[test]
+    fn now_ms_is_positive() {
+        assert!(now_ms() > 0);
+    }
 }

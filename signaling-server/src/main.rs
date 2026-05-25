@@ -35,11 +35,42 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
-    let addr = match (args.bind, args.port) {
+    serve(resolve_addr(args.bind, args.port)).await
+}
+
+/// Resolve the bind address. `--bind` wins outright; otherwise `--port`
+/// (or `$PORT`) binds `0.0.0.0:<port>`; otherwise the `0.0.0.0:7892` default.
+fn resolve_addr(bind: Option<SocketAddr>, port: Option<u16>) -> SocketAddr {
+    match (bind, port) {
         (Some(a), _) => a,
         (None, Some(p)) => SocketAddr::from(([0, 0, 0, 0], p)),
         (None, None) => SocketAddr::from(([0, 0, 0, 0], 7892)),
-    };
+    }
+}
 
-    serve(addr).await
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_wins_over_port() {
+        let bind: SocketAddr = "127.0.0.1:9000".parse().unwrap();
+        assert_eq!(resolve_addr(Some(bind), Some(1234)), bind);
+    }
+
+    #[test]
+    fn port_binds_all_interfaces() {
+        assert_eq!(
+            resolve_addr(None, Some(8080)),
+            SocketAddr::from(([0, 0, 0, 0], 8080))
+        );
+    }
+
+    #[test]
+    fn default_is_7892() {
+        assert_eq!(
+            resolve_addr(None, None),
+            SocketAddr::from(([0, 0, 0, 0], 7892))
+        );
+    }
 }

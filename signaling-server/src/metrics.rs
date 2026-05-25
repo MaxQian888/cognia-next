@@ -27,6 +27,7 @@ pub struct Metrics {
     pub frames_rejected_malformed: AtomicU64,
     pub frames_rejected_rate: AtomicU64,
     pub frames_rejected_not_subscribed: AtomicU64,
+    pub frames_rejected_too_large: AtomicU64,
     /// `Instant` is sufficient because we only ever subtract from a single
     /// process — no clock-skew concerns vs. a wall clock here.
     pub started_at: Instant,
@@ -42,6 +43,7 @@ impl Metrics {
             frames_rejected_malformed: AtomicU64::new(0),
             frames_rejected_rate: AtomicU64::new(0),
             frames_rejected_not_subscribed: AtomicU64::new(0),
+            frames_rejected_too_large: AtomicU64::new(0),
             started_at: Instant::now(),
         }
     }
@@ -64,6 +66,7 @@ impl Metrics {
             RejectReason::Malformed => &self.frames_rejected_malformed,
             RejectReason::Rate => &self.frames_rejected_rate,
             RejectReason::NotSubscribed => &self.frames_rejected_not_subscribed,
+            RejectReason::TooLarge => &self.frames_rejected_too_large,
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -83,6 +86,7 @@ impl Metrics {
         let rej_malformed = self.frames_rejected_malformed.load(Ordering::Relaxed);
         let rej_rate = self.frames_rejected_rate.load(Ordering::Relaxed);
         let rej_not_sub = self.frames_rejected_not_subscribed.load(Ordering::Relaxed);
+        let rej_too_large = self.frames_rejected_too_large.load(Ordering::Relaxed);
         let mut out = String::with_capacity(1024);
         out.push_str("# HELP signaling_frames_in_total Inbound client frames accepted for processing.\n");
         out.push_str("# TYPE signaling_frames_in_total counter\n");
@@ -117,6 +121,10 @@ impl Metrics {
             "signaling_frames_rejected_total{{reason=\"not_subscribed\"}} {}\n",
             rej_not_sub
         ));
+        out.push_str(&format!(
+            "signaling_frames_rejected_total{{reason=\"too_large\"}} {}\n",
+            rej_too_large
+        ));
         out.push_str("# HELP signaling_rooms_active Currently-tracked rendezvous rooms.\n");
         out.push_str("# TYPE signaling_rooms_active gauge\n");
         out.push_str(&format!("signaling_rooms_active {}\n", registry.rooms));
@@ -149,6 +157,7 @@ pub enum RejectReason {
     Malformed,
     Rate,
     NotSubscribed,
+    TooLarge,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +197,7 @@ mod tests {
         m.frame_rejected(RejectReason::Malformed);
         m.frame_rejected(RejectReason::Rate);
         m.frame_rejected(RejectReason::NotSubscribed);
+        m.frame_rejected(RejectReason::TooLarge);
         let s = m.render_prometheus(stats(2, 5));
         assert!(s.contains("signaling_frames_in_total 2\n"));
         assert!(s.contains("signaling_frames_relayed_total 3\n"));
@@ -196,6 +206,7 @@ mod tests {
         assert!(s.contains("signaling_frames_rejected_total{reason=\"malformed\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"rate\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"not_subscribed\"} 1\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"too_large\"} 1\n"));
         assert!(s.contains("signaling_rooms_active 2\n"));
         assert!(s.contains("signaling_peers_active 5\n"));
     }
@@ -211,6 +222,21 @@ mod tests {
         // peers_active, uptime_seconds.
         assert_eq!(help_lines, 6, "6 distinct metric families");
         assert_eq!(type_lines, 6);
+    }
+
+    #[test]
+    fn reject_reason_is_debug_formattable() {
+        // The enum is surfaced through `tracing` fields; keep its Debug repr
+        // stable and ensure every arm is constructible.
+        assert_eq!(format!("{:?}", RejectReason::Replay), "Replay");
+        assert_eq!(format!("{:?}", RejectReason::Hmac), "Hmac");
+        assert_eq!(format!("{:?}", RejectReason::TooLarge), "TooLarge");
+    }
+
+    #[test]
+    fn default_matches_new() {
+        let s = Metrics::default().render_prometheus(stats(0, 0));
+        assert!(s.contains("signaling_frames_in_total 0\n"));
     }
 
     #[test]

@@ -81,8 +81,11 @@ The opaque `payload` carries the HMAC-signed `Envelope` defined in
 
 - Per-connection rate limit: 20-frame token bucket, refills at 10 frames/sec.
   Exceeding triggers `error{code:"rate_limited"}` followed by a disconnect.
-- Frame size cap: 8 KiB (`tower_http::limit::RequestBodyLimitLayer`). SDP and
-  ICE messages are typically well under 2 KiB.
+- Frame size cap: 8 KiB per WS frame, enforced in `ws::handle_socket`
+  (oversized frames get a graceful `error{code:"frame_too_large"}`), backed by
+  a hard 64 KiB `max_message_size` on the upgrade as a memory bound.
+  `tower_http`'s `RequestBodyLimitLayer` only caps the pre-upgrade handshake.
+  SDP and ICE messages are typically well under 2 KiB.
 - Maximum simultaneous peers per room: unbounded by the server; in normal
   usage exactly 2 (the desktop and one mobile). Multiple subscribers are
   tolerated; receivers HMAC-validate to pick the legitimate counterpart.

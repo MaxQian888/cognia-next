@@ -13,10 +13,7 @@
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::sync::mpsc;
 
@@ -162,8 +159,6 @@ pub struct RoomRegistryStats {
     pub peers: usize,
 }
 
-pub type SharedRegistry = Arc<RoomRegistry>;
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -213,6 +208,9 @@ mod tests {
         // Leaving an already-empty room is a no-op.
         let others_again = reg.leave("r", h2.peer_id);
         assert!(others_again.is_empty());
+
+        // Leaving a room that was never created is also a no-op.
+        assert!(reg.leave("never-existed", 999).is_empty());
     }
 
     #[test]

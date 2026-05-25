@@ -193,6 +193,29 @@ mod tests {
     }
 
     #[test]
+    fn debug_impls_are_exercised() {
+        // These Debug reprs only ever fire from `tracing`/`panic!` paths that
+        // don't run on the happy path, so exercise them directly.
+        let lim = IpLimits::new(1);
+        let a = ip("10.0.0.1");
+        let outcome = lim.try_acquire(a);
+        match &outcome {
+            AcquireOutcome::Accepted(guard) => {
+                assert!(format!("{guard:?}").contains("Acquired"));
+            }
+            AcquireOutcome::Rejected { .. } => panic!("first acquire must be accepted"),
+        }
+        assert!(format!("{outcome:?}").contains("Accepted"));
+
+        // Second acquire on the same IP is rejected — covers that Debug arm.
+        let rejected = lim.try_acquire(a);
+        assert!(format!("{rejected:?}").contains("Rejected"));
+
+        // Snapshot is logged on the metrics path.
+        assert!(format!("{:?}", lim.snapshot()).contains("max_per_ip"));
+    }
+
+    #[test]
     fn drop_releases_a_slot() {
         let lim = IpLimits::new(2);
         let a = ip("10.0.0.1");

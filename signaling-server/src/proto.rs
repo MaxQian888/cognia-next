@@ -63,8 +63,10 @@ pub enum ClientFrame {
     /// the HMAC check (see [`Envelope`]).
     Relay {
         rendezvous_id: String,
-        /// Base64url-encoded application envelope. Cap is enforced at the
-        /// transport level via `tower-http`'s body limit (8 KiB per frame).
+        /// Base64url-encoded application envelope. The 8 KiB per-frame cap is
+        /// enforced in `ws::handle_socket` (`MAX_FRAME_BYTES`), backed by a
+        /// hard `max_message_size` on the WS upgrade — `tower-http`'s body
+        /// limit only bounds the pre-upgrade handshake, not WS frames.
         payload: String,
     },
     /// Application-level keepalive. Server replies with [`ServerFrame::Pong`].
@@ -230,5 +232,14 @@ mod tests {
         assert_eq!(json, "\"rtc:offer\"");
         let json = serde_json::to_string(&EnvelopeKind::Hello).unwrap();
         assert_eq!(json, "\"hello\"");
+    }
+
+    #[test]
+    fn peer_role_as_str_maps_to_wire_values() {
+        // `as_str` is only invoked inside `tracing` macros at runtime (which
+        // skip argument evaluation when no subscriber is attached), so pin the
+        // role→wire mapping here directly.
+        assert_eq!(PeerRole::Desktop.as_str(), "desktop");
+        assert_eq!(PeerRole::Mobile.as_str(), "mobile");
     }
 }

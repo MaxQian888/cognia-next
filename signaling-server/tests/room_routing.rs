@@ -24,7 +24,7 @@ async fn connect(addr: std::net::SocketAddr) -> WsClient {
 
 async fn send(client: &mut WsClient, frame: ClientFrame) {
     let text = serde_json::to_string(&frame).unwrap();
-    client.send(TgMessage::Text(text.into())).await.unwrap();
+    client.send(TgMessage::Text(text)).await.unwrap();
 }
 
 async fn recv(client: &mut WsClient) -> ServerFrame {
@@ -158,4 +158,119 @@ async fn malformed_frame_does_not_disconnect() {
     // The client is still usable.
     send(&mut client, ClientFrame::Ping).await;
     matches!(recv(&mut client).await, ServerFrame::Pong);
+}
+
+#[tokio::test]
+async fn binary_frame_is_rejected_gracefully() {
+    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+    let mut client = connect(addr).await;
+    client
+        .send(TgMessage::Binary(vec![1, 2, 3]))
+        .await
+        .unwrap();
+    match recv(&mut client).await {
+        ServerFrame::Error { code, .. } => assert_eq!(code, "binary_not_supported"),
+        other => panic!("expected Error, got {other:?}"),
+    }
+    // Binary frames are rejected without closing the socket.
+    send(&mut client, ClientFrame::Ping).await;
+    assert!(matches!(recv(&mut client).await, ServerFrame::Pong));
+}
+
+#[tokio::test]
+async fn explicit_unsubscribe_announces_peer_left() {
+    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+
+    let mut desktop = connect(addr).await;
+    send(
+        &mut desktop,
+        ClientFrame::Subscribe {
+            rendezvous_id: "u".into(),
+            role: PeerRole::Desktop,
+            client_nonce: "d".into(),
+        },
+    )
+    .await;
+    assert!(matches!(recv(&mut desktop).await, ServerFrame::Subscribed { .. }));
+
+    let mut mobile = connect(addr).await;
+    send(
+        &mut mobile,
+        ClientFrame::Subscribe {
+            rendezvous_id: "u".into(),
+            role: PeerRole::Mobile,
+            client_nonce: "m".into(),
+        },
+    )
+    .await;
+    assert!(matches!(recv(&mut mobile).await, ServerFrame::Subscribed { .. }));
+    assert!(matches!(recv(&mut desktop).await, ServerFrame::PeerJoined { .. }));
+
+    // Explicit unsubscribe — distinct from the socket-close path in
+    // `two_peers_relay_via_room`.
+    send(
+        &mut mobile,
+        ClientFrame::Unsubscribe {
+            rendezvous_id: "u".into(),
+        },
+    )
+    .await;
+    match recv(&mut desktop).await {
+        ServerFrame::PeerLeft { role, .. } => assert_eq!(role, PeerRole::Mobile),
+        other => panic!("expected PeerLeft, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn one_socket_can_join_multiple_rooms() {
+    let (addr, _handle) = serve_for_test().await.expect("server spawn");
+
+    // A single socket subscribes to two rooms.
+    let mut hub = connect(addr).await;
+    for room in ["a", "b"] {
+        send(
+            &mut hub,
+            ClientFrame::Subscribe {
+                rendezvous_id: room.into(),
+                role: PeerRole::Desktop,
+                client_nonce: "h".into(),
+            },
+        )
+        .await;
+        assert!(matches!(recv(&mut hub).await, ServerFrame::Subscribed { .. }));
+    }
+
+    // A peer in room "b" relays; the hub must receive it tagged room "b".
+    let mut other = connect(addr).await;
+    send(
+        &mut other,
+        ClientFrame::Subscribe {
+            rendezvous_id: "b".into(),
+            role: PeerRole::Mobile,
+            client_nonce: "o".into(),
+        },
+    )
+    .await;
+    assert!(matches!(recv(&mut other).await, ServerFrame::Subscribed { .. }));
+    assert!(matches!(recv(&mut hub).await, ServerFrame::PeerJoined { .. }));
+
+    send(
+        &mut other,
+        ClientFrame::Relay {
+            rendezvous_id: "b".into(),
+            payload: "p".into(),
+        },
+    )
+    .await;
+    match recv(&mut hub).await {
+        ServerFrame::Relay {
+            rendezvous_id,
+            payload,
+            ..
+        } => {
+            assert_eq!(rendezvous_id, "b");
+            assert_eq!(payload, "p");
+        }
+        other => panic!("expected Relay on room b, got {other:?}"),
+    }
 }
