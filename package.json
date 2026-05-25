@@ -74,7 +74,7 @@
     "@ai-sdk/openai": "^3.0.65",
     "@ai-sdk/react": "^3.0.192",
     "@babel/parser": "^7.29.3",
-    "@babel/types": "^7.29.0",
+    "@babel/types": "^7.29.7",
     "@base-ui/react": "^1.5.0",
     "@codemirror/autocomplete": "^6.20.2",
     "@codemirror/commands": "^6.10.3",
