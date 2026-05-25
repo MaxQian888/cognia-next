@@ -89,7 +89,7 @@ function createFakeLongConnSession() {
 
   const listenImpl = jest.fn().mockImplementation(async (eventName: string, handler: unknown) => {
     listenCallCount++
-    if ((eventName as string).endsWith("/message")) {
+    if ((eventName as string).endsWith("/event")) {
       messageHandler = handler as (event: { payload: string }) => void
     } else if ((eventName as string).endsWith("/close")) {
       closeHandler = handler as () => void
@@ -119,9 +119,8 @@ describe("createLarkAdapter", () => {
     mockInvoke.mockReset()
     mockListen.mockReset()
     mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "connectors_ws_open") return "lark-ws-handle"
-      if (cmd === "connectors_ws_send") return undefined
-      if (cmd === "connectors_ws_close") return undefined
+      if (cmd === "connectors_lark_ws_open") return "lark-ws-handle"
+      if (cmd === "connectors_lark_ws_close") return undefined
       if (cmd === "connectors_http_request") return makeTatOkResp()
       return undefined
     })
@@ -177,32 +176,11 @@ describe("createLarkAdapter", () => {
     const session = createFakeLongConnSession()
     mockListen.mockImplementation(session.listenImpl)
 
-    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
-      if (cmd === "connectors_ws_open") return "lark-ws-x"
-      if (cmd === "connectors_ws_send") return undefined
-      if (cmd === "connectors_ws_close") return undefined
-      if (cmd === "connectors_http_request") {
-        // Detect which HTTP call this is by looking at the URL
-        const url = (args as { req?: { url?: string } })?.req?.url ?? ""
-        if (url.includes("tenant_access_token")) {
-          // TAT fetch
-          return {
-            status: 200,
-            headers: {},
-            body: JSON.stringify({
-              code: 0,
-              tenant_access_token: "t-evt-tat",
-              expire: 7200,
-            }),
-          }
-        }
-        // wsServer fetch
-        return {
-          status: 200,
-          headers: {},
-          body: JSON.stringify({ code: 0, data: { url: "wss://lark-ws.example.com" } }),
-        }
-      }
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      // The long-connection handshake + protobuf framing now live in Rust; the
+      // TS side only opens a handle and listens on the lark-ws event channel.
+      if (cmd === "connectors_lark_ws_open") return "lark-ws-x"
+      if (cmd === "connectors_lark_ws_close") return undefined
       return undefined
     })
 
@@ -222,20 +200,17 @@ describe("createLarkAdapter", () => {
     await session.waitForListeners()
 
     session.push({
-      type: "event_push",
+      schema: "2.0",
+      header: { event_id: "evt_001", event_type: "im.message.receive_v1" },
       event: {
-        schema: "2.0",
-        header: { event_id: "evt_001", event_type: "im.message.receive_v1" },
-        event: {
-          sender: { sender_id: { open_id: "ou_user_001" } },
-          message: {
-            message_id: "om_evt_001",
-            chat_id: "oc_chat_001",
-            chat_type: "p2p",
-            message_type: "text",
-            content: '{"text":"hello from lark"}',
-            create_time: "1714900000000",
-          },
+        sender: { sender_id: { open_id: "ou_user_001" } },
+        message: {
+          message_id: "om_evt_001",
+          chat_id: "oc_chat_001",
+          chat_type: "p2p",
+          message_type: "text",
+          content: '{"text":"hello from lark"}',
+          create_time: "1714900000000",
         },
       },
     })
@@ -246,6 +221,42 @@ describe("createLarkAdapter", () => {
     expect(emitted.length).toBeGreaterThanOrEqual(1)
     expect(emitted[0].platform).toBe("lark")
     expect(emitted[0].messageId).toBe("om_evt_001")
+  }, 15000)
+
+  it("maps a bot-menu (快捷指令) click to its configured action", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+
+    const adapter = createLarkAdapter({
+      id: "lark-menu",
+      displayName: "Menu Test Bot",
+      appId: async () => "cli_menu",
+      appSecret: async () => "secret-menu",
+      verificationToken: async () => "token-menu",
+      selfBotOpenId: "ou_bot_menu",
+      quickCommands: [{ eventKey: "agenda", action: { type: "slash", value: "/agenda today" } }],
+      transport: "long-connection",
+    })
+
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+
+    session.push({
+      schema: "2.0",
+      header: { event_id: "evt_menu_1", event_type: "application.bot.menu_v6" },
+      event: {
+        operator: { operator_id: { open_id: "ou_user_777" } },
+        event_key: "agenda",
+      },
+    })
+
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+
+    expect(emitted.length).toBeGreaterThanOrEqual(1)
+    expect(emitted[0].plainText).toBe("/agenda today")
+    expect(emitted[0].conversationRef.channelId).toBe("ou_user_777")
   }, 15000)
 
   it("send() acquires TAT and calls Lark API", async () => {

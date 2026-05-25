@@ -5,6 +5,7 @@
 // ergonomic shape of hooks/skills/use-skill-marketplace.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import type { PluginSource } from "@/types/plugin"
 
 export type PluginMarketplaceQueryState =
   | { kind: "idle" }
@@ -25,6 +26,10 @@ export interface PluginMarketplaceEntry {
    * through the unified Skills marketplace storefront. Defaults to "plugin"
    * when reached through the plugin marketplace. */
   type: string
+  /** Origin of the entry. Remote registry entries leave this undefined (treated
+   * as "marketplace"); built-in plugins surfaced from Dexie set "builtin" so the
+   * card / detail can render a read-only Built-in badge instead of install. */
+  source?: PluginSource
 }
 
 export interface UsePluginMarketplace {

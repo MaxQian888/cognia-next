@@ -711,7 +711,7 @@ function ComposerInner(props: InnerProps) {
       <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
       <div
         className={cn(
-          "relative flex items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
+          "relative flex flex-col gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow @sm/composer:flex-row @sm/composer:items-end",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
         )}
         onDragEnter={onDragEnter}
@@ -731,7 +731,7 @@ function ComposerInner(props: InnerProps) {
           type="file"
         />
 
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="order-2 flex shrink-0 items-center gap-0.5 @sm/composer:order-none">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -754,7 +754,7 @@ function ComposerInner(props: InnerProps) {
           <VoiceTranscriptionBridge disabled={props.disabled} />
         </div>
 
-        <div className="relative flex-1 self-center">
+        <div className="relative order-1 w-full @sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center">
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
@@ -779,7 +779,7 @@ function ComposerInner(props: InnerProps) {
           <CharCounter />
         </div>
 
-        <div className="flex shrink-0 items-center">
+        <div className="order-3 ml-auto flex shrink-0 items-center @sm/composer:order-none @sm/composer:ml-0">
           <Tooltip>
             <TooltipTrigger asChild>
               {hasPendingDrafts ? (

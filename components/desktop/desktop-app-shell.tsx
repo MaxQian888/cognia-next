@@ -34,6 +34,7 @@ import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-sh
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
+import { PageLoading } from "@/components/ui/loading-states"
 import { whenSeeded } from "@/lib/db/schema"
 import { loggers } from "@/lib/logging"
 import { useUIStore } from "@/stores/ui/ui-store"
@@ -91,10 +92,13 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
 
   // Defense-in-depth against the SSR/hydration paint: until effects run,
   // `usePlatform()` returns the server snapshot ("web") and `usePathname()`
-  // can briefly disagree with the post-hydration value. Render children only
-  // until the first effect — Capacitor visiting /pair must never flash any
-  // desktop chrome.
-  if (!mounted) return <>{children}</>
+  // can briefly disagree with the post-hydration value. Bypass routes
+  // (/share-target, /pair, /oauth, /canvas/join) must render full-bleed with
+  // no chrome and no delay — Capacitor visiting /pair must never flash any
+  // desktop chrome — so they keep returning children. For ordinary routes,
+  // cover the boot/hydration gap with a neutral loader instead of a
+  // half-painted shell (the static-export HTML shows this until JS mounts).
+  if (!mounted) return bypass ? <>{children}</> : <PageLoading />
   if (isMobile || bypass) return <>{children}</>
 
   const handleCreateTeam = () => {

@@ -61,10 +61,15 @@ jest.mock("@/lib/tts/types", () => ({
 const settingsState = {
   settings: { ttsProvider: "openai" },
   providerKeys: { openai: "k" },
+  // `speak` lazily loads provider keys via getState().ensureProviderKeys().
+  ensureProviderKeys: jest.fn(async () => undefined),
 }
 
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: <T>(selector: (s: typeof settingsState) => T): T => selector(settingsState),
+  useSettingsStore: Object.assign(
+    <T>(selector: (s: typeof settingsState) => T): T => selector(settingsState),
+    { getState: () => settingsState }
+  ),
 }))
 
 import { useTTS } from "./use-tts"
@@ -112,6 +117,30 @@ describe("useTTS", () => {
   it("respects useSettings:false branch (uses defaults)", async () => {
     const { result } = renderHook(() => useTTS({ useSettings: false }))
     expect(result.current.currentProvider).toBe("system")
+  })
+
+  it("spreads voiceOverlay onto the speech settings and drives the provider", async () => {
+    const { result } = renderHook(() =>
+      useTTS({
+        source: "settings",
+        voiceOverlay: { ttsProvider: "elevenlabs", elevenlabsVoice: "rachel", ttsRate: 1.5 },
+      })
+    )
+    expect(result.current.currentProvider).toBe("elevenlabs")
+    await act(async () => {
+      await result.current.speak("hi")
+    })
+    expect(speakMock).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({
+        provider: "elevenlabs",
+        speechSettings: expect.objectContaining({
+          ttsProvider: "elevenlabs",
+          elevenlabsVoice: "rachel",
+          ttsRate: 1.5,
+        }),
+      })
+    )
   })
 
   it("wires stop/pause/resume to orchestrator", () => {

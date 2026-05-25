@@ -5,7 +5,12 @@
  * `liveQuery` timing race that fake-indexeddb exhibits under Jest.
  */
 
-import { applySettings, installMobileSignalingController } from "./mobile-controller"
+import {
+  applySettings,
+  installMobileSignalingController,
+  REUPGRADE_MIN_SPACING_MS,
+} from "./mobile-controller"
+import type { NetworkStatus } from "@/lib/capacitor/network"
 import type { AppSettings } from "@/lib/claude/types"
 
 class FakeTransport {
@@ -94,6 +99,73 @@ describe("installMobileSignalingController", () => {
     })
     expect(typeof uninstall).toBe("function")
     expect(tx.enableCalls).toEqual([])
+    uninstall()
+  })
+
+  it("re-upgrades the WebRTC tier on network reconnect and app resume, throttled", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    let resumeHandler: () => void = () => {}
+    let nowMs = 0
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async (handler) => {
+        resumeHandler = handler
+        return () => {}
+      },
+      nowOverride: () => nowMs,
+    })
+
+    // Let the async subscribe setup (and the settings liveQuery) settle.
+    await new Promise((r) => setTimeout(r, 10))
+    const baseline = tx.enableCalls.length
+
+    // Network connectivity returns → one re-upgrade.
+    netHandler({ connected: true, connectionType: "wifi" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tx.enableCalls.length).toBe(baseline + 1)
+
+    // App resume within the throttle window → suppressed.
+    resumeHandler()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tx.enableCalls.length).toBe(baseline + 1)
+
+    // Past the throttle window → resume re-upgrades again.
+    nowMs += REUPGRADE_MIN_SPACING_MS + 1
+    resumeHandler()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tx.enableCalls.length).toBe(baseline + 2)
+
+    uninstall()
+  })
+
+  it("does not re-upgrade on a disconnected network event", async () => {
+    const tx = new FakeTransport()
+    let netHandler: (s: NetworkStatus) => void = () => {}
+    const uninstall = installMobileSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+      subscribeNetworkOverride: async (handler) => {
+        netHandler = handler
+        return () => {}
+      },
+      subscribeResumeOverride: async () => () => {},
+      nowOverride: () => 0,
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const baseline = tx.enableCalls.length
+
+    netHandler({ connected: false, connectionType: "none" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tx.enableCalls.length).toBe(baseline)
+
     uninstall()
   })
 })

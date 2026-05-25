@@ -9,8 +9,10 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 const listMessagesMock = jest.fn()
+const persistMessagesMock = jest.fn()
 jest.mock("@/lib/db/messages", () => ({
   listMessages: (id: string) => listMessagesMock(id),
+  persistMessages: (id: string, msgs: unknown) => persistMessagesMock(id, msgs),
 }))
 
 const createSessionMock = jest.fn()
@@ -18,12 +20,19 @@ const deleteSessionMock = jest.fn()
 const bulkDeleteSessionsMock = jest.fn()
 const listSessionsMock = jest.fn()
 const updateSessionMock = jest.fn()
+const getSessionMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
   bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
   listSessions: () => listSessionsMock(),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
+  getSession: (id: string) => getSessionMock(id),
+}))
+
+const resolveCharacterByIdMock = jest.fn()
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (id: string) => resolveCharacterByIdMock(id),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
@@ -60,11 +69,14 @@ import { useSessions } from "./use-sessions"
 beforeEach(() => {
   liveQueryMock.mockReset().mockReturnValue([])
   listMessagesMock.mockReset().mockResolvedValue([])
+  persistMessagesMock.mockReset().mockResolvedValue(undefined)
   createSessionMock.mockReset()
   deleteSessionMock.mockReset().mockResolvedValue(undefined)
   bulkDeleteSessionsMock.mockReset().mockResolvedValue(undefined)
   listSessionsMock.mockReset().mockResolvedValue([])
   updateSessionMock.mockReset().mockResolvedValue(undefined)
+  getSessionMock.mockReset().mockResolvedValue({ id: "s1" })
+  resolveCharacterByIdMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   chatStoreState.setActiveSession.mockClear()
   chatStoreState.setMessages.mockClear()
@@ -79,6 +91,18 @@ describe("useSessions", () => {
     expect(result.current.sessions).toEqual([{ id: "s1" }])
   })
 
+  it("reports isLoadingSessions until the first live query resolves", () => {
+    liveQueryMock.mockReturnValue(undefined)
+    const { result, rerender } = renderHook(() => useSessions())
+    expect(result.current.isLoadingSessions).toBe(true)
+    expect(result.current.sessions).toEqual([])
+
+    liveQueryMock.mockReturnValue([{ id: "s1" }])
+    rerender()
+    expect(result.current.isLoadingSessions).toBe(false)
+    expect(result.current.sessions).toEqual([{ id: "s1" }])
+  })
+
   it("hydrates messages when activeSessionId changes", async () => {
     chatStoreState.activeSessionId = "s1"
     listMessagesMock.mockResolvedValueOnce([{ id: "m1" }])
@@ -90,6 +114,45 @@ describe("useSessions", () => {
     chatStoreState.activeSessionId = null
     renderHook(() => useSessions())
     expect(listMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it("seeds the character opening message for an empty session", async () => {
+    chatStoreState.activeSessionId = "s1"
+    listMessagesMock.mockResolvedValueOnce([])
+    getSessionMock.mockResolvedValueOnce({ id: "s1", characterId: "c1" })
+    resolveCharacterByIdMock.mockResolvedValueOnce({
+      id: "c1",
+      name: "Tutor",
+      persona: { openingMessage: "Welcome aboard!" },
+    })
+    renderHook(() => useSessions())
+    await waitFor(() => expect(persistMessagesMock).toHaveBeenCalledTimes(1))
+    const [persistedId, persistedMsgs] = persistMessagesMock.mock.calls[0]
+    expect(persistedId).toBe("s1")
+    expect(persistedMsgs[0].parts).toEqual([
+      { type: "text", text: "Welcome aboard!", state: "done" },
+    ])
+    expect(chatStoreState.setMessages).toHaveBeenCalledWith(persistedMsgs)
+  })
+
+  it("does not seed when the session is empty but has no character opening message", async () => {
+    chatStoreState.activeSessionId = "s1"
+    listMessagesMock.mockResolvedValueOnce([])
+    getSessionMock.mockResolvedValueOnce({ id: "s1", characterId: "c1" })
+    resolveCharacterByIdMock.mockResolvedValueOnce({ id: "c1", name: "Tutor", persona: {} })
+    renderHook(() => useSessions())
+    await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([]))
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it("does not seed an empty session with no character", async () => {
+    chatStoreState.activeSessionId = "s1"
+    listMessagesMock.mockResolvedValueOnce([])
+    getSessionMock.mockResolvedValueOnce({ id: "s1" })
+    renderHook(() => useSessions())
+    await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([]))
+    expect(resolveCharacterByIdMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).not.toHaveBeenCalled()
   })
 
   it("select forwards to chat store", () => {

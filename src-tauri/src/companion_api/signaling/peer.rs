@@ -256,6 +256,7 @@ pub enum PeerSendError {
 mod tests {
     use super::*;
     use tokio::sync::mpsc::unbounded_channel;
+    use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 
     fn callbacks() -> (
         PeerCallbacks,
@@ -297,6 +298,53 @@ mod tests {
             .await;
         assert!(matches!(result, Err(PeerSendError::Timeout)));
         session.close().await;
+    }
+
+    #[tokio::test]
+    async fn accept_offer_is_recallable_for_ice_restart() {
+        // The desktop ICE-restart path (client.rs) renegotiates on the live
+        // PeerSession instead of rebuilding it. This proves `accept_offer` is
+        // safely re-callable on the same session: a second (ice_restart) offer
+        // from the mobile peer yields a fresh answer without a new PeerSession.
+        let (cb, _ice, _data, _state) = callbacks();
+        let desktop = PeerSession::new(vec![], cb).await.expect("desktop");
+
+        let mobile_api = APIBuilder::new().build();
+        let mobile = mobile_api
+            .new_peer_connection(RTCConfiguration::default())
+            .await
+            .expect("mobile pc");
+        let _dc = mobile
+            .create_data_channel(DATACHANNEL_LABEL, None)
+            .await
+            .expect("mobile dc");
+
+        // Initial negotiation → stable on both ends.
+        let offer1 = mobile.create_offer(None).await.expect("offer1");
+        mobile.set_local_description(offer1.clone()).await.expect("ml1");
+        let answer1_sdp = desktop.accept_offer(offer1.sdp).await.expect("accept1");
+        assert!(!answer1_sdp.is_empty());
+        let answer1 = RTCSessionDescription::answer(answer1_sdp).expect("answer1 parse");
+        mobile.set_remote_description(answer1).await.expect("mr1");
+
+        // ICE restart: the mobile re-offers with `ice_restart` on the SAME PC;
+        // the desktop renegotiates on the SAME PeerSession (no rebuild).
+        let offer2 = mobile
+            .create_offer(Some(RTCOfferOptions {
+                ice_restart: true,
+                ..Default::default()
+            }))
+            .await
+            .expect("offer2 restart");
+        mobile.set_local_description(offer2.clone()).await.expect("ml2");
+        let answer2_sdp = desktop
+            .accept_offer(offer2.sdp)
+            .await
+            .expect("accept2 restart");
+        assert!(!answer2_sdp.is_empty());
+
+        desktop.close().await;
+        let _ = mobile.close().await;
     }
 
     #[tokio::test]

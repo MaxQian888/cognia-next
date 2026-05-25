@@ -31,6 +31,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -66,38 +67,67 @@ struct PendingConfirmationRecord {
     operation: PendingOperation,
 }
 
-/// Global scheduler state
+/// Global scheduler state.
+///
+/// Both the platform scheduler and the SQLite metadata store are built
+/// **lazily on first use**, not in `new()`. Construction is expensive and
+/// used to run on the synchronous Tauri startup path: `create_platform_scheduler`
+/// shells out to `schtasks.exe` / `launchctl` / `systemctl` to probe
+/// availability + elevation, and the metadata store opens a SQLite file.
+/// Nothing at app boot calls a `scheduler_*` command (the renderer's
+/// scheduler UI is Dexie-backed), so deferring keeps that subprocess probe
+/// and DB open off the startup critical path — they pay their cost on the
+/// first system-scheduler command instead, on a tokio worker thread.
 pub struct SchedulerState {
-    scheduler: Arc<dyn SystemScheduler>,
-    metadata_store: Option<SchedulerMetadataStore>,
+    scheduler: OnceCell<Arc<dyn SystemScheduler>>,
+    metadata_db_path: Option<PathBuf>,
+    metadata_store: OnceCell<Option<SchedulerMetadataStore>>,
     /// Pending confirmations keyed by confirmation_id
     pending_confirmations: RwLock<HashMap<String, PendingConfirmationRecord>>,
 }
 
 impl SchedulerState {
-    /// Create a new scheduler state with platform-appropriate scheduler
+    /// Create a new scheduler state. Cheap by design — the platform probe and
+    /// metadata-store open are deferred to first access (see the type docs).
     pub fn new(metadata_db_path: Option<PathBuf>) -> Self {
-        let scheduler: Arc<dyn SystemScheduler> = Self::create_platform_scheduler();
-        let metadata_store =
-            metadata_db_path.and_then(|path| match SchedulerMetadataStore::new(path) {
-                Ok(store) => Some(store),
-                Err(error) => {
-                    warn!("Failed to initialize scheduler metadata store: {}", error);
-                    None
-                }
-            });
-
-        info!(
-            "Scheduler state initialized: os={}, backend={}",
-            scheduler.capabilities().os,
-            scheduler.capabilities().backend
-        );
-
         Self {
-            scheduler,
-            metadata_store,
+            scheduler: OnceCell::new(),
+            metadata_db_path,
+            metadata_store: OnceCell::new(),
             pending_confirmations: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Lazily build the platform scheduler on first access. The availability /
+    /// elevation probe (a blocking subprocess spawn) runs here, off the
+    /// startup path.
+    fn scheduler(&self) -> &Arc<dyn SystemScheduler> {
+        self.scheduler.get_or_init(|| {
+            let scheduler = Self::create_platform_scheduler();
+            info!(
+                "Scheduler state initialized: os={}, backend={}",
+                scheduler.capabilities().os,
+                scheduler.capabilities().backend
+            );
+            scheduler
+        })
+    }
+
+    /// Lazily open the SQLite metadata store on first access. A failed open
+    /// (or absent path) yields `None` — same posture as before, just deferred.
+    fn metadata(&self) -> Option<&SchedulerMetadataStore> {
+        self.metadata_store
+            .get_or_init(|| {
+                let path = self.metadata_db_path.clone()?;
+                match SchedulerMetadataStore::new(path) {
+                    Ok(store) => Some(store),
+                    Err(error) => {
+                        warn!("Failed to initialize scheduler metadata store: {}", error);
+                        None
+                    }
+                }
+            })
+            .as_ref()
     }
 
     /// Create the appropriate scheduler for the current platform
@@ -123,7 +153,7 @@ impl SchedulerState {
 
     /// Get scheduler capabilities (with trigger_capabilities populated from platform impl)
     pub fn capabilities(&self) -> SchedulerCapabilities {
-        self.scheduler.capabilities()
+        self.scheduler().capabilities()
     }
 
     /// Validate trigger translation fidelity on the active platform
@@ -131,22 +161,22 @@ impl SchedulerState {
         &self,
         trigger: &SystemTaskTrigger,
     ) -> TranslationValidation {
-        self.scheduler.validate_trigger_translation(trigger)
+        self.scheduler().validate_trigger_translation(trigger)
     }
 
     /// Check if scheduler is available
     pub fn is_available(&self) -> bool {
-        self.scheduler.is_available()
+        self.scheduler().is_available()
     }
 
     /// Check if running with elevated privileges
     pub fn is_elevated(&self) -> bool {
-        self.scheduler.is_elevated()
+        self.scheduler().is_elevated()
     }
 
     /// Check if a task requires admin privileges (delegates to platform scheduler)
     pub fn requires_admin(&self, task: &SystemTask) -> bool {
-        self.scheduler.requires_admin(task)
+        self.scheduler().requires_admin(task)
     }
 
     fn is_placeholder_task(task: &SystemTask) -> bool {
@@ -197,7 +227,7 @@ impl SchedulerState {
         target_task_id: Option<SystemTaskId>,
         confirmation_id: String,
     ) -> TaskConfirmationRequest {
-        let requires_admin = task.check_requires_admin() || self.scheduler.requires_admin(task);
+        let requires_admin = task.check_requires_admin() || self.scheduler().requires_admin(task);
         TaskConfirmationRequest {
             confirmation_id,
             task_id: Some(task.id.clone()),
@@ -283,7 +313,7 @@ impl SchedulerState {
     }
 
     async fn enrich_task_with_metadata(&self, platform_task: SystemTask) -> SystemTask {
-        if let Some(store) = &self.metadata_store {
+        if let Some(store) = self.metadata() {
             match store.get_task_metadata(&platform_task.id, Some(&platform_task.name)) {
                 Ok(Some(metadata_task)) => {
                     return Self::merge_platform_with_metadata(&platform_task, &metadata_task);
@@ -306,7 +336,7 @@ impl SchedulerState {
     }
 
     fn persist_task_metadata(&self, task: &SystemTask) {
-        if let Some(store) = &self.metadata_store {
+        if let Some(store) = self.metadata() {
             if let Err(error) = store.upsert_task(task) {
                 warn!(
                     "Failed to persist scheduler metadata for task {}: {}",
@@ -317,7 +347,7 @@ impl SchedulerState {
     }
 
     fn delete_task_metadata(&self, task_id: &str) {
-        if let Some(store) = &self.metadata_store {
+        if let Some(store) = self.metadata() {
             if let Err(error) = store.delete_task(task_id) {
                 warn!(
                     "Failed deleting scheduler metadata for task {}: {}",
@@ -340,7 +370,7 @@ impl SchedulerState {
             TaskMetadataState::Full,
         );
         let requires_admin =
-            temp_task.check_requires_admin() || self.scheduler.requires_admin(&temp_task);
+            temp_task.check_requires_admin() || self.scheduler().requires_admin(&temp_task);
         let risk_level = temp_task.calculate_risk_level();
 
         // Check if confirmation is needed
@@ -371,7 +401,7 @@ impl SchedulerState {
         }
 
         // Create the task
-        let mut task = self.scheduler.create_task(input).await?;
+        let mut task = self.scheduler().create_task(input).await?;
         task.metadata_state = TaskMetadataState::Full;
         self.persist_task_metadata(&task);
         Ok(Ok(task))
@@ -410,25 +440,25 @@ impl SchedulerState {
 
         match record.operation {
             PendingOperation::Create { input } => {
-                let mut task = self.scheduler.create_task(input).await?;
+                let mut task = self.scheduler().create_task(input).await?;
                 task.metadata_state = TaskMetadataState::Full;
                 self.persist_task_metadata(&task);
                 Ok(Some(task))
             }
             PendingOperation::Update { task_id, input } => {
-                let mut task = self.scheduler.update_task(&task_id, input).await?;
+                let mut task = self.scheduler().update_task(&task_id, input).await?;
                 task.metadata_state = TaskMetadataState::Full;
                 self.persist_task_metadata(&task);
                 Ok(Some(task))
             }
             PendingOperation::Delete { task_id } => {
-                let _ = self.scheduler.delete_task(&task_id).await?;
+                let _ = self.scheduler().delete_task(&task_id).await?;
                 self.delete_task_metadata(&task_id);
                 Ok(None)
             }
             PendingOperation::Enable { task_id } => {
-                let _ = self.scheduler.enable_task(&task_id).await?;
-                if let Some(task) = self.scheduler.get_task(&task_id).await? {
+                let _ = self.scheduler().enable_task(&task_id).await?;
+                if let Some(task) = self.scheduler().get_task(&task_id).await? {
                     let enriched = self.enrich_task_with_metadata(task).await;
                     self.persist_task_metadata(&enriched);
                     Ok(Some(enriched))
@@ -437,8 +467,8 @@ impl SchedulerState {
                 }
             }
             PendingOperation::RunNow { task_id } => {
-                let _ = self.scheduler.run_task_now(&task_id).await?;
-                if let Some(task) = self.scheduler.get_task(&task_id).await? {
+                let _ = self.scheduler().run_task_now(&task_id).await?;
+                if let Some(task) = self.scheduler().get_task(&task_id).await? {
                     let enriched = self.enrich_task_with_metadata(task).await;
                     if enriched.metadata_state == TaskMetadataState::Full {
                         self.persist_task_metadata(&enriched);
@@ -484,7 +514,7 @@ impl SchedulerState {
             TaskMetadataState::Full,
         );
         let requires_admin =
-            temp_task.check_requires_admin() || self.scheduler.requires_admin(&temp_task);
+            temp_task.check_requires_admin() || self.scheduler().requires_admin(&temp_task);
         let risk_level = temp_task.calculate_risk_level();
 
         let needs_confirmation = matches!(risk_level, RiskLevel::High | RiskLevel::Critical)
@@ -517,7 +547,7 @@ impl SchedulerState {
             ));
         }
 
-        let mut task = self.scheduler.update_task(id, input).await?;
+        let mut task = self.scheduler().update_task(id, input).await?;
         task.metadata_state = TaskMetadataState::Full;
         self.persist_task_metadata(&task);
         Ok(Ok(task))
@@ -525,7 +555,7 @@ impl SchedulerState {
 
     /// Delete a task
     pub async fn delete_task(&self, id: &str) -> Result<bool> {
-        let deleted = self.scheduler.delete_task(id).await?;
+        let deleted = self.scheduler().delete_task(id).await?;
         if deleted {
             self.delete_task_metadata(id);
         }
@@ -534,7 +564,7 @@ impl SchedulerState {
 
     /// Get a task by ID
     pub async fn get_task(&self, id: &str) -> Result<Option<SystemTask>> {
-        match self.scheduler.get_task(id).await? {
+        match self.scheduler().get_task(id).await? {
             Some(task) => {
                 let enriched = self.enrich_task_with_metadata(task).await;
                 if enriched.metadata_state == TaskMetadataState::Full {
@@ -543,7 +573,7 @@ impl SchedulerState {
                 Ok(Some(enriched))
             }
             None => {
-                if let Some(store) = &self.metadata_store {
+                if let Some(store) = self.metadata() {
                     if let Some(mut metadata_task) = store.get_task_metadata(id, None)? {
                         metadata_task.status = SystemTaskStatus::Unknown;
                         metadata_task.metadata_state = TaskMetadataState::Degraded;
@@ -558,7 +588,7 @@ impl SchedulerState {
 
     /// List all tasks
     pub async fn list_tasks(&self) -> Result<Vec<SystemTask>> {
-        let tasks = self.scheduler.list_tasks().await?;
+        let tasks = self.scheduler().list_tasks().await?;
         let mut enriched = Vec::with_capacity(tasks.len());
         for task in tasks {
             let merged = self.enrich_task_with_metadata(task).await;
@@ -572,22 +602,22 @@ impl SchedulerState {
 
     /// Enable a task
     pub async fn enable_task(&self, id: &str) -> Result<bool> {
-        self.scheduler.enable_task(id).await
+        self.scheduler().enable_task(id).await
     }
 
     /// Disable a task
     pub async fn disable_task(&self, id: &str) -> Result<bool> {
-        self.scheduler.disable_task(id).await
+        self.scheduler().disable_task(id).await
     }
 
     /// Run a task immediately
     pub async fn run_task_now(&self, id: &str) -> Result<TaskRunResult> {
-        self.scheduler.run_task_now(id).await
+        self.scheduler().run_task_now(id).await
     }
 
     /// Request admin elevation
     pub async fn request_elevation(&self) -> Result<bool> {
-        self.scheduler.request_elevation().await
+        self.scheduler().request_elevation().await
     }
 
     /// Summarize an action for display
@@ -918,11 +948,40 @@ mod tests {
     }
 
     fn build_state_with_mock() -> SchedulerState {
+        // Pre-fill the lazy scheduler cell with the mock so `scheduler()`
+        // returns it instead of probing the real platform backend.
+        let scheduler: OnceCell<Arc<dyn SystemScheduler>> = OnceCell::new();
+        let _ = scheduler.set(Arc::new(MockScheduler::default()));
         SchedulerState {
-            scheduler: Arc::new(MockScheduler::default()),
-            metadata_store: None,
+            scheduler,
+            metadata_db_path: None,
+            metadata_store: OnceCell::new(),
             pending_confirmations: RwLock::new(HashMap::new()),
         }
+    }
+
+    fn build_state_with_mock_and_metadata(path: PathBuf) -> SchedulerState {
+        let scheduler: OnceCell<Arc<dyn SystemScheduler>> = OnceCell::new();
+        let _ = scheduler.set(Arc::new(MockScheduler::default()));
+        SchedulerState {
+            scheduler,
+            metadata_db_path: Some(path),
+            metadata_store: OnceCell::new(),
+            pending_confirmations: RwLock::new(HashMap::new()),
+        }
+    }
+
+    #[test]
+    fn metadata_store_opens_lazily() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("scheduler_metadata.sqlite");
+        let state = build_state_with_mock_and_metadata(path.clone());
+        // Construction must NOT open the SQLite file — that open used to run on
+        // the synchronous Tauri startup path.
+        assert!(!path.exists(), "metadata db opened before first access");
+        // First metadata access opens it.
+        assert!(state.metadata().is_some());
+        assert!(path.exists(), "metadata db not opened on first access");
     }
 
     fn interval_command_input(name: &str) -> CreateSystemTaskInput {

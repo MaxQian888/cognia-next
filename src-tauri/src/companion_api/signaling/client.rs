@@ -466,6 +466,15 @@ async fn push_relay(
         .map_err(|_| SessionError::Protocol("outbound queue closed".into()))
 }
 
+/// Whether an inbound `rtc:offer` should renegotiate on the live peer (a true
+/// ICE restart that preserves DTLS + the data channel) instead of rebuilding a
+/// fresh [`PeerSession`]. Reuse requires both the restart flag and an existing
+/// peer; a restart flag with no peer (e.g. after a teardown) falls through to a
+/// fresh build.
+fn should_reuse_peer_for_offer(ice_restart: bool, has_peer: bool) -> bool {
+    ice_restart && has_peer
+}
+
 fn envelope_err(e: EnvelopeError) -> SessionError {
     SessionError::Protocol(format!("envelope: {e}"))
 }
@@ -534,61 +543,92 @@ async fn handle_relay(
                 .get("sdp")
                 .and_then(Value::as_str)
                 .ok_or_else(|| SessionError::Protocol("rtc:offer missing sdp".into()))?;
+            let ice_restart = envelope
+                .body
+                .get("iceRestart")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
 
-            // Build the peer session lazily on first offer (or rebuild if
-            // a prior peer was torn down). Mobile re-issues offer on ICE
-            // restart, in which case we still want a fresh PC.
-            let (ice_tx, ice_rx) = mpsc::unbounded_channel();
-            let (data_tx, data_rx) = mpsc::unbounded_channel();
-            let (state_tx, state_rx) = mpsc::unbounded_channel();
-            let callbacks = PeerCallbacks {
-                outbound_ice: ice_tx,
-                inbound_data: data_tx,
-                state_change: state_tx,
-            };
-            let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)
-                .await
-                .map_err(|e| SessionError::Protocol(format!("peer build: {e}")))?;
-            let new_peer = Arc::new(new_peer);
+            if should_reuse_peer_for_offer(ice_restart, peer_session.is_some()) {
+                // True ICE restart: renegotiate on the EXISTING peer so DTLS,
+                // the data channel, and the dispatcher all survive — only ICE
+                // re-gathers. `accept_offer` (set_remote_description +
+                // create_answer + set_local_description) on the live PC
+                // produces an answer carrying fresh ICE credentials; the
+                // peer's existing `on_ice_candidate` hook keeps relaying new
+                // candidates. Mirrors the mobile `attemptIceRestart` path in
+                // `lib/tauri/transport-rtc.ts`.
+                let existing = peer_session
+                    .as_ref()
+                    .expect("peer_session is_some checked above");
+                let answer_sdp = existing
+                    .accept_offer(sdp.to_string())
+                    .await
+                    .map_err(|e| SessionError::Protocol(format!("accept_offer(restart): {e}")))?;
+                let answer = build_signed_envelope(
+                    *next_seq,
+                    EnvelopeKind::RtcAnswer,
+                    json!({ "sdp": answer_sdp }),
+                    &config.rendezvous_secret,
+                )
+                .map_err(envelope_err)?;
+                *next_seq += 1;
+                push_relay(out_tx, &config.rendezvous_id, &answer).await?;
+            } else {
+                // First offer (or a non-restart re-offer): build a fresh peer.
+                // A prior peer/dispatcher, if any, is torn down below.
+                let (ice_tx, ice_rx) = mpsc::unbounded_channel();
+                let (data_tx, data_rx) = mpsc::unbounded_channel();
+                let (state_tx, state_rx) = mpsc::unbounded_channel();
+                let callbacks = PeerCallbacks {
+                    outbound_ice: ice_tx,
+                    inbound_data: data_tx,
+                    state_change: state_tx,
+                };
+                let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)
+                    .await
+                    .map_err(|e| SessionError::Protocol(format!("peer build: {e}")))?;
+                let new_peer = Arc::new(new_peer);
 
-            // Generate the SDP answer and relay it back as a signed envelope.
-            let answer_sdp = new_peer
-                .accept_offer(sdp.to_string())
-                .await
-                .map_err(|e| SessionError::Protocol(format!("accept_offer: {e}")))?;
-            let answer = build_signed_envelope(
-                *next_seq,
-                EnvelopeKind::RtcAnswer,
-                json!({ "sdp": answer_sdp }),
-                &config.rendezvous_secret,
-            )
-            .map_err(envelope_err)?;
-            *next_seq += 1;
-            push_relay(out_tx, &config.rendezvous_id, &answer).await?;
+                // Generate the SDP answer and relay it back as a signed envelope.
+                let answer_sdp = new_peer
+                    .accept_offer(sdp.to_string())
+                    .await
+                    .map_err(|e| SessionError::Protocol(format!("accept_offer: {e}")))?;
+                let answer = build_signed_envelope(
+                    *next_seq,
+                    EnvelopeKind::RtcAnswer,
+                    json!({ "sdp": answer_sdp }),
+                    &config.rendezvous_secret,
+                )
+                .map_err(envelope_err)?;
+                *next_seq += 1;
+                push_relay(out_tx, &config.rendezvous_id, &answer).await?;
 
-            // Tear down any previous dispatcher / channels.
-            if let Some(h) = dispatcher.take() {
-                h.abort();
+                // Tear down any previous dispatcher / channels.
+                if let Some(h) = dispatcher.take() {
+                    h.abort();
+                }
+                *peer_session = Some(Arc::clone(&new_peer));
+                *peer_ice_rx = Some(ice_rx);
+                *peer_state_rx = Some(state_rx);
+                *peer_data_rx = Some(data_rx);
+
+                // Spawn the dispatcher — it owns the data_rx side until the
+                // DataChannel actually opens (waited on inside the dispatcher).
+                // Wrapping in tokio::spawn means the rest of the session loop
+                // continues to drive ICE / outbound while the DC is still
+                // negotiating.
+                let data_rx_take = peer_data_rx.take().expect("data rx just set");
+                let handle = spawn_dispatcher(
+                    Arc::clone(&new_peer),
+                    data_rx_take,
+                    state.clone(),
+                    app.clone(),
+                    config.device_id.clone(),
+                );
+                *dispatcher = Some(handle);
             }
-            *peer_session = Some(Arc::clone(&new_peer));
-            *peer_ice_rx = Some(ice_rx);
-            *peer_state_rx = Some(state_rx);
-            *peer_data_rx = Some(data_rx);
-
-            // Spawn the dispatcher — it owns the data_rx side until the
-            // DataChannel actually opens (waited on inside the dispatcher).
-            // Wrapping in tokio::spawn means the rest of the session loop
-            // continues to drive ICE / outbound while the DC is still
-            // negotiating.
-            let data_rx_take = peer_data_rx.take().expect("data rx just set");
-            let handle = spawn_dispatcher(
-                Arc::clone(&new_peer),
-                data_rx_take,
-                state.clone(),
-                app.clone(),
-                config.device_id.clone(),
-            );
-            *dispatcher = Some(handle);
         }
         EnvelopeKind::RtcAnswer => {
             // We are always the answerer in the desktop role. Receiving an
@@ -652,6 +692,18 @@ async fn teardown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reuse_peer_for_offer_requires_restart_flag_and_existing_peer() {
+        // True ICE restart: reuse the live peer.
+        assert!(should_reuse_peer_for_offer(true, true));
+        // Restart requested but no peer yet → fresh build.
+        assert!(!should_reuse_peer_for_offer(true, false));
+        // First/non-restart offer with an existing peer → fresh build
+        // (full renegotiation, new DTLS).
+        assert!(!should_reuse_peer_for_offer(false, true));
+        assert!(!should_reuse_peer_for_offer(false, false));
+    }
 
     #[test]
     fn client_frame_subscribe_serializes_camel_case() {

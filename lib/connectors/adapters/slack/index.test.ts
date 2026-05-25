@@ -322,6 +322,70 @@ describe("createSlackAdapter", () => {
     expect(httpCalls).toHaveLength(0)
   })
 
+  // -------------------------------------------------------------------------
+  // setSuggestedPrompts — assistant-thread escape hatch (plugins / workflows
+  // drive it via `bus.listAdapters().find(...).setSuggestedPrompts(...)`).
+  // -------------------------------------------------------------------------
+
+  describe("setSuggestedPrompts", () => {
+    type WithSuggested = ReturnType<typeof createSlackAdapter> & {
+      setSuggestedPrompts: (
+        conversationKey: string,
+        prompts: Array<{ title: string; message: string }>,
+        title?: string
+      ) => Promise<void>
+    }
+
+    function makeAssistantAdapter() {
+      return createSlackAdapter({
+        id: "sl-1",
+        displayName: "Assistant Bot",
+        botToken: async () => "xoxb-test-token",
+        appToken: async () => "xapp-test-token",
+        signingSecret: async () => "signing-secret",
+        selfId: "UBOT123",
+        transport: "socket-mode",
+        assistantAppEnabled: true,
+      }) as WithSuggested
+    }
+
+    const prompts = [{ title: "Summarise", message: "Summarise this thread" }]
+
+    function httpCalls() {
+      return mockInvoke.mock.calls.filter(([cmd]: [string]) => cmd === "connectors_http_request")
+    }
+
+    it("is a no-op when assistantAppEnabled is false", async () => {
+      const adapter = makeAdapter() as WithSuggested
+      await adapter.setSuggestedPrompts("slack:sl-1:C01:1600000000.000100", prompts)
+      expect(httpCalls()).toHaveLength(0)
+    })
+
+    it("is a no-op when the conversation has no thread_ts", async () => {
+      const adapter = makeAssistantAdapter()
+      await adapter.setSuggestedPrompts("slack:sl-1:C01", prompts)
+      expect(httpCalls()).toHaveLength(0)
+    })
+
+    it("POSTs assistant.threads.setSuggestedPrompts for an assistant thread", async () => {
+      const adapter = makeAssistantAdapter()
+      await adapter.setSuggestedPrompts("slack:sl-1:C01:1600000000.000100", prompts, "Try")
+
+      const calls = httpCalls()
+      expect(calls).toHaveLength(1)
+      const reqPayload = (
+        calls[0][1] as { req: { url: string; headers: Record<string, string>; body?: string } }
+      ).req
+      expect(reqPayload.url).toContain("assistant.threads.setSuggestedPrompts")
+      expect(reqPayload.headers["Authorization"]).toBe("Bearer xoxb-test-token")
+      const body = JSON.parse(reqPayload.body ?? "{}") as Record<string, unknown>
+      expect(body.channel_id).toBe("C01")
+      expect(body.thread_ts).toBe("1600000000.000100")
+      expect(body.prompts).toEqual(prompts)
+      expect(body.title).toBe("Try")
+    })
+  })
+
   it("fetchHistory() returns an empty async iterable", async () => {
     const adapter = makeAdapter()
     const events: unknown[] = []

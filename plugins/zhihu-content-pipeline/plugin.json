@@ -1,0 +1,35 @@
+{
+  "id": "zhihu-content-pipeline",
+  "name": "Zhihu Content Pipeline",
+  "version": "0.1.0",
+  "description": "A pluggable Zhihu content-creation system: five role characters (scout / editor / researcher / writer / polisher), Zhihu writing skills, and MCP presets that wrap zget-cli, Exa, Fetch, Sequential Thinking, and a CloakBrowser stealth browser. Find hot topics, research, draft a high-vote answer, and save it as a draft.",
+  "type": "frontend",
+  "capabilities": [
+    "character-pack",
+    "skills",
+    "mcp-server-preset",
+    "tools",
+    "workflow",
+    "workflow-template",
+    "agent-team-template",
+    "commands"
+  ],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "hint": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

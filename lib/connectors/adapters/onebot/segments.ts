@@ -17,6 +17,59 @@ export interface OneBotSegment {
 }
 
 // ---------------------------------------------------------------------------
+// Rich-segment helpers (NapCat extensions, shared by v11 + v12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Flatten a NapCat merged-forward (`forward` / `node`) segment into readable
+ * text. NapCat may inline the forwarded nodes under `data.content`
+ * (`[{ type:"node", data:{ nickname, content:[…segments] } }]`); when it does
+ * we render `nickname: text` lines. When the content isn't inlined (only a
+ * forward `id` is present) we fall back to a generic marker — fetching the full
+ * forward body needs a `get_forward_msg` round-trip, out of scope here.
+ */
+function summarizeForward(d: Record<string, unknown>): string {
+  const content = d.content
+  if (Array.isArray(content) && content.length > 0) {
+    const lines: string[] = []
+    for (const node of content as Array<Record<string, unknown>>) {
+      const nodeData = (node.data ?? {}) as Record<string, unknown>
+      const name = String(nodeData.nickname ?? nodeData.name ?? "")
+      const inner = nodeData.content ?? nodeData.message
+      let text = ""
+      if (Array.isArray(inner)) {
+        text = (inner as OneBotSegment[])
+          .map((s) => (s.type === "text" ? String((s.data ?? {}).text ?? "") : `[${s.type}]`))
+          .join("")
+      } else if (typeof inner === "string") {
+        text = inner
+      }
+      lines.push(name ? `${name}: ${text}` : text)
+    }
+    return `[合并转发]\n${lines.join("\n")}`
+  }
+  return "[合并转发消息]"
+}
+
+/**
+ * Extract a human-readable label from a NapCat `json` card segment (share
+ * cards / mini-apps). The card payload is a JSON string under `data.data`;
+ * its `prompt` field is the QQ-rendered one-line summary.
+ */
+function summarizeJsonCard(d: Record<string, unknown>): string {
+  const raw = d.data
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as { prompt?: unknown }
+      if (typeof parsed.prompt === "string" && parsed.prompt) return parsed.prompt
+    } catch {
+      // not valid JSON — fall through to the generic marker
+    }
+  }
+  return "[卡片消息]"
+}
+
+// ---------------------------------------------------------------------------
 // fromOneBotSegments — platform → internal
 // ---------------------------------------------------------------------------
 
@@ -54,6 +107,21 @@ function fromV11Segment(seg: OneBotSegment): MessageSegment {
         mimeType: "application/octet-stream",
         sizeBytes: Number(d.size ?? 0),
       }
+
+    case "mface": {
+      // NapCat market face (商城表情). Prefer the sticker image; fall back to
+      // its text summary.
+      const url = d.url ?? d.file
+      if (typeof url === "string" && url) return { type: "image", url }
+      return { type: "text", text: String(d.summary ?? "") || "[表情]" }
+    }
+
+    case "forward":
+    case "node":
+      return { type: "text", text: summarizeForward(d) }
+
+    case "json":
+      return { type: "text", text: summarizeJsonCard(d) }
 
     default:
       return { type: "text", text: `[unsupported:${seg.type}]` }
@@ -95,6 +163,19 @@ function fromV12Segment(seg: OneBotSegment): MessageSegment {
         mimeType: "application/octet-stream",
         sizeBytes: Number(d.size ?? 0),
       }
+
+    case "mface": {
+      const url = d.url ?? d.file_id
+      if (typeof url === "string" && url) return { type: "image", url }
+      return { type: "text", text: String(d.summary ?? "") || "[表情]" }
+    }
+
+    case "forward":
+    case "node":
+      return { type: "text", text: summarizeForward(d) }
+
+    case "json":
+      return { type: "text", text: summarizeJsonCard(d) }
 
     default:
       return { type: "text", text: `[unsupported:${seg.type}]` }

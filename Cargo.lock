@@ -1602,6 +1602,7 @@ dependencies = [
  "oslog",
  "parking_lot",
  "portable-pty",
+ "prost",
  "qdrant-client",
  "rand 0.8.6",
  "rcgen",

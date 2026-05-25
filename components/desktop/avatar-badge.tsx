@@ -2,7 +2,7 @@
 
 import { avatarColor, avatarGlyph, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
-import type { CSSProperties, ReactNode } from "react"
+import { useState, type CSSProperties, type ReactNode } from "react"
 
 interface AvatarBadgeProps {
   /** Anything with `name` (and optionally `avatarColor` / `avatarEmoji`). */
@@ -29,6 +29,9 @@ export function AvatarBadge({
   className,
   statusDot,
 }: AvatarBadgeProps) {
+  // Fall back to the glyph if the image fails to load (stale tauriPath, etc.).
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImage = Boolean(subject.avatarImageUrl) && !imgFailed
   const style: CSSProperties = {
     width: size,
     height: size,
@@ -38,14 +41,24 @@ export function AvatarBadge({
   return (
     <span
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center rounded-full",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full",
         textClassName,
         className
       )}
       style={style}
       aria-hidden
     >
-      {avatarGlyph(subject)}
+      {showImage ? (
+        // eslint-disable-next-line @next/next/no-img-element -- avatar is a data:/asset URL, not an optimizable remote asset
+        <img
+          src={subject.avatarImageUrl}
+          alt=""
+          className="size-full object-cover"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        avatarGlyph(subject)
+      )}
       {statusDot}
     </span>
   )

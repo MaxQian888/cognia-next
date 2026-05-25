@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { listMessages } from "@/lib/db/messages"
+import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
   bulkDeleteSessions,
   createSession,
   deleteSession,
+  getSession,
   listSessions,
   updateSession,
 } from "@/lib/db/sessions"
+import { resolveCharacterById } from "@/lib/db/characters"
+import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
@@ -19,7 +22,9 @@ import { isTauri } from "@/lib/tauri"
 export function useSessions() {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
+  const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const messagesReloadNonce = useChatStore((s) => s.messagesReloadNonce)
 
   // Live-bind the session list to Dexie so other tabs / quick deletes update.
   const sessions = useLiveQuery<ChatSession[]>(
@@ -27,21 +32,45 @@ export function useSessions() {
     []
   )
 
-  // When the active session changes, hydrate its messages from Dexie.
+  // When the active session changes, hydrate its messages from Dexie. For an
+  // empty session bound to a character with a persona opening message
+  // (ADR-0030), seed + persist that greeting as the first assistant turn so
+  // it shows immediately and survives reload. Idempotent: once seeded the
+  // session is no longer empty, so re-activating it won't re-seed.
   useEffect(() => {
     if (!activeSessionId) return
     let cancelled = false
     listMessages(activeSessionId)
-      .then((msgs) => {
+      .then(async (msgs) => {
+        if (cancelled) return
+        if (msgs.length === 0) {
+          const session = await getSession(activeSessionId)
+          const character = session?.characterId
+            ? await resolveCharacterById(session.characterId)
+            : null
+          const opening = buildOpeningMessage(character)
+          if (opening) {
+            await persistMessages(activeSessionId, [opening])
+            if (!cancelled) setMessages([opening])
+            return
+          }
+        }
         if (!cancelled) setMessages(msgs)
       })
       .catch((err) => {
+        // A transient Dexie read failure must not leave the conversation
+        // silently blank (it reads as "history lost"). Surface it so the chat
+        // pane can show an error + retry; don't overwrite the store with [].
         console.error("listMessages failed", err)
+        if (!cancelled) {
+          setMessagesLoadError(err instanceof Error ? err.message : String(err))
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [activeSessionId, setMessages])
+    // `messagesReloadNonce` re-runs the load when the retry button bumps it.
+  }, [activeSessionId, setMessages, setMessagesLoadError, messagesReloadNonce])
 
   const select = useCallback(
     (id: string | null) => {
@@ -121,6 +150,10 @@ export function useSessions() {
 
   return {
     sessions: sessions ?? [],
+    // `useLiveQuery` returns `undefined` until the first Dexie read resolves;
+    // distinguishing that from a genuinely empty list lets the session list
+    // show a skeleton instead of flashing the empty state on cold start.
+    isLoadingSessions: sessions === undefined,
     activeSessionId,
     select,
     create,

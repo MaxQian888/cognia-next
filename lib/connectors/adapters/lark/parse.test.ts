@@ -1,5 +1,6 @@
-import { parseLarkEventEnvelope } from "./parse"
+import { parseLarkEventEnvelope, parseLarkBotMenuEvent } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
+import type { LarkQuickCommand } from "./quick-commands"
 
 import dmTextFixture from "./fixtures/dm-text.json"
 import groupMentionFixture from "./fixtures/group-mention.json"
@@ -272,5 +273,83 @@ describe("parseLarkEventEnvelope", () => {
       expect(r!.kind).toBe("system")
       expect(r!.systemKind).toBe("member_removed")
     })
+  })
+})
+
+describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
+  const QUICK_COMMANDS: LarkQuickCommand[] = [
+    { eventKey: "agenda", label: "今日日程", action: { type: "slash", value: "/agenda today" } },
+  ]
+
+  function menuEnvelope(
+    eventKey: string | undefined,
+    openId: string | undefined
+  ): LarkEventEnvelope {
+    return {
+      schema: "2.0",
+      header: { event_id: "evt_menu_1", event_type: "application.bot.menu_v6" },
+      event: {
+        ...(openId ? { operator: { operator_id: { open_id: openId } } } : {}),
+        ...(eventKey ? { event_key: eventKey } : {}),
+      },
+    } as unknown as LarkEventEnvelope
+  }
+
+  it("maps a configured event_key to its action value as a p2p create event", () => {
+    const r = parseLarkBotMenuEvent(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      menuEnvelope("agenda", "ou_user_001"),
+      QUICK_COMMANDS
+    )
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("create")
+    expect(r!.plainText).toBe("/agenda today")
+    expect(r!.segments).toEqual([{ type: "text", text: "/agenda today" }])
+    expect(r!.channel.kind).toBe("private")
+    // Reply must address the operator p2p by open_id (ou_ prefix sniff).
+    expect(r!.conversationRef.channelId).toBe("ou_user_001")
+    expect(r!.conversationKey).toBe(`lark:${ADAPTER_ID}:ou_user_001`)
+    expect(r!.messageId).toBe("lark.menu:evt_menu_1")
+  })
+
+  it("falls back to the raw event_key when unmapped (never silently dropped)", () => {
+    const r = parseLarkBotMenuEvent(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      menuEnvelope("unknown_key", "ou_user_001"),
+      QUICK_COMMANDS
+    )
+    expect(r).not.toBeNull()
+    expect(r!.plainText).toBe("unknown_key")
+  })
+
+  it("returns null for non-menu events", () => {
+    const r = parseLarkBotMenuEvent(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      dmTextFixture as LarkEventEnvelope,
+      QUICK_COMMANDS
+    )
+    expect(r).toBeNull()
+  })
+
+  it("returns null when operator open_id or event_key is absent", () => {
+    expect(
+      parseLarkBotMenuEvent(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        menuEnvelope("agenda", undefined),
+        QUICK_COMMANDS
+      )
+    ).toBeNull()
+    expect(
+      parseLarkBotMenuEvent(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        menuEnvelope(undefined, "ou_user_001"),
+        QUICK_COMMANDS
+      )
+    ).toBeNull()
   })
 })

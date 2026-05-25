@@ -68,7 +68,7 @@ const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   ...overrides,
 })
 
-const RESET = { settings: null, loaded: false, providerKeys: {} }
+const RESET = { settings: null, loaded: false, providerKeys: {}, providerKeysLoaded: false }
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -84,7 +84,7 @@ afterEach(() => {
 // ---- load ----
 
 describe("load", () => {
-  it("fetches settings, marks loaded, and pulls keyring keys when fresh", async () => {
+  it("fetches settings and pushes the api key, but does NOT pull keyring keys at boot", async () => {
     dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-x" }))
     keyring.loadAllProviderKeys.mockResolvedValue({ openai: "sk-openai" })
     tauri.isTauri.mockReturnValue(true)
@@ -97,9 +97,12 @@ describe("load", () => {
     const s = useSettingsStore.getState()
     expect(s.loaded).toBe(true)
     expect(s.settings?.apiKey).toBe("sk-x")
-    expect(s.providerKeys).toEqual({ openai: "sk-openai" })
     expect(ipc.setApiKey).toHaveBeenCalledWith("sk-x")
-    expect(keyring.loadAllProviderKeys).toHaveBeenCalledTimes(1)
+    // TTS keys are loaded lazily via `ensureProviderKeys`, never during boot
+    // `load()` — keeps the `1 + N` keyring round-trips off the startup path.
+    expect(s.providerKeys).toEqual({})
+    expect(s.providerKeysLoaded).toBe(false)
+    expect(keyring.loadAllProviderKeys).not.toHaveBeenCalled()
   })
 
   it("short-circuits if already loaded", async () => {
@@ -128,17 +131,6 @@ describe("load", () => {
         terminalRepl: false,
       },
     })
-  })
-
-  it("warns but does not throw when loadAllProviderKeys fails", async () => {
-    dbSettings.getSettings.mockResolvedValue(baseSettings())
-    keyring.loadAllProviderKeys.mockRejectedValue(new Error("keyring err"))
-    tauri.isTauri.mockReturnValue(false)
-    await act(async () => {
-      await useSettingsStore.getState().load()
-    })
-    expect(useSettingsStore.getState().providerKeys).toEqual({})
-    expect(console.warn).toHaveBeenCalled()
   })
 
   it("does not push apiKey down to Tauri when not in Tauri", async () => {
@@ -682,6 +674,44 @@ describe("provider keys (TTS keyring)", () => {
     })
     expect(useSettingsStore.getState().providerKeys.openai).toBe("stale")
     expect(console.warn).toHaveBeenCalled()
+  })
+
+  it("ensureProviderKeys loads once and marks loaded", async () => {
+    keyring.loadAllProviderKeys.mockResolvedValue({ openai: "sk-lazy" })
+    await act(async () => {
+      await useSettingsStore.getState().ensureProviderKeys()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.providerKeys).toEqual({ openai: "sk-lazy" })
+    expect(s.providerKeysLoaded).toBe(true)
+    expect(keyring.loadAllProviderKeys).toHaveBeenCalledTimes(1)
+  })
+
+  it("ensureProviderKeys is idempotent — a second call does not reload", async () => {
+    keyring.loadAllProviderKeys.mockResolvedValue({ openai: "sk-lazy" })
+    await act(async () => {
+      await useSettingsStore.getState().ensureProviderKeys()
+      await useSettingsStore.getState().ensureProviderKeys()
+    })
+    expect(keyring.loadAllProviderKeys).toHaveBeenCalledTimes(1)
+  })
+
+  it("ensureProviderKeys warns and stays unloaded on failure, then retries later", async () => {
+    keyring.loadAllProviderKeys.mockRejectedValueOnce(new Error("keyring err"))
+    await act(async () => {
+      await useSettingsStore.getState().ensureProviderKeys()
+    })
+    expect(useSettingsStore.getState().providerKeys).toEqual({})
+    expect(useSettingsStore.getState().providerKeysLoaded).toBe(false)
+    expect(console.warn).toHaveBeenCalled()
+
+    // A later call retries because the flag stayed false.
+    keyring.loadAllProviderKeys.mockResolvedValue({ openai: "ok" })
+    await act(async () => {
+      await useSettingsStore.getState().ensureProviderKeys()
+    })
+    expect(useSettingsStore.getState().providerKeys).toEqual({ openai: "ok" })
+    expect(useSettingsStore.getState().providerKeysLoaded).toBe(true)
   })
 })
 

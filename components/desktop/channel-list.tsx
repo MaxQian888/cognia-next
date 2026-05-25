@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { SessionListLoading } from "@/components/ui/loading-states"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useRangeSelection } from "@/hooks/ui"
 import { useClientLiveQuery } from "@/hooks/data"
@@ -33,6 +34,12 @@ const log = loggers.ui
 
 interface Props {
   sessions: ChatSession[]
+  /**
+   * True while the Dexie session query hasn't resolved yet (cold start). Lets
+   * the list show a skeleton instead of flashing the empty state before the
+   * first read lands. Defaults to false.
+   */
+  loading?: boolean
   activeSessionId: string | null
   onSelect: (id: string) => void
   onNewDirect: () => void
@@ -120,6 +127,7 @@ function sortByPinThenRecent(list: ChatSession[]): ChatSession[] {
 
 function ChannelListBody({
   sessions,
+  loading,
   activeSessionId,
   onSelect,
   onNewDirect,
@@ -325,7 +333,9 @@ function ChannelListBody({
         ) : null}
         <Separator />
         <ScrollArea className="flex-1">
-          {filtered.length === 0 ? (
+          {loading && filtered.length === 0 ? (
+            <SessionListLoading />
+          ) : filtered.length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">
               {chatGuild.kind === "team" ? t("emptyTeam") : t("emptyDm")}
             </p>

@@ -128,6 +128,28 @@ The response includes `bot.open_id`.
 
 ---
 
+## 8. Bot Menu / Quick Commands (快捷指令)
+
+Feishu bot menus (快捷指令) are configured in the developer console — Feishu exposes
+no API to create them. cognia-next maps each menu item's `event_key` to an action
+you choose, then runs an assistant turn when the menu is clicked.
+
+1. In the Lark console, open **Bot → Bot menu** (机器人 → 机器人自定义菜单) and add a
+   menu item. Set its action to **push an event** and give it an `event_key`
+   (e.g. `agenda`).
+2. Under **Event subscriptions**, also subscribe:
+   - `application.bot.menu_v6` — Bot menu clicked
+3. Release a new version so the menu and the new event subscription take effect.
+4. In cognia-next, open **Settings → Connections → Lark → Quick commands** and add
+   a row mapping the `event_key` to an action:
+   - **Prompt** — free text sent to the assistant (e.g. `Summarize my unread messages`).
+   - **Slash command** — a command line (e.g. `/agenda today`).
+5. Clicking the menu in Lark now drives an assistant reply in that 1:1 chat. An
+   `event_key` with no mapping falls back to its label / raw key as the prompt, so
+   the click is never silently dropped.
+
+---
+
 ## Troubleshooting
 
 | Symptom                               | Likely cause                                                                 |
@@ -137,3 +159,4 @@ The response includes `bot.open_id`.
 | Events not received (webhook)         | Verify the webhook URL is reachable and returns 200                          |
 | Decrypt error                         | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions |
 | Bot not responding in groups          | Ensure the bot is installed to the group and has `im:message` scope          |
+| Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |

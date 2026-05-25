@@ -18,6 +18,9 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
     dispatchWorkflowStepComplete: jest.fn(),
     dispatchWorkflowComplete: jest.fn(),
     dispatchWorkflowError: jest.fn(),
+    dispatchWorkflowNodeStart: jest.fn(),
+    dispatchWorkflowNodeComplete: jest.fn(),
+    dispatchWorkflowNodeError: jest.fn(),
   })),
   getPluginLifecycleHooks: jest.fn(() => ({
     dispatchOnTeamStart: jest.fn(),

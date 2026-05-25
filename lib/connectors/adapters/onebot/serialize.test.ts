@@ -7,6 +7,7 @@ import {
   serializeEditV12,
   serializeTypingV11,
   serializeTypingV12,
+  serializeSetMsgEmojiLike,
   OneBotUnsupportedError,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
@@ -164,6 +165,26 @@ describe("serializeDeleteV12", () => {
     const call = serializeDeleteV12("m-999", "100000")
     expect(call.action).toBe("delete_message")
     expect(call.params.message_id).toBe("m-999")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reaction (NapCat set_msg_emoji_like)
+// ---------------------------------------------------------------------------
+
+describe("serializeSetMsgEmojiLike", () => {
+  it("produces set_msg_emoji_like with numeric message_id and emoji_id", () => {
+    const call = serializeSetMsgEmojiLike("12345", "128077")
+    expect(call.action).toBe("set_msg_emoji_like")
+    expect(call.params.message_id).toBe(12345)
+    expect(call.params.emoji_id).toBe("128077")
+    expect(call.params.set).toBe(true)
+  })
+
+  it("echo strings are unique per call", () => {
+    const a = serializeSetMsgEmojiLike("1", "76")
+    const b = serializeSetMsgEmojiLike("1", "76")
+    expect(a.echo).not.toBe(b.echo)
   })
 })
 

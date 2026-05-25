@@ -37,36 +37,68 @@ pub use registry::VectorRegistry;
 #[allow(unused_imports)]
 pub use types::*;
 
-/// Application state wrapper. Held by Tauri via `.manage(...)`. The inner
-/// `Mutex` is short-lived: only `reset_store` actually replaces the
-/// store; everything else takes a shared `&VectorStore`.
+/// Tri-state for the lazily-opened vector store.
+///
+/// `Unavailable` is terminal: once an open attempt fails (or no path was
+/// provided) we don't retry, so a corrupt file doesn't pay the open cost on
+/// every query.
+enum LazyStore {
+    Uninit,
+    Ready(VectorStore),
+    Unavailable,
+}
+
+/// Application state wrapper. Held by Tauri via `.manage(...)`.
+///
+/// Opening the store (sqlite-vec extension load + `Connection::open` +
+/// migrations) is **deferred to first use** rather than done in `new()`:
+/// nothing on the app-startup path touches the vector store — RAG/twin
+/// queries are all user-initiated — so building it eagerly only blocked the
+/// synchronous Tauri `setup()`/builder path. The `Mutex` serialises the
+/// one-time open and the (rare) `reset`.
 pub struct VectorState {
-    store: Mutex<Option<VectorStore>>,
+    /// SQLite path; `None` in web mode / tests with no backing file.
+    path: Option<PathBuf>,
+    store: Mutex<LazyStore>,
 }
 
 impl VectorState {
     pub fn new(path: Option<PathBuf>) -> Self {
-        let store = path.and_then(|p| match VectorStore::new(p) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                error!("vector store init failed: {}", e);
-                None
-            }
-        });
         Self {
-            store: Mutex::new(store),
+            path,
+            store: Mutex::new(LazyStore::Uninit),
         }
     }
 
-    /// Borrow the underlying store for a read-only operation. Returns
-    /// `NotAvailable` when init failed or no path was provided.
+    /// Resolve the lazy slot to a terminal state under the held lock. Safe
+    /// under concurrency: the mutex serialises the one-time open so a second
+    /// caller never observes `Uninit` mid-open.
+    fn ensure(&self, slot: &mut LazyStore) {
+        if matches!(slot, LazyStore::Uninit) {
+            *slot = match self.path.as_ref() {
+                Some(p) => match VectorStore::new(p.clone()) {
+                    Ok(s) => LazyStore::Ready(s),
+                    Err(e) => {
+                        error!("vector store init failed: {}", e);
+                        LazyStore::Unavailable
+                    }
+                },
+                None => LazyStore::Unavailable,
+            };
+        }
+    }
+
+    /// Borrow the underlying store for a read-only operation, opening it on
+    /// first call. Returns `NotAvailable` when init failed or no path was
+    /// provided.
     ///
     /// We hand back a `MutexGuard` mapped to `&VectorStore` so callers can
     /// chain into `VectorStore` methods without separately locking. The
     /// guard lifetime is tied to `&self` — see callers in `commands.rs`.
     pub fn store(&self) -> Result<VectorStoreGuard<'_>> {
-        let guard = self.store.lock();
-        if guard.is_none() {
+        let mut guard = self.store.lock();
+        self.ensure(&mut guard);
+        if !matches!(*guard, LazyStore::Ready(_)) {
             return Err(VectorError::NotAvailable(
                 "vector store not initialised".into(),
             ));
@@ -76,14 +108,17 @@ impl VectorState {
 
     /// Replace the store with a fresh empty one — calls
     /// `VectorStore::reset_store` on the existing instance, preserving
-    /// the SQLite path. Returns `NotAvailable` if the store was never
-    /// initialised.
+    /// the SQLite path. Opens the store first if it hasn't been yet. Returns
+    /// `NotAvailable` if no path was provided or the open failed.
     pub fn reset(&self) -> Result<()> {
         let mut guard = self.store.lock();
-        let store = guard.as_mut().ok_or_else(|| {
-            VectorError::NotAvailable("vector store not initialised".into())
-        })?;
-        store.reset_store()
+        self.ensure(&mut guard);
+        match &mut *guard {
+            LazyStore::Ready(store) => store.reset_store(),
+            _ => Err(VectorError::NotAvailable(
+                "vector store not initialised".into(),
+            )),
+        }
     }
 }
 
@@ -97,15 +132,18 @@ impl Default for VectorState {
 /// whole borrow — same posture as `parking_lot::MutexGuard`. Inside a
 /// command handler the lock is released as soon as the borrow ends.
 pub struct VectorStoreGuard<'a> {
-    guard: parking_lot::MutexGuard<'a, Option<VectorStore>>,
+    guard: parking_lot::MutexGuard<'a, LazyStore>,
 }
 
 impl<'a> std::ops::Deref for VectorStoreGuard<'a> {
     type Target = VectorStore;
 
     fn deref(&self) -> &Self::Target {
-        // `store()` already verified the inner `Option` is `Some`.
-        self.guard.as_ref().expect("store was Some at borrow time")
+        // `store()` only builds a guard after confirming the slot is `Ready`.
+        match &*self.guard {
+            LazyStore::Ready(store) => store,
+            _ => unreachable!("store was Ready at borrow time"),
+        }
     }
 }
 
@@ -138,6 +176,19 @@ mod tests {
         assert!(matches!(err, VectorError::NotAvailable(_)));
         let reset_err = state.reset().unwrap_err();
         assert!(matches!(reset_err, VectorError::NotAvailable(_)));
+    }
+
+    #[test]
+    fn open_is_deferred_until_first_access() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("lazy.sqlite");
+        let state = VectorState::new(Some(path.clone()));
+        // Construction must NOT touch disk — the eager open used to run here
+        // on the synchronous Tauri startup path.
+        assert!(!path.exists(), "sqlite file created before first access");
+        // First access opens it.
+        let _ = state.store().expect("store");
+        assert!(path.exists(), "sqlite file not created on first access");
     }
 
     #[test]

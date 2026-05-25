@@ -11,12 +11,13 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ChevronLeftIcon, Settings2Icon } from "lucide-react"
+import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
 import { ConversationOverrideDialog } from "./overrides/conversation-override-dialog"
+import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
 import { ComputerUseToggle } from "./overrides/computer-use-toggle"
 import { AdapterHealthBadge } from "./adapter-health-badge"
 import { ComputerUseChip } from "./computer-use-chip"
@@ -110,10 +111,12 @@ export function ConversationHeader({
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
   const tModes = useTranslations("inbox.modeSwitcher.modes")
+  const tBindings = useTranslations("inbox.bindingsInspector")
   const desktop = isTauri()
   const character = useCharacter(characterId)
   const router = useRouter()
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false)
+  const [bindingsOpen, setBindingsOpen] = useState(false)
   const overrideRow = useConversationOverride(conversationKey)
   // The conversationKey carries `${platform}:${adapterId}:${chatId}` — extract
   // the middle segment so the override dialog can audit + namespace correctly.
@@ -257,6 +260,28 @@ export function ConversationHeader({
         <TooltipContent>{t("openOverrides")}</TooltipContent>
       </Tooltip>
 
+      {/* A2UI callback-bindings inspector — diagnostic surface for triaging
+       * "the button didn't route my surface". Desktop-only because the row
+       * "test" action drives the live bus runtime. */}
+      {parsedAdapterId && desktop && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              onClick={() => setBindingsOpen(true)}
+              aria-label={tBindings("openInspector")}
+              data-testid="conversation-header-bindings"
+            >
+              <ListChecksIcon className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{tBindings("openInspector")}</TooltipContent>
+        </Tooltip>
+      )}
+
       <ConversationOverrideDialog
         open={overrideDialogOpen}
         onOpenChange={setOverrideDialogOpen}
@@ -265,6 +290,15 @@ export function ConversationHeader({
         sessionId={sessionId}
         initialRow={overrideRow ?? null}
       />
+
+      {parsedAdapterId && desktop && (
+        <CallbackBindingsInspector
+          open={bindingsOpen}
+          onOpenChange={setBindingsOpen}
+          conversationKey={conversationKey}
+          adapterId={parsedAdapterId}
+        />
+      )}
     </header>
   )
 }

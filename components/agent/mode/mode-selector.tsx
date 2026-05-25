@@ -192,18 +192,21 @@ export function AgentModeSelector({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             disabled={disabled}
-            className={cn("gap-2", className)}
+            className={cn(
+              "h-6 gap-1 rounded-md border border-transparent px-1.5 text-[11px] font-normal text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
+              className
+            )}
           >
-            <ModeIcon name={selectedMode.icon} className="h-4 w-4" />
-            <span className="hidden sm:inline">
+            <ModeIcon name={selectedMode.icon} className="size-3.5 shrink-0" />
+            <span className="hidden max-w-[8rem] truncate sm:inline-block">
               {selectedMode.type === "custom"
                 ? selectedMode.name
                 : t(`modes.${selectedMode.id}.name`)}
             </span>
-            <ChevronDown className="h-3 w-3 opacity-50" />
+            <ChevronDown className="size-3 shrink-0 opacity-50" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center" className="w-80">

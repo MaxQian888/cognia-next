@@ -147,7 +147,7 @@
     },
     "chat": {
       "empty": "No messages yet.",
-      "emptyHint": "Try @claude, @codex, or @<member-name> to dispatch this message to that agent.",
+      "emptyHint": "Try @claude, @codex, or @'<member-name>' to dispatch this message to that agent.",
       "streaming": "Thinking…",
       "mentionAgents": "Mention an agent",
       "messageTypes": {
@@ -169,7 +169,7 @@
         "noAgents": "No agents available — add a teammate first",
         "noMatches": "No agent matches \"{query}\"",
         "unknownAgent": "Unknown agent: @{name}",
-        "missingMention": "Start your message with @<agent-name> to dispatch it.",
+        "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
         "missingPrompt": "Add a message after the mention.",
         "imageNotSupported": "Image attachments aren't supported in team chat yet.",
         "sendingFailed": "Failed to send to {agent}: {reason}",
@@ -919,7 +919,7 @@
         "workspaceEmpty": "Workspace is empty.",
         "bashHintPrefix": "Press",
         "bashHintSuffix": "to run as a shell command.",
-        "bashEmpty": "<empty>",
+        "bashEmpty": "'<empty>'",
         "comingSoon": "Coming soon"
       },
       "toolbar": {
@@ -1005,6 +1005,7 @@
       "sections": {
         "quickStart": "Quick start",
         "tryPrompt": "Try a prompt",
+        "characterPrompts": "Try with this character",
         "continue": "Continue"
       },
       "capabilities": {
@@ -1046,6 +1047,11 @@
     },
     "copy": {
       "success": "Copied to clipboard"
+    },
+    "history": {
+      "loadError": "Couldn't load this conversation.",
+      "retry": "Retry",
+      "loading": "Loading conversation…"
     },
     "message": {
       "editingCancel": "Cancel",
@@ -2225,7 +2231,7 @@
         "variantHelp": {
           "claude-desktop-stdio": "Edit ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%/Claude/claude_desktop_config.json (Windows). Restart Claude Desktop after saving.",
           "claude-desktop-http": "Edit Claude Desktop's claude_desktop_config.json and ensure the bridge HTTP transport is running. The bearer token rotates with the regenerate button above.",
-          "cursor": "Save to ~/.cursor/mcp.json (global) or <project>/.cursor/mcp.json (per-project). Cursor picks the file up on restart.",
+          "cursor": "Save to ~/.cursor/mcp.json (global) or '<project>'/.cursor/mcp.json (per-project). Cursor picks the file up on restart.",
           "goose": "Save to ~/.config/goose/config.yaml. Run goose configure to verify the extension is detected."
         }
       },
@@ -3506,6 +3512,25 @@
       "description": "Reusable personas. Each character carries its own system prompt, model, MCP subset, and skills. Pick one when you start a new chat.",
       "newCharacter": "New character",
       "emptyHint": "No characters yet. The built-ins should appear here automatically.",
+      "noMatches": "No characters match your search.",
+      "searchPlaceholder": "Search characters…",
+      "filter": {
+        "label": "Filter by source",
+        "all": "All sources",
+        "builtin": "Built-in",
+        "plugin": "Plugin",
+        "user": "Custom"
+      },
+      "bulk": {
+        "select": "Select",
+        "done": "Done",
+        "selectRow": "Select {name}",
+        "deleteSelected": "Delete ({count})",
+        "exportSelected": "Export ({count})",
+        "deletedToast": "Deleted {count} character(s).",
+        "exportedToast": "Exported {count} character(s).",
+        "exportPackName": "Exported characters"
+      },
       "builtIn": "Built-in",
       "removeTitle": "Remove character?",
       "removeBody": "\"{name}\" will be removed. Existing conversations using this character keep their history but fall back to app defaults.",
@@ -3617,6 +3642,41 @@
         "mcpServers": "MCP servers",
         "mcpServersHint": "Leave all unselected to mean \"use every enabled server\".",
         "mcpServersEmptyHint": "(uses all enabled MCP servers)",
+        "avatarImage": {
+          "upload": "Upload image",
+          "clear": "Remove image",
+          "large": "Avatar image is large — a smaller image keeps the character data lean."
+        },
+        "persona": {
+          "title": "Persona",
+          "description": "Optional tone and personality woven into the system prompt, plus a greeting and starter prompts.",
+          "tone": "Tone",
+          "tonePlaceholder": "warm, encouraging",
+          "personality": "Personality",
+          "personalityPlaceholder": "Former teacher who prefers analogies",
+          "openingMessage": "Opening message",
+          "openingMessagePlaceholder": "Hi! What are we working on today?",
+          "exemplarPrompts": "Starter prompts",
+          "exemplarPromptsPlaceholder": "Review my pull request\nDraft release notes",
+          "exemplarPromptsHint": "One prompt per line — shown as quick-start chips on a new chat."
+        },
+        "voice": {
+          "title": "Voice",
+          "description": "Optional per-character voice for read-aloud. Inherits the global speech settings when left on Inherit.",
+          "provider": "Provider",
+          "inherit": "Inherit global",
+          "voiceId": "Voice",
+          "voiceIdPlaceholder": "Voice id",
+          "rate": "Rate",
+          "pitch": "Pitch",
+          "volume": "Volume"
+        },
+        "platforms": {
+          "title": "Available on",
+          "description": "Restrict this character to specific platforms. Leave both off to show it everywhere.",
+          "tauri": "Desktop",
+          "browser": "Web / Mobile"
+        },
         "twinBinding": {
           "titleUnbound": "Digital twin (optional)",
           "titleBound": "Digital twin",
@@ -3737,7 +3797,7 @@
     },
     "slashCommands": {
       "title": "Slash commands",
-      "description": "Browse every command surface — built-in actions, your `.claude/commands/*.md` templates, and plugin-contributed commands. Click the play icon to copy `/<name>` to your clipboard.",
+      "description": "Browse every command surface — built-in actions, your `.claude/commands/*.md` templates, and plugin-contributed commands. Click the play icon to copy `/'<name>'` to your clipboard.",
       "filterPlaceholder": "Filter by name or description…",
       "builtin": "Built-in ({count})",
       "custom": "Custom ({count})",
@@ -3782,7 +3842,7 @@
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Shown in the picker.",
         "argHintLabel": "Argument hint",
-        "argHintPlaceholder": "e.g. <file> or <focus area?>",
+        "argHintPlaceholder": "e.g. '<file>' or '<focus area?>'",
         "modelLabel": "Model override",
         "modelPlaceholder": "e.g. claude-sonnet-4-5 (optional)",
         "allowedToolsLabel": "Allowed tools",
@@ -4131,7 +4191,7 @@
         "ssmlSampleText": "Hello, this is a test of the text-to-speech feature.",
         "customSSML": "Use custom SSML",
         "customSSMLHint": "Override the auto-generated SSML with your own markup.",
-        "customSSMLPlaceholder": "<speak version=\"1.0\" …>…</speak>",
+        "customSSMLPlaceholder": "'<'speak version=\"1.0\" …>…'<'/speak>",
         "pronunciationDict": "Pronunciation dictionary",
         "pronunciationDictHint": "Map words to their pronunciation. Matched case-insensitively as whole words.",
         "pronunciationWord": "Word",
@@ -4458,7 +4518,7 @@
         "heading": "Outbound webhook signing",
         "description": "Optional HMAC-SHA256 signature added to every outbound webhook delivery. Receivers can verify the request actually came from this cognia install.",
         "signingSecret": "Signing secret",
-        "signingSecretHelp": "Stored in the OS keyring on desktop. Webhooks then carry an X-Cognia-Signature: sha256=<hex> header.",
+        "signingSecretHelp": "Stored in the OS keyring on desktop. Webhooks then carry an X-Cognia-Signature: sha256='<hex>' header.",
         "secretSet": "A signing secret is configured.",
         "secretMissing": "No signing secret set.",
         "setSecret": "Save secret",
@@ -4586,6 +4646,36 @@
         "configure": "Configure",
         "configureAria": "Configure {name}",
         "pendingBadgeAria": "{count} message(s) waiting to send",
+        "listTitle": "Adapters",
+        "platforms": {
+          "telegram": "Telegram",
+          "discord": "Discord",
+          "slack": "Slack",
+          "lark": "Lark / Feishu",
+          "onebot": "QQ (OneBot / NapCat)",
+          "unknown": "Adapter"
+        },
+        "actions": {
+          "menuAria": "Actions for {name}",
+          "configure": "Configure",
+          "enable": "Enable",
+          "disable": "Disable",
+          "sendTest": "Send test message",
+          "remove": "Remove"
+        },
+        "rowHealth": {
+          "aria": "Adapter health: {state}",
+          "breakerOpen": "Breaker open",
+          "rateLimited": "Rate limited",
+          "degraded": "Degraded",
+          "down": "Down"
+        },
+        "removeConfirm": {
+          "title": "Remove adapter?",
+          "body": "\"{name}\" and its stored credentials will be permanently removed. This cannot be undone.",
+          "cancel": "Cancel",
+          "confirm": "Remove"
+        },
         "detail": {
           "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
           "adapterMissing": "Adapter row not found. It may have been deleted in another tab.",
@@ -4945,6 +5035,8 @@
         "sectionDeliveryDesc": "Inbound transport and the callback URL Lark Open Platform calls.",
         "sectionAdvanced": "Advanced",
         "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "sectionQuickCommands": "Quick commands",
+        "sectionQuickCommandsDesc": "Map Feishu bot-menu (快捷指令) event keys to a prompt or slash command.",
         "transportLongConnectionDesc": "Long connection (WSS) — Lark pushes events to this app; no public callback URL required.",
         "transportWebhookDesc": "Webhook — Lark calls a public HTTPS URL you paste into the Open Platform.",
         "webhookUrlLabel": "Callback URL",
@@ -5002,6 +5094,22 @@
           "addChatIdPlaceholder": "oc_… (paste chat id)",
           "removeAria": "Remove {id}",
           "helpText": "Paste the Lark chat_id (starts with oc_…). Find it via the audit log or the Lark client's chat URL."
+        },
+        "quickCommands": {
+          "title": "Bot menu / quick commands",
+          "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only.",
+          "eventKeyLabel": "Event key",
+          "eventKeyPlaceholder": "event_key (from the bot menu)",
+          "labelLabel": "Label (optional)",
+          "labelPlaceholder": "Label",
+          "actionTypeLabel": "Action type",
+          "actionTypePrompt": "Prompt",
+          "actionTypeSlash": "Slash command",
+          "valueLabel": "Action value",
+          "valuePlaceholder": "Prompt text, or /command args",
+          "addAria": "Add quick command",
+          "empty": "No quick commands mapped yet.",
+          "removeAria": "Remove {key}"
         }
       },
       "adapterFormSections": {
@@ -5028,6 +5136,14 @@
         "expectedClientLlonebot": "LLOneBot",
         "expectedClientOther": "Other",
         "expectedClientHelp": "Purely cosmetic — used for documentation links.",
+        "transportModeLabel": "Connection mode",
+        "transportReverse": "Reverse WS (NapCat connects to cognia)",
+        "transportForward": "Forward WS (cognia connects to NapCat)",
+        "transportModeHelp": "Forward WS is the common NapCat setup — cognia dials the NapCat WebSocket server. Reverse WS makes NapCat dial cognia instead.",
+        "forwardUrlLabel": "NapCat WebSocket URL",
+        "forwardUrlHelp": "The WebSocket server address NapCat exposes (NapCat WebUI → Network → WebSocket Server). The Bearer token above is sent as the access token.",
+        "forwardUrlPlaceholder": "ws://127.0.0.1:3001",
+        "forwardUrlRequired": "Forward-WS URL is required.",
         "endpointLabel": "Reverse-WS Endpoint URL",
         "endpointHelpPrefix": "Paste this URL into your NapCat / Lagrange",
         "endpointHelpSuffix": "config.",
@@ -5050,7 +5166,7 @@
         "sectionIdentity": "Identity",
         "sectionIdentityDesc": "Bot UIN, access token, and the upstream client hint.",
         "sectionDelivery": "Delivery & transport",
-        "sectionDeliveryDesc": "Reverse-WS endpoint URL that NapCat / Lagrange / LLOneBot dial into.",
+        "sectionDeliveryDesc": "How cognia and NapCat / Lagrange / LLOneBot connect — forward or reverse WebSocket.",
         "sectionAdvanced": "Advanced",
         "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
         "endpointNewAdapterHint": "Save the adapter first; the reverse-WS URL is derived from the new adapter ID.",
@@ -5873,6 +5989,11 @@
       "unknown": "Unknown",
       "unknownTooltip": "Signature state could not be determined."
     },
+    "source": {
+      "builtin": "Built-in",
+      "local": "Local",
+      "marketplace": "Marketplace"
+    },
     "card": {
       "openDetails": "Open details",
       "configure": "Configure",
@@ -6109,8 +6230,12 @@
     },
     "toolbar": {
       "install": "Install",
+      "groupManifest": "Manifest",
+      "groupWasm": "WASM bundle",
       "fromFile": "From file…",
       "fromUrl": "From URL…",
+      "fromLocalWasm": "From local file…",
+      "fromUrlSigned": "From signed URL…",
       "fromUrlPrompt": "Plugin manifest URL",
       "fromFileSourceLabel": "Local files ({count})",
       "checkUpdates": "Check for updates",
@@ -6125,6 +6250,65 @@
         "cancel": "Cancel",
         "emptyError": "Please enter a URL.",
         "error": "Failed to fetch manifest: {message}"
+      }
+    },
+    "wasmInstall": {
+      "capabilityGrantSheet": {
+        "title": "Review capabilities for {name}",
+        "description": "This plugin runs as sandboxed WebAssembly. Review the capabilities it requests before installing — granted calls won't ask again.",
+        "unsignedAuthor": "Unsigned author",
+        "noSignature": "No signature",
+        "noSensitivePermissions": "This plugin requests no sensitive permissions.",
+        "requestedPermissions": "Requested permissions",
+        "optionalPermissions": "Optional permissions",
+        "extraFilesystem": "Extra filesystem access",
+        "extraFilesystemDescription": "Beyond its own data directory, this plugin asks to access these paths. Uncheck any you don't want to allow.",
+        "allowFsAriaLabel": "Allow access to {path}",
+        "dangerousWarning": "You're granting {count, plural, one {# sensitive capability} other {# sensitive capabilities}}. Only install plugins you trust.",
+        "cancel": "Cancel",
+        "install": "Install",
+        "sensitiveBadge": "Sensitive",
+        "customPermission": "Custom permission",
+        "togglePermissionAriaLabel": "Toggle permission {permission}",
+        "groups": {
+          "filesystem": "Filesystem",
+          "network": "Network",
+          "clipboard": "Clipboard",
+          "notifications": "Notifications",
+          "osProcess": "Processes & automation",
+          "secrets": "Secrets",
+          "other": "Other"
+        }
+      },
+      "fromUrlDialog": {
+        "title": "Install signed WASM plugin",
+        "description": "Provide a direct link to a signed WASM bundle. The manifest is fetched and verified before anything is installed.",
+        "bundleUrlLabel": "Bundle URL",
+        "bundleUrlPlaceholder": "https://example.com/plugin.zip",
+        "signatureUrlLabel": "Signature URL (optional)",
+        "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
+        "publicKeyLabel": "Author public key (optional)",
+        "publicKeyPlaceholder": "base64-encoded ed25519 public key",
+        "trustRequiredError": "Trust this author before installing.",
+        "anonymousAuthor": "Anonymous author",
+        "noAuthorKey": "No author key",
+        "signatureVerified": "Signature verified",
+        "unsignedBundle": "Unsigned bundle",
+        "trustAriaLabel": "Trust this author",
+        "alreadyTrusted": "You already trust this author.",
+        "trustFirstTime": "Trust this author for future installs.",
+        "installing": "Installing…",
+        "fetchingManifest": "Fetching manifest…",
+        "cancel": "Cancel",
+        "preview": "Preview",
+        "install": "Install"
+      },
+      "fromLocalButton": {
+        "tauriRequiredError": "Installing a local WASM plugin requires the desktop app.",
+        "filePickerTitle": "Select a WASM plugin bundle",
+        "filterWasmBundle": "WASM bundle",
+        "filterAllFiles": "All files",
+        "label": "Install local WASM plugin"
       }
     },
     "grid": {
@@ -6216,7 +6400,8 @@
         "all": "All",
         "featured": "Featured",
         "popular": "Popular",
-        "recent": "Recent"
+        "recent": "Recent",
+        "builtin": "Built-in"
       },
       "modeBanner": {
         "degradedTitle": "Marketplace is unreachable",
@@ -9600,7 +9785,7 @@
       "shellExecuteAdvanced": "Run a single program with argv, gated by allowlist + blocklist + dangerous-pattern guard. Always requires approval.",
       "terminalReplSpawn": "Open a persistent interactive PTY (e.g. python / sql REPL). Returns sessionId for subsequent writes / reads.",
       "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
-      "terminalReplRead": "Drain accumulated REPL output (default: destructive read). Returns {data, truncated, exited, exitCode}.",
+      "terminalReplRead": "Drain accumulated REPL output (default: destructive read). Returns '{data, truncated, exited, exitCode}'.",
       "terminalReplKill": "Signal-terminate a REPL session. Idempotent."
     }
   },
@@ -10838,7 +11023,7 @@
       "aborted": "OCR cancelled."
     },
     "slash": {
-      "usage": "Usage: /ocr <file path or attachment id> [--provider auto|<id>] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
+      "usage": "Usage: /ocr '<file path or attachment id>' [--provider auto|'<id>'] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
       "providerFlag": "Provider id (or \"auto\")",
       "langFlag": "Comma-separated language codes",
       "pagesFlag": "Page range, e.g. 1,3-5",
@@ -11892,7 +12077,7 @@
         "title": "Mobile companion server",
         "enableLabel": "Enable companion server",
         "listeningOn": "Listening on {url}",
-        "bindModePlaceholderLan": "<your-LAN-IP>",
+        "bindModePlaceholderLan": "'<your-LAN-IP>'",
         "serverOff": "Server is off. Phones cannot reach this device.",
         "bindMode": "Bind mode",
         "loopbackLabel": "Loopback (this device only)",
@@ -12482,13 +12667,108 @@
       "title": "Workflows",
       "subtitle": "Visual orchestrations across triggers, AI, and connectors.",
       "new": "New workflow",
+      "newFolder": "New folder",
       "searchPlaceholder": "Search workflows…",
       "empty": {
         "title": "No workflows yet",
         "description": "Build your first workflow to automate a multi-step flow across chat, triggers, and tools.",
         "cta": "Create workflow",
         "titleQuery": "No matching workflows",
-        "descriptionQuery": "Try a different search term or clear the filter."
+        "descriptionQuery": "Try a different search term or clear the filter.",
+        "folderTitle": "This folder is empty",
+        "folderDescription": "Add a workflow here, or move existing ones into this folder.",
+        "filterTitle": "No matching workflows",
+        "filterDescription": "Try a different search or clear the filters.",
+        "clearFilters": "Clear filters"
+      },
+      "view": {
+        "toggleAria": "Switch layout",
+        "grid": "Grid view",
+        "list": "List view"
+      },
+      "sort": {
+        "label": "Sort",
+        "nameAsc": "Name (A–Z)",
+        "nameDesc": "Name (Z–A)",
+        "updated": "Recently updated",
+        "created": "Recently created",
+        "runCount": "Most runs"
+      },
+      "filter": {
+        "label": "Filter",
+        "type": "Type",
+        "typeAll": "All",
+        "typeUser": "My workflows",
+        "typeTemplate": "Templates",
+        "typeBuiltin": "Built-in",
+        "hasTrigger": "Has trigger",
+        "recentlyFailed": "Recently failed",
+        "clear": "Clear filters",
+        "active": "{count, plural, one {# filter} other {# filters}}"
+      },
+      "folders": {
+        "root": "All workflows",
+        "section": "Folders",
+        "create": "New folder",
+        "rename": "Rename",
+        "delete": "Delete folder",
+        "open": "Open folder",
+        "namePlaceholder": "Folder name",
+        "createTitle": "Create folder",
+        "renameTitle": "Rename folder",
+        "save": "Save",
+        "cancel": "Cancel",
+        "createCta": "Create",
+        "created": "Folder created",
+        "renamed": "Folder renamed",
+        "deleted": "Folder deleted",
+        "createFailed": "Failed to create folder",
+        "removedToast": "This folder was removed.",
+        "deleteConfirm": {
+          "title": "Delete \"{name}\"?",
+          "description": "Its contents move up to the parent — nothing is deleted.",
+          "confirm": "Delete folder",
+          "cancel": "Cancel"
+        }
+      },
+      "bulk": {
+        "selected": "{count, plural, one {# selected} other {# selected}}",
+        "move": "Move",
+        "tag": "Add tag",
+        "delete": "Delete",
+        "clear": "Clear",
+        "selectAll": "Select all",
+        "select": "Select",
+        "deleteConfirm": {
+          "title": "Delete {count, plural, one {# workflow} other {# workflows}}?",
+          "description": "Permanently deletes the selected workflows and their run history. Built-in workflows are skipped.",
+          "confirm": "Delete",
+          "cancel": "Cancel"
+        },
+        "deleted": "{count, plural, one {# workflow deleted} other {# workflows deleted}}",
+        "builtinSkipped": "{count, plural, one {# built-in skipped} other {# built-in skipped}}",
+        "deleteFailed": "Failed to delete workflows"
+      },
+      "move": {
+        "title": "Move to folder",
+        "description": "Choose a destination folder.",
+        "root": "All workflows (root)",
+        "confirm": "Move here",
+        "cancel": "Cancel",
+        "moved": "Moved {count, plural, one {# workflow} other {# workflows}}",
+        "moveFailed": "Failed to move"
+      },
+      "tag": {
+        "title": "Add tag",
+        "description": "Add a tag to the selected workflows.",
+        "placeholder": "Tag name",
+        "add": "Add tag",
+        "cancel": "Cancel",
+        "added": "Tag added",
+        "addFailed": "Failed to add tag"
+      },
+      "pinned": {
+        "section": "Pinned"
       },
       "createDialog": {
         "title": "Create workflow",
@@ -12522,6 +12802,32 @@
       "builtin": "Built-in",
       "template": "Template",
       "updated": "Updated {ago}",
+      "moreActions": "More actions",
+      "rename": "Rename",
+      "renamed": "Workflow renamed",
+      "renameFailed": "Failed to rename workflow",
+      "editTags": "Edit tags",
+      "tagsSaved": "Tags updated",
+      "tagsFailed": "Failed to update tags",
+      "moveTo": "Move to…",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "pinned": "Pinned",
+      "open": "Open",
+      "select": "Select",
+      "renameDialog": {
+        "title": "Rename workflow",
+        "namePlaceholder": "Workflow name",
+        "save": "Save",
+        "cancel": "Cancel"
+      },
+      "tagsDialog": {
+        "title": "Edit tags",
+        "description": "Comma-separated tags.",
+        "placeholder": "tag1, tag2",
+        "save": "Save",
+        "cancel": "Cancel"
+      },
       "deleteConfirm": {
         "title": "Delete workflow?",
         "description": "This permanently deletes \"{name}\" along with its run history. This cannot be undone.",
@@ -12539,7 +12845,9 @@
       "layoutUnavailable": "Auto-layout unavailable",
       "exported": "Workflow JSON downloaded",
       "imported": "Workflow imported",
-      "importFailed": "Failed to import workflow JSON"
+      "importFailed": "Failed to import workflow JSON",
+      "imageExported": "Workflow image downloaded",
+      "imageExportFailed": "Failed to export workflow image"
     },
     "toolbar": {
       "namePlaceholder": "Workflow name",
@@ -12556,7 +12864,9 @@
         "commands": "Commands (Ctrl+K)",
         "shortcuts": "Keyboard shortcuts (Ctrl+/)",
         "exportJson": "Export workflow as JSON",
-        "importJson": "Import workflow JSON"
+        "exportImage": "Export as PNG",
+        "importJson": "Import workflow JSON",
+        "more": "More"
       }
     },
     "editor": {
@@ -12572,6 +12882,46 @@
         "highHint": "Everything on: minimap, animations, live inspector preview.",
         "balancedHint": "Drop edge animations and pause inspector preview while dragging.",
         "reducedHint": "Hide minimap, freeze animations, skip alignment guides."
+      },
+      "canvasToolbar": {
+        "addNode": "Add node",
+        "undo": "Undo",
+        "redo": "Redo",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "zoomReset": "Reset to 100%",
+        "fitView": "Fit view",
+        "lock": "Lock canvas",
+        "unlock": "Unlock canvas",
+        "autoLayout": "Auto-layout",
+        "view": "View options",
+        "snapToGrid": "Snap to grid",
+        "showMinimap": "Show minimap",
+        "minimapTierHint": "Hidden by the current performance tier",
+        "background": "Background",
+        "bgDots": "Dots",
+        "bgLines": "Lines",
+        "bgNone": "Off",
+        "search": "Search nodes (Ctrl+F)",
+        "annotation": "Annotations",
+        "addSticky": "Add sticky note",
+        "addGroup": "Add group"
+      },
+      "selectionToolbar": {
+        "selected": "{count, plural, one {# selected} other {# selected}}",
+        "duplicate": "Duplicate",
+        "group": "Group",
+        "delete": "Delete",
+        "fit": "Fit to selection",
+        "align": "Align & distribute",
+        "alignLeft": "Align left",
+        "alignCenterH": "Align horizontal centers",
+        "alignRight": "Align right",
+        "alignTop": "Align top",
+        "alignCenterV": "Align vertical centers",
+        "alignBottom": "Align bottom",
+        "distributeH": "Distribute horizontally",
+        "distributeV": "Distribute vertically"
       },
       "contextMenu": {
         "pane": {
@@ -13808,7 +14158,7 @@
         },
         "path": {
           "label": "Path",
-          "hint": "Mounted at /webhook/<path>",
+          "hint": "Mounted at /webhook/'<path>'",
           "placeholder": "incoming-events"
         },
         "hmacSecret": {
@@ -14655,6 +15005,19 @@
       "loading": "Preparing chat…",
       "ariaLabel": "Workflow AI chat for {name}",
       "placeholder": "Ask the workflow AI to build, refactor, or diagnose this graph.",
+      "starters": {
+        "title": "Build or refine this workflow",
+        "subtitle": "Describe a flow to scaffold, or ask me to explain, validate, or fix the current graph.",
+        "heading": "Workflow starters",
+        "buildTitle": "Scaffold a workflow",
+        "buildPrompt": "Help me build this workflow. Ask me what it should accomplish, then propose the nodes and connections.",
+        "explainTitle": "Explain this workflow",
+        "explainPrompt": "Walk me through what the current workflow does, node by node, and how data flows between them.",
+        "validateTitle": "Validate and fix",
+        "validatePrompt": "Validate the current workflow graph and list any problems with suggested fixes.",
+        "suggestTitle": "Suggest next steps",
+        "suggestPrompt": "Based on the current graph, suggest which nodes I should add next."
+      },
       "clear": "Clear conversation",
       "clearConfirmTitle": "Clear this workflow's chat?",
       "clearConfirmDescription": "Every message in this workflow's co-pilot session will be deleted. The next message you send starts a fresh agent session.",

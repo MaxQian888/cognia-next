@@ -1,19 +1,24 @@
 "use client"
 
 /**
- * Toolbar dropdown that lists named viewport bookmarks for the current
- * workflow and lets the user save the current viewport under a new name.
+ * Saved-views ("viewport bookmarks") content for the workflow editor canvas
+ * toolbar. Lists named viewport bookmarks for the current workflow and lets the
+ * user save the current viewport under a new name.
  *
- * Persistence: `lib/workflow/editor/viewport-bookmarks-db.ts` (Dexie). The
- * dropdown is driven by `useLiveQuery` so new bookmarks land instantly
- * everywhere they appear.
+ * Rendered inside the canvas toolbar's "View" popover (see `canvas-toolbar.tsx`)
+ * as plain content — rows are buttons, not dropdown items — so it composes
+ * cleanly without nesting a menu inside a popover. The save dialog portals
+ * above everything.
+ *
+ * Persistence: `lib/workflow/editor/viewport-bookmarks-db.ts` (Dexie). Driven by
+ * `useLiveQuery` so new bookmarks land instantly.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { BookmarkIcon, PlusIcon, Trash2 } from "lucide-react"
+import { PlusIcon, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -22,17 +27,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import {
   deleteBookmark,
@@ -41,19 +38,19 @@ import {
 } from "@/lib/workflow/editor/viewport-bookmarks-db"
 import type { Viewport } from "@xyflow/react"
 
-export interface ViewportBookmarksProps {
+export interface ViewportBookmarksContentProps {
   workflowId: string
   currentViewport: Viewport
   onRestore: (viewport: Viewport) => void
   className?: string
 }
 
-export function ViewportBookmarks({
+export function ViewportBookmarksContent({
   workflowId,
   currentViewport,
   onRestore,
   className,
-}: ViewportBookmarksProps) {
+}: ViewportBookmarksContentProps) {
   const t = useTranslations("workflows.editor.bookmarks")
   const bookmarks = useLiveQuery(() => listBookmarks(workflowId), [workflowId], []) ?? []
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -71,65 +68,48 @@ export function ViewportBookmarks({
   }
 
   return (
-    <>
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
+    <div className={cn("space-y-1", className)} data-testid="viewport-bookmarks-content">
+      <div className="text-sm font-medium">{t("label")}</div>
+      <button
+        type="button"
+        onClick={openDialog}
+        className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-sm hover:bg-accent hover:text-accent-foreground"
+        data-testid="viewport-bookmarks-save"
+      >
+        <PlusIcon className="size-4" aria-hidden />
+        {t("saveCurrent")}
+      </button>
+      <Separator />
+      {bookmarks.length === 0 ? (
+        <p className="px-1.5 py-1 text-xs text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto">
+          {bookmarks.map((b) => (
+            <div key={b.id} className="flex items-center gap-1">
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className={cn("h-8 gap-1.5", className)}
-                aria-label={t("label")}
-                data-testid="viewport-bookmarks-trigger"
-              >
-                <BookmarkIcon className="size-4" aria-hidden />
-                <span className="hidden md:inline">{t("label")}</span>
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("label")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuItem onSelect={openDialog} data-testid="viewport-bookmarks-save">
-            <PlusIcon className="size-4" aria-hidden />
-            {t("saveCurrent")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {bookmarks.length === 0 ? (
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("empty")}
-            </DropdownMenuLabel>
-          ) : (
-            bookmarks.map((b) => (
-              <DropdownMenuItem
-                key={b.id}
-                className="flex items-center gap-2"
-                onSelect={() => onRestore(b.viewport)}
+                onClick={() => onRestore(b.viewport)}
+                className="flex flex-1 items-center gap-2 rounded-sm px-1.5 py-1 text-sm hover:bg-accent hover:text-accent-foreground"
                 data-testid={`viewport-bookmark-row-${b.id}`}
               >
-                <span className="flex-1 truncate">{b.name}</span>
+                <span className="flex-1 truncate text-left">{b.name}</span>
                 <span className="text-xs text-muted-foreground">
                   ×{Math.round(b.viewport.zoom * 100)}%
                 </span>
-                <button
-                  type="button"
-                  aria-label={t("delete")}
-                  className="ml-1 inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void deleteBookmark(b.id)
-                  }}
-                  data-testid={`viewport-bookmark-delete-${b.id}`}
-                >
-                  <Trash2 className="size-3" aria-hidden />
-                </button>
-              </DropdownMenuItem>
-            ))
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              </button>
+              <button
+                type="button"
+                aria-label={t("delete")}
+                className="inline-flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                onClick={() => void deleteBookmark(b.id)}
+                data-testid={`viewport-bookmark-delete-${b.id}`}
+              >
+                <Trash2 className="size-3" aria-hidden />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
@@ -172,6 +152,6 @@ export function ViewportBookmarks({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   )
 }

@@ -50,6 +50,7 @@ import {
   snapshotFromEditorState,
 } from "@/lib/workflow/editor/mention-expand"
 import { PerfBoundary } from "@/lib/perf"
+import { buildWorkflowChatStarters } from "./workflow-chat-starters"
 
 export function WorkflowEditorChatTab({
   useStore,
@@ -134,6 +135,18 @@ export function WorkflowEditorChatTab({
     [useStore, handleQuickAction]
   )
 
+  // Workflow-specific welcome copy + starter cards for the empty chat state,
+  // in place of the generic dev-tool starters the main chat shows.
+  const emptyState = useMemo(
+    () => ({
+      title: t("starters.title"),
+      subtitle: t("starters.subtitle"),
+      samplesHeading: t("starters.heading"),
+      samples: buildWorkflowChatStarters(t),
+    }),
+    [t]
+  )
+
   if (!workflowId) {
     return (
       <div
@@ -187,6 +200,7 @@ export function WorkflowEditorChatTab({
             }}
             onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
             showHeader={false}
+            emptyState={emptyState}
           />
         </div>
       </PerfBoundary>

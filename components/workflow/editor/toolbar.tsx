@@ -1,31 +1,30 @@
 "use client"
 
-import { useRef } from "react"
+import { memo, useRef } from "react"
 import {
   Save as SaveIcon,
   Play as PlayIcon,
-  Undo2 as UndoIcon,
-  Redo2 as RedoIcon,
-  LayoutGrid as LayoutIcon,
   ArrowLeft as BackIcon,
   Download as ExportIcon,
   Upload as ImportIcon,
   Command as CommandIcon,
   Keyboard as KeyboardIcon,
+  Image as ImageIcon,
+  MoreHorizontal as MoreIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import type {
-  PerformanceTier,
-  ResolvedPerformanceTier,
-} from "@/lib/workflow/editor/performance-tier"
-import { PerformanceTierPopover } from "./performance-tier-popover"
-import { ViewportBookmarks } from "./viewport-bookmarks"
-import type { Viewport } from "@xyflow/react"
 
 export interface EditorToolbarProps {
   workflowName: string
@@ -34,50 +33,25 @@ export interface EditorToolbarProps {
   saving?: boolean
   onSave: () => void
   onRun?: () => void
-  onUndo?: () => void
-  onRedo?: () => void
-  canUndo?: boolean
-  canRedo?: boolean
-  onAutoLayout?: () => void
   onExportJson?: () => void
+  onExportImage?: () => void
   onImportJson?: (json: string) => void
   onOpenCommandPalette?: () => void
   onOpenShortcuts?: () => void
-  /** User-selected performance tier (defaults to "auto"). */
-  performanceTier?: PerformanceTier
-  /** Effective tier after auto resolution (display-only when `performanceTier` is "auto"). */
-  effectivePerformanceTier?: ResolvedPerformanceTier
-  onPerformanceTierChange?: (tier: PerformanceTier) => void
-  /** Workflow id for the bookmarks dropdown. Omit to hide the control. */
-  workflowId?: string
-  /** Current canvas viewport, used as the "save current view" payload. */
-  currentViewport?: Viewport
-  /** Restore handler — typically wraps `reactFlowInstance.setViewport`. */
-  onRestoreViewport?: (viewport: Viewport) => void
 }
 
-export function EditorToolbar({
+export const EditorToolbar = memo(function EditorToolbar({
   workflowName,
   onRename,
   dirty,
   saving,
   onSave,
   onRun,
-  onUndo,
-  onRedo,
-  canUndo,
-  canRedo,
-  onAutoLayout,
   onExportJson,
+  onExportImage,
   onImportJson,
   onOpenCommandPalette,
   onOpenShortcuts,
-  performanceTier,
-  effectivePerformanceTier,
-  onPerformanceTierChange,
-  workflowId,
-  currentViewport,
-  onRestoreViewport,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const t = useTranslations("workflows.toolbar")
@@ -97,6 +71,10 @@ export function EditorToolbar({
     // Reset input so the same file can be re-picked.
     e.target.value = ""
   }
+
+  const hasOverflow = Boolean(
+    onOpenCommandPalette || onOpenShortcuts || onExportJson || onExportImage || onImportJson
+  )
 
   return (
     <div
@@ -131,139 +109,73 @@ export function EditorToolbar({
         {dirty ? t("unsavedChanges") : t("saved")}
       </span>
       <div className="ml-auto flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={onUndo}
-              disabled={!canUndo}
-              aria-label={t("tooltip.undo")}
-              data-testid="workflow-undo"
-            >
-              <UndoIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("tooltip.undo")}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={onRedo}
-              disabled={!canRedo}
-              aria-label={t("tooltip.redo")}
-              data-testid="workflow-redo"
-            >
-              <RedoIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("tooltip.redo")}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={onAutoLayout}
-              aria-label={t("tooltip.autoLayout")}
-              data-testid="workflow-auto-layout"
-            >
-              <LayoutIcon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("tooltip.autoLayout")}</TooltipContent>
-        </Tooltip>
-        {onOpenCommandPalette ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={onOpenCommandPalette}
-                aria-label={t("tooltip.commands")}
-                data-testid="workflow-command-palette"
-              >
-                <CommandIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("tooltip.commands")}</TooltipContent>
-          </Tooltip>
-        ) : null}
-        {onOpenShortcuts ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={onOpenShortcuts}
-                aria-label={t("tooltip.shortcuts")}
-                data-testid="workflow-shortcuts"
-              >
-                <KeyboardIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("tooltip.shortcuts")}</TooltipContent>
-          </Tooltip>
-        ) : null}
-        {performanceTier !== undefined &&
-        effectivePerformanceTier !== undefined &&
-        onPerformanceTierChange ? (
-          <PerformanceTierPopover
-            value={performanceTier}
-            effective={effectivePerformanceTier}
-            onChange={onPerformanceTierChange}
-          />
-        ) : null}
-        {workflowId && currentViewport && onRestoreViewport ? (
-          <ViewportBookmarks
-            workflowId={workflowId}
-            currentViewport={currentViewport}
-            onRestore={onRestoreViewport}
-          />
-        ) : null}
-        {onExportJson ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={onExportJson}
-                aria-label={t("tooltip.exportJson")}
-                data-testid="workflow-export-json"
-              >
-                <ExportIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("tooltip.exportJson")}</TooltipContent>
-          </Tooltip>
-        ) : null}
         {onImportJson ? (
-          <>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="application/json,.json"
-              className="hidden"
-              onChange={handleImportFile}
-              data-testid="workflow-import-input"
-            />
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleImportFile}
+            data-testid="workflow-import-input"
+          />
+        ) : null}
+        {hasOverflow ? (
+          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={handleImportClick}
-                  aria-label={t("tooltip.importJson")}
-                  data-testid="workflow-import-json"
-                >
-                  <ImportIcon className="size-4" />
-                </Button>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={t("tooltip.more")}
+                    data-testid="workflow-overflow"
+                  >
+                    <MoreIcon className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t("tooltip.importJson")}</TooltipContent>
+              <TooltipContent side="bottom">{t("tooltip.more")}</TooltipContent>
             </Tooltip>
-          </>
+            <DropdownMenuContent align="end" className="w-56">
+              {onOpenCommandPalette ? (
+                <DropdownMenuItem
+                  onSelect={onOpenCommandPalette}
+                  data-testid="workflow-command-palette"
+                >
+                  <CommandIcon className="size-4" aria-hidden />
+                  {t("tooltip.commands")}
+                </DropdownMenuItem>
+              ) : null}
+              {onOpenShortcuts ? (
+                <DropdownMenuItem onSelect={onOpenShortcuts} data-testid="workflow-shortcuts">
+                  <KeyboardIcon className="size-4" aria-hidden />
+                  {t("tooltip.shortcuts")}
+                </DropdownMenuItem>
+              ) : null}
+              {(onExportJson || onExportImage || onImportJson) &&
+              (onOpenCommandPalette || onOpenShortcuts) ? (
+                <DropdownMenuSeparator />
+              ) : null}
+              {onExportJson ? (
+                <DropdownMenuItem onSelect={onExportJson} data-testid="workflow-export-json">
+                  <ExportIcon className="size-4" aria-hidden />
+                  {t("tooltip.exportJson")}
+                </DropdownMenuItem>
+              ) : null}
+              {onExportImage ? (
+                <DropdownMenuItem onSelect={onExportImage} data-testid="workflow-export-image">
+                  <ImageIcon className="size-4" aria-hidden />
+                  {t("tooltip.exportImage")}
+                </DropdownMenuItem>
+              ) : null}
+              {onImportJson ? (
+                <DropdownMenuItem onSelect={handleImportClick} data-testid="workflow-import-json">
+                  <ImportIcon className="size-4" aria-hidden />
+                  {t("tooltip.importJson")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
         <Button
           size="sm"
@@ -282,4 +194,4 @@ export function EditorToolbar({
       </div>
     </div>
   )
-}
+})

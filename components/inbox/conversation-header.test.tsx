@@ -73,6 +73,14 @@ jest.mock("@/lib/connectors/lifecycle", () => ({
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+// Stub the inspector so the header test doesn't pull in Dexie / the bus — the
+// inspector's own behaviour is covered by its co-located test. We only verify
+// the header mounts it and the trigger toggles `open`.
+jest.mock("./debug/callback-bindings-inspector", () => ({
+  CallbackBindingsInspector: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="bindings-inspector-open" /> : null,
+}))
+
 // ---------------------------------------------------------------------------
 // Subject
 // ---------------------------------------------------------------------------
@@ -427,5 +435,45 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
     fireEvent.click(reconnect)
     await new Promise((r) => setTimeout(r, 0))
     expect(mockRequeueAdapter).toHaveBeenCalledWith("adp-1")
+  })
+})
+
+describe("ConversationHeader — callback-bindings inspector (B3)", () => {
+  const conversationKey = "telegram:adp-1:12345"
+
+  it("renders the inspector trigger on desktop and opens it on click", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-bind"
+        title="Bindings"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const trigger = screen.getByTestId("conversation-header-bindings")
+    expect(trigger).toBeInTheDocument()
+    expect(trigger).toHaveAccessibleName(/bindings inspector/i)
+    // Closed until clicked.
+    expect(screen.queryByTestId("bindings-inspector-open")).not.toBeInTheDocument()
+    fireEvent.click(trigger)
+    expect(screen.getByTestId("bindings-inspector-open")).toBeInTheDocument()
+  })
+
+  it("does not render the inspector trigger in web mode", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-bind-web"
+        title="Bindings web"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.queryByTestId("conversation-header-bindings")).not.toBeInTheDocument()
   })
 })

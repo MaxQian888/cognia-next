@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
@@ -43,6 +43,11 @@ export function CharacterCard({ character, href, onSelect, className }: Characte
     >
       <ItemMedia variant="image" className="size-12">
         <Avatar className="size-12">
+          {/* ADR-0030 v2 — optional avatar image; Radix shows the fallback
+              when the src is absent or fails to load. */}
+          {character.avatarImage?.webDataUrl ? (
+            <AvatarImage src={character.avatarImage.webDataUrl} alt="" />
+          ) : null}
           <AvatarFallback
             style={{ backgroundColor: character.avatarColor }}
             className="text-base"

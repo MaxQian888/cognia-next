@@ -6,7 +6,7 @@ describe("ONEBOT_CAPS", () => {
     expect([...ONEBOT_CAPS]).toEqual(sorted)
   })
 
-  it("includes the Phase-1 ship-set (minus send.markdown) plus send.a2ui", () => {
+  it("includes the Phase-1 ship-set (minus send.markdown) plus send.a2ui + send.reaction", () => {
     const required = [
       "send.a2ui",
       "send.text",
@@ -17,6 +17,7 @@ describe("ONEBOT_CAPS", () => {
       "send.reply",
       "send.mention",
       "send.emoji",
+      "send.reaction",
       "delete",
       "history.fetch",
     ]
@@ -35,7 +36,11 @@ describe("ONEBOT_CAPS", () => {
     expect(ONEBOT_CAPS).not.toContain("send.markdown")
   })
 
-  it("has exactly 11 entries (removed send.markdown, added send.a2ui)", () => {
-    expect(ONEBOT_CAPS).toHaveLength(11)
+  it("includes send.reaction (NapCat set_msg_emoji_like, runtime-gated)", () => {
+    expect(ONEBOT_CAPS).toContain("send.reaction")
+  })
+
+  it("has exactly 12 entries (removed send.markdown, added send.a2ui + send.reaction)", () => {
+    expect(ONEBOT_CAPS).toHaveLength(12)
   })
 })

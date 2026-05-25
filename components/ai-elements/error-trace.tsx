@@ -61,7 +61,7 @@ export function ErrorTraceDetails({
     <Alert variant="destructive" className={cn("space-y-2", className)}>
       <AlertCircle className="h-4 w-4" />
       <AlertTitle>{headline}</AlertTitle>
-      <AlertDescription className="space-y-2">
+      <AlertDescription className="min-w-0 space-y-2">
         {body ?? <p className="text-sm">{message}</p>}
         {(stack || componentStack) && (
           <Collapsible open={open} onOpenChange={setOpen}>
@@ -74,7 +74,7 @@ export function ErrorTraceDetails({
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="mt-2 max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] font-mono leading-relaxed">
+              <pre className="mt-2 max-h-60 w-full min-w-0 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 text-[11px] font-mono leading-relaxed">
                 {stack}
                 {componentStack ? `\n\nComponent stack:\n${componentStack}` : ""}
               </pre>

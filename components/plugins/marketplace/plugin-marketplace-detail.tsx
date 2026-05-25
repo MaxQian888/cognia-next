@@ -26,6 +26,7 @@ import {
 } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
+import { PluginSourceBadge } from "../plugin-source-badge"
 import type {
   MarketplaceClient,
   PluginMarketplaceEntry,
@@ -85,6 +86,7 @@ export function PluginMarketplaceDetail({
                     v{entry.version}
                   </span>
                 </SheetTitle>
+                {entry.source === "builtin" && <PluginSourceBadge source="builtin" />}
                 <PluginSignatureBadge
                   state={entry.signatureState ?? (entry.signed ? "verified" : "unverified")}
                   signer={entry.author}
@@ -129,13 +131,17 @@ export function PluginMarketplaceDetail({
             </div>
 
             <SheetFooter className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <InstallSection
-                entry={entry}
-                installed={installed}
-                installing={installing}
-                onInstall={onInstall}
-                onUninstall={onUninstall}
-              />
+              {entry.source === "builtin" ? (
+                <PluginSourceBadge source="builtin" />
+              ) : (
+                <InstallSection
+                  entry={entry}
+                  installed={installed}
+                  installing={installing}
+                  onInstall={onInstall}
+                  onUninstall={onUninstall}
+                />
+              )}
             </SheetFooter>
           </>
         ) : null}

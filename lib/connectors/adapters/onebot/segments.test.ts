@@ -321,3 +321,98 @@ describe("parseCqCodeString", () => {
     expect(result).toEqual([{ type: "voice", url: "https://voice.amr" }])
   })
 })
+
+// ---------------------------------------------------------------------------
+// NapCat rich segments — forward / mface / json (v11 + v12)
+// ---------------------------------------------------------------------------
+
+describe("fromOneBotSegments — NapCat rich segments", () => {
+  it("mface with a url → image", () => {
+    const segs: OneBotSegment[] = [
+      { type: "mface", data: { url: "https://q.qq.com/face.png", summary: "[doge]" } },
+    ]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([
+      { type: "image", url: "https://q.qq.com/face.png" },
+    ])
+  })
+
+  it("mface without a url → text summary", () => {
+    const segs: OneBotSegment[] = [{ type: "mface", data: { summary: "[原神]" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[原神]" }])
+  })
+
+  it("mface with neither url nor summary → generic marker", () => {
+    const segs: OneBotSegment[] = [{ type: "mface", data: {} }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[表情]" }])
+  })
+
+  it("forward with inline content → flattened text", () => {
+    const segs: OneBotSegment[] = [
+      {
+        type: "forward",
+        data: {
+          id: "abc",
+          content: [
+            {
+              type: "node",
+              data: { nickname: "Alice", content: [{ type: "text", data: { text: "hi" } }] },
+            },
+            {
+              type: "node",
+              data: { nickname: "Bob", content: [{ type: "text", data: { text: "yo" } }] },
+            },
+          ],
+        },
+      },
+    ]
+    const result = fromOneBotSegments(segs, "v11")
+    expect(result[0].type).toBe("text")
+    expect((result[0] as { type: "text"; text: string }).text).toBe(
+      "[合并转发]\nAlice: hi\nBob: yo"
+    )
+  })
+
+  it("forward without inline content → generic marker", () => {
+    const segs: OneBotSegment[] = [{ type: "forward", data: { id: "abc" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[合并转发消息]" }])
+  })
+
+  it("forward node renders non-text children as type markers", () => {
+    const segs: OneBotSegment[] = [
+      {
+        type: "forward",
+        data: {
+          content: [
+            {
+              type: "node",
+              data: { nickname: "Carol", content: [{ type: "image", data: { url: "x" } }] },
+            },
+          ],
+        },
+      },
+    ]
+    const result = fromOneBotSegments(segs, "v11")
+    expect((result[0] as { type: "text"; text: string }).text).toBe("[合并转发]\nCarol: [image]")
+  })
+
+  it("json card → prompt text", () => {
+    const segs: OneBotSegment[] = [
+      { type: "json", data: { data: JSON.stringify({ prompt: "[分享]看看这个" }) } },
+    ]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[分享]看看这个" }])
+  })
+
+  it("json card with invalid payload → generic marker", () => {
+    const segs: OneBotSegment[] = [{ type: "json", data: { data: "not-json{" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[卡片消息]" }])
+  })
+
+  it("v12 also resolves mface and forward", () => {
+    expect(fromOneBotSegments([{ type: "mface", data: { url: "https://f.png" } }], "v12")).toEqual([
+      { type: "image", url: "https://f.png" },
+    ])
+    expect(fromOneBotSegments([{ type: "forward", data: { id: "z" } }], "v12")).toEqual([
+      { type: "text", text: "[合并转发消息]" },
+    ])
+  })
+})

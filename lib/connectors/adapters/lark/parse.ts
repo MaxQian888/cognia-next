@@ -25,6 +25,7 @@ import type {
   ConnectorCallbackActionType,
   ConnectorCallbackEvent,
 } from "@/types/connectors/interaction"
+import { resolveQuickCommand, type LarkQuickCommand } from "./quick-commands"
 
 // ---------------------------------------------------------------------------
 // Lark event envelope types
@@ -348,6 +349,75 @@ export function parseLarkEventEnvelope(
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
     raw: envelope,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bot-menu (快捷指令) parser — application.bot.menu_v6
+// ---------------------------------------------------------------------------
+
+export interface LarkBotMenuEvent {
+  operator?: { operator_id?: LarkSenderId }
+  event_key?: string
+  timestamp?: string
+}
+
+/**
+ * Project an `application.bot.menu_v6` envelope (a bot-menu / 快捷指令 click)
+ * into a synthetic `create` inbound event so it flows through the normal
+ * gate → bus → ai-run pipeline.
+ *
+ * The menu event carries the operator's `open_id` but no `chat_id`, so the
+ * reply targets the operator's p2p chat: `conversationRef.channelId` is set to
+ * the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves to
+ * `receive_id_type=open_id`.
+ *
+ * The `event_key` is mapped to an action via `quickCommands`. A configured
+ * mapping supplies the prompt / slash-command text; an unmapped key falls back
+ * to its label or the raw key so the click is never silently dropped.
+ *
+ * Returns null for non-menu events or when operator / event_key are absent.
+ */
+export function parseLarkBotMenuEvent(
+  adapterId: string,
+  selfBotOpenId: string,
+  envelope: LarkEventEnvelope,
+  quickCommands: LarkQuickCommand[] | undefined
+): NormalizedInboundEvent | null {
+  if (envelope.header?.event_type !== "application.bot.menu_v6") return null
+  const event = envelope.event as unknown as LarkBotMenuEvent
+  const openId = event.operator?.operator_id?.open_id
+  const eventKey = event.event_key
+  if (!openId || !eventKey) return null
+
+  const mapped = resolveQuickCommand(quickCommands, eventKey)
+  const text = mapped?.action.value ?? mapped?.label ?? eventKey
+
+  const conversationKey = buildConversationKey("lark", adapterId, openId)
+
+  return {
+    platform: "lark",
+    adapterId,
+    selfId: selfBotOpenId,
+    messageId: `lark.menu:${envelope.header.event_id}`,
+    conversationRef: {
+      platform: "lark",
+      adapterId,
+      channelId: openId,
+    },
+    conversationKey,
+    sender: buildPlatformIdentity(adapterId, openId),
+    channel: {
+      id: conversationKey,
+      kind: "private",
+      platformChannelId: openId,
+    },
+    segments: [{ type: "text", text }],
+    plainText: text,
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: Date.now(),
+    raw: envelope,
+    kind: "create",
   }
 }
 

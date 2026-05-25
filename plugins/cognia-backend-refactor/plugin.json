@@ -1,0 +1,33 @@
+{
+  "id": "cognia-backend-refactor",
+  "name": "Backend Refactor Suite",
+  "version": "0.1.0",
+  "description": "A reusable backend-refactoring development system: role characters, a synchronous tool-enabled agent.turn workflow node, a review-board agent team, refactoring skills, and an end-to-end backend-refactor-pipeline workflow template. Point a role at a repo clone and run the pipeline.",
+  "type": "frontend",
+  "capabilities": [
+    "character-pack",
+    "workflow",
+    "skills",
+    "subagent",
+    "agent-team-template",
+    "workflow-template"
+  ],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "hint": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

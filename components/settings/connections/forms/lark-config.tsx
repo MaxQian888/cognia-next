@@ -44,6 +44,8 @@ import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-se
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import { LarkAtStrategy } from "./lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "./lark/lark-whitelist-editor"
+import { LarkQuickCommandsEditor } from "./lark/lark-quick-commands-editor"
+import type { LarkQuickCommand } from "@/lib/connectors/adapters/lark/quick-commands"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,6 +63,8 @@ interface LarkPersistedSettings {
   transport?: TransportMode
   /** Cached at adapter start by `buildLarkAdapter`; refreshed via the UI affordance. */
   selfBotOpenId?: string
+  /** Bot-menu (快捷指令) `event_key` → action mappings. */
+  quickCommands?: LarkQuickCommand[]
   /** Index signature so the row's open-ended `Record<string, unknown>` accepts us. */
   [key: string]: unknown
 }
@@ -122,6 +126,9 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
   )
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
+  const [quickCommands, setQuickCommands] = useState<LarkQuickCommand[]>(
+    persistedSettings.quickCommands ?? []
+  )
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TatTestResult | null>(null)
@@ -143,7 +150,8 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     verificationToken.length > 0 ||
     transport !== (persistedSettings.transport ?? "long-connection") ||
     muted !== (row?.muted ?? false) ||
-    quietHours !== (row?.quietHours ?? null)
+    quietHours !== (row?.quietHours ?? null) ||
+    JSON.stringify(quickCommands) !== JSON.stringify(persistedSettings.quickCommands ?? [])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -224,6 +232,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
       const nextSettings: LarkPersistedSettings = {
         transport,
         ...(selfBotOpenId ? { selfBotOpenId } : {}),
+        ...(quickCommands.length > 0 ? { quickCommands } : {}),
       }
 
       if (isNew) {
@@ -354,6 +363,19 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     ),
   }
 
+  const quickCommandsSection: FormSection = {
+    id: "quick-commands",
+    label: t("sectionQuickCommands"),
+    description: t("sectionQuickCommandsDesc"),
+    children: (
+      <LarkQuickCommandsEditor
+        value={quickCommands}
+        onChange={setQuickCommands}
+        disabled={saving}
+      />
+    ),
+  }
+
   const advancedSection: FormSection = {
     id: "advanced",
     label: t("sectionAdvanced"),
@@ -391,7 +413,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
-            sections={[identitySection, deliverySection, advancedSection]}
+            sections={[identitySection, deliverySection, quickCommandsSection, advancedSection]}
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}

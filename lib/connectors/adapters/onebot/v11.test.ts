@@ -164,4 +164,47 @@ describe("parseV11Event", () => {
     }
     expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
   })
+
+  it("poke notice (notice_type=poke) → system event with systemKind=poke", () => {
+    const event: OneBotV11Event = {
+      time: 1700000400,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "poke",
+      group_id: 300001,
+      user_id: 200001,
+    }
+    const r = parseV11Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("system")
+    expect(r!.systemKind).toBe("poke")
+    expect(r!.channel.kind).toBe("group")
+  })
+
+  it("go-cqhttp poke (notify/poke) → system event with systemKind=poke", () => {
+    const event: OneBotV11Event = {
+      time: 1700000500,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "notify",
+      sub_type: "poke",
+      user_id: 200001,
+    }
+    const r = parseV11Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.systemKind).toBe("poke")
+  })
+
+  it("notify notice with a non-poke sub_type → null", () => {
+    const event: OneBotV11Event = {
+      time: 1700000600,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "notify",
+      sub_type: "honor",
+      group_id: 300001,
+      user_id: 200001,
+    }
+    expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
+  })
 })

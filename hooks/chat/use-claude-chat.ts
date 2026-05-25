@@ -127,6 +127,20 @@ export function useClaudeChat() {
    */
   const pendingBranchTagRef = useRef<Map<string, { groupId: string; index: number }>>(new Map())
 
+  /**
+   * Per-session serialization queue for `handleEvent`. Sidecar events arrive
+   * fire-and-forget, but `handleEvent` does an async read → apply → persist →
+   * store-update that spans multiple `await`s. Without serialization, two
+   * events for the same session interleave: both read the same stale base, and
+   * the loser's `persistMessages` can `bulkDelete` rows the winner just wrote
+   * (durable message loss) or overwrite the store with a base missing a delta.
+   * Chaining each event onto the tail of its session's promise guarantees the
+   * read-modify-write for one session runs to completion before the next
+   * starts. Different sessions keep their own chains so a busy background
+   * session never blocks the foreground one.
+   */
+  const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
+
   // Subscribe to sidecar events once.
   useEffect(() => {
     if (!isTauri()) return
@@ -134,8 +148,25 @@ export function useClaudeChat() {
     let cancelled = false
 
     onClaudeMessage((evt) => {
-      void handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef).catch((err) => {
-        console.error("handleEvent failed", err)
+      // Key by session so same-session events serialize; events without a
+      // session id (ready/log/sidecar_exited) share one chain — they're cheap
+      // no-ops in handleEvent but still kept in arrival order.
+      const key =
+        typeof (evt as { sessionId?: unknown }).sessionId === "string"
+          ? (evt as { sessionId: string }).sessionId
+          : "__nosession__"
+      const queues = eventQueuesRef.current
+      const tail = (queues.get(key) ?? Promise.resolve())
+        // A prior failure must not break the chain for later events.
+        .catch(() => {})
+        .then(() => handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef))
+        .catch((err) => {
+          console.error("handleEvent failed", err)
+        })
+      queues.set(key, tail)
+      // Drop the entry once the chain drains so the map doesn't grow per event.
+      void tail.finally(() => {
+        if (queues.get(key) === tail) queues.delete(key)
       })
     })
       .then((u) => {
@@ -823,16 +854,24 @@ async function handleEvent(
       }
 
       if (nextMessages !== current) {
-        await persistMessages(sessionId, nextMessages)
         if (isActive) {
+          // Update the store first so the token render is instant — it no
+          // longer waits on a Dexie write that grows with session length.
+          // Safe because same-session events are serialized (eventQueuesRef):
+          // the next event won't start until this persist resolves, so there's
+          // no lost-update from reordering store-update ahead of persistence.
           useChatStore.getState().replaceMessages(nextMessages)
-        } else if (
-          nextMessages.length > current.length &&
-          nextMessages[nextMessages.length - 1]?.role === "assistant"
-        ) {
-          // Background reply landed for a non-active session — bump the
-          // unread count so the channel list shows a dot.
-          await bumpUnread(sessionId).catch(() => {})
+          await persistMessages(sessionId, nextMessages)
+        } else {
+          await persistMessages(sessionId, nextMessages)
+          if (
+            nextMessages.length > current.length &&
+            nextMessages[nextMessages.length - 1]?.role === "assistant"
+          ) {
+            // Background reply landed for a non-active session — bump the
+            // unread count so the channel list shows a dot.
+            await bumpUnread(sessionId).catch(() => {})
+          }
         }
       }
 

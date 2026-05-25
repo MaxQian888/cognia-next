@@ -56,6 +56,15 @@ impl EventEmitter for AppHandleEmitter {
 #[derive(Clone)]
 pub struct EmitterExt(pub Arc<dyn EventEmitter>);
 
+/// Carries the live `tauri::AppHandle` to the OneBot reverse-WS handler, which
+/// needs both `Emitter` (open/event/response/close) and `Listener` (the
+/// outbound `/send` channel) — capabilities the `EventEmitter` trait does not
+/// expose. Layered only by `build_router` (production); absent in the
+/// `build_unresolved_router` test path, where the WS handler falls back to
+/// auth-only frame draining.
+#[derive(Clone)]
+pub struct AppHandleExt(pub tauri::AppHandle);
+
 /// Build the connectors axum `Router<ConnectorsState>` (state not yet
 /// resolved). Used by tests in `ws_server.rs` that compose extra routes.
 pub fn build_unresolved_router() -> Router<ConnectorsState> {
@@ -66,11 +75,21 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
 }
 
 /// Compose the resolved router with state + emitter. Used by
-/// `server_lifecycle::start_server`.
-pub fn build_router(state: ConnectorsState, emitter: Arc<dyn EventEmitter>) -> Router {
-    build_unresolved_router()
+/// `server_lifecycle::start_server`. `app` carries the live `AppHandle` for the
+/// OneBot reverse-WS bridge; production passes `Some(...)`, tests pass `None`
+/// (the WS handler then drains frames after auth, preserving prior behaviour).
+pub fn build_router(
+    state: ConnectorsState,
+    emitter: Arc<dyn EventEmitter>,
+    app: Option<tauri::AppHandle>,
+) -> Router {
+    let mut router = build_unresolved_router()
         .with_state(state)
-        .layer(Extension(EmitterExt(emitter)))
+        .layer(Extension(EmitterExt(emitter)));
+    if let Some(app) = app {
+        router = router.layer(Extension(AppHandleExt(app)));
+    }
+    router
 }
 
 async fn health_handler() -> &'static str {
@@ -274,7 +293,7 @@ mod tests {
 
     fn test_router_with(state: ConnectorsState) -> (Router, Arc<RecordingEmitter>) {
         let emitter = Arc::new(RecordingEmitter::default());
-        let router = build_router(state, emitter.clone());
+        let router = build_router(state, emitter.clone(), None);
         (router, emitter)
     }
 

@@ -3,7 +3,7 @@ name = "cognia-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Cognia WASM plugin author CLI (scaffold / build / sign / verify / dev)"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 rust-version = "1.82"
 
 [[bin]]

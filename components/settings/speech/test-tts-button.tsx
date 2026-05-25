@@ -7,16 +7,29 @@ import { Button } from "@/components/ui/button"
 import { useTTS } from "@/hooks/media"
 import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@/lib/logging"
+import type { SpeechSettings } from "@/lib/tts/types"
+
+interface TestTtsButtonProps {
+  /**
+   * Per-character voice overlay to audition instead of the global settings
+   * (see `resolveCharacterVoice`). When omitted, the button uses the active
+   * AppSettings voice — its original behaviour.
+   */
+  voiceOverlay?: Partial<SpeechSettings>
+  /** Override the spoken sample. Defaults to a language-aware sample line. */
+  sampleText?: string
+}
 
 /**
  * "Test voice" button. Speaks a language-aware sample using the active
  * settings → provider → voice → speed, allowing the user to audition
- * configuration before committing.
+ * configuration before committing. Pass `voiceOverlay` to audition a
+ * character's `voiceProfile` without touching global settings.
  */
-export function TestTtsButton() {
+export function TestTtsButton({ voiceOverlay, sampleText }: TestTtsButtonProps = {}) {
   const t = useTranslations("settings.speech.tts")
   const sttLanguage = useSettingsStore((s) => s.settings?.sttLanguage ?? "en-US")
-  const { speak, stop, isPlaying, isLoading } = useTTS({ source: "settings" })
+  const { speak, stop, isPlaying, isLoading } = useTTS({ source: "settings", voiceOverlay })
 
   const handleClick = () => {
     if (isPlaying) {
@@ -24,13 +37,15 @@ export function TestTtsButton() {
       stop()
       return
     }
-    const sample = sttLanguage.startsWith("zh")
-      ? t("sample.zh")
-      : sttLanguage.startsWith("ja")
-        ? t("sample.ja")
-        : sttLanguage.startsWith("ko")
-          ? t("sample.ko")
-          : t("sample.en")
+    const sample =
+      sampleText ??
+      (sttLanguage.startsWith("zh")
+        ? t("sample.zh")
+        : sttLanguage.startsWith("ja")
+          ? t("sample.ja")
+          : sttLanguage.startsWith("ko")
+            ? t("sample.ko")
+            : t("sample.en"))
     loggers.tts.info("settings.testVoice.requested", { lang: sttLanguage })
     void speak(sample)
   }

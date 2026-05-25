@@ -3,7 +3,7 @@ name = "cognia-next"
 version = "0.1.0"
 description = "cognia-next — AI-powered desktop application built with Next.js 16 + Tauri 2"
 authors = ["AstroAir <astro_air@126.com>"]
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/AstroAir/cognia-next"
 edition = "2021"
 # 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
@@ -157,6 +157,11 @@ keyring = "3"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 base64 = "0.22"
+# Feishu/Lark long-connection wire protocol — the WS transport exchanges
+# protobuf-framed `pbbp2.Frame` messages (not JSON). `prost` decodes/encodes
+# them via `#[derive(Message)]`, so no `.proto`/`protoc`/build.rs is needed.
+# See `src-tauri/src/connectors/lark_ws.rs`.
+prost = "0.13"
 
 # Workflow cron daemon — `cron` is just the expression parser; we drive
 # firing via a small tokio loop in `src-tauri/src/workflow/triggers/cron_daemon.rs`

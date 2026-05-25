@@ -73,6 +73,21 @@ describe("PluginMarketplaceCard", () => {
     expect(screen.getByText("dangerous")).toBeInTheDocument()
   })
 
+  it("for a built-in entry, shows the Built-in badge and no install/uninstall button", () => {
+    const cb = callbacks()
+    render(
+      <PluginMarketplaceCard
+        entry={{ ...baseEntry, source: "builtin" as const }}
+        installed
+        installing={false}
+        {...cb}
+      />
+    )
+    expect(screen.getByTestId("plugin-source-badge-builtin")).toBeInTheDocument()
+    expect(screen.queryByText("install")).not.toBeInTheDocument()
+    expect(screen.queryByText("uninstall")).not.toBeInTheDocument()
+  })
+
   it("renders the click-card region as a real <button> so it inherits keyboard focus", () => {
     const cb = callbacks()
     render(<PluginMarketplaceCard entry={baseEntry} installed={false} installing={false} {...cb} />)

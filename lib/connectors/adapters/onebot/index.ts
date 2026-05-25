@@ -1,14 +1,18 @@
 /**
  * OneBot adapter factory — assembles parse + serialize + capability +
- * reverse-WS transport into a PlatformAdapter.
+ * transport into a PlatformAdapter.
  *
- * Transport: the OneBot client (NapCat/Lagrange/LLOneBot) connects TO us via
- * reverse WebSocket. The Rust axum server accepts the WS upgrade on
- * `/ws/onebot/:adapter_id` and emits Tauri events; this module subscribes to
- * those events and projects them through the parser.
+ * Transport (selected per instance via `transportMode`):
+ *   - reverse-ws: the OneBot client (NapCat/Lagrange/LLOneBot) connects TO us;
+ *     the Rust axum server accepts the WS upgrade on `/ws/onebot/:adapter_id`
+ *     and bridges it through Tauri events.
+ *   - forward-ws: cognia dials a NapCat WS server (`forwardWsUrl`, e.g.
+ *     `ws://host:3001`) as a client via the generic Rust WS client.
+ * Both carry the identical event stream + echo-matched RPC, so the parse /
+ * serialise layers below are transport-agnostic.
  *
- * Outbound: routes through sendToOneBot (echo-matched RPC), using v11 or v12
- * serialiser based on the cached variant from the first inbound event.
+ * Outbound: routes through `transport.send` (echo-matched RPC), using the v11
+ * or v12 serialiser based on the cached variant from the first inbound event.
  *
  * Edit: throws unsupported (OneBot has no edit API).
  * Delete: uses delete_msg (v11) / delete_message (v12).
@@ -33,15 +37,12 @@ import {
   serializeDeleteV12,
   serializeGetGroupMsgHistoryV11,
   serializeGetFriendMsgHistoryV11,
+  serializeSetMsgEmojiLike,
+  OneBotUnsupportedError,
 } from "./serialize"
-import {
-  subscribeOneBotEvents,
-  subscribeOneBotOpen,
-  subscribeOneBotClose,
-  subscribeOneBotResponses,
-  sendToOneBot,
-  type UnlistenFn,
-} from "./transport-reverse-ws"
+import { createReverseWsTransport } from "./transport-reverse-ws"
+import { createForwardWsTransport } from "./transport-forward-ws"
+import type { OneBotTransport } from "./transport"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,13 @@ export interface OneBotAdapterOptions {
   bearerToken?: () => Promise<string>
   /** Hint for documentation display only. */
   expectedClient?: "napcat" | "lagrange" | "llonebot"
+  /**
+   * Connection direction. `reverse-ws` (default): NapCat dials cognia.
+   * `forward-ws`: cognia dials the NapCat WS server at `forwardWsUrl`.
+   */
+  transportMode?: "reverse-ws" | "forward-ws"
+  /** NapCat WS server URL — required when `transportMode === "forward-ws"`. */
+  forwardWsUrl?: string
 }
 
 const ONEBOT_CONFIG_SCHEMA = {
@@ -71,6 +79,7 @@ const ONEBOT_CONFIG_SCHEMA = {
       enum: ["napcat", "lagrange", "llonebot"],
       title: "Expected Client",
     },
+    forwardWsUrl: { type: "string", title: "Forward-WS URL (ws://host:3001)" },
   },
   additionalProperties: false,
 }
@@ -85,8 +94,16 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
   let stopCalled = false
   let currentVariant: "v11" | "v12" | null = null
 
-  // Cleanup functions for Tauri event listeners
-  const unlisteners: UnlistenFn[] = []
+  // Pick the transport. Forward-WS needs a URL; a forward-ws row missing one is
+  // misconfigured, so we fall back to the safe reverse-WS default.
+  const useForwardWs = opts.transportMode === "forward-ws" && !!opts.forwardWsUrl
+  const transport: OneBotTransport = useForwardWs
+    ? createForwardWsTransport({
+        adapterId: opts.id,
+        url: opts.forwardWsUrl!,
+        token: opts.bearerToken,
+      })
+    : createReverseWsTransport(opts.id)
 
   function getVariant(): "v11" | "v12" {
     return currentVariant ?? "v11"
@@ -106,7 +123,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
    */
   async function probeUpstreamImpl(): Promise<void> {
     try {
-      const resp = await sendToOneBot(opts.id, {
+      const resp = await transport.send({
         action: "get_version_info",
         params: {},
         echo: `${opts.id}:probe:${Date.now()}`,
@@ -157,57 +174,43 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     stopCalled = false
     healthState = "running"
 
-    // Subscribe to RPC responses first
-    const unlistenResp = await subscribeOneBotResponses(opts.id)
-    unlisteners.push(unlistenResp)
-
-    // Subscribe to open/close lifecycle. A5 — kick a `get_version_info`
-    // probe on every open so reconnects update implMetadata if the user
-    // upgraded their upstream (NapCat → Lagrange swap, version bump, …).
-    const unlistenOpen = await subscribeOneBotOpen(opts.id, () => {
-      healthState = "running"
-      lastActivityAt = Date.now()
-      // Fire-and-forget — the probe writes Dexie + returns. We don't
-      // await so a slow client doesn't block other connection setup.
-      void probeUpstreamImpl()
-    })
-    unlisteners.push(unlistenOpen)
-
-    const unlistenClose = await subscribeOneBotClose(opts.id, () => {
-      if (!stopCalled) {
-        healthState = "degraded"
-      }
-    })
-    unlisteners.push(unlistenClose)
-
-    // Subscribe to inbound events
-    const unlistenEvents = await subscribeOneBotEvents(opts.id, async (rawEvent) => {
-      const result = parseOneBotEvent(opts.id, rawEvent)
-      if (result === null) return
-
-      // Cache the detected variant
-      currentVariant = result.variant
-
-      if (result.parsed !== null) {
-        // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
-        if (!(await gateInboundEvent(opts.id, result.parsed))) return
+    // The transport owns the socket lifecycle and the RPC response channel.
+    // A5 — kick a `get_version_info` probe on every open so reconnects update
+    // implMetadata if the user upgraded their upstream (NapCat → Lagrange swap,
+    // version bump, …).
+    await transport.start({
+      onOpen: () => {
+        healthState = "running"
         lastActivityAt = Date.now()
-        await ctx.emit(result.parsed)
-      }
+        // Fire-and-forget — the probe writes Dexie + returns. We don't await
+        // so a slow client doesn't block other connection setup.
+        void probeUpstreamImpl()
+      },
+      onClose: () => {
+        if (!stopCalled) {
+          healthState = "degraded"
+        }
+      },
+      onEvent: async (rawEvent) => {
+        const result = parseOneBotEvent(opts.id, rawEvent)
+        if (result === null) return
+
+        // Cache the detected variant
+        currentVariant = result.variant
+
+        if (result.parsed !== null) {
+          // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+          if (!(await gateInboundEvent(opts.id, result.parsed))) return
+          lastActivityAt = Date.now()
+          await ctx.emit(result.parsed)
+        }
+      },
     })
-    unlisteners.push(unlistenEvents)
   }
 
   async function stop(): Promise<void> {
     stopCalled = true
-    for (const fn of unlisteners) {
-      try {
-        fn()
-      } catch {
-        // Ignore errors during cleanup
-      }
-    }
-    unlisteners.length = 0
+    await transport.stop()
     clearVariantCache(opts.id)
     currentVariant = null
     healthState = "down"
@@ -235,7 +238,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
     try {
       for (const call of calls) {
-        const resp = await sendToOneBot(opts.id, call)
+        const resp = await transport.send(call)
         if (resp.status === "ok" && resp.data && typeof resp.data === "object") {
           const data = resp.data as Record<string, unknown>
           if (data.message_id !== undefined) {
@@ -275,7 +278,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         ? serializeDeleteV11(messageId, opts.selfBotUin)
         : serializeDeleteV12(messageId, opts.selfBotUin)
 
-    await sendToOneBot(opts.id, call)
+    await transport.send(call)
   }
 
   async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
@@ -284,6 +287,24 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   async function refreshCredentials(): Promise<void> {
     // bearerToken is resolved on each call; nothing to refresh eagerly
+  }
+
+  /**
+   * Add an emoji reaction to a message. The OneBot v11/v12 standard defines no
+   * reaction action; NapCat ships the `set_msg_emoji_like` extension. We gate
+   * on the upstream probe result (`implMetadata.features`, written by
+   * `probeUpstreamImpl`) so a non-NapCat upstream fails honestly with
+   * `OneBotUnsupportedError` rather than silently no-op'ing. `emojiId` is the
+   * QQ face id.
+   */
+  async function addReaction(messageId: string, emojiId: string): Promise<void> {
+    const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+    const row = await getAdapterInstance(opts.id)
+    const features = row?.implMetadata?.features ?? []
+    if (!features.includes("set_msg_emoji_like")) {
+      throw new OneBotUnsupportedError("set_msg_emoji_like (reaction)")
+    }
+    await transport.send(serializeSetMsgEmojiLike(messageId, emojiId))
   }
 
   /**
@@ -345,7 +366,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           ? serializeGetGroupMsgHistoryV11(chatId, cursor, pageSize)
           : serializeGetFriendMsgHistoryV11(chatId, cursor, pageSize)
 
-      const resp = await sendToOneBot(opts.id, call)
+      const resp = await transport.send(call)
       if (resp.status !== "ok") return
 
       const data = resp.data as { messages?: OneBotV11Event[] } | null
@@ -372,14 +393,14 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     }
   }
 
-  return {
+  const adapter: PlatformAdapter & { addReaction?: typeof addReaction } = {
     get meta() {
       return {
         type: "onebot" as const,
         displayName: opts.displayName,
         version: "0.1.0",
         capabilities: ONEBOT_CAPS,
-        transportModes: ["reverse-ws"] as const,
+        transportModes: ["reverse-ws", "forward-ws"] as const,
         configSchema: ONEBOT_CONFIG_SCHEMA,
       }
     },
@@ -394,5 +415,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     refreshCredentials,
     a2uiCapability: () => ONEBOT_A2UI_CAPABILITY,
     fetchHistory,
+    addReaction,
   }
+
+  return adapter
 }

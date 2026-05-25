@@ -149,6 +149,29 @@ export async function connectorsWsClose(handleId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Lark long-connection (protobuf-framed WS)
+//
+// Dedicated path: the generic `connectors_ws_*` passthrough can't decode
+// Feishu's binary protobuf frames. Rust does the handshake (reading appId /
+// appSecret from the keyring), protobuf framing, chunk reassembly, ack and
+// keepalive, then emits complete event envelopes (JSON strings) on
+// `connectors://lark-ws/<handleId>/event` and a terminal
+// `connectors://lark-ws/<handleId>/close`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Open a Lark long connection for `adapterId`. Returns the stable handle id.
+ * The connection self-reconnects until `connectorsLarkWsClose` is called.
+ */
+export async function connectorsLarkWsOpen(adapterId: string): Promise<string> {
+  return invoke<string>("connectors_lark_ws_open", { adapterId })
+}
+
+export async function connectorsLarkWsClose(handleId: string): Promise<void> {
+  await invoke("connectors_lark_ws_close", { handleId })
+}
+
+// ---------------------------------------------------------------------------
 // Task 24 — attachment cache
 // ---------------------------------------------------------------------------
 

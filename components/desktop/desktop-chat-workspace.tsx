@@ -46,8 +46,17 @@ const log = loggers.shell
 export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const router = useRouter()
-  const { sessions, activeSessionId, select, create, remove, rename, bulkRemove, bulkSetPinned } =
-    useSessions()
+  const {
+    sessions,
+    isLoadingSessions,
+    activeSessionId,
+    select,
+    create,
+    remove,
+    rename,
+    bulkRemove,
+    bulkSetPinned,
+  } = useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -337,6 +346,7 @@ export function DesktopChatWorkspace() {
           {!sidebarCollapsed && (
             <ChannelList
               sessions={sessions}
+              loading={isLoadingSessions}
               activeSessionId={activeSessionId}
               onSelect={handleSwitchToSession}
               onNewDirect={handleChannelNewDirect}

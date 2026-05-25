@@ -66,6 +66,21 @@ describe("PluginMarketplace", () => {
     expect(screen.getByText("sections.recent")).toBeInTheDocument()
   })
 
+  it("lists built-in plugins in the dedicated Built-in section", async () => {
+    installedRows.push({
+      id: "builtin-1",
+      name: "Builtin One",
+      version: "1.0.0",
+      source: "builtin",
+      capabilities: [],
+      manifest: {},
+    } as never)
+    render(<PluginMarketplace />)
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByText("sections.builtin"))
+    await waitFor(() => expect(screen.getByText("Builtin One")).toBeInTheDocument())
+  })
+
   it("install click invokes the marketplace install path", async () => {
     const install = jest.fn(async () => undefined)
     __resetPluginMarketplaceClientForTests({

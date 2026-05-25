@@ -13,22 +13,33 @@ jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: jest.fn().mockResolvedValue({ id: "new-id" }),
   updateAdapterInstance: jest.fn().mockResolvedValue(undefined),
+  deleteAdapterInstance: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(false) }))
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsHttpRequest: jest.fn(),
   connectorsKeyringSet: jest.fn().mockResolvedValue(undefined),
+  connectorsKeyringDelete: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+// Each AdapterListRow calls useAdapterHealth → useLiveQuery. Stub it to a
+// nominal state so it doesn't consume the modulo-2 useLiveQuery sequence
+// below and so no health badge renders.
+jest.mock("@/hooks/connectors/use-adapter-health", () => ({
+  useAdapterHealth: () => ({ current: { state: "running" }, breaker: null, rateBucket: null }),
+}))
+
 // Radix UI Portal doesn't render content into the document in jsdom — mock
-// DropdownMenu so its Content always appears in the DOM directly.
+// DropdownMenu so its Content (add menu + row action menu) always appears in
+// the DOM directly.
 jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode; asChild?: boolean }) => (
     <div>{children}</div>
   ),
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
   DropdownMenuItem: ({
     children,
     onClick,
@@ -42,6 +53,20 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
       {children}
     </button>
   ),
+}))
+
+// The row's destructive AlertDialog is closed in these tests — render nothing
+// unless open so it doesn't bleak a second "Remove" into the DOM.
+jest.mock("@/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
+    open ? <div>{children}</div> : null,
+  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  AlertDialogAction: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
 }))
 
 jest.mock("dexie-react-hooks", () => ({
@@ -73,8 +98,9 @@ const baseAdapter: AdapterInstanceRow = {
  * `AdaptersTab` calls `useLiveQuery` twice in a fixed order:
  *   1) adapterInstances rows
  *   2) outboundQueue rows
+ * (The per-row health hook is mocked, so it does not add to this sequence.)
  * This helper drives each call independently. Modulo by 2 so re-renders
- * (selection toggles, switch flips) re-issue the same sequence.
+ * re-issue the same sequence.
  */
 function setupAdapterQueries(opts: {
   adapters: AdapterInstanceRow[]
@@ -101,7 +127,8 @@ describe("AdaptersTab", () => {
   it("renders the adapter list when adapters exist", () => {
     render(<AdaptersTab />)
     expect(screen.getByText("Test Bot")).toBeInTheDocument()
-    expect(screen.getByText("telegram")).toBeInTheDocument()
+    // Transport shows in the row sublabel.
+    expect(screen.getByText(/longpoll/)).toBeInTheDocument()
   })
 
   it("shows empty state when no adapters", () => {
@@ -110,16 +137,15 @@ describe("AdaptersTab", () => {
     expect(screen.getByText(/no adapters configured/i)).toBeInTheDocument()
   })
 
-  it("renders enable/disable switch for each adapter", () => {
+  it("exposes enable/disable in the row action menu", () => {
     render(<AdaptersTab />)
-    const toggle = screen.getByRole("switch", { name: /disable test bot/i })
-    expect(toggle).toBeInTheDocument()
-    expect(toggle).toBeChecked()
+    // Row is enabled → menu offers "Disable".
+    expect(screen.getByText("Disable")).toBeInTheDocument()
   })
 
-  it("renders the Configure button for each adapter", () => {
+  it("exposes Configure in the row action menu", () => {
     render(<AdaptersTab />)
-    expect(screen.getByRole("button", { name: /configure test bot/i })).toBeInTheDocument()
+    expect(screen.getByText("Configure")).toBeInTheDocument()
   })
 
   it("shows Add adapter dropdown trigger", () => {
@@ -127,15 +153,15 @@ describe("AdaptersTab", () => {
     expect(screen.getByRole("button", { name: /add adapter/i })).toBeInTheDocument()
   })
 
-  it("opens the dropdown and shows Telegram entry as active", async () => {
+  it("opens the dropdown and shows the Telegram entry", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
     await waitFor(() => {
-      expect(screen.getByText("Telegram")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Telegram" })).toBeInTheDocument()
     })
   })
 
-  it("does not show Coming soon — all five platforms are now active", async () => {
+  it("does not show Coming soon — all five platforms are active", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
     await waitFor(() => expect(screen.queryAllByText(/lark \/ feishu/i).length).toBeGreaterThan(0))
@@ -145,46 +171,38 @@ describe("AdaptersTab", () => {
   it("opens Telegram dialog when Add → Telegram is clicked", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => screen.getByText("Telegram"))
-    fireEvent.click(screen.getByText("Telegram"))
+    fireEvent.click(screen.getByRole("button", { name: "Telegram" }))
     await waitFor(() => {
       expect(screen.getByText(/add telegram bot/i)).toBeInTheDocument()
     })
   })
 
-  it("opens Telegram configure dialog when Configure is clicked on telegram row", async () => {
+  it("opens Telegram configure dialog from the row menu", async () => {
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /configure test bot/i }))
+    fireEvent.click(screen.getByText("Configure"))
     await waitFor(() => {
       expect(screen.getByText(/configure telegram bot/i)).toBeInTheDocument()
     })
   })
 
-  // im-refactored-crayon — Lark moves out of "Coming soon" and the existing
-  // LarkConfigDialog is now wired into the add / configure dispatchers.
-
-  it("shows Lark as an active menu entry (no Coming soon badge)", async () => {
+  it("shows Lark as an active menu entry", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => screen.getByText(/lark/i))
-    const larkItem = screen.getByText(/lark \/ feishu/i)
-    // Walk up to the menu-item button — it must be enabled now.
-    const button = larkItem.closest("button")
-    expect(button).not.toBeNull()
+    await waitFor(() => screen.getByRole("button", { name: /lark \/ feishu/i }))
+    const button = screen.getByRole("button", { name: /lark \/ feishu/i })
     expect(button).not.toBeDisabled()
   })
 
   it("opens Lark dialog when Add → Lark / Feishu is clicked", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => screen.getByText(/lark \/ feishu/i))
-    fireEvent.click(screen.getByText(/lark \/ feishu/i))
+    fireEvent.click(screen.getByRole("button", { name: /lark \/ feishu/i }))
     await waitFor(() => {
       expect(screen.getByText(/add lark bot/i)).toBeInTheDocument()
     })
   })
 
-  it("opens Lark configure dialog when Configure is clicked on a lark row", async () => {
+  it("opens Lark configure dialog from the row menu", async () => {
     const larkRow: AdapterInstanceRow = {
       ...baseAdapter,
       id: "cai_lark_1",
@@ -198,25 +216,19 @@ describe("AdaptersTab", () => {
     }
     setupAdapterQueries({ adapters: [larkRow] })
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /configure lark probe/i }))
+    fireEvent.click(screen.getByText("Configure"))
     await waitFor(() => {
       expect(screen.getByText(/configure lark bot/i)).toBeInTheDocument()
     })
   })
 
-  // im-refactored-crayon — Discord, Slack, OneBot move out of "Coming soon"
-  // and into the dialog dispatcher alongside Telegram + Lark.
-
   it.each<[string, RegExp, RegExp]>([
     ["Discord", /^discord$/i, /add discord bot/i],
     ["Slack", /^slack$/i, /add slack bot/i],
-    ["OneBot v11 \\(QQ\\)", /^onebot v11 \(qq\)$/i, /add onebot/i],
+    ["QQ (OneBot / NapCat)", /qq \(onebot \/ napcat\)/i, /add onebot/i],
   ])("opens the %s dialog when Add → %s is clicked", async (_label, menuText, dialogText) => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    // The sidebar card may also contain text matching `menuText` (the
-    // platform badge), so query by role + exact accessible name to hit
-    // the dropdown menu button.
     await waitFor(() => expect(screen.getByRole("button", { name: menuText })).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: menuText }))
     await waitFor(() => {
@@ -224,55 +236,27 @@ describe("AdaptersTab", () => {
     })
   })
 
-  it("opens Discord configure dialog when Configure is clicked on a discord row", async () => {
-    const dcRow: AdapterInstanceRow = {
+  it.each<[string, AdapterInstanceRow["type"], RegExp]>([
+    ["discord", "discord", /configure discord bot/i],
+    ["slack", "slack", /configure slack bot/i],
+    ["onebot", "onebot", /configure onebot/i],
+  ])("opens the %s configure dialog from the row menu", async (kind, type, dialogText) => {
+    const row: AdapterInstanceRow = {
       ...baseAdapter,
-      id: "cai_dc_1",
-      type: "discord",
-      displayName: "Discord Probe",
-      transportMode: "gateway",
+      id: `cai_${kind}_1`,
+      type,
+      displayName: `${kind} Probe`,
+      transportMode: type === "onebot" ? "reverse-ws" : "gateway",
     }
-    setupAdapterQueries({ adapters: [dcRow] })
+    setupAdapterQueries({ adapters: [row] })
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /configure discord probe/i }))
+    fireEvent.click(screen.getByText("Configure"))
     await waitFor(() => {
-      expect(screen.getByText(/configure discord bot/i)).toBeInTheDocument()
+      expect(screen.getByText(dialogText)).toBeInTheDocument()
     })
   })
 
-  it("opens Slack configure dialog when Configure is clicked on a slack row", async () => {
-    const slRow: AdapterInstanceRow = {
-      ...baseAdapter,
-      id: "cai_sl_1",
-      type: "slack",
-      displayName: "Slack Probe",
-      transportMode: "gateway",
-    }
-    setupAdapterQueries({ adapters: [slRow] })
-    render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /configure slack probe/i }))
-    await waitFor(() => {
-      expect(screen.getByText(/configure slack bot/i)).toBeInTheDocument()
-    })
-  })
-
-  it("opens OneBot configure dialog when Configure is clicked on a onebot row", async () => {
-    const obRow: AdapterInstanceRow = {
-      ...baseAdapter,
-      id: "cai_ob_1",
-      type: "onebot",
-      displayName: "OneBot Probe",
-      transportMode: "reverse-ws",
-    }
-    setupAdapterQueries({ adapters: [obRow] })
-    render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /configure onebot probe/i }))
-    await waitFor(() => {
-      expect(screen.getByText(/configure onebot/i)).toBeInTheDocument()
-    })
-  })
-
-  it("renders the pending-outbound badge when the adapter has queued jobs (Task P2.1)", () => {
+  it("renders the pending-outbound badge when the adapter has queued jobs", () => {
     const job: OutboundJobRow = {
       id: "job-pend",
       adapterId: baseAdapter.id,
@@ -334,13 +318,5 @@ describe("AdaptersTab", () => {
     render(<AdaptersTab />)
     const badge = screen.getByTestId(`adapter-pending-${baseAdapter.id}`)
     expect(badge.textContent).toMatch(/1/)
-  })
-
-  it("no menu entry is gated 'Coming soon' (all five active)", async () => {
-    render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    // Wait until at least one menu item has rendered; any platform works.
-    await waitFor(() => expect(screen.queryAllByText(/lark \/ feishu/i).length).toBeGreaterThan(0))
-    expect(screen.queryAllByText(/coming soon/i)).toHaveLength(0)
   })
 })

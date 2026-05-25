@@ -29,10 +29,18 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
   const stored = useSettingsStore((s) => s.providerKeys[provider] ?? "")
   const setProviderApiKey = useSettingsStore((s) => s.setProviderApiKey)
   const clearProviderApiKey = useSettingsStore((s) => s.clearProviderApiKey)
+  const ensureProviderKeys = useSettingsStore((s) => s.ensureProviderKeys)
 
   const [draft, setDraft] = useState(stored)
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  // Provider keys are loaded lazily (not at app boot). The speech settings UI
+  // is user-navigated, so trigger the (idempotent) load on mount to surface
+  // the stored key.
+  useEffect(() => {
+    void ensureProviderKeys()
+  }, [ensureProviderKeys])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

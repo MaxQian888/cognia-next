@@ -88,19 +88,27 @@ export async function withPlugin<P, R>(
  */
 export function makeDefaultLoader<P>(moduleId: string, exportName: string): () => Promise<P> {
   return async () => {
-    if (detectNativePlatform() === "web") {
-      throw new Error(`${moduleId} not available on web`)
-    }
     // Capacitor injects every plugin onto window.Capacitor.Plugins at boot.
     // In a production static-export the webpackIgnore import below usually
     // fails because the npm module is not in the bundle and there is no
     // node_modules inside the WebView. Falling back to the global keeps
     // splash-screen hide, haptics, status-bar, etc. working on device.
+    // Checked first so a test that injects `window.Capacitor.Plugins.X`
+    // resolves regardless of the detected platform.
     const capPlugins = (globalThis as unknown as { Capacitor?: { Plugins?: Record<string, P> } })
       .Capacitor?.Plugins
     const fromGlobal = capPlugins?.[exportName]
     if (fromGlobal) {
       return fromGlobal
+    }
+    // Capacitor plugins only exist on mobile. On `web` AND `tauri` the dynamic
+    // import resolves to Capacitor's web-shim Proxy whose `.then` getter throws
+    // ("X.then() is not implemented on web") the moment it's awaited. Gate the
+    // import to mobile so `withPlugin` collapses to `{ kind: "unsupported" }`
+    // everywhere else instead of surfacing that proxy throw (which broke the
+    // biometric guard's graceful-degradation path under Tauri).
+    if (detectNativePlatform() !== "mobile") {
+      throw new Error(`${moduleId} not available on ${detectNativePlatform()}`)
     }
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as Record<string, unknown>
     const exported = mod[exportName]

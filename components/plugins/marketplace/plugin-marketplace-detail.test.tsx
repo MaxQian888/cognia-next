@@ -81,6 +81,23 @@ describe("PluginMarketplaceDetail", () => {
     expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
   })
 
+  it("for a built-in entry, shows the Built-in badge and no install/uninstall CTA", () => {
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={{ ...detail, source: "builtin" as const }}
+        installed
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+    expect(screen.getAllByTestId("plugin-source-badge-builtin").length).toBeGreaterThan(0)
+    expect(screen.queryByText("install")).not.toBeInTheDocument()
+    expect(screen.queryByText("uninstall")).not.toBeInTheDocument()
+  })
+
   it("when installed, uninstall click invokes onUninstall", () => {
     const onUninstall = jest.fn()
     render(

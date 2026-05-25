@@ -239,3 +239,17 @@ describe("DiscordConfigDialog — closed state", () => {
     expect(screen.queryByText(/add discord bot/i)).not.toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Tests — responsive dialog layout
+// ---------------------------------------------------------------------------
+
+describe("DiscordConfigDialog — layout", () => {
+  it("caps height and scrolls the body so the sticky footer stays reachable", () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("max-h-[90vh]")
+    expect(dialog.className).toContain("flex-col")
+    expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
+  })
+})

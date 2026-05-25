@@ -136,6 +136,25 @@ test("Empty DM bucket shows the DM empty state", () => {
   expect(screen.getByText("emptyDm")).toBeInTheDocument()
 })
 
+test("shows the session-list skeleton while the first Dexie read is loading", () => {
+  callQueue.push(characters, [], undefined)
+  const { container } = render(
+    <ChannelList
+      sessions={[]}
+      loading
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  // Skeleton placeholders render; the empty state must not flash during load.
+  expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0)
+  expect(screen.queryByText("emptyDm")).toBeNull()
+})
+
 test("New chat button on DM guild calls onNewDirect", async () => {
   callQueue.push(characters, [], undefined)
   const onNewDirect = jest.fn()

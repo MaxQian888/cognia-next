@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { Slider } from "@/components/ui/slider"
 import {
   Select,
   SelectContent,
@@ -60,6 +61,29 @@ import {
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { TestTtsButton } from "@/components/settings/speech/test-tts-button"
+import { resolveCharacterVoice } from "@/lib/plugin/character-pack/character-voice"
+import { buildPersona, buildVoiceProfile } from "@/lib/plugin/character-pack/editor-projection"
+import type {
+  PluginCharacterAvatarImage,
+  PluginCharacterPersona,
+  PluginCharacterVoiceProfile,
+} from "@/types/plugin/plugin-character-pack"
+import type { PluginRuntimeProfile } from "@/types/plugin/plugin"
+import {
+  TTS_PROVIDERS,
+  type TTSProvider,
+  OPENAI_TTS_VOICES,
+  GEMINI_TTS_VOICES,
+  EDGE_TTS_VOICES,
+  ELEVENLABS_TTS_VOICES,
+  LMNT_TTS_VOICES,
+  HUME_TTS_VOICES,
+  CARTESIA_TTS_VOICES,
+  DEEPGRAM_TTS_VOICES,
+  XIAOMI_TTS_VOICES,
+} from "@/lib/tts/types"
 import {
   Accordion,
   AccordionContent,
@@ -72,19 +96,25 @@ import {
 } from "@/components/settings/character/twin-binding-section"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  CheckSquareIcon,
   CopyIcon,
   DownloadIcon,
   PackageIcon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   Trash2Icon,
   UploadIcon,
   UsersRoundIcon,
+  XIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
-import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { Checkbox } from "@/components/ui/checkbox"
+import { characterToPackDef, filterCharacters } from "@/lib/plugin/character-pack/editor-projection"
+import { serializeLocalPackFile } from "@/lib/plugin/character-pack/schema"
+import { downloadBlob } from "@/lib/files/download"
 import { createLogger } from "@/lib/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
@@ -102,6 +132,55 @@ const COLOR_PALETTE = [
   "oklch(0.7 0.14 60)",
 ]
 
+// ADR-0030 v2 — per-character voice profile editor support. Reuses the
+// existing TTS voice catalogs (`lib/tts/types.ts`). `system` has no static
+// catalog (browser voices load at runtime), so its voiceId is free-text.
+const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; name: string }>>> = {
+  openai: OPENAI_TTS_VOICES,
+  gemini: GEMINI_TTS_VOICES,
+  edge: EDGE_TTS_VOICES,
+  elevenlabs: ELEVENLABS_TTS_VOICES,
+  lmnt: LMNT_TTS_VOICES,
+  hume: HUME_TTS_VOICES,
+  cartesia: CARTESIA_TTS_VOICES,
+  deepgram: DEEPGRAM_TTS_VOICES,
+  xiaomi: XIAOMI_TTS_VOICES,
+}
+
+const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser"]
+
+/** Labelled 0.05-step slider for the voice rate / pitch / volume controls. */
+function VoiceSlider({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  onChange: (n: number) => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">{label}</Label>
+        <span className="text-xs tabular-nums text-muted-foreground">{value.toFixed(2)}</span>
+      </div>
+      <Slider
+        value={[value]}
+        min={min}
+        max={max}
+        step={0.05}
+        onValueChange={(v) => onChange(v[0])}
+        aria-label={label}
+      />
+    </div>
+  )
+}
+
 export function CharactersSection() {
   const t = useTranslations("settings.characters")
   const charactersRaw = useLiveQuery(() => listCharacters(), [])
@@ -111,6 +190,65 @@ export function CharactersSection() {
   const [editing, setEditing] = useState<Character | null>(null)
   const [creating, setCreating] = useState(false)
   const [applyUpdateTarget, setApplyUpdateTarget] = useState<Character | null>(null)
+  // C2 — search + source filter. C3 — multi-select bulk delete / export.
+  const [query, setQuery] = useState("")
+  const [sourceFilter, setSourceFilter] = useState<"all" | "builtin" | "plugin" | "user">("all")
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+
+  const filtered = useMemo(
+    () => filterCharacters(characters, query, sourceFilter),
+    [characters, query, sourceFilter]
+  )
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const exitSelection = useCallback(() => {
+    setSelectionMode(false)
+    setSelectedIds(new Set())
+  }, [])
+
+  const bulkDelete = useCallback(async () => {
+    const ids = [...selectedIds]
+    let deleted = 0
+    for (const id of ids) {
+      try {
+        await deleteCharacter(id)
+        deleted++
+      } catch {
+        // Built-in / plugin-overlay rows can't be deleted — skip silently.
+      }
+    }
+    log.info("character_bulk_delete", { requested: ids.length, deleted })
+    toast.success(t("bulk.deletedToast", { count: deleted }))
+    exitSelection()
+  }, [selectedIds, t, exitSelection])
+
+  const bulkExport = useCallback(() => {
+    const chosen = characters.filter((c) => selectedIds.has(c.id))
+    if (chosen.length === 0) return
+    const pack = {
+      id: `export-${Date.now()}`,
+      name: t("bulk.exportPackName"),
+      version: "1.0.0",
+      characters: chosen.map(characterToPackDef),
+    }
+    const json = serializeLocalPackFile(pack)
+    const ts = new Date().toISOString().replaceAll(/[:.]/g, "-")
+    downloadBlob(
+      new Blob([json], { type: "application/json" }),
+      `characters-${ts}.cognia-pack.json`
+    )
+    log.info("character_bulk_export", { count: chosen.length })
+    toast.success(t("bulk.exportedToast", { count: chosen.length }))
+  }, [characters, selectedIds, t])
 
   // Count clones-with-pending-update per pack so each row can decide
   // whether to surface the "Apply to all" batch button (≥2). Recomputed
@@ -168,13 +306,77 @@ export function CharactersSection() {
 
       <CharacterPacksSubsection />
 
+      {characters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[10rem] flex-1">
+            <SearchIcon className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("searchPlaceholder")}
+              className="h-8 pl-7 text-sm"
+              aria-label={t("searchPlaceholder")}
+            />
+          </div>
+          <Select
+            value={sourceFilter}
+            onValueChange={(v) => setSourceFilter(v as typeof sourceFilter)}
+          >
+            <SelectTrigger className="h-8 w-[8.5rem] text-xs" aria-label={t("filter.label")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("filter.all")}</SelectItem>
+              <SelectItem value="builtin">{t("filter.builtin")}</SelectItem>
+              <SelectItem value="plugin">{t("filter.plugin")}</SelectItem>
+              <SelectItem value="user">{t("filter.user")}</SelectItem>
+            </SelectContent>
+          </Select>
+          {selectionMode ? (
+            <>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={selectedIds.size === 0}
+                onClick={() => void bulkDelete()}
+              >
+                <Trash2Icon className="mr-1 size-4" />
+                {t("bulk.deleteSelected", { count: selectedIds.size })}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={selectedIds.size === 0}
+                onClick={bulkExport}
+              >
+                <DownloadIcon className="mr-1 size-4" />
+                {t("bulk.exportSelected", { count: selectedIds.size })}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={exitSelection}>
+                <XIcon className="mr-1 size-4" />
+                {t("bulk.done")}
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => setSelectionMode(true)}>
+              <CheckSquareIcon className="mr-1 size-4" />
+              {t("bulk.select")}
+            </Button>
+          )}
+        </div>
+      )}
+
       {characters.length === 0 && !creating ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {t("emptyHint")}
         </p>
+      ) : filtered.length === 0 ? (
+        <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+          {t("noMatches")}
+        </p>
       ) : (
         <div className="grid gap-2">
-          {characters.map((c) => (
+          {filtered.map((c) => (
             <CharacterRow
               key={c.id}
               character={c}
@@ -184,6 +386,9 @@ export function CharactersSection() {
               onEditCancel={() => setEditing(null)}
               skillsCatalog={skills}
               mcpCatalog={mcpServers}
+              selectionMode={selectionMode}
+              selected={selectedIds.has(c.id)}
+              onToggleSelect={() => toggleSelect(c.id)}
               siblingPendingCount={
                 c.sourcePluginId && c.sourcePackId
                   ? (pendingUpdateByPack.get(`${c.sourcePluginId}:${c.sourcePackId}`) ?? 0)
@@ -394,6 +599,17 @@ export function CharactersSection() {
             sandboxEnabled: false,
             sandboxTier: "inherit",
             accountIdOverride: "inherit",
+            personaTone: "",
+            personaPersonality: "",
+            openingMessage: "",
+            exemplarPromptsText: "",
+            avatarImageDataUrl: "",
+            voiceProvider: "none",
+            voiceId: "",
+            voiceRate: 1,
+            voicePitch: 1,
+            voiceVolume: 1,
+            availablePlatforms: [],
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
@@ -439,6 +655,10 @@ interface RowProps {
   onApplyUpdateForPack: () => Promise<void>
   /** Number of *other* clones from the same pack pending an update. Drives the batch button. */
   siblingPendingCount: number
+  /** Bulk-selection mode — renders a leading checkbox and suppresses inline actions. */
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
 }
 
 function CharacterRow({
@@ -458,6 +678,9 @@ function CharacterRow({
   onApplyUpdate,
   onApplyUpdateForPack,
   siblingPendingCount,
+  selectionMode,
+  selected,
+  onToggleSelect,
 }: RowProps) {
   const t = useTranslations("settings.characters")
   // Hook calls must precede the editing-mode early return below to keep
@@ -491,6 +714,17 @@ function CharacterRow({
           sandboxEnabled: Boolean(character.sandboxEnabled),
           sandboxTier: character.sandboxTier ?? "inherit",
           accountIdOverride: character.accountIdOverride ?? "inherit",
+          personaTone: character.persona?.tone ?? "",
+          personaPersonality: character.persona?.personality ?? "",
+          openingMessage: character.persona?.openingMessage ?? "",
+          exemplarPromptsText: (character.persona?.exemplarPrompts ?? []).join("\n"),
+          avatarImageDataUrl: character.avatarImage?.webDataUrl ?? "",
+          voiceProvider: character.voiceProfile?.provider ?? "none",
+          voiceId: character.voiceProfile?.voiceId ?? "",
+          voiceRate: character.voiceProfile?.rate ?? 1,
+          voicePitch: character.voiceProfile?.pitch ?? 1,
+          voiceVolume: character.voiceProfile?.volume ?? 1,
+          availablePlatforms: character.availableOnPlatforms ?? [],
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
@@ -565,16 +799,19 @@ function CharacterRow({
   return (
     <Card className="p-3">
       <div className="flex items-start gap-3">
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-base"
-          style={{
-            backgroundColor: avatarColor(character),
-            color: "white",
-          }}
-          aria-hidden
-        >
-          {avatarGlyph(character)}
-        </span>
+        {selectionMode && (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => onToggleSelect?.()}
+            aria-label={t("bulk.selectRow", { name: character.name })}
+            className="mt-1"
+          />
+        )}
+        <AvatarBadge
+          subject={{ ...character, avatarImageUrl: character.avatarImage?.webDataUrl }}
+          size={40}
+          textClassName="text-base"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{character.name}</p>
@@ -1060,7 +1297,7 @@ function PackRow({
 
 // --- Editor ---------------------------------------------------------------
 
-type EditorState = {
+export type EditorState = {
   name: string
   description: string
   avatarColor: string
@@ -1086,6 +1323,24 @@ type EditorState = {
   sandboxTier: "os" | "microvm" | "inherit"
   /** ADR-0028 Phase 10 — account UUID from `ProviderVault::accounts[]`. */
   accountIdOverride: string | "inherit"
+  // ---- ADR-0030 v2 fields ---------------------------------------------------
+  /** Persona — tone / personality prose. */
+  personaTone: string
+  personaPersonality: string
+  /** Opening greeting seeded as the first assistant message on a new chat. */
+  openingMessage: string
+  /** Exemplar prompts (one per line) surfaced as quick-start chips. */
+  exemplarPromptsText: string
+  /** Avatar image as a web data URL ("" = none). */
+  avatarImageDataUrl: string
+  /** Voice profile — `"none"` means inherit the global TTS settings. */
+  voiceProvider: TTSProvider | "none"
+  voiceId: string
+  voiceRate: number
+  voicePitch: number
+  voiceVolume: number
+  /** Host profiles this character is available on (empty = all). */
+  availablePlatforms: PluginRuntimeProfile[]
 }
 
 type EditorOutput = {
@@ -1111,6 +1366,11 @@ type EditorOutput = {
   sandboxEnabled?: boolean
   sandboxTier?: "os" | "microvm"
   accountIdOverride?: string
+  // ---- ADR-0030 v2 fields ----
+  persona?: PluginCharacterPersona
+  voiceProfile?: PluginCharacterVoiceProfile
+  avatarImage?: PluginCharacterAvatarImage
+  availableOnPlatforms?: PluginRuntimeProfile[]
 }
 
 interface EditorProps {
@@ -1151,7 +1411,7 @@ async function loadAccountOptions(): Promise<AccountOption[]> {
   return all
 }
 
-function CharacterEditor({
+export function CharacterEditor({
   initial,
   skillsCatalog,
   mcpCatalog,
@@ -1190,6 +1450,29 @@ function CharacterEditor({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [initial])
 
+  // Voice catalog for the currently-selected provider (undefined for
+  // `system` / no provider — those fall back to a free-text voice id).
+  const voiceCatalog = s.voiceProvider !== "none" ? VOICE_CATALOG[s.voiceProvider] : undefined
+
+  // Read a picked image file into a `data:` URL stored on the character.
+  // Warns (non-blocking, mirrors `defineCharacterPack`) when the encoded
+  // payload exceeds 64 KB — keeps the Dexie row small.
+  const handleAvatarFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = "" // allow re-selecting the same file
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      if (!result) return
+      if (result.length > 64 * 1024) {
+        toast.warning(tEditor("avatarImage.large"))
+      }
+      setS((prev) => ({ ...prev, avatarImageDataUrl: result }))
+    }
+    reader.readAsDataURL(file)
+  }
+
   const submit = async () => {
     if (!s.name.trim()) {
       toast.error(t("validation.nameRequired"))
@@ -1226,6 +1509,21 @@ function CharacterEditor({
         sandboxEnabled: s.sandboxEnabled || undefined,
         sandboxTier: s.sandboxTier === "inherit" ? undefined : s.sandboxTier,
         accountIdOverride: s.accountIdOverride === "inherit" ? undefined : s.accountIdOverride,
+        persona: buildPersona({
+          tone: s.personaTone,
+          personality: s.personaPersonality,
+          openingMessage: s.openingMessage,
+          exemplarPromptsText: s.exemplarPromptsText,
+        }),
+        voiceProfile: buildVoiceProfile({
+          provider: s.voiceProvider,
+          voiceId: s.voiceId,
+          rate: s.voiceRate,
+          pitch: s.voicePitch,
+          volume: s.voiceVolume,
+        }),
+        avatarImage: s.avatarImageDataUrl ? { webDataUrl: s.avatarImageDataUrl } : undefined,
+        availableOnPlatforms: s.availablePlatforms.length > 0 ? s.availablePlatforms : undefined,
       })
     } finally {
       setSaving(false)
@@ -1236,16 +1534,16 @@ function CharacterEditor({
     <Card className="space-y-4 p-4">
       <div className="grid grid-cols-[auto_1fr] gap-3">
         <div className="flex flex-col items-center gap-2">
-          <span
-            className="flex size-12 items-center justify-center rounded-full text-lg"
-            style={{
-              backgroundColor: s.avatarColor || COLOR_PALETTE[0],
-              color: "white",
+          <AvatarBadge
+            subject={{
+              name: s.name,
+              avatarColor: s.avatarColor || COLOR_PALETTE[0],
+              avatarEmoji: s.avatarEmoji,
+              avatarImageUrl: s.avatarImageDataUrl || undefined,
             }}
-            aria-hidden
-          >
-            {s.avatarEmoji?.trim() || s.name.slice(0, 1).toUpperCase() || "?"}
-          </span>
+            size={48}
+            textClassName="text-lg"
+          />
           <Input
             value={s.avatarEmoji}
             onChange={(e) => setS({ ...s, avatarEmoji: e.target.value })}
@@ -1269,6 +1567,27 @@ function CharacterEditor({
                 aria-label={tEditor("pickColor", { color: c })}
               />
             ))}
+          </div>
+          <div className="flex flex-col items-center gap-0.5">
+            <label className="cursor-pointer text-[10px] text-primary underline-offset-2 hover:underline">
+              {tEditor("avatarImage.upload")}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarFile}
+                aria-label={tEditor("avatarImage.upload")}
+              />
+            </label>
+            {s.avatarImageDataUrl && (
+              <button
+                type="button"
+                className="text-[10px] text-muted-foreground underline-offset-2 hover:underline"
+                onClick={() => setS({ ...s, avatarImageDataUrl: "" })}
+              >
+                {tEditor("avatarImage.clear")}
+              </button>
+            )}
           </div>
         </div>
         <div className="space-y-2">
@@ -1300,6 +1619,53 @@ function CharacterEditor({
           className="text-sm"
           placeholder={tEditor("systemPromptPlaceholder")}
         />
+      </div>
+
+      {/* ADR-0030 v2 — persona (tone / personality / opening / exemplars) */}
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <Label className="text-xs font-medium">{tEditor("persona.title")}</Label>
+        <p className="text-[10px] text-muted-foreground">{tEditor("persona.description")}</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("persona.tone")}</Label>
+            <Input
+              value={s.personaTone}
+              onChange={(e) => setS({ ...s, personaTone: e.target.value })}
+              placeholder={tEditor("persona.tonePlaceholder")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("persona.personality")}</Label>
+            <Input
+              value={s.personaPersonality}
+              onChange={(e) => setS({ ...s, personaPersonality: e.target.value })}
+              placeholder={tEditor("persona.personalityPlaceholder")}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{tEditor("persona.openingMessage")}</Label>
+          <Textarea
+            rows={2}
+            value={s.openingMessage}
+            onChange={(e) => setS({ ...s, openingMessage: e.target.value })}
+            className="text-sm"
+            placeholder={tEditor("persona.openingMessagePlaceholder")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{tEditor("persona.exemplarPrompts")}</Label>
+          <Textarea
+            rows={3}
+            value={s.exemplarPromptsText}
+            onChange={(e) => setS({ ...s, exemplarPromptsText: e.target.value })}
+            className="text-sm"
+            placeholder={tEditor("persona.exemplarPromptsPlaceholder")}
+          />
+          <p className="text-[10px] text-muted-foreground">
+            {tEditor("persona.exemplarPromptsHint")}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1527,6 +1893,128 @@ function CharacterEditor({
         emptyHint={tEditor("mcpServersEmptyHint")}
         onChange={(ids) => setS({ ...s, mcpServerIds: ids.length > 0 ? ids : undefined })}
       />
+
+      {/* ADR-0030 v2 — voice profile (rides the existing TTS subsystem) */}
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <Label className="text-xs font-medium">{tEditor("voice.title")}</Label>
+        <p className="text-[10px] text-muted-foreground">{tEditor("voice.description")}</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">{tEditor("voice.provider")}</Label>
+            <Select
+              value={s.voiceProvider}
+              onValueChange={(v) =>
+                setS({ ...s, voiceProvider: v as EditorState["voiceProvider"], voiceId: "" })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{tEditor("voice.inherit")}</SelectItem>
+                {Object.values(TTS_PROVIDERS).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {s.voiceProvider !== "none" && (
+            <div className="space-y-1">
+              <Label className="text-xs">{tEditor("voice.voiceId")}</Label>
+              {voiceCatalog ? (
+                <Select value={s.voiceId} onValueChange={(v) => setS({ ...s, voiceId: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={tEditor("voice.voiceIdPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {voiceCatalog.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  value={s.voiceId}
+                  onChange={(e) => setS({ ...s, voiceId: e.target.value })}
+                  placeholder={tEditor("voice.voiceIdPlaceholder")}
+                  className="font-mono text-xs"
+                />
+              )}
+            </div>
+          )}
+        </div>
+        {s.voiceProvider !== "none" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <VoiceSlider
+                label={tEditor("voice.rate")}
+                value={s.voiceRate}
+                min={0.5}
+                max={2}
+                onChange={(n) => setS({ ...s, voiceRate: n })}
+              />
+              <VoiceSlider
+                label={tEditor("voice.pitch")}
+                value={s.voicePitch}
+                min={0.5}
+                max={2}
+                onChange={(n) => setS({ ...s, voicePitch: n })}
+              />
+              <VoiceSlider
+                label={tEditor("voice.volume")}
+                value={s.voiceVolume}
+                min={0}
+                max={1}
+                onChange={(n) => setS({ ...s, voiceVolume: n })}
+              />
+            </div>
+            <TestTtsButton
+              voiceOverlay={resolveCharacterVoice({
+                voiceProfile: buildVoiceProfile({
+                  provider: s.voiceProvider,
+                  voiceId: s.voiceId,
+                  rate: s.voiceRate,
+                  pitch: s.voicePitch,
+                  volume: s.voiceVolume,
+                }),
+              })}
+              sampleText={s.openingMessage.trim() || undefined}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ADR-0030 v2 — platform availability (empty = all) */}
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <Label className="text-xs font-medium">{tEditor("platforms.title")}</Label>
+        <p className="text-[10px] text-muted-foreground">{tEditor("platforms.description")}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {PLATFORM_OPTIONS.map((p) => {
+            const active = s.availablePlatforms.includes(p)
+            return (
+              <Badge
+                key={p}
+                variant={active ? "default" : "outline"}
+                className="cursor-pointer text-xs hover:bg-primary/10"
+                onClick={() =>
+                  setS({
+                    ...s,
+                    availablePlatforms: active
+                      ? s.availablePlatforms.filter((x) => x !== p)
+                      : [...s.availablePlatforms, p],
+                  })
+                }
+              >
+                {tEditor(`platforms.${p}` as `platforms.${PluginRuntimeProfile}`)}
+              </Badge>
+            )
+          })}
+        </div>
+      </div>
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>

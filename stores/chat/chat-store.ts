@@ -95,11 +95,32 @@ interface ChatState {
    * by the caller (so the choice survives a reload).
    */
   activeBranchByGroup: Record<string, string>
+  /**
+   * True while the active session's history is being hydrated from Dexie
+   * (`hooks/chat/use-sessions.ts`). Lets the chat pane show a loading state
+   * instead of flashing the empty/welcome layout during the switch gap.
+   */
+  messagesLoading: boolean
+  /**
+   * Set when the Dexie history load throws. The chat pane surfaces this with a
+   * retry affordance instead of silently leaving the conversation blank (which
+   * looks like lost history). Cleared on a successful load or session change.
+   */
+  messagesLoadError: string | null
+  /**
+   * Monotonic counter bumped by `requestMessagesReload`. `useSessions` watches
+   * it so the retry button can re-trigger the hydration effect.
+   */
+  messagesReloadNonce: number
 
   setActiveSession: (id: string | null) => void
   setMessages: (msgs: UIMessage[]) => void
   appendMessage: (msg: UIMessage) => void
   replaceMessages: (msgs: UIMessage[]) => void
+  setMessagesLoading: (v: boolean) => void
+  setMessagesLoadError: (msg: string | null) => void
+  /** Re-trigger the active session's history load (retry after a load error). */
+  requestMessagesReload: () => void
   setStatus: (s: ChatStatus) => void
   setError: (msg: string | null) => void
   pushApproval: (approval: PendingApproval) => void
@@ -138,6 +159,9 @@ export const useChatStore = create<ChatState>((set) => ({
   ephemeralSkillIds: [],
   lastSendBySession: {},
   activeBranchByGroup: {},
+  messagesLoading: false,
+  messagesLoadError: null,
+  messagesReloadNonce: 0,
 
   setActiveSession: (id) =>
     set({
@@ -154,10 +178,22 @@ export const useChatStore = create<ChatState>((set) => ({
       ephemeralSkillIds: [],
       lastSendBySession: {},
       activeBranchByGroup: {},
+      // Switching to a session begins a hydration; switching to none doesn't.
+      messagesLoading: id != null,
+      messagesLoadError: null,
     }),
-  setMessages: (msgs) => set({ messages: msgs }),
+  // A successful hydration / replacement clears the transient load flags.
+  setMessages: (msgs) => set({ messages: msgs, messagesLoading: false, messagesLoadError: null }),
   appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   replaceMessages: (msgs) => set({ messages: msgs }),
+  setMessagesLoading: (v) => set({ messagesLoading: v }),
+  setMessagesLoadError: (msg) => set({ messagesLoadError: msg, messagesLoading: false }),
+  requestMessagesReload: () =>
+    set((s) => ({
+      messagesReloadNonce: s.messagesReloadNonce + 1,
+      messagesLoading: true,
+      messagesLoadError: null,
+    })),
   setStatus: (s) => set({ status: s }),
   setError: (msg) => set({ errorMessage: msg, status: msg ? "error" : "idle" }),
   pushApproval: (approval) =>
@@ -253,6 +289,9 @@ export const useChatStore = create<ChatState>((set) => ({
       ephemeralSkillIds: [],
       lastSendBySession: {},
       activeBranchByGroup: {},
+      messagesLoading: false,
+      messagesLoadError: null,
+      messagesReloadNonce: 0,
     }),
 }))
 

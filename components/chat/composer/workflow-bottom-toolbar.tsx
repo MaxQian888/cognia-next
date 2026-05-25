@@ -25,9 +25,10 @@
  *   • Suggest   — ask the workflow-designer subagent for the next node.
  *
  * The quick-action button labels collapse to icon-only at
- * `@max-xs/composer` (≈240px) so a narrow right-sidebar (the editor
- * allows down to 18% of viewport) doesn't crowd the toolbar. Tier-1
- * controls always stay visible.
+ * `@max-sm/composer` (≈384px) so a narrow right-sidebar (the editor
+ * allows down to 18% of viewport) doesn't crowd the toolbar; the row
+ * also `flex-wrap`s as a last-resort overflow guard. Tier-1 controls
+ * always stay visible.
  */
 
 import { useTranslations } from "next-intl"
@@ -94,8 +95,8 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
     : undefined
 
   return (
-    <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <ModelPicker session={session} disabled={isStreaming} />
         <PermissionModeIndicator
           onCycle={(next) => setPermissionMode(next)}
@@ -219,7 +220,7 @@ function QuickActionButton({
           className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground"
         >
           {icon}
-          <span className="@max-xs/composer:hidden">{label}</span>
+          <span className="@max-sm/composer:hidden">{label}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>

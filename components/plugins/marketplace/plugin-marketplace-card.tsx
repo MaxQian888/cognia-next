@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
+import { PluginSourceBadge } from "../plugin-source-badge"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 import { cn } from "@/lib/utils"
@@ -52,6 +53,9 @@ export function PluginMarketplaceCard({
         p === "filesystem:write"
     ).length > 0
   const sigState = entry.signatureState ?? (entry.signed ? "verified" : "unverified")
+  // Built-in plugins ship with the app and can't be installed / uninstalled —
+  // they show a read-only Built-in badge in place of the install CTA.
+  const isBuiltin = entry.source === "builtin"
 
   return (
     <Card className="p-3 space-y-2 flex flex-col">
@@ -114,42 +118,48 @@ export function PluginMarketplaceCard({
           {entry.author && <span className="truncate">{entry.author}</span>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="icon"
-            variant="ghost"
-            className={cn("size-7", inComparison && "text-primary")}
-            onClick={() =>
-              inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
-            }
-            disabled={comparisonFull}
-            aria-label={
-              inComparison
-                ? t("removeFromCompareAria", { name: entry.name })
-                : t("addToCompareAria", { name: entry.name })
-            }
-            aria-pressed={inComparison}
-            data-testid={`plugin-marketplace-compare-toggle-${entry.id}`}
-          >
-            <GitCompareIcon className="size-3.5" />
-          </Button>
-          {installed ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onUninstall(entry.id)}
-              disabled={installing}
-            >
-              {installing ? t("uninstalling") : t("uninstall")}
-            </Button>
+          {isBuiltin ? (
+            <PluginSourceBadge source="builtin" />
           ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onInstall(entry.id, entry.version)}
-              disabled={installing}
-            >
-              {installing ? t("installing") : t("install")}
-            </Button>
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn("size-7", inComparison && "text-primary")}
+                onClick={() =>
+                  inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
+                }
+                disabled={comparisonFull}
+                aria-label={
+                  inComparison
+                    ? t("removeFromCompareAria", { name: entry.name })
+                    : t("addToCompareAria", { name: entry.name })
+                }
+                aria-pressed={inComparison}
+                data-testid={`plugin-marketplace-compare-toggle-${entry.id}`}
+              >
+                <GitCompareIcon className="size-3.5" />
+              </Button>
+              {installed ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onUninstall(entry.id)}
+                  disabled={installing}
+                >
+                  {installing ? t("uninstalling") : t("uninstall")}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onInstall(entry.id, entry.version)}
+                  disabled={installing}
+                >
+                  {installing ? t("installing") : t("install")}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>

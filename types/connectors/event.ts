@@ -99,6 +99,7 @@ export interface NormalizedInboundEvent {
     | "member_removed"
     | "reaction_added"
     | "reaction_removed"
+    | "poke"
 }
 
 const KEY_SEP = ":"

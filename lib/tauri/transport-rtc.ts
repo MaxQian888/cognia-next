@@ -32,8 +32,10 @@ import { SignalingClient } from "@/lib/signaling/client"
 import {
   DATACHANNEL_LABEL,
   type Envelope,
+  type HelloBody,
   type PeerRole,
   type RtcAnswerBody,
+  type RtcCloseBody,
   type RtcIceBody,
   type RtcOfferBody,
 } from "@/lib/signaling/types"
@@ -139,6 +141,18 @@ export interface TransportRtcOptions {
    */
   reconnectBackoffMs?: readonly number[]
   /**
+   * How long (ms) to wait for ICE to re-converge after an ICE restart
+   * before escalating to a full peer teardown + reconnect. Default 8000.
+   */
+  iceRestartTimeoutMs?: number
+  /**
+   * Maximum consecutive ICE restarts attempted on the live peer before
+   * escalating to a full teardown reconnect. The counter resets whenever
+   * ICE recovers or the DataChannel (re)opens. Default 2; set `0` to skip
+   * ICE restart entirely (straight to full reconnect on ICE failure).
+   */
+  iceRestartMaxAttempts?: number
+  /**
    * Optional override for the global `RTCPeerConnection` constructor.
    * Tests inject a polyfill / mock.
    */
@@ -191,6 +205,12 @@ export class TransportRtc {
   private reconnectAttempt = 0
   /** Pending timer for the next reconnect attempt; null when none scheduled. */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /** True while an ICE restart is in flight on the live peer. */
+  private iceRestarting = false
+  /** Consecutive ICE restarts since the last recovery / DataChannel open. */
+  private iceRestartAttempt = 0
+  /** Timer that escalates a stalled ICE restart to a full reconnect. */
+  private iceRestartTimer: ReturnType<typeof setTimeout> | null = null
   /**
    * Wall-clock timestamp (ms) of the most recent `reconnectNow()` call.
    * Used by the throttle in `reconnectNow()` so XSS-driven floods are
@@ -209,6 +229,8 @@ export class TransportRtc {
       rtcConfiguration: opts.rtcConfiguration,
       negotiationTimeoutMs: opts.negotiationTimeoutMs ?? 8000,
       reconnectBackoffMs: opts.reconnectBackoffMs ?? RECONNECT_BACKOFF_MS,
+      iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 8000,
+      iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
       peerConnectionFactory:
         opts.peerConnectionFactory ??
         ((config) => new RTCPeerConnection(config as RTCConfiguration | undefined)),
@@ -276,10 +298,26 @@ export class TransportRtc {
       })
 
       const detachErr = signaling.on("error", ({ code, message }) => {
-        // Signaling-side errors (rate_limited / bad MAC / replay) are
-        // non-fatal to the in-flight negotiation; we surface them but only
-        // give up when the negotiation timer fires.
-        console.warn(`TransportRtc: signaling error ${code}: ${message}`)
+        // Every server error code emitted during a relay — frame_too_large,
+        // rate_limited, malformed_frame, binary_not_supported, not_subscribed
+        // (see signaling-server/src/ws.rs) — means a critical handshake frame
+        // (offer / answer / ICE) was dropped, so the negotiation cannot
+        // complete. Fail fast instead of stalling until the negotiation timer
+        // fires; the caller falls back to HTTPS+WS immediately and the
+        // mobile-controller re-attempts the upgrade on the next
+        // network/resume trigger.
+        if (this.negotiationSettled) return
+        this.negotiationSettled = true
+        if (this.negotiationTimer) {
+          clearTimeout(this.negotiationTimer)
+          this.negotiationTimer = null
+        }
+        detachState()
+        detachEnv()
+        detachErr()
+        const err = new Error(`signaling error during negotiation: ${code} ${message}`)
+        this.fail(err)
+        reject(err)
       })
 
       this.negotiationTimer = setTimeout(() => {
@@ -465,6 +503,7 @@ export class TransportRtc {
   close(): void {
     if (this.state === "closed") return
     this.setState("closing")
+    this.cancelIceRestart()
     if (this.negotiationTimer) {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
@@ -494,9 +533,24 @@ export class TransportRtc {
       }
       this.pc = null
     }
-    if (this.signaling) {
-      this.signaling.close()
-      this.signaling = null
+    // Best-effort graceful shutdown: tell the peer before tearing the
+    // signaling WS down so the desktop's `rtc:close` handler can release its
+    // PeerSession + dispatcher immediately instead of waiting for ICE/state
+    // failure. The signed frame is async (SubtleCrypto), so close the WS only
+    // after the send settles. Failures (already-broken channel) are ignored.
+    const sig = this.signaling
+    this.signaling = null
+    if (sig) {
+      void sig
+        .send("rtc:close", { reason: "client closing" } satisfies RtcCloseBody)
+        .catch(() => {})
+        .finally(() => {
+          try {
+            sig.close()
+          } catch {
+            // ignored
+          }
+        })
     }
     this.setState("closed")
   }
@@ -508,6 +562,16 @@ export class TransportRtc {
 
   private async startNegotiation(): Promise<void> {
     this.setState("negotiating")
+    // Announce our identity before the offer (HelloBody.deviceId). The
+    // desktop logs it (informational — it maps the peer by its per-device
+    // signaling task), completing the documented handshake contract. Sent
+    // once per signaling session, not on ICE restart.
+    if (!this.signaling) {
+      throw new Error("TransportRtc: signaling closed before negotiation")
+    }
+    const hello: HelloBody = { deviceId: this.opts.deviceId }
+    await this.signaling.send("hello", hello)
+
     const pc = this.opts.peerConnectionFactory(this.opts.rtcConfiguration)
     this.pc = pc
 
@@ -517,14 +581,35 @@ export class TransportRtc {
       void this.signaling.send("rtc:ice", body)
     }
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
-        const err = new Error(`ICE state ${pc.iceConnectionState}`)
-        if (this.state === "open") {
-          this.handleMidSessionDisconnect()
-        } else {
-          this.fail(err)
-        }
+      const ice = pc.iceConnectionState
+      // ICE recovered (possibly via an in-flight restart) — stop the
+      // watchdog and stay open. The attempt counter is NOT reset here: a
+      // link that flaps connected↔failed must still escalate to a full
+      // reconnect once the budget is spent. Only a healthy DataChannel
+      // (re)open resets it (see attachDataChannel.onopen).
+      if (ice === "connected" || ice === "completed") {
+        if (this.iceRestarting) this.cancelIceRestart()
+        return
       }
+      if (ice !== "failed" && ice !== "closed") return
+      if (this.state !== "open") {
+        // ICE collapse during initial negotiation is a hard failure.
+        this.fail(new Error(`ICE state ${ice}`))
+        return
+      }
+      // Mid-session ICE failure. Prefer a true ICE restart on the live peer
+      // (keeps DTLS + DataChannel) over a full teardown. Only `failed` is
+      // restartable; `closed` is terminal, and a restart already in flight
+      // (or exhausted attempts) escalates to a full reconnect.
+      if (
+        ice === "failed" &&
+        !this.iceRestarting &&
+        this.iceRestartAttempt < this.opts.iceRestartMaxAttempts
+      ) {
+        void this.attemptIceRestart()
+        return
+      }
+      this.handleMidSessionDisconnect()
     }
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed") {
@@ -587,8 +672,11 @@ export class TransportRtc {
     dc.onopen = () => {
       this.setState("open")
       // Successful (re)open clears the backoff so the next mid-session
-      // disconnect starts from the smallest delay again.
+      // disconnect starts from the smallest delay again, and resets the
+      // ICE-restart ladder.
       this.reconnectAttempt = 0
+      this.iceRestartAttempt = 0
+      this.cancelIceRestart()
       const resolvers = this.onDcOpenResolvers
       this.onDcOpenResolvers = []
       for (const r of resolvers) r()
@@ -616,6 +704,7 @@ export class TransportRtc {
    * machine can re-enter `connect()` cleanly.
    */
   private teardownPeer(): void {
+    this.cancelIceRestart()
     if (this.negotiationTimer) {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
@@ -657,6 +746,51 @@ export class TransportRtc {
   }
 
   /**
+   * Attempt a true ICE restart on the live peer connection. Reuses the
+   * existing `RTCPeerConnection`, DataChannel, DTLS transport, and signaling
+   * session — only ICE re-gathers. The desktop answerer reuses its existing
+   * `PeerSession` when it sees `iceRestart: true` (see
+   * `src-tauri/.../signaling/client.rs`), so the data channel survives.
+   *
+   * The new answer flows back through the existing `rtc:answer` handler and
+   * fresh candidates through the existing `onicecandidate` relay — no new
+   * wiring. A watchdog escalates to a full teardown reconnect if ICE doesn't
+   * re-converge within `iceRestartTimeoutMs`.
+   */
+  private async attemptIceRestart(): Promise<void> {
+    const pc = this.pc
+    const signaling = this.signaling
+    if (!pc || !signaling || this.state !== "open") return
+    this.iceRestarting = true
+    this.iceRestartAttempt += 1
+    this.iceRestartTimer = setTimeout(() => {
+      if (!this.iceRestarting) return
+      this.cancelIceRestart()
+      this.handleMidSessionDisconnect()
+    }, this.opts.iceRestartTimeoutMs)
+    try {
+      const offer = await pc.createOffer({ iceRestart: true })
+      await pc.setLocalDescription(offer)
+      if (!this.signaling) throw new Error("signaling closed during ICE restart")
+      const body: RtcOfferBody = { sdp: offer.sdp ?? "", iceRestart: true }
+      await this.signaling.send("rtc:offer", body)
+    } catch (err) {
+      console.warn("TransportRtc: ICE restart failed to start", err)
+      this.cancelIceRestart()
+      if (this.state === "open") this.handleMidSessionDisconnect()
+    }
+  }
+
+  /** Clear ICE-restart bookkeeping (flag + watchdog timer). */
+  private cancelIceRestart(): void {
+    this.iceRestarting = false
+    if (this.iceRestartTimer) {
+      clearTimeout(this.iceRestartTimer)
+      this.iceRestartTimer = null
+    }
+  }
+
+  /**
    * Schedule a reconnection attempt after the DataChannel dropped post-open.
    * After exhausting [`RECONNECT_BACKOFF_MS`] we surface `failed` so the
    * outer `CompanionTransport` drops its RTC reference and the UI falls
@@ -664,7 +798,8 @@ export class TransportRtc {
    */
   private handleMidSessionDisconnect(): void {
     if (this.state !== "open") return
-
+    // A full teardown (via teardownPeer below) supersedes any in-flight ICE
+    // restart and cancels its watchdog.
     const schedule = this.opts.reconnectBackoffMs
     const willExhaust = this.reconnectAttempt >= schedule.length
 
@@ -728,6 +863,7 @@ export class TransportRtc {
   private fail(err: Error): void {
     if (this.state === "failed" || this.state === "closed") return
     this.setState("failed")
+    this.cancelIceRestart()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

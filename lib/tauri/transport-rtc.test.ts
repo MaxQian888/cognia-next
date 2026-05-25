@@ -120,7 +120,10 @@ class FakePeerConnection {
     return dc as unknown as FakeDataChannel
   }
 
-  async createOffer(): Promise<RTCSessionDescriptionInit> {
+  /** Options passed to each createOffer call (tests assert ICE restart). */
+  offerOptions: Array<RTCOfferOptions | undefined> = []
+  async createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
+    this.offerOptions.push(options)
     return { type: "offer", sdp: "v=0\r\nmock-offer" }
   }
   async setLocalDescription(_d: RTCSessionDescriptionInit): Promise<void> {}
@@ -275,12 +278,12 @@ describe("TransportRtc", () => {
     jest.useRealTimers()
   })
 
-  it("ICE failure mid-session schedules a reconnect (per ADR-0021 hardening)", async () => {
-    // Before W1, ICE failure mid-session went straight to `failed`. The
-    // mid-session-reconnect work changed that: the outer state machine
-    // now treats it as a transient disconnect and schedules a fresh
-    // handshake. The dedicated `mid-session reconnect` block below
-    // covers the rest of the lifecycle.
+  it("ICE failure mid-session attempts an ICE restart before tearing down", async () => {
+    // ICE restart (ADR-0021): a mid-session ICE failure first re-offers with
+    // `iceRestart: true` on the SAME peer connection (preserving DTLS + the
+    // data channel) rather than tearing everything down. The dedicated
+    // "ICE restart" block below covers recovery / escalation. `makeRtc`
+    // leaves iceRestartMaxAttempts at its default (2).
     const { rtc, sig, pcs } = makeRtc()
     const connect = rtc.connect()
     await new Promise((r) => setTimeout(r, 5))
@@ -289,7 +292,12 @@ describe("TransportRtc", () => {
     await connect
 
     pcs[0].setIceState("failed")
-    expect(rtc.getState()).toBe("reconnecting")
+    await new Promise((r) => setTimeout(r, 5))
+    // Stays open, re-offers with iceRestart on the SAME pc — no new peer.
+    expect(rtc.getState()).toBe("open")
+    expect(pcs.length).toBe(1)
+    expect(pcs[0].offerOptions.some((o) => o?.iceRestart === true)).toBe(true)
+    expect(sig.sent.filter((m) => m.kind === "rtc:offer")).toHaveLength(2)
     rtc.close()
   })
 
@@ -305,7 +313,34 @@ describe("TransportRtc", () => {
     rtc.close()
     await expect(pending).rejects.toThrow(/closing/i)
     expect(rtc.getState()).toBe("closed")
+    // Graceful shutdown: rtc:close is relayed best-effort, then the WS is
+    // torn down once the signed frame settles.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sig.sent.some((m) => m.kind === "rtc:close")).toBe(true)
     expect(sig.closed).toBe(true)
+  })
+
+  it("announces identity with a hello envelope before the offer", async () => {
+    const { rtc, sig } = makeRtc()
+    void rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    const helloIdx = sig.sent.findIndex((m) => m.kind === "hello")
+    const offerIdx = sig.sent.findIndex((m) => m.kind === "rtc:offer")
+    expect(helloIdx).toBeGreaterThanOrEqual(0)
+    expect(offerIdx).toBeGreaterThan(helloIdx)
+    expect(sig.sent[helloIdx].body).toEqual({ deviceId: "dev-1" })
+    rtc.close()
+  })
+
+  it("fails fast on a signaling error during negotiation (no 8s wait)", async () => {
+    const { rtc, sig } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((r) => setTimeout(r, 5)) // reach 'negotiating'
+    // A server error means a handshake frame was dropped — abort immediately
+    // rather than stalling until the negotiation timeout.
+    sig.emitError("rate_limited", "too many frames")
+    await expect(connect).rejects.toThrow(/signaling error during negotiation/i)
+    expect(rtc.getState()).toBe("failed")
   })
 
   it("call() rejects when DataChannel isn't open yet", async () => {
@@ -428,6 +463,10 @@ describe("TransportRtc", () => {
         deviceId: "dev-1",
         role: "mobile",
         reconnectBackoffMs,
+        // These tests exercise the full teardown/backoff ladder, so disable
+        // the ICE-restart fast path — an ICE failure escalates straight to a
+        // reconnect, matching the pre-ICE-restart behavior they assert.
+        iceRestartMaxAttempts: 0,
         peerConnectionFactory: () => {
           const pc = new FakePeerConnection()
           pcs.push(pc)
@@ -658,6 +697,152 @@ describe("TransportRtc", () => {
       pcs[0].channels[0].close()
       await expect(pending).rejects.toThrow(/reset/i)
       expect(rtc.getState()).toBe("reconnecting")
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // True ICE restart (ADR-0021) — renegotiate on the live peer
+  // ---------------------------------------------------------------------------
+
+  describe("ICE restart", () => {
+    function makeIceRestartable(
+      opts: {
+        iceRestartTimeoutMs?: number
+        iceRestartMaxAttempts?: number
+        reconnectBackoffMs?: readonly number[]
+      } = {}
+    ) {
+      const sigs: FakeSignaling[] = []
+      const pcs: FakePeerConnection[] = []
+      const rtc = new TransportRtc({
+        signalingUrl: "wss://signaling.test/v1/signaling",
+        rendezvousId: "room-1",
+        rendezvousSecret: SECRET,
+        deviceId: "dev-1",
+        role: "mobile",
+        iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 50,
+        iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
+        reconnectBackoffMs: opts.reconnectBackoffMs ?? [1000],
+        peerConnectionFactory: () => {
+          const pc = new FakePeerConnection()
+          pcs.push(pc)
+          return pc as unknown as RTCPeerConnection
+        },
+        signalingClientFactory: () => {
+          const sig = new FakeSignaling()
+          sigs.push(sig)
+          return sig as unknown as SignalingClient
+        },
+      })
+      return { rtc, sigs, pcs }
+    }
+
+    async function open(sigs: FakeSignaling[], pcs: FakePeerConnection[]): Promise<void> {
+      await new Promise((r) => setTimeout(r, 5))
+      const i = pcs.length - 1
+      sigs[sigs.length - 1].emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[i].channels[0].open()
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    it("re-offers with iceRestart on the same peer and stays open", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable()
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      pcs[0].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("open")
+      expect(pcs).toHaveLength(1)
+      expect(pcs[0].offerOptions.some((o) => o?.iceRestart === true)).toBe(true)
+      // hello + initial offer + restart offer.
+      expect(sigs[0].sent.filter((m) => m.kind === "rtc:offer")).toHaveLength(2)
+      rtc.close()
+    })
+
+    it("escalates to a full reconnect after the restart budget on a flapping link", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable({ iceRestartMaxAttempts: 2 })
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      // Flap 1: failed → restart (attempt 1), then ICE recovers.
+      pcs[0].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("open")
+      pcs[0].setIceState("connected")
+
+      // Flap 2: failed → restart (attempt 2), then ICE recovers.
+      pcs[0].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("open")
+      pcs[0].setIceState("connected")
+
+      // Flap 3: budget exhausted → full teardown reconnect.
+      pcs[0].setIceState("failed")
+      expect(rtc.getState()).toBe("reconnecting")
+      expect(pcs[0].offerOptions.filter((o) => o?.iceRestart === true)).toHaveLength(2)
+      rtc.close()
+    })
+
+    it("escalates to a full reconnect when the ICE restart times out", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable({
+        iceRestartTimeoutMs: 20,
+        reconnectBackoffMs: [10_000],
+      })
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      pcs[0].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("open") // restart in flight
+      // No recovery → watchdog fires → full teardown → reconnecting.
+      await new Promise((r) => setTimeout(r, 40))
+      expect(rtc.getState()).toBe("reconnecting")
+      rtc.close()
+    })
+
+    it("skips ICE restart entirely when iceRestartMaxAttempts is 0", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable({ iceRestartMaxAttempts: 0 })
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      pcs[0].setIceState("failed")
+      expect(rtc.getState()).toBe("reconnecting")
+      expect(pcs[0].offerOptions.some((o) => o?.iceRestart === true)).toBe(false)
+      rtc.close()
+    })
+
+    it("a fresh DataChannel open resets the restart budget", async () => {
+      const { rtc, sigs, pcs } = makeIceRestartable({
+        iceRestartMaxAttempts: 1,
+        reconnectBackoffMs: [5],
+      })
+      const connect = rtc.connect()
+      await open(sigs, pcs)
+      await connect
+
+      // Spend the budget (attempt 1), recover, then exhaust → full reconnect.
+      pcs[0].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[0].setIceState("connected")
+      pcs[0].setIceState("failed")
+      expect(rtc.getState()).toBe("reconnecting")
+
+      // The backoff reconnect opens a brand-new peer; its DC open resets the
+      // budget so ICE restart is available again on the fresh peer.
+      await open(sigs, pcs)
+      expect(rtc.getState()).toBe("open")
+      expect(pcs).toHaveLength(2)
+      pcs[1].setIceState("failed")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("open")
+      expect(pcs[1].offerOptions.some((o) => o?.iceRestart === true)).toBe(true)
+      rtc.close()
     })
   })
 })

@@ -21,9 +21,15 @@ import { createWorkflow } from "@/lib/db/workflows"
 export interface WorkflowCreateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Folder the new workflow lands in. Defaults to the library root when unset. */
+  parentFolderId?: string
 }
 
-export function WorkflowCreateDialog({ open, onOpenChange }: WorkflowCreateDialogProps) {
+export function WorkflowCreateDialog({
+  open,
+  onOpenChange,
+  parentFolderId,
+}: WorkflowCreateDialogProps) {
   const t = useTranslations("workflows.library.createDialog")
   const tToolbar = useTranslations("workflows.toolbar")
   const router = useRouter()
@@ -38,6 +44,7 @@ export function WorkflowCreateDialog({ open, onOpenChange }: WorkflowCreateDialo
       const wf = await createWorkflow({
         name: name.trim() || t("namePlaceholder"),
         description: description.trim() || undefined,
+        folderId: parentFolderId,
         nodes: [
           {
             id: "n_start",

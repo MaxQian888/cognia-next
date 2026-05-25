@@ -23,6 +23,7 @@ describe("lib/tauri/events", () => {
         cliMatches: "cli://matches",
         cliSecondInstance: "cli://second-instance",
         deepLink: "deep-link://received",
+        appCloseRequested: "app://close-requested",
       })
     })
   })

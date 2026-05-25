@@ -19,6 +19,7 @@
 
 import { listen, emit } from "@tauri-apps/api/event"
 import type { SerializedOneBotCall } from "./serialize"
+import type { OneBotTransport, OneBotTransportHandlers } from "./transport"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -149,4 +150,42 @@ export async function sendToOneBot(
       reject(err instanceof Error ? err : new Error(String(err)))
     })
   })
+}
+
+// ---------------------------------------------------------------------------
+// OneBotTransport adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrap the reverse-WS helpers above in the {@link OneBotTransport} interface.
+ *
+ * Behaviour is byte-identical to the pre-abstraction adapter: the Rust axum
+ * server owns the socket and bridges it through `connectors://onebot/<id>/*`
+ * Tauri events, so `start` just registers the four listeners (responses first,
+ * so `send` can resolve) and `send` delegates to `sendToOneBot`.
+ */
+export function createReverseWsTransport(adapterId: string): OneBotTransport {
+  const unlisteners: UnlistenFn[] = []
+
+  return {
+    async start(handlers: OneBotTransportHandlers): Promise<void> {
+      unlisteners.push(await subscribeOneBotResponses(adapterId))
+      unlisteners.push(await subscribeOneBotOpen(adapterId, handlers.onOpen))
+      unlisteners.push(await subscribeOneBotClose(adapterId, handlers.onClose))
+      unlisteners.push(await subscribeOneBotEvents(adapterId, handlers.onEvent))
+    },
+    send(call: SerializedOneBotCall, timeoutMs?: number): Promise<OneBotRpcResponse> {
+      return sendToOneBot(adapterId, call, timeoutMs)
+    },
+    async stop(): Promise<void> {
+      for (const fn of unlisteners) {
+        try {
+          fn()
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      unlisteners.length = 0
+    },
+  }
 }

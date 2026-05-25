@@ -128,6 +128,25 @@ The response includes `bot.open_id`.
 
 ---
 
+## 8. 机器人菜单 / 快捷指令（Bot Menu）
+
+飞书的机器人菜单（快捷指令）只能在开发者后台配置——飞书没有创建菜单的 API。
+cognia-next 把每个菜单项的 `event_key` 映射到你指定的动作，点击菜单时触发一次助手回复。
+
+1. 在飞书开发者后台打开 **机器人 → 机器人自定义菜单**，添加一个菜单项。把它的动作设为
+   **推送事件**，并设置一个 `event_key`（例如 `agenda`）。
+2. 在 **事件订阅** 中额外订阅：
+   - `application.bot.menu_v6` —— 点击机器人菜单
+3. 发布新版本，使菜单与新订阅生效。
+4. 在 cognia-next 中打开 **设置 → 连接 → 飞书 → 快捷指令**，添加一行，把 `event_key`
+   映射到一个动作：
+   - **提示词** —— 发送给助手的自由文本（例如 `总结我的未读消息`）。
+   - **斜杠命令** —— 一条命令行（例如 `/agenda today`）。
+5. 此后在飞书中点击该菜单，就会在与机器人的单聊里触发一次助手回复。未映射的
+   `event_key` 会回退为它的标签 / 原始 key 作为提示词，因此点击不会被静默丢弃。
+
+---
+
 ## Troubleshooting
 
 | Symptom                               | Likely cause                                                                 |
@@ -137,3 +156,4 @@ The response includes `bot.open_id`.
 | Events not received (webhook)         | Verify the webhook URL is reachable and returns 200                          |
 | Decrypt error                         | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions |
 | Bot not responding in groups          | Ensure the bot is installed to the group and has `im:message` scope          |
+| Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |

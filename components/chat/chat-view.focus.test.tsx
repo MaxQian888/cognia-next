@@ -62,6 +62,7 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
 jest.mock("@/lib/ui/motion", () => ({ mobileTransition: () => ({}) }))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
+jest.mock("@/lib/data-hooks/context", () => ({ useCharacter: jest.fn(() => undefined) }))
 
 const storeState = {
   messages: [] as unknown[],

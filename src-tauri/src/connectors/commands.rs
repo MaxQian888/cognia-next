@@ -70,8 +70,15 @@ pub async fn connectors_start_server(
     } else {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     };
+    let app_for_bridge = app.clone();
     let emitter: Arc<dyn EventEmitter> = Arc::new(AppHandleEmitter(app));
-    let handle = start_server(state.inner_state(), SocketAddr::new(ip, port), emitter).await?;
+    let handle = start_server(
+        state.inner_state(),
+        SocketAddr::new(ip, port),
+        emitter,
+        Some(app_for_bridge),
+    )
+    .await?;
     let bound = handle.bound_addr.to_string();
     *handle_lock = Some(handle);
     Ok(bound)
@@ -161,6 +168,26 @@ pub async fn connectors_ws_send(handle_id: String, data: String) -> Result<(), S
 #[tauri::command]
 pub async fn connectors_ws_close(handle_id: String) -> Result<(), String> {
     super::ws_client::ws_close(&handle_id).await
+}
+
+// ---------------------------------------------------------------------------
+// Lark long-connection (protobuf-framed WS) — dedicated client because the
+// generic `connectors_ws_*` passthrough can't decode Feishu's binary frames.
+// Credentials are read from the keyring inside Rust (mirrors the webhook path)
+// so App Secret never crosses the IPC boundary.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn connectors_lark_ws_open(
+    app: tauri::AppHandle,
+    adapter_id: String,
+) -> Result<String, String> {
+    super::lark_ws::open(app, adapter_id).await
+}
+
+#[tauri::command]
+pub async fn connectors_lark_ws_close(handle_id: String) -> Result<(), String> {
+    super::lark_ws::close(&handle_id).await
 }
 
 // ---------------------------------------------------------------------------

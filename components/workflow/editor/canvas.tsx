@@ -15,7 +15,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Background,
   BackgroundVariant,
-  Controls,
   ReactFlow,
   ReactFlowProvider,
   applyEdgeChanges,
@@ -70,6 +69,9 @@ import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import type { TriggerEvent } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { EditorToolbar } from "./toolbar"
+import { CanvasToolbar, type CanvasBackgroundVariant } from "./canvas-toolbar"
+import { SelectionToolbar } from "./selection-toolbar"
+import { exportWorkflowImage } from "@/lib/workflow/editor/export-image"
 import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { RightSidebar } from "./right-sidebar"
@@ -154,6 +156,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // Split out so toggling these doesn't churn the structural slice.
   const isDraggingAny = useStore((s) => s.isDraggingAny)
   const snapToGrid = useStore((s) => s.snapToGrid)
+  const setSnapToGrid = useStore((s) => s.setSnapToGrid)
   const setIsDraggingAny = useStore((s) => s.setIsDraggingAny)
   const setLastRunByStepId = useStore((s) => s.setLastRunByStepId)
 
@@ -183,6 +186,14 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+  // Canvas-toolbar view state. Local to this editor instance (the store is
+  // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
+  // `interactive` mirrors React Flow's native lock; `minimapVisible` and
+  // `backgroundVariant` were previously fixed and are now user-toggleable.
+  const [interactive, setInteractive] = useState(true)
+  const [minimapVisible, setMinimapVisible] = useState(true)
+  const [backgroundVariant, setBackgroundVariant] = useState<CanvasBackgroundVariant>("dots")
+  const toggleInteractive = useCallback(() => setInteractive((v) => !v), [])
   // Alignment guides — populated by `onNodeDrag` while a node is moving,
   // cleared on drag stop so the overlay doesn't linger.
   const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
@@ -663,6 +674,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     toast.success(t("exported"))
   }, [toWorkflow, t])
 
+  const handleExportImage = useCallback(async () => {
+    const el = canvasWrapperRef.current
+    if (!el) return
+    try {
+      await exportWorkflowImage({
+        flowEl: el,
+        nodes,
+        fileName: workflowName.replace(/[^a-z0-9-_]+/gi, "_") || "workflow",
+        backgroundColor: null,
+      })
+      toast.success(t("imageExported"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("imageExportFailed"))
+    }
+  }, [nodes, workflowName, t])
+
   const handleImportJson = useCallback(
     (jsonText: string) => {
       try {
@@ -699,6 +726,29 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       setSelectedNodes([id])
     },
     [reactFlowInstance, useStore, setSelectedNodes]
+  )
+
+  // Stable callbacks for the chrome toolbars. These let the memoized
+  // CanvasToolbar / EditorToolbar skip the per-frame re-render that
+  // CanvasInner fires during a node drag (setNodes + alignment-guide state) —
+  // inline arrows here would defeat the memo by changing identity each render.
+  const handleOpenPalette = useCallback(() => setPaletteOpen(true), [])
+  const handleOpenSpotlight = useCallback(() => setSpotlightOpen(true), [])
+  const handleOpenShortcuts = useCallback(() => setShortcutsOpen(true), [])
+  const handleAddSticky = useCallback(
+    () => handleAddFromPalette("annotation.note"),
+    [handleAddFromPalette]
+  )
+  const handleAddGroup = useCallback(
+    () => handleAddFromPalette("annotation.group"),
+    [handleAddFromPalette]
+  )
+  const handleRestoreViewport = useCallback(
+    (vp: Viewport) =>
+      reactFlowInstance?.setViewport(vp, {
+        duration: perfTier.flags.edgeAnimations ? 400 : 0,
+      }),
+    [reactFlowInstance, perfTier.flags.edgeAnimations]
   )
 
   // Keyboard shortcuts: Ctrl/Cmd+S, Z/Shift-Z/Y, K — plus clipboard/group
@@ -897,24 +947,11 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         saving={saving || running}
         onSave={handleSave}
         onRun={handleRun}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onAutoLayout={handleAutoLayout}
         onExportJson={handleExportJson}
+        onExportImage={handleExportImage}
         onImportJson={handleImportJson}
-        onOpenCommandPalette={() => setPaletteOpen(true)}
-        performanceTier={perfTier.userChoice}
-        effectivePerformanceTier={perfTier.effective}
-        onPerformanceTierChange={perfTier.setUserChoice}
-        workflowId={workflowId}
-        currentViewport={viewport}
-        onRestoreViewport={(vp) =>
-          reactFlowInstance?.setViewport(vp, {
-            duration: perfTier.flags.edgeAnimations ? 400 : 0,
-          })
-        }
+        onOpenCommandPalette={handleOpenPalette}
+        onOpenShortcuts={handleOpenShortcuts}
       />
       <input
         ref={importInputRef}
@@ -987,6 +1024,12 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 panOnScroll
                 selectionOnDrag
                 proOptions={PRO_OPTIONS}
+                // Interactivity lock driven by the canvas toolbar — when locked,
+                // nodes can't be dragged / connected / selected but pan + zoom
+                // still work (mirrors React Flow's native Controls lock).
+                nodesDraggable={interactive}
+                nodesConnectable={interactive}
+                elementsSelectable={interactive}
                 // (A1) Tier-aware viewport culling: enable when graphs grow
                 // past `perfTier.flags.cullingThreshold` OR when the user/
                 // system chose a non-`high` tier. Below the threshold on
@@ -997,9 +1040,18 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                   nodes.length >= perfTier.flags.cullingThreshold || perfTier.effective !== "high"
                 }
               >
-                <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-                <Controls position="bottom-left" />
-                {perfTier.flags.showMinimap ? (
+                {backgroundVariant !== "none" ? (
+                  <Background
+                    variant={
+                      backgroundVariant === "lines"
+                        ? BackgroundVariant.Lines
+                        : BackgroundVariant.Dots
+                    }
+                    gap={16}
+                    size={1}
+                  />
+                ) : null}
+                {perfTier.flags.showMinimap && minimapVisible ? (
                   <PerfMiniMap
                     degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
                     nodeColor={minimapNodeColor}
@@ -1009,6 +1061,38 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 <AlignmentOverlay guides={alignmentGuides} />
               </ReactFlow>
             </PerfBoundary>
+            <SelectionToolbar
+              store={useStore}
+              reactFlowInstance={reactFlowInstance}
+              motionEnabled={perfTier.flags.edgeAnimations}
+            />
+            <CanvasToolbar
+              onAddNode={handleOpenPalette}
+              onOpenSearch={handleOpenSpotlight}
+              onAddSticky={handleAddSticky}
+              onAddGroup={handleAddGroup}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onAutoLayout={handleAutoLayout}
+              interactive={interactive}
+              onToggleInteractive={toggleInteractive}
+              snapToGrid={snapToGrid}
+              onToggleSnap={setSnapToGrid}
+              minimapVisible={minimapVisible}
+              minimapAvailable={perfTier.flags.showMinimap}
+              onToggleMinimap={setMinimapVisible}
+              backgroundVariant={backgroundVariant}
+              onBackgroundChange={setBackgroundVariant}
+              motionEnabled={perfTier.flags.edgeAnimations}
+              performanceTier={perfTier.userChoice}
+              effectivePerformanceTier={perfTier.effective}
+              onPerformanceTierChange={perfTier.setUserChoice}
+              workflowId={workflowId}
+              currentViewport={viewport}
+              onRestoreViewport={handleRestoreViewport}
+            />
             {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
           </div>
         </ResizablePrimitive.Panel>

@@ -52,6 +52,13 @@ jest.mock("@/lib/claude/env-resolver", () => ({
   resolveProxyEnv: jest.fn(),
 }))
 
+// Twin runtime is dynamically imported by resolveSendOptions; the mock only
+// kicks in when a test supplies twinId + twinDeps + twinUserMessage.
+const mApplyTwinContext = jest.fn()
+jest.mock("@/lib/twin/runtime", () => ({
+  applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
+}))
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
@@ -475,6 +482,50 @@ describe("resolveSendOptions — system prompt assembly", () => {
   it("omits systemPrompt when nothing produces a non-empty string", async () => {
     const opts = await resolveSendOptions({})
     expect(opts.systemPrompt).toBeUndefined()
+  })
+
+  it("appends the v2 persona section (tone + personality) after the base prompt", async () => {
+    const ch = makeChar({
+      id: "c1",
+      systemPrompt: "base",
+      persona: { tone: "warm, encouraging", personality: "Former teacher, uses analogies." },
+    })
+    const opts = await resolveSendOptions({ character: ch })
+    expect(opts.systemPrompt).toBe(
+      "base\n\n---\n\n## Persona\n\nTone: warm, encouraging\n\nFormer teacher, uses analogies."
+    )
+  })
+
+  it("omits the persona section when tone and personality are blank", async () => {
+    const ch = makeChar({
+      id: "c1",
+      systemPrompt: "base",
+      persona: { openingMessage: "hi there", exemplarPrompts: ["do x"] },
+    })
+    const opts = await resolveSendOptions({ character: ch })
+    expect(opts.systemPrompt).toBe("base")
+  })
+
+  it("suppresses the persona section when the twin runtime replaced the base prompt", async () => {
+    mApplyTwinContext.mockResolvedValueOnce({
+      applied: { systemPrompt: "TWIN PROMPT" },
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+      degraded: false,
+    })
+    const ch = makeChar({
+      id: "c1",
+      systemPrompt: "base",
+      twinId: "twin1",
+      persona: { tone: "warm", personality: "Former teacher." },
+    })
+    const opts = await resolveSendOptions({
+      character: ch,
+      twinDeps: {} as never,
+      twinUserMessage: "hello",
+    })
+    expect(opts.systemPrompt).toBe("TWIN PROMPT")
+    expect(opts.systemPrompt).not.toContain("## Persona")
   })
 })
 

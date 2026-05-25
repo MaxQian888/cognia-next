@@ -213,6 +213,16 @@ export function parseV11Event(
       case "group_msg_emoji_like":
         // Custom OneBot v11 extension — emoji reaction on a message.
         return v11SystemEvent(adapterId, event, "reaction_added")
+      case "poke":
+        // NapCat surfaces poke (戳一戳) directly under notice_type.
+        return v11SystemEvent(adapterId, event, "poke")
+      case "notify":
+        // go-cqhttp nests poke under notice_type:"notify" sub_type:"poke"
+        // (other notify sub_types — honor, lucky_king — stay unhandled).
+        if (event.sub_type === "poke") {
+          return v11SystemEvent(adapterId, event, "poke")
+        }
+        return null
       default:
         // Unknown notice types stay unhandled rather than producing
         // misleading system events. The bus's `unknown.notice` audit

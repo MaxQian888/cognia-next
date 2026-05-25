@@ -6,6 +6,28 @@ function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/**
+ * Per-session snapshot of the last *committed* persist: message id →
+ * `{ ref, createdAt }`. `ref` is the in-memory `UIMessage` object reference at
+ * the time it was written. The streaming adapter keeps object references stable
+ * for messages that didn't change (`lib/claude/adapter.ts`), so ref-equality
+ * against this snapshot cleanly tells `persistMessages` which rows are
+ * unchanged and can be skipped — turning a per-event O(n) full-table rewrite
+ * into O(changed rows). It also caches `createdAt` so steady-state streaming
+ * never has to `bulkGet` existing rows just to preserve ordering.
+ *
+ * Only valid because same-session events are serialized upstream
+ * (`hooks/chat/use-claude-chat.ts`), so there is never a concurrent persist for
+ * one session racing this cache. Any out-of-band mutation of a session's rows
+ * (clear / truncate / delete) must call `invalidatePersistSnapshot`.
+ */
+const persistSnapshots = new Map<string, Map<string, { ref: UIMessage; createdAt: number }>>()
+
+/** Drop the cached persist snapshot for a session (see `persistSnapshots`). */
+export function invalidatePersistSnapshot(sessionId: string): void {
+  persistSnapshots.delete(sessionId)
+}
+
 export async function listMessages(sessionId: string): Promise<UIMessage[]> {
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")
@@ -48,8 +70,16 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
   // events for newly-arrived user messages once the rows are persisted.
   const newUserMessageIds: string[] = []
 
+  const snapshot = persistSnapshots.get(sessionId)
+  // Built inside the transaction, applied to `persistSnapshots` only after the
+  // write commits — so a thrown/aborted transaction never leaves the cache
+  // ahead of disk.
+  let nextSnapshot: Map<string, { ref: UIMessage; createdAt: number }> | null = null
+  let clearSnapshot = false
+
   await db.transaction("rw", db.messages, async () => {
-    // Existing ids for this session — used to compute deletions.
+    // Existing ids for this session — used to compute deletions. `primaryKeys`
+    // reads the index only (no row/parts deserialization), so this stays cheap.
     const existingIds = new Set(
       await db.messages.where("sessionId").equals(sessionId).primaryKeys()
     )
@@ -58,27 +88,52 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
       if (existingIds.size > 0) {
         await db.messages.bulkDelete([...existingIds])
       }
+      clearSnapshot = true
       return
     }
 
-    // Build the rows we want to write, preserving order via createdAt.
-    // Reuse existing createdAt values where we can so re-ordering doesn't
-    // happen on every persist; only new messages get a fresh timestamp.
+    // createdAt source: prefer the in-memory snapshot; only fetch rows from
+    // Dexie for ids that exist on disk but aren't cached (cold start). In
+    // steady-state streaming the snapshot covers every existing id, so this
+    // read — the old per-event full-table `bulkGet` — is skipped entirely.
+    const createdAtById = new Map<string, number>()
+    if (snapshot) {
+      for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
+    }
+    const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
+    if (missingIds.length > 0) {
+      const fetched = await db.messages.bulkGet(missingIds)
+      for (const r of fetched) {
+        if (r) createdAtById.set(r.id, r.createdAt)
+      }
+    }
+
+    // Only changed/new rows are written; unchanged ones are skipped via
+    // ref-equality against the snapshot. `incomingIds` still covers *all*
+    // messages so deletion stays computed against the full set.
     const rows: StoredMessage[] = []
     const incomingIds = new Set<string>()
-
-    // Pre-fetch existing rows to preserve their createdAt.
-    const existingRows = existingIds.size ? await db.messages.bulkGet([...existingIds]) : []
-    const byId = new Map<string, StoredMessage>()
-    for (const r of existingRows) {
-      if (r) byId.set(r.id, r)
-    }
+    nextSnapshot = new Map<string, { ref: UIMessage; createdAt: number }>()
 
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i]
       const id = m.id ?? newId()
       incomingIds.add(id)
-      const prior = byId.get(id)
+
+      const createdAt = createdAtById.get(id) ?? now + i
+      // Record every message in the next snapshot regardless of whether we
+      // rewrite its row, so the next persist can skip it.
+      nextSnapshot.set(id, { ref: m, createdAt })
+
+      // Skip rewriting a row whose in-memory reference is unchanged since the
+      // last committed persist *and* that still exists on disk. The adapter
+      // keeps refs stable for untouched messages, so this is the common case
+      // during streaming (only the trailing assistant message mutates).
+      const prevEntry = snapshot?.get(id)
+      if (prevEntry !== undefined && prevEntry.ref === m && existingIds.has(id)) {
+        continue
+      }
+
       // `metadata` may carry usage/cost info plus team-routing fields
       // (senderId/senderKind). The latter are hoisted into top-level columns
       // so we can index by senderId for fast lookups.
@@ -105,7 +160,7 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
         senderId,
         senderKind,
         metadata: strippedMeta,
-        createdAt: prior?.createdAt ?? now + i,
+        createdAt,
       })
       // Track new user-role messages so we can fan out the chat-message
       // trigger after the write commits.
@@ -122,8 +177,17 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
     if (toDelete.length > 0) {
       await db.messages.bulkDelete(toDelete)
     }
-    await db.messages.bulkPut(rows)
+    if (rows.length > 0) {
+      await db.messages.bulkPut(rows)
+    }
   })
+
+  // Commit the cache only after the transaction resolved cleanly.
+  if (clearSnapshot) {
+    persistSnapshots.delete(sessionId)
+  } else if (nextSnapshot) {
+    persistSnapshots.set(sessionId, nextSnapshot)
+  }
 
   if (newUserMessageIds.length > 0) {
     // Fire-and-forget so persistence is never blocked by the workflow
@@ -209,6 +273,7 @@ async function dispatchChatMessageTriggers(
 
 export async function clearMessages(sessionId: string): Promise<void> {
   await getDb().messages.where("sessionId").equals(sessionId).delete()
+  invalidatePersistSnapshot(sessionId)
 }
 
 /**
@@ -237,4 +302,7 @@ export async function truncateAfter(
       await db.messages.bulkDelete(ids as string[])
     }
   })
+  // The on-disk row set changed out-of-band from `persistMessages`; drop the
+  // cache so the next persist re-derives existence/createdAt from Dexie.
+  invalidatePersistSnapshot(sessionId)
 }

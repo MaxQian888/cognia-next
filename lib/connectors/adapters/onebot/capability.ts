@@ -11,6 +11,10 @@ import {
  * send.file, send.reply, send.mention (at), send.emoji (face), delete,
  * history.fetch (get_msg_history). No native edit or typing.
  *
+ * `send.reaction` is declared because NapCat ships the `set_msg_emoji_like`
+ * extension; the adapter's `addReaction` is gated at runtime on the upstream
+ * probe (`implMetadata.features`) so non-NapCat upstreams fail honestly.
+ *
  * Kept in alphabetical order for stable diffs.
  *
  * NOTE: `send.markdown` and `send.edit` are intentionally absent — Group
@@ -27,6 +31,7 @@ export const ONEBOT_CAPS: readonly Capability[] = [
   "send.file",
   "send.image",
   "send.mention",
+  "send.reaction",
   "send.reply",
   "send.text",
   "send.video",

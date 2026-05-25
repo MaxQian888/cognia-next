@@ -1,0 +1,134 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import "fake-indexeddb/auto"
+import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
+import type { WorkflowNode, WorkflowRow } from "@/types/workflow/visual"
+
+function node(id: string, type: string): WorkflowNode {
+  return {
+    id,
+    type: type as WorkflowNode["type"],
+    typeVersion: 1,
+    position: { x: 0, y: 0 },
+    data: { label: id, params: {} },
+  }
+}
+import { WorkflowCard } from "./workflow-card"
+import { useWorkflowLibraryStore } from "@/stores/workflow"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+
+function makeWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
+  return {
+    id: "wf_a",
+    schemaVersion: 1,
+    name: "Daily digest",
+    folderId: ROOT_FOLDER_ID,
+    createdAt: 0,
+    updatedAt: 0,
+    nodes: [],
+    edges: [],
+    settings: {
+      errorPolicy: "stop",
+      timeoutMs: 1000,
+      concurrency: 1,
+      retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+    },
+    ...overrides,
+  } as WorkflowRow
+}
+
+beforeEach(() => {
+  useWorkflowLibraryStore.setState({
+    selectionMode: false,
+    selection: new Set<string>(),
+    deleteDialogTarget: null,
+  })
+  useSettingsStore.setState({ settings: { pinnedWorkflowIds: [] } as never })
+})
+
+describe("WorkflowCard", () => {
+  it("renders the name and node-count badge", () => {
+    render(<WorkflowCard workflow={makeWorkflow({ nodes: [] })} />)
+    expect(screen.getByTestId("workflow-card-wf_a")).toHaveTextContent("Daily digest")
+  })
+
+  it("toggles selection via the checkbox", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-select-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("selects instead of navigating while in selection mode", () => {
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-open-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("shows the pinned indicator when pinned", () => {
+    useSettingsStore.setState({ settings: { pinnedWorkflowIds: ["wf_a"] } as never })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    expect(screen.getByTestId("workflow-pinned-wf_a")).toBeInTheDocument()
+  })
+
+  it("routes delete through the store delete dialog", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-delete-wf_a"))
+    expect(useWorkflowLibraryStore.getState().deleteDialogTarget).toEqual({ ids: ["wf_a"] })
+  })
+
+  it("disables delete for built-in workflows", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow({ isBuiltIn: true })} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    expect(await screen.findByTestId("workflow-action-delete-wf_a")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
+  it("renders trigger, action, template, and tag badges", () => {
+    render(
+      <WorkflowCard
+        workflow={makeWorkflow({
+          nodes: [node("n1", "trigger.manual"), node("n2", "action.http")],
+          isTemplate: true,
+          tags: ["ops"],
+        })}
+      />
+    )
+    expect(screen.getByText("Template")).toBeInTheDocument()
+    expect(screen.getByText("ops")).toBeInTheDocument()
+    expect(screen.getByText(/trigger/)).toBeInTheDocument()
+    expect(screen.getByText(/action/)).toBeInTheDocument()
+  })
+
+  it("activates navigation when clicked outside selection mode", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-open-wf_a"))
+    // Not in selection mode → nothing selected (it navigated instead).
+    expect(useWorkflowLibraryStore.getState().selection.size).toBe(0)
+  })
+
+  it("opens the rename dialog from the menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-rename-wf_a"))
+    expect(await screen.findByTestId("workflow-rename-input")).toBeInTheDocument()
+  })
+
+  it("opens the edit-tags dialog from the menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-tags-wf_a"))
+    expect(await screen.findByTestId("workflow-tags-input")).toBeInTheDocument()
+  })
+})

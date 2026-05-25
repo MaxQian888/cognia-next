@@ -226,14 +226,25 @@ pub fn run() {
         .manage(cli_bridge::CliBridgeServerState::new())
         .setup(|app| {
             // Phase B follow-up — install the keyring-backed push credential
-            // store before any push-related command can fire, then reinstate
-            // any FCM/APNs dispatchers the user uploaded in a prior session.
-            companion_api::push_creds::install(
-                companion_api::push_creds::KeyringPushCredStore::new(),
-            );
-            if let Err(err) = companion_api::push_creds::reinstall_persisted_dispatchers() {
-                log::warn!("push-creds reinstall failed: {err}");
-            }
+            // store and reinstate any FCM/APNs dispatchers the user uploaded
+            // in a prior session.
+            //
+            // Deferred off the synchronous startup path via `spawn_blocking`:
+            // keyring access (store init + dispatcher reinstall) is blocking
+            // OS-credential I/O that can spike to hundreds of ms on a cold
+            // credential subsystem, which would delay window paint (setup()
+            // runs before the event loop / window show). No push command fires
+            // during boot — a connector has to be running first — and the
+            // pre-install push path already warns gracefully, so installing a
+            // moment later is safe.
+            tauri::async_runtime::spawn_blocking(|| {
+                companion_api::push_creds::install(
+                    companion_api::push_creds::KeyringPushCredStore::new(),
+                );
+                if let Err(err) = companion_api::push_creds::reinstall_persisted_dispatchers() {
+                    log::warn!("push-creds reinstall failed: {err}");
+                }
+            });
             let _ = app;
             Ok(())
         })
@@ -532,6 +543,8 @@ pub fn run() {
             connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
+            connectors::commands::connectors_lark_ws_open,
+            connectors::commands::connectors_lark_ws_close,
             connectors::commands::connectors_attachment_fetch,
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
@@ -660,6 +673,14 @@ pub fn run() {
             ocr::msix::ocr_msix_status,
         ])
         .setup(|app| {
+            // Startup timing anchor (perf/tauri-startup-unblock). `setup()` runs
+            // on the main thread before the event loop starts, so its wall time
+            // directly gates window paint. After the lazy-init work
+            // (scheduler/vector/workflow opens + keyring now deferred), this
+            // number is the residual synchronous startup cost — log it so the
+            // before/after can be compared from the app logs.
+            let setup_start = std::time::Instant::now();
+
             // ADR-0020 W1 — automation subsystem. We construct the
             // worker thread with an `AppHandle` so it can emit
             // `automation:worker-restart` / `automation:worker-dead`
@@ -921,6 +942,10 @@ pub fn run() {
                 });
             }
 
+            log::info!(
+                "native setup() completed in {:?} (heavy subsystem opens are lazy/spawned)",
+                setup_start.elapsed()
+            );
             Ok(())
         })
         .build(tauri::generate_context!())

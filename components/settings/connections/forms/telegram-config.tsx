@@ -422,19 +422,21 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
-        <AdapterFormSections
-          sections={[identitySection, deliverySection, advancedSection]}
-          onSubmit={handleSave}
-          onCancel={() => onOpenChange(false)}
-          submitting={saving}
-          dirty={dirty}
-          submitLabel={isNew ? t("create") : t("save")}
-        />
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <AdapterFormSections
+            sections={[identitySection, deliverySection, advancedSection]}
+            onSubmit={handleSave}
+            onCancel={() => onOpenChange(false)}
+            submitting={saving}
+            dirty={dirty}
+            submitLabel={isNew ? t("create") : t("save")}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   )

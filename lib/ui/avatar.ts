@@ -6,6 +6,12 @@ export interface AvatarSubject {
   name: string
   avatarColor?: string
   avatarEmoji?: string
+  /**
+   * Optional resolved avatar image URL (a `data:` URL or `convertFileSrc`
+   * result). When present, renderers show the image and fall back to
+   * `avatarEmoji` / initials only if it fails to load.
+   */
+  avatarImageUrl?: string
 }
 
 /**

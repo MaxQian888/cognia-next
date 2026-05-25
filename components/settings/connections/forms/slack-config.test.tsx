@@ -300,3 +300,18 @@ describe("SlackConfigDialog — closed state", () => {
     expect(screen.queryByText(/add slack bot/i)).not.toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Tests — responsive dialog layout
+// ---------------------------------------------------------------------------
+
+describe("SlackConfigDialog — layout", () => {
+  it("caps height, scrolls the body, and lays credentials out in a responsive grid", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("max-h-[90vh]")
+    expect(dialog.className).toContain("flex-col")
+    expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
+    expect(dialog.querySelector('[class*="sm:grid-cols-2"]')).not.toBeNull()
+  })
+})

@@ -123,6 +123,40 @@ describe("CharacterPicker", () => {
     expect(screen.getByText("User Bob")).toBeInTheDocument()
   })
 
+  it("hides characters restricted away from the current (browser) profile", () => {
+    // jsdom has no __TAURI_INTERNALS__, so currentRuntimeProfile() === "browser".
+    const desktopOnly: Character = {
+      ...mkChar("Desktop Only", "desk1"),
+      availableOnPlatforms: ["tauri"],
+    }
+    const everywhere = mkChar("Everywhere", "ev1")
+    const Wrapper = withAdapter(makeAdapter([desktopOnly, everywhere]))
+    render(
+      <Wrapper>
+        <CharacterPicker open onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Desktop Only")).not.toBeInTheDocument()
+    expect(screen.getByText("Everywhere")).toBeInTheDocument()
+  })
+
+  it("renders the avatar image when the character has a webDataUrl", () => {
+    const withImage: Character = {
+      ...mkChar("Pixel", "px1"),
+      avatarImage: { webDataUrl: "data:image/png;base64,AAAA" },
+    }
+    const Wrapper = withAdapter(makeAdapter([withImage]))
+    render(
+      <Wrapper>
+        <CharacterPicker open onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    // CommandDialog portals to document.body, so query the whole document.
+    const img = document.querySelector("img") as HTMLImageElement
+    expect(img).not.toBeNull()
+    expect(img.getAttribute("src")).toBe("data:image/png;base64,AAAA")
+  })
+
   it("renders a local-file group heading for synthetic ids without a registered plugin", () => {
     pluginsState = {}
     const localOverlay: Character = {

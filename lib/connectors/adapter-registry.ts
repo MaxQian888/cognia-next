@@ -182,6 +182,7 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
   const settings = (row.settings ?? {}) as {
     transport?: "long-connection" | "webhook"
     selfBotOpenId?: string
+    quickCommands?: import("./adapters/lark/quick-commands").LarkQuickCommand[]
     [key: string]: unknown
   }
   const transport: "long-connection" | "webhook" =
@@ -241,6 +242,7 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     encryptKey: () => connectorsKeyringGet(row.id, "encryptKey").then((v) => v ?? ""),
     verificationToken: () => connectorsKeyringGet(row.id, "verificationToken").then((v) => v ?? ""),
     selfBotOpenId,
+    quickCommands: settings.quickCommands,
     transport,
   })
 }
@@ -248,19 +250,24 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
 /**
  * Instantiate a OneBot PlatformAdapter from a persisted AdapterInstanceRow.
  *
- * OneBot uses reverse-WebSocket — the QQ client connects to cognia-next.
- * No API call is needed at startup; transport starts when NapCat/Lagrange
- * establishes the WS connection.
+ * Two transport directions are supported (selected by `row.transportMode`):
+ *   - reverse-ws (default): the QQ client (NapCat/Lagrange/LLOneBot) dials
+ *     cognia-next; transport starts when the WS connection is established.
+ *   - forward-ws: cognia dials the NapCat WS server at
+ *     `settings.forwardWsUrl` (e.g. `ws://host:3001`).
  *
  * NOTE: OneBot does not use OAuth. The only credential is the optional
- * bearer token (`onebotBearer`) stored in the keyring.
+ * bearer/access token (`onebotBearer`) stored in the keyring — for forward-ws
+ * it is sent as `Authorization: Bearer`.
  */
 export async function buildOneBotAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
   const settings = (row.settings ?? {}) as {
     selfBotUin?: string
     expectedClient?: "napcat" | "lagrange" | "llonebot"
+    forwardWsUrl?: string
   }
   const selfBotUin = settings.selfBotUin ?? ""
+  const transportMode = row.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws"
 
   return createOneBotAdapter({
     id: row.id,
@@ -268,6 +275,8 @@ export async function buildOneBotAdapter(row: AdapterInstanceRow): Promise<Platf
     selfBotUin,
     bearerToken: () => connectorsKeyringGet(row.id, "onebotBearer").then((t) => t ?? ""),
     expectedClient: settings.expectedClient,
+    transportMode,
+    forwardWsUrl: settings.forwardWsUrl,
   })
 }
 

@@ -180,6 +180,81 @@ describe("OneBotConfigDialog — edit existing", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Tests — transport mode (reverse vs forward WS)
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — transport mode", () => {
+  const forwardRow: AdapterInstanceRow = {
+    id: "ob-forward",
+    type: "onebot",
+    displayName: "Forward QQ Bot",
+    enabled: true,
+    transportMode: "forward-ws",
+    settings: {
+      selfBotUin: "111222333",
+      expectedClient: "napcat",
+      forwardWsUrl: "ws://127.0.0.1:3001",
+    },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+    trigger: defaultGroupChatPolicy(),
+    defaultMode: "auto",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  it("renders the connection-mode select", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/connection mode/i)).toBeInTheDocument()
+  })
+
+  it("shows the NapCat WebSocket URL input, pre-filled, for a forward-ws row", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={forwardRow} />)
+    const urlInput = screen.getByLabelText(/napcat websocket url/i)
+    expect(urlInput).toBeInTheDocument()
+    expect(urlInput).toHaveValue("ws://127.0.0.1:3001")
+  })
+
+  it("persists transportMode + forwardWsUrl on Save", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={forwardRow} />)
+    fireEvent.change(screen.getByLabelText(/napcat websocket url/i), {
+      target: { value: "ws://10.0.0.5:3001" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "ob-forward",
+        expect.objectContaining({
+          transportMode: "forward-ws",
+          settings: expect.objectContaining({ forwardWsUrl: "ws://10.0.0.5:3001" }),
+        })
+      )
+    })
+  })
+
+  it("blocks Save with an error when the forward-ws URL is empty", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={forwardRow} />)
+    fireEvent.change(screen.getByLabelText(/napcat websocket url/i), { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
+    })
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("a reverse-ws row does not render the forward URL input", () => {
+    const reverseRow: AdapterInstanceRow = {
+      ...forwardRow,
+      transportMode: "reverse-ws",
+      settings: { selfBotUin: "1" },
+    }
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={reverseRow} />)
+    expect(screen.queryByLabelText(/napcat websocket url/i)).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Tests — closed state
 // ---------------------------------------------------------------------------
 
@@ -187,5 +262,20 @@ describe("OneBotConfigDialog — closed", () => {
   it("does not render content when closed", () => {
     render(<OneBotConfigDialog open={false} onOpenChange={jest.fn()} row={null} />)
     expect(screen.queryByText(/add onebot/i)).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — responsive dialog layout
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — layout", () => {
+  it("caps height, scrolls the body, and lays credentials out in a responsive grid", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("max-h-[90vh]")
+    expect(dialog.className).toContain("flex-col")
+    expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
+    expect(dialog.querySelector('[class*="sm:grid-cols-2"]')).not.toBeNull()
   })
 })

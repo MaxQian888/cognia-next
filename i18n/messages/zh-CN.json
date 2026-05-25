@@ -919,7 +919,7 @@
         "workspaceEmpty": "工作区为空。",
         "bashHintPrefix": "按",
         "bashHintSuffix": "以 shell 命令运行。",
-        "bashEmpty": "<空>",
+        "bashEmpty": "'<空>'",
         "comingSoon": "即将上线"
       },
       "toolbar": {
@@ -1005,6 +1005,7 @@
       "sections": {
         "quickStart": "快速开始",
         "tryPrompt": "试试这些",
+        "characterPrompts": "用该角色试试",
         "continue": "最近"
       },
       "capabilities": {
@@ -1046,6 +1047,11 @@
     },
     "copy": {
       "success": "已复制到剪贴板"
+    },
+    "history": {
+      "loadError": "无法加载此对话。",
+      "retry": "重试",
+      "loading": "正在加载对话…"
     },
     "message": {
       "editingCancel": "取消",
@@ -2225,7 +2231,7 @@
         "variantHelp": {
           "claude-desktop-stdio": "编辑 ~/Library/Application Support/Claude/claude_desktop_config.json（macOS）或 %APPDATA%/Claude/claude_desktop_config.json（Windows），保存后重启 Claude Desktop。",
           "claude-desktop-http": "编辑 Claude Desktop 的 claude_desktop_config.json，并确认 Bridge HTTP 传输已启动。上方的「重新生成」按钮会更新 Bearer Token。",
-          "cursor": "保存到 ~/.cursor/mcp.json（全局）或 <project>/.cursor/mcp.json（项目级），重启 Cursor 后生效。",
+          "cursor": "保存到 ~/.cursor/mcp.json（全局）或 '<project>'/.cursor/mcp.json（项目级），重启 Cursor 后生效。",
           "goose": "保存到 ~/.config/goose/config.yaml，运行 goose configure 确认插件被识别。"
         }
       },
@@ -3506,6 +3512,25 @@
       "description": "可复用的人设。每个角色携带自己的系统提示词、模型、MCP 子集与技能。新建会话时可以选择一个使用。",
       "newCharacter": "新建角色",
       "emptyHint": "暂无角色。内置角色应该会自动出现在这里。",
+      "noMatches": "没有匹配的角色。",
+      "searchPlaceholder": "搜索角色…",
+      "filter": {
+        "label": "按来源筛选",
+        "all": "全部来源",
+        "builtin": "内置",
+        "plugin": "插件",
+        "user": "自定义"
+      },
+      "bulk": {
+        "select": "多选",
+        "done": "完成",
+        "selectRow": "选择 {name}",
+        "deleteSelected": "删除（{count}）",
+        "exportSelected": "导出（{count}）",
+        "deletedToast": "已删除 {count} 个角色。",
+        "exportedToast": "已导出 {count} 个角色。",
+        "exportPackName": "导出的角色"
+      },
       "builtIn": "内置",
       "removeTitle": "删除角色?",
       "removeBody": "「{name}」将被删除。当前正在使用此角色的会话仍保留历史,但会回退到应用默认值。",
@@ -3617,6 +3642,41 @@
         "mcpServers": "MCP 服务器",
         "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
         "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+        "avatarImage": {
+          "upload": "上传图片",
+          "clear": "移除图片",
+          "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。"
+        },
+        "persona": {
+          "title": "人设",
+          "description": "可选的语气与性格，会织入系统提示；另含开场白与起手 prompt。",
+          "tone": "语气",
+          "tonePlaceholder": "温暖、鼓励",
+          "personality": "性格",
+          "personalityPlaceholder": "曾任教师，偏好用类比讲解",
+          "openingMessage": "开场白",
+          "openingMessagePlaceholder": "你好！今天我们做点什么？",
+          "exemplarPrompts": "起手 prompt",
+          "exemplarPromptsPlaceholder": "审查我的 PR\n起草发布说明",
+          "exemplarPromptsHint": "每行一条——新会话时作为快捷起手卡片展示。"
+        },
+        "voice": {
+          "title": "语音",
+          "description": "可选的角色专属朗读语音。保持「继承」时使用全局语音设置。",
+          "provider": "提供商",
+          "inherit": "继承全局",
+          "voiceId": "音色",
+          "voiceIdPlaceholder": "音色 id",
+          "rate": "语速",
+          "pitch": "音调",
+          "volume": "音量"
+        },
+        "platforms": {
+          "title": "可用平台",
+          "description": "将该角色限定到特定平台。两者都不选则在所有平台显示。",
+          "tauri": "桌面端",
+          "browser": "Web / 移动端"
+        },
         "twinBinding": {
           "titleUnbound": "数字孪生（可选）",
           "titleBound": "数字孪生",
@@ -3782,7 +3842,7 @@
         "descriptionLabel": "描述",
         "descriptionPlaceholder": "在命令选择器中显示的说明。",
         "argHintLabel": "参数提示",
-        "argHintPlaceholder": "例如 <file> 或 <重点区域?>",
+        "argHintPlaceholder": "例如 '<file>' 或 '<重点区域?>'",
         "modelLabel": "模型覆盖",
         "modelPlaceholder": "例如 claude-sonnet-4-5（可选）",
         "allowedToolsLabel": "允许的工具",
@@ -4131,7 +4191,7 @@
         "ssmlSampleText": "你好，这是一段文字转语音测试。",
         "customSSML": "使用自定义 SSML",
         "customSSMLHint": "用自定义 SSML 标记覆盖自动生成的 SSML。",
-        "customSSMLPlaceholder": "<speak version=\"1.0\" …>…</speak>",
+        "customSSMLPlaceholder": "'<'speak version=\"1.0\" …>…'<'/speak>",
         "pronunciationDict": "发音词典",
         "pronunciationDictHint": "将单词映射到其发音。按整词不区分大小写匹配。",
         "pronunciationWord": "单词",
@@ -4458,7 +4518,7 @@
         "heading": "出站 webhook 签名",
         "description": "可选的 HMAC-SHA256 签名，会随每次出站 webhook 投递发送，接收方可据此验证请求确实来自这台 cognia。",
         "signingSecret": "签名密钥",
-        "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 X-Cognia-Signature: sha256=<hex> 请求头。",
+        "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 X-Cognia-Signature: sha256='<hex>' 请求头。",
         "secretSet": "已配置签名密钥。",
         "secretMissing": "尚未设置签名密钥。",
         "setSecret": "保存密钥",
@@ -4586,6 +4646,36 @@
         "configure": "配置",
         "configureAria": "配置 {name}",
         "pendingBadgeAria": "{count} 条消息等待发送",
+        "listTitle": "适配器",
+        "platforms": {
+          "telegram": "Telegram",
+          "discord": "Discord",
+          "slack": "Slack",
+          "lark": "飞书 / Lark",
+          "onebot": "QQ（OneBot / NapCat）",
+          "unknown": "适配器"
+        },
+        "actions": {
+          "menuAria": "{name} 的操作",
+          "configure": "配置",
+          "enable": "启用",
+          "disable": "停用",
+          "sendTest": "发送测试消息",
+          "remove": "删除"
+        },
+        "rowHealth": {
+          "aria": "适配器健康状态：{state}",
+          "breakerOpen": "熔断开启",
+          "rateLimited": "已限流",
+          "degraded": "降级",
+          "down": "离线"
+        },
+        "removeConfirm": {
+          "title": "删除适配器？",
+          "body": "“{name}”及其存储的凭据将被永久删除，且无法撤销。",
+          "cancel": "取消",
+          "confirm": "删除"
+        },
         "detail": {
           "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。",
           "adapterMissing": "找不到该适配器，可能已被其他窗口删除。",
@@ -4945,6 +5035,8 @@
         "sectionDeliveryDesc": "入站传输方式与飞书开放平台调用的回调 URL。",
         "sectionAdvanced": "高级",
         "sectionAdvancedDesc": "出站回复的静默时段与全局静音。",
+        "sectionQuickCommands": "快捷指令",
+        "sectionQuickCommandsDesc": "将飞书机器人菜单（快捷指令）的 event_key 映射到一条提示词或斜杠命令。",
         "transportLongConnectionDesc": "长连接（WSS）——飞书向本应用推送事件，不需要公网回调 URL。",
         "transportWebhookDesc": "Webhook——飞书调用您粘贴到开放平台的公网 HTTPS URL。",
         "webhookUrlLabel": "回调 URL",
@@ -5002,6 +5094,22 @@
           "addChatIdPlaceholder": "oc_… （粘贴 chat id）",
           "removeAria": "移除 {id}",
           "helpText": "粘贴飞书 chat_id（以 oc_… 开头）。可从审计日志或飞书客户端的会话 URL 中找到。"
+        },
+        "quickCommands": {
+          "title": "机器人菜单 / 快捷指令",
+          "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。",
+          "eventKeyLabel": "Event key",
+          "eventKeyPlaceholder": "event_key（来自机器人菜单）",
+          "labelLabel": "标签（可选）",
+          "labelPlaceholder": "标签",
+          "actionTypeLabel": "动作类型",
+          "actionTypePrompt": "提示词",
+          "actionTypeSlash": "斜杠命令",
+          "valueLabel": "动作内容",
+          "valuePlaceholder": "提示词文本，或 /命令 参数",
+          "addAria": "添加快捷指令",
+          "empty": "尚未映射任何快捷指令。",
+          "removeAria": "移除 {key}"
         }
       },
       "adapterFormSections": {
@@ -5028,6 +5136,14 @@
         "expectedClientLlonebot": "LLOneBot",
         "expectedClientOther": "其它",
         "expectedClientHelp": "仅作展示用途——用于跳转对应文档。",
+        "transportModeLabel": "连接方式",
+        "transportReverse": "反向 WS（NapCat 连接到 cognia）",
+        "transportForward": "正向 WS（cognia 连接到 NapCat）",
+        "transportModeHelp": "正向 WS 是 NapCat 的常见用法——由 cognia 主动连接 NapCat 的 WebSocket 服务端；反向 WS 则相反，由 NapCat 主动连接 cognia。",
+        "forwardUrlLabel": "NapCat WebSocket 地址",
+        "forwardUrlHelp": "NapCat 暴露的 WebSocket 服务端地址（NapCat WebUI → 网络配置 → WebSocket 服务器）。上面的 Bearer Token 会作为 access token 发送。",
+        "forwardUrlPlaceholder": "ws://127.0.0.1:3001",
+        "forwardUrlRequired": "正向 WS 地址不能为空。",
         "endpointLabel": "反向 WebSocket 地址",
         "endpointHelpPrefix": "把该地址粘贴到 NapCat / Lagrange 的",
         "endpointHelpSuffix": "配置中。",
@@ -5050,7 +5166,7 @@
         "sectionIdentity": "身份与凭证",
         "sectionIdentityDesc": "Bot UIN、Access Token 与上游客户端类型。",
         "sectionDelivery": "交付与传输",
-        "sectionDeliveryDesc": "NapCat / Lagrange / LLOneBot 客户端反向连接的 WebSocket 端点。",
+        "sectionDeliveryDesc": "cognia 与 NapCat / Lagrange / LLOneBot 的连接方式——正向或反向 WebSocket。",
         "sectionAdvanced": "高级",
         "sectionAdvancedDesc": "出站回复的静默时段与全局静音。",
         "endpointNewAdapterHint": "请先保存适配器；反向 WS 端点 URL 由新适配器 ID 派生。",
@@ -5873,6 +5989,11 @@
       "unknown": "未知",
       "unknownTooltip": "无法判定签名状态。"
     },
+    "source": {
+      "builtin": "内置",
+      "local": "本地",
+      "marketplace": "市场"
+    },
     "card": {
       "openDetails": "查看详情",
       "configure": "配置",
@@ -6109,8 +6230,12 @@
     },
     "toolbar": {
       "install": "安装",
+      "groupManifest": "清单",
+      "groupWasm": "WASM 包",
       "fromFile": "从文件…",
       "fromUrl": "从 URL…",
+      "fromLocalWasm": "从本地文件…",
+      "fromUrlSigned": "从已签名 URL…",
       "fromUrlPrompt": "插件清单 URL",
       "fromFileSourceLabel": "本地文件 ({count})",
       "checkUpdates": "检查更新",
@@ -6125,6 +6250,65 @@
         "cancel": "取消",
         "emptyError": "请输入 URL。",
         "error": "获取清单失败：{message}"
+      }
+    },
+    "wasmInstall": {
+      "capabilityGrantSheet": {
+        "title": "审查 {name} 申请的能力",
+        "description": "该插件以沙箱化 WebAssembly 运行。安装前请审查它申请的能力——授予后运行时调用不会再次询问。",
+        "unsignedAuthor": "未签名作者",
+        "noSignature": "无签名",
+        "noSensitivePermissions": "该插件未申请任何敏感权限。",
+        "requestedPermissions": "申请的权限",
+        "optionalPermissions": "可选权限",
+        "extraFilesystem": "额外的文件系统访问",
+        "extraFilesystemDescription": "除自身数据目录外，该插件还申请访问以下路径。取消勾选你不希望授予的项。",
+        "allowFsAriaLabel": "允许访问 {path}",
+        "dangerousWarning": "你正在授予 {count} 项敏感能力。请仅安装你信任的插件。",
+        "cancel": "取消",
+        "install": "安装",
+        "sensitiveBadge": "敏感",
+        "customPermission": "自定义权限",
+        "togglePermissionAriaLabel": "切换权限 {permission}",
+        "groups": {
+          "filesystem": "文件系统",
+          "network": "网络",
+          "clipboard": "剪贴板",
+          "notifications": "通知",
+          "osProcess": "进程与自动化",
+          "secrets": "密钥",
+          "other": "其他"
+        }
+      },
+      "fromUrlDialog": {
+        "title": "安装已签名的 WASM 插件",
+        "description": "提供已签名 WASM 包的直链。安装前会先获取并验证其清单。",
+        "bundleUrlLabel": "包 URL",
+        "bundleUrlPlaceholder": "https://example.com/plugin.zip",
+        "signatureUrlLabel": "签名 URL（可选）",
+        "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
+        "publicKeyLabel": "作者公钥（可选）",
+        "publicKeyPlaceholder": "base64 编码的 ed25519 公钥",
+        "trustRequiredError": "安装前请先信任该作者。",
+        "anonymousAuthor": "匿名作者",
+        "noAuthorKey": "无作者公钥",
+        "signatureVerified": "签名已验证",
+        "unsignedBundle": "未签名的包",
+        "trustAriaLabel": "信任该作者",
+        "alreadyTrusted": "你已信任该作者。",
+        "trustFirstTime": "信任该作者，用于后续安装。",
+        "installing": "安装中…",
+        "fetchingManifest": "正在获取清单…",
+        "cancel": "取消",
+        "preview": "预览",
+        "install": "安装"
+      },
+      "fromLocalButton": {
+        "tauriRequiredError": "安装本地 WASM 插件需要桌面应用。",
+        "filePickerTitle": "选择 WASM 插件包",
+        "filterWasmBundle": "WASM 包",
+        "filterAllFiles": "所有文件",
+        "label": "安装本地 WASM 插件"
       }
     },
     "grid": {
@@ -6216,7 +6400,8 @@
         "all": "全部",
         "featured": "精选",
         "popular": "热门",
-        "recent": "最近上架"
+        "recent": "最近上架",
+        "builtin": "内置"
       },
       "modeBanner": {
         "degradedTitle": "插件市场不可达",
@@ -9600,7 +9785,7 @@
       "shellExecuteAdvanced": "以 argv 形式运行单个程序，带白名单 + 黑名单 + 危险模式守卫；始终需要审批。",
       "terminalReplSpawn": "打开持久化交互式 PTY（例如 python / sql REPL），返回 sessionId 供后续写入 / 读取。",
       "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
-      "terminalReplRead": "排空累积的 REPL 输出（默认销毁性读取）。返回 {data, truncated, exited, exitCode}。",
+      "terminalReplRead": "排空累积的 REPL 输出（默认销毁性读取）。返回 '{data, truncated, exited, exitCode}'。",
       "terminalReplKill": "信号终止 REPL 会话，可重复调用。"
     }
   },
@@ -10838,7 +11023,7 @@
       "aborted": "OCR 已取消。"
     },
     "slash": {
-      "usage": "用法：/ocr <文件路径或附件 id> [--provider auto|<id>] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
+      "usage": "用法：/ocr '<文件路径或附件 id>' [--provider auto|'<id>'] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
       "providerFlag": "Provider id（或 \"auto\"）",
       "langFlag": "逗号分隔的语言代码",
       "pagesFlag": "页码范围，如 1,3-5",
@@ -12482,13 +12667,108 @@
       "title": "工作流",
       "subtitle": "围绕触发器、AI 和连接器的可视化编排。",
       "new": "新建工作流",
+      "newFolder": "新建文件夹",
       "searchPlaceholder": "搜索工作流…",
       "empty": {
         "title": "暂无工作流",
         "description": "创建第一个工作流，把多步流程串联到聊天、触发器和工具之上。",
         "cta": "创建工作流",
         "titleQuery": "未找到匹配的工作流",
-        "descriptionQuery": "试试其它关键词，或清空筛选条件。"
+        "descriptionQuery": "试试其它关键词，或清空筛选条件。",
+        "folderTitle": "此文件夹为空",
+        "folderDescription": "在这里新建工作流，或把已有的工作流移进来。",
+        "filterTitle": "未找到匹配的工作流",
+        "filterDescription": "换个搜索词，或清空筛选条件。",
+        "clearFilters": "清空筛选"
+      },
+      "view": {
+        "toggleAria": "切换布局",
+        "grid": "网格视图",
+        "list": "列表视图"
+      },
+      "sort": {
+        "label": "排序",
+        "nameAsc": "名称（A–Z）",
+        "nameDesc": "名称（Z–A）",
+        "updated": "最近修改",
+        "created": "最近创建",
+        "runCount": "运行最多"
+      },
+      "filter": {
+        "label": "筛选",
+        "type": "类型",
+        "typeAll": "全部",
+        "typeUser": "我的工作流",
+        "typeTemplate": "模板",
+        "typeBuiltin": "内置",
+        "hasTrigger": "含触发器",
+        "recentlyFailed": "最近失败",
+        "clear": "清空筛选",
+        "active": "{count, plural, other {# 个筛选}}"
+      },
+      "folders": {
+        "root": "全部工作流",
+        "section": "文件夹",
+        "create": "新建文件夹",
+        "rename": "重命名",
+        "delete": "删除文件夹",
+        "open": "打开文件夹",
+        "namePlaceholder": "文件夹名称",
+        "createTitle": "新建文件夹",
+        "renameTitle": "重命名文件夹",
+        "save": "保存",
+        "cancel": "取消",
+        "createCta": "创建",
+        "created": "文件夹已创建",
+        "renamed": "文件夹已重命名",
+        "deleted": "文件夹已删除",
+        "createFailed": "创建文件夹失败",
+        "removedToast": "该文件夹已被移除。",
+        "deleteConfirm": {
+          "title": "确认删除「{name}」？",
+          "description": "其中的内容会上移到父级 —— 不会删除任何工作流。",
+          "confirm": "删除文件夹",
+          "cancel": "取消"
+        }
+      },
+      "bulk": {
+        "selected": "{count, plural, other {已选 # 项}}",
+        "move": "移动",
+        "tag": "添加标签",
+        "delete": "删除",
+        "clear": "清除",
+        "selectAll": "全选",
+        "select": "选择",
+        "deleteConfirm": {
+          "title": "确认删除 {count, plural, other {# 个工作流}}？",
+          "description": "将永久删除所选工作流及其运行历史；内置工作流会被跳过。",
+          "confirm": "删除",
+          "cancel": "取消"
+        },
+        "deleted": "{count, plural, other {已删除 # 个工作流}}",
+        "builtinSkipped": "{count, plural, other {已跳过 # 个内置工作流}}",
+        "deleteFailed": "删除工作流失败"
+      },
+      "move": {
+        "title": "移动到文件夹",
+        "description": "选择一个目标文件夹。",
+        "root": "全部工作流（根目录）",
+        "confirm": "移动到这里",
+        "cancel": "取消",
+        "moved": "已移动 {count, plural, other {# 个工作流}}",
+        "moveFailed": "移动失败"
+      },
+      "tag": {
+        "title": "添加标签",
+        "description": "给所选工作流添加一个标签。",
+        "placeholder": "标签名称",
+        "add": "添加标签",
+        "cancel": "取消",
+        "added": "标签已添加",
+        "addFailed": "添加标签失败"
+      },
+      "pinned": {
+        "section": "已收藏"
       },
       "createDialog": {
         "title": "创建工作流",
@@ -12522,6 +12802,32 @@
       "builtin": "内置",
       "template": "模板",
       "updated": "更新于 {ago}",
+      "moreActions": "更多操作",
+      "rename": "重命名",
+      "renamed": "工作流已重命名",
+      "renameFailed": "重命名工作流失败",
+      "editTags": "编辑标签",
+      "tagsSaved": "标签已更新",
+      "tagsFailed": "更新标签失败",
+      "moveTo": "移动到…",
+      "pin": "收藏",
+      "unpin": "取消收藏",
+      "pinned": "已收藏",
+      "open": "打开",
+      "select": "选择",
+      "renameDialog": {
+        "title": "重命名工作流",
+        "namePlaceholder": "工作流名称",
+        "save": "保存",
+        "cancel": "取消"
+      },
+      "tagsDialog": {
+        "title": "编辑标签",
+        "description": "用逗号分隔多个标签。",
+        "placeholder": "tag1, tag2",
+        "save": "保存",
+        "cancel": "取消"
+      },
       "deleteConfirm": {
         "title": "确认删除工作流？",
         "description": "将永久删除「{name}」及其运行历史，且无法撤销。",
@@ -12539,7 +12845,9 @@
       "layoutUnavailable": "当前环境不支持自动布局",
       "exported": "已下载工作流 JSON",
       "imported": "已导入工作流",
-      "importFailed": "导入工作流 JSON 失败"
+      "importFailed": "导入工作流 JSON 失败",
+      "imageExported": "已下载工作流图片",
+      "imageExportFailed": "导出工作流图片失败"
     },
     "toolbar": {
       "namePlaceholder": "工作流名称",
@@ -12556,7 +12864,9 @@
         "commands": "命令面板（Ctrl+K）",
         "shortcuts": "键盘快捷键（Ctrl+/）",
         "exportJson": "导出为 JSON",
-        "importJson": "导入 JSON"
+        "exportImage": "导出为 PNG",
+        "importJson": "导入 JSON",
+        "more": "更多"
       }
     },
     "editor": {
@@ -12572,6 +12882,46 @@
         "highHint": "开启所有效果：缩略图、动画、检查器实时预览。",
         "balancedHint": "拖拽时关闭边动画与检查器实时预览。",
         "reducedHint": "隐藏缩略图、关闭动画、跳过对齐辅助线。"
+      },
+      "canvasToolbar": {
+        "addNode": "添加节点",
+        "undo": "撤销",
+        "redo": "重做",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "zoomReset": "重置为 100%",
+        "fitView": "适配视图",
+        "lock": "锁定画布",
+        "unlock": "解锁画布",
+        "autoLayout": "自动布局",
+        "view": "视图选项",
+        "snapToGrid": "对齐网格",
+        "showMinimap": "显示小地图",
+        "minimapTierHint": "当前性能档已隐藏小地图",
+        "background": "背景",
+        "bgDots": "圆点",
+        "bgLines": "网格线",
+        "bgNone": "无",
+        "search": "搜索节点（Ctrl+F）",
+        "annotation": "批注",
+        "addSticky": "添加便签",
+        "addGroup": "添加分组"
+      },
+      "selectionToolbar": {
+        "selected": "{count, plural, one {已选 #} other {已选 #}}",
+        "duplicate": "复制",
+        "group": "编组",
+        "delete": "删除",
+        "fit": "适配选区",
+        "align": "对齐与分布",
+        "alignLeft": "左对齐",
+        "alignCenterH": "水平居中对齐",
+        "alignRight": "右对齐",
+        "alignTop": "顶部对齐",
+        "alignCenterV": "垂直居中对齐",
+        "alignBottom": "底部对齐",
+        "distributeH": "水平均分",
+        "distributeV": "垂直均分"
       },
       "contextMenu": {
         "pane": {
@@ -13808,7 +14158,7 @@
         },
         "path": {
           "label": "路径",
-          "hint": "挂载在 /webhook/<path>",
+          "hint": "挂载在 /webhook/'<path>'",
           "placeholder": "incoming-events"
         },
         "hmacSecret": {
@@ -14655,6 +15005,19 @@
       "loading": "正在准备对话…",
       "ariaLabel": "{name} 的工作流 AI 对话",
       "placeholder": "让工作流 AI 帮你构建、重构或诊断这张图。",
+      "starters": {
+        "title": "搭建或优化这个工作流",
+        "subtitle": "描述你想构建的流程，或让我解释、校验、修复当前的图。",
+        "heading": "工作流流程",
+        "buildTitle": "搭建工作流",
+        "buildPrompt": "帮我搭建这个工作流。先问我它要完成什么，再给出节点和连线方案。",
+        "explainTitle": "解释当前流程",
+        "explainPrompt": "逐个节点讲解当前工作流在做什么，以及数据如何在节点间流动。",
+        "validateTitle": "校验并修复",
+        "validatePrompt": "校验当前工作流图，列出所有问题并给出修复建议。",
+        "suggestTitle": "建议下一步",
+        "suggestPrompt": "根据当前的工作流图，建议接下来应该添加哪些节点。"
+      },
       "clear": "清空对话",
       "clearConfirmTitle": "清空这个工作流的对话？",
       "clearConfirmDescription": "这个工作流的副驾驶会话中的所有消息都将被删除。下一次发送时会开启一个新的 agent 会话。",

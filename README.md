@@ -513,7 +513,7 @@ pnpm monaco:copy           # also runs automatically via predev/prebuild
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+AGPL-3.0-or-later — see [LICENSE](./LICENSE).
 
 ## Support
 

@@ -3,15 +3,20 @@
  */
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { SparklesIcon } from "lucide-react"
 
-import { EmptyChatState, type RecentSessionEntry } from "./empty-state"
+import { EmptyChatState, type RecentSessionEntry, type StarterSample } from "./empty-state"
 
 // next-intl: echo the key so assertions can target stable strings; stub the
 // locale-aware relative-time formatter used by the "Continue" group.
 const mockRelativeTime = jest.fn((value: number | Date) => `rel:${Number(value)}`)
+const MOCK_NOW = new Date("2026-05-25T00:00:00Z")
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
   useFormatter: () => ({ relativeTime: mockRelativeTime }),
+  // Provide a stable render-time "now" so relativeTime gets an explicit
+  // anchor (mirrors the component's useNow() usage).
+  useNow: () => MOCK_NOW,
 }))
 
 // Keep real `motion` (jsdom-safe, as the featured-carousel test proves) but
@@ -66,6 +71,80 @@ describe("<EmptyChatState />", () => {
     expect(props.onUseSample).toHaveBeenCalledWith("samples.reviewPrompt")
   })
 
+  // ── Surface-specific override (workflow editor chat tab) ─────────────
+  it("renders override copy + starter cards in place of the generic ones", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    const samples: StarterSample[] = [
+      { key: "build", icon: SparklesIcon, title: "Scaffold a workflow", prompt: "Build it for me" },
+      { key: "explain", icon: SparklesIcon, title: "Explain this workflow", prompt: "Explain it" },
+    ]
+    render(
+      <EmptyChatState
+        {...props}
+        override={{
+          title: "Build or refine this workflow",
+          subtitle: "Describe a flow to scaffold",
+          samplesHeading: "Workflow starters",
+          samples,
+        }}
+      />
+    )
+    // Custom heading / subtitle / section heading replace the generic copy.
+    expect(
+      screen.getByRole("heading", { name: "Build or refine this workflow" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Describe a flow to scaffold")).toBeInTheDocument()
+    expect(screen.getByText("Workflow starters")).toBeInTheDocument()
+    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
+    // Generic dev-tool starters are gone; workflow starters are shown.
+    expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Scaffold a workflow/ }))
+    expect(props.onUseSample).toHaveBeenCalledWith("Build it for me")
+  })
+
+  it("falls back to generic copy for override fields left undefined", () => {
+    const samples: StarterSample[] = [
+      { key: "build", icon: SparklesIcon, title: "Scaffold a workflow", prompt: "Build it" },
+    ]
+    // Only `samples` provided — heading/subtitle/section keep the generic keys.
+    render(<EmptyChatState {...baseProps()} override={{ samples }} />)
+    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByText("subtitle")).toBeInTheDocument()
+    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Scaffold a workflow/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
+  })
+
+  // ── Character exemplar prompts (ADR-0030) ─────────────────────────────
+  it("renders character exemplar prompts and fires onUseSample on click", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    render(<EmptyChatState {...props} characterSamples={["Explain recursion", "Draft a haiku"]} />)
+    expect(screen.getByText("sections.characterPrompts")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Draft a haiku/ }))
+    expect(props.onUseSample).toHaveBeenCalledWith("Draft a haiku")
+  })
+
+  it("hides the character group when characterSamples is empty or only blanks", () => {
+    const { rerender } = render(<EmptyChatState {...baseProps()} characterSamples={[]} />)
+    expect(screen.queryByText("sections.characterPrompts")).not.toBeInTheDocument()
+    rerender(<EmptyChatState {...baseProps()} characterSamples={["   ", ""]} />)
+    expect(screen.queryByText("sections.characterPrompts")).not.toBeInTheDocument()
+  })
+
+  it("activates a character prompt card via Enter / Space", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    render(<EmptyChatState {...props} characterSamples={["Summarize this"]} />)
+    const card = screen.getByRole("button", { name: /Summarize this/ })
+    card.focus()
+    await user.keyboard("{Enter}")
+    await user.keyboard(" ")
+    expect(props.onUseSample).toHaveBeenCalledTimes(2)
+    expect(props.onUseSample).toHaveBeenCalledWith("Summarize this")
+  })
+
   // ── Capability entries ────────────────────────────────────────────────
   it("hides the capability group when onNavigate is absent", () => {
     render(<EmptyChatState {...baseProps()} />)
@@ -112,8 +191,8 @@ describe("<EmptyChatState />", () => {
     )
     expect(screen.getByText("sections.continue")).toBeInTheDocument()
     // Timestamps go through next-intl's locale-aware relativeTime (no
-    // hard-coded English) — verify the formatter is fed each updatedAt.
-    expect(mockRelativeTime).toHaveBeenCalledWith(recentSessions[0].updatedAt)
+    // hard-coded English), anchored to an explicit render-time "now".
+    expect(mockRelativeTime).toHaveBeenCalledWith(recentSessions[0].updatedAt, MOCK_NOW)
     await user.click(screen.getByRole("button", { name: /Refactor auth/ }))
     expect(onResumeSession).toHaveBeenCalledWith("s1")
   })

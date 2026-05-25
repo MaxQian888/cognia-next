@@ -2,14 +2,17 @@
 
 import { useCallback, useRef, type Ref } from "react"
 import { useTranslations } from "next-intl"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
-import { EmptyChatState, type RecentSessionEntry } from "./empty-state"
+import { EmptyChatState, type EmptyStateOverride, type RecentSessionEntry } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
+import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
 import { useChatStore } from "@/stores/chat"
+import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -56,6 +59,12 @@ interface ChatPaneProps {
    * Defaults to true.
    */
   showHeader?: boolean
+  /**
+   * Surface-specific overrides for the empty/welcome state (heading, subtitle,
+   * and starter cards). The workflow-editor chat tab uses this to swap the
+   * generic dev-tool starters for workflow-specific flows.
+   */
+  emptyState?: EmptyStateOverride
 }
 
 /**
@@ -81,12 +90,22 @@ export function ChatPane({
   composerRef,
   mobileMentionMembers,
   showHeader = true,
+  emptyState,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
+  const tHistory = useTranslations("chat.history")
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const errorMessage = useChatStore((s) => s.errorMessage)
+  const messagesLoading = useChatStore((s) => s.messagesLoading)
+  const messagesLoadError = useChatStore((s) => s.messagesLoadError)
   const reduce = useReducedMotion()
+
+  // ADR-0030 — surface the active character's exemplar prompts as quick-start
+  // chips on the empty inline state. `useCharacter` resolves Dexie + overlay
+  // characters; returns undefined for legacy/unset ids.
+  const activeCharacter = useCharacter(activeSession?.characterId)
+  const characterSamples = activeCharacter?.persona?.exemplarPrompts
 
   // The composer remounts when the layout swaps from the centered empty state
   // to the docked chat state (the two motion branches mount it at different
@@ -130,6 +149,11 @@ export function ChatPane({
     await onRegenerate()
   }, [onRegenerate])
 
+  // Re-trigger the Dexie history load after a load failure.
+  const handleRetryLoad = useCallback(() => {
+    useChatStore.getState().requestMessagesReload()
+  }, [])
+
   if (!activeSession) {
     return (
       <EmptyChatState
@@ -138,6 +162,7 @@ export function ChatPane({
         onNavigate={onNavigate}
         recentSessions={recentSessions}
         onResumeSession={onResumeSession}
+        override={emptyState}
       />
     )
   }
@@ -211,15 +236,39 @@ export function ChatPane({
             exit={reduce ? undefined : { opacity: 0, y: 16 }}
             transition={mobileTransition("normal")}
           >
-            <EmptyChatState
-              onCreate={onCreate}
-              onUseSample={(text) => onUseSample(text)}
-              variant="inline"
-              composerSlot={composerEl}
-              onNavigate={onNavigate}
-              recentSessions={recentSessions}
-              onResumeSession={onResumeSession}
-            />
+            {messagesLoadError ? (
+              // History load failed — surface it with a retry instead of the
+              // welcome layout, which would read as silently lost history.
+              <div
+                role="alert"
+                className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+              >
+                <AlertTriangle className="size-8 text-destructive" aria-hidden />
+                <p className="text-sm text-muted-foreground">{tHistory("loadError")}</p>
+                <Button variant="outline" size="sm" onClick={handleRetryLoad}>
+                  {tHistory("retry")}
+                </Button>
+              </div>
+            ) : messagesLoading ? (
+              // Hydration in flight — a quiet loader avoids flashing the empty
+              // welcome state during the session-switch gap.
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+                <span className="sr-only">{tHistory("loading")}</span>
+              </div>
+            ) : (
+              <EmptyChatState
+                onCreate={onCreate}
+                onUseSample={(text) => onUseSample(text)}
+                variant="inline"
+                composerSlot={composerEl}
+                onNavigate={onNavigate}
+                recentSessions={recentSessions}
+                onResumeSession={onResumeSession}
+                characterSamples={characterSamples}
+                override={emptyState}
+              />
+            )}
             {errorAndFooter}
           </motion.div>
         ) : (

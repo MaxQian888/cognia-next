@@ -44,7 +44,13 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
 }))
 
+// ChatPane resolves the active character to surface its exemplar prompts.
+jest.mock("@/lib/data-hooks/context", () => ({
+  useCharacter: jest.fn(() => undefined),
+}))
+
 import { render } from "@testing-library/react"
+import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
 import type { ChatSession, SendContent } from "@/lib/claude/types"
@@ -235,6 +241,22 @@ describe("ChatPane", () => {
       expect(props?.onNavigate).toBe(onNavigate)
       expect(props?.recentSessions).toBe(recentSessions)
       expect(props?.onResumeSession).toBe(onResumeSession)
+      storeState.messages = saved
+    })
+
+    it("forwards the emptyState override to the empty state", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      const emptyState = {
+        title: "Build or refine this workflow",
+        samplesHeading: "Workflow starters",
+        samples: [{ key: "build", icon: SparklesIcon, title: "Scaffold", prompt: "Build it" }],
+      }
+      render(<ChatPane {...makeProps()} emptyState={emptyState} />)
+      const props = EmptyChatState.mock.calls.at(-1)?.[0]
+      expect(props?.override).toBe(emptyState)
       storeState.messages = saved
     })
   })

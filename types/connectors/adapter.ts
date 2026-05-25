@@ -3,7 +3,14 @@ import type { A2UICapabilityMatrix, Capability } from "./capability"
 import type { NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 
-export type TransportMode = "longpoll" | "webhook" | "reverse-ws" | "gateway" | "imap-smtp" | "stub" // tests only
+export type TransportMode =
+  | "longpoll"
+  | "webhook"
+  | "reverse-ws"
+  | "forward-ws"
+  | "gateway"
+  | "imap-smtp"
+  | "stub" // tests only
 
 export interface AdapterMeta {
   type: PlatformKind

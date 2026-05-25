@@ -75,6 +75,9 @@ jest.mock("@/components/shell/guild-rail", () => ({
 jest.mock("@/hooks/desktop/use-menu-event-router", () => ({
   useMenuEventRouter: jest.fn(),
 }))
+jest.mock("@/components/ui/loading-states", () => ({
+  PageLoading: () => <div data-testid="page-loading" />,
+}))
 
 const uiStateRef = {
   guildRailCollapsed: false,
@@ -160,6 +163,24 @@ test("SSR / pre-hydration paint emits no chrome (Capacitor /pair flash guard)", 
   expect(html).not.toContain("guild-rail-stub")
   expect(html).not.toContain("command-palette")
   expect(html).toContain("route-content")
+  // Bypass routes render their target immediately, not the boot loader.
+  expect(html).not.toContain("page-loading")
+})
+
+test("pre-hydration paint on an ordinary route shows a neutral loader (no chrome, no children)", () => {
+  pathname = "/"
+  platformValue = "web"
+  const html = renderToString(
+    <DesktopAppShell>
+      <div data-testid="route-content" />
+    </DesktopAppShell>
+  )
+  // Covers the boot/hydration gap with a neutral loader instead of a
+  // half-painted shell or bare (empty) client children.
+  expect(html).toContain("page-loading")
+  expect(html).not.toContain("route-content")
+  expect(html).not.toContain("title-bar")
+  expect(html).not.toContain("guild-rail-stub")
 })
 
 test("returns children passthrough on mobile (no chrome)", () => {

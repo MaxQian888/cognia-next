@@ -12,6 +12,7 @@ pub mod commands;
 pub mod http_client;
 pub mod keyring;
 pub mod lark_upload;
+pub mod lark_ws;
 pub mod server_lifecycle;
 pub mod sigverify;
 pub mod state;

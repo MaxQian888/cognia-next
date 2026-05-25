@@ -2,6 +2,7 @@ import type { ChatSession } from "@/lib/claude/types"
 import { getDb } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
+import { invalidatePersistSnapshot } from "./messages"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -164,6 +165,7 @@ export async function deleteSession(id: string): Promise<void> {
     await db.sessionUsage.where("sessionId").equals(id).delete()
     await db.sessions.delete(id)
   })
+  invalidatePersistSnapshot(id)
 }
 
 /**
@@ -182,6 +184,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       await db.sessions.delete(id)
     }
   })
+  for (const id of ids) invalidatePersistSnapshot(id)
 }
 
 export async function touchSession(id: string): Promise<void> {

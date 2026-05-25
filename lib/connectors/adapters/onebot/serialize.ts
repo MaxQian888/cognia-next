@@ -169,6 +169,26 @@ export function serializeDeleteV12(messageId: string, _selfId: string): Serializ
 }
 
 // ---------------------------------------------------------------------------
+// reaction — NapCat `set_msg_emoji_like` extension
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialise a `set_msg_emoji_like` call — NapCat's QQ "emoji like" reaction.
+ *
+ * Not part of the OneBot v11/v12 standard; advertised via the
+ * `set_msg_emoji_like` feature flag the upstream probe records on
+ * `implMetadata` (see `index.ts:addReaction`, which gates on it). `emoji_id`
+ * is the QQ face id; `set: true` adds the reaction (vs. removing it).
+ */
+export function serializeSetMsgEmojiLike(messageId: string, emojiId: string): SerializedOneBotCall {
+  return {
+    action: "set_msg_emoji_like",
+    echo: nextEcho(),
+    params: { message_id: Number(messageId), emoji_id: emojiId, set: true },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // history fetch (v11 NapCat / go-cqhttp extension)
 // ---------------------------------------------------------------------------
 

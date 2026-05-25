@@ -3,20 +3,28 @@
 
 import "fake-indexeddb/auto"
 import {
+  __resetRunCountCacheForTesting,
+  addTagToWorkflows,
   createWorkflow,
   deleteWorkflow,
   duplicateWorkflow,
+  getRecentlyFailedWorkflowIds,
+  getRunCounts,
   getWorkflow,
   listTemplateWorkflows,
   listUserWorkflows,
   listWorkflows,
   listWorkflowsByUpdated,
+  listWorkflowsInFolder,
+  moveWorkflowsToFolder,
+  moveWorkflowToFolder,
   regenerateNodeIds,
   replaceWorkflow,
   seedBuiltInWorkflows,
   updateWorkflow,
 } from "./workflows"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 beforeEach(async () => {
@@ -25,6 +33,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().workflows.clear()
+  await getDb().workflowFolders.clear()
+  await getDb().workflowRuns.clear()
+  __resetRunCountCacheForTesting()
 })
 
 function manualNode(id: string, x = 0): VisualWorkflow["nodes"][number] {
@@ -222,5 +233,93 @@ describe("regenerateNodeIds", () => {
     // Edge endpoints follow the rename map.
     expect(fresh.edges[0].source).toBe(fresh.nodes[0].id)
     expect(fresh.edges[0].target).toBe(fresh.nodes[1].id)
+  })
+})
+
+describe("folder organization", () => {
+  it("createWorkflow defaults folderId to the root sentinel", async () => {
+    const wf = await createWorkflow({ name: "A" })
+    expect(wf.folderId).toBe(ROOT_FOLDER_ID)
+  })
+
+  it("createWorkflow honors a caller-supplied folderId", async () => {
+    const wf = await createWorkflow({ name: "A", folderId: "wff_x" })
+    expect(wf.folderId).toBe("wff_x")
+  })
+
+  it("moveWorkflowToFolder updates folderId and listWorkflowsInFolder finds it", async () => {
+    const wf = await createWorkflow({ name: "A" })
+    await moveWorkflowToFolder(wf.id, "wff_target")
+    expect((await getWorkflow(wf.id))?.folderId).toBe("wff_target")
+    const inFolder = await listWorkflowsInFolder("wff_target")
+    expect(inFolder.map((w) => w.id)).toEqual([wf.id])
+  })
+
+  it("moveWorkflowToFolder coerces a falsy folder to root", async () => {
+    const wf = await createWorkflow({ name: "A", folderId: "wff_x" })
+    await moveWorkflowToFolder(wf.id, "")
+    expect((await getWorkflow(wf.id))?.folderId).toBe(ROOT_FOLDER_ID)
+  })
+
+  it("moveWorkflowsToFolder batch-moves and is a no-op on empty input", async () => {
+    const a = await createWorkflow({ name: "A" })
+    const b = await createWorkflow({ name: "B" })
+    await moveWorkflowsToFolder([a.id, b.id], "wff_bulk")
+    expect((await listWorkflowsInFolder("wff_bulk")).map((w) => w.id).sort()).toEqual(
+      [a.id, b.id].sort()
+    )
+    await expect(moveWorkflowsToFolder([], "wff_bulk")).resolves.toBeUndefined()
+  })
+})
+
+describe("addTagToWorkflows", () => {
+  it("adds a tag to each row without duplicating", async () => {
+    const a = await createWorkflow({ name: "A", tags: ["x"] })
+    const b = await createWorkflow({ name: "B" })
+    await addTagToWorkflows([a.id, b.id], "shared")
+    await addTagToWorkflows([a.id], "shared") // idempotent
+    expect((await getWorkflow(a.id))?.tags).toEqual(["x", "shared"])
+    expect((await getWorkflow(b.id))?.tags).toEqual(["shared"])
+  })
+
+  it("ignores empty ids or blank tag", async () => {
+    const a = await createWorkflow({ name: "A" })
+    await addTagToWorkflows([], "t")
+    await addTagToWorkflows([a.id], "   ")
+    expect((await getWorkflow(a.id))?.tags).toEqual([])
+  })
+})
+
+describe("getRunCounts", () => {
+  it("counts runs per workflow via the workflowId index", async () => {
+    const a = await createWorkflow({ name: "A" })
+    const b = await createWorkflow({ name: "B" })
+    await getDb().workflowRuns.bulkPut([
+      { id: "r1", workflowId: a.id, status: "success", startedAt: 1 },
+      { id: "r2", workflowId: a.id, status: "error", startedAt: 2 },
+      { id: "r3", workflowId: b.id, status: "success", startedAt: 3 },
+    ] as never)
+    const counts = await getRunCounts([a.id, b.id])
+    expect(counts.get(a.id)).toBe(2)
+    expect(counts.get(b.id)).toBe(1)
+  })
+
+  it("returns an empty map for empty input", async () => {
+    expect((await getRunCounts([])).size).toBe(0)
+  })
+})
+
+describe("getRecentlyFailedWorkflowIds", () => {
+  it("collects workflow ids with a failed run at or after the cutoff", async () => {
+    const a = await createWorkflow({ name: "A" })
+    const b = await createWorkflow({ name: "B" })
+    await getDb().workflowRuns.bulkPut([
+      { id: "r1", workflowId: a.id, status: "failed", startedAt: 1000 },
+      { id: "r2", workflowId: a.id, status: "succeeded", startedAt: 2000 },
+      { id: "r3", workflowId: b.id, status: "failed", startedAt: 100 },
+    ] as never)
+    const ids = await getRecentlyFailedWorkflowIds(500)
+    expect(ids.has(a.id)).toBe(true) // failed at 1000 ≥ 500
+    expect(ids.has(b.id)).toBe(false) // failed at 100 < 500
   })
 })

@@ -270,83 +270,93 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="sl-bot-token">
-            {t("botTokenLabel")}
-            <span className="ml-1 text-destructive">*</span>
-          </Label>
-          <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
-          <div className="flex gap-2">
-            <Input
-              id="sl-bot-token"
-              type="password"
-              autoComplete="new-password"
-              value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
-              placeholder={t("botTokenPlaceholder")}
-              disabled={saving}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleTest}
-              disabled={testing || saving || !desktop}
-              aria-label={t("testConnectionAria")}
-            >
-              {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : t("testButtonLabel")}
-            </Button>
+        {/* Credentials grid — 1 col on narrow, 2 cols ≥ sm. Help text sits
+            below the label so inputs across columns stay independent.
+            `items-start` keeps each cell's height self-contained. */}
+        <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 sm:items-start">
+          <div className="space-y-1.5">
+            <Label htmlFor="sl-bot-token">
+              {t("botTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
+            <div className="flex gap-2">
+              <Input
+                id="sl-bot-token"
+                type="password"
+                autoComplete="new-password"
+                value={botToken}
+                onChange={(e) => setBotToken(e.target.value)}
+                placeholder={t("botTokenPlaceholder")}
+                disabled={saving}
+                className="min-w-0 flex-1"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleTest}
+                disabled={testing || saving || !desktop}
+                aria-label={t("testConnectionAria")}
+                className="shrink-0"
+              >
+                {testing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
+              </Button>
+            </div>
           </div>
 
-          {testResult !== null && (
-            <div
-              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-                testResult.ok
-                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                  : "bg-destructive/10 text-destructive"
-              }`}
-              role="status"
-              aria-label={
-                testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
-              }
-            >
-              {testResult.ok ? (
-                <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
-              )}
-              {testResult.ok
-                ? t("connectedAs", {
-                    user: testResult.user ?? t("unknownUser"),
-                    team: testResult.team ?? t("unknownUser"),
-                    userId: testResult.userId ?? t("unknownId"),
-                  })
-                : testResult.error}
-            </div>
-          )}
-
-          {!desktop && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="sl-signing-secret">
+              {t("signingSecretLabel")}
+              <span className="ml-1 text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
+            <Input
+              id="sl-signing-secret"
+              type="password"
+              autoComplete="new-password"
+              value={signingSecret}
+              onChange={(e) => setSigningSecret(e.target.value)}
+              placeholder={t("signingSecretPlaceholder")}
+              disabled={saving}
+            />
+          </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="sl-signing-secret">
-            {t("signingSecretLabel")}
-            <span className="ml-1 text-destructive">*</span>
-          </Label>
-          <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
-          <Input
-            id="sl-signing-secret"
-            type="password"
-            autoComplete="new-password"
-            value={signingSecret}
-            onChange={(e) => setSigningSecret(e.target.value)}
-            placeholder={t("signingSecretPlaceholder")}
-            disabled={saving}
-          />
-        </div>
+        {/* Test status + desktop hint — full width below the grid so a long
+            error message can wrap without distorting the credential columns. */}
+        {testResult !== null && (
+          <div
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+              testResult.ok
+                ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                : "bg-destructive/10 text-destructive"
+            }`}
+            role="status"
+            aria-label={testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")}
+          >
+            {testResult.ok ? (
+              <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
+            )}
+            {testResult.ok
+              ? t("connectedAs", {
+                  user: testResult.user ?? t("unknownUser"),
+                  team: testResult.team ?? t("unknownUser"),
+                  userId: testResult.userId ?? t("unknownId"),
+                })
+              : testResult.error}
+          </div>
+        )}
+
+        {!desktop && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+        )}
 
         <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>
@@ -499,19 +509,21 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
-        <AdapterFormSections
-          sections={[identitySection, deliverySection, advancedSection]}
-          onSubmit={handleSave}
-          onCancel={() => onOpenChange(false)}
-          submitting={saving}
-          dirty={dirty}
-          submitLabel={isNew ? t("create") : t("save")}
-        />
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <AdapterFormSections
+            sections={[identitySection, deliverySection, advancedSection]}
+            onSubmit={handleSave}
+            onCancel={() => onOpenChange(false)}
+            submitting={saving}
+            dirty={dirty}
+            submitLabel={isNew ? t("create") : t("save")}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   )

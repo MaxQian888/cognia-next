@@ -55,11 +55,16 @@ interface SettingsState {
   loaded: boolean
   /**
    * In-memory mirror of the OS keyring (Tauri) or web-fallback Dexie store
-   * for TTS provider API keys. Populated once during `load()` and updated
-   * via `setProviderApiKey` / `clearProviderApiKey`. The orchestrator reads
-   * keys from here so playback paths don't pay an IPC round-trip per chunk.
+   * for TTS provider API keys. Populated lazily on first TTS use (or when the
+   * speech settings UI mounts) via `ensureProviderKeys`, then updated via
+   * `setProviderApiKey` / `clearProviderApiKey`. Kept out of `load()` so the
+   * `1 + N` keyring round-trips don't run during app boot — most sessions
+   * never touch TTS. The orchestrator reads keys from here so playback paths
+   * don't pay an IPC round-trip per chunk.
    */
   providerKeys: Partial<Record<KeyringProviderId, string>>
+  /** Whether `ensureProviderKeys` has completed a successful load. */
+  providerKeysLoaded: boolean
   load: () => Promise<void>
   save: (patch: Partial<Omit<AppSettings, "id">>) => Promise<void>
   toggleAlwaysAllow: (toolName: string, allow: boolean) => Promise<void>
@@ -79,7 +84,14 @@ interface SettingsState {
   // ---- TTS provider keys + per-field shortcuts ----
   setProviderApiKey: (provider: KeyringProviderId, key: string) => Promise<void>
   clearProviderApiKey: (provider: KeyringProviderId) => Promise<void>
+  /** Force a reload of all provider keys from the keyring/Dexie. */
   refreshProviderKeys: () => Promise<void>
+  /**
+   * Lazily load provider keys on first TTS use. Idempotent: returns
+   * immediately once a load has succeeded. Triggered from the TTS `speak`
+   * path and the speech settings UI — never on the boot path.
+   */
+  ensureProviderKeys: () => Promise<void>
 
   setTtsEnabled: (enabled: boolean) => Promise<void>
   setTtsProvider: (provider: NonNullable<AppSettings["ttsProvider"]>) => Promise<void>
@@ -420,6 +432,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     settings: null,
     loaded: false,
     providerKeys: {},
+    providerKeysLoaded: false,
     ...deriveFlatPluginFields(null),
 
     load: async () => {
@@ -452,14 +465,8 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
             console.warn("networkProxy.applyToRust failed", err)
           }
         }
-        // Load TTS provider keys from the OS keyring (Tauri) / Dexie fallback.
-        // Failures here are non-fatal; missing keys are surfaced in the UI.
-        try {
-          const keys = await loadAllProviderKeys()
-          set({ providerKeys: keys })
-        } catch (err) {
-          console.warn("tts.loadAllProviderKeys failed", err)
-        }
+        // TTS provider keys are loaded lazily (see `ensureProviderKeys`), NOT
+        // here — keeping the `1 + N` keyring round-trips off the boot path.
       } catch (err) {
         console.error("settings.load failed", err)
         set({ settings: DEFAULTS, loaded: true })
@@ -715,9 +722,21 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     refreshProviderKeys: async () => {
       try {
         const keys = await loadAllProviderKeys()
-        set({ providerKeys: keys })
+        set({ providerKeys: keys, providerKeysLoaded: true })
       } catch (err) {
         console.warn("refreshProviderKeys failed", err)
+      }
+    },
+
+    ensureProviderKeys: async () => {
+      if (get().providerKeysLoaded) return
+      try {
+        const keys = await loadAllProviderKeys()
+        set({ providerKeys: keys, providerKeysLoaded: true })
+      } catch (err) {
+        // Non-fatal: missing keys are surfaced in the UI. Leave the flag false
+        // so a later call retries.
+        console.warn("ensureProviderKeys failed", err)
       }
     },
 

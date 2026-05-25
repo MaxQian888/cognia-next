@@ -22,6 +22,11 @@ export {
   type PluginMarketplaceEntry,
   __resetPluginMarketplaceClientForTests,
 } from "./use-plugin-marketplace"
+export {
+  useBuiltinPluginEntries,
+  mapBuiltinRowToEntry,
+  type BuiltinMarketplaceEntry,
+} from "./use-builtin-plugin-entries"
 export { useDevtoolsGate, DEVTOOLS_GATE_STORAGE_KEY } from "./use-devtools-gate"
 export { usePluginRow, type PluginRowState } from "./use-plugin-row"
 export { usePluginDiagnostics } from "./use-plugin-diagnostics"

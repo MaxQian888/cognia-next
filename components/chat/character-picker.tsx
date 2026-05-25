@@ -11,9 +11,10 @@ import {
 } from "@/components/ui/command"
 import type { Character } from "@/lib/claude/types"
 import { useCharacters } from "@/lib/data-hooks/context"
-import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { isOverlayCharacterId } from "@/lib/plugin/registries/character-pack-registry"
 import { LOCAL_PACK_PLUGIN_ID } from "@/lib/plugin/character-pack/local-pack-store"
+import { isAvailableOnProfile } from "@/lib/plugin/character-pack/platform-availability"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
 interface Props {
@@ -76,7 +77,9 @@ export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
   const t = useTranslations("chat.characterPicker")
   const characters = useCharacters() ?? []
   const plugins = usePluginStore((s) => s.plugins)
-  const groups = groupCharacters(characters)
+  // ADR-0030 — hide characters a pack restricted away from this host profile.
+  const visible = characters.filter((c) => isAvailableOnProfile(c.availableOnPlatforms))
+  const groups = groupCharacters(visible)
 
   const renderItem = (c: Character) => (
     <CommandItem
@@ -87,16 +90,11 @@ export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
         onOpenChange(false)
       }}
     >
-      <span
-        className="flex size-6 items-center justify-center rounded-full text-xs"
-        style={{
-          backgroundColor: avatarColor(c),
-          color: "white",
-        }}
-        aria-hidden
-      >
-        {avatarGlyph(c)}
-      </span>
+      <AvatarBadge
+        subject={{ ...c, avatarImageUrl: c.avatarImage?.webDataUrl }}
+        size={24}
+        textClassName="text-xs"
+      />
       <span className="flex flex-col">
         <span className="text-sm">{c.name}</span>
         {c.description && (

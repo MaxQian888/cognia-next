@@ -236,6 +236,13 @@ export interface VisualWorkflow {
    * value fall through to the picker's default bucket.
    */
   complexity?: "starter" | "intermediate" | "advanced"
+  /**
+   * Library folder this workflow lives in. `ROOT_FOLDER_ID` ("root") = the
+   * library root. Stored as a non-null sentinel string (never `null`/
+   * `undefined`) so Dexie's `where("folderId")` range queries can index it —
+   * IndexedDB cannot match null keys. See `types/workflow/folder.ts`.
+   */
+  folderId?: string
   createdAt: number
   updatedAt: number
   nodes: WorkflowNode[]

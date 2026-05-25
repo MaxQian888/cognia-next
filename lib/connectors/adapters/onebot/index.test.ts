@@ -3,8 +3,18 @@ import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import { clearAllVariantCaches } from "./parse"
 
+// Mock the generic WS client commands so the forward-ws path doesn't invoke
+// Tauri. The reverse-ws path (default in most tests) never touches these.
+jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsWsOpen: jest.fn().mockResolvedValue("fw-1"),
+  connectorsWsSend: jest.fn().mockResolvedValue(undefined),
+  connectorsWsClose: jest.fn().mockResolvedValue(undefined),
+}))
+import { connectorsWsOpen } from "@/lib/connectors/tauri/commands"
+
 const mockListen = listen as jest.Mock
 const mockEmit = emit as jest.Mock
+const mockWsOpen = connectorsWsOpen as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,6 +229,60 @@ describe("createOneBotAdapter", () => {
     const { ctx } = makeCtx()
     await adapter.start(ctx)
     await expect(adapter.setTyping!("onebot:ob-typing:g:300001", true)).resolves.toBeUndefined()
+    await adapter.stop()
+  })
+})
+
+describe("createOneBotAdapter — forward-ws transport", () => {
+  beforeEach(() => {
+    mockWsOpen.mockClear()
+    mockWsOpen.mockResolvedValue("fw-1")
+  })
+
+  it("meta advertises both reverse-ws and forward-ws", () => {
+    const adapter = makeAdapter()
+    expect(adapter.meta.transportModes).toContain("reverse-ws")
+    expect(adapter.meta.transportModes).toContain("forward-ws")
+  })
+
+  it("dials the NapCat WS server with a Bearer header on start", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+
+    const adapter = createOneBotAdapter({
+      id: "ob-forward",
+      displayName: "Fwd",
+      selfBotUin: "100000",
+      transportMode: "forward-ws",
+      forwardWsUrl: "ws://127.0.0.1:3001",
+      bearerToken: async () => "tok",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+
+    expect(mockWsOpen).toHaveBeenCalledWith("ws://127.0.0.1:3001", {
+      Authorization: "Bearer tok",
+    })
+
+    await adapter.stop()
+  })
+
+  it("falls back to reverse-ws when forward-ws is selected without a URL", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+
+    const adapter = createOneBotAdapter({
+      id: "ob-forward-nourl",
+      displayName: "Fwd",
+      selfBotUin: "100000",
+      transportMode: "forward-ws",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+
+    // No outbound dial — the reverse-ws path subscribes via Tauri events.
+    expect(mockWsOpen).not.toHaveBeenCalled()
+
     await adapter.stop()
   })
 })

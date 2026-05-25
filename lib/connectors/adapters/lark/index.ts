@@ -16,9 +16,14 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
-import { parseLarkEventEnvelope, parseLarkInteractiveCallback } from "./parse"
+import {
+  parseLarkEventEnvelope,
+  parseLarkBotMenuEvent,
+  parseLarkInteractiveCallback,
+} from "./parse"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
+import type { LarkQuickCommand } from "./quick-commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   serializeOutbound,
@@ -48,6 +53,11 @@ export interface LarkAdapterOptions {
   verificationToken: () => Promise<string>
   /** Bot's own open_id; used to detect self-mentions. */
   selfBotOpenId: string
+  /**
+   * Bot-menu (快捷指令) mappings: each `event_key` → an action the assistant
+   * turn should run when the user clicks the corresponding Feishu bot menu.
+   */
+  quickCommands?: LarkQuickCommand[]
   transport: "webhook" | "long-connection"
   /**
    * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
@@ -159,6 +169,22 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         }
         return
       }
+      // Bot-menu (快捷指令) clicks — map event_key → action, then run the
+      // same gate → bus → ai-run path as a regular message.
+      if (envelope.header?.event_type === "application.bot.menu_v6") {
+        const menuEvent = parseLarkBotMenuEvent(
+          opts.id,
+          opts.selfBotOpenId,
+          envelope,
+          opts.quickCommands
+        )
+        if (menuEvent) {
+          if (!(await gateInboundEvent(opts.id, menuEvent))) return
+          lastActivityAt = Date.now()
+          await ctx.emit(menuEvent)
+        }
+        return
+      }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
       if (event) {
         // v45 (im-refactored-crayon) — gate inbound `create` messages on
@@ -175,7 +201,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       ;(async () => {
         try {
           const generator = startLarkLongConn({
-            tenantAccessToken: getTat,
+            adapterId: opts.id,
             signal,
           })
           for await (const envelope of generator) {

@@ -502,6 +502,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.defaultSystemPrompt ??
     undefined
 
+  // Tracks whether the twin runtime replaced `baseSystem` below. When it did,
+  // the twin prompt already encodes personality, so the v2 persona section
+  // (tone / personality) is suppressed to avoid contradictory guidance.
+  let twinReplacedBase = false
+
   // --- Twin runtime injection (opt-in) -------------------------------------
   // When the resolving character is twin-bound AND the caller supplied
   // `twinDeps` + `twinUserMessage`, replace `baseSystem` with the four-segment
@@ -518,6 +523,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       })
       if (result.applied) {
         baseSystem = result.applied.systemPrompt
+        twinReplacedBase = true
       }
       // Stash the retrieved context for the chat hook so it can render a
       // Twin SourcesPart on the assistant message. Always attached when the
@@ -589,7 +595,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     void recordPluginSkillUsage(pluginUsageIds, pluginIdMap).catch(() => undefined)
   }
 
-  const systemPrompt = [baseSystem, modeSection, skillSection, pluginSkillSection]
+  // --- v2 persona (ADR-0030) ----------------------------------------------
+  // Project the character's free-form `tone` / `personality` into a short
+  // guidance block appended after the base system prompt. Suppressed when the
+  // twin runtime already produced a personality-rich prompt (see above).
+  let personaSection = ""
+  if (!twinReplacedBase && character?.persona) {
+    const personaParts: string[] = []
+    const tone = character.persona.tone?.trim()
+    const personality = character.persona.personality?.trim()
+    if (tone) personaParts.push(`Tone: ${tone}`)
+    if (personality) personaParts.push(personality)
+    if (personaParts.length > 0) {
+      personaSection = `## Persona\n\n${personaParts.join("\n\n")}`
+    }
+  }
+
+  const systemPrompt = [baseSystem, personaSection, modeSection, skillSection, pluginSkillSection]
     .filter((p) => p && p.trim().length > 0)
     .join("\n\n---\n\n")
   if (systemPrompt) opts.systemPrompt = systemPrompt

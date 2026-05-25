@@ -21,6 +21,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value as JsonValue;
@@ -44,42 +45,28 @@ pub enum MirrorError {
 pub type Result<T> = std::result::Result<T, MirrorError>;
 
 pub struct RunMirror {
-    conn: Mutex<Connection>,
+    /// On-disk path; `None` for an in-memory (test) connection that is filled
+    /// eagerly because it can't be reopened from a path.
+    path: Option<PathBuf>,
+    conn: OnceCell<Mutex<Connection>>,
 }
 
 impl RunMirror {
+    /// Register the mirror DB path. The SQLite connection (file open + schema
+    /// creation) is opened **lazily on first use**, not here, so it stays off
+    /// the synchronous Tauri startup path — nothing at boot reads the mirror.
+    /// The cron daemon's first tick and the TS orchestrator's run-state calls
+    /// are the first touches, both off the main thread.
     pub fn open(path: PathBuf) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let conn = Connection::open(path)?;
-        conn.execute_batch(
-            r#"
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-
-            CREATE TABLE IF NOT EXISTS workflow_run_mirror (
-                run_id          TEXT PRIMARY KEY,
-                workflow_id     TEXT NOT NULL,
-                status          TEXT NOT NULL,
-                last_step_id    TEXT,
-                snapshot_json   TEXT NOT NULL,
-                started_at      INTEGER NOT NULL,
-                updated_at      INTEGER NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_run_mirror_status
-                ON workflow_run_mirror(status);
-            CREATE INDEX IF NOT EXISTS idx_run_mirror_workflow
-                ON workflow_run_mirror(workflow_id);
-            "#,
-        )?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            path: Some(path),
+            conn: OnceCell::new(),
         })
     }
 
     /// Open an in-memory database. Used by tests so they don't touch disk.
+    /// In-memory connections can't be reopened from a path, so the cell is
+    /// filled eagerly here.
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -96,8 +83,48 @@ impl RunMirror {
             );
             "#,
         )?;
+        let cell = OnceCell::new();
+        let _ = cell.set(Mutex::new(conn));
         Ok(Self {
-            conn: Mutex::new(conn),
+            path: None,
+            conn: cell,
+        })
+    }
+
+    /// Lazily open (and schema-init) the file-backed connection on first use.
+    /// On open error the cell stays empty so a later call can retry.
+    fn conn(&self) -> Result<&Mutex<Connection>> {
+        self.conn.get_or_try_init(|| {
+            let path = self
+                .path
+                .clone()
+                .ok_or_else(|| MirrorError::Io(std::io::Error::other("run mirror path unset")))?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let conn = Connection::open(path)?;
+            conn.execute_batch(
+                r#"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+
+                CREATE TABLE IF NOT EXISTS workflow_run_mirror (
+                    run_id          TEXT PRIMARY KEY,
+                    workflow_id     TEXT NOT NULL,
+                    status          TEXT NOT NULL,
+                    last_step_id    TEXT,
+                    snapshot_json   TEXT NOT NULL,
+                    started_at      INTEGER NOT NULL,
+                    updated_at      INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_run_mirror_status
+                    ON workflow_run_mirror(status);
+                CREATE INDEX IF NOT EXISTS idx_run_mirror_workflow
+                    ON workflow_run_mirror(workflow_id);
+                "#,
+            )?;
+            Ok(Mutex::new(conn))
         })
     }
 
@@ -108,7 +135,7 @@ impl RunMirror {
         let status = RunStatus::from_str(&input.status)
             .ok_or_else(|| MirrorError::InvalidStatus(input.status.clone()))?;
         let now = current_millis();
-        let conn = self.conn.lock();
+        let conn = self.conn()?.lock();
 
         let existing_snapshot: Option<String> = conn
             .query_row(
@@ -163,7 +190,7 @@ impl RunMirror {
     /// re-emits each as a `workflow:resume` event so the orchestrator picks
     /// up where the crashed run left off.
     pub fn list_in_flight(&self) -> Result<Vec<InFlightRunRow>> {
-        let conn = self.conn.lock();
+        let conn = self.conn()?.lock();
         let mut stmt = conn.prepare(
             r#"
             SELECT run_id, workflow_id, last_step_id, snapshot_json, started_at, status
@@ -202,7 +229,7 @@ impl RunMirror {
     /// alternatively keep the row for audit, but the durable Dexie history is
     /// the source of truth so the mirror exists only for crash recovery.
     pub fn ack_completed(&self, run_id: &str) -> Result<()> {
-        let conn = self.conn.lock();
+        let conn = self.conn()?.lock();
         conn.execute(
             "DELETE FROM workflow_run_mirror WHERE run_id = ?1",
             params![run_id],
@@ -213,7 +240,7 @@ impl RunMirror {
     /// Total mirror row count — used by tests and the diagnostics tab.
     #[allow(dead_code)]
     pub fn count(&self) -> Result<usize> {
-        let conn = self.conn.lock();
+        let conn = self.conn()?.lock();
         let count: i64 =
             conn.query_row("SELECT COUNT(*) FROM workflow_run_mirror", [], |row| row.get(0))?;
         Ok(count.max(0) as usize)
@@ -256,6 +283,19 @@ mod tests {
             "nodes": [],
             "edges": [],
         })
+    }
+
+    #[test]
+    fn file_backed_open_is_lazy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("workflow-runs.sqlite");
+        let mirror = RunMirror::open(path.clone()).expect("register path");
+        // `open` must NOT touch disk — the eager open used to run on the
+        // synchronous Tauri startup path.
+        assert!(!path.exists(), "mirror db created before first use");
+        // First read opens + schema-inits the file.
+        assert_eq!(mirror.list_in_flight().expect("list").len(), 0);
+        assert!(path.exists(), "mirror db not created on first use");
     }
 
     #[test]

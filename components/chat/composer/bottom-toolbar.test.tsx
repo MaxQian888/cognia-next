@@ -158,6 +158,16 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
   })
+
+  // Regression: the row must wrap instead of pinning both ends with
+  // `justify-between`, which let the left controls slide under the
+  // right-aligned context indicator on a narrow (welcome) composer.
+  it("lays the generic toolbar out as a wrapping row so controls can't overlap", () => {
+    const { container } = render(<BottomToolbar session={session} />)
+    const root = container.firstChild as HTMLElement
+    expect(root.className).toContain("flex-wrap")
+    expect(root.className).not.toContain("justify-between")
+  })
 })
 
 describe("BottomToolbar — agent-mode wiring", () => {

@@ -515,7 +515,7 @@ pnpm monaco:copy           # predev/prebuild 会自动跑
 
 ## 许可证
 
-MIT —— 见 [LICENSE](./LICENSE)。
+AGPL-3.0-or-later —— 见 [LICENSE](./LICENSE)。
 
 ## 支持
 

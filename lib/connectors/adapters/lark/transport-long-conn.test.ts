@@ -1,37 +1,29 @@
 /**
  * Long-connection transport tests.
  *
- * Mocks: connectorsWsOpen, connectorsWsSend, connectorsWsClose,
- * connectorsHttpRequest, @tauri-apps/api/event listen.
+ * The binary protobuf protocol now lives in Rust; this TS layer just opens the
+ * Rust handle (`connectorsLarkWsOpen`) and consumes complete event envelopes
+ * delivered on `connectors://lark-ws/<handleId>/event`.
  *
- * Pattern: POST wsServer → connect WS → push event_push frames → assert yield;
- * push heartbeat_req → assert heartbeat_rsp sent; abort → stops.
+ * Mocks: connectorsLarkWsOpen, connectorsLarkWsClose, @tauri-apps/api/event listen.
+ * Pattern: open → push /event envelopes → assert yield; abort → handle closed.
  */
 
 import { listen } from "@tauri-apps/api/event"
-import {
-  connectorsWsOpen,
-  connectorsWsSend,
-  connectorsWsClose,
-  connectorsHttpRequest,
-} from "@/lib/connectors/tauri/commands"
+import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
 import { startLarkLongConn } from "./transport-long-conn"
 
 const mockListen = listen as jest.Mock
-const mockWsOpen = connectorsWsOpen as jest.Mock
-const mockWsSend = connectorsWsSend as jest.Mock
-const mockWsClose = connectorsWsClose as jest.Mock
-const mockHttp = connectorsHttpRequest as jest.Mock
+const mockOpen = connectorsLarkWsOpen as jest.Mock
+const mockClose = connectorsLarkWsClose as jest.Mock
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
-  connectorsWsOpen: jest.fn(),
-  connectorsWsSend: jest.fn(),
-  connectorsWsClose: jest.fn(),
-  connectorsHttpRequest: jest.fn(),
+  connectorsLarkWsOpen: jest.fn(),
+  connectorsLarkWsClose: jest.fn(),
 }))
 
 function createFakeWsSession() {
-  let messageHandler: ((event: { payload: string }) => void) | null = null
+  let eventHandler: ((event: { payload: string }) => void) | null = null
   let closeHandler: (() => void) | null = null
   let listenCallCount = 0
   let handlersResolve: () => void = () => {}
@@ -41,8 +33,8 @@ function createFakeWsSession() {
 
   const listenImpl = jest.fn().mockImplementation(async (eventName: string, handler: unknown) => {
     listenCallCount++
-    if ((eventName as string).endsWith("/message")) {
-      messageHandler = handler as (event: { payload: string }) => void
+    if ((eventName as string).endsWith("/event")) {
+      eventHandler = handler as (event: { payload: string }) => void
     } else if ((eventName as string).endsWith("/close")) {
       closeHandler = handler as () => void
     }
@@ -53,20 +45,12 @@ function createFakeWsSession() {
   return {
     listenImpl,
     waitForListeners: () => handlersReadyP,
-    push(payload: unknown) {
-      messageHandler?.({ payload: JSON.stringify(payload) })
+    push(envelope: unknown) {
+      eventHandler?.({ payload: JSON.stringify(envelope) })
     },
     triggerClose() {
       closeHandler?.()
     },
-  }
-}
-
-function makeWsServerOkResp(url = "wss://fake-lark-ws") {
-  return {
-    status: 200,
-    headers: {},
-    body: JSON.stringify({ code: 0, data: { url } }),
   }
 }
 
@@ -89,14 +73,12 @@ function makeLarkEnvelope(msgId: string) {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockWsOpen.mockResolvedValue("lark-handle-id")
-  mockWsSend.mockResolvedValue(undefined)
-  mockWsClose.mockResolvedValue(undefined)
-  mockHttp.mockResolvedValue(makeWsServerOkResp())
+  mockOpen.mockResolvedValue("lark-handle-id")
+  mockClose.mockResolvedValue(undefined)
 })
 
 describe("startLarkLongConn", () => {
-  it("yields events from event_push frames", async () => {
+  it("yields envelopes delivered on the /event channel", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
@@ -105,10 +87,8 @@ describe("startLarkLongConn", () => {
 
     const collectorDone = (async () => {
       for await (const envelope of startLarkLongConn({
-        tenantAccessToken: async () => "tat-xxx",
+        adapterId: "lark-1",
         signal: ctrl.signal,
-        _wsServerUrl: "https://fake-ws-server",
-        _heartbeatIntervalMs: 100_000, // prevent timer fires during test
         _backoffBaseMs: 1,
       })) {
         yielded.push(envelope.event.message!.message_id)
@@ -118,18 +98,42 @@ describe("startLarkLongConn", () => {
 
     await session.waitForListeners()
 
-    session.push({ type: "event_push", event: makeLarkEnvelope("om_001") })
+    session.push(makeLarkEnvelope("om_001"))
     await new Promise((r) => setTimeout(r, 10))
-    session.push({ type: "event_push", event: makeLarkEnvelope("om_002") })
+    session.push(makeLarkEnvelope("om_002"))
     await new Promise((r) => setTimeout(r, 10))
 
     ctrl.abort()
     await collectorDone
 
+    expect(mockOpen).toHaveBeenCalledWith("lark-1")
     expect(yielded).toEqual(["om_001", "om_002"])
   }, 10000)
 
-  it("replies heartbeat_rsp to heartbeat_req", async () => {
+  it("closes the Rust handle when the signal aborts", async () => {
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+
+    const ctrl = new AbortController()
+
+    const collectorDone = (async () => {
+      for await (const _ of startLarkLongConn({
+        adapterId: "lark-1",
+        signal: ctrl.signal,
+        _backoffBaseMs: 1,
+      })) {
+        // drain
+      }
+    })()
+
+    await session.waitForListeners()
+    ctrl.abort()
+    await collectorDone
+
+    expect(mockClose).toHaveBeenCalledWith("lark-handle-id")
+  }, 10000)
+
+  it("ignores malformed (non-JSON) event payloads", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
@@ -138,43 +142,34 @@ describe("startLarkLongConn", () => {
 
     const collectorDone = (async () => {
       for await (const envelope of startLarkLongConn({
-        tenantAccessToken: async () => "tat-xxx",
+        adapterId: "lark-1",
         signal: ctrl.signal,
-        _wsServerUrl: "https://fake-ws-server",
-        _heartbeatIntervalMs: 100_000,
         _backoffBaseMs: 1,
       })) {
         yielded.push(envelope.event.message!.message_id)
-        break
+        if (yielded.length >= 1) break
       }
     })()
 
     await session.waitForListeners()
 
-    // Trigger a server heartbeat probe
-    session.push({ type: "heartbeat_req" })
-    await new Promise((r) => setTimeout(r, 20))
-
-    // Then push a real event so we have something to yield and break
-    session.push({ type: "event_push", event: makeLarkEnvelope("om_hb") })
-    await new Promise((r) => setTimeout(r, 20))
+    // Malformed frame must not throw or yield.
+    session["push"] // noop ref to keep linter calm
+    const handler = (session.listenImpl.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).endsWith("/event")
+    )?.[1] ?? (() => {})) as (e: { payload: string }) => void
+    handler({ payload: "<not json>" })
+    await new Promise((r) => setTimeout(r, 10))
+    session.push(makeLarkEnvelope("om_ok"))
+    await new Promise((r) => setTimeout(r, 10))
 
     ctrl.abort()
     await collectorDone
 
-    // Assert heartbeat_rsp was sent
-    const rspCalls = mockWsSend.mock.calls.filter((args: unknown[]) => {
-      try {
-        const p = JSON.parse(args[1] as string) as { type?: string }
-        return p.type === "heartbeat_rsp"
-      } catch {
-        return false
-      }
-    })
-    expect(rspCalls.length).toBeGreaterThanOrEqual(1)
+    expect(yielded).toEqual(["om_ok"])
   }, 10000)
 
-  it("stops immediately when signal is pre-aborted", async () => {
+  it("stops immediately when the signal is pre-aborted", async () => {
     mockListen.mockResolvedValue(jest.fn())
 
     const ctrl = new AbortController()
@@ -182,14 +177,14 @@ describe("startLarkLongConn", () => {
 
     const collected: unknown[] = []
     for await (const e of startLarkLongConn({
-      tenantAccessToken: async () => "tat-xxx",
+      adapterId: "lark-1",
       signal: ctrl.signal,
-      _heartbeatIntervalMs: 100_000,
       _backoffBaseMs: 1,
     })) {
       collected.push(e)
     }
 
     expect(collected).toHaveLength(0)
+    expect(mockOpen).not.toHaveBeenCalled()
   })
 })

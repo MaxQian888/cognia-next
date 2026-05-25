@@ -13,9 +13,16 @@ import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import { clearAllVariantCaches } from "./parse"
 import type { OutboundRequest } from "@/types/connectors/outbound"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
+
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: jest.fn(),
+  updateAdapterInstance: jest.fn(),
+}))
 
 const mockListen = listen as jest.Mock
 const mockEmit = emit as jest.Mock
+const mockGetAdapterInstance = getAdapterInstance as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,6 +115,12 @@ async function setupAdapter(bus: ReturnType<typeof createEventBus>, id: string) 
 beforeEach(() => {
   mockListen.mockReset()
   mockEmit.mockReset()
+  mockGetAdapterInstance.mockReset()
+  // Default: unknown adapter row → undefined (mirrors a Dexie miss). The
+  // inbound at-gate (`at-gate.ts`) calls `getAdapterInstance(id).catch(...)`
+  // on every event, so the mock must always return a Promise. Reaction tests
+  // override this with a row carrying `implMetadata.features`.
+  mockGetAdapterInstance.mockResolvedValue(undefined)
   clearAllVariantCaches()
 })
 
@@ -122,6 +135,7 @@ describe("OneBot adapter contract suite", () => {
       expect(adapter.meta.type).toBe("onebot")
       expect(adapter.meta.version).toBe("0.1.0")
       expect(adapter.meta.transportModes).toContain("reverse-ws")
+      expect(adapter.meta.transportModes).toContain("forward-ws")
     })
 
     it("capabilities include the ship-set and exclude edit/typing", () => {
@@ -287,6 +301,57 @@ describe("OneBot adapter contract suite", () => {
       const payload = JSON.parse(mockEmit.mock.calls[0][1] as string) as Record<string, unknown>
       expect(payload.action).toBe("delete_msg")
       expect((payload.params as Record<string, unknown>).message_id).toBe(12345)
+
+      await adapter.stop()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // send.reaction — NapCat set_msg_emoji_like (runtime feature-gated)
+  // ---------------------------------------------------------------------------
+
+  describe("send.reaction capability", () => {
+    it("addReaction emits set_msg_emoji_like when the upstream advertises it", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      mockGetAdapterInstance.mockResolvedValue({
+        implMetadata: { impl: "napcat", version: "4.x", features: ["set_msg_emoji_like"] },
+      })
+
+      const { adapter } = await setupAdapter(bus, "ob-react")
+      const withReact = adapter as typeof adapter & {
+        addReaction: (messageId: string, emojiId: string) => Promise<void>
+      }
+
+      await withReact.addReaction("12345", "128077")
+
+      const sendCall = mockEmit.mock.calls.find((c) => (c[0] as string).endsWith("/send"))
+      expect(sendCall).toBeDefined()
+      const payload = JSON.parse(sendCall![1] as string) as Record<string, unknown>
+      expect(payload.action).toBe("set_msg_emoji_like")
+      const params = payload.params as Record<string, unknown>
+      expect(params.message_id).toBe(12345)
+      expect(params.emoji_id).toBe("128077")
+
+      await adapter.stop()
+    })
+
+    it("addReaction throws (no emit) when the upstream lacks set_msg_emoji_like", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      mockGetAdapterInstance.mockResolvedValue({
+        implMetadata: { impl: "lagrange", version: "0.x", features: [] },
+      })
+
+      const { adapter } = await setupAdapter(bus, "ob-react-no")
+      const withReact = adapter as typeof adapter & {
+        addReaction: (messageId: string, emojiId: string) => Promise<void>
+      }
+
+      await expect(withReact.addReaction("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
+
+      const sendCalls = mockEmit.mock.calls.filter((c) => (c[0] as string).endsWith("/send"))
+      expect(sendCalls).toHaveLength(0)
 
       await adapter.stop()
     })

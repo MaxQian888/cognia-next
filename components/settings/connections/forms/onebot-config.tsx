@@ -36,6 +36,7 @@ import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-se
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 type ExpectedClient = "napcat" | "lagrange" | "llonebot" | "other"
+type OneBotTransportMode = "reverse-ws" | "forward-ws"
 
 interface OneBotConfigDialogProps {
   open: boolean
@@ -60,6 +61,7 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
   const settings = (row?.settings ?? {}) as {
     selfBotUin?: string
     expectedClient?: ExpectedClient
+    forwardWsUrl?: string
   }
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
@@ -68,6 +70,10 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
   const [expectedClient, setExpectedClient] = useState<ExpectedClient>(
     settings.expectedClient ?? "napcat"
   )
+  const [transportMode, setTransportMode] = useState<OneBotTransportMode>(
+    row?.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws"
+  )
+  const [forwardWsUrl, setForwardWsUrl] = useState(settings.forwardWsUrl ?? "")
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [saving, setSaving] = useState(false)
@@ -84,6 +90,8 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
     botUin.trim() !== (settings.selfBotUin ?? "") ||
     bearerToken.length > 0 ||
     expectedClient !== (settings.expectedClient ?? "napcat") ||
+    transportMode !== (row?.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws") ||
+    forwardWsUrl.trim() !== (settings.forwardWsUrl ?? "") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -112,6 +120,10 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
       toast.error(t("botUinRequired"))
       return
     }
+    if (transportMode === "forward-ws" && !forwardWsUrl.trim()) {
+      toast.error(t("forwardUrlRequired"))
+      return
+    }
     if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
       toast.error(t("quietHoursIncomplete"))
       return
@@ -121,16 +133,19 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
     try {
       let adapterId: string
 
+      const onebotSettings = {
+        selfBotUin: botUin.trim(),
+        expectedClient,
+        ...(transportMode === "forward-ws" ? { forwardWsUrl: forwardWsUrl.trim() } : {}),
+      }
+
       if (isNew) {
         const newRow = await createAdapterInstance({
           type: "onebot",
           displayName: displayName.trim(),
           enabled: true,
-          transportMode: "reverse-ws",
-          settings: {
-            selfBotUin: botUin.trim(),
-            expectedClient,
-          },
+          transportMode,
+          settings: onebotSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
             accounts: bearerToken.trim() ? ["onebotBearer"] : [],
@@ -145,10 +160,8 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
         adapterId = row.id
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
-          settings: {
-            selfBotUin: botUin.trim(),
-            expectedClient,
-          },
+          transportMode,
+          settings: onebotSettings,
           muted,
           quietHours: quietHours ?? undefined,
         })
@@ -237,126 +250,175 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="ob-uin">
-            {t("botUinLabel")}
-            <span className="ml-1 text-destructive">*</span>
-          </Label>
-          <p className="text-xs text-muted-foreground">{t("botUinHelp")}</p>
-          <Input
-            id="ob-uin"
-            value={botUin}
-            onChange={(e) => setBotUin(e.target.value)}
-            placeholder={t("botUinPlaceholder")}
-            disabled={saving}
-          />
-        </div>
+        {/* Credentials grid — 1 col on narrow, 2 cols ≥ sm. `items-start`
+            keeps each cell's height independent so help-text length differences
+            don't misalign the columns. */}
+        <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 sm:items-start">
+          <div className="space-y-1.5">
+            <Label htmlFor="ob-uin">
+              {t("botUinLabel")}
+              <span className="ml-1 text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("botUinHelp")}</p>
+            <Input
+              id="ob-uin"
+              value={botUin}
+              onChange={(e) => setBotUin(e.target.value)}
+              placeholder={t("botUinPlaceholder")}
+              disabled={saving}
+            />
+          </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="ob-bearer">{t("bearerTokenLabel")}</Label>
-          <p className="text-xs text-muted-foreground">
-            {t("bearerTokenHelpPrefix")} <code className="text-xs">accessToken</code>{" "}
-            {t("bearerTokenHelpSuffix")}
-          </p>
-          <Input
-            id="ob-bearer"
-            type="password"
-            autoComplete="new-password"
-            value={bearerToken}
-            onChange={(e) => setBearerToken(e.target.value)}
-            placeholder={t("bearerTokenPlaceholder")}
-            disabled={saving}
-          />
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ob-bearer">{t("bearerTokenLabel")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("bearerTokenHelpPrefix")} <code className="text-xs">accessToken</code>{" "}
+              {t("bearerTokenHelpSuffix")}
+            </p>
+            <Input
+              id="ob-bearer"
+              type="password"
+              autoComplete="new-password"
+              value={bearerToken}
+              onChange={(e) => setBearerToken(e.target.value)}
+              placeholder={t("bearerTokenPlaceholder")}
+              disabled={saving}
+            />
+          </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="ob-client">{t("expectedClientLabel")}</Label>
-          <Select
-            value={expectedClient}
-            onValueChange={(v) => setExpectedClient(v as ExpectedClient)}
-            disabled={saving}
-          >
-            <SelectTrigger id="ob-client">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="napcat">{t("expectedClientNapcat")}</SelectItem>
-              <SelectItem value="lagrange">{t("expectedClientLagrange")}</SelectItem>
-              <SelectItem value="llonebot">{t("expectedClientLlonebot")}</SelectItem>
-              <SelectItem value="other">{t("expectedClientOther")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{t("expectedClientHelp")}</p>
+          <div className="space-y-1.5">
+            <Label htmlFor="ob-client">{t("expectedClientLabel")}</Label>
+            <Select
+              value={expectedClient}
+              onValueChange={(v) => setExpectedClient(v as ExpectedClient)}
+              disabled={saving}
+            >
+              <SelectTrigger id="ob-client">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="napcat">{t("expectedClientNapcat")}</SelectItem>
+                <SelectItem value="lagrange">{t("expectedClientLagrange")}</SelectItem>
+                <SelectItem value="llonebot">{t("expectedClientLlonebot")}</SelectItem>
+                <SelectItem value="other">{t("expectedClientOther")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("expectedClientHelp")}</p>
+          </div>
         </div>
       </div>
     ),
   }
+
+  const transportSelector = (
+    <div className="space-y-1.5">
+      <Label htmlFor="ob-transport">{t("transportModeLabel")}</Label>
+      <Select
+        value={transportMode}
+        onValueChange={(v) => setTransportMode(v as OneBotTransportMode)}
+        disabled={saving}
+      >
+        <SelectTrigger id="ob-transport">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="reverse-ws">{t("transportReverse")}</SelectItem>
+          <SelectItem value="forward-ws">{t("transportForward")}</SelectItem>
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">{t("transportModeHelp")}</p>
+    </div>
+  )
+
+  const forwardWsBlock = (
+    <div className="space-y-1.5">
+      <Label htmlFor="ob-forward-url">
+        {t("forwardUrlLabel")}
+        <span className="ml-1 text-destructive">*</span>
+      </Label>
+      <p className="text-xs text-muted-foreground">{t("forwardUrlHelp")}</p>
+      <Input
+        id="ob-forward-url"
+        value={forwardWsUrl}
+        onChange={(e) => setForwardWsUrl(e.target.value)}
+        placeholder={t("forwardUrlPlaceholder")}
+        disabled={saving}
+      />
+    </div>
+  )
+
+  const reverseWsBlock =
+    savedAdapterId && wsEndpoint ? (
+      <div className="space-y-3">
+        <Label className="text-xs font-medium">{t("endpointLabel")}</Label>
+        <p className="text-xs text-muted-foreground">
+          {t("endpointHelpPrefix")} <code className="text-xs">wsReverse</code>{" "}
+          {t("endpointHelpSuffix")}
+        </p>
+        <div
+          className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all"
+          aria-label={t("endpointAria")}
+          data-testid="onebot-endpoint-display"
+        >
+          {wsEndpoint}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleCopyEndpoint}
+            aria-label={t("endpointCopyAria")}
+          >
+            {t("endpointCopy")}
+          </Button>
+          {desktop && (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleVerify}
+                disabled={verifying}
+                aria-label={t("verifyConnectionAria")}
+              >
+                {verifying ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("verifyConnectionButton")
+                )}
+              </Button>
+              {verifyResult === "connected" && (
+                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2Icon className="h-3.5 w-3.5" />
+                  {t("verifyConnectedBadge")}
+                </span>
+              )}
+              {verifyResult === "timeout" && (
+                <span className="flex items-center gap-1 text-xs text-destructive">
+                  <XCircleIcon className="h-3.5 w-3.5" />
+                  {t("verifyTimeoutBadge")}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    ) : (
+      <p className="text-xs text-muted-foreground">{t("endpointNewAdapterHint")}</p>
+    )
 
   const deliverySection: FormSection = {
     id: "delivery",
     label: t("sectionDelivery"),
     description: t("sectionDeliveryDesc"),
     defaultOpen: true,
-    children:
-      savedAdapterId && wsEndpoint ? (
-        <div className="space-y-3">
-          <Label className="text-xs font-medium">{t("endpointLabel")}</Label>
-          <p className="text-xs text-muted-foreground">
-            {t("endpointHelpPrefix")} <code className="text-xs">wsReverse</code>{" "}
-            {t("endpointHelpSuffix")}
-          </p>
-          <div
-            className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all"
-            aria-label={t("endpointAria")}
-            data-testid="onebot-endpoint-display"
-          >
-            {wsEndpoint}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCopyEndpoint}
-              aria-label={t("endpointCopyAria")}
-            >
-              {t("endpointCopy")}
-            </Button>
-            {desktop && (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleVerify}
-                  disabled={verifying}
-                  aria-label={t("verifyConnectionAria")}
-                >
-                  {verifying ? (
-                    <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    t("verifyConnectionButton")
-                  )}
-                </Button>
-                {verifyResult === "connected" && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2Icon className="h-3.5 w-3.5" />
-                    {t("verifyConnectedBadge")}
-                  </span>
-                )}
-                {verifyResult === "timeout" && (
-                  <span className="flex items-center gap-1 text-xs text-destructive">
-                    <XCircleIcon className="h-3.5 w-3.5" />
-                    {t("verifyTimeoutBadge")}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">{t("endpointNewAdapterHint")}</p>
-      ),
+    children: (
+      <div className="space-y-4">
+        {transportSelector}
+        {transportMode === "forward-ws" ? forwardWsBlock : reverseWsBlock}
+      </div>
+    ),
   }
 
   const advancedSection: FormSection = {
@@ -376,19 +438,21 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
-        <AdapterFormSections
-          sections={[identitySection, deliverySection, advancedSection]}
-          onSubmit={handleSave}
-          onCancel={() => onOpenChange(false)}
-          submitting={saving}
-          dirty={dirty}
-          submitLabel={isNew ? t("create") : t("save")}
-        />
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <AdapterFormSections
+            sections={[identitySection, deliverySection, advancedSection]}
+            onSubmit={handleSave}
+            onCancel={() => onOpenChange(false)}
+            submitting={saving}
+            dirty={dirty}
+            submitLabel={isNew ? t("create") : t("save")}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   )

@@ -20,6 +20,8 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { SettingsCard } from "@/components/settings/common/settings-section"
+import { getPlatformMeta } from "./platform-meta"
 import { ConfigDetail } from "./tabs/config-detail"
 import { HealthDetail } from "./tabs/health-detail"
 import { ConversationsDetail } from "./tabs/conversations-detail"
@@ -55,20 +57,20 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
     )
   }
 
+  const { Icon } = getPlatformMeta(row.type)
+
   return (
     <div className="space-y-4" data-testid="adapter-detail-panel">
-      <Card>
-        <CardContent className="flex items-center justify-between gap-3 py-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold truncate">{row.displayName}</span>
-            <Badge variant="outline" className="shrink-0 text-xs">
-              {row.type}
-            </Badge>
+      <SettingsCard
+        icon={<Icon className="size-4" />}
+        title={row.displayName}
+        badge={row.type}
+        badgeVariant="outline"
+        headerAction={
+          <div className="flex items-center gap-2">
             <Badge variant="secondary" className="shrink-0 text-xs">
               {row.defaultMode}
             </Badge>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
             <Switch
               id={`detail-enabled-${row.id}`}
               checked={row.enabled}
@@ -87,8 +89,10 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
               {row.enabled ? t("enabled") : t("disabled")}
             </label>
           </div>
-        </CardContent>
-      </Card>
+        }
+      >
+        <></>
+      </SettingsCard>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
         <TabsList>

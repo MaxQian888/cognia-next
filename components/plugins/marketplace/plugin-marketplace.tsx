@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { listPlugins } from "@/lib/db/plugins"
-import { usePluginMarketplace } from "@/hooks/plugins"
+import { usePluginMarketplace, useBuiltinPluginEntries } from "@/hooks/plugins"
 import type {
   MarketplaceClient,
   PluginMarketplaceEntry,
@@ -31,13 +31,14 @@ import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
 import { PluginComparisonSheet, PluginComparisonTrigger } from "../dialogs/plugin-comparison-sheet"
 import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
 
-type Section = "all" | "featured" | "popular" | "recent"
+type Section = "all" | "featured" | "popular" | "recent" | "builtin"
 
 const PAGE_SIZE = 12
 
 export function PluginMarketplace() {
   const t = useTranslations("plugins.marketplace")
   const market = usePluginMarketplace()
+  const builtinEntries = useBuiltinPluginEntries()
   const [section, setSection] = useState<Section>("all")
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE)
   const [selectedEntry, setSelectedEntry] = useState<PluginMarketplaceEntry | null>(null)
@@ -121,6 +122,8 @@ export function PluginMarketplace() {
         return market.popular
       case "recent":
         return market.recent
+      case "builtin":
+        return builtinEntries
       default:
         return allResults
     }
@@ -161,6 +164,7 @@ export function PluginMarketplace() {
               <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
               <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
               <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
+              <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
             </ToggleGroup>
           </ScrollShadowRow>
           <PluginComparisonTrigger />

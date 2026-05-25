@@ -119,8 +119,8 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   // their open-state. The user can resize the panel, or change the
   // affected setting from Settings → Agent runtime / Web search / Skills.
   return (
-    <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <ModelPicker session={session} disabled={isStreaming} />
         <PermissionModeIndicator
           onCycle={(next) => setPermissionMode(next)}
@@ -184,7 +184,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
       </div>
 
       <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>
-        <ContextTrigger className="h-6 gap-1.5 px-1.5 text-[11px] font-normal" />
+        <ContextTrigger className="ml-auto h-6 shrink-0 gap-1.5 px-1.5 text-[11px] font-normal" />
         <ContextContent>
           <ContextContentHeader />
           <ContextContentBody>

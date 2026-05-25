@@ -52,6 +52,7 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
@@ -134,6 +135,9 @@ export class CogniaDB extends Dexie {
   workflowRuns!: Table<WorkflowRunRow, string>
   workflowRunEvents!: Table<WorkflowRunEventRow, string>
   workflowTriggers!: Table<WorkflowTriggerRow, string>
+  // v52 — Workflow library folders (ADR-0011 library upgrade). See
+  // `types/workflow/folder.ts`.
+  workflowFolders!: Table<WorkflowFolder, string>
   // v23 — Mobile companion paired devices (ADR 0012 → M2). One row per phone
   // that completed the QR pairing flow (POST /api/v1/auth/pair, M2.3). The
   // owner can soft-delete (revoke) any row from the desktop's "Mobile
@@ -1430,6 +1434,36 @@ export class CogniaDB extends Dexie {
       connectorAudit: "&id, adapterId, kind, at, [adapterId+at], [adapterId+kind+at]",
       connectorHeartbeats: "&id, adapterId, [adapterId+at], at",
     })
+
+    // v52 — Workflow library folders + the `folderId` index on workflows
+    // (ADR-0011 library upgrade). `workflowFolders` is a new additive table.
+    // The `workflows` keyPath re-declares its full index list with the added
+    // `folderId` so the library can range-query a folder's contents.
+    //   • workflowFolders — &id primary; `parentFolderId` and the compound
+    //                       [parentFolderId+name] drive the "children of folder
+    //                       X, sorted by name" query that renders a folder's
+    //                       sub-folders without a scan; `updatedAt`/`createdAt`
+    //                       for debug/data views.
+    //   • workflows.folderId — equality lookup for "workflows in folder X".
+    //
+    // The upgrade hook backfills every pre-existing row to the root sentinel
+    // ("root"). This is REQUIRED: IndexedDB does not index `undefined`, so
+    // without the backfill the library's `where("folderId").equals("root")`
+    // read would never see legacy workflows.
+    this.version(52)
+      .stores({
+        workflows:
+          "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion, folderId",
+        workflowFolders: "&id, name, parentFolderId, [parentFolderId+name], updatedAt, createdAt",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("workflows")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (row.folderId === undefined) row.folderId = "root"
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

@@ -19,13 +19,26 @@ import {
   type TTSOrchestratorState,
 } from "@/lib/tts/tts-orchestrator"
 import { providerKeyMapToSettingsMap } from "@/lib/tts/keyring"
-import { DEFAULT_SPEECH_SETTINGS, type TTSPlaybackState, type TTSProvider } from "@/lib/tts/types"
+import {
+  DEFAULT_SPEECH_SETTINGS,
+  type SpeechSettings,
+  type TTSPlaybackState,
+  type TTSProvider,
+} from "@/lib/tts/types"
 
 export interface UseTTSOptions {
   /** Use settings from store (default: true). False uses defaults only. */
   useSettings?: boolean
   /** Override the active provider (otherwise pulled from settings). */
   provider?: TTSProvider
+  /**
+   * Partial SpeechSettings overlay spread on top of the settings-derived base
+   * before each `speak`. Used to audition a per-character `voiceProfile`
+   * (see `lib/plugin/character-pack/character-voice.ts:resolveCharacterVoice`)
+   * without mutating global AppSettings. Its `ttsProvider`, when set, also
+   * drives the active provider.
+   */
+  voiceOverlay?: Partial<SpeechSettings>
   /** Tag attached to orchestrator state for cancellation arbitration. */
   source?: TTSActiveSource
   onStart?: () => void
@@ -55,6 +68,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
   const {
     useSettings = true,
     provider,
+    voiceOverlay,
     source = "unknown",
     onStart,
     onEnd,
@@ -63,13 +77,15 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
   } = options
 
   const settings = useSettingsStore((s) => s.settings)
-  const providerKeys = useSettingsStore((s) => s.providerKeys)
 
-  const speechSettings = useSettings ? selectSpeechSettings(settings) : DEFAULT_SPEECH_SETTINGS
-  const providerSettings = providerKeyMapToSettingsMap(providerKeys)
+  const baseSpeech = useSettings ? selectSpeechSettings(settings) : DEFAULT_SPEECH_SETTINGS
+  // Spread the per-character overlay (if any) on top of the global base.
+  const speechSettings: SpeechSettings = voiceOverlay
+    ? { ...baseSpeech, ...voiceOverlay }
+    : baseSpeech
 
   const currentProvider: TTSProvider =
-    provider ?? (useSettings ? speechSettings.ttsProvider : "system")
+    provider ?? (useSettings ? speechSettings.ttsProvider : (voiceOverlay?.ttsProvider ?? "system"))
 
   const [orchState, setOrchState] = useState<TTSOrchestratorState>(ttsOrchestrator.getState())
 
@@ -80,6 +96,12 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
   const speak = useCallback(
     async (text: string, overrideProvider?: TTSProvider): Promise<void> => {
       const active = overrideProvider ?? currentProvider
+      // Lazily load TTS provider keys on first actual playback — they're no
+      // longer fetched during app boot. Read the freshest keys straight from
+      // the store after the (idempotent) load so even the very first `speak`
+      // sees them, regardless of render timing.
+      await useSettingsStore.getState().ensureProviderKeys()
+      const providerSettings = providerKeyMapToSettingsMap(useSettingsStore.getState().providerKeys)
       await ttsOrchestrator.speak(text, {
         provider: active,
         source,
@@ -91,7 +113,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
         onProgress,
       })
     },
-    [currentProvider, source, speechSettings, providerSettings, onStart, onEnd, onError, onProgress]
+    [currentProvider, source, speechSettings, onStart, onEnd, onError, onProgress]
   )
 
   const isSupported =

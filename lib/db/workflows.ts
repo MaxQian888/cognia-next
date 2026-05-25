@@ -14,6 +14,7 @@ import type {
   WorkflowNode,
 } from "@/types/workflow/visual"
 import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
+import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { getDb } from "./schema"
 
 function newWorkflowId(): string {
@@ -57,6 +58,7 @@ export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
       | "credentials"
       | "viewport"
       | "isTemplate"
+      | "folderId"
     >
   >
 
@@ -71,6 +73,7 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
     tags: draft.tags ?? [],
     isTemplate: draft.isTemplate ?? false,
     isBuiltIn: false,
+    folderId: draft.folderId ?? ROOT_FOLDER_ID,
     createdAt: now,
     updatedAt: now,
     nodes: draft.nodes ?? [],
@@ -202,4 +205,93 @@ export function regenerateNodeIds(w: VisualWorkflow): VisualWorkflow {
     target: idMap.get(e.target) ?? e.target,
   }))
   return { ...w, nodes, edges }
+}
+
+// ── Library organization (ADR-0011 library upgrade) ──────────────────────────
+
+/** Workflows directly in a folder. Unsorted — the library store applies the
+ * user's chosen sort so the DB read stays index-only. */
+export async function listWorkflowsInFolder(folderId: string): Promise<WorkflowRow[]> {
+  return getDb().workflows.where("folderId").equals(folderId).toArray()
+}
+
+/** Move a single workflow into a folder (root = `ROOT_FOLDER_ID`). */
+export async function moveWorkflowToFolder(id: string, folderId: string): Promise<void> {
+  await updateWorkflow(id, { folderId: folderId || ROOT_FOLDER_ID })
+}
+
+/** Batch-move workflows into one folder. Single transaction so the library's
+ * `useLiveQuery` re-renders once, not per row. */
+export async function moveWorkflowsToFolder(ids: string[], folderId: string): Promise<void> {
+  if (ids.length === 0) return
+  const db = getDb()
+  const target = folderId || ROOT_FOLDER_ID
+  await db.transaction("rw", db.workflows, async () => {
+    const now = nowMs()
+    for (const id of ids) {
+      await db.workflows.update(id, { folderId: target, updatedAt: now })
+    }
+  })
+}
+
+/** Add a tag to every workflow in `ids` (idempotent per row). Read-modify-
+ * write in one transaction; bumps `updatedAt`. */
+export async function addTagToWorkflows(ids: string[], tag: string): Promise<void> {
+  const clean = tag.trim()
+  if (ids.length === 0 || !clean) return
+  const db = getDb()
+  await db.transaction("rw", db.workflows, async () => {
+    const now = nowMs()
+    for (const id of ids) {
+      const row = await db.workflows.get(id)
+      if (!row) continue
+      const tags = row.tags ?? []
+      if (tags.includes(clean)) continue
+      await db.workflows.update(id, { tags: [...tags, clean], updatedAt: now })
+    }
+  })
+}
+
+// Per-workflow run counts feed the "most runs" library sort. The count query
+// hits the `workflowId` index on `workflowRuns`, but firing one count per card
+// on every keystroke is wasteful, so results are memoized for a short window.
+// Only the runCount sort path calls this; the other four sorts never pay for it.
+const RUN_COUNT_TTL_MS = 30_000
+let runCountCache: { at: number; counts: Map<string, number> } | null = null
+
+export async function getRunCounts(ids: string[]): Promise<Map<string, number>> {
+  if (ids.length === 0) return new Map()
+  const now = nowMs()
+  if (runCountCache && now - runCountCache.at < RUN_COUNT_TTL_MS) {
+    return runCountCache.counts
+  }
+  const db = getDb()
+  const counts = new Map<string, number>()
+  await Promise.all(
+    ids.map(async (id) => {
+      counts.set(id, await db.workflowRuns.where("workflowId").equals(id).count())
+    })
+  )
+  runCountCache = { at: now, counts }
+  return counts
+}
+
+/** Test seam — drop the run-count memo so a fresh count is fetched. */
+export function __resetRunCountCacheForTesting(): void {
+  runCountCache = null
+}
+
+/**
+ * Ids of workflows whose runs include a failure at or after `sinceMs`. Powers
+ * the library's "recently failed" status filter. One query against the
+ * `status` index, filtered to the time window in memory.
+ */
+export async function getRecentlyFailedWorkflowIds(sinceMs: number): Promise<Set<string>> {
+  const db = getDb()
+  const rows = await db.workflowRuns.where("status").equals("failed").toArray()
+  const out = new Set<string>()
+  for (const r of rows) {
+    if (r.startedAt >= sinceMs) out.add(r.workflowId)
+  }
+  return out
 }

@@ -19,6 +19,8 @@
 
 import { liveQuery, type Subscription } from "dexie"
 
+import { subscribeResume } from "@/lib/capacitor/app"
+import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { isCapacitor, transport } from "@/lib/tauri"
 import { CompanionTransport, hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
@@ -31,11 +33,27 @@ const DEFAULT_STUN: RTCIceServer[] = [
   { urls: "stun:stun.cloudflare.com:3478" },
 ]
 
+/**
+ * Minimum spacing between two automatic WebRTC re-upgrade attempts driven by
+ * network-reconnect / app-resume events. Negotiation itself is guarded by
+ * `enableWebRtcTier`'s in-flight check; this throttle just stops a flapping
+ * connection from re-resolving keyring TURN creds on every transition.
+ */
+export const REUPGRADE_MIN_SPACING_MS = 15_000
+
 export interface MobileSignalingControllerOptions {
   /** Override platform detection for tests. */
   isCapacitorOverride?: boolean
   /** Test injection of the transport (defaults to the live module-scope `transport`). */
   transportOverride?: CompanionTransport
+  /** Test injection of the settings reader (defaults to the Dexie `getSettings`). */
+  getSettingsOverride?: () => Promise<AppSettings>
+  /** Test injection of the network subscriber (defaults to `@/lib/capacitor/network`). */
+  subscribeNetworkOverride?: typeof subscribeNetwork
+  /** Test injection of the app-resume subscriber (defaults to `@/lib/capacitor/app`). */
+  subscribeResumeOverride?: typeof subscribeResume
+  /** Test injection of the clock used by the re-upgrade throttle. */
+  nowOverride?: () => number
 }
 
 /**
@@ -59,6 +77,10 @@ export function installMobileSignalingController(
   const tx =
     (options.transportOverride as CompanionTransport | undefined) ??
     (transport as unknown as CompanionTransport)
+  const readSettings = options.getSettingsOverride ?? getSettings
+  const subscribeNetworkFn = options.subscribeNetworkOverride ?? subscribeNetwork
+  const subscribeResumeFn = options.subscribeResumeOverride ?? subscribeResume
+  const now = options.nowOverride ?? Date.now
 
   // First hydrate the CompanionConfig in case the caller didn't, so the
   // upgrade can run on a cold boot before the pair onboarding screen
@@ -68,7 +90,7 @@ export function installMobileSignalingController(
     // `enableWebRtcTier`; nothing to do here.
   })
 
-  const sub: Subscription = liveQuery(() => getSettings()).subscribe({
+  const sub: Subscription = liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
       void applySettings(tx, settings).catch((err) => {
         console.warn("mobile-signaling-controller: applySettings failed", err)
@@ -79,8 +101,55 @@ export function installMobileSignalingController(
     },
   })
 
+  // Re-attempt the WebRTC upgrade when connectivity returns or the app
+  // resumes. `enableWebRtcTier` is idempotent — a no-op while a peer is open
+  // or connecting — so after the tier dropped to `failed` (backoff exhausted)
+  // this re-promotes to WebRTC without a manual "Reconnect" tap or app
+  // restart. Throttled so a flapping link doesn't thrash keyring TURN
+  // resolution. `applySettings` self-gates: it disables the tier when
+  // `webrtcEnabled === false`.
+  // Seeded to -Infinity so the first trigger always fires (the throttle only
+  // suppresses *subsequent* triggers within the window).
+  let lastReupgradeMs = Number.NEGATIVE_INFINITY
+  const reupgrade = async (): Promise<void> => {
+    const t = now()
+    if (t - lastReupgradeMs < REUPGRADE_MIN_SPACING_MS) return
+    lastReupgradeMs = t
+    try {
+      await applySettings(tx, await readSettings())
+    } catch (err) {
+      console.warn("mobile-signaling-controller: re-upgrade failed", err)
+    }
+  }
+
+  let netUnsub: (() => void) | null = null
+  let resumeUnsub: (() => void) | null = null
+  void subscribeNetworkFn((status) => {
+    if (status.connected) void reupgrade()
+  }).then(
+    (u) => {
+      netUnsub = u
+    },
+    () => {
+      // Subscription setup failed (no plugin / no window) — re-upgrade is
+      // best-effort; the settings liveQuery still drives the happy path.
+    }
+  )
+  void subscribeResumeFn(() => {
+    void reupgrade()
+  }).then(
+    (u) => {
+      resumeUnsub = u
+    },
+    () => {
+      // Best-effort; see above.
+    }
+  )
+
   return () => {
     sub.unsubscribe()
+    netUnsub?.()
+    resumeUnsub?.()
   }
 }
 
