@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { createEditorStore } from "./store"
+import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 function emptyWorkflow(): VisualWorkflow {
@@ -231,6 +231,85 @@ describe("editor store — drag flag + snap-to-grid", () => {
     useStore.getState().setSnapToGrid(false)
     useStore.getState().setIsDraggingAny(false)
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — drag history coalescing", () => {
+  function withOneNode() {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    return useStore
+  }
+
+  /** Simulate one drag frame: replace only the first node's position. */
+  function moveFirstNode(useStore: ReturnType<typeof createEditorStore>, x: number, y: number) {
+    const next = useStore
+      .getState()
+      .nodes.map((n, i) => (i === 0 ? { ...n, position: { x, y } } : n))
+    useStore.getState().setNodes(next)
+  }
+
+  it("coalesces a multi-frame drag into a single undo entry", () => {
+    const useStore = withOneNode()
+    const before = useStore.temporal.getState().pastStates.length
+
+    useStore.getState().beginDragHistory()
+    moveFirstNode(useStore, 10, 0)
+    moveFirstNode(useStore, 20, 0)
+    moveFirstNode(useStore, 30, 0)
+    // Paused: not one of the intermediate frames is recorded.
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+
+    useStore.getState().commitDragHistory()
+    // Exactly one entry for the whole drag; redo stack cleared.
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
+    expect(useStore.temporal.getState().futureStates).toHaveLength(0)
+    expect(useStore.getState().nodes[0].position).toEqual({ x: 30, y: 0 })
+  })
+
+  it("undo after a coalesced drag restores the pre-drag position in one step", () => {
+    const useStore = withOneNode()
+    useStore.getState().beginDragHistory()
+    moveFirstNode(useStore, 99, 99)
+    useStore.getState().commitDragHistory()
+
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes[0].position).toEqual({ x: 0, y: 0 })
+  })
+
+  it("records nothing for a no-op drag (no movement between begin and commit)", () => {
+    const useStore = withOneNode()
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().beginDragHistory()
+    useStore.getState().commitDragHistory()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+
+  it("is idempotent across overlapping begin calls (node + selection drag)", () => {
+    const useStore = withOneNode()
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().beginDragHistory()
+    useStore.getState().beginDragHistory() // second begin must not re-snapshot
+    moveFirstNode(useStore, 5, 5)
+    useStore.getState().commitDragHistory()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
+  })
+
+  it("trims a coalesced drag entry to EDITOR_HISTORY_LIMIT", () => {
+    const useStore = withOneNode()
+    // Seed the history at the cap so the commit must trim one off the front.
+    const filler = Array.from({ length: EDITOR_HISTORY_LIMIT }, () => ({ nodes: [], edges: [] }))
+    useStore.temporal.setState({ pastStates: filler, futureStates: [] })
+    expect(useStore.temporal.getState().pastStates).toHaveLength(EDITOR_HISTORY_LIMIT)
+
+    useStore.getState().beginDragHistory()
+    moveFirstNode(useStore, 7, 7)
+    useStore.getState().commitDragHistory()
+
+    expect(useStore.temporal.getState().pastStates).toHaveLength(EDITOR_HISTORY_LIMIT)
+    // The newest (last) entry is the pre-drag snapshot we just pushed.
+    const newest = useStore.temporal.getState().pastStates.at(-1)
+    expect(newest?.nodes?.[0]?.position).toEqual({ x: 0, y: 0 })
   })
 })
 

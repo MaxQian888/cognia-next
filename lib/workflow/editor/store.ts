@@ -205,6 +205,15 @@ export interface EditorState extends EditorStateSnapshot {
   setNodes: (nodes: RFWorkflowNode[]) => void
   setEdges: (edges: RFWorkflowEdge[]) => void
   setViewport: (viewport: Viewport) => void
+  /**
+   * Drag-history coalescing. `beginDragHistory` pauses zundo recording and
+   * snapshots the pre-drag graph; `commitDragHistory` resumes recording and
+   * pushes exactly one undo entry for the whole drag (or none if nothing
+   * moved). Without this, the ~60 `setNodes` calls a drag emits each push a
+   * full snapshot, exhausting the history limit in 1–2 drags.
+   */
+  beginDragHistory: () => void
+  commitDragHistory: () => void
   addNode: (
     kind: WorkflowNodeKind,
     position: { x: number; y: number },
@@ -345,8 +354,18 @@ function shallowEqualValidation(a: NodeValidationResult, b: NodeValidationResult
   return true
 }
 
+/**
+ * Max undo/redo snapshots retained by zundo. Shared between the temporal
+ * config and `commitDragHistory` so the drag-coalescing path trims to the
+ * same bound (no magic-number drift).
+ */
+export const EDITOR_HISTORY_LIMIT = 100
+
 export function createEditorStore(initial: VisualWorkflow): EditorStore {
   const converted = workflowToReactFlow(initial)
+  // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
+  // store state) so it never triggers a re-render and stays per-editor.
+  let dragHistorySnapshot: { nodes: RFWorkflowNode[]; edges: RFWorkflowEdge[] } | null = null
   const useStore = create<EditorState>()(
     temporal(
       (set, get) => ({
@@ -440,6 +459,33 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
         setViewport: (viewport) => set({ viewport, dirty: true }),
+
+        beginDragHistory: () => {
+          // Idempotent: overlapping node-drag + selection-drag events must not
+          // re-snapshot or re-pause mid-drag.
+          if (dragHistorySnapshot) return
+          ;(useStore as EditorStore).temporal.getState().pause()
+          const { nodes, edges } = get()
+          dragHistorySnapshot = { nodes, edges }
+        },
+        commitDragHistory: () => {
+          const snap = dragHistorySnapshot
+          dragHistorySnapshot = null
+          const temporalStore = (useStore as EditorStore).temporal
+          temporalStore.getState().resume()
+          if (!snap) return
+          const cur = get()
+          // No-op drag (click without move): the arrays keep their identity
+          // because no `setNodes`/`setEdges` ran, so skip — mirrors the
+          // temporal `equality` guard below.
+          if (snap.nodes === cur.nodes && snap.edges === cur.edges) return
+          const past = temporalStore.getState().pastStates.concat({
+            nodes: snap.nodes,
+            edges: snap.edges,
+          })
+          while (past.length > EDITOR_HISTORY_LIMIT) past.shift()
+          temporalStore.setState({ pastStates: past, futureStates: [] })
+        },
 
         addNode: (kind, position, overrides) => {
           const id = "n_" + nanoid(8)
@@ -887,7 +933,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         // pre-drag position, not each intermediate frame) is deferred to
         // Phase 9 polish.
         equality: (a, b) => a.nodes === b.nodes && a.edges === b.edges,
-        limit: 100,
+        limit: EDITOR_HISTORY_LIMIT,
       }
     )
   ) as EditorStore

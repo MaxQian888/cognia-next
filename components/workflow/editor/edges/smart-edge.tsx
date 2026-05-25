@@ -87,7 +87,10 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
       setEditingEdgeIdInline: s.setEditingEdgeIdInline,
       updateEdgeData: s.updateEdgeData,
       performanceTier: s.performanceTier,
-      nodes: s.nodes,
+      // Subscribe to the node *count* (a primitive), not the `nodes` array —
+      // otherwise every drag frame (which replaces the array) re-renders every
+      // edge. Mirrors the leaf pattern in `workflow-node.tsx`.
+      nodeCount: s.nodes.length,
     })
   )
   const storeBits = store?.(storeSelector)
@@ -125,7 +128,7 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
   const animations = storeBits
     ? flagsForTier(
         resolveEffectiveTier(storeBits.performanceTier, {
-          nodeCount: storeBits.nodes.length,
+          nodeCount: storeBits.nodeCount,
           prefersReducedMotion:
             typeof window !== "undefined" && window.matchMedia
               ? window.matchMedia("(prefers-reduced-motion: reduce)").matches

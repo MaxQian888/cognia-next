@@ -349,6 +349,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         height?: number | null
       }
     ) => {
+      // Pause + snapshot before any position `setNodes` fires, so the whole
+      // drag coalesces into a single undo entry (see store.beginDragHistory).
+      useStore.getState().beginDragHistory()
       setIsDraggingAny(true)
       if (!perfTier.flags.alignmentGuides) {
         dragRectRef.current = null
@@ -371,7 +374,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         80
       dragRectRef.current = { width: w, height: h }
     },
-    [drag, nodes, perfTier.flags.alignmentGuides, rf, setIsDraggingAny]
+    [drag, nodes, perfTier.flags.alignmentGuides, rf, setIsDraggingAny, useStore]
   )
 
   const handleNodeDrag = useCallback(
@@ -401,12 +404,28 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   )
 
   const handleNodeDragStop = useCallback(() => {
+    // Resume recording + push the single coalesced undo entry for the drag.
+    useStore.getState().commitDragHistory()
     dragThrottled.cancel()
     drag.release()
     dragRectRef.current = null
     setAlignmentGuides(null)
     setIsDraggingAny(false)
-  }, [drag, dragThrottled, setIsDraggingAny])
+  }, [drag, dragThrottled, setIsDraggingAny, useStore])
+
+  // Multi-selection drags route through React Flow's selection-drag events
+  // (the canvas has `selectionOnDrag`), not the node-drag events — so they
+  // need the same begin/commit coalescing. The store guards make overlapping
+  // node/selection events idempotent.
+  const handleSelectionDragStart = useCallback(() => {
+    useStore.getState().beginDragHistory()
+    setIsDraggingAny(true)
+  }, [setIsDraggingAny, useStore])
+
+  const handleSelectionDragStop = useCallback(() => {
+    useStore.getState().commitDragHistory()
+    setIsDraggingAny(false)
+  }, [setIsDraggingAny, useStore])
 
   // ── Context menu callbacks ──────────────────────────────────────────────
   const handlePaneContextMenu = useCallback(
@@ -947,6 +966,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 onNodeDragStart={handleNodeDragStart}
                 onNodeDrag={handleNodeDrag}
                 onNodeDragStop={handleNodeDragStop}
+                onSelectionDragStart={handleSelectionDragStart}
+                onSelectionDragStop={handleSelectionDragStop}
                 onPaneContextMenu={handlePaneContextMenu}
                 onNodeContextMenu={handleNodeContextMenu}
                 onEdgeContextMenu={handleEdgeContextMenu}

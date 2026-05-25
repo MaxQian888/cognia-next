@@ -10,11 +10,15 @@ import { SmartEdge } from "./smart-edge"
 
 // Capture props passed to BaseEdge so tests can assert on stroke and path.
 const baseEdgeProps: { current: Record<string, unknown> | null } = { current: null }
+// Count BaseEdge invocations == SmartEdge renders, so a test can prove the
+// edge does NOT re-render when an unrelated node moves.
+const baseEdgeRenders = { count: 0 }
 
 jest.mock("@xyflow/react", () => ({
   __esModule: true,
   BaseEdge: (props: Record<string, unknown>) => {
     baseEdgeProps.current = props
+    baseEdgeRenders.count++
     return (
       <div
         data-testid="base-edge"
@@ -63,6 +67,7 @@ function renderEdge(
   store?: EditorStore
 ) {
   baseEdgeProps.current = null
+  baseEdgeRenders.count = 0
   const defaults = {
     id: "e_1",
     source: "n_a",
@@ -156,5 +161,25 @@ describe("SmartEdge", () => {
     fireEvent.change(input, { target: { value: "discarded" } })
     fireEvent.keyDown(input, { key: "Escape" })
     expect(store.getState().editingEdgeIdInline).toBeNull()
+  })
+
+  it("does not re-render when a node moves but the node count is unchanged", () => {
+    const store = seedStore()
+    renderEdge({}, store)
+    const before = baseEdgeRenders.count
+    const { act } = jest.requireActual("@testing-library/react")
+    act(() => {
+      // Simulate a drag frame: a fresh `nodes` array of the same length with
+      // one node moved. The edge subscribes to `nodes.length` (a primitive),
+      // not the array, so this must NOT re-render it.
+      store
+        .getState()
+        .setNodes(
+          store
+            .getState()
+            .nodes.map((n) => ({ ...n, position: { x: n.position.x + 10, y: n.position.y } }))
+        )
+    })
+    expect(baseEdgeRenders.count).toBe(before)
   })
 })

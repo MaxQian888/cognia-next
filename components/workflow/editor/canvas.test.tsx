@@ -207,6 +207,27 @@ describe("WorkflowEditorCanvas", () => {
     expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
   })
 
+  it("wires selection-drag through the same begin/commit drag lifecycle", async () => {
+    const wf = await createWorkflow({ name: "x" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const props = reactFlowPropsRef.current
+    // Multi-selection drags route through these events, so they must be wired
+    // or the drag-coalescing fix would miss them.
+    expect(typeof props?.onSelectionDragStart).toBe("function")
+    expect(typeof props?.onSelectionDragStop).toBe("function")
+
+    const { act } = jest.requireActual("@testing-library/react")
+    act(() => {
+      ;(props!.onSelectionDragStart as () => void)()
+    })
+    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    act(() => {
+      ;(props!.onSelectionDragStop as () => void)()
+    })
+    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+  })
+
   it("flips minimap to degraded mode while the viewport is panning/zooming", async () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
