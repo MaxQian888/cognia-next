@@ -37,7 +37,9 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useState } from "react"
 import { toast } from "sonner"
+import { motion, useReducedMotion } from "motion/react"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { STAGGER_CHILD, STAGGER_CONTAINER, mobileTransition } from "@/lib/ui/motion"
 
 const log = loggers.ui
 
@@ -97,6 +99,8 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
   const [keyInput, setKeyInput] = useState("")
   const [saving, setSaving] = useState(false)
   const [tourIndex, setTourIndex] = useState(0)
+  const [tourDirection, setTourDirection] = useState<1 | -1>(1)
+  const reduce = useReducedMotion() ?? false
 
   const persistDismiss = async () => {
     try {
@@ -170,6 +174,7 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
 
   const handleTourNext = () => {
     if (tourIndex < TOUR_SLIDES.length - 1) {
+      setTourDirection(1)
       setTourIndex((i) => i + 1)
     } else {
       void handleClose("tour-done")
@@ -177,7 +182,10 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
   }
 
   const handleTourPrev = () => {
-    if (tourIndex > 0) setTourIndex((i) => i - 1)
+    if (tourIndex > 0) {
+      setTourDirection(-1)
+      setTourIndex((i) => i - 1)
+    }
   }
 
   const handleTourOpenSettings = async (slide: TourSlide) => {
@@ -210,41 +218,52 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
             <AlertDialogDescription>{dialogDescription}</AlertDialogDescription>
           </AlertDialogHeader>
 
-          {step === "provider" && (
-            <ProviderStep
-              t={t}
-              connectedProvider={connectedProvider}
-              keyInput={keyInput}
-              setKeyInput={setKeyInput}
-              saving={saving}
-              onCardClick={handleProviderCardClick}
-              onSaveKey={handleSaveKey}
-              onSkip={() => void handleClose("skip-step-provider")}
-              onAdvance={() => setStep("character")}
-            />
-          )}
+          <motion.div
+            key={step}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={mobileTransition("fast")}
+          >
+            {step === "provider" && (
+              <ProviderStep
+                t={t}
+                reduce={reduce}
+                connectedProvider={connectedProvider}
+                keyInput={keyInput}
+                setKeyInput={setKeyInput}
+                saving={saving}
+                onCardClick={handleProviderCardClick}
+                onSaveKey={handleSaveKey}
+                onSkip={() => void handleClose("skip-step-provider")}
+                onAdvance={() => setStep("character")}
+              />
+            )}
 
-          {step === "character" && (
-            <CharacterStep
-              t={t}
-              characters={characters ?? []}
-              canGoBack={connectedProvider === null}
-              onPick={(c) => void handlePickCharacter(c)}
-              onBack={handleBackToProvider}
-              onSkip={() => void handleClose("skip-step-character")}
-            />
-          )}
+            {step === "character" && (
+              <CharacterStep
+                t={t}
+                reduce={reduce}
+                characters={characters ?? []}
+                canGoBack={connectedProvider === null}
+                onPick={(c) => void handlePickCharacter(c)}
+                onBack={handleBackToProvider}
+                onSkip={() => void handleClose("skip-step-character")}
+              />
+            )}
 
-          {step === "tour" && (
-            <TourStep
-              t={t}
-              index={tourIndex}
-              onPrev={handleTourPrev}
-              onNext={handleTourNext}
-              onSkip={() => void handleClose("skip-step-tour")}
-              onOpenSettings={(slide) => void handleTourOpenSettings(slide)}
-            />
-          )}
+            {step === "tour" && (
+              <TourStep
+                t={t}
+                reduce={reduce}
+                direction={tourDirection}
+                index={tourIndex}
+                onPrev={handleTourPrev}
+                onNext={handleTourNext}
+                onSkip={() => void handleClose("skip-step-tour")}
+                onOpenSettings={(slide) => void handleTourOpenSettings(slide)}
+              />
+            )}
+          </motion.div>
         </AlertDialogContent>
       </AlertDialog>
 
@@ -277,6 +296,7 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
 
 interface ProviderStepProps {
   t: (key: string, params?: Record<string, string | number>) => string
+  reduce: boolean
   connectedProvider: ProviderId | "apiKey" | null
   keyInput: string
   setKeyInput: (v: string) => void
@@ -289,6 +309,7 @@ interface ProviderStepProps {
 
 function ProviderStep({
   t,
+  reduce,
   connectedProvider,
   keyInput,
   setKeyInput,
@@ -305,7 +326,7 @@ function ProviderStep({
         : t(`provider.${connectedProvider}.title`)
     return (
       <div className="space-y-3 py-2" data-testid="onboarding-connected">
-        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+        <div className="rounded-md border border-success/40 bg-success/10 p-3">
           <p className="text-sm font-medium">
             {t("provider.loggedInBadge")} — {providerLabel}
           </p>
@@ -328,37 +349,32 @@ function ProviderStep({
 
   return (
     <div className="space-y-3 py-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <ProviderCard
-          providerKey="claude"
-          title={t("provider.claude.title")}
-          description={t("provider.claude.description")}
-          cta={t("provider.claude.cta")}
-          onClick={() => onCardClick("claude")}
-        />
-        <ProviderCard
-          providerKey="codex"
-          title={t("provider.codex.title")}
-          description={t("provider.codex.description")}
-          cta={t("provider.codex.cta")}
-          onClick={() => onCardClick("codex")}
-        />
-        <ProviderCard
-          providerKey="opencode"
-          title={t("provider.opencode.title")}
-          description={t("provider.opencode.description")}
-          cta={t("provider.opencode.cta")}
-          onClick={() => onCardClick("opencode")}
-        />
-        <ProviderCard
-          providerKey="apiKey"
-          icon={KeyRoundIcon}
-          title={t("provider.apiKey.title")}
-          description={t("provider.apiKey.description")}
-          cta={t("provider.apiKey.cta")}
-          onClick={() => onCardClick("apiKey")}
-        />
-      </div>
+      <motion.div
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+        variants={STAGGER_CONTAINER}
+        initial={reduce ? false : "initial"}
+        animate="animate"
+      >
+        {(
+          [
+            { providerKey: "claude" as const },
+            { providerKey: "codex" as const },
+            { providerKey: "opencode" as const },
+            { providerKey: "apiKey" as const, icon: KeyRoundIcon },
+          ] satisfies { providerKey: ProviderChoice; icon?: LucideIcon }[]
+        ).map(({ providerKey, icon }) => (
+          <motion.div key={providerKey} variants={STAGGER_CHILD}>
+            <ProviderCard
+              providerKey={providerKey}
+              icon={icon}
+              title={t(`provider.${providerKey}.title`)}
+              description={t(`provider.${providerKey}.description`)}
+              cta={t(`provider.${providerKey}.cta`)}
+              onClick={() => onCardClick(providerKey)}
+            />
+          </motion.div>
+        ))}
+      </motion.div>
 
       <div className="space-y-2 rounded-md border bg-muted/30 p-3">
         <Label htmlFor="onboarding-key" className="text-xs">
@@ -413,7 +429,7 @@ function ProviderCard({
       type="button"
       onClick={onClick}
       data-testid={`onboarding-provider-${providerKey}`}
-      className="flex h-full flex-col gap-1 rounded-md border p-3 text-left transition-colors hover:bg-accent"
+      className="flex h-full flex-col gap-1 rounded-md border p-3 text-left transition-all motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex items-center gap-2">
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
@@ -427,6 +443,7 @@ function ProviderCard({
 
 interface CharacterStepProps {
   t: (key: string) => string
+  reduce: boolean
   characters: Character[]
   canGoBack: boolean
   onPick: (c: Character) => void
@@ -434,27 +451,41 @@ interface CharacterStepProps {
   onSkip: () => void
 }
 
-function CharacterStep({ t, characters, canGoBack, onPick, onBack, onSkip }: CharacterStepProps) {
+function CharacterStep({
+  t,
+  reduce,
+  characters,
+  canGoBack,
+  onPick,
+  onBack,
+  onSkip,
+}: CharacterStepProps) {
   return (
     <div className="space-y-3 py-2">
-      <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-2">
+      <motion.div
+        className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-2 sm:grid-cols-2"
+        variants={STAGGER_CONTAINER}
+        initial={reduce ? false : "initial"}
+        animate="animate"
+      >
         {characters.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => onPick(c)}
-            className="flex items-start gap-2 rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent"
-          >
-            <AvatarBadge subject={c} size={32} textClassName="text-sm" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">{c.name}</p>
-              {c.description && (
-                <p className="line-clamp-2 text-[11px] text-muted-foreground">{c.description}</p>
-              )}
-            </div>
-          </button>
+          <motion.div key={c.id} variants={STAGGER_CHILD}>
+            <button
+              type="button"
+              onClick={() => onPick(c)}
+              className="flex h-full w-full items-start gap-2 rounded-md border p-2 text-left text-sm transition-all motion-safe:hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <AvatarBadge subject={c} size={32} textClassName="text-sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{c.name}</p>
+                {c.description && (
+                  <p className="line-clamp-2 text-[11px] text-muted-foreground">{c.description}</p>
+                )}
+              </div>
+            </button>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
       <div className="flex justify-between gap-2 pt-2">
         <Button variant="ghost" size="sm" onClick={onBack} disabled={!canGoBack}>
           <ArrowLeftIcon className="mr-1 size-3.5" />
@@ -470,6 +501,8 @@ function CharacterStep({ t, characters, canGoBack, onPick, onBack, onSkip }: Cha
 
 interface TourStepProps {
   t: (key: string, params?: Record<string, string | number>) => string
+  reduce: boolean
+  direction: 1 | -1
   index: number
   onPrev: () => void
   onNext: () => void
@@ -477,13 +510,26 @@ interface TourStepProps {
   onOpenSettings: (slide: TourSlide) => void
 }
 
-function TourStep({ t, index, onPrev, onNext, onSkip, onOpenSettings }: TourStepProps) {
+function TourStep({
+  t,
+  reduce,
+  direction,
+  index,
+  onPrev,
+  onNext,
+  onSkip,
+  onOpenSettings,
+}: TourStepProps) {
   const slide = TOUR_SLIDES[index]
   const Icon = slide.icon
   const isLast = index === TOUR_SLIDES.length - 1
   return (
     <div className="space-y-3 py-2">
-      <div
+      <motion.div
+        key={slide.id}
+        initial={reduce ? false : { opacity: 0, x: direction * 16 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={mobileTransition("fast")}
         className="rounded-md border bg-muted/30 p-4"
         data-testid={`onboarding-tour-slide-${slide.id}`}
       >
@@ -505,12 +551,22 @@ function TourStep({ t, index, onPrev, onNext, onSkip, onOpenSettings }: TourStep
             </Button>
           </div>
         </div>
-      </div>
+      </motion.div>
       <div className="flex items-center justify-between gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onSkip}>
           {t("tour.skip")}
         </Button>
-        <span className="text-[11px] text-muted-foreground" aria-live="polite">
+        <div className="flex items-center gap-1.5" aria-hidden>
+          {TOUR_SLIDES.map((s, i) => (
+            <span
+              key={s.id}
+              className={`h-1.5 rounded-full transition-all ${
+                i === index ? "w-4 bg-primary" : "w-1.5 bg-muted-foreground/30"
+              }`}
+            />
+          ))}
+        </div>
+        <span className="sr-only" aria-live="polite">
           {t("tour.progress", { current: index + 1, total: TOUR_SLIDES.length })}
         </span>
         <div className="flex items-center gap-1">

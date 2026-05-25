@@ -99,7 +99,17 @@ jest.mock("sonner", () => ({
   toast: { error: (...args: unknown[]) => toastError(...args) },
 }))
 
+// Keep the shared motion/react mock (merges `animate` into style, jsdom-safe)
+// but make reduced-motion controllable so the `reduce ? …` entrance branches
+// in each step get exercised.
+jest.mock("motion/react", () => {
+  const actual = jest.requireActual("motion/react")
+  return { ...actual, useReducedMotion: jest.fn(() => false) }
+})
+
 import { OnboardingDialog } from "./onboarding-dialog"
+import { useReducedMotion } from "motion/react"
+const mockUseReducedMotion = useReducedMotion as jest.Mock
 
 function reset() {
   logInfo.mockReset()
@@ -113,6 +123,7 @@ function reset() {
   anthropicAddedRef.onAdded = undefined
   codexAddedRef.onAdded = undefined
   opencodeAddedRef.onAdded = undefined
+  mockUseReducedMotion.mockReturnValue(false)
   charactersRef.current = [
     {
       id: "c-1",
@@ -266,4 +277,41 @@ test("Skip at provider step closes and dismisses onboarding", async () => {
   await user.click(screen.getByRole("button", { name: /^skip$/i }))
   await waitFor(() => expect(dismissOnboarding).toHaveBeenCalled())
   expect(onOpenChange).toHaveBeenCalledWith(false)
+})
+
+test("tour Previous steps back to the prior slide (reverse direction)", async () => {
+  const user = userEvent.setup()
+  render(<OnboardingDialog open={true} onOpenChange={jest.fn()} onPickCharacter={jest.fn()} />)
+  await user.type(screen.getByPlaceholderText("apiKeyPlaceholder"), "sk-test")
+  await user.click(screen.getByRole("button", { name: /continue/i }))
+  await waitFor(() => expect(screen.getByText("step2Title")).toBeInTheDocument())
+  await user.click(screen.getByText("Helper"))
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
+  )
+  // Previous is disabled on the first slide — advance, then go back.
+  expect(screen.getByRole("button", { name: /tour\.previous/i })).toBeDisabled()
+  await user.click(screen.getByRole("button", { name: /tour\.next/i }))
+  await waitFor(() => expect(screen.getByTestId("onboarding-tour-slide-ocr")).toBeInTheDocument())
+  await user.click(screen.getByRole("button", { name: /tour\.previous/i }))
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
+  )
+})
+
+test("renders every step under reduced motion", async () => {
+  mockUseReducedMotion.mockReturnValue(true)
+  const user = userEvent.setup()
+  render(<OnboardingDialog open={true} onOpenChange={jest.fn()} onPickCharacter={jest.fn()} />)
+  // provider step (its grid is a reduced-motion stagger container)
+  expect(screen.getByTestId("onboarding-provider-claude")).toBeInTheDocument()
+  await user.type(screen.getByPlaceholderText("apiKeyPlaceholder"), "sk-test")
+  await user.click(screen.getByRole("button", { name: /continue/i }))
+  // character step
+  await waitFor(() => expect(screen.getByText("Helper")).toBeInTheDocument())
+  await user.click(screen.getByText("Helper"))
+  // tour step
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-tour-slide-sandbox")).toBeInTheDocument()
+  )
 })
