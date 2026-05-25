@@ -233,7 +233,7 @@
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
     "jest-junit": "^17.0.0",
-    "lint-staged": "^16.4.0",
+    "lint-staged": "^17.0.5",
     "prettier": "^3.8.3",
     "shadcn": "^4.8.0",
     "tailwindcss": "^4.3.0",
