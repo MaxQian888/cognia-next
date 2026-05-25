@@ -75,7 +75,7 @@ once_cell = "1"
 # the latest line bumped its MSRV to 1.95, above our 1.93 toolchain pin
 # (`rust-toolchain.toml`). Only the `system` feature is needed; disabling the
 # defaults drops disk/network/component/multithread to keep it lean.
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 thiserror = "2"
 # `anyhow` is already pulled in as a transitive; expose it directly so
 # `cli_bridge` (and similar small modules) can use Result<T> + Context
