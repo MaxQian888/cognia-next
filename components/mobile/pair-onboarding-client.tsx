@@ -26,10 +26,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { Spinner } from "@/components/ui/spinner"
+import { mobileTransition } from "@/lib/ui/motion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
+import { loadRecentServers, recentServersToDiscovered } from "@/lib/connectivity/recent-servers"
 
 import { DiscoverStep } from "./pair/discover-step"
 import { PairStep } from "./pair/pair-step"
@@ -58,6 +61,7 @@ interface Selection {
   pairJwt: string
   fingerprint: string
   locked: boolean
+  autoScan: boolean
 }
 
 const EMPTY_SELECTION: Selection = {
@@ -65,6 +69,7 @@ const EMPTY_SELECTION: Selection = {
   pairJwt: "",
   fingerprint: "",
   locked: false,
+  autoScan: false,
 }
 
 export function PairOnboardingClient() {
@@ -74,6 +79,13 @@ export function PairOnboardingClient() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [step, setStep] = useState<PairStepName>("discover")
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION)
+  const reduce = useReducedMotion()
+  // Recently-paired servers (localStorage) — surfaced as the Discover step's
+  // "Recent" group so the user can one-tap reconnect even after sign-out.
+  // Read once on mount (synchronous; localStorage is hot for first paint).
+  const [recentServers] = useState<DiscoveredServer[]>(() =>
+    recentServersToDiscovered(loadRecentServers())
+  )
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
@@ -111,12 +123,20 @@ export function PairOnboardingClient() {
       pairJwt: "",
       fingerprint: server.fingerprint ?? "",
       locked: true,
+      autoScan: false,
     })
     setStep("pair")
   }, [])
 
   const onSkipDiscover = useCallback(() => {
     setSelection(EMPTY_SELECTION)
+    setStep("pair")
+  }, [])
+
+  // "Scan QR" shortcut from Discover — jump to the pair step with the camera
+  // launching automatically.
+  const onScanShortcut = useCallback(() => {
+    setSelection({ ...EMPTY_SELECTION, autoScan: true })
     setStep("pair")
   }, [])
 
@@ -173,31 +193,47 @@ export function PairOnboardingClient() {
         <PairStepper current={step} />
       </header>
 
-      {step === "discover" ? (
-        <DiscoverStep onSelect={onSelectServer} onSkip={onSkipDiscover} />
-      ) : null}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={step}
+          initial={reduce ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduce ? undefined : { opacity: 0, y: -8 }}
+          transition={mobileTransition("fast")}
+        >
+          {step === "discover" ? (
+            <DiscoverStep
+              history={recentServers}
+              onSelect={onSelectServer}
+              onSkip={onSkipDiscover}
+              onScanShortcut={onScanShortcut}
+            />
+          ) : null}
 
-      {step === "pair" ? (
-        <PairStep
-          key={`${selection.baseUrl}|${selection.pairJwt}|${selection.fingerprint}`}
-          prefilledBaseUrl={selection.baseUrl}
-          prefilledPairJwt={selection.pairJwt}
-          prefilledFingerprint={selection.fingerprint}
-          lockBaseUrl={selection.locked}
-          onPaired={onPaired}
-          onBack={onBackToDiscover}
-        />
-      ) : null}
+          {step === "pair" ? (
+            <PairStep
+              key={`${selection.baseUrl}|${selection.pairJwt}|${selection.fingerprint}`}
+              prefilledBaseUrl={selection.baseUrl}
+              prefilledPairJwt={selection.pairJwt}
+              prefilledFingerprint={selection.fingerprint}
+              lockBaseUrl={selection.locked}
+              autoScan={selection.autoScan}
+              onPaired={onPaired}
+              onBack={onBackToDiscover}
+            />
+          ) : null}
 
-      {step === "paired" && phase.kind === "paired" ? (
-        <PairedStep
-          baseUrl={phase.baseUrl}
-          deviceId={phase.deviceId}
-          serverVersion={phase.serverVersion}
-          onContinue={onContinueToChat}
-          onAfterSignOut={onAfterSignOut}
-        />
-      ) : null}
+          {step === "paired" && phase.kind === "paired" ? (
+            <PairedStep
+              baseUrl={phase.baseUrl}
+              deviceId={phase.deviceId}
+              serverVersion={phase.serverVersion}
+              onContinue={onContinueToChat}
+              onAfterSignOut={onAfterSignOut}
+            />
+          ) : null}
+        </motion.div>
+      </AnimatePresence>
     </main>
   )
 }

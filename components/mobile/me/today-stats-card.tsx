@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { listSessions } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import { getLatestSuccessful } from "@/lib/db/backup-history"
+import { formatBytes, getStorageUsage } from "@/lib/storage/usage"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
@@ -18,6 +19,7 @@ export interface TodayStatsCardProps {
     sessionCount?: () => Promise<number>
     pendingDrafts?: () => Promise<number>
     lastBackupMs?: () => Promise<number | null>
+    storageBytes?: () => Promise<number | null>
   }
   className?: string
 }
@@ -26,9 +28,10 @@ interface Stats {
   sessions: number
   drafts: number
   lastBackupMs: number | null
+  storageBytes: number | null
 }
 
-const initial: Stats = { sessions: 0, drafts: 0, lastBackupMs: null }
+const initial: Stats = { sessions: 0, drafts: 0, lastBackupMs: null, storageBytes: null }
 
 function relative(ms: number, now: number = Date.now()): string {
   const diff = now - ms
@@ -45,6 +48,7 @@ const defaultLoaders = {
     const row = await getLatestSuccessful()
     return row ? row.completedAt : null
   },
+  storageBytes: async () => (await getStorageUsage()).totalBytes,
 }
 
 export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
@@ -57,12 +61,16 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     const sc = loaders?.sessionCount ?? defaultLoaders.sessionCount
     const pd = loaders?.pendingDrafts ?? defaultLoaders.pendingDrafts
     const lb = loaders?.lastBackupMs ?? defaultLoaders.lastBackupMs
-    void Promise.all([sc().catch(() => 0), pd().catch(() => 0), lb().catch(() => null)]).then(
-      ([sessions, drafts, lastBackupMs]) => {
-        if (cancelled) return
-        setStats({ sessions, drafts, lastBackupMs })
-      }
-    )
+    const sb = loaders?.storageBytes ?? defaultLoaders.storageBytes
+    void Promise.all([
+      sc().catch(() => 0),
+      pd().catch(() => 0),
+      lb().catch(() => null),
+      sb().catch(() => null),
+    ]).then(([sessions, drafts, lastBackupMs, storageBytes]) => {
+      if (cancelled) return
+      setStats({ sessions, drafts, lastBackupMs, storageBytes })
+    })
     return () => {
       cancelled = true
     }
@@ -84,14 +92,20 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     {
       label: t("backup"),
       value: stats.lastBackupMs ? relative(stats.lastBackupMs) : t("backupNever"),
-      href: "/settings?section=data",
+      href: "/me/backup",
       testId: "stat-tile-backup",
+    },
+    {
+      label: t("storage"),
+      value: stats.storageBytes !== null ? formatBytes(stats.storageBytes) : "—",
+      href: "/me/storage",
+      testId: "stat-tile-storage",
     },
   ]
 
   return (
     <motion.div
-      className={cn("grid grid-cols-3 gap-2", className)}
+      className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}
       data-testid="today-stats-card"
       initial={reduce ? false : "initial"}
       animate="animate"

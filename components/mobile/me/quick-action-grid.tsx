@@ -73,7 +73,7 @@ function Tile({
       aria-label={ariaLabel}
       data-testid={testid}
       className={cn(
-        "h-auto flex-1 flex-col items-center gap-1 px-2 py-3",
+        "h-auto w-full flex-col items-center gap-1 px-2 py-3",
         active && "border-primary/60 bg-primary/5"
       )}
     >
@@ -143,7 +143,7 @@ export function QuickActionGrid({ className }: QuickActionGridProps) {
 
   return (
     <>
-      <div className={cn("flex items-center gap-2", className)} data-testid="quick-action-grid">
+      <div className={cn("grid grid-cols-4 gap-2", className)} data-testid="quick-action-grid">
         <Tile
           icon={ThemeIcon}
           label={t("themeAria")}

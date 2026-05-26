@@ -111,6 +111,26 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
+  it("hides the tab bar on a workflow detail sub-route (full-screen editor)", () => {
+    pathnameMock.mockReturnValue("/workflows/wf-123")
+    render(
+      <MobileShellWrapper>
+        <div>editor</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
+  })
+
+  it("keeps the tab bar on the /workflows list", () => {
+    pathnameMock.mockReturnValue("/workflows")
+    render(
+      <MobileShellWrapper>
+        <div>list</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
+  })
+
   it("does not render tab bar on tauri", () => {
     platformMock.mockReturnValue("tauri")
     render(

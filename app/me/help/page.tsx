@@ -12,9 +12,7 @@ import { BookOpenIcon, ExternalLinkIcon, CodeIcon, ScaleIcon } from "lucide-reac
 import { MeRow } from "@/components/mobile/me/me-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
-
-const DOCS_URL = "https://docs.cognia.app"
-const GITHUB_URL = "https://github.com/anthropics/claude-code"
+import { DOCS_URL, GITHUB_URL } from "@/lib/constants/external-urls"
 
 export default function MobileHelpPage() {
   const t = useTranslations("mobile.me")

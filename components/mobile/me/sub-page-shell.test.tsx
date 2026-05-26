@@ -57,4 +57,16 @@ describe("<SubPageShell />", () => {
     )
     expect(container.querySelector("section")?.className).toMatch(/px-2/)
   })
+
+  it("centers content within a max width on large screens", () => {
+    const { container } = render(
+      <SubPageShell title="X" backAria="Back">
+        body
+      </SubPageShell>
+    )
+    // Body section + header inner row both clamp to a centered max width so
+    // the page reads correctly on tablets / landscape, not edge-to-edge.
+    expect(container.querySelector("section")?.className).toMatch(/max-w-2xl/)
+    expect(container.querySelector("header > div")?.className).toMatch(/max-w-2xl/)
+  })
 })

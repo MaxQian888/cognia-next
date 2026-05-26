@@ -41,6 +41,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { share } from "@/lib/capacitor/share"
 import { writeFile } from "@/lib/capacitor/filesystem"
 import { ensureChannel, schedule as scheduleLocalNotif } from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
@@ -113,7 +114,14 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
       recursive: true,
     })
     if (out.kind === "ok") {
-      toast.success(t("exportSuccess", { path: out.value.uri }))
+      toast.success(t("exportSuccess", { path: out.value.uri }), {
+        action: {
+          label: t("shareFile"),
+          onClick: () => {
+            void share({ title: t("shareTitle"), files: [out.value.uri] })
+          },
+        },
+      })
     } else if (out.kind === "unsupported") {
       // Web fallback — trigger a download via Blob URL.
       const blob = new Blob([json], { type: "application/octet-stream" })

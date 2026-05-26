@@ -41,6 +41,7 @@ const DEFAULTS: AppSettings = {
   sttLanguage: "en-US",
   selectedMicId: undefined,
   pinnedWorkflowIds: [],
+  pinnedMeRowIds: [],
   lastInboxViewedAt: 0,
   // TTS defaults (mirror lib/tts/types.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,

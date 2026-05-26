@@ -1,12 +1,14 @@
 /**
  * @jest-environment jsdom
  *
- * Covers the platform gate / desktop-redirect behavior in
- * `app/me/page.tsx`. The mobile body is heavily dependency-laden, so we
- * stub every downstream component to keep the unit under test as just
- * the gate + section composition.
+ * Covers the platform gate / desktop-redirect plus the data-driven section
+ * composition, search filtering, and pinned-favorites behavior in
+ * `app/me/page.tsx`. The heavyweight card/row dependencies are stubbed so the
+ * unit under test is the page's own composition logic. `MeRow` / `MeSection`
+ * render for real (as in the original test) so the `me-row-*` / `me-section-*`
+ * ids and hrefs are exercised end-to-end.
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -35,6 +37,45 @@ jest.mock("@/hooks/companion/use-companion-config", () => ({
   }),
 }))
 
+const pinnedState = { current: [] as string[] }
+const togglePinMock = jest.fn()
+jest.mock("@/components/mobile/me/use-pinned-me-rows", () => ({
+  usePinnedMeRows: () => ({
+    pinnedIds: pinnedState.current,
+    isPinned: (id: string) => pinnedState.current.includes(id),
+    togglePin: togglePinMock,
+  }),
+}))
+
+const syncStates = { current: {} as Record<string, { lastSyncAt: number | null }> }
+jest.mock("@/lib/sync/companion-sync", () => ({
+  snapshotSyncStates: () => syncStates.current,
+}))
+
+// Long-press is a thin gesture wrapper — pass children straight through.
+jest.mock("@/components/interactions/long-press", () => ({
+  LongPress: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+// A controllable search input so we can drive the query.
+jest.mock("@/components/mobile/discover/discover-search", () => ({
+  DiscoverSearch: ({
+    value,
+    onChange,
+    testid,
+  }: {
+    value: string
+    onChange: (v: string) => void
+    testid?: string
+  }) => (
+    <input
+      data-testid={`${testid ?? "discover-search"}-input`}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 jest.mock("@/components/mobile/me/account-card", () => ({
   AccountCard: () => <div data-testid="stub-account-card" />,
 }))
@@ -43,6 +84,12 @@ jest.mock("@/components/mobile/me/today-stats-card", () => ({
 }))
 jest.mock("@/components/mobile/me/quick-action-grid", () => ({
   QuickActionGrid: () => <div data-testid="stub-quick-action-grid" />,
+}))
+jest.mock("@/components/mobile/me/transport-tier-indicator", () => ({
+  TransportTierIndicator: () => <div data-testid="stub-transport-tier" />,
+}))
+jest.mock("@/components/mobile/notifications/notification-permission-cta", () => ({
+  NotificationPermissionCta: () => <div data-testid="stub-notif-cta" />,
 }))
 jest.mock("@/components/mobile/me/version-row", () => ({
   VersionRow: () => <div data-testid="stub-version-row" />,
@@ -58,9 +105,18 @@ import MePage from "./page"
 
 beforeEach(() => {
   routerReplace.mockReset()
+  togglePinMock.mockReset()
   platformValue = "web"
   companionConfigState.current = { paired: false, shortDeviceId: null }
+  pinnedState.current = []
+  syncStates.current = {}
 })
+
+function hrefOf(testid: string): string | null | undefined {
+  const row = screen.getByTestId(testid)
+  const link = row.closest("a") || row.querySelector("a")
+  return link?.getAttribute("href")
+}
 
 describe("MePage platform gate", () => {
   it("renders the mobile body when platform === 'mobile'", () => {
@@ -71,6 +127,8 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("stub-today-stats")).toBeInTheDocument()
     expect(screen.getByTestId("stub-quick-action-grid")).toBeInTheDocument()
     expect(screen.getByTestId("stub-connection-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-transport-tier")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-notif-cta")).toBeInTheDocument()
     expect(screen.getByTestId("stub-sign-out")).toBeInTheDocument()
     expect(routerReplace).not.toHaveBeenCalled()
   })
@@ -89,10 +147,15 @@ describe("MePage platform gate", () => {
   it("renders the scheduler row in the automation section pointing at /me/scheduler", () => {
     platformValue = "mobile"
     render(<MePage />)
-    const row = screen.getByTestId("me-row-scheduler")
-    expect(row).toBeInTheDocument()
-    const link = row.closest("a") || row.querySelector("a")
-    expect(link?.getAttribute("href")).toBe("/me/scheduler")
+    expect(screen.getByTestId("me-row-scheduler")).toBeInTheDocument()
+    expect(hrefOf("me-row-scheduler")).toBe("/me/scheduler")
+  })
+
+  it("surfaces the new terminal and remote-sessions entries", () => {
+    platformValue = "mobile"
+    render(<MePage />)
+    expect(hrefOf("me-row-terminal")).toBe("/me/terminal")
+    expect(hrefOf("me-row-remote-sessions")).toBe("/remote-sessions")
   })
 
   it("shows the 'Pair now' row only when unpaired", () => {
@@ -113,6 +176,13 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("me-row-devices")).toHaveTextContent("ABCDEFGH")
   })
 
+  it("shows the last-synced stamp on the sync row when sync state exists", () => {
+    platformValue = "mobile"
+    syncStates.current = { sessions: { lastSyncAt: Date.now() - 120_000 } }
+    render(<MePage />)
+    expect(screen.getByTestId("me-row-sync")).toHaveTextContent(/ago/)
+  })
+
   it("renders null and redirects to /settings on web", () => {
     platformValue = "web"
     const { container } = render(<MePage />)
@@ -125,5 +195,46 @@ describe("MePage platform gate", () => {
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
     expect(routerReplace).toHaveBeenCalledWith("/settings")
+  })
+})
+
+describe("MePage search", () => {
+  it("filters to matching rows and hides the grouped sections", () => {
+    platformValue = "mobile"
+    render(<MePage />)
+    fireEvent.change(screen.getByTestId("me-search-input"), { target: { value: "backup" } })
+    expect(screen.getByTestId("me-search-results")).toBeInTheDocument()
+    expect(screen.getByTestId("me-row-backup")).toBeInTheDocument()
+    // Non-matching rows and the normal grouped layout are gone.
+    expect(screen.queryByTestId("me-row-subscription")).toBeNull()
+    expect(screen.queryByTestId("me-section-account")).toBeNull()
+  })
+
+  it("shows an empty state when nothing matches", () => {
+    platformValue = "mobile"
+    render(<MePage />)
+    fireEvent.change(screen.getByTestId("me-search-input"), { target: { value: "zzzzzzz" } })
+    expect(screen.getByTestId("me-search-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("me-search-results")).toBeNull()
+  })
+})
+
+describe("MePage favorites", () => {
+  it("hides the favorites section when nothing is pinned", () => {
+    platformValue = "mobile"
+    pinnedState.current = []
+    render(<MePage />)
+    expect(screen.queryByTestId("me-section-favorites")).toBeNull()
+  })
+
+  it("renders pinned rows in a favorites section above the groups", () => {
+    platformValue = "mobile"
+    pinnedState.current = ["sync", "backup"]
+    render(<MePage />)
+    expect(screen.getByTestId("me-section-favorites")).toBeInTheDocument()
+    expect(screen.getByTestId("me-row-fav-sync")).toBeInTheDocument()
+    expect(screen.getByTestId("me-row-fav-backup")).toBeInTheDocument()
+    // The same rows still appear in their normal groups (distinct ids).
+    expect(screen.getByTestId("me-row-sync")).toBeInTheDocument()
   })
 })

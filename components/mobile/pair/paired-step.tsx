@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
+import { DiscoverHelp } from "@/components/mobile/pair/discover-help"
 import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -27,7 +28,6 @@ import {
 } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Spinner } from "@/components/ui/spinner"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { transport } from "@/lib/tauri"
 import { clearCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -193,6 +193,7 @@ export function PairedStep({
           ) : null}
         </CardFooter>
       </Card>
+      <DiscoverHelp />
       <p className="text-center text-xs text-muted-foreground">
         {t("transportLabel")}: <code className="font-mono">{transportName}</code>
       </p>
@@ -275,10 +276,9 @@ function ConnectionHealthCard({
           <dt className="text-muted-foreground">{t("health.lastHeartbeat")}</dt>
           <dd>
             {healthState === "checking" ? (
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                <Spinner className="size-3" />
-                {t("health.checking")}
-              </span>
+              // Single source of "in flight" feedback is the pulsing status
+              // dot in the card title — no second spinner here.
+              <span className="text-muted-foreground">{t("health.checking")}</span>
             ) : (
               formatRelative(lastHeartbeatMs)
             )}
@@ -302,10 +302,7 @@ function ConnectionHealthCard({
           disabled={healthState === "checking"}
           data-testid="pair-refresh"
         >
-          <RefreshCwIcon
-            className={cn("size-4", healthState === "checking" && "animate-spin")}
-            aria-hidden="true"
-          />
+          <RefreshCwIcon className="size-4" aria-hidden="true" />
           {t("health.refresh")}
         </Button>
         <Button

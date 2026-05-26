@@ -1,99 +1,135 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowRightIcon, RefreshCwIcon, SearchXIcon, ScanLineIcon } from "lucide-react"
+import { ArrowRightIcon, QrCodeIcon, RefreshCwIcon, ScanLineIcon, SearchXIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/mobile/empty-state"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import { cn } from "@/lib/utils"
-import { rankSource, scanLan, type DiscoveredServer } from "@/lib/connectivity/lan-scanner"
+import { fetchHealthz } from "@/lib/connectivity/healthz"
+import { impact, notify } from "@/lib/capacitor/haptics"
+import {
+  rankSource,
+  scanLan,
+  type DiscoveredServer,
+  type PairedSummary,
+} from "@/lib/connectivity/lan-scanner"
+import { useLanScan } from "@/hooks/connectivity/use-lan-scan"
 
+import { DiscoverHelp } from "./discover-help"
 import { ScanRadar } from "./scan-radar"
-import { ServerCard } from "./server-card"
+import { ServerCard, type ServerCardStatus } from "./server-card"
 
 export interface DiscoverStepProps {
-  /** Pre-populate the list with previously paired baseUrls. */
+  /** Pre-populate the list with previously paired / recent servers. */
   history?: DiscoveredServer[]
-  /** Called when a user taps a discovered server. */
+  /** Currently-paired desktop(s) — ranked at the top, drive multi-port probe. */
+  paired?: PairedSummary[]
+  /** Called once a tapped server passes the pre-flight reachability check. */
   onSelect: (server: DiscoveredServer) => void
-  /** Called when the user opts out of auto-discovery. */
+  /** Called when the user opts into manual entry. */
   onSkip: () => void
-  /** Test seam — replaces the full scan with a stub. */
+  /** Called when the user taps "Scan QR" — jumps to the pair step's scanner. */
+  onScanShortcut?: () => void
+  /** Test seam — replaces the full scan. */
   scan?: typeof scanLan
+  /** Test seam — replaces the `/healthz` pre-flight probe. */
+  probe?: typeof fetchHealthz
+  /** How long the ✓ result lingers before advancing. Test seam (default 600). */
+  precheckDelayMs?: number
 }
 
-type ScanState = "scanning" | "idle"
-
 const SCAN_WINDOW_MS = 5_000
-const EMPTY_HISTORY: readonly DiscoveredServer[] = []
+const PRECHECK_TIMEOUT_MS = 800
 
-export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: DiscoverStepProps) {
+interface Precheck {
+  id: string
+  status: ServerCardStatus
+  label?: string
+}
+
+export function DiscoverStep({
+  history,
+  paired,
+  onSelect,
+  onSkip,
+  onScanShortcut,
+  scan = scanLan,
+  probe = fetchHealthz,
+  precheckDelayMs = 600,
+}: DiscoverStepProps) {
   const t = useTranslations("mobile.pair.discover")
   const tPerm = useTranslations("mobile.pair.permissions")
-  // Snapshot history at mount — props default `[]` would otherwise create
-  // a new array per render and retrigger the auto-scan effect forever.
-  const [stableHistory] = useState<readonly DiscoveredServer[]>(history ?? EMPTY_HISTORY)
-  const [servers, setServers] = useState<DiscoveredServer[]>(() =>
-    stableHistory.map((h) => ({ ...h, source: "history" as const }))
-  )
-  const [scanState, setScanState] = useState<ScanState>("scanning")
-  const [permissionDenied, setPermissionDenied] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-
-  // Pure side-effect runner; does NOT touch local state synchronously
-  // (the linter rejects setState calls inside an effect body, and the
-  // initial scanState is already "scanning" so we don't need to set it).
-  const runScan = useCallback(() => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    void scan({
-      signal: controller.signal,
-      mdnsWindowMs: SCAN_WINDOW_MS,
-      history: stableHistory as DiscoveredServer[],
-      onFound: (svc) =>
-        setServers((prev) => {
-          const idx = prev.findIndex((s) => s.id === svc.id)
-          if (idx < 0) return [...prev, svc]
-          const existing = prev[idx]
-          if (rankSource(existing.source) >= rankSource(svc.source)) return prev
-          const next = [...prev]
-          next[idx] = svc
-          return next
-        }),
-    })
-      .catch((err) => {
-        if (isPermissionError(err)) setPermissionDenied(true)
-      })
-      .finally(() => {
-        if (controller.signal.aborted) return
-        setScanState("idle")
-      })
-  }, [scan, stableHistory])
-
-  // Click handler: explicit user-initiated rescan. Resets transient state
-  // synchronously, then kicks off the side-effect.
-  const onRescan = useCallback(() => {
-    setScanState("scanning")
-    setPermissionDenied(false)
-    runScan()
-  }, [runScan])
-
-  useEffect(() => {
-    runScan()
-    return () => {
-      abortRef.current?.abort()
-    }
-  }, [runScan])
-
-  const sortedServers = useMemo(() => sortServers(servers), [servers])
-  const foundCount = sortedServers.length
-  const showEmpty = scanState === "idle" && foundCount === 0
   const reduce = useReducedMotion()
+
+  const { servers, scanning, permissionDenied, rescan } = useLanScan({
+    history,
+    paired,
+    mdnsWindowMs: SCAN_WINDOW_MS,
+    scan,
+  })
+
+  const [precheck, setPrecheck] = useState<Precheck | null>(null)
+
+  const sorted = useMemo(() => sortServers(servers), [servers])
+  const recent = useMemo(
+    () => sorted.filter((s) => s.source === "paired" || s.source === "history"),
+    [sorted]
+  )
+  const live = useMemo(
+    () => sorted.filter((s) => s.source === "mdns" || s.source === "probe"),
+    [sorted]
+  )
+  const foundCount = sorted.length
+  const showEmpty = !scanning && foundCount === 0
+  const checking = precheck?.status === "checking"
+
+  // Pre-flight: probe `/healthz` before advancing so we never hand a dead
+  // server to the pair step. Success enriches the picked server with the
+  // reported version + fingerprint; failure surfaces inline and stays put.
+  const onCardSelect = useCallback(
+    async (server: DiscoveredServer) => {
+      void impact("light")
+      setPrecheck({ id: server.id, status: "checking" })
+      const startedAt = Date.now()
+      const hz = await probe(server.baseUrl, {
+        signal: new AbortController().signal,
+        timeoutMs: PRECHECK_TIMEOUT_MS,
+      })
+      if (!hz) {
+        void notify("error")
+        setPrecheck({ id: server.id, status: "error", label: t("precheckUnreachable") })
+        return
+      }
+      const latencyMs = Date.now() - startedAt
+      void notify("success")
+      setPrecheck({
+        id: server.id,
+        status: "ok",
+        label: t("precheckOk", { version: hz.version, ms: latencyMs }),
+      })
+      const enriched: DiscoveredServer = {
+        ...server,
+        fingerprint: server.fingerprint ?? hz.fingerprint,
+        serverId: server.serverId ?? hz.serverId,
+        serverVersion: server.serverVersion ?? hz.version,
+        latencyMs: server.latencyMs ?? latencyMs,
+      }
+      if (precheckDelayMs <= 0) {
+        onSelect(enriched)
+        return
+      }
+      setTimeout(() => onSelect(enriched), precheckDelayMs)
+    },
+    [probe, onSelect, precheckDelayMs, t]
+  )
+
+  const statusFor = (id: string): ServerCardStatus =>
+    precheck?.id === id ? precheck.status : "idle"
+  const labelFor = (id: string) => (precheck?.id === id ? precheck.label : undefined)
 
   return (
     <section
@@ -102,23 +138,16 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
       data-testid="pair-discover-step"
     >
       <header className="flex flex-col items-center gap-2 text-center">
-        <ScanRadar active={scanState === "scanning"} />
+        <ScanRadar active={scanning} />
         <h2 className="text-base font-semibold">{t("title")}</h2>
         <p className="max-w-sm text-balance text-sm text-muted-foreground">
-          {scanState === "scanning" ? t("scanning") : t("subtitle")}
+          {scanning ? t("scanning") : t("subtitle")}
         </p>
         <span
           aria-live="polite"
           className="text-[11px] uppercase tracking-wide text-muted-foreground"
         >
-          {scanState === "scanning" ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Spinner className="size-3" />
-              {t("foundCount", { count: foundCount })}
-            </span>
-          ) : (
-            t("foundCount", { count: foundCount })
-          )}
+          {t("foundCount", { count: foundCount })}
         </span>
       </header>
 
@@ -129,44 +158,64 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
         </Alert>
       ) : null}
 
-      {sortedServers.length > 0 ? (
-        <motion.ul
-          className="flex flex-col gap-2"
-          role="list"
-          initial={reduce ? false : "initial"}
-          animate="animate"
-          variants={STAGGER_CONTAINER}
-        >
-          {sortedServers.map((server) => (
-            <motion.li key={server.id} variants={STAGGER_CHILD}>
-              <ServerCard server={server} onSelect={onSelect} />
-            </motion.li>
-          ))}
-        </motion.ul>
+      {recent.length > 0 ? (
+        <ServerGroup
+          heading={t("recentTitle")}
+          servers={recent}
+          onSelect={onCardSelect}
+          statusFor={statusFor}
+          labelFor={labelFor}
+          disabled={checking}
+          reduce={reduce}
+          testid="pair-discover-recent"
+        />
+      ) : null}
+
+      {live.length > 0 ? (
+        <ServerGroup
+          heading={recent.length > 0 ? t("nearbyTitle") : undefined}
+          servers={live}
+          onSelect={onCardSelect}
+          statusFor={statusFor}
+          labelFor={labelFor}
+          disabled={checking}
+          reduce={reduce}
+          testid="pair-discover-nearby"
+        />
       ) : null}
 
       {showEmpty ? (
-        <div
-          className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/40 px-6 py-8 text-center"
-          data-testid="pair-discover-empty"
-        >
-          <span className="inline-flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <SearchXIcon className="size-5" aria-hidden="true" />
-          </span>
-          <div className="flex flex-col gap-1">
-            <p className="text-sm font-semibold">{t("emptyTitle")}</p>
-            <p className="text-xs text-muted-foreground">{t("emptyDescription")}</p>
-          </div>
-        </div>
+        <EmptyState
+          icon={SearchXIcon}
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
+          className="py-8"
+        />
       ) : null}
 
-      <div className={cn("flex flex-col gap-2", showEmpty ? "" : "border-t pt-3")}>
+      <DiscoverHelp emphasised={showEmpty} />
+
+      <div className="flex flex-col gap-2 border-t pt-3">
+        {onScanShortcut ? (
+          <Button
+            type="button"
+            size="lg"
+            className="touch-target w-full"
+            onClick={onScanShortcut}
+            disabled={checking}
+            data-testid="pair-discover-scan-qr"
+          >
+            <QrCodeIcon className="size-4" aria-hidden="true" />
+            {t("scanQrCta")}
+          </Button>
+        ) : null}
         <Button
           type="button"
-          variant={showEmpty ? "default" : "outline"}
+          variant="outline"
           size="lg"
           className="touch-target w-full"
           onClick={onSkip}
+          disabled={checking}
           data-testid="pair-discover-skip"
         >
           <ScanLineIcon className="size-4" aria-hidden="true" />
@@ -178,26 +227,76 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
           variant="ghost"
           size="sm"
           className="touch-target w-full"
-          onClick={onRescan}
-          disabled={scanState === "scanning"}
+          onClick={rescan}
+          disabled={scanning || checking}
           data-testid="pair-discover-rescan"
         >
-          <RefreshCwIcon
-            className={cn("size-4", scanState === "scanning" && "animate-spin")}
-            aria-hidden="true"
-          />
-          {scanState === "scanning" ? t("scanning") : t("rescanCta")}
+          <RefreshCwIcon className="size-4" aria-hidden="true" />
+          {scanning ? t("scanning") : t("rescanCta")}
         </Button>
       </div>
     </section>
   )
 }
 
+interface ServerGroupProps {
+  heading?: string
+  servers: DiscoveredServer[]
+  onSelect: (server: DiscoveredServer) => void
+  statusFor: (id: string) => ServerCardStatus
+  labelFor: (id: string) => string | undefined
+  disabled: boolean
+  reduce: boolean | null
+  testid: string
+}
+
+function ServerGroup({
+  heading,
+  servers,
+  onSelect,
+  statusFor,
+  labelFor,
+  disabled,
+  reduce,
+  testid,
+}: ServerGroupProps) {
+  return (
+    <div className="flex flex-col gap-2" data-testid={testid}>
+      {heading ? (
+        <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {heading}
+        </p>
+      ) : null}
+      <motion.ul
+        className="flex flex-col gap-2"
+        role="list"
+        initial={reduce ? false : "initial"}
+        animate="animate"
+        variants={STAGGER_CONTAINER}
+      >
+        {servers.map((server) => {
+          const status = statusFor(server.id)
+          return (
+            <motion.li key={server.id} variants={STAGGER_CHILD}>
+              <ServerCard
+                server={server}
+                onSelect={onSelect}
+                status={status}
+                statusLabel={labelFor(server.id)}
+                disabled={disabled && status !== "checking"}
+              />
+            </motion.li>
+          )
+        })}
+      </motion.ul>
+    </div>
+  )
+}
+
 /**
- * Sort by source priority (paired first, then mDNS, probe, history) then
- * by latency ascending so the closest server lands at the top. Uses the
- * canonical [`rankSource`] from `lan-scanner` so a new source tier
- * (e.g. "paired") never silently drops to rank 1 here.
+ * Sort by source priority (paired → mDNS → probe → history) then latency
+ * ascending so the closest server lands at the top. Uses the canonical
+ * `rankSource` from `lan-scanner`.
  */
 function sortServers(items: DiscoveredServer[]): DiscoveredServer[] {
   return [...items].sort((a, b) => {
@@ -207,10 +306,4 @@ function sortServers(items: DiscoveredServer[]): DiscoveredServer[] {
     const bl = b.latencyMs ?? Number.POSITIVE_INFINITY
     return al - bl
   })
-}
-
-function isPermissionError(err: unknown): boolean {
-  if (!err) return false
-  const msg = err instanceof Error ? err.message : String(err)
-  return /permission|denied|not allowed/i.test(msg)
 }

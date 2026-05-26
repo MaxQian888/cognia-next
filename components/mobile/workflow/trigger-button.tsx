@@ -6,6 +6,7 @@ import { PlayIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { impact } from "@/lib/capacitor/haptics"
 
@@ -59,7 +60,9 @@ export function TriggerButton({
       onClick={onClick}
       disabled={busy}
       size="sm"
-      className={className}
+      // Mobile touch target floor (iOS HIG 44px) — `min-h-11` wins over the
+      // `size="sm"` height without changing the desktop visual weight.
+      className={cn("min-h-11", className)}
       data-testid={`workflow-trigger-${workflowId}`}
     >
       <PlayIcon className="size-3.5" aria-hidden="true" />

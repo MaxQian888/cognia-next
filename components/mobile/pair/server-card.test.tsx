@@ -10,10 +10,12 @@ import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
+      viaPaired: "Paired",
       viaMdns: "mDNS",
       viaProbe: "Probe",
       viaHistory: "Last used",
       tlsPinned: "TLS pinned",
+      tlsMismatch: "Fingerprint changed",
       tlsUnverified: "TLS unverified",
       latencyMs: `${(vars?.ms as number) ?? 0} ms`,
     }
@@ -87,5 +89,42 @@ describe("<ServerCard />", () => {
     const node = screen.getByTestId("pair-server-card")
     expect(node).toHaveAttribute("aria-pressed", "true")
     expect(node).toHaveAttribute("data-selected", "true")
+  })
+
+  it("shows a busy spinner and disables taps while checking", () => {
+    const onSelect = jest.fn()
+    render(<ServerCard server={baseServer} onSelect={onSelect} status="checking" disabled />)
+    const node = screen.getByTestId("pair-server-card")
+    expect(node).toHaveAttribute("data-status", "checking")
+    expect(node).toHaveAttribute("aria-busy", "true")
+    expect(node).toBeDisabled()
+  })
+
+  it("renders the ok status line under the badges", () => {
+    render(
+      <ServerCard server={baseServer} onSelect={() => {}} status="ok" statusLabel="Reachable" />
+    )
+    expect(screen.getByTestId("pair-server-card")).toHaveAttribute("data-status", "ok")
+    expect(screen.getByTestId("pair-server-card-status")).toHaveTextContent("Reachable")
+  })
+
+  it("renders the error status line and flags the row", () => {
+    render(
+      <ServerCard
+        server={baseServer}
+        onSelect={() => {}}
+        status="error"
+        statusLabel="Unreachable"
+      />
+    )
+    expect(screen.getByTestId("pair-server-card-status")).toHaveTextContent("Unreachable")
+  })
+
+  it("flags a fingerprint mismatch and swaps the badge label", () => {
+    render(<ServerCard server={baseServer} onSelect={() => {}} mismatch />)
+    const node = screen.getByTestId("pair-server-card")
+    expect(node).toHaveAttribute("data-mismatch", "true")
+    expect(screen.getByText("Fingerprint changed")).toBeInTheDocument()
+    expect(screen.queryByText("TLS pinned")).not.toBeInTheDocument()
   })
 })

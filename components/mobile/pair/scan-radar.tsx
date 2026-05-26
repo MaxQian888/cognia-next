@@ -32,22 +32,29 @@ export function ScanRadar({ active, className }: ScanRadarProps) {
     >
       <span
         className={cn(
-          "pair-radar-ring absolute inset-0 rounded-full border border-primary/40",
+          "pair-radar-ring absolute inset-0 rounded-full border border-primary/30",
           active && "pair-radar-ring--active"
         )}
         data-ring="outer"
       />
       <span
         className={cn(
-          "pair-radar-ring absolute inset-3 rounded-full border border-primary/60",
-          active && "pair-radar-ring--active pair-radar-ring--inner"
+          "pair-radar-ring absolute inset-3 rounded-full border border-primary/45",
+          active && "pair-radar-ring--active pair-radar-ring--d1"
+        )}
+        data-ring="mid"
+      />
+      <span
+        className={cn(
+          "pair-radar-ring absolute inset-6 rounded-full border border-primary/60",
+          active && "pair-radar-ring--active pair-radar-ring--d2"
         )}
         data-ring="inner"
       />
       <span
         className={cn(
-          "relative inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary",
-          active ? "shadow-[0_0_0_4px_color-mix(in_oklch,var(--primary)_15%,transparent)]" : ""
+          "pair-radar-core relative inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary",
+          active && "pair-radar-core--active"
         )}
       >
         <WifiIcon className="size-6" />

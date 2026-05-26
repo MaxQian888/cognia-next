@@ -191,6 +191,43 @@ describe("<PairStep />", () => {
     expect((screen.getByTestId("pair-jwt") as HTMLTextAreaElement).value).toBe("qq.qq.qq")
   })
 
+  it("autoScan launches the QR scanner on mount", async () => {
+    mockedScanQr.mockResolvedValueOnce({
+      kind: "scanned",
+      raw: JSON.stringify({ baseUrl: "http://192.168.1.50:7890", pairJwt: "zz.zz.zz", v: 1 }),
+    })
+    render(<PairStep onPaired={() => {}} autoScan />)
+    await waitFor(() => expect(mockedScanQr).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect((screen.getByTestId("pair-baseurl") as HTMLInputElement).value).toBe(
+        "http://192.168.1.50:7890"
+      )
+    )
+  })
+
+  it("records the server in recents after a successful pair", async () => {
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({ device_id: "dev-rec", device_jwt: "jwt.rec", server_version: "0.2.0" }),
+      text: () => Promise.resolve(""),
+    })
+    const user = userEvent.setup()
+    render(<PairStep onPaired={() => {}} />)
+    fireEvent.change(screen.getByTestId("pair-baseurl"), {
+      target: { value: "http://192.168.1.77:7890" },
+    })
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: VALID_JWT } })
+    await user.click(screen.getByTestId("pair-submit"))
+    await waitFor(() => {
+      const raw = window.localStorage.getItem("cognia.mobile.recentServers")
+      expect(raw).toContain("192.168.1.77")
+    })
+  })
+
   it("Scan QR explains permission denial without throwing", async () => {
     mockedScanQr.mockResolvedValueOnce({ kind: "permission_denied" })
     const user = userEvent.setup()

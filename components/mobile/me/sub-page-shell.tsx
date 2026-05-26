@@ -61,22 +61,24 @@ export function SubPageShell({
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
       data-testid={testid}
     >
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-        <Button
-          asChild
-          variant="ghost"
-          size="icon"
-          aria-label={backAria}
-          data-testid="mobile-sub-page-back"
-        >
-          <Link href={backHref}>
-            <ArrowLeftIcon className="size-5" aria-hidden="true" />
-          </Link>
-        </Button>
-        <h1 className="flex-1 truncate text-base font-semibold tracking-tight">{title}</h1>
-        {headerAccessory ? <div className="shrink-0">{headerAccessory}</div> : null}
+      <header className="sticky top-0 z-10 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            aria-label={backAria}
+            data-testid="mobile-sub-page-back"
+          >
+            <Link href={backHref}>
+              <ArrowLeftIcon className="size-5" aria-hidden="true" />
+            </Link>
+          </Button>
+          <h1 className="flex-1 truncate text-base font-semibold tracking-tight">{title}</h1>
+          {headerAccessory ? <div className="shrink-0">{headerAccessory}</div> : null}
+        </div>
       </header>
-      <section className={cn("px-4 py-4", bodyClassName)}>
+      <section className={cn("mx-auto w-full max-w-2xl px-4 py-4", bodyClassName)}>
         <Suspense fallback={fallback ?? <DefaultFallback />}>{children}</Suspense>
       </section>
     </main>

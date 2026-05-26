@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
@@ -26,10 +26,12 @@ import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { parsePairQrPayload } from "@/lib/qr/pair-qr"
 import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
+import { recordRecentServer } from "@/lib/connectivity/recent-servers"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
 import { describeNetworkError, validateBaseUrl, validatePairJwt } from "./pair-helpers"
 import { redeemPairCode, redeemPairJwt, type RedeemResult } from "./pair-api"
+import { DiscoverHelp } from "./discover-help"
 
 export interface PairStepProps {
   /** Pre-fill the URL field, e.g. after the user picked a discovered server. */
@@ -40,6 +42,8 @@ export interface PairStepProps {
   prefilledFingerprint?: string
   /** When true, the URL field is read-only — discover already validated it. */
   lockBaseUrl?: boolean
+  /** Launch the QR scanner automatically on mount (the discover "Scan QR" shortcut). */
+  autoScan?: boolean
   /** Bubble a successful pair up to the coordinator. */
   onPaired: (config: CompanionConfig) => void
   /** "Back to discover" handler. */
@@ -60,6 +64,7 @@ export function PairStep({
   prefilledPairJwt = "",
   prefilledFingerprint = "",
   lockBaseUrl = false,
+  autoScan = false,
   onPaired,
   onBack,
 }: PairStepProps) {
@@ -129,6 +134,15 @@ export function PairStep({
     }
     setPhase({ kind: "error", message: t("scanError.failed", { message: result.message }) })
   }, [t])
+
+  // Discover "Scan QR" shortcut — launch the camera once on mount.
+  const autoScanFiredRef = useRef(false)
+  useEffect(() => {
+    if (autoScan && !autoScanFiredRef.current) {
+      autoScanFiredRef.current = true
+      void onScanQr()
+    }
+  }, [autoScan, onScanQr])
 
   const onPair = useCallback(async () => {
     const trimmedUrl = baseUrl.trim().replace(/\/+$/, "")
@@ -212,6 +226,14 @@ export function PairStep({
       }
 
       await saveCompanionConfig(result.config)
+      // Remember this server so the Discover step can offer one-tap reconnect
+      // next time, even after sign-out.
+      recordRecentServer({
+        baseUrl: result.config.baseUrl,
+        fingerprint: result.config.serverFingerprint,
+        label: result.config.deviceId ? result.config.deviceId.slice(0, 8) : undefined,
+        serverVersion: result.config.serverVersion,
+      })
       onPaired(result.config)
       return
     }
@@ -438,6 +460,8 @@ export function PairStep({
           {t("discover.backToDiscover")}
         </Button>
       ) : null}
+
+      <DiscoverHelp />
     </section>
   )
 }

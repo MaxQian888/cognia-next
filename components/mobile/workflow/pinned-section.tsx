@@ -47,7 +47,7 @@ export function PinnedSection({ workflows, pinnedIds, className }: PinnedSection
         variants={STAGGER_CONTAINER}
       >
         {pinned.map((wf) => (
-          <motion.li key={wf.id} variants={STAGGER_CHILD}>
+          <motion.li key={wf.id} variants={STAGGER_CHILD} className="min-w-0">
             <Card
               // Compact 2-col-grid card: smaller radius, no shadow.
               className="flex h-full flex-col gap-2 rounded-md p-3 py-3 shadow-none"

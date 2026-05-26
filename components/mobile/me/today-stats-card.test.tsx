@@ -21,9 +21,21 @@ jest.mock("next-intl", () => ({
       drafts: "Drafts",
       backup: "Last backup",
       backupNever: "Never",
+      storage: "Storage",
     }
     return map[key] ?? key
   },
+}))
+
+jest.mock("@/lib/storage/usage", () => ({
+  getStorageUsage: jest.fn(async () => ({
+    totalBytes: 1024,
+    quotaBytes: null,
+    backupBytes: null,
+    backups: [],
+  })),
+  formatBytes: (b: number | null | undefined) =>
+    b === null || b === undefined ? "—" : `${b}B`,
 }))
 
 const listSessionsMock = jest.fn(() => Promise.resolve([]) as Promise<unknown[]>)
@@ -54,13 +66,14 @@ beforeEach(() => {
 })
 
 describe("<TodayStatsCard />", () => {
-  it("renders three tiles linked to the right routes", async () => {
+  it("renders four tiles linked to the right routes", async () => {
     render(
       <TodayStatsCard
         loaders={{
           sessionCount: async () => 12,
           pendingDrafts: async () => 3,
           lastBackupMs: async () => Date.now() - 2 * 3_600_000,
+          storageBytes: async () => 2048,
         }}
       />
     )
@@ -69,12 +82,16 @@ describe("<TodayStatsCard />", () => {
     })
     expect(screen.getByTestId("stat-tile-drafts")).toHaveTextContent("3")
     expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent(/2h/)
+    expect(screen.getByTestId("stat-tile-storage")).toHaveTextContent("2048B")
     expect(screen.getByTestId("stat-tile-sessions")).toHaveAttribute("href", "/")
     expect(screen.getByTestId("stat-tile-drafts")).toHaveAttribute(
       "href",
       "/discover?tab=twinDrafts"
     )
-    expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("href", "/settings?section=data")
+    // Regression: the backup tile used to dead-link to the desktop-only
+    // `/settings?section=data` route, which mobile redirects away.
+    expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("href", "/me/backup")
+    expect(screen.getByTestId("stat-tile-storage")).toHaveAttribute("href", "/me/storage")
   })
 
   it('shows "Never" when no backup is recorded', async () => {
@@ -137,6 +154,9 @@ describe("<TodayStatsCard />", () => {
           lastBackupMs: async () => {
             throw new Error("boom")
           },
+          storageBytes: async () => {
+            throw new Error("boom")
+          },
         }}
       />
     )
@@ -145,5 +165,6 @@ describe("<TodayStatsCard />", () => {
     })
     expect(screen.getByTestId("stat-tile-drafts")).toHaveTextContent("0")
     expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent("Never")
+    expect(screen.getByTestId("stat-tile-storage")).toHaveTextContent("—")
   })
 })

@@ -31,4 +31,15 @@ describe("<ScanRadar />", () => {
       .querySelectorAll(".pair-radar-ring--active")
     expect(ringsActive.length).toBeGreaterThan(0)
   })
+
+  it("breathes the centre badge only while scanning", () => {
+    const { rerender } = render(<ScanRadar active={false} />)
+    expect(
+      screen.getByTestId("pair-scan-radar").querySelector(".pair-radar-core--active")
+    ).toBeNull()
+    rerender(<ScanRadar active />)
+    expect(
+      screen.getByTestId("pair-scan-radar").querySelector(".pair-radar-core--active")
+    ).not.toBeNull()
+  })
 })

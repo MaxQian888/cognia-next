@@ -859,6 +859,13 @@ export interface AppSettings {
    */
   pinnedWorkflowIds?: string[]
   /**
+   * Row ids the user has pinned on the mobile `/me` screen. Surfaced as a
+   * "Favorites" section above the grouped settings list. Lives in settings
+   * JSON (same pattern as `pinnedWorkflowIds`) so a pin set on either surface
+   * persists without a Dexie migration.
+   */
+  pinnedMeRowIds?: string[]
+  /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
    * count of `inboundLedger` rows newer than this timestamp. `0` / unset
@@ -1164,10 +1171,12 @@ export interface AppSettings {
    */
   webrtcEnabled?: boolean
   /**
-   * WSS endpoint of the rendezvous signaling service. Default: the project's
-   * hosted endpoint (`wss://signaling.cognia.app/v1/signaling`). Users may
-   * override to self-host the `cognia-signaling-server` binary on their
-   * own VPS.
+   * WSS endpoint of the rendezvous signaling service. Default: the
+   * `DEFAULT_SIGNALING_URL` from `lib/signaling/types.ts`
+   * (`NEXT_PUBLIC_SIGNALING_URL` build var, else
+   * `wss://signaling.cognia.cn/v1/signaling`). Users may override to self-host
+   * the `cognia-signaling-server` binary (or the Cloudflare Worker) on their
+   * own domain.
    */
   signalingUrl?: string
   /**

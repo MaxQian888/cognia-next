@@ -21,6 +21,7 @@ import { usePathname } from "next/navigation"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
 import { MobileOutboundRunnerProvider } from "@/components/mobile/mobile-outbound-runner-provider"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { usePlatform } from "@/hooks/use-platform"
@@ -52,6 +53,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
 
   const showTabBar = useMemo(() => {
     if (platform !== "mobile") return false
+    // Workflow detail sub-routes (the full-screen touch editor + run detail)
+    // own the whole viewport — hide the tab bar so it doesn't fight the
+    // canvas FAB / inspector drawer. The `/workflows` list itself keeps it.
+    if (pathname.startsWith("/workflows/")) return false
     return !TAB_BAR_HIDDEN_PREFIXES.some(
       (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
     )
@@ -96,6 +101,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         {children}
       </div>
       <MobileOutboundRunnerProvider />
+      <MobileConsentSheet />
       {showTabBar ? <MobileTabBar badges={mergedBadges} /> : null}
     </div>
   )

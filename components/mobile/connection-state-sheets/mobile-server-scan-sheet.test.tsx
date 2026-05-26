@@ -37,25 +37,31 @@ let scanLanImpl: (opts: {
 }) => Promise<void>
 jest.mock("@/lib/connectivity/lan-scanner", () => ({
   scanLan: (opts: Parameters<typeof scanLanImpl>[0]) => scanLanImpl(opts),
+  rankSource: (s: string) =>
+    (({ paired: 4, mdns: 3, probe: 2, history: 1 }) as Record<string, number>)[s] ?? 0,
 }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
+      // mobile.connectionState.scan
       title: "Scan local network",
       scanning: "Scanning",
       empty: "No servers yet",
       mdnsDenied: "Local network permission denied",
       openSettings: "Open Settings",
-      portLabel: "port",
-      "source.paired": "PAIRED",
-      "source.mdns": "MDNS",
-      "source.probe": "PROBE",
-      "source.history": "HIST",
-      "source.pairedTag": "Last paired",
       "fingerprintMismatch.title": "Fingerprint changed",
       "fingerprintMismatch.description": `${(vars?.count as number) ?? 0} server(s) returned a fingerprint that doesn't match the paired record.`,
       "fingerprintMismatch.dismiss": "Dismiss",
+      // mobile.pair.discover (ServerCard)
+      viaPaired: "Paired",
+      viaMdns: "mDNS",
+      viaProbe: "Probe",
+      viaHistory: "Last used",
+      tlsPinned: "TLS pinned",
+      tlsMismatch: "Fingerprint changed",
+      tlsUnverified: "TLS unverified",
+      latencyMs: `${(vars?.ms as number) ?? 0} ms`,
     }
     return map[key] ?? key
   },
@@ -71,6 +77,12 @@ function discoveredServer(overrides: Partial<DiscoveredServer>): DiscoveredServe
     discoveredAt: Date.now(),
     ...overrides,
   } as DiscoveredServer
+}
+
+function rowById(id: string): HTMLElement | undefined {
+  return screen
+    .getAllByTestId("pair-server-card")
+    .find((el) => el.getAttribute("data-server-id") === id)
 }
 
 beforeEach(() => {
@@ -112,7 +124,7 @@ describe("MobileServerScanSheet", () => {
     expect(observedPaired[0].fingerprint).toBe("ABCDEF0123456789")
   })
 
-  it("renders the paired badge on paired-source rows + shows port", async () => {
+  it("renders a paired-source row with its source label and port", async () => {
     scanLanImpl = async (opts) => {
       opts.onFound(
         discoveredServer({
@@ -126,10 +138,11 @@ describe("MobileServerScanSheet", () => {
       )
     }
     render(<MobileServerScanSheet open onOpenChange={() => {}} />)
-    const row = await screen.findByTestId("mobile-server-row-10.0.2.2:7891")
-    expect(row).toHaveTextContent("PAIRED")
-    expect(row).toHaveTextContent("port: 7891")
-    expect(screen.getByTestId("mobile-server-row-10.0.2.2:7891-paired-badge")).toBeInTheDocument()
+    const row = await screen.findByTestId("pair-server-card")
+    expect(row).toHaveAttribute("data-server-id", "10.0.2.2:7891")
+    expect(row).toHaveAttribute("data-source", "paired")
+    expect(row).toHaveTextContent("Paired")
+    expect(row).toHaveTextContent(":7891")
   })
 
   it("shows the fingerprint-mismatch banner when paired fp differs from scan fp", async () => {
@@ -154,8 +167,7 @@ describe("MobileServerScanSheet", () => {
     }
     render(<MobileServerScanSheet open onOpenChange={() => {}} />)
     expect(await screen.findByTestId("scan-fingerprint-mismatch-banner")).toBeInTheDocument()
-    const row = screen.getByTestId("mobile-server-row-192.168.1.42:7890")
-    expect(row.getAttribute("data-mismatch")).toBe("true")
+    expect(rowById("192.168.1.42:7890")?.getAttribute("data-mismatch")).toBe("true")
   })
 
   it("dismiss button hides the banner without forgetting the mismatch on the row", async () => {
@@ -183,9 +195,7 @@ describe("MobileServerScanSheet", () => {
     await screen.findByTestId("scan-fingerprint-mismatch-banner")
     await user.click(screen.getByTestId("scan-fingerprint-mismatch-dismiss"))
     expect(screen.queryByTestId("scan-fingerprint-mismatch-banner")).toBeNull()
-    // Row still flagged.
-    const row = screen.getByTestId("mobile-server-row-192.168.1.42:7890")
-    expect(row.getAttribute("data-mismatch")).toBe("true")
+    expect(rowById("192.168.1.42:7890")?.getAttribute("data-mismatch")).toBe("true")
   })
 
   it("does NOT flag mismatch when the probe didn't supply a fingerprint", async () => {
@@ -207,7 +217,7 @@ describe("MobileServerScanSheet", () => {
       )
     }
     render(<MobileServerScanSheet open onOpenChange={() => {}} />)
-    await screen.findByTestId("mobile-server-row-192.168.1.42:7890")
+    await screen.findByTestId("pair-server-card")
     expect(screen.queryByTestId("scan-fingerprint-mismatch-banner")).toBeNull()
   })
 
@@ -232,7 +242,7 @@ describe("MobileServerScanSheet", () => {
     }
     const user = userEvent.setup()
     render(<MobileServerScanSheet open onOpenChange={onOpenChange} />)
-    await user.click(await screen.findByTestId("mobile-server-row-192.168.1.5:7890"))
+    await user.click(await screen.findByTestId("pair-server-card"))
     expect(routerPushMock).toHaveBeenCalled()
     const url = routerPushMock.mock.calls[0][0] as string
     expect(url).toContain("/pair?")

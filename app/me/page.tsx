@@ -1,50 +1,35 @@
 "use client"
 
 /**
- * "Me" tab (Wave 2.4 → /me iOS-style refactor).
+ * "Me" tab (Wave 2.4 → /me iOS-style refactor → search + favorites + adaptive
+ * layout).
  *
  * iOS Settings layout:
  *   ┌─ Header (sticky)                                  ─┐
  *   │  我的                              [ConnectionBadge]│
+ *   ├─ Search (filters the grouped rows)                 ┤
  *   ├─ AccountCard  (live identity + 5h/7d usage)        ┤
- *   ├─ TodayStatsCard  (sessions · drafts · last backup) ┤
+ *   ├─ TodayStatsCard  (sessions · drafts · backup · 存储)┤
  *   ├─ QuickActionGrid (theme · lang · CU · scan)        ┤
- *   ├─ MeSection: 账户                                   ┤
- *   ├─ MeSection: 连接                                   ┤
- *   ├─ MeSection: 外观与体验                             ┤
- *   ├─ MeSection: 数据                                   ┤
- *   ├─ MeSection: 关于                                   ┤
+ *   ├─ TransportTierIndicator (how we reach the desktop) ┤
+ *   ├─ NotificationPermissionCta (auto-hides when granted)┤
+ *   ├─ MeSection: 常用 (pinned rows, when any)           ┤
+ *   ├─ MeSection × 6 (account / appearance / connection / ┤
+ *   │                 automation / data / about)          │
  *   └─ SignOutButton (biometric-gated, clears both)      ┘
  *
- * All section links route to mobile sub-pages under `/me/<route>` —
- * desktop `/settings?section=…` deep-links no longer exist (mobile
- * redirected them back to `/`, leaving the rows as dead-ends).
+ * The grouped rows are data-driven from `me-entries.ts` so the same list
+ * powers rendering, search (`matchMeEntry`) and pin/favorite
+ * (`usePinnedMeRows`). Long-press any row to toggle its pin. Conditional /
+ * dynamic rows (Pair, Devices' short id, Sync's last-synced stamp, the
+ * Version row) stay inline. On tablets / landscape the content clamps to a
+ * centered max width and the sections flow into two columns.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import {
-  BellIcon,
-  BookmarkIcon,
-  BookOpenIcon,
-  CalendarClockIcon,
-  ChartBarIcon,
-  DatabaseIcon,
-  HardDriveIcon,
-  InfoIcon,
-  KeyRoundIcon,
-  LinkIcon,
-  MessageSquareIcon,
-  MonitorIcon,
-  PaletteIcon,
-  RefreshCwIcon,
-  SaveIcon,
-  ScanIcon,
-  SlidersHorizontalIcon,
-  SmartphoneIcon,
-  TypeIcon,
-} from "lucide-react"
+import { ScanIcon } from "lucide-react"
 
 import { AccountCard } from "@/components/mobile/me/account-card"
 import { MeRow } from "@/components/mobile/me/me-row"
@@ -52,17 +37,34 @@ import { MeSection } from "@/components/mobile/me/me-section"
 import { QuickActionGrid } from "@/components/mobile/me/quick-action-grid"
 import { SignOutButton } from "@/components/mobile/me/sign-out-button"
 import { TodayStatsCard } from "@/components/mobile/me/today-stats-card"
+import { TransportTierIndicator } from "@/components/mobile/me/transport-tier-indicator"
 import { VersionRow } from "@/components/mobile/me/version-row"
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
+import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
+import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
+import { LongPress } from "@/components/interactions/long-press"
+import {
+  ME_ENTRIES,
+  ME_SECTION_ORDER,
+  ME_SECTION_TITLE_KEY,
+  matchMeEntry,
+  type MeEntry,
+} from "@/components/mobile/me/me-entries"
+import { usePinnedMeRows } from "@/components/mobile/me/use-pinned-me-rows"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { usePlatform } from "@/hooks/use-platform"
+import { snapshotSyncStates } from "@/lib/sync/companion-sync"
+import { formatRelative } from "@/lib/time/relative"
 
 export default function MePage() {
   const t = useTranslations("mobile.me")
   const platform = usePlatform()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const [query, setQuery] = useState("")
+  const [lastSyncedLabel, setLastSyncedLabel] = useState<string | undefined>(undefined)
   const { paired, shortDeviceId } = useCompanionConfig()
+  const { pinnedIds, togglePin } = usePinnedMeRows()
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -75,143 +77,123 @@ export default function MePage() {
     router.replace("/settings")
   }, [mounted, platform, router])
 
+  useEffect(() => {
+    if (!mounted || platform !== "mobile") return
+    const states = snapshotSyncStates()
+    const max = Object.values(states).reduce((acc, s) => Math.max(acc, s.lastSyncAt ?? 0), 0)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLastSyncedLabel(max > 0 ? formatRelative(max) : undefined)
+  }, [mounted, platform])
+
+  const filtered = useMemo(
+    () => (query.trim() ? ME_ENTRIES.filter((e) => matchMeEntry(e, query, t)) : []),
+    [query, t]
+  )
+  const pinnedEntries = useMemo(
+    () => ME_ENTRIES.filter((e) => pinnedIds.includes(e.id)),
+    [pinnedIds]
+  )
+
   if (!mounted || platform !== "mobile") return null
+
+  /** Right-aligned dynamic value for certain rows. */
+  const rowValue = (id: string): string | undefined => {
+    if (id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
+    if (id === "sync") return lastSyncedLabel
+    return undefined
+  }
+
+  const renderEntry = (entry: MeEntry, opts?: { favorite?: boolean }) => {
+    const testid = opts?.favorite ? `me-row-fav-${entry.id}` : `me-row-${entry.id}`
+    return (
+      <LongPress key={testid} onLongPress={() => void togglePin(entry.id)} className="block">
+        <MeRow
+          icon={entry.icon}
+          label={t(entry.labelKey)}
+          href={entry.href}
+          value={rowValue(entry.id)}
+          testid={testid}
+        />
+      </LongPress>
+    )
+  }
 
   return (
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
       data-testid="me-page"
     >
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-        <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <ConnectionStateBadge />
+      <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+          <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
+          <ConnectionStateBadge />
+        </div>
       </header>
 
-      <section className="flex flex-col gap-3 px-4 pt-3">
-        <AccountCard />
-        <TodayStatsCard />
-        <QuickActionGrid />
-      </section>
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-3">
+        <DiscoverSearch
+          value={query}
+          onChange={setQuery}
+          placeholder={t("search")}
+          ariaLabel={t("searchAria")}
+          testid="me-search"
+        />
 
-      <div className="flex flex-col gap-4 px-4 pb-8 pt-5">
-        <MeSection title={t("sectionAccount")} testid="me-section-account">
-          <MeRow
-            icon={KeyRoundIcon}
-            label={t("subscriptionRow")}
-            href="/me/subscription"
-            testid="me-row-subscription"
-          />
-          <MeRow icon={RefreshCwIcon} label={t("syncRow")} href="/me/sync" testid="me-row-sync" />
-          <MeRow
-            icon={SmartphoneIcon}
-            label={t("devicesRow")}
-            value={paired && shortDeviceId ? shortDeviceId : undefined}
-            href="/me/devices"
-            testid="me-row-devices"
-          />
-          {!paired ? (
-            <MeRow
-              icon={ScanIcon}
-              label={t("actionPair")}
-              href="/pair"
-              destructive={false}
-              testid="me-row-pair"
-            />
-          ) : null}
-        </MeSection>
+        {query.trim() ? (
+          filtered.length > 0 ? (
+            <MeSection title={t("searchResults")} testid="me-search-results">
+              {filtered.map((entry) => renderEntry(entry))}
+            </MeSection>
+          ) : (
+            <p
+              className="px-1 py-10 text-center text-sm text-muted-foreground"
+              data-testid="me-search-empty"
+            >
+              {t("searchEmpty")}
+            </p>
+          )
+        ) : (
+          <>
+            <section className="flex flex-col gap-3">
+              <AccountCard />
+              <TodayStatsCard />
+              <QuickActionGrid />
+              <TransportTierIndicator />
+              <NotificationPermissionCta />
+            </section>
 
-        <MeSection title={t("sectionAppearance")} testid="me-section-appearance">
-          <MeRow
-            icon={PaletteIcon}
-            label={t("appearanceLink")}
-            href="/me/appearance"
-            testid="me-row-appearance"
-          />
-          <MeRow
-            icon={BellIcon}
-            label={t("notificationsRow")}
-            href="/me/notifications"
-            testid="me-row-notifications"
-          />
-          <MeRow
-            icon={TypeIcon}
-            label={t("preferencesRow")}
-            href="/me/preferences"
-            testid="me-row-preferences"
-          />
-          <MeRow
-            icon={BookmarkIcon}
-            label={t("presetsRow")}
-            href="/me/presets"
-            testid="me-row-presets"
-          />
-        </MeSection>
+            {pinnedEntries.length > 0 ? (
+              <MeSection title={t("sectionFavorites")} testid="me-section-favorites">
+                {pinnedEntries.map((entry) => renderEntry(entry, { favorite: true }))}
+              </MeSection>
+            ) : null}
 
-        <MeSection title={t("sectionConnection")} testid="me-section-connection">
-          <MeRow
-            icon={LinkIcon}
-            label={t("connectorsRow")}
-            href="/me/connectors"
-            testid="me-row-connectors"
-          />
-          <MeRow
-            icon={SlidersHorizontalIcon}
-            label={t("ocrRow")}
-            href="/me/ocr"
-            testid="me-row-ocr"
-          />
-          <MeRow
-            icon={MonitorIcon}
-            label={t("computerUseRow")}
-            href="/me/computer-use"
-            testid="me-row-computer-use"
-          />
-        </MeSection>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {ME_SECTION_ORDER.map((section) => (
+                <MeSection
+                  key={section}
+                  title={t(ME_SECTION_TITLE_KEY[section])}
+                  testid={`me-section-${section}`}
+                >
+                  {section === "about" ? <VersionRow /> : null}
+                  {ME_ENTRIES.filter((e) => e.section === section).map((entry) =>
+                    renderEntry(entry)
+                  )}
+                  {section === "account" && !paired ? (
+                    <MeRow
+                      icon={ScanIcon}
+                      label={t("actionPair")}
+                      href="/pair"
+                      testid="me-row-pair"
+                    />
+                  ) : null}
+                </MeSection>
+              ))}
+            </div>
 
-        <MeSection title={t("sectionAutomation")} testid="me-section-automation">
-          <MeRow
-            icon={CalendarClockIcon}
-            label={t("schedulerRow")}
-            href="/me/scheduler"
-            testid="me-row-scheduler"
-          />
-        </MeSection>
-
-        <MeSection title={t("sectionData")} testid="me-section-data">
-          <MeRow icon={SaveIcon} label={t("backupRow")} href="/me/backup" testid="me-row-backup" />
-          <MeRow
-            icon={DatabaseIcon}
-            label={t("dexieMaintenance")}
-            href="/me/maintenance"
-            testid="me-row-maintenance"
-          />
-          <MeRow
-            icon={HardDriveIcon}
-            label={t("storageRow")}
-            href="/me/storage"
-            testid="me-row-storage"
-          />
-        </MeSection>
-
-        <MeSection title={t("sectionAbout")} testid="me-section-about">
-          <VersionRow />
-          <MeRow icon={InfoIcon} label={t("aboutRow")} href="/me/about" testid="me-row-about" />
-          <MeRow icon={BookOpenIcon} label={t("helpRow")} href="/me/help" testid="me-row-help" />
-          <MeRow
-            icon={MessageSquareIcon}
-            label={t("feedbackRow")}
-            href="/me/feedback"
-            testid="me-row-feedback"
-          />
-          <MeRow
-            icon={ChartBarIcon}
-            label={t("deviceInfoRow")}
-            href="/me/device-info"
-            testid="me-row-device-info"
-          />
-        </MeSection>
-
-        <SignOutButton className="mt-2" />
+            <SignOutButton className="mt-2" />
+          </>
+        )}
       </div>
     </main>
   )

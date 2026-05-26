@@ -35,6 +35,23 @@ jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
 const mockScanLan = jest.fn()
 jest.mock("@/lib/connectivity/lan-scanner", () => ({
   scanLan: (opts: unknown) => mockScanLan(opts),
+  rankSource: (s: string) =>
+    (({ paired: 4, mdns: 3, probe: 2, history: 1 }) as Record<string, number>)[s] ?? 0,
+}))
+
+// DiscoverStep pre-flights /healthz before advancing — resolve it so a tapped
+// server reaches the pair step. Haptics is a no-op on web; stub to silence it.
+jest.mock("@/lib/connectivity/healthz", () => ({
+  fetchHealthz: async () => ({
+    version: "0.4.2",
+    fingerprint: "HZ-FP",
+    advertisedPort: 7890,
+    serverId: "srv-1",
+  }),
+}))
+jest.mock("@/lib/capacitor/haptics", () => ({
+  impact: jest.fn(async () => ({ kind: "unsupported" })),
+  notify: jest.fn(async () => ({ kind: "unsupported" })),
 }))
 
 // next/navigation — useRouter().push is used after Continue-to-chat.
