@@ -92,6 +92,7 @@ import {
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { SkillChipRow } from "./composer/skill-chip-row"
+import { GoalStatusPill } from "@/components/goal/goal-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
@@ -231,6 +232,10 @@ function ComposerInner(props: InnerProps) {
   const tMemory = useTranslations("chat.composer.memory")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
+  // Capacitor native shell. Mobile gets a Claude-style vertical layout
+  // (textarea on top, a single bottom action row) regardless of container
+  // width; web/desktop keep the container-query responsive layout below.
+  const isMobile = platform === "mobile"
   const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
@@ -667,6 +672,26 @@ function ComposerInner(props: InnerProps) {
     }
   }, [controller.textInput.value, sessionId, draftHydratedFor])
 
+  // Auto-resize textarea (JS fallback for browsers without field-sizing:content
+  // support, e.g. older iOS/Android WebViews). field-sizing-content in the
+  // className is the progressive-enhancement path; this effect only runs when
+  // the CSS property is absent.
+  //
+  // Crucially, it must NOT touch the textarea mid-composition: mutating
+  // `style.height` forces a synchronous reflow that aborts the active IME
+  // composition buffer on Android/iOS WebViews, so on-device typing (esp. CJK
+  // / predictive keyboards) appears to "swallow" characters. We defer the
+  // resize until composition ends, where this effect re-runs (isComposing flips
+  // back to false) and adjusts the height once for the committed text.
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) return
+    if (isComposing) return
+    ta.style.height = "auto"
+    ta.style.height = `${Math.min(ta.scrollHeight, 12 * 16)}px`
+  }, [controller.textInput.value, isComposing])
+
   // Imperative handle: insert `@name ` at the caret. Used by the desktop
   // shell's member list to mention a teammate without going through any
   // intermediate draft store.
@@ -709,9 +734,17 @@ function ComposerInner(props: InnerProps) {
       <AttachmentPreview />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
       <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
+      {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
+      <GoalStatusPill sessionId={sessionId} />
       <div
         className={cn(
-          "relative flex flex-col gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow @sm/composer:flex-row @sm/composer:items-end",
+          "relative flex gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
+          // Mobile (Capacitor): Claude-style stack — textarea fills the first
+          // row (w-full forces the wrap), the attach + send clusters share the
+          // bottom row. Web/desktop keep the container-query responsive layout.
+          isMobile
+            ? "flex-wrap items-end"
+            : "flex-col @sm/composer:flex-row @sm/composer:items-end",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
         )}
         onDragEnter={onDragEnter}
@@ -731,7 +764,12 @@ function ComposerInner(props: InnerProps) {
           type="file"
         />
 
-        <div className="order-2 flex shrink-0 items-center gap-0.5 @sm/composer:order-none">
+        <div
+          className={cn(
+            "order-2 flex shrink-0 items-center gap-0.5",
+            !isMobile && "@sm/composer:order-none"
+          )}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -754,7 +792,13 @@ function ComposerInner(props: InnerProps) {
           <VoiceTranscriptionBridge disabled={props.disabled} />
         </div>
 
-        <div className="relative order-1 w-full @sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center">
+        <div
+          className={cn(
+            "relative order-1 w-full",
+            !isMobile &&
+              "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
+          )}
+        >
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
@@ -779,7 +823,12 @@ function ComposerInner(props: InnerProps) {
           <CharCounter />
         </div>
 
-        <div className="order-3 ml-auto flex shrink-0 items-center @sm/composer:order-none @sm/composer:ml-0">
+        <div
+          className={cn(
+            "order-3 ml-auto flex shrink-0 items-center",
+            !isMobile && "@sm/composer:order-none @sm/composer:ml-0"
+          )}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               {hasPendingDrafts ? (
@@ -1192,7 +1241,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [])
 
   return (
-    <div className="@container/composer border-t bg-background/70 p-3">
+    <div className="@container/composer border-t bg-background/70 p-2 sm:p-3">
       <PromptInputProvider>
         <ComposerInner
           session={session}

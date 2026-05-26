@@ -49,6 +49,10 @@ jest.mock("@/lib/data-hooks/context", () => ({
   useCharacter: jest.fn(() => undefined),
 }))
 
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => false,
+}))
+
 import { render } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"

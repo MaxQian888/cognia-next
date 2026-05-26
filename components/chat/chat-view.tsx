@@ -18,6 +18,7 @@ import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -100,6 +101,7 @@ export function ChatPane({
   const messagesLoading = useChatStore((s) => s.messagesLoading)
   const messagesLoadError = useChatStore((s) => s.messagesLoadError)
   const reduce = useReducedMotion()
+  const isMobile = useIsMobile()
 
   // ADR-0030 — surface the active character's exemplar prompts as quick-start
   // chips on the empty inline state. `useCharacter` resolves Dexie + overlay
@@ -226,7 +228,10 @@ export function ChatPane({
           // After the centered→docked swap completes the new composer is
           // mounted; pull focus back to it. Only when entering the chat layout
           // (messages present) — not when returning to the empty welcome.
-          if (messages.length > 0) internalComposerRef.current?.focus()
+          // Skip on mobile viewports: programmatic focus opens the virtual
+          // keyboard, which is disruptive when switching sessions from the nav
+          // sheet (the left drawer on mobile).
+          if (messages.length > 0 && !isMobile) internalComposerRef.current?.focus()
         }}
       >
         {messages.length === 0 ? (

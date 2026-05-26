@@ -5,9 +5,15 @@ import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
   applySdkEvent,
   contentPreview,
+  extractUsage,
   makeUserMessage,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
+import { getGoalRuntime } from "@/lib/goal/runtime"
+import { handleTurnComplete } from "@/lib/goal/turn-driver"
+import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
+import { gateContinuation } from "@/lib/goal/pacing"
+import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
@@ -89,6 +95,105 @@ function extractAssistantText(message: UIMessage | undefined): string {
     .join("\n")
 }
 
+/** Signature of the hook's `send`, threaded into `handleEvent` via a ref. */
+type SendFn = (
+  content: SendContent,
+  opts?: SendOptions,
+  callOptions?: { skipUserAppend?: boolean }
+) => Promise<void>
+
+/**
+ * Goal ids for which we've already surfaced the "can't build a judge client"
+ * notice this process. Prevents re-warning on every turn for a legacy
+ * `ANTHROPIC_API_KEY`-env-only setup. Module-scope so it survives the
+ * module-scope `handleEvent` callback.
+ */
+const goalJudgeClientWarned = new Set<string>()
+
+/** Epoch ms of the last dispatched auto-continuation, per goal (interval gating). */
+const goalLastContinuationAt = new Map<string, number>()
+/** Active manual-continue unsubscribe fns, per goal (one held continuation at a time). */
+const goalManualUnsub = new Map<string, () => void>()
+/** Active defer timers, per goal (quiet-hours / interval). */
+const goalDeferTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Tear down any pending continuation (defer timer + manual subscription) for a goal. */
+function clearPendingContinuation(goalId: string): void {
+  const timer = goalDeferTimers.get(goalId)
+  if (timer) {
+    clearTimeout(timer)
+    goalDeferTimers.delete(goalId)
+  }
+  const unsub = goalManualUnsub.get(goalId)
+  if (unsub) {
+    unsub()
+    goalManualUnsub.delete(goalId)
+  }
+}
+
+/**
+ * Schedule (or hold/defer) a goal continuation per the pacing gate
+ * (ADR-0019 Phase 2). Re-reads the goal each attempt so a pause/stop between
+ * the turn-driver decision and dispatch cancels cleanly. Re-entrant: a defer
+ * timer re-invokes this, and a fresh turn supersedes any prior pending one.
+ */
+function scheduleGoalContinuation(
+  goalId: string,
+  sessionId: string,
+  userMessage: string,
+  sendRef: React.MutableRefObject<SendFn | null>,
+  activeRef: React.MutableRefObject<string | null>
+): void {
+  clearPendingContinuation(goalId)
+  void (async () => {
+    const goal = await getGoalRuntime().getActiveGoalForSession(sessionId)
+    // Goal paused/stopped/replaced, or session backgrounded → drop silently.
+    if (!goal || goal.id !== goalId || sessionId !== activeRef.current) return
+
+    const gate = gateContinuation(goal, Date.now(), goalLastContinuationAt.get(goalId))
+    if (gate.kind === "send") {
+      goalLastContinuationAt.set(goalId, Date.now())
+      void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
+    } else if (gate.kind === "hold") {
+      // Wait for the user to click "Continue" on the status pill.
+      const unsub = getGoalRuntime().onManualContinue(goalId, () => {
+        clearPendingContinuation(goalId)
+        goalLastContinuationAt.set(goalId, Date.now())
+        void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
+      })
+      goalManualUnsub.set(goalId, unsub)
+    } else {
+      // defer — re-gate at untilMs (quiet-hours window end / interval gap).
+      const delay = Math.max(0, gate.untilMs - Date.now())
+      const timer = setTimeout(() => {
+        goalDeferTimers.delete(goalId)
+        scheduleGoalContinuation(goalId, sessionId, userMessage, sendRef, activeRef)
+      }, delay)
+      goalDeferTimers.set(goalId, timer)
+    }
+  })()
+}
+
+/**
+ * Render the system-message card shown when the `/goal` loop reaches a
+ * terminal/exit state. Hard-coded English for Phase 1, consistent with the
+ * existing slash-command cards in `lib/slash-commands/actions/goal.ts`; both
+ * get i18n-wired together in the ADR-0019 console phase (Phase 3).
+ */
+function renderGoalExitCard(resultingStatus: GoalStatus, reason: string): string {
+  const head: Record<string, string> = {
+    completed: "✅ **Goal completed**",
+    turn_limited: "🛑 **Goal stopped — turn budget reached**",
+    budget_limited: "🛑 **Goal stopped — token budget reached**",
+    timed_out: "⏱️ **Goal stopped — timed out**",
+    stopped: "⏹️ **Goal stopped**",
+    preempted: "✋ **Goal preempted**",
+    paused: "⏸️ **Goal paused — judge needs attention**",
+  }
+  const title = head[resultingStatus] ?? `🎯 **Goal ${resultingStatus}**`
+  return reason ? `${title}\n\n> ${reason}` : title
+}
+
 /**
  * Wires the Claude sidecar IPC into the React store. Mount this hook once at
  * the top of the chat page; do not invoke it per-message.
@@ -128,6 +233,14 @@ export function useClaudeChat() {
   const pendingBranchTagRef = useRef<Map<string, { groupId: string; index: number }>>(new Map())
 
   /**
+   * Holds the latest `send` so the module-scope `handleEvent` can dispatch a
+   * silent goal continuation (ADR-0019). `handleEvent` is defined outside the
+   * hook (can't close over `send`), so we thread the live reference through a
+   * ref kept fresh by the effect below.
+   */
+  const sendRef = useRef<SendFn | null>(null)
+
+  /**
    * Per-session serialization queue for `handleEvent`. Sidecar events arrive
    * fire-and-forget, but `handleEvent` does an async read → apply → persist →
    * store-update that spans multiple `await`s. Without serialization, two
@@ -159,7 +272,7 @@ export function useClaudeChat() {
       const tail = (queues.get(key) ?? Promise.resolve())
         // A prior failure must not break the chain for later events.
         .catch(() => {})
-        .then(() => handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef))
+        .then(() => handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef))
         .catch((err) => {
           console.error("handleEvent failed", err)
         })
@@ -208,6 +321,17 @@ export function useClaudeChat() {
       if (Array.isArray(content) && content.length === 0) return
 
       const session = await getSession(sessionId)
+
+      // ADR-0019 — a fresh user message while a goal is self-driving is
+      // mid-course guidance: PAUSE the goal (rotates generationId + fires the
+      // turn-driver abort) rather than terminating it; the user resumes with
+      // `/goal resume`. The silent continuation dispatch passes
+      // `skipUserAppend`, so it never trips this branch.
+      if (!callOptions?.skipUserAppend) {
+        const openGoal = await getGoalRuntime().getActiveGoalForSession(sessionId)
+        if (openGoal) await getGoalRuntime().pauseGoal(openGoal.id)
+      }
+
       // Extract a plain-text version of the user message for twin RAG. The
       // multimodal path (array of blocks) finds the first text block; if
       // none we leave userMessage undefined and the runtime falls back to
@@ -442,6 +566,15 @@ export function useClaudeChat() {
     [store]
   )
 
+  // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
+  // dispatch a silent goal continuation (ADR-0019) without closing over it.
+  useEffect(() => {
+    sendRef.current = send
+    return () => {
+      if (sendRef.current === send) sendRef.current = null
+    }
+  }, [send])
+
   const stop = useCallback(async () => {
     const sessionId = useChatStore.getState().activeSessionId
     if (!sessionId) return
@@ -651,6 +784,14 @@ async function buildSendOptions(
   // cleared after the send dispatches.
   const ephemeralSkillIds = useChatStore.getState().ephemeralSkillIds ?? []
 
+  // ADR-0019 — when this session has an active goal, hand it to the resolver
+  // so the goal's `<objective>` system section is appended to this turn. The
+  // resolver only injects when `status === "active"`, so a paused goal (e.g.
+  // after the user typed a fresh message) is correctly skipped.
+  const activeGoal = session?.id
+    ? ((await getGoalRuntime().getActiveGoalForSession(session.id)) ?? null)
+    : null
+
   return resolveSendOptions({
     session,
     appSettings,
@@ -658,6 +799,7 @@ async function buildSendOptions(
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
     ephemeralSkillIds,
+    activeGoal,
   })
 }
 
@@ -672,7 +814,8 @@ async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
   allowListRef: React.MutableRefObject<string[]>,
-  pendingBranchTagRef: React.MutableRefObject<Map<string, { groupId: string; index: number }>>
+  pendingBranchTagRef: React.MutableRefObject<Map<string, { groupId: string; index: number }>>,
+  sendRef: React.MutableRefObject<SendFn | null>
 ) {
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
@@ -935,6 +1078,100 @@ async function handleEvent(
           }
         } catch (err) {
           console.warn("autoCreateFromContent failed", err)
+        }
+
+        // ── ADR-0019: drive the self-driving `/goal` loop forward ───────────
+        // Runs once the turn truly sealed and no tool approval is pending.
+        // `handleTurnComplete` is pure (no IPC) and returns a decision; we
+        // own dispatch here. The per-session event queue serializes this with
+        // the next turn's events; the generationId guard + AbortController
+        // make a mid-turn pause/stop/update return `stale`/`aborted`.
+        if (useChatStore.getState().pendingApprovals.length === 0) {
+          try {
+            const goal = await getGoalRuntime().getActiveGoalForSession(sessionId)
+            if (goal) {
+              const appSettings = useSettingsStore.getState().settings
+              const goalSession = await getSession(sessionId).catch(() => undefined)
+              const judgeClient = buildGoalJudgeClient(goalSession, appSettings, {
+                // Per-goal judge model/provider (ADR-0019 Phase 2); undefined
+                // → falls back to the session/app-default provider.
+                model: goal.config.judgeModel,
+                provider: goal.config.judgeProvider,
+              })
+              if (!judgeClient) {
+                // Legacy env-key setup — can't judge from the renderer. Warn
+                // once and pause so the loop doesn't appear to silently stall.
+                if (!goalJudgeClientWarned.has(goal.id)) {
+                  goalJudgeClientWarned.add(goal.id)
+                  useChatStore.getState().appendMessage({
+                    id: `sys-goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    role: "system",
+                    parts: [
+                      {
+                        type: "text",
+                        text: "⚠️ **Goal paused — no judge model available.** Add a provider API key in Settings → Providers so the goal loop can evaluate progress. (A legacy ANTHROPIC_API_KEY environment variable alone can't drive the renderer-side judge.)",
+                      },
+                    ],
+                  })
+                  await getGoalRuntime().pauseGoal(goal.id)
+                  await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+                }
+              } else {
+                const lastAssistant = [...nextMessages]
+                  .reverse()
+                  .find((m) => m.role === "assistant")
+                const lastResponse = extractAssistantText(lastAssistant)
+                const usage = sdkResult ? extractUsage(sdkResult) : null
+                const tokensDelta = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
+                const capturedGenerationId = goal.generationId
+                const ac = new AbortController()
+                const unregister = getGoalRuntime().registerAbortController(goal.id, ac)
+                let outcome: Awaited<ReturnType<typeof handleTurnComplete>>
+                try {
+                  outcome = await handleTurnComplete({
+                    goalId: goal.id,
+                    lastResponse,
+                    tokensDelta,
+                    modelMessageId: lastAssistant?.id,
+                    judgeClient,
+                    signal: ac.signal,
+                    capturedGenerationId,
+                  })
+                } finally {
+                  unregister()
+                }
+                if (outcome.kind === "exit") {
+                  useChatStore.getState().appendMessage({
+                    id: `sys-goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    role: "system",
+                    parts: [
+                      {
+                        type: "text",
+                        text: renderGoalExitCard(outcome.resultingStatus, outcome.reason),
+                      },
+                    ],
+                  })
+                  await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+                } else if (outcome.kind === "continue") {
+                  // Pacing gate (ADR-0019 Phase 2): dispatch now / hold for a
+                  // manual "Continue" / defer past quiet-hours or the interval.
+                  // The scheduler re-reads the goal so a pause/stop in the tiny
+                  // window after handleTurnComplete returned cancels cleanly.
+                  scheduleGoalContinuation(
+                    goal.id,
+                    sessionId,
+                    outcome.userMessage,
+                    sendRef,
+                    activeRef
+                  )
+                }
+                // aborted | stale | no_goal → no-op: a pause/stop/update owns
+                // the next step and the live-query pill reflects the status.
+              }
+            }
+          } catch (err) {
+            console.warn("goal turn-driver failed", err)
+          }
         }
       }
       return

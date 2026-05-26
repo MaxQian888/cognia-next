@@ -38,6 +38,30 @@ jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
   makeUserMessage: (c: unknown) => ({ id: "u1", role: "user", parts: [{ type: "text", text: c }] }),
+  extractUsage: jest.fn(() => null),
+  mergeTwinSourcesIntoLastAssistant: (msgs: unknown) => msgs,
+}))
+
+// ADR-0019 goal wiring — mock the runtime/turn-driver/judge-client so `send`
+// and the turn-complete handler don't reach real Dexie. Defaults make the
+// no-goal path a no-op (getActiveGoalForSession → undefined).
+const goalRuntimeMock = {
+  getActiveGoalForSession: jest.fn().mockResolvedValue(undefined),
+  pauseGoal: jest.fn().mockResolvedValue(null),
+  registerAbortController: jest.fn(() => () => {}),
+  onManualContinue: jest.fn(() => () => {}),
+  requestManualContinue: jest.fn(),
+}
+jest.mock("@/lib/goal/runtime", () => ({
+  getGoalRuntime: () => goalRuntimeMock,
+}))
+const handleTurnCompleteMock = jest.fn()
+jest.mock("@/lib/goal/turn-driver", () => ({
+  handleTurnComplete: (...a: unknown[]) => handleTurnCompleteMock(...a),
+}))
+const buildGoalJudgeClientMock = jest.fn()
+jest.mock("@/lib/goal/judge-client", () => ({
+  buildGoalJudgeClient: (...a: unknown[]) => buildGoalJudgeClientMock(...a),
 }))
 
 const persistMessagesMock = jest.fn().mockResolvedValue(undefined)
@@ -81,14 +105,18 @@ interface ChatStateLike {
   pendingApprovals: unknown[]
   pendingCommandOverrides: unknown
   referencedPaths: unknown[]
+  lastSendBySession: Record<string, unknown>
   setActiveSession: jest.Mock
   setMessages: jest.Mock
   replaceMessages: jest.Mock
+  appendMessage: jest.Mock
   setStatus: jest.Mock
   setError: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
   setPendingCommandOverrides: jest.Mock
+  setLastSend: jest.Mock
+  clearLastSend: jest.Mock
 }
 
 const chatState: ChatStateLike = {
@@ -97,14 +125,18 @@ const chatState: ChatStateLike = {
   pendingApprovals: [],
   pendingCommandOverrides: null,
   referencedPaths: [],
+  lastSendBySession: {},
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
   replaceMessages: jest.fn(),
+  appendMessage: jest.fn(),
   setStatus: jest.fn(),
   setError: jest.fn(),
   pushApproval: jest.fn(),
   clearApproval: jest.fn(),
   setPendingCommandOverrides: jest.fn(),
+  setLastSend: jest.fn(),
+  clearLastSend: jest.fn(),
 }
 
 const subscribers: Array<(s: ChatStateLike) => void> = []
@@ -184,9 +216,11 @@ beforeEach(() => {
   chatState.pendingApprovals = []
   chatState.pendingCommandOverrides = null
   chatState.referencedPaths = []
+  chatState.lastSendBySession = {}
   chatState.setActiveSession.mockClear()
   chatState.setMessages.mockClear()
   chatState.replaceMessages.mockClear()
+  chatState.appendMessage.mockClear()
   chatState.setStatus.mockClear()
   chatState.setError.mockClear()
   chatState.pushApproval.mockClear()
@@ -196,6 +230,13 @@ beforeEach(() => {
   settingsSubscribers.length = 0
   mockGetTwinRuntimeSettings.mockReset()
   mockCreateVectorStore.mockReset()
+  goalRuntimeMock.getActiveGoalForSession.mockReset().mockResolvedValue(undefined)
+  goalRuntimeMock.pauseGoal.mockReset().mockResolvedValue(null)
+  goalRuntimeMock.registerAbortController.mockReset().mockReturnValue(() => {})
+  goalRuntimeMock.onManualContinue.mockReset().mockReturnValue(() => {})
+  goalRuntimeMock.requestManualContinue.mockReset()
+  handleTurnCompleteMock.mockReset()
+  buildGoalJudgeClientMock.mockReset().mockReturnValue(null)
 })
 
 async function flush() {
@@ -628,5 +669,146 @@ describe("useClaudeChat — native vector backend branch", () => {
         embeddingConfig: expect.objectContaining({ provider: "openai" }),
       })
     )
+  })
+})
+
+describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
+  const adapterMock = jest.requireMock("@/lib/claude/adapter") as {
+    applySdkEvent: jest.Mock
+    extractUsage: jest.Mock
+  }
+
+  beforeEach(() => {
+    // `recordResultUsage` (real module) also calls the mocked extractUsage, so
+    // reset it here to the no-usage default for deterministic per-test setup.
+    adapterMock.extractUsage.mockReset().mockReturnValue(null)
+  })
+
+  function activeGoal(over: Record<string, unknown> = {}) {
+    return { id: "g1", status: "active", generationId: "gen1", config: {}, ...over }
+  }
+
+  /** Drive a synthetic `event` whose applySdkEvent result seals the turn. */
+  async function driveTurnComplete(
+    result: unknown = { usage: { input_tokens: 1, output_tokens: 1 } }
+  ) {
+    adapterMock.applySdkEvent.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "draft" }] }],
+      turnComplete: true,
+      result,
+    })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+    })
+    await flush()
+    await flush()
+  }
+
+  it("send pauses an active goal on a fresh user message", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal())
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("steer this way")
+    })
+    expect(goalRuntimeMock.pauseGoal).toHaveBeenCalledWith("g1")
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("send does NOT pause on a silent continuation (skipUserAppend)", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal())
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("keep going", undefined, { skipUserAppend: true })
+    })
+    expect(goalRuntimeMock.pauseGoal).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("send does NOT pause when there is no active goal", async () => {
+    // default getActiveGoalForSession → undefined
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    expect(goalRuntimeMock.pauseGoal).not.toHaveBeenCalled()
+  })
+
+  it("turnComplete + continue dispatches a silent continuation", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal())
+    buildGoalJudgeClientMock.mockReturnValue({ complete: jest.fn() })
+    handleTurnCompleteMock.mockResolvedValue({ kind: "continue", userMessage: "go on" })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(handleTurnCompleteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ goalId: "g1", capturedGenerationId: "gen1" })
+    )
+    // The continuation routes back through send → sendPrompt with the text.
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "go on", expect.any(Object))
+  })
+
+  it("turnComplete computes tokensDelta from result usage", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal({ id: "g-tok" }))
+    buildGoalJudgeClientMock.mockReturnValue({ complete: jest.fn() })
+    handleTurnCompleteMock.mockResolvedValue({ kind: "stale", reason: "x" })
+    // Persistent (not Once): `recordResultUsage` consumes one call before the
+    // goal block reads it, so both calls must see the same usage.
+    adapterMock.extractUsage.mockReturnValue({ inputTokens: 10, outputTokens: 5 })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(handleTurnCompleteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ tokensDelta: 15 })
+    )
+  })
+
+  it("turnComplete + exit appends a system card and does not continue", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal({ id: "g-exit" }))
+    buildGoalJudgeClientMock.mockReturnValue({ complete: jest.fn() })
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "objective satisfied",
+    })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(chatState.appendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "system",
+        parts: [expect.objectContaining({ text: expect.stringContaining("Goal completed") })],
+      })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("turnComplete with no judge client warns once and pauses", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal({ id: "g-nojudge" }))
+    buildGoalJudgeClientMock.mockReturnValue(null)
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(handleTurnCompleteMock).not.toHaveBeenCalled()
+    expect(goalRuntimeMock.pauseGoal).toHaveBeenCalledWith("g-nojudge")
+    expect(chatState.appendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: [expect.objectContaining({ text: expect.stringContaining("no judge model") })],
+      })
+    )
+  })
+
+  it("turnComplete + stale outcome is a no-op (no card, no continuation)", async () => {
+    goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal({ id: "g-stale" }))
+    buildGoalJudgeClientMock.mockReturnValue({ complete: jest.fn() })
+    handleTurnCompleteMock.mockResolvedValue({ kind: "stale", reason: "rotated" })
+    renderHook(() => useClaudeChat())
+    await flush()
+    await driveTurnComplete()
+    expect(chatState.appendMessage).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })

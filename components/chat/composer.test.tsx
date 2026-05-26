@@ -26,8 +26,11 @@ jest.mock("./composer/screenshot-button", () => ({
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
+// Platform is the gate for the mobile (Capacitor) Claude-style layout. Default
+// to "web" so the existing tests keep the desktop/web responsive layout.
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { act } from "react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -35,7 +38,10 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { usePlatform } from "@/hooks/use-platform"
 import type { ChatSession } from "@/lib/claude/types"
+
+const mockUsePlatform = usePlatform as jest.Mock
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -73,6 +79,7 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  mockUsePlatform.mockReturnValue("web")
 })
 
 describe("Composer — data-hooks integration", () => {
@@ -152,5 +159,94 @@ describe("Composer — data-hooks integration", () => {
       return new Promise((r) => setTimeout(r, 30))
     })
     expect(updateSession).not.toHaveBeenCalled()
+  })
+})
+
+describe("Composer — mobile (Claude-style) layout", () => {
+  function renderComposer() {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+  }
+
+  // The pill container carries `rounded-2xl`; the layout direction lives on the
+  // same element. We assert the responsive-class *strategy* (jsdom computes no
+  // geometry), which is the meaningful structural difference between platforms.
+  function pillClass(): string {
+    const ta = document.querySelector("textarea")
+    const pill = ta?.closest("[class*='rounded-2xl']")
+    return pill?.className ?? ""
+  }
+
+  it("stacks textarea over a single wrapping action row on mobile", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    renderComposer()
+    const cls = pillClass()
+    expect(cls).toContain("flex-wrap")
+    expect(cls).not.toContain("flex-col")
+  })
+
+  it("keeps the container-query responsive layout on web/desktop", () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+    const cls = pillClass()
+    expect(cls).toContain("flex-col")
+    expect(cls).toContain("@sm/composer:flex-row")
+    expect(cls).not.toContain("flex-wrap")
+  })
+})
+
+describe("Composer — auto-resize is IME-safe", () => {
+  // The JS auto-resize fallback only runs when CSS `field-sizing` is absent
+  // (older mobile WebViews). It must NOT mutate the textarea mid-composition,
+  // or it aborts the IME buffer and on-device typing swallows characters.
+  let originalCSS: typeof globalThis.CSS
+
+  beforeEach(() => {
+    originalCSS = globalThis.CSS
+    // Force the fallback path: report no field-sizing support.
+    ;(globalThis as { CSS?: unknown }).CSS = { supports: () => false }
+  })
+
+  afterEach(() => {
+    ;(globalThis as { CSS?: unknown }).CSS = originalCSS
+  })
+
+  it("defers height adjustment until composition ends", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    expect(ta).not.toBeNull()
+
+    // Begin an IME composition, then plant a sentinel height. While composing,
+    // a value change must leave the height untouched.
+    fireEvent.compositionStart(ta)
+    ta.style.height = "123px"
+    fireEvent.change(ta, { target: { value: "测试" } })
+    expect(ta.style.height).toBe("123px")
+
+    // After composition ends the effect re-runs and resizes (scrollHeight is 0
+    // in jsdom ⇒ "0px"), proving the resize was only deferred, not dropped.
+    fireEvent.compositionEnd(ta)
+    expect(ta.style.height).toBe("0px")
   })
 })

@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 export function HelperHints() {
   const t = useTranslations("chat.composer.helperHints")
   return (
-    <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
+    <div className="mt-1.5 hidden sm:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
       <Hint>{t("send")}</Hint>
       <Hint>{t("dropImages")}</Hint>
       <Hint>

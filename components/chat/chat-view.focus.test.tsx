@@ -64,6 +64,9 @@ jest.mock("@/lib/ui/motion", () => ({ mobileTransition: () => ({}) }))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("@/lib/data-hooks/context", () => ({ useCharacter: jest.fn(() => undefined) }))
 
+let mockIsMobile = false
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => mockIsMobile }))
+
 const storeState = {
   messages: [] as unknown[],
   status: "idle" as const,
@@ -95,6 +98,7 @@ afterEach(() => {
   jest.clearAllMocks()
   capturedOnExitComplete = undefined
   storeState.messages = []
+  mockIsMobile = false
 })
 
 describe("ChatPane focus-on-transition", () => {
@@ -123,5 +127,16 @@ describe("ChatPane focus-on-transition", () => {
     expect(externalRef.current).not.toBeNull()
     externalRef.current?.focus()
     expect(mockComposerFocus).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not autofocus on mobile viewports to avoid opening the virtual keyboard", () => {
+    mockIsMobile = true
+    storeState.messages = [{ id: "m1" }]
+    render(<ChatPane {...makeProps()} />)
+    expect(typeof capturedOnExitComplete).toBe("function")
+
+    mockComposerFocus.mockClear()
+    capturedOnExitComplete?.()
+    expect(mockComposerFocus).not.toHaveBeenCalled()
   })
 })
