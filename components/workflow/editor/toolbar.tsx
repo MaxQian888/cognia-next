@@ -10,6 +10,7 @@ import {
   Command as CommandIcon,
   Keyboard as KeyboardIcon,
   Image as ImageIcon,
+  Link2 as ShareIcon,
   MoreHorizontal as MoreIcon,
 } from "lucide-react"
 import Link from "next/link"
@@ -35,6 +36,7 @@ export interface EditorToolbarProps {
   onRun?: () => void
   onExportJson?: () => void
   onExportImage?: () => void
+  onShareImage?: () => void
   onImportJson?: (json: string) => void
   onOpenCommandPalette?: () => void
   onOpenShortcuts?: () => void
@@ -49,12 +51,14 @@ export const EditorToolbar = memo(function EditorToolbar({
   onRun,
   onExportJson,
   onExportImage,
+  onShareImage,
   onImportJson,
   onOpenCommandPalette,
   onOpenShortcuts,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const t = useTranslations("workflows.toolbar")
+  const tShare = useTranslations("share")
 
   function handleImportClick() {
     fileInputRef.current?.click()
@@ -73,7 +77,12 @@ export const EditorToolbar = memo(function EditorToolbar({
   }
 
   const hasOverflow = Boolean(
-    onOpenCommandPalette || onOpenShortcuts || onExportJson || onExportImage || onImportJson
+    onOpenCommandPalette ||
+    onOpenShortcuts ||
+    onExportJson ||
+    onExportImage ||
+    onShareImage ||
+    onImportJson
   )
 
   return (
@@ -152,7 +161,7 @@ export const EditorToolbar = memo(function EditorToolbar({
                   {t("tooltip.shortcuts")}
                 </DropdownMenuItem>
               ) : null}
-              {(onExportJson || onExportImage || onImportJson) &&
+              {(onExportJson || onExportImage || onShareImage || onImportJson) &&
               (onOpenCommandPalette || onOpenShortcuts) ? (
                 <DropdownMenuSeparator />
               ) : null}
@@ -166,6 +175,12 @@ export const EditorToolbar = memo(function EditorToolbar({
                 <DropdownMenuItem onSelect={onExportImage} data-testid="workflow-export-image">
                   <ImageIcon className="size-4" aria-hidden />
                   {t("tooltip.exportImage")}
+                </DropdownMenuItem>
+              ) : null}
+              {onShareImage ? (
+                <DropdownMenuItem onSelect={onShareImage} data-testid="workflow-share-image">
+                  <ShareIcon className="size-4" aria-hidden />
+                  {tShare("shareAction")}
                 </DropdownMenuItem>
               ) : null}
               {onImportJson ? (

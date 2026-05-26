@@ -22,6 +22,7 @@ import {
   DownloadIcon,
   FileArchiveIcon,
   KeyRoundIcon,
+  Link2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { EncryptionOptions, type EncryptionMode } from "@/components/data/shared/encryption-options"
@@ -32,7 +33,15 @@ import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dia
 import { useFullBackup } from "@/hooks/data/use-full-backup"
 import { useScheduler } from "@/hooks/scheduler"
 import { rotateBackupKey } from "@/lib/data/backup-key"
+import {
+  buildBackupPackage,
+  serializePackage,
+  defaultExportFileName,
+} from "@/lib/data/build-package"
 import { loggers } from "@/lib/logging"
+import { ShareSettingsCard } from "@/components/share/share-settings-card"
+import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { backupPayload } from "@/lib/share/payload"
 
 export function BackupRestoreTab() {
   return (
@@ -42,6 +51,7 @@ export function BackupRestoreTab() {
       <CronScheduleBlock />
       <QuickSessionExportBlock />
       <RotateKeyBlock />
+      <ShareSettingsCard />
       <FullRestoreDialog />
     </div>
   )
@@ -49,6 +59,7 @@ export function BackupRestoreTab() {
 
 function ExportBlock() {
   const t = useTranslations("settings.data")
+  const tShare = useTranslations("share")
   const [includeSessions, setIncludeSessions] = useState(false)
   const [includeApiKey, setIncludeApiKey] = useState(false)
   const [includeBuiltIns, setIncludeBuiltIns] = useState(false)
@@ -138,7 +149,23 @@ function ExportBlock() {
         disabled={busy}
       />
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <ShareLinkDialog
+          buildPayload={async () => {
+            const pkg = await buildBackupPackage({
+              includeSessions,
+              includeApiKey,
+              includeBuiltIns,
+            })
+            return backupPayload(serializePackage(pkg), defaultExportFileName(new Date(), "plain"))
+          }}
+          trigger={
+            <Button size="sm" variant="outline" disabled={busy}>
+              <Link2Icon className="mr-1.5 size-4" />
+              {tShare("shareAction")}
+            </Button>
+          }
+        />
         <Button size="sm" onClick={() => void onExport()} disabled={busy}>
           {busy ? t("exporting") : t("exportButton")}
         </Button>

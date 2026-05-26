@@ -72,7 +72,9 @@ import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { EditorToolbar } from "./toolbar"
 import { CanvasToolbar, type CanvasBackgroundVariant } from "./canvas-toolbar"
 import { SelectionToolbar } from "./selection-toolbar"
-import { exportWorkflowImage } from "@/lib/workflow/editor/export-image"
+import { exportWorkflowImage, renderWorkflowImageBlob } from "@/lib/workflow/editor/export-image"
+import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { workflowImagePayload } from "@/lib/share/payload"
 import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { RightSidebar } from "./right-sidebar"
@@ -654,6 +656,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     toast.success(t("exported"))
   }, [toWorkflow, t])
 
+  const [shareImageOpen, setShareImageOpen] = useState(false)
+
   const handleExportImage = useCallback(async () => {
     const el = canvasWrapperRef.current
     if (!el) return
@@ -669,6 +673,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       toast.error(err instanceof Error ? err.message : t("imageExportFailed"))
     }
   }, [nodes, workflowName, t])
+
+  const buildImageSharePayload = useCallback(async () => {
+    const el = canvasWrapperRef.current
+    if (!el) throw new Error("Canvas not ready")
+    const blob = await renderWorkflowImageBlob({ flowEl: el, nodes, backgroundColor: null })
+    return workflowImagePayload(blob, workflowName || "workflow")
+  }, [nodes, workflowName])
 
   const handleImportJson = useCallback(
     (jsonText: string) => {
@@ -925,9 +936,15 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onRun={handleRun}
         onExportJson={handleExportJson}
         onExportImage={handleExportImage}
+        onShareImage={() => setShareImageOpen(true)}
         onImportJson={handleImportJson}
         onOpenCommandPalette={handleOpenPalette}
         onOpenShortcuts={handleOpenShortcuts}
+      />
+      <ShareLinkDialog
+        open={shareImageOpen}
+        onOpenChange={setShareImageOpen}
+        buildPayload={buildImageSharePayload}
       />
       <input
         ref={importInputRef}

@@ -1,0 +1,112 @@
+---
+title: Public share links (zero-knowledge)
+description: Self-host the Cognia share worker on Cloudflare (R2 + KV) so you can turn a chat export, workflow image, A2UI app, or backup into a short public link. Contents are end-to-end encrypted in your browser; the server only ever stores ciphertext.
+---
+
+# Public share links (zero-knowledge)
+
+Cognia can turn an artifact — a chat transcript, a workflow diagram, an A2UI
+app, or a backup package — into a short URL anyone can open in a browser. The
+content is **end-to-end encrypted on your device**: a random key is generated
+locally, placed in the URL `#fragment`, and **never uploaded**. The worker
+stores only opaque ciphertext, and decryption happens in the recipient's
+browser. The `#fragment` is never sent to any server, so the host cannot read
+your shares even in principle.
+
+This is a **self-hosted, single-tenant** model, mirroring the signaling
+server: you deploy the worker to *your own* Cloudflare account and point the
+app at it. Reads are public (anyone with the link); creating and revoking
+links requires a bearer secret only you hold.
+
+<Callout type="info">
+  Free-tier friendly: Cloudflare R2 (10&nbsp;GB free), Workers KV, and Workers
+  all have free tiers sufficient for personal use.
+</Callout>
+
+## What gets shared
+
+| Artifact | Viewer renders it as |
+| --- | --- |
+| Chat export (HTML / animated) | Inline, in a sandboxed iframe |
+| Chat export (Markdown / JSON / text) | Preformatted text |
+| Workflow image | A PNG |
+| Backup package | A download (re-import under Settings → Data) |
+| A2UI app | A download (re-import into Cognia to run it interactively) |
+
+## Prerequisites
+
+- A Cloudflare account, and `wrangler` installed (`npm i -g wrangler`, then `wrangler login`).
+- Optional: a domain on Cloudflare DNS if you want a custom hostname
+  (`share.example.com`); otherwise the worker is reachable on `*.workers.dev`.
+
+## Deploy the worker
+
+The worker + viewer live in `share-server/` in the repo. They are a standalone
+project (not part of the app's pnpm workspace).
+
+```bash
+# 1. Install deps (standalone — ignore the app workspace)
+cd share-server/viewer && pnpm install --ignore-workspace && pnpm build
+cd ../worker && pnpm install --ignore-workspace
+
+# 2. Create the storage the worker binds to
+wrangler r2 bucket create cognia-shares
+wrangler kv namespace create SHARE_KV
+#   → paste the printed namespace id into share-server/worker/wrangler.toml
+#     under [[kv_namespaces]] id = "..."
+
+# 3. Set the bearer secret the app will use to create/revoke links
+wrangler secret put SHARE_UPLOAD_SECRET
+#   → enter a long random string; keep a copy for the app config below
+
+# 4. Deploy (builds the viewer assets + worker)
+wrangler deploy
+```
+
+<Callout type="info">
+  `wrangler.toml` has a `routes` line for `share.cognia.cn` — change it to your
+  own hostname (requires that zone active on your account), or comment it out to
+  use the `*.workers.dev` subdomain only.
+</Callout>
+
+Run the test suite any time without an account — it uses miniflare:
+
+```bash
+cd share-server/worker && pnpm test
+```
+
+## Point the app at it
+
+In Cognia: **Settings → Data → Public share links**.
+
+1. **Share worker URL** — the deployed origin, e.g. `https://share.example.com`
+   (no trailing `/v1`). Also settable at build time via `NEXT_PUBLIC_SHARE_URL`.
+2. **Upload secret** — paste the same value you gave to
+   `wrangler secret put SHARE_UPLOAD_SECRET`. It is stored in your OS keyring
+   (desktop) / encrypted IndexedDB (web), never in plaintext settings.
+
+Now a **Share via link** action appears in the chat export dialog, the workflow
+editor's overflow menu, the A2UI workspace toolbar, and the backup export card.
+
+## Link controls
+
+When you create a link you can set:
+
+- **Expiry** — never / 1 hour / 24 hours / 7 days (enforced by Worker + KV TTL).
+- **View limit / burn-after-reading** — the link self-destructs after N views.
+- **Extra passphrase** — derives the key from `urlKey ‖ passphrase`, so even
+  someone with the full link can't open it without the passphrase (share it
+  out-of-band). Still zero-knowledge: the server never sees either.
+
+Manage and revoke existing links under the same settings panel
+(**My shared links**). Revoking deletes the object from the server immediately.
+
+## Security notes
+
+- The worker is **untrusted by design** — it stores ciphertext and counters
+  only. Losing the link means losing the content (there is no recovery).
+- Sharing a backup that includes API keys puts those (encrypted) on a public
+  URL — only do so when you trust the link's distribution and ideally add a
+  passphrase.
+- Because shares are zero-knowledge, there is no server-side search or preview;
+  the artifact's type and title live inside the ciphertext.

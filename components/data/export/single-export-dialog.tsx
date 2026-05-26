@@ -25,6 +25,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSingleExport } from "@/hooks/data/use-single-export"
+import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { buildChatSharePayload } from "@/lib/share/chat-export"
+import { Link2Icon } from "lucide-react"
 import { CustomThemeEditor } from "./custom-theme-editor"
 import { THEME_LIST, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { useCustomThemeStore } from "@/stores/theme"
@@ -53,6 +56,7 @@ export function SingleExportDialog({
 }: Props) {
   const t = useTranslations("export")
   const tData = useTranslations("settings.data")
+  const tShare = useTranslations("share")
   const [format, setFormat] = useState<SingleExportFormat>(defaultFormat)
   const [theme, setTheme] = useState<ThemeId>("light")
   const [customThemeId, setCustomThemeId] = useState<string | null>(null)
@@ -162,6 +166,25 @@ export function SingleExportDialog({
         </div>
 
         <DialogFooter>
+          <ShareLinkDialog
+            buildPayload={() =>
+              buildChatSharePayload({
+                format,
+                session,
+                theme,
+                customTheme,
+                includeMetadata,
+                includeTimestamps,
+                includeTokens,
+              })
+            }
+            trigger={
+              <Button variant="outline">
+                <Link2Icon className="mr-1.5 size-4" />
+                {tShare("shareAction")}
+              </Button>
+            }
+          />
           <Button onClick={() => void onSubmit()} disabled={busy}>
             {busy ? t("exporting") : t("exportButton")}
           </Button>

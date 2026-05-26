@@ -3,7 +3,7 @@
  */
 
 import type { Node } from "@xyflow/react"
-import { exportWorkflowImage } from "./export-image"
+import { exportWorkflowImage, renderWorkflowImageBlob } from "./export-image"
 
 const mockHtml2canvas = jest.fn()
 jest.mock("html2canvas", () => ({
@@ -91,5 +91,22 @@ describe("exportWorkflowImage", () => {
     expect(vp.style.transform).toBe("translate(10px, 20px) scale(1.5)")
     expect(captured!.download).toBe("already.png")
     ;(document.createElement as jest.Mock).mockRestore()
+  })
+})
+
+describe("renderWorkflowImageBlob", () => {
+  it("resolves a PNG blob from the rasterised canvas", async () => {
+    const flowEl = makeFlowEl(true)
+    mockHtml2canvas.mockResolvedValue({
+      toBlob: (cb: (b: Blob | null) => void) => cb(new Blob(["x"], { type: "image/png" })),
+    })
+    const blob = await renderWorkflowImageBlob({ flowEl, nodes, backgroundColor: null })
+    expect(blob.type).toBe("image/png")
+  })
+
+  it("rejects when the canvas yields no blob", async () => {
+    const flowEl = makeFlowEl(true)
+    mockHtml2canvas.mockResolvedValue({ toBlob: (cb: (b: Blob | null) => void) => cb(null) })
+    await expect(renderWorkflowImageBlob({ flowEl, nodes })).rejects.toThrow(/rasterise/i)
   })
 })

@@ -33,6 +33,16 @@ jest.mock("sonner", () => ({
   },
 }))
 
+const createShareLink = jest.fn()
+jest.mock("@/lib/share/client", () => {
+  class ShareNotConfiguredError extends Error {}
+  return {
+    createShareLink: (...a: unknown[]) => createShareLink(...a),
+    revokeShareLink: jest.fn(),
+    ShareNotConfiguredError,
+  }
+})
+
 import { A2UIWorkspaceProvider } from "./a2ui-workspace-context"
 import { A2UIToolbar } from "./a2ui-toolbar"
 import { toast } from "sonner"
@@ -123,5 +133,25 @@ describe("A2UIToolbar", () => {
       .filter((b) => b.querySelector("svg.lucide-download"))
     fireEvent.click(exportButtons[0])
     expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("share opens the dialog and creates an a2ui link from the exported app", async () => {
+    exportApp.mockReturnValue('{"app":{"name":"My App"}}')
+    createShareLink.mockResolvedValue({ code: "C", url: "https://share.test/v/C#k=K" })
+    renderToolbar()
+
+    const shareButton = screen
+      .getAllByRole("button")
+      .find((b) => b.querySelector("svg.lucide-share2"))!
+    fireEvent.click(shareButton)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create link" }))
+    await screen.findByText("Your share link is ready")
+    expect(exportApp).toHaveBeenCalledWith("sx")
+    expect(createShareLink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ kind: "a2ui", title: "My App" }),
+      })
+    )
   })
 })

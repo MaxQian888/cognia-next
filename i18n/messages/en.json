@@ -15814,5 +15814,81 @@
       "testPatterns": "Test Patterns",
       "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior."
     }
+  },
+  "share": {
+    "shareAction": "Share via link",
+    "dialogTitle": "Share via link",
+    "dialogDescription": "Create a public link. The contents are end-to-end encrypted in your browser — the server only ever stores ciphertext.",
+    "ttlLabel": "Expires",
+    "ttl": {
+      "never": "Never",
+      "h1": "In 1 hour",
+      "h24": "In 24 hours",
+      "d7": "In 7 days"
+    },
+    "limitLabel": "View limit",
+    "limit": {
+      "unlimited": "Unlimited",
+      "count": "Limit views",
+      "burn": "Burn after reading"
+    },
+    "maxViewsLabel": "Max views",
+    "passphraseLabel": "Extra passphrase (optional)",
+    "passphrasePlaceholder": "Shared separately, never in the link",
+    "passphraseHelp": "Recipients must enter this to open the link.",
+    "createButton": "Create link",
+    "creating": "Creating…",
+    "createdTitle": "Your share link is ready",
+    "createdHelp": "Anyone with this link can view the content. The decryption key is in the link after “#”.",
+    "linkLabel": "Share link",
+    "copy": "Copy",
+    "copied": "Copied",
+    "openLink": "Open",
+    "revoke": "Revoke",
+    "revoking": "Revoking…",
+    "revoked": "Link revoked",
+    "done": "Done",
+    "scanHint": "Scan to open",
+    "notConfiguredTitle": "Share service not set up",
+    "notConfiguredBody": "Set your share worker URL and upload secret first.",
+    "notConfiguredCta": "Open settings",
+    "errorGeneric": "Could not create the share link.",
+    "myShares": {
+      "title": "My shared links",
+      "description": "Links you have created. Revoking removes them from the server immediately.",
+      "empty": "You haven’t created any share links yet.",
+      "copy": "Copy",
+      "open": "Open",
+      "revoke": "Revoke",
+      "created": "Created",
+      "expires": "Expires",
+      "never": "Never",
+      "views": "{count} views",
+      "burnBadge": "Burn after read",
+      "passphraseBadge": "Passphrase",
+      "kind": {
+        "chat-html": "Conversation (HTML)",
+        "chat-animated": "Conversation (animated)",
+        "chat-md": "Conversation (Markdown)",
+        "chat-json": "Conversation (JSON)",
+        "chat-text": "Conversation (text)",
+        "workflow-png": "Workflow image",
+        "backup": "Backup package",
+        "a2ui": "App"
+      }
+    },
+    "settings": {
+      "title": "Public share links",
+      "description": "Self-host the share worker on Cloudflare, then point the app at it. The upload secret is stored in your OS keyring.",
+      "urlLabel": "Share worker URL",
+      "urlPlaceholder": "https://share.example.com",
+      "secretLabel": "Upload secret",
+      "secretPlaceholder": "Bearer secret for creating links",
+      "secretSet": "A secret is saved",
+      "save": "Save",
+      "saved": "Saved",
+      "clear": "Clear",
+      "cleared": "Cleared"
+    }
   }
 }

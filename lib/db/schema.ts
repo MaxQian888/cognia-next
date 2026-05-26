@@ -62,6 +62,7 @@ import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
 import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow } from "@/lib/sync/types"
+import type { SharedLinkRow } from "./shared-links"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -215,6 +216,13 @@ export class CogniaDB extends Dexie {
    * upgrade hook needed.
    */
   workflowProposalHistory!: Table<WorkflowProposalHistoryRow, string>
+  /**
+   * v54 — Cloudflare-hosted public share links (zero-knowledge). One row per
+   * link the owner created, so the "My Shares" panel can list / re-copy /
+   * revoke. The URL embeds the decryption key, which lives only on this device.
+   * Per-row type + CRUD live in `./shared-links.ts`. Pure additive table.
+   */
+  sharedLinks!: Table<SharedLinkRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1477,6 +1485,13 @@ export class CogniaDB extends Dexie {
     // filtered in-memory (the v12 promptPresets precedent).
     this.version(53).stores({
       goalTemplates: "&id, builtin, isFavorite, sortOrder, updatedAt, createdAt",
+    })
+
+    // v54 — public share links. Additive only; no upgrade hook. `code` is
+    // unique; `createdAt` drives the newest-first list; `expiresAt` powers the
+    // expired-row prune. `revoked` (boolean) is filtered in-memory, not indexed.
+    this.version(54).stores({
+      sharedLinks: "&id, &code, kind, createdAt, expiresAt",
     })
   }
 

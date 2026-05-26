@@ -20,6 +20,10 @@ const eslintConfig = defineConfig([
     ".agents/**",
     ".claude/**",
     "sidecar/**",
+    // Standalone Cloudflare worker + Vite viewer workspace with its own
+    // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
+    // by its own config; its dist/ is a minified build artifact.
+    "share-server/**",
     "node_modules/**",
     // VS Code extension fixture under sidecar/vscode-ext-host — simulates
     // a real CJS extension on purpose (require("vscode")), and the .js file

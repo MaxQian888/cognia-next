@@ -5,7 +5,7 @@
  * Grouped action bar: [Undo/Redo] | [Mode] | [AI] | [Save/Export/Share]
  */
 
-import React, { useCallback } from "react"
+import React, { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Undo2, Redo2, Sparkles, Save, Download, Share2, Pencil, Eye, Database } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,8 @@ import { useA2UIStore } from "@/stores/a2ui"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { a2uiPayload } from "@/lib/share/payload"
 import { useWorkspaceContext } from "./a2ui-workspace-context"
 
 export function A2UIToolbar() {
@@ -26,6 +28,7 @@ export function A2UIToolbar() {
   const undo = useA2UIStore((state) => state.undo)
   const redo = useA2UIStore((state) => state.redo)
   const appBuilder = useA2UIAppBuilder({})
+  const [shareOpen, setShareOpen] = useState(false)
 
   const handleUndo = useCallback(() => undo(surfaceId), [undo, surfaceId])
   const handleRedo = useCallback(() => redo(surfaceId), [redo, surfaceId])
@@ -33,6 +36,19 @@ export function A2UIToolbar() {
   const handleSave = useCallback(() => {
     toast.success(t("appSaved"))
   }, [t])
+
+  const buildSharePayload = useCallback(() => {
+    const json = appBuilder.exportApp(surfaceId)
+    if (!json) throw new Error("a2ui export failed")
+    let title = t("shareApp")
+    try {
+      const parsed = JSON.parse(json) as { app?: { title?: string; name?: string } }
+      title = parsed.app?.title || parsed.app?.name || title
+    } catch {
+      /* keep fallback title */
+    }
+    return a2uiPayload(json, title)
+  }, [appBuilder, surfaceId, t])
 
   const handleExport = useCallback(() => {
     try {
@@ -112,9 +128,13 @@ export function A2UIToolbar() {
       <ToolbarButton
         icon={<Share2 className="h-4 w-4" />}
         label={t("shareApp")}
-        onClick={() => {
-          /* TODO: Share dialog */
-        }}
+        onClick={() => setShareOpen(true)}
+      />
+
+      <ShareLinkDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        buildPayload={buildSharePayload}
       />
     </div>
   )

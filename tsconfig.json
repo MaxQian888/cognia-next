@@ -39,6 +39,7 @@
     "docs",
     "mobile",
     "sidecar",
+    "share-server",
     "out",
     ".next",
     "tests/e2e",

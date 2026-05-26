@@ -1,0 +1,103 @@
+---
+title: 公开分享链接（零知识）
+description: 在 Cloudflare 自部署 Cognia 分享 worker（R2 + KV），把对话导出、工作流图片、A2UI 应用或备份包变成一个公开短链。内容在你的浏览器内端到端加密，服务器只存密文。
+---
+
+# 公开分享链接（零知识）
+
+Cognia 可以把一个产物——对话记录、工作流图、A2UI 应用或备份包——变成任何人
+都能用浏览器打开的短链。内容在**你的设备上端到端加密**：随机密钥本地生成、
+放进 URL 的 `#fragment`、**永不上传**；worker 只存不透明的密文，解密发生在
+收件人的浏览器里。`#fragment` 不会发给任何服务器，所以宿主在原理上也读不到你
+的分享内容。
+
+这是**自部署、单租户**模型，与 signaling 服务器一致：你把 worker 部署到**自己
+的** Cloudflare 账号，再让应用指向它。读取是公开的（拿到链接即可看）；创建和
+撤销链接需要只有你持有的 bearer 密钥。
+
+<Callout type="info">
+  对免费额度友好：Cloudflare R2（10&nbsp;GB 免费）、Workers KV、Workers
+  均有足够个人使用的免费层。
+</Callout>
+
+## 可分享的产物
+
+| 产物 | viewer 的呈现方式 |
+| --- | --- |
+| 对话导出（HTML / 动画） | 沙箱 iframe 内联渲染 |
+| 对话导出（Markdown / JSON / 文本） | 预格式化文本 |
+| 工作流图片 | 一张 PNG |
+| 备份包 | 下载（在 设置 → 数据 里重新导入） |
+| A2UI 应用 | 下载（导入回 Cognia 后可交互运行） |
+
+## 前置条件
+
+- 一个 Cloudflare 账号，并安装 `wrangler`（`npm i -g wrangler` 后 `wrangler login`）。
+- 可选：若想用自定义域名（`share.example.com`），需要域名托管在 Cloudflare DNS；
+  否则 worker 可经 `*.workers.dev` 访问。
+
+## 部署 worker
+
+worker 与 viewer 位于仓库的 `share-server/`，是独立项目（不在应用的 pnpm
+workspace 内）。
+
+```bash
+# 1. 安装依赖（独立项目——忽略应用 workspace）
+cd share-server/viewer && pnpm install --ignore-workspace && pnpm build
+cd ../worker && pnpm install --ignore-workspace
+
+# 2. 创建 worker 绑定的存储
+wrangler r2 bucket create cognia-shares
+wrangler kv namespace create SHARE_KV
+#   → 把打印出的 namespace id 填进 share-server/worker/wrangler.toml
+#     的 [[kv_namespaces]] id = "..."
+
+# 3. 设置应用用于创建/撤销链接的 bearer 密钥
+wrangler secret put SHARE_UPLOAD_SECRET
+#   → 输入一段长随机串；下面应用配置里要用同一个值
+
+# 4. 部署（会构建 viewer 资源 + worker）
+wrangler deploy
+```
+
+<Callout type="info">
+  `wrangler.toml` 里有一行指向 `share.cognia.cn` 的 `routes`——改成你自己的
+  域名（需该 zone 已托管在你账号），或注释掉以仅使用 `*.workers.dev`。
+</Callout>
+
+无需账号也可随时跑测试（用 miniflare）：
+
+```bash
+cd share-server/worker && pnpm test
+```
+
+## 让应用指向它
+
+在 Cognia：**设置 → 数据 → 公开分享链接**。
+
+1. **分享 worker 地址**——部署后的源，如 `https://share.example.com`
+   （末尾不带 `/v1`）。也可在构建期用 `NEXT_PUBLIC_SHARE_URL` 设置。
+2. **上传密钥**——填入与 `wrangler secret put SHARE_UPLOAD_SECRET` 相同的值。
+   它存在操作系统钥匙串（桌面）/ 加密 IndexedDB（Web）中，绝不以明文写入设置。
+
+之后，「生成分享链接」会出现在对话导出对话框、工作流编辑器的溢出菜单、A2UI
+工作区工具栏，以及备份导出卡片中。
+
+## 链接控制
+
+创建链接时可设置：
+
+- **有效期**——永久 / 1 小时 / 24 小时 / 7 天（由 Worker + KV TTL 强制）。
+- **查看次数上限 / 阅后即焚**——达到 N 次查看后链接自毁。
+- **额外口令**——密钥由 `urlKey ‖ 口令` 派生，因此即便拿到完整链接、没有口令
+  也打不开（口令请另行告知）。仍是零知识：服务器两者都看不到。
+
+在同一设置面板（**我的分享链接**）里管理与撤销已有链接。撤销会立即从服务器删除
+该对象。
+
+## 安全说明
+
+- worker **被设计为不可信**——只存密文与计数。丢了链接就等于丢了内容（无法找回）。
+- 分享含 API 密钥的备份会把它们（加密后）放到公开 URL——仅在你信任链接分发范围
+  时这么做，并最好加上口令。
+- 由于分享是零知识的，服务器端没有搜索或预览；产物的类型与标题都在密文内部。
