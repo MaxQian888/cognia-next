@@ -153,7 +153,7 @@ function RunDetailInner({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b px-6 py-4">
+      <header className="safe-area-pt flex items-center gap-3 border-b px-4 py-4 sm:px-6">
         <Button asChild size="icon" variant="ghost" aria-label={t("backToRuns")}>
           <Link href={`/workflows/${workflowId}/runs`}>
             <ArrowLeftIcon className="size-4" />
@@ -170,7 +170,9 @@ function RunDetailInner({
             {formatRunStartedAt(run.startedAt)} · {totalDuration} · {run.triggerKind}
           </p>
         </div>
-        <RunDurationSparkline workflowId={run.workflowId} />
+        <div className="hidden sm:block">
+          <RunDurationSparkline workflowId={run.workflowId} />
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -182,10 +184,10 @@ function RunDetailInner({
           {busy ? t("rerunning") : t("rerun")}
         </Button>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <ScrollArea className="h-full">
-            <div className="px-6 py-4">
+            <div className="px-4 py-4 sm:px-6">
               <RunTimeline
                 events={events}
                 workflow={run.workflowSnapshot}
@@ -197,7 +199,9 @@ function RunDetailInner({
             </div>
           </ScrollArea>
         </div>
-        <aside className="hidden w-96 shrink-0 border-l bg-card/40 lg:block">
+        {/* Step inspector: a side rail on desktop; below the timeline (capped
+            height, scrollable) on mobile so step I/O stays reachable. */}
+        <aside className="min-h-0 shrink-0 overflow-y-auto border-t bg-card/40 max-lg:max-h-[45%] lg:w-96 lg:border-t-0 lg:border-l">
           <RunStepDetail workflow={run.workflowSnapshot} events={events} stepId={selectedStepId} />
         </aside>
       </div>

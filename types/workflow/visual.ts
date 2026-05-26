@@ -33,6 +33,7 @@ export type WorkflowNodeKind =
   | "trigger.webhook"
   | "trigger.github.webhook"
   | "trigger.team"
+  | "trigger.goal.completed"
   // Actions on cognia-next runtime entities
   | "action.character.send"
   | "action.character.create"
@@ -139,6 +140,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.webhook",
   "trigger.github.webhook",
   "trigger.team",
+  "trigger.goal.completed",
   "action.character.send",
   "action.character.create",
   "action.character.update",
@@ -389,6 +391,8 @@ export interface WorkflowTriggerBinding {
   sessionId?: string
   conversationKey?: string
   characterId?: string
+  /** Scopes a `trigger.goal.completed` subscription to a specific goal id. */
+  goalId?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -38,6 +38,8 @@ import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { replaceWorkflow } from "@/lib/db/workflows"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
+import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
+import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
 import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
@@ -64,7 +66,6 @@ import { LassoOverlay } from "./lasso-overlay"
 import { SmartEdge } from "./edges/smart-edge"
 import { ConnectionLineGhostFactory, ConnectionPointerListener } from "./connection-overlay"
 import type { EdgeTypes } from "@xyflow/react"
-import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import type { TriggerEvent } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./nodes/workflow-node"
@@ -541,19 +542,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     if (saving) return
     setSaving(true)
     try {
-      const wf: VisualWorkflow = toWorkflow()
-      await replaceWorkflow(wf)
-      // Push the workflow's trigger nodes to the Rust side so cron / webhook
-      // triggers fire even when the editor is closed. Web-mode no-ops.
-      await syncWorkflowTriggers(wf).catch((err: unknown) => {
-        console.warn("syncWorkflowTriggers failed:", err)
-      })
-      markSaved()
-      // Re-validate on save so the status badges + inspector header reflect
-      // the freshly-persisted state. Saves are NOT blocked on validation —
-      // the user is allowed to keep a dirty draft on disk.
-      const issues = revalidateAll()
-      const issueCount = Object.keys(issues).length
+      // Shared persist path (toWorkflow → replaceWorkflow → trigger sync →
+      // markSaved → revalidate); the mobile editor uses the same helper.
+      const issueCount = await persistEditorWorkflow(useStore)
       if (issueCount > 0) {
         toast.warning(tValidation("blockedSaveTitle", { count: issueCount }))
       } else {
@@ -564,7 +555,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     } finally {
       setSaving(false)
     }
-  }, [saving, toWorkflow, markSaved, t, tValidation, revalidateAll])
+  }, [saving, useStore, t, tValidation])
 
   const [running, setRunning] = useState(false)
   const handleRun = useCallback(
@@ -659,18 +650,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   // ── JSON export / import ──────────────────────────────────────────────────
   const handleExportJson = useCallback(() => {
-    const wf = toWorkflow()
-    const blob = new Blob([JSON.stringify(wf, null, 2)], {
-      type: "application/json",
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${wf.name.replace(/[^a-z0-9-_]+/gi, "_") || "workflow"}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    downloadWorkflowJson(toWorkflow())
     toast.success(t("exported"))
   }, [toWorkflow, t])
 
@@ -693,11 +673,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleImportJson = useCallback(
     (jsonText: string) => {
       try {
-        const parsed = JSON.parse(jsonText) as Partial<VisualWorkflow>
-        if (!parsed || typeof parsed !== "object") throw new Error("Top-level must be an object")
-        if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-          throw new Error("Missing 'nodes' or 'edges' array")
-        }
+        const parsed = parseWorkflowImport(jsonText)
         useStore.getState().loadWorkflow({
           ...useStore.getState().toWorkflow(),
           ...parsed,

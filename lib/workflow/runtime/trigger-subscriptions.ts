@@ -32,6 +32,7 @@ export interface SubscribedTrigger {
 const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",
+  "trigger.goal.completed",
 ]
 
 interface SubscriptionState {
@@ -113,6 +114,10 @@ export interface TriggerMatchContext {
   conversationKey?: string
   characterId?: string
   sessionId?: string
+  /** Goal id (goal.completed) — optional match; unspecified node matches any goal. */
+  goalId?: string
+  /** Terminal goal status (goal.completed) — optional match; e.g. "completed". */
+  status?: string
 }
 
 /**
@@ -142,6 +147,12 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.sessionId === "string" && p.sessionId.length > 0) {
     if (ctx.sessionId !== p.sessionId) return false
+  }
+  if (typeof p.goalId === "string" && p.goalId.length > 0) {
+    if (ctx.goalId !== p.goalId) return false
+  }
+  if (typeof p.status === "string" && p.status.length > 0) {
+    if (ctx.status !== p.status) return false
   }
   return true
 }

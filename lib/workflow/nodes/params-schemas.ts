@@ -70,6 +70,15 @@ const ChatMessageTriggerParams = z.object({
   sessionId: optionalString,
 })
 
+const GoalCompletedTriggerParams = z.object({
+  // All optional — an unscoped node fires for every goal that reaches a
+  // terminal status. Scope by goal, session, character, or terminal status.
+  goalId: optionalString,
+  sessionId: optionalString,
+  characterId: optionalString,
+  status: optionalString,
+})
+
 const WebhookTriggerParams = z.object({
   path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
@@ -368,6 +377,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.cron": CronParams,
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
+  "trigger.goal.completed": GoalCompletedTriggerParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.github.webhook": WebhookTriggerParams,
   "trigger.team": z.object({}),

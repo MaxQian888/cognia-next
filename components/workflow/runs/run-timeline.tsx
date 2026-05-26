@@ -112,7 +112,7 @@ export function RunTimeline({
             )}
             data-testid={`timeline-row-${span.stepId}`}
           >
-            <div className="flex w-44 shrink-0 items-center gap-1.5">
+            <div className="flex w-24 shrink-0 items-center gap-1.5 sm:w-44">
               <span
                 className={cn("size-2 rounded-full", CATEGORY_COLORS[category])}
                 aria-hidden="true"
@@ -138,7 +138,7 @@ export function RunTimeline({
                 aria-hidden="true"
               />
             </div>
-            <div className="flex w-32 shrink-0 items-center justify-end gap-1.5 text-xs text-muted-foreground tabular-nums">
+            <div className="flex w-20 shrink-0 items-center justify-end gap-1.5 text-xs text-muted-foreground tabular-nums sm:w-32">
               {StatusIcon ? (
                 <StatusIcon
                   className={cn(

@@ -44,6 +44,7 @@ export type SeededWorkflowKind =
   | "trigger-chat"
   | "trigger-connector-inbound"
   | "trigger-github-webhook"
+  | "trigger-goal-completed"
   // Character actions
   | "action-character-send"
   | "action-character-create"
@@ -533,6 +534,19 @@ const FIXTURES: Record<SeededWorkflowKind, () => WorkflowDraft> = {
           label: "GitHub Webhook",
           params: { repo: "owner/repo", events: ["pull_request"], secret: "shh" },
         },
+      },
+    ],
+    edges: [],
+  }),
+  "trigger-goal-completed": () => ({
+    name: "E2E Goal Completed Trigger",
+    nodes: [
+      {
+        id: "n_trigger",
+        type: "trigger.goal.completed",
+        typeVersion: 1,
+        position: { x: 80, y: 120 },
+        data: { label: "Goal Completed", params: { status: "completed" } },
       },
     ],
     edges: [],

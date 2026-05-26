@@ -23,6 +23,7 @@ const KINDS_WITHOUT_HOST_EXECUTOR: ReadonlySet<WorkflowNodeKind> = new Set<Workf
   "trigger.cron",
   "trigger.connector.inbound",
   "trigger.chat.message",
+  "trigger.goal.completed",
   "trigger.webhook",
   "trigger.github.webhook",
   "annotation.note",

@@ -169,6 +169,53 @@ export function ChatMessageTriggerConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── trigger.goal.completed ────────────────────────────────────────────────
+export function GoalCompletedTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.goalCompletedTrigger")
+  const goalId = readString(params, "goalId")
+  const sessionId = readString(params, "sessionId")
+  const characterId = readString(params, "characterId")
+  const status = readString(params, "status")
+  return (
+    <FieldGroup>
+      <Field label={t("goalId.label")} htmlFor="gc-goal" hint={t("goalId.hint")} name="goalId">
+        <Input
+          id="gc-goal"
+          value={goalId}
+          onChange={(e) => onChange(patchParam(params, "goalId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("status.label")} htmlFor="gc-status" hint={t("status.hint")} name="status">
+        <Input
+          id="gc-status"
+          value={status}
+          onChange={(e) => onChange(patchParam(params, "status", e.target.value))}
+          placeholder={t("status.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="gc-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+      >
+        <Input
+          id="gc-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("characterId.label")} htmlFor="gc-char" name="characterId">
+        <CharacterPicker
+          id="gc-char"
+          value={characterId}
+          onChange={(v) => onChange(patchParam(params, "characterId", v))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // ── action.character.send ─────────────────────────────────────────────────
 export function CharacterSendConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.characterSend")

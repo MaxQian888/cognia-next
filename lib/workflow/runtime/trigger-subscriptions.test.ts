@@ -86,6 +86,30 @@ describe("trigger-subscriptions", () => {
     )
   })
 
+  it("indexes goal.completed and matches by goalId / status (unscoped matches any)", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.goal.completed", {})]),
+      wf("wf_goal", [trigger("n", "trigger.goal.completed", { goalId: "g1" })]),
+      wf("wf_status", [trigger("n", "trigger.goal.completed", { status: "completed" })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.goal.completed")).toHaveLength(3)
+
+    const g1Completed = findMatchingWorkflows("trigger.goal.completed", {
+      goalId: "g1",
+      status: "completed",
+    })
+    expect(g1Completed.map((m) => m.workflowId)).toEqual(
+      expect.arrayContaining(["wf_any", "wf_goal", "wf_status"])
+    )
+
+    // A different goal that stopped: only the unscoped node fires.
+    const otherStopped = findMatchingWorkflows("trigger.goal.completed", {
+      goalId: "g2",
+      status: "stopped",
+    })
+    expect(otherStopped.map((m) => m.workflowId)).toEqual(["wf_any"])
+  })
+
   it("returns an empty array when nothing matches or cache is empty", () => {
     expect(findMatchingWorkflows("trigger.chat.message", {})).toEqual([])
     _seedTriggerSubscriptionsForTest([])

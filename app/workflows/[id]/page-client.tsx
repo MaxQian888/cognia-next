@@ -15,7 +15,7 @@ import { notFound } from "next/navigation"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
-import { WorkflowGraphViewer } from "@/components/mobile/workflow/workflow-graph-viewer"
+import { MobileWorkflowEditor } from "@/components/mobile/workflow/editor/mobile-workflow-editor"
 import { usePlatform } from "@/hooks/use-platform"
 import { getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
@@ -55,18 +55,9 @@ export function WorkflowEditorPageClient({ params }: PageProps) {
   }
 
   if (platform === "mobile") {
-    const graph = {
-      nodes: workflow.nodes.map((n) => ({
-        id: n.id,
-        kind: n.type,
-        label: n.data?.label,
-        description: n.data?.notes,
-      })),
-      edges: workflow.edges.map((e) => ({ from: e.source, to: e.target })),
-    }
     return (
-      <div className="h-full w-full overflow-y-auto p-3">
-        <WorkflowGraphViewer graph={graph} />
+      <div className="h-full w-full overflow-hidden">
+        <MobileWorkflowEditor workflow={workflow} />
       </div>
     )
   }

@@ -32,6 +32,7 @@ import {
   Network as McpIcon,
   Send as SendIcon,
   PencilLine as DraftIcon,
+  Target as TargetIcon,
   type LucideIcon,
 } from "lucide-react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
@@ -41,6 +42,7 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "trigger.cron": ClockIcon,
   "trigger.connector.inbound": InboxIcon,
   "trigger.chat.message": MessageIcon,
+  "trigger.goal.completed": TargetIcon,
   "trigger.webhook": WebhookIcon,
   "action.character.send": SendIcon,
   "action.character.create": UsersIcon,

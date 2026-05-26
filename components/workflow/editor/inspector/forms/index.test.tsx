@@ -8,7 +8,12 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { TeamTriggerConfig, TeamTaskDispatchConfig, DesktopEventTriggerConfig } from "./index"
+import {
+  TeamTriggerConfig,
+  TeamTaskDispatchConfig,
+  DesktopEventTriggerConfig,
+  GoalCompletedTriggerConfig,
+} from "./index"
 
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
 jest.mock("@/lib/db/teams", () => ({
@@ -49,6 +54,16 @@ const messages = {
             "property-changed": "Property changed",
           },
         },
+      },
+      goalCompletedTrigger: {
+        goalId: { label: "Goal id (optional)", hint: "Limit to a specific goal." },
+        status: {
+          label: "Terminal status (optional)",
+          hint: "Limit to one outcome.",
+          placeholder: "completed",
+        },
+        sessionId: { label: "Session id (optional)", hint: "Limit to a chat session." },
+        characterId: { label: "Character (optional)" },
       },
     },
   },
@@ -93,5 +108,22 @@ describe("DesktopEventTriggerConfig", () => {
     wrap(<DesktopEventTriggerConfig params={{ kinds: ["focus-changed"] }} onChange={onChange} />)
     fireEvent.click(screen.getByTestId("desktop-event-focus-changed"))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kinds: [] }))
+  })
+})
+
+describe("GoalCompletedTriggerConfig", () => {
+  it("renders the optional scope fields and propagates edits", () => {
+    const onChange = jest.fn()
+    wrap(<GoalCompletedTriggerConfig params={{}} onChange={onChange} />)
+    expect(screen.getByLabelText(/Goal id/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Terminal status/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/Goal id/i), { target: { value: "goal_7" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ goalId: "goal_7" }))
+  })
+
+  it("reflects existing params into the inputs", () => {
+    const onChange = jest.fn()
+    wrap(<GoalCompletedTriggerConfig params={{ status: "stopped" }} onChange={onChange} />)
+    expect(screen.getByLabelText(/Terminal status/i)).toHaveValue("stopped")
   })
 })

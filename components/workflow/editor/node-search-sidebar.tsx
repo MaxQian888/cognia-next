@@ -42,10 +42,18 @@ function getServerSnapshot(): readonly NodeCatalogEntry[] {
 export function NodeSearchSidebar({
   className,
   onAddNodeAtCenter,
+  embedded = false,
 }: {
   className?: string
   /** Called when the user clicks an entry instead of dragging it. */
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
+  /**
+   * Drop the side-rail chrome (`border-r bg-card/50 backdrop-blur`) and the
+   * drag-hint footer. Set when hosted in a surface that owns its own
+   * background and where drag-to-canvas isn't the affordance — e.g. the
+   * mobile node-palette bottom sheet (tap-to-add only).
+   */
+  embedded?: boolean
 }) {
   const t = useTranslations("workflows.sidebar")
   const [query, setQuery] = useState("")
@@ -71,7 +79,11 @@ export function NodeSearchSidebar({
 
   return (
     <aside
-      className={cn("flex h-full w-full flex-col border-r bg-card/50 backdrop-blur", className)}
+      className={cn(
+        "flex h-full w-full flex-col",
+        !embedded && "border-r bg-card/50 backdrop-blur",
+        className
+      )}
       data-testid="workflow-node-sidebar"
       aria-label={t("searchPlaceholder")}
     >
@@ -112,9 +124,11 @@ export function NodeSearchSidebar({
           ))
         )}
       </div>
-      <div className="border-t px-3 py-2 text-[10px] text-muted-foreground leading-relaxed">
-        {t("dragHint")}
-      </div>
+      {embedded ? null : (
+        <div className="border-t px-3 py-2 text-[10px] text-muted-foreground leading-relaxed">
+          {t("dragHint")}
+        </div>
+      )}
     </aside>
   )
 }

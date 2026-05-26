@@ -89,9 +89,16 @@ const CATEGORY_BADGE = {
 function InspectorPanelInner({
   useStore,
   className,
+  embedded = false,
 }: {
   useStore: EditorStore
   className?: string
+  /**
+   * Drop the side-rail chrome (`border-l bg-card/50`) and the header
+   * close-X. Set when the panel is embedded in a host that owns its own
+   * surface + dismiss — e.g. the mobile node-config bottom drawer.
+   */
+  embedded?: boolean
 }) {
   const t = useTranslations("workflows.inspector")
   const tNodes = useTranslations("workflows.nodes")
@@ -196,7 +203,8 @@ function InspectorPanelInner({
     return (
       <aside
         className={cn(
-          "flex h-full w-full flex-col items-center justify-center border-l bg-card/50 p-6 text-center text-sm text-muted-foreground",
+          "flex h-full w-full flex-col items-center justify-center p-6 text-center text-sm text-muted-foreground",
+          !embedded && "border-l bg-card/50",
           className
         )}
         data-testid="workflow-inspector-empty"
@@ -211,7 +219,7 @@ function InspectorPanelInner({
 
   return (
     <aside
-      className={cn("flex h-full w-full flex-col border-l bg-card/50", className)}
+      className={cn("flex h-full w-full flex-col", !embedded && "border-l bg-card/50", className)}
       aria-label={t("closeAria")}
       data-testid="workflow-inspector"
     >
@@ -243,15 +251,17 @@ function InspectorPanelInner({
             {tNode(tNodes, `${node.data.kind}.description`, entry.description)}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          onClick={clearSelection}
-          aria-label={t("closeAria")}
-        >
-          <XIcon className="size-4" />
-        </Button>
+        {embedded ? null : (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={clearSelection}
+            aria-label={t("closeAria")}
+          >
+            <XIcon className="size-4" />
+          </Button>
+        )}
       </header>
       <ScrollArea className="flex-1">
         <div className="space-y-4 px-4 py-4" ref={formScrollRef}>

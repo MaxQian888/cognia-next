@@ -70,6 +70,13 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     iconName: "MessageSquare",
     keywords: ["chat", "user", "message", "session"],
   },
+  "trigger.goal.completed": {
+    label: "On goal completed",
+    description:
+      "Fires when a /goal reaches a terminal status (completed, stopped, budget/turn/timeout).",
+    iconName: "Target",
+    keywords: ["goal", "objective", "completed", "done", "finished", "loop"],
+  },
   "trigger.webhook": {
     label: "On webhook",
     description: "Fires when an HTTP request hits the workflow's webhook path.",
