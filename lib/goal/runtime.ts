@@ -45,6 +45,7 @@ import { getDb } from "@/lib/db/schema"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { redactObjective } from "./redact-objective"
+import { onGoalTerminal } from "./completion-linkage"
 
 /**
  * Thrown by `GoalRuntime.createGoal` when the target session is bound to
@@ -110,6 +111,17 @@ export function resolveGoalConfig(
       DEFAULT_GOAL_CONFIG.maxJudgeFailures,
     timeoutMs: overrides.timeoutMs ?? defaults?.timeoutMs ?? DEFAULT_GOAL_CONFIG.timeoutMs,
     inlineStopCondition: overrides.inlineStopCondition,
+    // Judge customization + pacing — optional, no hard default (undefined ⇒
+    // the consumer falls back to its own built-in: chat model / temp 0 /
+    // 200 tokens / no delay).
+    judgeModel: overrides.judgeModel ?? defaults?.judgeModel,
+    judgeProvider: overrides.judgeProvider ?? defaults?.judgeProvider,
+    judgePromptOverride: overrides.judgePromptOverride ?? defaults?.judgePromptOverride,
+    judgeTemperature: overrides.judgeTemperature ?? defaults?.judgeTemperature,
+    judgeMaxTokens: overrides.judgeMaxTokens ?? defaults?.judgeMaxTokens,
+    manualContinue: overrides.manualContinue ?? defaults?.manualContinue,
+    continuationIntervalMs: overrides.continuationIntervalMs ?? defaults?.continuationIntervalMs,
+    quietHours: overrides.quietHours ?? defaults?.quietHours,
   }
 }
 
@@ -125,6 +137,15 @@ interface AbortRegistration {
 class GoalRuntime {
   /** Per-goal active turn-driver abort controllers. */
   private aborters = new Map<string, AbortRegistration>()
+
+  /**
+   * Per-goal "advance one turn" listeners (ADR-0019 Phase 2 manual-continue).
+   * The chat hook registers a listener while it HOLDs a continuation; the
+   * status pill's "Continue" button calls `requestManualContinue` to fire it.
+   * Ephemeral renderer state — never persisted (the held message lives in the
+   * hook; this only signals "go").
+   */
+  private manualContinueListeners = new Map<string, Set<() => void>>()
 
   /**
    * Register the AbortController for an in-flight turn driver. The runtime
@@ -149,6 +170,44 @@ class GoalRuntime {
     this.aborters.delete(goalId)
     if (!reg.controller.signal.aborted) {
       reg.controller.abort()
+    }
+  }
+
+  /**
+   * Subscribe to manual-continue requests for a goal (ADR-0019 Phase 2). The
+   * chat hook calls this while holding a continuation; returns an unsubscribe
+   * function. Multiple listeners are supported but the hook registers one at
+   * a time and unsubscribes after firing.
+   */
+  onManualContinue(goalId: string, cb: () => void): () => void {
+    let set = this.manualContinueListeners.get(goalId)
+    if (!set) {
+      set = new Set()
+      this.manualContinueListeners.set(goalId, set)
+    }
+    set.add(cb)
+    return () => {
+      const s = this.manualContinueListeners.get(goalId)
+      if (!s) return
+      s.delete(cb)
+      if (s.size === 0) this.manualContinueListeners.delete(goalId)
+    }
+  }
+
+  /**
+   * Fire every manual-continue listener for a goal — called by the status
+   * pill's "Continue" button. No-op when nothing is held (the user clicked
+   * with no continuation pending).
+   */
+  requestManualContinue(goalId: string): void {
+    const set = this.manualContinueListeners.get(goalId)
+    if (!set) return
+    for (const cb of [...set]) {
+      try {
+        cb()
+      } catch {
+        // A listener error must not block the others.
+      }
     }
   }
 
@@ -357,6 +416,9 @@ class GoalRuntime {
     })
     const updated = (await getGoal(goalId)) ?? null
     void emitGoalStatus(updated)
+    // Completion linkage (ADR-0019 Phase 2) — notify + fire goal-completed
+    // workflows on the user-driven terminal transition.
+    if (updated) void onGoalTerminal(updated)
     return updated
   }
 
@@ -382,6 +444,7 @@ class GoalRuntime {
     })
     const updated = (await getGoal(goalId)) ?? null
     void emitGoalStatus(updated)
+    if (updated) void onGoalTerminal(updated)
     return updated
   }
 
@@ -426,6 +489,7 @@ class GoalRuntime {
   /** Delete a goal (and its events). Mostly for History "remove" actions. */
   async deleteGoal(goalId: string): Promise<void> {
     this.fireAbort(goalId)
+    this.manualContinueListeners.delete(goalId)
     await deleteGoal(goalId)
   }
 }

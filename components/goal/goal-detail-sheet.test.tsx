@@ -3,6 +3,12 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { Goal } from "@/types/goal"
+
+const isMobileMock = jest.fn(() => false)
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => isMobileMock(),
+}))
+
 import { GoalDetailSheet } from "./goal-detail-sheet"
 
 const goal: Goal = {
@@ -31,6 +37,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  isMobileMock.mockReturnValue(false)
 })
 
 describe("GoalDetailSheet", () => {
@@ -59,5 +66,13 @@ describe("GoalDetailSheet", () => {
     await user.click(subgoalsTrigger)
     expect(subgoalsTrigger).toHaveAttribute("data-state", "active")
     expect(screen.getByTestId("goal-tab-overview")).toHaveAttribute("data-state", "inactive")
+  })
+
+  it("renders the bottom Drawer (with the same tabs) on mobile", () => {
+    isMobileMock.mockReturnValue(true)
+    render(<GoalDetailSheet goal={goal} open onOpenChange={() => {}} />)
+    // Same tab content, different container — title + tabs still present.
+    expect(screen.getByText(/Goal · active/)).toBeInTheDocument()
+    expect(screen.getByTestId("goal-tab-overview")).toBeInTheDocument()
   })
 })

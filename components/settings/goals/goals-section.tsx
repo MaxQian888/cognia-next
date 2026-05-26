@@ -1,52 +1,37 @@
 "use client"
 
 /**
- * Settings → Goals tab — three sub-tabs:
- *   - History — every persisted goal across all sessions.
- *   - Tracker — defaults for the built-in "Goal Tracker" character.
- *   - Defaults — global default GoalConfig applied to new goals.
+ * Settings → Goals — a thin launcher into the standalone `/goals` console
+ * (ADR-0019 Phase 3). The full management surface (open goals, history,
+ * templates, defaults, tracker) lives at `/goals`; this preserves the
+ * `goals` settings section + its deep-link contract while pointing users at
+ * the richer console. The built-in tracker stays inline so users who land
+ * here still see it without a hop.
  */
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { TargetIcon } from "lucide-react"
-import { GoalsHistoryTable } from "./history-table"
+import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
+import { TargetIcon, ExternalLinkIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { GoalTrackerConfig } from "./goal-tracker-config"
-import { GoalDefaultsForm } from "./goal-defaults-form"
 
 export function GoalsSection() {
+  const t = useTranslations("goal")
+  const router = useRouter()
   return (
     <div className="space-y-4" data-testid="goals-section">
       <header className="flex items-center gap-2">
         <TargetIcon className="size-5 text-primary" aria-hidden />
         <div>
-          <h2 className="text-lg font-semibold">Goals</h2>
-          <p className="text-sm text-muted-foreground">
-            Persistent objectives the agent works toward automatically (ADR-0013).
-          </p>
+          <h2 className="text-lg font-semibold">{t("launcher.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("launcher.description")}</p>
         </div>
       </header>
-      <Tabs defaultValue="history">
-        <TabsList>
-          <TabsTrigger value="history" data-testid="goals-section-history">
-            History
-          </TabsTrigger>
-          <TabsTrigger value="tracker" data-testid="goals-section-tracker">
-            Tracker
-          </TabsTrigger>
-          <TabsTrigger value="defaults" data-testid="goals-section-defaults">
-            Defaults
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="history" className="mt-4">
-          <GoalsHistoryTable />
-        </TabsContent>
-        <TabsContent value="tracker" className="mt-4">
-          <GoalTrackerConfig />
-        </TabsContent>
-        <TabsContent value="defaults" className="mt-4">
-          <GoalDefaultsForm />
-        </TabsContent>
-      </Tabs>
+      <Button onClick={() => router.push("/goals")} data-testid="goals-open-console">
+        <ExternalLinkIcon className="size-4" aria-hidden />
+        {t("launcher.open")}
+      </Button>
+      <GoalTrackerConfig />
     </div>
   )
 }

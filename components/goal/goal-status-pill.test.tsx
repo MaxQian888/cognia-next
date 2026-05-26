@@ -93,4 +93,19 @@ describe("GoalStatusPill", () => {
     // SheetTitle includes "Goal · active"
     expect(screen.getByText(/Goal · active/)).toBeInTheDocument()
   })
+
+  it("hides the Continue button unless manualContinue is on", () => {
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={baseGoal} />)
+    expect(screen.queryByTestId("goal-continue-button")).not.toBeInTheDocument()
+  })
+
+  it("shows Continue when manualContinue is on and fires onManualContinue listeners", () => {
+    const manualGoal: Goal = { ...baseGoal, config: { ...baseGoal.config, manualContinue: true } }
+    const fired = jest.fn()
+    const unsub = getGoalRuntime().onManualContinue(manualGoal.id, fired)
+    render(<GoalStatusPill sessionId="ses_a" goalOverride={manualGoal} />)
+    fireEvent.click(screen.getByTestId("goal-continue-button"))
+    expect(fired).toHaveBeenCalledTimes(1)
+    unsub()
+  })
 })

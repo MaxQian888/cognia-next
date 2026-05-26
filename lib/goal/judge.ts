@@ -41,6 +41,10 @@ export interface EvaluateGoalInput {
   signal?: AbortSignal
   /** Hard cap on judge response tokens. Default 200 — judge replies are tiny. */
   maxTokens?: number
+  /** Sampling temperature. Default 0 — judge wants determinism. */
+  temperature?: number
+  /** System prompt override. Default `JUDGE_SYSTEM_PROMPT`. */
+  system?: string
 }
 
 /**
@@ -58,7 +62,7 @@ interface ParsedJudgePayload {
  * failure mode lands in a `JudgeResult` discriminant the caller can route.
  */
 export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResult> {
-  const { goal, lastResponse, client, signal, maxTokens } = input
+  const { goal, lastResponse, client, signal, maxTokens, temperature, system } = input
 
   if (signal?.aborted) {
     return { kind: "aborted" }
@@ -69,12 +73,12 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
   let raw: string
   try {
     raw = await client.complete(userPrompt, {
-      system: JUDGE_SYSTEM_PROMPT,
-      maxTokens: maxTokens ?? 200,
+      system: system ?? JUDGE_SYSTEM_PROMPT,
+      maxTokens: maxTokens ?? goal.config.judgeMaxTokens ?? 200,
       // Judge wants determinism — paraphrasing the same agent reply
       // shouldn't flip the verdict, otherwise we'd spuriously continue
-      // when the agent's response is borderline.
-      temperature: 0,
+      // when the agent's response is borderline. Per-goal override allowed.
+      temperature: temperature ?? 0,
     })
   } catch (err) {
     if (signal?.aborted) {

@@ -3,6 +3,12 @@ import type { Goal, GoalConfig } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { appendGoalEvent, createGoal, getGoal, listGoalEvents } from "@/lib/db/goals"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+
+const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("./completion-linkage", () => ({
+  onGoalTerminal: (...a: unknown[]) => onGoalTerminalMock(...a),
+}))
+
 import { handleTurnComplete } from "./turn-driver"
 
 const SAMPLE_CONFIG: GoalConfig = {
@@ -44,6 +50,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  onGoalTerminalMock.mockClear()
 })
 
 describe("handleTurnComplete — basic outcomes", () => {
@@ -300,6 +307,40 @@ describe("handleTurnComplete — judge parse failures (fail-OPEN)", () => {
     })
     expect(out.kind).toBe("continue")
     expect((await getGoal("g1"))?.judgeFailureCount).toBe(1)
+  })
+})
+
+describe("handleTurnComplete — completion linkage (ADR-0019 Phase 2)", () => {
+  it("fires onGoalTerminal on a terminal exit (turn_limited)", async () => {
+    await createGoal(
+      buildGoal({ id: "g1", turnsUsed: 19, config: { ...SAMPLE_CONFIG, maxTurns: 20 } })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    expect(onGoalTerminalMock).toHaveBeenCalledTimes(1)
+    expect(onGoalTerminalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "g1", status: "turn_limited" })
+    )
+  })
+
+  it("does NOT fire onGoalTerminal when judge failures land as paused (non-terminal)", async () => {
+    await createGoal(buildGoal({ id: "g2", config: { ...SAMPLE_CONFIG, maxJudgeFailures: 1 } }))
+    const out = await handleTurnComplete({
+      goalId: "g2",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => "not json"),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind === "exit") expect(out.resultingStatus).toBe("paused")
+    expect(onGoalTerminalMock).not.toHaveBeenCalled()
   })
 })
 

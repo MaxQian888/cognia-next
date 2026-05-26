@@ -140,6 +140,27 @@ Reply ONLY with a single JSON object on one line, no prose, no markdown:
 {"done": <true|false>, "reason": "<one-sentence rationale>"}`
 
 /**
+ * The strict single-line-JSON directive every judge prompt must end with so
+ * `evaluateGoal` can parse the verdict. Appended to a user-supplied override
+ * that omits it, so a custom judge persona still returns parseable output.
+ */
+const JUDGE_JSON_DIRECTIVE = `Reply ONLY with a single JSON object on one line, no prose, no markdown:
+{"done": <true|false>, "reason": "<one-sentence rationale>"}`
+
+/**
+ * Resolve the judge system prompt for a goal: the per-goal
+ * `config.judgePromptOverride` when set (ADR-0019 Phase 2), otherwise the
+ * built-in `JUDGE_SYSTEM_PROMPT`. If an override is provided but doesn't
+ * already demand the single-line JSON shape (heuristic: no `"done"` token),
+ * the JSON directive is appended so the fail-OPEN parser stays well-defined.
+ */
+export function resolveJudgeSystemPrompt(goal: Goal): string {
+  const override = goal.config.judgePromptOverride?.trim()
+  if (!override) return JUDGE_SYSTEM_PROMPT
+  return override.includes('"done"') ? override : `${override}\n\n${JUDGE_JSON_DIRECTIVE}`
+}
+
+/**
  * User message for the judge call. The format keeps the goal and the
  * latest agent response visually separated so the small model doesn't
  * confuse the two.

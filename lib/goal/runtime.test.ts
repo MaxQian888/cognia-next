@@ -3,6 +3,11 @@ import type { AppSettings } from "@/lib/claude/types"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { listGoalEvents } from "@/lib/db/goals"
+const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("./completion-linkage", () => ({
+  onGoalTerminal: (...a: unknown[]) => onGoalTerminalMock(...a),
+}))
+
 import {
   DEFAULT_GOAL_CONFIG,
   __resetGoalRuntimeForTesting,
@@ -17,6 +22,7 @@ beforeEach(async () => {
   await whenSeeded()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
+  onGoalTerminalMock.mockClear()
 })
 
 describe("resolveGoalConfig", () => {
@@ -43,6 +49,35 @@ describe("resolveGoalConfig", () => {
   it("preserves inlineStopCondition from overrides", () => {
     const out = resolveGoalConfig(null, { inlineStopCondition: "or after 2h" })
     expect(out.inlineStopCondition).toBe("or after 2h")
+  })
+
+  it("merges judge + pacing fields from settings (ADR-0019 Phase 2)", () => {
+    const settings = {
+      goals: {
+        judgeModel: "claude-haiku-4-5",
+        judgeProvider: "anthropic",
+        judgeTemperature: 0.2,
+        judgeMaxTokens: 120,
+        manualContinue: true,
+        continuationIntervalMs: 5_000,
+        quietHours: { from: "22:00", to: "07:00", tz: "UTC" },
+      },
+    } as unknown as AppSettings
+    const out = resolveGoalConfig(settings)
+    expect(out.judgeModel).toBe("claude-haiku-4-5")
+    expect(out.judgeProvider).toBe("anthropic")
+    expect(out.judgeTemperature).toBe(0.2)
+    expect(out.judgeMaxTokens).toBe(120)
+    expect(out.manualContinue).toBe(true)
+    expect(out.continuationIntervalMs).toBe(5_000)
+    expect(out.quietHours).toEqual({ from: "22:00", to: "07:00", tz: "UTC" })
+  })
+
+  it("per-goal overrides win over settings for judge/pacing fields", () => {
+    const settings = { goals: { judgeModel: "haiku" } } as unknown as AppSettings
+    const out = resolveGoalConfig(settings, { judgeModel: "opus", manualContinue: true })
+    expect(out.judgeModel).toBe("opus")
+    expect(out.manualContinue).toBe(true)
   })
 })
 
@@ -243,6 +278,10 @@ describe("GoalRuntime — pause/resume/stop transitions", () => {
     expect(stopped?.status).toBe("stopped")
     expect(stopped?.endedAt).toBeGreaterThan(0)
     expect(ac.signal.aborted).toBe(true)
+    // Completion linkage (ADR-0019 Phase 2) fires on the terminal transition.
+    expect(onGoalTerminalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: g.id, status: "stopped" })
+    )
   })
 
   it("stopGoal is a no-op for terminal goals", async () => {
@@ -264,6 +303,9 @@ describe("GoalRuntime — pause/resume/stop transitions", () => {
     if (exitEvent?.payload.kind === "exit_triggered") {
       expect(exitEvent.payload.exit).toBe("preempted")
     }
+    expect(onGoalTerminalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: g.id, status: "preempted" })
+    )
   })
 
   it("returns null for missing goal ids on every transition", async () => {

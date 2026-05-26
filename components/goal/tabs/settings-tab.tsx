@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ interface Props {
  * historical record only.
  */
 export function GoalSettingsTab({ goal }: Props) {
+  const t = useTranslations("goal")
   const disabled = isTerminalGoalStatus(goal.status)
   // Use React's official "storing information from previous renders" pattern
   // (https://react.dev/reference/react/useState#storing-information-from-previous-renders):
@@ -60,7 +62,7 @@ export function GoalSettingsTab({ goal }: Props) {
 
   return (
     <div className="space-y-3 text-sm" data-testid="goal-settings-form">
-      <Field label="Max turns" hint="Hard cap on continuation turns. 1–100.">
+      <Field label={t("config.maxTurns")} hint={t("config.maxTurnsHint")}>
         <Input
           type="number"
           min={1}
@@ -73,7 +75,7 @@ export function GoalSettingsTab({ goal }: Props) {
           data-testid="goal-config-max-turns"
         />
       </Field>
-      <Field label="Max tokens" hint="Hard cap on cumulative tokens billed against this goal.">
+      <Field label={t("config.maxTokens")} hint={t("config.maxTokensHint")}>
         <Input
           type="number"
           min={1000}
@@ -85,10 +87,7 @@ export function GoalSettingsTab({ goal }: Props) {
           data-testid="goal-config-max-tokens"
         />
       </Field>
-      <Field
-        label="Max judge failures"
-        hint="Consecutive JSON parse failures before auto-pause (fail-OPEN)."
-      >
+      <Field label={t("config.maxJudgeFailures")} hint={t("config.maxJudgeFailuresHint")}>
         <Input
           type="number"
           min={1}
@@ -104,7 +103,7 @@ export function GoalSettingsTab({ goal }: Props) {
           data-testid="goal-config-max-judge-failures"
         />
       </Field>
-      <Field label="Timeout (minutes)" hint="Wall-clock cap from goal creation.">
+      <Field label={t("config.timeout")} hint={t("config.timeoutHint")}>
         <Input
           type="number"
           min={1}
@@ -119,10 +118,7 @@ export function GoalSettingsTab({ goal }: Props) {
           data-testid="goal-config-timeout"
         />
       </Field>
-      <Field
-        label="Inline stop condition"
-        hint="Appended to the system prompt. Example: 'or after producing 3 haikus'."
-      >
+      <Field label={t("config.inlineStop")} hint={t("config.inlineStopHint")}>
         <Input
           type="text"
           value={draft.inlineStopCondition ?? ""}
@@ -137,7 +133,7 @@ export function GoalSettingsTab({ goal }: Props) {
           onClick={() => void handleSave()}
           data-testid="goal-config-save"
         >
-          {saving ? "Saving…" : "Save changes"}
+          {saving ? t("config.saving") : t("config.save")}
         </Button>
       </div>
     </div>

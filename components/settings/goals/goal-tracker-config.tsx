@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getCharacter } from "@/lib/db/characters"
 
@@ -13,6 +14,7 @@ const GOAL_TRACKER_ID = "char_builtin_goal_tracker"
  * this card just links there.
  */
 export function GoalTrackerConfig() {
+  const t = useTranslations("goal")
   // Map "not found" to `null` so we can distinguish loading (useLiveQuery
   // pre-emission → `undefined`) from a genuine missing-row state (→ `null`).
   const character = useLiveQuery(async () => {
@@ -20,7 +22,8 @@ export function GoalTrackerConfig() {
     return row ?? null
   }, [])
 
-  if (character === undefined) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (character === undefined)
+    return <p className="text-sm text-muted-foreground">{t("tracker.loading")}</p>
 
   if (character === null) {
     return (
@@ -28,7 +31,7 @@ export function GoalTrackerConfig() {
         className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
         data-testid="goal-tracker-missing"
       >
-        The Goal Tracker character is missing. Re-open the app to re-seed built-in characters.
+        {t("tracker.missing")}
       </div>
     )
   }
@@ -45,20 +48,17 @@ export function GoalTrackerConfig() {
         </div>
       </div>
       <details className="rounded-md border p-3 text-sm">
-        <summary className="cursor-pointer font-medium">System prompt</summary>
+        <summary className="cursor-pointer font-medium">{t("tracker.systemPrompt")}</summary>
         <pre className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
           {character.systemPrompt}
         </pre>
       </details>
       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-        <span>Permission mode: {character.permissionMode ?? "default"}</span>
+        <span>{t("tracker.permissionMode", { mode: character.permissionMode ?? "default" })}</span>
         <span>•</span>
-        <span>Built-in (cannot be deleted)</span>
+        <span>{t("tracker.builtin")}</span>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Want to customise this agent&apos;s prompt or tools? Open{" "}
-        <strong>Settings → Characters</strong> and duplicate the Goal Tracker.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("tracker.customise")}</p>
     </div>
   )
 }

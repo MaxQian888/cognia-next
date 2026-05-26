@@ -56,7 +56,7 @@ import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
-import type { Goal, GoalEvent } from "@/types/goal"
+import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -181,6 +181,10 @@ export class CogniaDB extends Dexie {
   // is the lifecycle audit trail driving the Activity tab + History view.
   chatGoals!: Table<Goal, string>
   chatGoalEvents!: Table<GoalEvent, string>
+  // v53 — reusable goal templates (ADR-0019 Phase 2). Built-ins seeded on
+  // access; booleans (builtin/isFavorite) are filtered in-memory by the CRUD
+  // layer since IndexedDB doesn't index booleans reliably.
+  goalTemplates!: Table<GoalTemplate, string>
   /**
    * v35 — Visual workflow editor viewport bookmarks. One row per saved view,
    * scoped to a workflow. The `[workflowId+createdAt]` compound index drives
@@ -1464,6 +1468,16 @@ export class CogniaDB extends Dexie {
             if (row.folderId === undefined) row.folderId = "root"
           })
       })
+
+    // v53 — Goal template library (ADR-0019 Phase 2). Additive table only;
+    // no data migration (all new GoalConfig/GoalDefaults fields are optional
+    // and round-trip on existing chatGoals rows). Built-in templates are
+    // seeded on access (see `lib/goal/seed-templates.ts`). `sortOrder` drives
+    // the picker order; `updatedAt`/`createdAt` for data views. Booleans are
+    // filtered in-memory (the v12 promptPresets precedent).
+    this.version(53).stores({
+      goalTemplates: "&id, builtin, isFavorite, sortOrder, updatedAt, createdAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

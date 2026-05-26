@@ -60,7 +60,22 @@ export function isTerminalGoalStatus(status: GoalStatus): boolean {
   )
 }
 
-/** Per-goal knobs — defaults come from `AppSettings.goals` via `lib/goal/runtime.ts:resolveDefaults`. */
+/**
+ * Quiet-hours window during which the goal loop defers its next
+ * continuation. Identical shape to `ConversationOverrideRow.quietHours` so
+ * `lib/connectors/outbound-runner.ts:isInQuietHours` / `msUntilQuietEnd`
+ * consume it unchanged.
+ */
+export interface GoalQuietHours {
+  /** Window start, "HH:mm" 24-hour. */
+  from: string
+  /** Window end, "HH:mm" 24-hour. Crosses midnight when `to < from`. */
+  to: string
+  /** IANA time zone id, e.g. "Asia/Shanghai". */
+  tz: string
+}
+
+/** Per-goal knobs — defaults come from `AppSettings.goals` via `lib/goal/runtime.ts:resolveGoalConfig`. */
 export interface GoalConfig {
   /** Hard cap on completed turns. Default 20 (Hermes default). Range 1..100. */
   maxTurns: number
@@ -79,6 +94,32 @@ export interface GoalConfig {
    * judgment of "done" feels unreliable for the task.
    */
   inlineStopCondition?: string
+
+  // ── Judge customization (ADR-0019 Phase 2) ──────────────────────────────
+  /**
+   * Judge model id (e.g. "claude-haiku-4-5"). Undefined → the chat hook
+   * builds the judge client from the session's chat model.
+   */
+  judgeModel?: string
+  /** Provider id paired with `judgeModel`. Undefined → session/app provider. */
+  judgeProvider?: string
+  /** Full replacement for `JUDGE_SYSTEM_PROMPT`. Empty/undefined → built-in. */
+  judgePromptOverride?: string
+  /** Judge sampling temperature. Undefined → 0 (judge wants determinism). */
+  judgeTemperature?: number
+  /** Hard cap on judge response tokens. Undefined → 200. */
+  judgeMaxTokens?: number
+
+  // ── Pacing / manual control (ADR-0019 Phase 2) ──────────────────────────
+  /**
+   * When true, the loop HOLDS the continuation — the user clicks "Continue"
+   * on the status pill to advance one turn. See `gateContinuation`.
+   */
+  manualContinue?: boolean
+  /** Minimum wall-clock ms between auto-continuations. Undefined → 0 (none). */
+  continuationIntervalMs?: number
+  /** Defer the next continuation while inside this window. */
+  quietHours?: GoalQuietHours
 }
 
 export interface Goal {
@@ -249,8 +290,68 @@ export interface GoalDefaults {
   /**
    * When true, the composer pill is shown but the auto-continuation message
    * is NOT dispatched — the user must hit a "Continue" button per turn.
-   * Phase 1 ships this off by default; reserved for users who want a manual
-   * loop without losing the persistent objective.
+   * Reserved for users who want a manual loop without losing the persistent
+   * objective. Wired in ADR-0019 Phase 2 via `gateContinuation`.
    */
   manualContinue?: boolean
+
+  // ── Mirrors of the new per-goal knobs (defaults for fresh goals) ─────────
+  /** Default judge model id for new goals. */
+  judgeModel?: string
+  /** Default judge provider id for new goals. */
+  judgeProvider?: string
+  /** Default judge system-prompt override for new goals. */
+  judgePromptOverride?: string
+  /** Default judge sampling temperature for new goals. */
+  judgeTemperature?: number
+  /** Default judge response-token cap for new goals. */
+  judgeMaxTokens?: number
+  /** Default min ms between auto-continuations for new goals. */
+  continuationIntervalMs?: number
+  /** Default quiet-hours window for new goals. */
+  quietHours?: GoalQuietHours
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Continuation gate (ADR-0019 Phase 2) — pacing decision for the chat hook.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Decision returned by `lib/goal/pacing.ts:gateContinuation` after the turn
+ * driver yields `{ kind: "continue" }`. The chat hook honors it:
+ *   • `send`  → dispatch the continuation immediately.
+ *   • `hold`  → wait for the user to click "Continue" (manualContinue).
+ *   • `defer` → re-check at `untilMs` (quiet-hours window / interval gap).
+ */
+export type ContinuationGate =
+  | { kind: "send" }
+  | { kind: "hold"; reason: "manual" }
+  | { kind: "defer"; untilMs: number; reason: "quiet_hours" | "interval" }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goal templates (ADR-0019 Phase 2) — preset objectives backed by Dexie v53.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A reusable preset objective ("Review this PR", "Summarise my week"). Stored
+ * in the `goalTemplates` Dexie table (v53). Built-ins are seeded on access
+ * and clone-on-edit; user templates are fully mutable.
+ */
+export interface GoalTemplate {
+  /** Stable id. Built-ins use a `gtpl_builtin_*` prefix; user rows `gtpl_<uuid>`. */
+  id: string
+  /** Short title shown in the picker. */
+  title: string
+  /** Raw objective text (PII redaction happens at `createGoal`, not here). */
+  objectiveText: string
+  /** Optional per-template config overrides applied when creating the goal. */
+  configOverrides?: Partial<GoalConfig>
+  /** True for seeded built-ins (clone-on-edit; cannot be deleted). */
+  builtin: boolean
+  /** User favourite — favourites sort first in the picker. */
+  isFavorite: boolean
+  /** Manual sort order (ascending). */
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
 }

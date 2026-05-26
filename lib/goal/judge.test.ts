@@ -98,6 +98,47 @@ describe("evaluateGoal — happy path", () => {
   })
 })
 
+describe("evaluateGoal — judge customization (ADR-0019 Phase 2)", () => {
+  it("honours an explicit temperature override", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
+    await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      temperature: 0.7,
+    })
+    expect(complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ temperature: 0.7 })
+    )
+  })
+
+  it("honours an explicit system override", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
+    await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+      system: "CUSTOM JUDGE PERSONA",
+    })
+    const [, options] = complete.mock.calls[0]!
+    expect((options as { system: string }).system).toBe("CUSTOM JUDGE PERSONA")
+  })
+
+  it("falls back to goal.config.judgeMaxTokens when the maxTokens arg is absent", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
+    await evaluateGoal({
+      goal: buildGoal({ config: { ...SAMPLE_CONFIG, judgeMaxTokens: 80 } }),
+      lastResponse: "x",
+      client: mockClient(complete),
+    })
+    expect(complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxTokens: 80 })
+    )
+  })
+})
+
 describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("returns parse_error when the response is not JSON", async () => {
     const complete = jest.fn().mockResolvedValue("not json at all")

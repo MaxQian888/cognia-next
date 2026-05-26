@@ -6,6 +6,7 @@ import {
   renderGoalSystemSection,
   renderJudgeUserPrompt,
   renderObjectiveUpdatedMessage,
+  resolveJudgeSystemPrompt,
 } from "./prompts"
 
 const SAMPLE_CONFIG: GoalConfig = {
@@ -203,5 +204,31 @@ describe("Judge templates", () => {
     const out = renderJudgeUserPrompt(goal, "y")
     expect(out).not.toContain("<objective>")
     expect(out).not.toContain("<untrusted_objective>")
+  })
+})
+
+describe("resolveJudgeSystemPrompt (ADR-0019 Phase 2)", () => {
+  it("returns the built-in prompt when no override is set", () => {
+    expect(resolveJudgeSystemPrompt(buildGoal())).toBe(JUDGE_SYSTEM_PROMPT)
+  })
+
+  it("returns the built-in prompt when the override is blank", () => {
+    const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: "   " } })
+    expect(resolveJudgeSystemPrompt(goal)).toBe(JUDGE_SYSTEM_PROMPT)
+  })
+
+  it("uses a custom override that already demands JSON verbatim", () => {
+    const custom = 'Be terse. Reply {"done": true|false, "reason": "..."}'
+    const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: custom } })
+    expect(resolveJudgeSystemPrompt(goal)).toBe(custom)
+  })
+
+  it("appends the JSON directive when the override omits it", () => {
+    const custom = "Judge strictly and concisely."
+    const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: custom } })
+    const out = resolveJudgeSystemPrompt(goal)
+    expect(out).toContain(custom)
+    expect(out).toMatch(/single JSON object/)
+    expect(out).toMatch(/"done": <true\|false>/)
   })
 })

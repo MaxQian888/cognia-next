@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listGoalEvents } from "@/lib/db/goals"
 import type { Goal, GoalEvent } from "@/types/goal"
@@ -8,6 +9,9 @@ import { cn } from "@/lib/utils"
 interface Props {
   goal: Goal
 }
+
+/** Translator type for the goal namespace (next-intl `useTranslations` return). */
+type GoalT = ReturnType<typeof useTranslations>
 
 const KIND_ICON: Record<GoalEvent["kind"], string> = {
   goal_created: "🎯",
@@ -24,16 +28,17 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
 }
 
 export function GoalActivityTab({ goal }: Props) {
+  const t = useTranslations("goal")
   const events = useLiveQuery(() => listGoalEvents(goal.id, 200), [goal.id])
 
   if (!events) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>
+    return <p className="text-sm text-muted-foreground">{t("activity.loading")}</p>
   }
 
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground" data-testid="goal-activity-empty">
-        No activity yet.
+        {t("activity.empty")}
       </p>
     )
   }
@@ -54,7 +59,9 @@ export function GoalActivityTab({ goal }: Props) {
               <span className="font-mono">{ev.kind}</span>
               <span className="text-muted-foreground">{new Date(ev.ts).toLocaleTimeString()}</span>
             </div>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">{summarisePayload(ev)}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {summarisePayload(ev, t)}
+            </p>
           </div>
         </li>
       ))}
@@ -62,30 +69,33 @@ export function GoalActivityTab({ goal }: Props) {
   )
 }
 
-function summarisePayload(ev: GoalEvent): string {
+function summarisePayload(ev: GoalEvent, t: GoalT): string {
   const p = ev.payload
   switch (p.kind) {
     case "goal_created":
-      return `Created with ${p.config.maxTurns}-turn / ${p.config.maxTokens.toLocaleString()}-token budget`
+      return t("activity.goal_created", {
+        turns: p.config.maxTurns,
+        tokens: p.config.maxTokens.toLocaleString(),
+      })
     case "objective_updated":
-      return "Objective replaced"
+      return t("activity.objective_updated")
     case "turn_started":
-      return `Turn ${p.turnNumber} started`
+      return t("activity.turn_started", { n: p.turnNumber })
     case "turn_completed":
-      return `Turn ${p.turnNumber} completed (${p.tokensDelta} tok)`
+      return t("activity.turn_completed", { n: p.turnNumber, tokens: p.tokensDelta })
     case "judge_evaluated":
-      return `done=${p.done} — ${p.reason}`
+      return t("activity.judge_evaluated", { done: String(p.done), reason: p.reason })
     case "judge_parse_failed":
-      return `Parse failure #${p.failureCount}`
+      return t("activity.judge_parse_failed", { n: p.failureCount })
     case "exit_triggered":
-      return `${p.exit} — ${p.reason}`
+      return t("activity.exit_triggered", { exit: p.exit, reason: p.reason })
     case "user_paused":
-      return "User paused"
+      return t("activity.user_paused")
     case "user_resumed":
-      return "User resumed"
+      return t("activity.user_resumed")
     case "user_stopped":
-      return "User stopped"
+      return t("activity.user_stopped")
     case "config_updated":
-      return "Config updated"
+      return t("activity.config_updated")
   }
 }

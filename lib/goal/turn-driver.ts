@@ -32,10 +32,12 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { ExitReason, Goal, GoalStatus } from "@/types/goal"
+import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
 import { evaluateExitConditions } from "./exit-conditions"
 import { evaluateGoal } from "./judge"
-import { renderContinuationMessage } from "./prompts"
+import { onGoalTerminal } from "./completion-linkage"
+import { renderContinuationMessage, resolveJudgeSystemPrompt } from "./prompts"
 
 export interface TurnCompleteInput {
   goalId: string
@@ -126,12 +128,16 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
 
   if (signal?.aborted) return { kind: "aborted" }
 
-  // Step 3 — judge LLM call.
+  // Step 3 — judge LLM call. Per-goal judge customization (ADR-0019 Phase 2)
+  // threads through here; absent fields fall back to the judge's built-ins.
   const judgement = await evaluateGoal({
     goal,
     lastResponse,
     client: judgeClient,
     signal,
+    temperature: goal.config.judgeTemperature,
+    maxTokens: goal.config.judgeMaxTokens,
+    system: resolveJudgeSystemPrompt(goal),
   })
 
   if (judgement.kind === "aborted") {
@@ -219,6 +225,12 @@ async function commitExit(
       reason: decision.reason,
     },
   })
+  // Completion linkage (ADR-0019 Phase 2): notify + fire goal-completed
+  // workflows on a terminal exit. judge_failed_too_many lands as `paused`
+  // (non-terminal) and is deliberately skipped. Best-effort, never throws.
+  if (isTerminalGoalStatus(decision.resultingStatus)) {
+    void onGoalTerminal({ ...fresh, status: decision.resultingStatus })
+  }
   return {
     kind: "exit",
     exit: decision.exit,
