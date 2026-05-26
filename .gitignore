@@ -71,11 +71,16 @@ coverage_output.txt
 .VSCodeCounter
 
 # Rust build artifacts. The workspace target/ lives at repo root (members:
-# src-tauri, crates/cognia-cli). signaling-server stays standalone with its
-# own target/, and each WASM plugin under crates/* or plugins/* builds via
-# `cargo component` into its own target/ as well.
+# src-tauri, crates/cognia-cli). signaling-server is its own Cargo workspace
+# (root axum pkg + `core/` member → shared `signaling-server/target/`); the
+# Cloudflare Worker in `signaling-server/worker/` is EXCLUDED from that
+# workspace (it targets wasm32) so it builds into its own target/, and
+# `worker-build` emits the JS shim into `worker/build/`. Each WASM plugin under
+# crates/* or plugins/* builds via `cargo component` into its own target/ too.
 /target/
 /signaling-server/target/
+/signaling-server/worker/target/
+/signaling-server/worker/build/
 /crates/*/target/
 /plugins/*/target/
 

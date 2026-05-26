@@ -6,6 +6,29 @@
 import "@testing-library/jest-dom"
 import React from "react"
 
+// jsdom omits `window.matchMedia` — provide a default (non-matching) stub so
+// viewport hooks (`hooks/ui/use-mobile.ts:useIsMobile`, the shadcn sidebar,
+// the goal detail sheet's responsive Sheet/Drawer switch) render their
+// desktop branch in tests instead of throwing. Tests that need the mobile
+// branch override `useIsMobile` directly.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string) =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  })
+}
+
 // jsdom omits TextEncoder/TextDecoder — node:util has them. Required by
 // crypto helpers and fake-indexeddb's structured clone.
 if (typeof globalThis.TextEncoder === "undefined") {
