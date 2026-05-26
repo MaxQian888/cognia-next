@@ -18,6 +18,8 @@ function makeHandle(overrides: Partial<TerminalInstanceHandle> = {}): TerminalIn
     findPrevious: jest.fn(() => true),
     clearSearch: jest.fn(),
     clearScreen: jest.fn(),
+    jumpToPrevCommand: jest.fn(),
+    jumpToNextCommand: jest.fn(),
     copySelection: jest.fn(async () => undefined),
     pasteFromClipboard: jest.fn(async () => undefined),
     ...overrides,
