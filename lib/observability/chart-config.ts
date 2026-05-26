@@ -1,16 +1,23 @@
 import type { CSSProperties } from "react"
 
+// The Recharts tooltip renders as an HTML <div>, so CSS custom properties
+// resolve directly — but the theme tokens are oklch, and wrapping them as
+// `hsl(var(--popover))` yields `hsl(oklch(…))`, which is invalid CSS and gets
+// dropped (the tooltip then falls back to an unthemed white box). Reference
+// the vars directly instead. (SVG presentation attributes like grid/axis
+// strokes still can't resolve `var()` — those resolve via `useThemeColors`.)
 export const TOOLTIP_STYLE = {
   contentStyle: {
-    backgroundColor: "hsl(var(--popover))",
-    border: "1px solid hsl(var(--border))",
+    backgroundColor: "var(--popover)",
+    border: "1px solid var(--border)",
     borderRadius: "6px",
+    color: "var(--popover-foreground)",
   } as CSSProperties,
   labelStyle: {
     fontWeight: "bold",
   } as CSSProperties,
   itemStyle: {
-    color: "hsl(var(--foreground))",
+    color: "var(--popover-foreground)",
   } as CSSProperties,
 }
 

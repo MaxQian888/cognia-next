@@ -35,16 +35,13 @@ import {
   AlertTriangle,
   Clock,
   Layers,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   Gauge,
   Hash,
   Grid3X3,
   AlertCircle,
-  type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { StatCard } from "@/components/observability/stat-card"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
 import { LEVEL_THEME } from "@/lib/logging/level-theme"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
@@ -143,47 +140,6 @@ function computeErrorTrendData(volumeData: ReturnType<typeof computeVolumeBucket
           : 0,
     }
   })
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  color,
-  trend,
-}: {
-  icon: LucideIcon
-  label: string
-  value: string | number
-  sub?: string
-  color?: string
-  trend?: "up" | "down" | "stable"
-}) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div
-          className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-            color || "bg-primary/10 text-primary"
-          )}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground truncate">{label}</p>
-          <div className="flex items-center gap-1.5">
-            <p className="text-lg font-semibold leading-tight">{value}</p>
-            {trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-destructive" />}
-            {trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-success" />}
-            {trend === "stable" && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
-          </div>
-          {sub && <p className="text-xs text-muted-foreground truncate">{sub}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  )
 }
 
 export function LogStatsDashboard({

@@ -16,6 +16,14 @@ describe("chart-config constants", () => {
     expect(TOOLTIP_STYLE.itemStyle).toBeDefined()
   })
 
+  it("TOOLTIP_STYLE references theme vars directly (no invalid hsl(oklch) wrapper)", () => {
+    // The theme tokens are oklch; `hsl(var(--popover))` → `hsl(oklch(…))` is
+    // invalid and gets dropped. The HTML tooltip div resolves bare `var()`.
+    expect(TOOLTIP_STYLE.contentStyle.backgroundColor).toBe("var(--popover)")
+    expect(TOOLTIP_STYLE.contentStyle.border).toContain("var(--border)")
+    expect(JSON.stringify(TOOLTIP_STYLE)).not.toContain("hsl(var(")
+  })
+
   it("CHART_MARGINS has all four named presets", () => {
     expect(CHART_MARGINS.default.top).toBeDefined()
     expect(CHART_MARGINS.withYAxis.left).toBeDefined()
