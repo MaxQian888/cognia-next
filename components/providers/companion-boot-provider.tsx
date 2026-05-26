@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
 import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
+import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
@@ -102,6 +103,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
     const cleanup: Array<() => void | Promise<void>> = []
 
     void (async () => {
+      // FIRST: create the window.Capacitor.Plugins.* proxies. Capacitor Android
+      // injects only the transport bridge — without this every lib/capacitor/*
+      // wrapper (splash, haptics, camera, openSettings, …) silently no-ops.
+      // Must run before any other native call below. Best-effort + self-logs.
+      await registerNativePlugins()
+
       // Hide native splash now that React has painted. Best-effort — if the
       // plugin is missing this is a no-op.
       void hideSplash(300)

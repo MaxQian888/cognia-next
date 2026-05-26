@@ -8,10 +8,11 @@ import type { MetadataRoute } from "next"
  * browser can offer "Install cognia" on web and the desktop Tauri shell
  * gets a manifest for completeness.
  *
- * Icons live under `public/icons/`. Currently shipped as SVG placeholders
- * (see public/icons/README.md) — modern browsers handle SVG manifests
- * since Chrome 93 + Safari 16.4. Production PNG variants (192/512/512-
- * maskable/180-apple) are a follow-up.
+ * Icons live under `public/icons/` (192/512 standard + 512 maskable),
+ * rasterised from `mobile/resources/splash.png` — the same source that
+ * feeds the desktop (`src-tauri/icons/`) and Android (`mipmap-*`) icons.
+ * The Apple Touch Icon is served via the Next.js `app/apple-icon.png`
+ * file convention and the favicon via `app/favicon.ico`.
  */
 // Required by Next.js 16 when `output: "export"` is set in next.config.ts —
 // the manifest returns a fully static object so we opt in explicitly.
@@ -28,14 +29,19 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#0a0a0a",
     icons: [
       {
-        src: "/icons/icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/icons/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
       },
       {
-        src: "/icons/icon-maskable.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/icons/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+      },
+      {
+        src: "/icons/icon-512-maskable.png",
+        sizes: "512x512",
+        type: "image/png",
         purpose: "maskable",
       },
     ],

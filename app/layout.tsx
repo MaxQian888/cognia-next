@@ -26,6 +26,7 @@ import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
+import { AppSplash } from "@/components/mobile/splash/app-splash"
 import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
 import { ExitConfirmationDialog } from "@/components/desktop/exit-confirmation-dialog"
 import { CrashReportDialog } from "@/components/desktop/crash-report-dialog"
@@ -185,6 +186,10 @@ export default async function RootLayout({
                      * unless `localStorage.cogniaPerfHud === "1"`. */}
                     <PerfHud />
                     <Toaster />
+                    {/* Branded boot splash on the Capacitor shell — takes over
+                     * from the static Android 12 system splash with an animated
+                     * circular logo, then fades out. Renders null off mobile. */}
+                    <AppSplash />
                   </LoggerProvider>
                 </TooltipProvider>
               </TauriProvider>

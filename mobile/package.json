@@ -33,6 +33,7 @@
     "@capacitor/status-bar": "^8.0.2",
     "@capacitor/toast": "^8.0.1",
     "@capgo/capacitor-native-biometric": "^8.4.5",
+    "capacitor-native-settings": "^8.1.0",
     "capacitor-secure-storage-plugin": "^0.13.0",
     "capacitor-voice-recorder": "^7.0.6",
     "capacitor-zeroconf": "^4.0.0"

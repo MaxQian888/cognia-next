@@ -12009,6 +12009,9 @@
     }
   },
   "mobile": {
+    "splash": {
+      "label": "正在启动 cognia"
+    },
     "tabs": {
       "chat": "聊天",
       "workflows": "工作流",

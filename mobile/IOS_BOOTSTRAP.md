@@ -85,8 +85,10 @@ them into project-properties view):
 
 ## Required LaunchScreen dark variant
 
-The Android side ships a dark splash via `values-night/colors.xml` +
-`drawable/splash_themed.xml` (see the Phase 3 mobile theme parity work).
+The Android side ships a fixed deep-navy splash via the Android 12+
+SplashScreen API: `AppTheme.NoActionBarLaunch` sets
+`windowSplashScreenBackground` (`@color/splash_background`, identical in
+light + night) and `windowSplashScreenAnimatedIcon` (`@drawable/splash_icon`).
 iOS requires a sibling change inside the storyboard so the launch surface
 honors `userInterfaceStyle = .dark` instead of flashing white.
 

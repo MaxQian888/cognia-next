@@ -36,12 +36,20 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: process.env.COGNIA_MOBILE_DEV ? 1500 : 600,
-      // DEV: auto-hide so a bug in the boot path doesn't leave the user
-      // staring at the Capacitor logo. Production keeps the explicit
-      // hideSplash() call from CompanionBootProvider as the source of truth.
-      launchAutoHide: process.env.COGNIA_MOBILE_DEV ? true : false,
-      backgroundColor: "#ffffff",
+      // Always auto-hide as a failsafe. If the boot path ever fails to call
+      // hideSplash() (e.g. the native SplashScreen plugin didn't register, the
+      // exact bug that froze the app on the launch icon), the splash MUST still
+      // dismiss rather than strand the user forever. CompanionBootProvider
+      // calls hideSplash() right after React's first paint, which dismisses it
+      // well before this ceiling — the timeout only fires if that call never
+      // lands. The web <AppSplash> overlay shares the #01061e backdrop, so the
+      // native→web handoff shows no flash of unstyled content either way.
+      launchShowDuration: process.env.COGNIA_MOBILE_DEV ? 1500 : 3000,
+      launchAutoHide: true,
+      // Deep-navy to match the splash illustration + @color/splash_background.
+      // Only the legacy (pre-Android-12 / fallback) ImageView path reads this;
+      // Android 12+ uses the theme's windowSplashScreenBackground.
+      backgroundColor: "#01061e",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
       showSpinner: false,

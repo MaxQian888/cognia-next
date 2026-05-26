@@ -72,6 +72,14 @@ const deeplinkSubscribeMock = jest.fn(async (_handler: unknown) => deeplinkUnsub
 jest.mock("@/lib/capacitor/deeplink", () => ({
   subscribe: (handler: unknown) => deeplinkSubscribeMock(handler),
 }))
+const registerNativePluginsMock = jest.fn(async () => ({
+  kind: "registered" as const,
+  registered: [] as string[],
+  available: [] as string[],
+}))
+jest.mock("@/lib/capacitor/register-plugins", () => ({
+  registerNativePlugins: () => registerNativePluginsMock(),
+}))
 jest.mock("@/lib/capacitor/splash-screen", () => ({
   hide: jest.fn(async () => ({ kind: "ok" })),
 }))
@@ -104,6 +112,7 @@ beforeEach(() => {
   logWarn.mockReset()
   deeplinkUnsubMock.mockReset()
   deeplinkSubscribeMock.mockClear()
+  registerNativePluginsMock.mockClear()
   delete (window as { Capacitor?: unknown }).Capacitor
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 })
@@ -126,6 +135,7 @@ describe("<CompanionBootProvider /> — platform gates", () => {
     expect(hydrateMock).not.toHaveBeenCalled()
     expect(replaceMock).not.toHaveBeenCalled()
     expect(runSyncDownMock).not.toHaveBeenCalled()
+    expect(registerNativePluginsMock).not.toHaveBeenCalled()
   })
 
   it("does nothing on Tauri", async () => {
@@ -153,6 +163,8 @@ describe("<CompanionBootProvider /> — unpaired", () => {
     )
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/pair"))
+    // Native plugin proxies are registered on every mobile boot, even unpaired.
+    expect(registerNativePluginsMock).toHaveBeenCalled()
     // Sync + push should NOT run when there's no pairing.
     expect(runSyncDownMock).not.toHaveBeenCalled()
     expect(registerPushMock).not.toHaveBeenCalled()

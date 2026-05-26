@@ -4,25 +4,29 @@ Wave 4 / ADR-0026 — referenced by `app/manifest.ts` and the Web App Manifest.
 
 ## Current state
 
-`icon.svg` and `icon-maskable.svg` are placeholder vector marks (sized
-512×512, monochrome) that satisfy the manifest schema and let the Serwist
-SW build without errors. They render correctly on modern browsers (Chrome
-93+, Safari 16.4+) which accept SVG icons in the PWA manifest.
+Production PNG icons rasterised from `mobile/resources/splash.png` — the
+single source shared with the desktop (`src-tauri/icons/`) and Android
+(`mobile/android/.../mipmap-*`) icon sets:
 
-## Production icons (TODO)
+- `icon-192.png` — 192×192, standard purpose
+- `icon-512.png` — 512×512, standard purpose
+- `icon-512-maskable.png` — 512×512, maskable (the splash has an opaque
+  near-black border, so it satisfies the maskable safe-zone requirement)
 
-For Android adaptive icons + iOS Touch Icon optimization, replace with:
+The Apple Touch Icon (`app/apple-icon.png`, 180×180) and favicon
+(`app/favicon.ico`) are served via the Next.js file conventions, so no
+`<link>` wiring is needed in `app/layout.tsx`.
 
-- `icon-192.png` — 192×192, transparent corners OK
-- `icon-512.png` — 512×512, transparent corners OK
-- `icon-512-maskable.png` — 512×512, solid background (safe zone is the inner ~80%)
-- `apple-touch-icon.png` — 180×180, opaque background
+## Regenerating
 
-Update `app/manifest.ts` to reference the PNG variants and add the Apple
-Touch Icon as `<link rel="apple-touch-icon">` via the Metadata API in
-`app/layout.tsx`.
+All icon sets are produced from the one source by the Tauri CLI (it bundles
+its own image processing — no `sharp`/`resvg` needed):
 
-## Source files
+```bash
+# Desktop set + Android mipmaps (under src-tauri/icons/android, then copied
+# into the Capacitor project) + iOS appiconset:
+pnpm tauri icon mobile/resources/splash.png
 
-Vector sources live in this directory; SVG → PNG export is done via
-`scripts/export-icons.mjs` (TODO) using `sharp` or `resvg`.
+# Web PNG sizes for this directory + the Apple Touch Icon:
+pnpm tauri icon mobile/resources/splash.png -p 192 -p 512 -p 180
+```

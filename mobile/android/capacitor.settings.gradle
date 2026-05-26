@@ -62,6 +62,9 @@ project(':capacitor-toast').projectDir = new File('../../node_modules/.pnpm/@cap
 include ':capgo-capacitor-native-biometric'
 project(':capgo-capacitor-native-biometric').projectDir = new File('../../node_modules/.pnpm/@capgo+capacitor-native-bio_dd07739c2f92d2a1a07a89513a1751e6/node_modules/@capgo/capacitor-native-biometric/android')
 
+include ':capacitor-native-settings'
+project(':capacitor-native-settings').projectDir = new File('../../node_modules/.pnpm/capacitor-native-settings@8.1.0_@capacitor+core@8.3.4/node_modules/capacitor-native-settings/android')
+
 include ':capacitor-secure-storage-plugin'
 project(':capacitor-secure-storage-plugin').projectDir = new File('../../node_modules/.pnpm/capacitor-secure-storage-plugin@0.13.0_@capacitor+core@8.3.4/node_modules/capacitor-secure-storage-plugin/android')
 

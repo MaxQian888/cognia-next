@@ -12009,6 +12009,9 @@
     }
   },
   "mobile": {
+    "splash": {
+      "label": "Starting cognia"
+    },
     "tabs": {
       "chat": "Chat",
       "workflows": "Workflows",

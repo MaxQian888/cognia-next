@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Splash + chrome colors. Night-mode overrides live in values-night/colors.xml. -->
+    <!-- Chrome colors. Night-mode overrides live in values-night/colors.xml. -->
     <color name="colorPrimary">#3b82f6</color>
     <color name="colorPrimaryDark">#1d4ed8</color>
     <color name="colorAccent">#3b82f6</color>
-    <color name="splash_background">#ffffff</color>
+    <!-- Splash backdrop: fixed deep-navy that matches the splash illustration's
+         own background, identical in light + night so the Android 12 system
+         splash never flashes white before the circular icon paints. -->
+    <color name="splash_background">#01061e</color>
 </resources>

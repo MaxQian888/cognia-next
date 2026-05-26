@@ -4,11 +4,14 @@
 import { openAppSettings } from "./app-settings"
 
 describe("openAppSettings", () => {
-  it("returns ok when the plugin opens settings", async () => {
-    const openSettings = jest.fn(async () => undefined)
-    const out = await openAppSettings(async () => ({ openSettings }))
+  it("opens the app's native settings screen via NativeSettings.open", async () => {
+    const open = jest.fn(async () => ({ status: true }))
+    const out = await openAppSettings(async () => ({ open }))
     expect(out).toEqual({ kind: "ok" })
-    expect(openSettings).toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith({
+      optionAndroid: "application_details",
+      optionIOS: "app",
+    })
   })
 
   it("returns unsupported when the loader rejects (web / Tauri)", async () => {
@@ -18,9 +21,9 @@ describe("openAppSettings", () => {
     expect(out).toEqual({ kind: "unsupported" })
   })
 
-  it("returns error when openSettings throws", async () => {
+  it("returns error when open throws", async () => {
     const out = await openAppSettings(async () => ({
-      openSettings: async () => {
+      open: async () => {
         throw new Error("system denied")
       },
     }))

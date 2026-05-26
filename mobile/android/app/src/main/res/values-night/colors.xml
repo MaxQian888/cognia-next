@@ -6,5 +6,7 @@
     <color name="colorPrimary">#60a5fa</color>
     <color name="colorPrimaryDark">#3b82f6</color>
     <color name="colorAccent">#60a5fa</color>
-    <color name="splash_background">#0a0a0a</color>
+    <!-- Same deep-navy as the light theme: the splash backdrop is intentionally
+         theme-independent so it blends seamlessly into the dark illustration. -->
+    <color name="splash_background">#01061e</color>
 </resources>

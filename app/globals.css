@@ -1164,6 +1164,81 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
   animation: pulse-handle 1.2s ease-out infinite;
 }
 
+/* Mobile boot splash — `<AppSplash>` overlays the first paint on the Capacitor
+ * shell, taking over from the static Android 12 system splash. A circular logo
+ * sits inside a slowly-rotating conic-gradient ring with a breathing glow, then
+ * the whole overlay fades out. The spin/glow keyframes collapse to a static
+ * frame under the global reduce-motion guard above; the fade is an opacity
+ * transition (not an animation) so it always completes. */
+.app-splash {
+  transition: opacity 450ms ease;
+}
+
+.app-splash--leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Rotating sweep — a conic gradient masked into a thin rim so only the ring
+ * shows around the logo. Cyan→blue→violet echoes the splash illustration's
+ * glow frame and the app primary. */
+.app-splash__ring {
+  --ring-thickness: 6px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    #38bdf8 70deg,
+    #3b82f6 150deg,
+    #8b5cf6 220deg,
+    transparent 320deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--ring-thickness)),
+    #000 calc(100% - var(--ring-thickness))
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--ring-thickness)),
+    #000 calc(100% - var(--ring-thickness))
+  );
+  animation: app-splash-spin 1.4s linear infinite;
+}
+
+@keyframes app-splash-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Soft halo behind the logo, breathing in and out. */
+.app-splash__glow {
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, #3b82f6 45%, transparent) 0%,
+    transparent 68%
+  );
+  filter: blur(8px);
+  animation: app-splash-glow 2.6s ease-in-out infinite;
+}
+
+@keyframes app-splash-glow {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.06);
+  }
+}
+
+/* Faint inner rim so the circular logo reads as a coin against the backdrop. */
+.app-splash__logo {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
 /* iOS auto-zoom prevention: any text input that's <16px on focus triggers
  * an unwanted zoom-in. Apply to every native form control globally so we
  * don't have to remember per-component. The visual size at the desktop's

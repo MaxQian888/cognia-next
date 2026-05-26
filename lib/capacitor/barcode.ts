@@ -1,5 +1,7 @@
 "use client"
 
+import { makeDefaultLoader } from "./_shared"
+
 /**
  * Barcode/QR scan via `@capacitor-mlkit/barcode-scanning`.
  *
@@ -28,13 +30,16 @@ interface BarcodeScannerShape {
 
 export type BarcodeScannerLoader = () => Promise<BarcodeScannerShape>
 
-const defaultLoader: BarcodeScannerLoader = async () => {
-  const moduleId = "@capacitor-mlkit/barcode-scanning"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    BarcodeScanner: BarcodeScannerShape
-  }
-  return mod.BarcodeScanner
-}
+// Resolve through the shared global-aware loader: on device the plugin proxy
+// lives at `window.Capacitor.Plugins.BarcodeScanner` (populated by
+// `registerNativePlugins()` at boot — see `register-plugins.ts`). The previous
+// bare `import("@capacitor-mlkit/barcode-scanning")` could never resolve on
+// device (mobile-workspace dep, not bundled), so QR-scan pairing silently
+// reported `unsupported`.
+const defaultLoader: BarcodeScannerLoader = makeDefaultLoader<BarcodeScannerShape>(
+  "@capacitor-mlkit/barcode-scanning",
+  "BarcodeScanner"
+)
 
 export interface ScanOptions {
   formats?: string[]

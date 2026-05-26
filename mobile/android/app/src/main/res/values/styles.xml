@@ -16,10 +16,19 @@
     </style>
 
 
-    <!-- Launch theme: paints @color/splash_background underneath the existing
-         splash bitmap so the launch window honors dark mode automatically
-         (the same drawable + a values-night/colors.xml swap). -->
+    <!-- Launch theme — Android 12+ SplashScreen API (androidx.core:core-splashscreen).
+         windowSplashScreenBackground: fixed deep-navy (@color/splash_background,
+           identical in light + night) so the launch surface never flashes white.
+         windowSplashScreenAnimatedIcon: the circular cognia icon, centered &
+           sized by the system.
+         postSplashScreenTheme: the normal app theme applied once the splash exits.
+         Held until CompanionBootProvider calls hideSplash() after React's first
+         paint (capacitor.config launchAutoHide=false). This replaces the old
+         `android:background="@drawable/splash_themed"` layer-list, which the
+         Android 12+ system splash ignores (it produced a white card on black). -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash_themed</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
