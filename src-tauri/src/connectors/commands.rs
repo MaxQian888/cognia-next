@@ -162,6 +162,7 @@ pub async fn connectors_ws_open(
 
 #[tauri::command]
 pub async fn connectors_ws_send(handle_id: String, data: String) -> Result<(), String> {
+    let _perf = crate::perf::guard("connector.ws_send");
     super::ws_client::ws_send(&handle_id, data).await
 }
 

@@ -12,10 +12,15 @@
  * subscription or PerformanceObserver instantiation. In dev (`NODE_ENV !==
  * "production"`) it auto-mounts so engineers see metrics without flipping
  * the flag.
+ *
+ * It never renders inside the Capacitor mobile shell: the floating panel is a
+ * desktop / web affordance only, so the mobile runtime is excluded ahead of
+ * both the dev auto-mount and the production opt-in flag.
  */
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { PERF_NAMESPACE, clearMeasuresByName, clearPerfEntries } from "./perf-marker"
+import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { cn } from "@/lib/utils"
 
 const HUD_LOCALSTORAGE_KEY = "cogniaPerfHud"
@@ -117,6 +122,12 @@ function getNodeEnv(): string {
 }
 
 function isHudEnabledForRuntime(): boolean {
+  // The perf HUD is a desktop / web debugging affordance. Exclude the
+  // Capacitor mobile shell first — before the dev-mode short-circuit and the
+  // production flag — so it never auto-mounts on device and can't be flipped
+  // on there via localStorage either. `detectNativePlatform()` returns "web"
+  // when `window` is undefined (SSR), so this is safe to call unconditionally.
+  if (detectNativePlatform() === "mobile") return false
   if (getNodeEnv() !== "production") return true
   if (typeof window === "undefined") return false
   try {

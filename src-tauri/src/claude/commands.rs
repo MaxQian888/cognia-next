@@ -176,6 +176,7 @@ pub async fn claude_send(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    let _perf = crate::perf::guard("claude.send");
     spawn_sidecar(app, state.inner().clone()).await?;
     let opts_value = match options {
         Some(o) => {

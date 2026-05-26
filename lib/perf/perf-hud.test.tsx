@@ -1,6 +1,18 @@
 import { act, render, screen } from "@testing-library/react"
+import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { PERF_NAMESPACE } from "./perf-marker"
 import { PerfHud, __test__ } from "./perf-hud"
+
+jest.mock("@/lib/capacitor/_shared", () => ({
+  detectNativePlatform: jest.fn(() => "web"),
+}))
+
+const mockDetectNativePlatform = detectNativePlatform as jest.Mock
+
+// Default every test to the web runtime; mobile-gate tests opt in explicitly.
+beforeEach(() => {
+  mockDetectNativePlatform.mockReturnValue("web")
+})
 
 const {
   isHudEnabledForRuntime,
@@ -131,6 +143,19 @@ describe("PerfHud helpers", () => {
       })
     })
 
+    it("returns false on the Capacitor mobile shell even in dev", () => {
+      mockDetectNativePlatform.mockReturnValue("mobile")
+      expect(isHudEnabledForRuntime()).toBe(false)
+    })
+
+    it("returns false on the mobile shell even when the production flag is set", () => {
+      mockDetectNativePlatform.mockReturnValue("mobile")
+      window.localStorage.setItem(HUD_LOCALSTORAGE_KEY, "1")
+      withNodeEnv("production", () => {
+        expect(isHudEnabledForRuntime()).toBe(false)
+      })
+    })
+
     // The `try / catch` around `localStorage.getItem` is defensive — jsdom's
     // Storage prototype doesn't expose its methods to jest.spyOn, so the
     // catch branch is exercised via production smoke testing rather than a
@@ -163,6 +188,12 @@ describe("<PerfHud>", () => {
     render(<PerfHud />)
     expect(screen.getByTestId("perf-hud")).toBeInTheDocument()
     expect(screen.getByTestId("perf-hud-empty")).toBeInTheDocument()
+  })
+
+  it("returns null inside the Capacitor mobile shell", () => {
+    mockDetectNativePlatform.mockReturnValue("mobile")
+    const { container } = render(<PerfHud />)
+    expect(container.querySelector("[data-testid='perf-hud']")).toBeNull()
   })
 
   it("renders ingested entries as aggregated rows", () => {

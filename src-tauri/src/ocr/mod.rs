@@ -147,6 +147,7 @@ pub async fn ocr_extract_native(
     state: tauri::State<'_, NativeOcrRegistry>,
     payload: NativeOcrInvokePayload,
 ) -> Result<NativeOcrResult, String> {
+    let _perf = crate::perf::guard("ocr.extract");
     state.dispatch(&payload).await.map_err(|e| e.to_string())
 }
 

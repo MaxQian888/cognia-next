@@ -593,6 +593,7 @@ pub async fn vector_cloud_query(
     query_vector: Vec<f32>,
     options: SearchOptions,
 ) -> Result<SearchResponse, String> {
+    let _perf = crate::perf::guard("vector.query");
     let backend = resolve_cloud(&registry, provider, &config_id).await?;
     backend
         .query(&collection, query_vector, options)

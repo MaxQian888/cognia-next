@@ -19,6 +19,7 @@ mod keyring_secrets;
 mod logging;
 mod mcp_server;
 mod ocr;
+mod perf;
 mod plugin_api;
 mod plugins;
 mod proxy_config;
@@ -219,6 +220,11 @@ pub fn run() {
         // ADR-0024 — Native OCR registry. Backends are populated in the
         // setup hook after platform detection (Windows MSIX check, etc.).
         .manage(ocr::NativeOcrRegistry::new())
+        // Performance panel — ref-counted process/runtime/span sampler. The
+        // loop is started/stopped on demand from the renderer (panel
+        // mount/unmount), so this `.manage(...)` only registers the control
+        // surface + sample ring; nothing samples while the panel is closed.
+        .manage(perf::PerfState::new())
         // CLI bridge — loopback-only HTTP listener that `cognia-cli` talks
         // to for `install`/`uninstall`/`reload`. Spawned at app boot in the
         // setup hook below; this `.manage(...)` just registers the state
@@ -513,6 +519,10 @@ pub fn run() {
             companion_api::commands::companion_tunnel_start,
             companion_api::commands::companion_tunnel_stop,
             companion_api::commands::companion_tunnel_current,
+            companion_api::commands::companion_tunnel_save_named_config,
+            companion_api::commands::companion_tunnel_get_config,
+            companion_api::commands::companion_tunnel_set_mode,
+            companion_api::commands::companion_tunnel_clear_named,
             // ADR-0021 — WebRTC WAN signaling control surface.
             companion_api::signaling::commands::companion_signaling_sync_devices,
             companion_api::signaling::commands::companion_signaling_configure,
@@ -671,6 +681,16 @@ pub fn run() {
             ocr::ocr_model_status,
             ocr::ocr_download_model,
             ocr::msix::ocr_msix_status,
+            // Performance panel — process/runtime/span sampling + hotspots.
+            perf::commands::perf_snapshot,
+            perf::commands::perf_start_sampling,
+            perf::commands::perf_set_interval,
+            perf::commands::perf_stop_sampling,
+            perf::commands::perf_hotspots,
+            perf::commands::perf_reset_hotspots,
+            perf::commands::perf_system_details,
+            perf::commands::perf_list_traces,
+            perf::commands::perf_open_trace_dir,
         ])
         .setup(|app| {
             // Startup timing anchor (perf/tauri-startup-unblock). `setup()` runs
