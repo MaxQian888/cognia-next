@@ -42,8 +42,8 @@ description: Enable the GitHub Delivery plugin in cognia, configure a GitHub App
      `checkPolicy` / `getWorkOrder` / `upsertWorkOrder`).
    - Registers the Claude sidecar driver for the Issue → PR loop.
    - Registers the `github` connector adapter into the ConnectorBus via `registerPluginAdapters`.
-     </Step>
-     <Step>
+</Step>
+<Step>
 **Confirm Settings → GitHub Delivery is visible.** The sidebar shows a GitHub Delivery entry under the "Extensions" group.
 Click it to see 5 tabs: Repos / Credentials / Policies / Audit / Usage.
 </Step>
@@ -83,7 +83,7 @@ the Repos Tab will show a "desktop only" notice.
   - Pull request, Pull request review, Issues, Issue comment, Check run, Release.
 - Webhook URL: leave blank for now; we will fill it in after cognia provides the real path.
 - Generate a private key and download the PEM file.
-    </Step>
+</Step>
 <Step>
 **Install the App in the target repo or org.** After installation, grab the `installation_id` from the URL
 (e.g. `https://github.com/settings/installations/12345678` → 12345678).
@@ -124,7 +124,7 @@ on web, it remains in an encrypted blob.
 - Repository permissions: Contents (RW), Issues (RW), Pull requests (RW), Metadata (Read),
   Checks (Read).
 - Do not check Organization permissions (principle of least privilege).
-    </Step>
+</Step>
 <Step>
 **Paste the token in cognia.** Settings → GitHub Delivery → Credentials → choose PAT,
 paste the token. On desktop, it is saved to the OS keyring and the `patToken` field in the row is cleared

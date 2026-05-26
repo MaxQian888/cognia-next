@@ -56,9 +56,50 @@ no app secrets, no business knowledge. Deploys as a Docker image; the
 sample `fly.toml` targets Fly.io's free `shared-cpu-1x` tier.
 
 Default hosted endpoint (project-operated):
-`wss://signaling.cognia.app/v1/signaling`. Users with a privacy or
-operational preference may run their own — `AppSettings.signalingUrl`
-overrides the default.
+`wss://signaling.cognia.cn/v1/signaling`. The host is customizable without code
+edits: set `NEXT_PUBLIC_SIGNALING_URL` at build time — one var feeds the TS
+default (`lib/signaling/types.ts`) and the Rust default (`option_env!` in
+`signaling/mod.rs`), so every shell and the desktop peer agree. Users with a
+privacy or operational preference may also override per-install at runtime via
+`AppSettings.signalingUrl`.
+
+### Signaling deployment targets (axum self-host **or** Cloudflare Worker)
+
+The signaling server ships in two interchangeable deployment forms that speak
+the **identical wire protocol**. The shared `signaling-server/core` crate
+(`cognia-signaling-core`: `ClientFrame` / `ServerFrame` / `Envelope` + the
+token bucket) is the single source of truth, consumed by the axum binary, the
+Cloudflare Worker, **and** the desktop peer (`src-tauri/.../signaling`) — so no
+mirror can drift.
+
+- **axum binary** (above): one stateful process; Docker / Fly.io.
+- **Cloudflare Worker + Durable Objects** (`signaling-server/worker/`,
+  workers-rs): the platform-native form. The Worker is a stateless router; each
+  room is a **Durable Object** addressed by `idFromName(rendezvousId)` — exactly
+  what the axum server's in-process `RoomRegistry` was, except the platform
+  shards it. The DO holds the room's peers as **hibernatable** WebSockets
+  (per-connection role / join time / rate-limit bucket ride on each socket's
+  serialized attachment), so it can be evicted from memory between messages at
+  zero idle cost. Durable Objects run on the Workers **Free** plan when
+  SQLite-backed (`new_sqlite_classes`). It claims its hostname (default
+  `signaling.cognia.cn`, set in `wrangler.toml`) via a `custom_domain` route,
+  kept in sync with the app's `NEXT_PUBLIC_SIGNALING_URL`.
+
+Feature parity for the Worker form:
+
+| axum | Cloudflare Worker |
+| --- | --- |
+| per-IP cap (`ip_limits.rs`, 50/IP) | a Rate Limiting rule on the `/v1/signaling` route (platform layer) |
+| Prometheus `/metrics` | Analytics Engine data points (one per event) + `console_log!`; best-effort |
+| app-level Ping/Pong loop | `setWebSocketAutoResponse` (answered without waking the DO) |
+
+**`?rid=` connect parameter.** A Durable Object must be picked at connection
+time, before the first frame — so clients append the room id to the upgrade
+URL: `wss://…/v1/signaling?rid=<rendezvousId>`. The `Subscribe` frame still
+carries `rendezvousId` (the DO validates they match). The axum server ignores
+the query string, so one client build works against either backend — no
+protocol fork. Both the TS client (`lib/signaling/client.ts`) and the desktop
+Rust client (`src-tauri/.../signaling/client.rs`) append it.
 
 ### Pair-flow extension
 
@@ -104,16 +145,20 @@ envelope, or read the SDP/ICE traffic — it only sees opaque base64.
 ### Where things live
 
 ```
-signaling-server/                       (Rust, standalone deployable)
-  Cargo.toml, Dockerfile, fly.toml, README.md
-  src/{proto,room,limits,ws,server,lib,main}.rs
-  tests/room_routing.rs
+signaling-server/                       (Rust, standalone Cargo workspace)
+  Cargo.toml (workspace root = axum pkg), Dockerfile, fly.toml, README.md
+  src/{room,ws,server,ip_limits,metrics,lib,main}.rs   axum binary
+  core/                                  shared wire protocol + token bucket
+    src/{proto,limits,lib}.rs            (also used by worker + desktop peer)
+  worker/                                Cloudflare Worker (workers-rs); excluded
+    src/{lib,room}.rs, wrangler.toml, README.md, tests/integration.mjs
+  tests/{room_routing,frame_limits,http_endpoints}.rs
 
 src-tauri/src/companion_api/
   auth.rs                                + rendezvous tuple in PairResponse
   rpc.rs                                 dispatch made pub(super), allowlist +4 keys
   signaling/                             webrtc-rs peer + envelope sign/verify
-    {mod,client,peer,envelope,dispatch}.rs
+    {mod,client,peer,envelope,dispatch}.rs  (frame/envelope types reused from core)
   commands.rs                            SignalingHub::bind() wired into companion_server_start
 
 src-tauri/src/lib.rs                     SignalingHub managed; commands registered
@@ -149,7 +194,7 @@ for `app_settings_update`:
 | Key             | Default                                     | Purpose                            |
 | --------------- | ------------------------------------------- | ---------------------------------- | ---- | ------------- |
 | `webrtcEnabled` | `true`                                      | Master toggle. Off → tier skipped. |
-| `signalingUrl`  | `"wss://signaling.cognia.app/v1/signaling"` | Override for self-hosters.         |
+| `signalingUrl`  | `NEXT_PUBLIC_SIGNALING_URL` ?? `"wss://signaling.cognia.cn/v1/signaling"` | Build-var default; override for self-hosters. |
 | `iceServers`    | Google + Cloudflare STUN                    | Augment / replace default STUN.    |
 | `turnServers`   | `[]`                                        | Optional TURN relays (URL `        | user | credential`). |
 

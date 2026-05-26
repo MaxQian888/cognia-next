@@ -88,10 +88,10 @@ Cloudflare TURN credentials and rerun [Step 1](#step-1--pair-and-observe-tier-ro
 While the DataChannel is open, curl the rendezvous you're hitting:
 
 ```bash
-curl -s https://signaling.cognia.app/healthz
+curl -s https://signaling.cognia.cn/healthz
 # → { "ok": true, "rooms": >=1, "peers": >=2, "uptimeSeconds": ..., "version": ... }
 
-curl -s https://signaling.cognia.app/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
+curl -s https://signaling.cognia.cn/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
 # → non-zero counters; specifically `signaling_rooms_active >= 1` and
 #   `signaling_peers_active >= 2` while the room is live.
 ```

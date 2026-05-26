@@ -329,9 +329,7 @@ calculate semver bump → output Markdown notes.
 
 **Octokit.** `GET /repos/{owner}/{repo}/compare/{basehead}` (basehead format: `since...HEAD`)
 
-**Conventional Commits implementation.** `lib/github/changelog.ts`. Grammar: `<type>(<scope>)!:
-
-<subject>` + optional body + `BREAKING CHANGE:` footer. `!` or footer match triggers major bump;
+**Conventional Commits implementation.** `lib/github/changelog.ts`. Grammar: `<type>(<scope>)!: <subject>` + optional body + `BREAKING CHANGE:` footer. `!` or footer match triggers major bump;
 `feat` → minor, `fix` → patch, others → none.
 
 ---

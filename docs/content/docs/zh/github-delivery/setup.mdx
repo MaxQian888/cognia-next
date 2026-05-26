@@ -41,8 +41,8 @@ description: 在 cognia 里启用 GitHub Delivery 插件、配置 GitHub App 或
      `checkPolicy` / `getWorkOrder` / `upsertWorkOrder`)。
    - 注册 Issue → PR loop 的 Claude sidecar 驱动器。
    - 通过 `registerPluginAdapters` 把 `github` 连接器适配器登记到 ConnectorBus。
-     </Step>
-     <Step>
+</Step>
+<Step>
 **确认 Settings → GitHub Delivery 可见。** 侧边栏在 "Extensions" 组下出现 GitHub Delivery
 入口。点开后看到 5 个 Tab:Repos / Credentials / Policies / Audit / Usage。
 </Step>
@@ -82,7 +82,7 @@ description: 在 cognia 里启用 GitHub Delivery 插件、配置 GitHub App 或
   - Pull request、Pull request review、Issues、Issue comment、Check run、Release。
 - Webhook URL:留空,稍后回来填(我们要等 cognia 端给出真实路径)。
 - Generate a private key,下载 PEM 文件。
-    </Step>
+</Step>
 <Step>
 **在目标仓库或组织里 Install 该 App。** 安装完成后从 URL 抓取 `installation_id`
 (例如 `https://github.com/settings/installations/12345678` → 12345678)。
@@ -123,7 +123,7 @@ Web 端继续留在加密 blob 里。
 - Repository permissions:Contents (RW)、Issues (RW)、Pull requests (RW)、Metadata (Read)、
   Checks (Read)。
 - 不要勾选 Organization permissions(以最小权限为原则)。
-    </Step>
+</Step>
 <Step>
 **在 cognia 粘贴 token.** Settings → GitHub Delivery → Credentials → 选择 PAT,
 粘贴 token。桌面端会在 OS keyring 保存,并把 row 里的 `patToken` 清掉(以 `patKeyringId`

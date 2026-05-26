@@ -78,10 +78,10 @@ description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清�
 DataChannel 打开期间，curl 你正在用的汇合点：
 
 ```bash
-curl -s https://signaling.cognia.app/healthz
+curl -s https://signaling.cognia.cn/healthz
 # → { "ok": true, "rooms": >=1, "peers": >=2, "uptimeSeconds": ..., "version": ... }
 
-curl -s https://signaling.cognia.app/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
+curl -s https://signaling.cognia.cn/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
 # → 计数器非零；尤其是 signaling_rooms_active >= 1 与
 #   signaling_peers_active >= 2 在房间存活期间都应满足。
 ```

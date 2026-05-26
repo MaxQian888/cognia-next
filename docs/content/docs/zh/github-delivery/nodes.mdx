@@ -329,9 +329,7 @@ LLM 被要求输出严格 JSON `{ body, comments: [{ path, line, side, body }] }
 
 **Octokit.** `GET /repos/{owner}/{repo}/compare/{basehead}`(basehead 形如 `since...HEAD`)
 
-**Conventional Commits 实现.** `lib/github/changelog.ts`。grammar:`<type>(<scope>)!:
-
-<subject>` + 可选 body + `BREAKING CHANGE:` footer。`!` 或 footer 命中即 major bump;
+**Conventional Commits 实现.** `lib/github/changelog.ts`。grammar:`<type>(<scope>)!: <subject>` + 可选 body + `BREAKING CHANGE:` footer。`!` 或 footer 命中即 major bump;
 `feat` → minor、`fix` → patch、其他 → none。
 
 ---

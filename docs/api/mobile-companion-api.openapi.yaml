@@ -794,6 +794,44 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/companion_can_control:
+    post:
+      operationId: rpcCompanionCanControl
+      tags: [rpc-remote-control]
+      summary: Probe whether this device holds the remote-control capability.
+      description: |
+        Read-only — skips the idempotency cache. Reports whether the calling
+        device may issue control RPCs (e.g. `automation_consent_respond`,
+        `session_attach`). The mobile shell calls this once so observe-only
+        devices hide control affordances (the computer-use consent sheet)
+        instead of surfacing a prompt that 403s on tap. NOT gated by
+        `allowRemoteControl` — every paired device may query its own standing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: "Empty body." }
+            examples:
+              empty: { value: {} }
+      responses:
+        "200":
+          description: Capability snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allowed]
+                properties:
+                  allowed:
+                    { type: boolean, description: "True when this device may issue control RPCs." }
+              examples: { allowed: { value: { allowed: true } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/claude_sidecar_status:
     post:
       operationId: rpcClaudeSidecarStatus

@@ -191,7 +191,7 @@ This wait responds to cancellation via `step.signal` (orchestrator calls `abort`
   `approval.editedBody` is passed through by `guardedExecutor` to `run`, and the executor prefers the edited body.
 - `reject`: Writes a deny audit entry "user rejected HITL approval", and the executor returns
   `{ output: { skipped: true, reason: "HITL rejected: ...", draftId } }`.
-    </Step>
+</Step>
 </Steps>
 
 <Callout type="info">

@@ -29,6 +29,7 @@
     "0031-integrated-terminal",
     "0032-agent-team-plugin-integration",
     "0033-integrated-terminal-phase-3",
-    "0034-workflow-editor-completeness-and-plugin-parity"
+    "0034-workflow-editor-completeness-and-plugin-parity",
+    "0035-rust-performance-dashboard"
   ]
 }

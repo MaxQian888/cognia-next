@@ -1,0 +1,251 @@
+---
+title: Cloudflare Tunnel (persistent WAN access)
+description: Expose Cognia's companion server over a stable public hostname with a named Cloudflare Tunnel, so mobile clients reconnect across restarts. A hands-on guide you run manually before the in-app flow lands.
+---
+
+# Cloudflare Tunnel (persistent WAN access)
+
+Cognia's companion server lets your phone reach your home desktop. On the
+same Wi-Fi that happens over the LAN; off-network it needs a path through
+the internet. Cognia already ships a one-click **Quick Tunnel**, but a
+Quick Tunnel hands you a *random* `*.trycloudflare.com` URL that **changes
+every time it restarts** — so the `baseUrl` your phone stored at pairing
+time goes stale and the phone can no longer connect.
+
+This guide sets up a **named Cloudflare Tunnel** bound to a hostname on a
+domain you own. The URL is **stable across restarts**, so a phone paired
+once keeps reconnecting — no re-pairing.
+
+<Callout type="info">
+  This is the **manual** procedure. You run `cloudflared` yourself and
+  configure the hostname in the Cloudflare dashboard. It is also the
+  validation path for the upcoming in-app *Named tunnel* config (paste a
+  token + hostname, one-click run) — the moving parts are identical, so
+  what you verify here is exactly what the app will automate.
+</Callout>
+
+## Quick Tunnel vs named tunnel
+
+| | Quick Tunnel (built-in today) | Named tunnel (this guide) |
+| --- | --- | --- |
+| Cloudflare account / domain | Not needed | **Required** (domain on Cloudflare DNS) |
+| Public URL | Random, **changes on restart** | **Fixed** hostname you pick |
+| Limits | 200 concurrent requests, no SSE, no SLA | Standard Cloudflare proxy limits |
+| Good for | Quick test, throwaway link | Daily/long-term phone access |
+
+## Prerequisites
+
+- A **Cloudflare account** with a **domain already on Cloudflare DNS**
+  (the domain's nameservers point at Cloudflare). If you don't have one,
+  add a site in the Cloudflare dashboard first — a named tunnel cannot
+  attach a hostname to a domain Cloudflare doesn't manage.
+- **`cloudflared`** installed on the desktop running Cognia:
+
+  <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
+    <Tab value="Windows">
+      ```powershell
+      winget install --id Cloudflare.cloudflared
+      ```
+      Or download the binary from
+      [Cloudflare downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+    </Tab>
+    <Tab value="macOS">
+      ```bash
+      brew install cloudflared
+      ```
+    </Tab>
+    <Tab value="Linux">
+      Install via APT/RPM or download the binary — see
+      [Cloudflare downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+    </Tab>
+  </Tabs>
+
+  Verify:
+
+  ```bash
+  cloudflared --version
+  ```
+
+## Steps
+
+<Steps>
+  <Step>
+    ### Start Cognia's companion server
+
+    In Cognia (desktop): **Settings → Companion → Server**. Start the
+    server and note the port — the default is **7890**. The **loopback**
+    bind mode is fine here: `cloudflared` runs on the same machine and
+    connects to `localhost`, so you do **not** need LAN mode.
+
+    Cognia serves **HTTPS with a self-signed certificate**. Confirm it's
+    up locally by opening `https://localhost:7890` in a browser — you'll
+    get a certificate warning, which is expected. Seeing the warning (not
+    a connection refused) means the server is listening.
+  </Step>
+
+  <Step>
+    ### Create a tunnel in the Cloudflare dashboard
+
+    Go to the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/)
+    → **Networks → Connectors → Cloudflare Tunnels** → **Create a tunnel**
+    → choose **Cloudflared** as the connector → name it (e.g. `cognia`) →
+    **Save tunnel**.
+  </Step>
+
+  <Step>
+    ### Copy the connector token
+
+    On the **Install and run a connector** screen, Cloudflare shows an
+    install command containing a long token, e.g.:
+
+    ```text
+    cloudflared service install eyJhIjoiN...very-long...gifQ==
+    ```
+
+    The `eyJ...` blob **is the token**. Copy it.
+
+    <Callout type="warn">
+      The connector token grants control of this tunnel. Treat it like a
+      password — don't paste it into chats or commit it to a repo.
+    </Callout>
+  </Step>
+
+  <Step>
+    ### Run the connector manually
+
+    In a terminal on the Cognia desktop, run the tunnel in the foreground
+    using the token (keep this terminal open for the whole test):
+
+    ```bash
+    cloudflared tunnel run --token eyJhIjoiN...gifQ==
+    ```
+
+    Wait until the log prints lines like `Registered tunnel connection`.
+    That means the connector is live and reaching Cloudflare's edge.
+  </Step>
+
+  <Step>
+    ### Point a public hostname at the local server
+
+    Back in the dashboard, open the tunnel's **Published application
+    routes** (a.k.a. Public Hostname) and add a route:
+
+    - **Subdomain**: e.g. `cognia`
+    - **Domain**: pick your Cloudflare-managed domain
+    - **Service → Type**: `HTTPS`
+    - **Service → URL**: `localhost:7890`
+    - **Additional application settings → TLS → No TLS Verify**: **On**
+
+    Save. Cloudflare auto-creates the DNS record for
+    `cognia.your-domain.com`.
+
+    <Callout type="warn">
+      **No TLS Verify must be On.** Cognia's origin uses a self-signed
+      certificate; without this, Cloudflare rejects the origin with a
+      `502`. Use service type `HTTPS` (not `HTTP`) and port `7890`.
+    </Callout>
+  </Step>
+
+  <Step>
+    ### Verify the origin is reachable
+
+    Open `https://cognia.your-domain.com` in a browser. Any response that
+    clearly comes from Cognia (a health response, a `404` from Cognia's
+    router, etc.) means the path works end-to-end. A Cloudflare error
+    page (**Error 1033** "tunnel not found / connector down", or **530**)
+    means the connector or hostname isn't wired yet — recheck steps 4–5.
+  </Step>
+
+  <Step>
+    ### Pair a phone over the tunnel
+
+    Because you launched `cloudflared` **by hand**, Cognia doesn't know
+    about this tunnel yet — so the pairing **QR still carries your LAN
+    address and the server's self-signed TLS fingerprint**, neither of
+    which is right for the public hostname. Pair manually instead:
+
+    1. Desktop: **Settings → Companion → Pair device** — note the
+       **6-digit pair code** shown next to the QR.
+    2. In the Cognia mobile app's pairing screen, **don't scan the QR**.
+       Type your hostname `https://cognia.your-domain.com` into the
+       server-URL field, switch to the **Code** tab, enter the 6-digit
+       code, and submit.
+
+    The phone redeems over the tunnel against **Cloudflare's real
+    certificate** (standard TLS validation, no fingerprint pin) and
+    stores the **hostname** as its server URL.
+
+    <Callout type="info">
+      Auto-filling this hostname into the pair QR — and dropping the
+      LAN-only fingerprint when the base URL is a public tunnel host — is
+      exactly what the upcoming in-app *Named tunnel* config adds, at
+      which point scan-to-pair works directly.
+    </Callout>
+  </Step>
+
+  <Step>
+    ### Verify persistence (the whole point)
+
+    Stop the `cloudflared` terminal (Ctrl-C) and start it again with the
+    same `--token` command. Optionally restart Cognia too. The phone
+    should reconnect **without re-pairing**, because the hostname never
+    changed. This is the core advantage over a Quick Tunnel.
+  </Step>
+
+  <Step>
+    ### Verify the event stream survives idle
+
+    Keep the Cognia mobile app in the foreground for **more than two
+    minutes** without interacting, then trigger an event from the
+    desktop. Live events should keep flowing.
+
+    This checks that Cognia's WebSocket heartbeat (a ping every ~25 s)
+    keeps the connection under Cloudflare's **100 s idle timeout** on Free
+    and Pro plans. If the stream dies at ~100 s of inactivity, the
+    heartbeat isn't reaching the origin — recheck the hostname route.
+  </Step>
+</Steps>
+
+## Cleanup
+
+Press **Ctrl-C** in the `cloudflared` terminal to stop the connector. The
+tunnel definition and DNS record stay in your Cloudflare account for next
+time — that's what makes the URL persistent.
+
+## Troubleshooting
+
+- **Error 1033 / 530 in the browser** — the connector isn't connected.
+  Make sure `cloudflared tunnel run --token …` is still running and
+  printed `Registered tunnel connection`.
+- **`502 Bad Gateway`** — origin TLS rejection. Confirm the route uses
+  service type `HTTPS`, URL `localhost:7890`, and **No TLS Verify = On**.
+- **Phone connects but the event stream drops after ~100 s idle** —
+  you're on a Free/Pro plan's WebSocket idle timeout. Cognia's 25 s
+  heartbeat normally covers this; verify the hostname route points at the
+  same port the companion server is actually bound to.
+- **QR still shows a `trycloudflare.com` URL** — a Quick Tunnel is
+  active. Stop it, then re-issue the pair code so the named hostname is
+  used.
+- **`cloudflared: command not found`** — re-check the install step and
+  that the binary is on `PATH`.
+
+## Appendix — locally-managed alternative
+
+If you prefer to keep the tunnel config on your own machine instead of in
+the Cloudflare dashboard, you can run a **locally-managed** tunnel:
+`cloudflared tunnel login` → `cloudflared tunnel create cognia` →
+`cloudflared tunnel route dns cognia cognia.your-domain.com` → write
+`~/.cloudflared/config.yml` with an ingress rule pointing at
+`https://localhost:7890` (with `originRequest.noTLSVerify: true`) →
+`cloudflared tunnel run cognia`. This is functionally equivalent for
+reaching Cognia; the token flow above is simpler and is what Cognia will
+automate in-app. See the Cloudflare docs linked below.
+
+## References
+
+- [Cloudflare Tunnel — create a remote (token) tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)
+- [Tunnel run parameters (`--token`)](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)
+- [Quick Tunnels (TryCloudflare) and their limits](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+- [Locally-managed tunnels](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)
+- [Cloudflare WebSockets (idle timeout)](https://developers.cloudflare.com/network/websockets/)
+- [companion/webrtc-verification](./webrtc-verification) — the WebRTC tier alternative for WAN

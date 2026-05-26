@@ -1,0 +1,234 @@
+---
+title: Cloudflare Tunnel（持久公网访问）
+description: 用命名 Cloudflare Tunnel 把 Cognia 的 companion server 暴露在一个固定的公网主机名上，让手机在重启后也能持续重连。这是一份在应用内功能落地前先手动跑一遍的实操指南。
+---
+
+# Cloudflare Tunnel（持久公网访问）
+
+Cognia 的 companion server 让手机能访问家里的桌面。同一个 Wi-Fi 下走
+LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 已经内置了
+一键 **Quick Tunnel**，但 Quick Tunnel 给你的是一个**随机**的
+`*.trycloudflare.com` URL，而且**每次重启都会变**——于是配对时存到手机
+的 `baseUrl` 就失效了，手机再也连不上。
+
+本指南配置一个**命名 Cloudflare Tunnel**，把它绑定到你自己域名下的一个
+主机名上。这个 URL **重启后不变**，所以配对过一次的手机能一直重连，
+无需重新配对。
+
+<Callout type="info">
+  这是**手动**流程：你自己跑 `cloudflared`，在 Cloudflare 控制台配置
+  主机名。它同时也是后续应用内**命名隧道**配置（粘贴 token + 主机名、
+  一键运行）的验证路径——两者的关键环节完全一致，所以你这里验证通过
+  的东西，正是应用将要自动化的东西。
+</Callout>
+
+## Quick Tunnel 与命名隧道对比
+
+| | Quick Tunnel（当前内置） | 命名隧道（本指南） |
+| --- | --- | --- |
+| Cloudflare 账户 / 域名 | 不需要 | **必须**（域名已托管在 Cloudflare DNS） |
+| 公网 URL | 随机、**重启即变** | **固定**，你自己选的主机名 |
+| 限制 | 200 并发请求、无 SSE、无 SLA | 标准 Cloudflare 代理限制 |
+| 适用 | 快速测试、一次性链接 | 日常 / 长期手机访问 |
+
+## 前提
+
+- 一个 **Cloudflare 账户**，且**域名已托管在 Cloudflare DNS**（域名的
+  nameserver 指向 Cloudflare）。如果还没有，先在 Cloudflare 控制台添加
+  站点——命名隧道无法把主机名挂到一个 Cloudflare 不管理的域名上。
+- 在运行 Cognia 的桌面上安装 **`cloudflared`**：
+
+  <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
+    <Tab value="Windows">
+      ```powershell
+      winget install --id Cloudflare.cloudflared
+      ```
+      或从
+      [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+      下载二进制。
+    </Tab>
+    <Tab value="macOS">
+      ```bash
+      brew install cloudflared
+      ```
+    </Tab>
+    <Tab value="Linux">
+      用 APT/RPM 安装或下载二进制——见
+      [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)。
+    </Tab>
+  </Tabs>
+
+  验证：
+
+  ```bash
+  cloudflared --version
+  ```
+
+## 步骤
+
+<Steps>
+  <Step>
+    ### 启动 Cognia 的 companion server
+
+    在 Cognia（桌面端）：**设置 → Companion → Server**。启动服务并记下
+    端口——默认是 **7890**。这里 **loopback** 绑定模式即可：`cloudflared`
+    与 Cognia 在同一台机器上、连的是 `localhost`，**不需要** LAN 模式。
+
+    Cognia 用**自签名证书的 HTTPS** 提供服务。在浏览器打开
+    `https://localhost:7890` 确认它在跑——会出现证书警告，这是正常的。
+    看到警告（而不是连接被拒）就说明服务在监听。
+  </Step>
+
+  <Step>
+    ### 在 Cloudflare 控制台创建隧道
+
+    打开 [Cloudflare Zero Trust 控制台](https://one.dash.cloudflare.com/)
+    → **Networks → Connectors → Cloudflare Tunnels** → **Create a tunnel**
+    → 连接器类型选 **Cloudflared** → 命名（如 `cognia`）→ **Save tunnel**。
+  </Step>
+
+  <Step>
+    ### 复制 connector token
+
+    在 **Install and run a connector** 界面，Cloudflare 会给出一条带长
+    token 的安装命令，例如：
+
+    ```text
+    cloudflared service install eyJhIjoiN...一长串...gifQ==
+    ```
+
+    其中 `eyJ...` 那一段**就是 token**。复制它。
+
+    <Callout type="warn">
+      connector token 能控制这条隧道，把它当密码对待——别贴进聊天、
+      别提交进仓库。
+    </Callout>
+  </Step>
+
+  <Step>
+    ### 手动运行 connector
+
+    在 Cognia 桌面的终端里，用 token 在前台运行隧道（整个测试期间保持
+    这个终端开着）：
+
+    ```bash
+    cloudflared tunnel run --token eyJhIjoiN...gifQ==
+    ```
+
+    等到日志打印出类似 `Registered tunnel connection` 的行，就表示
+    connector 已连上 Cloudflare 边缘。
+  </Step>
+
+  <Step>
+    ### 把公网主机名指向本地服务
+
+    回到控制台，打开这条隧道的 **Published application routes**（即
+    Public Hostname），添加一条路由：
+
+    - **Subdomain**：如 `cognia`
+    - **Domain**：选你托管在 Cloudflare 的域名
+    - **Service → Type**：`HTTPS`
+    - **Service → URL**：`localhost:7890`
+    - **Additional application settings → TLS → No TLS Verify**：**开启**
+
+    保存。Cloudflare 会自动为 `cognia.你的域名.com` 创建 DNS 记录。
+
+    <Callout type="warn">
+      **No TLS Verify 必须开启。** Cognia 的源站用的是自签名证书；不开
+      这个，Cloudflare 会以 `502` 拒绝源站。Service 类型用 `HTTPS`（不是
+      `HTTP`），端口 `7890`。
+    </Callout>
+  </Step>
+
+  <Step>
+    ### 验证回源可达
+
+    浏览器打开 `https://cognia.你的域名.com`。只要返回的内容明显来自
+    Cognia（健康响应、Cognia 路由的 `404` 等），就说明整条链路通了。
+    如果看到 Cloudflare 错误页（**Error 1033** “隧道未找到 / connector
+    掉线”，或 **530**），说明 connector 或主机名还没接好——回查第 4–5 步。
+  </Step>
+
+  <Step>
+    ### 用隧道配对手机
+
+    因为你是**手动**起的 `cloudflared`，Cognia 还不知道这条隧道——所以
+    配对**二维码里仍是你的 LAN 地址和源站的自签名 TLS 指纹**，这两样都
+    不适用于公网主机名。改用手动方式配对：
+
+    1. 桌面端：**设置 → Companion → Pair device** —— 记下二维码旁的
+       **6 位配对码**。
+    2. 在 Cognia 手机端配对界面，**不要扫码**。在服务器 URL 栏里输入你的
+       主机名 `https://cognia.你的域名.com`，切到 **Code** 标签页，输入
+       6 位配对码并提交。
+
+    手机会经隧道用 **Cloudflare 的真实证书**完成 redeem（标准 TLS 校验、
+    不做指纹固定），并把**主机名**存为它的服务器 URL。
+
+    <Callout type="info">
+      把这个主机名自动填进配对二维码——并在 base URL 是公网隧道主机时
+      去掉那个只适用于 LAN 的指纹——正是后续应用内**命名隧道**配置要做的
+      事，到那时直接扫码配对即可。
+    </Callout>
+  </Step>
+
+  <Step>
+    ### 验证持久性（核心价值）
+
+    停掉 `cloudflared` 终端（Ctrl-C），再用同样的 `--token` 命令重新
+    启动它。也可以顺便重启 Cognia。手机应当**无需重新配对**就能重连，
+    因为主机名从未改变。这正是相对 Quick Tunnel 的关键优势。
+  </Step>
+
+  <Step>
+    ### 验证事件流空闲不掉线
+
+    让 Cognia 手机端在前台**保持两分钟以上**不操作，然后从桌面触发一个
+    事件。实时事件应当持续不断地到达。
+
+    这是在验证 Cognia 的 WebSocket 心跳（约每 25 秒一次 ping）能把连接
+    撑在 Cloudflare Free / Pro 套餐的 **100 秒空闲超时**之内。如果事件流
+    在约 100 秒无操作后中断，说明心跳没到源站——回查主机名路由。
+  </Step>
+</Steps>
+
+## 收尾
+
+在 `cloudflared` 终端按 **Ctrl-C** 停掉 connector。隧道定义和 DNS 记录
+会留在你的 Cloudflare 账户里供下次使用——这正是 URL 持久的原因。
+
+## 排错
+
+- **浏览器报 Error 1033 / 530** —— connector 没连上。确认
+  `cloudflared tunnel run --token …` 还在跑、且打印过
+  `Registered tunnel connection`。
+- **`502 Bad Gateway`** —— 源站 TLS 被拒。确认路由用的是 Service 类型
+  `HTTPS`、URL `localhost:7890`、且 **No TLS Verify = 开启**。
+- **手机连上了但事件流约 100 秒空闲后断开** —— 这是 Free/Pro 套餐的
+  WebSocket 空闲超时。Cognia 的 25 秒心跳通常能覆盖；检查主机名路由是否
+  指向 companion server 实际绑定的端口。
+- **二维码仍显示 `trycloudflare.com` URL** —— 有 Quick Tunnel 在跑。
+  停掉它，再重新签发配对码，让命名主机名被采用。
+- **`cloudflared: command not found`** —— 回查安装步骤，确认二进制在
+  `PATH` 上。
+
+## 附录 —— 本地托管的替代方案
+
+如果你更想把隧道配置留在自己机器上（而非 Cloudflare 控制台），可以跑
+**本地托管**隧道：`cloudflared tunnel login` →
+`cloudflared tunnel create cognia` →
+`cloudflared tunnel route dns cognia cognia.你的域名.com` → 写
+`~/.cloudflared/config.yml`，用一条 ingress 规则指向
+`https://localhost:7890`（带 `originRequest.noTLSVerify: true`）→
+`cloudflared tunnel run cognia`。在访问 Cognia 这件事上二者等价；上面的
+token 流程更简单，也是 Cognia 将要在应用内自动化的那条。详见下方
+Cloudflare 文档。
+
+## 参考
+
+- [Cloudflare Tunnel —— 创建远程（token）隧道](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)
+- [Tunnel 运行参数（`--token`）](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)
+- [Quick Tunnels（TryCloudflare）及其限制](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+- [本地托管隧道](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)
+- [Cloudflare WebSockets（空闲超时）](https://developers.cloudflare.com/network/websockets/)
+- [companion/webrtc-verification](./webrtc-verification) —— 用于 WAN 的 WebRTC 通道替代方案
