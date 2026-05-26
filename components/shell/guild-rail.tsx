@@ -12,6 +12,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore } from "@/stores/ui"
 import type { Team } from "@/lib/claude/types"
 import {
+  ActivityIcon,
   BotIcon,
   CalendarClockIcon,
   CompassIcon,
@@ -23,6 +24,7 @@ import {
   ScrollTextIcon,
   SettingsIcon,
   SparklesIcon,
+  TargetIcon,
   UserRoundIcon,
   Users2Icon,
   WorkflowIcon,
@@ -30,6 +32,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
+import { usePlatform } from "@/hooks/use-platform"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
@@ -53,9 +56,11 @@ const FEATURE_ENTRIES: FeatureEntry[] = [
   { route: "/plugins", i18nKey: "plugins", Icon: PlugIcon },
   { route: "/agent-teams", i18nKey: "agentTeams", Icon: Users2Icon },
   { route: "/scheduler", i18nKey: "scheduler", Icon: CalendarClockIcon },
+  { route: "/goals", i18nKey: "goals", Icon: TargetIcon },
 ]
 
 const AUXILIARY_ENTRIES: FeatureEntry[] = [
+  { route: "/performance", i18nKey: "performance", Icon: ActivityIcon },
   { route: "/logs", i18nKey: "logs", Icon: ScrollTextIcon },
   { route: "/me", i18nKey: "me", Icon: UserRoundIcon },
 ]
@@ -82,9 +87,15 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
   const t = useTranslations("desktop.guildRail")
   const router = useRouter()
   const pathname = usePathname() ?? "/"
+  const platform = usePlatform()
   const selected = useUIStore((s) => s.selectedGuild)
   const setSelected = useUIStore((s) => s.setSelectedGuild)
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+
+  const auxiliaryEntries =
+    platform === "mobile"
+      ? AUXILIARY_ENTRIES.filter((e) => e.route !== "/performance")
+      : AUXILIARY_ENTRIES
 
   const onHomeRoute = pathname === "/"
   const isDmActive = onHomeRoute && selected.kind === "dm"
@@ -191,7 +202,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
 
           <Separator className="my-1 w-8" aria-label={t("auxiliaryGroup")} />
 
-          {AUXILIARY_ENTRIES.map(({ route, i18nKey, Icon }) => (
+          {auxiliaryEntries.map(({ route, i18nKey, Icon }) => (
             <RailButton
               key={route}
               active={isFeatureActive(route)}

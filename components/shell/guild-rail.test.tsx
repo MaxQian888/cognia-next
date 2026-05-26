@@ -70,6 +70,11 @@ jest.mock("@/stores/ui", () => ({
   ): T => selector({ selectedGuild, setSelectedGuild }),
 }))
 
+let platformValue: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformValue,
+}))
+
 import { GuildRail } from "./guild-rail"
 
 beforeEach(() => {
@@ -81,6 +86,7 @@ beforeEach(() => {
   selectedGuild = { kind: "dm" }
   teamsRef.current = []
   pathname = "/"
+  platformValue = "tauri"
 })
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
@@ -101,11 +107,21 @@ test("renders feature buttons for every top-level route", () => {
     "plugins",
     "agentTeams",
     "scheduler",
+    "goals",
+    "performance",
     "logs",
     "me",
   ]) {
     expect(screen.getByLabelText(key)).toBeInTheDocument()
   }
+})
+
+test("hides the performance entry on mobile platform", () => {
+  platformValue = "mobile"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByLabelText("performance")).not.toBeInTheDocument()
+  expect(screen.getByLabelText("logs")).toBeInTheDocument()
+  expect(screen.getByLabelText("me")).toBeInTheDocument()
 })
 
 test("clicking DM/Canvas updates the guild selection and logs", async () => {
