@@ -188,11 +188,12 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
 /**
  * Build and insert a StoredMessage for the inbound event.
  */
-async function insertInboundMessage(
+export async function insertInboundMessage(
   event: NormalizedInboundEvent,
-  sessionId: string
+  sessionId: string,
+  overrideTimestamp?: number
 ): Promise<StoredMessage> {
-  const now = Date.now()
+  const now = overrideTimestamp ?? Date.now()
   // Map MessageSegment[] → UIMessage parts (text & image; others as text-fallback)
   const parts: StoredMessage["parts"] = event.segments
     .map((seg) => {
