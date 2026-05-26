@@ -41,6 +41,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { getSettings, saveSettings } from "@/lib/db/settings"
+import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
 import { isTauri, transport } from "@/lib/tauri"
 import {
   KEYRING_CREDENTIAL_PREFIX,
@@ -50,7 +51,6 @@ import {
   saveTurnCredential,
 } from "@/lib/credentials/turn-credentials"
 
-const DEFAULT_SIGNALING_URL = "wss://signaling.cognia.app/v1/signaling"
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun.cloudflare.com:3478" },

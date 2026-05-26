@@ -40,6 +40,7 @@ import {
   startTunnel,
   stopTunnel,
   getTunnelInfo,
+  getTunnelConfig,
   type TunnelInfo,
 } from "@/lib/connectivity/tunnel-resolver"
 import { getDb } from "@/lib/db/schema"
@@ -99,6 +100,11 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
   const t = useTranslations("settings.connections.tunnel")
   const desktop = isTauri()
   const [info, setInfo] = useState<TunnelInfo | null>(null)
+  const [config, setConfig] = useState<{
+    mode: "quick" | "named"
+    hostname?: string
+    hasToken: boolean
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [notInstalled, setNotInstalled] = useState(false)
   const platform = useMemo(() => detectPlatform(), [])
@@ -109,10 +115,16 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     let cancelled = false
     const refresh = async () => {
       try {
-        const current = await getTunnelInfo()
-        if (!cancelled) setInfo(current)
+        const [current, cfg] = await Promise.all([getTunnelInfo(), getTunnelConfig()])
+        if (!cancelled) {
+          setInfo(current)
+          setConfig(cfg)
+        }
       } catch {
-        if (!cancelled) setInfo(null)
+        if (!cancelled) {
+          setInfo(null)
+          setConfig(null)
+        }
       }
     }
     void refresh()
@@ -189,6 +201,11 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">{t("description")}</p>
+          {config?.mode === "named" && config.hostname && (
+            <p className="text-[11px] text-muted-foreground">
+              {t("modeNamed")}: <span className="font-mono">{config.hostname}</span>
+            </p>
+          )}
           {info ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">

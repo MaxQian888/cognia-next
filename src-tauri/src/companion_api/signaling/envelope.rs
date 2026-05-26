@@ -15,41 +15,20 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Mirror of `lib/signaling/types.ts:EnvelopeKind`. The serde tag uses
-/// kebab-case for the `rtc:*` variants so the wire format matches the
-/// TypeScript discriminator exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EnvelopeKind {
-    Hello,
-    #[serde(rename = "rtc:offer")]
-    RtcOffer,
-    #[serde(rename = "rtc:answer")]
-    RtcAnswer,
-    #[serde(rename = "rtc:ice")]
-    RtcIce,
-    #[serde(rename = "rtc:close")]
-    RtcClose,
-}
-
-/// Envelope wire shape. Fields are camelCase via `#[serde]` annotations so
-/// the JSON round-trips with `lib/signaling/types.ts:Envelope`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Envelope {
-    pub ver: u8,
-    pub ts: i64,
-    pub nonce: String,
-    pub seq: u64,
-    pub kind: EnvelopeKind,
-    pub body: Value,
-    pub mac: String,
-}
+// The wire protocol types (`Envelope`, `EnvelopeKind`, `PeerRole`) are the
+// single source of truth in the shared `cognia-signaling-core` crate —
+// re-exported here so this module's HMAC/replay code and `super::client` keep
+// importing them from `super::envelope` unchanged. The canonical-JSON + HMAC
+// logic below stays desktop-local (core is intentionally crypto-free). Both
+// crates' `Envelope`/`EnvelopeKind` serialize byte-identically, so the
+// cross-implementation MAC pin (`mac_matches_cross_implementation_vector_v1`)
+// still holds.
+pub use cognia_signaling_core::proto::{Envelope, EnvelopeKind, PeerRole};
 
 /// Default acceptable wall-clock skew window (ms). Mirrors
 /// `REPLAY_CLOCK_SKEW_MS` in `lib/signaling/types.ts`.
@@ -57,39 +36,6 @@ pub const REPLAY_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 
 /// Per-room replay protection LRU capacity. Mirrors `REPLAY_LRU_CAPACITY`.
 pub const REPLAY_LRU_CAPACITY: usize = 256;
-
-/// Typed peer role used by [`ReplayWindow`]. Mirrors
-/// `lib/signaling/types.ts:PeerRole` and `signaling-server/src/proto.rs:PeerRole`.
-/// Kept as a local enum to avoid a crate-level dependency on the standalone
-/// signaling-server (this module is part of the Tauri desktop binary). The two
-/// enums agree by inspection; the `as_str()` outputs are the LRU key prefix and
-/// MUST match the TypeScript `PeerRole` literals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PeerRole {
-    Desktop,
-    Mobile,
-}
-
-impl PeerRole {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PeerRole::Desktop => "desktop",
-            PeerRole::Mobile => "mobile",
-        }
-    }
-
-    /// Parse a role string off the wire. Anything other than `"desktop"` or
-    /// `"mobile"` is rejected — the signaling server only routes those two
-    /// values, so an unknown role on the client side is a protocol violation
-    /// that the caller must drop rather than try to scope.
-    pub fn from_wire(s: &str) -> Option<PeerRole> {
-        match s {
-            "desktop" => Some(PeerRole::Desktop),
-            "mobile" => Some(PeerRole::Mobile),
-            _ => None,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Errors

@@ -503,20 +503,30 @@ pub async fn companion_issue_pair_jwt(
     let (pair_jwt, exp_secs) = issue_pair_jwt(&signing_secret).map_err(|e| e.to_string())?;
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
 
-    // URL priority: active tunnel > LAN > loopback fallback.
+    // URL priority: active tunnel (quick or named) > persisted named hostname
+    // > LAN > loopback fallback.
     // Local origins use HTTPS (M2.9 self-signed termination); the tunnel URL
     // is already Cloudflare HTTPS upstream.
-    let base_url = if let Some(info) = state.tunnel.current() {
-        info.public_url
+    let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
+        (info.public_url, true)
+    } else if let Some(hostname) = state.tunnel.named_public_url() {
+        (hostname, true)
     } else {
         let host = match state.bind_mode() {
             Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
             _ => "127.0.0.1".to_string(),
         };
-        format!("https://{host}:{port}")
+        (format!("https://{host}:{port}"), false)
     };
 
-    let fingerprint = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
+    // Tunnel hosts (quick or named) terminate TLS with Cloudflare's real
+    // certificate; the self-signed fingerprint is only meaningful for direct
+    // LAN/loopback connections.
+    let fingerprint = if is_tunnel {
+        String::new()
+    } else {
+        ensure_tls_fingerprint(&app_handle).unwrap_or_default()
+    };
     let app_version = app_handle.package_info().version.to_string();
 
     let expires_at_ms = exp_secs * 1000;
@@ -633,30 +643,125 @@ pub fn companion_mdns_status(state: State<'_, CompanionServerState>) -> bool {
     state.mdns.is_running()
 }
 
-/// Start a Cloudflared tunnel to the loopback companion server. Returns the
-/// public trycloudflare URL once it appears in the cloudflared subprocess
-/// stderr. Errors with "not_installed" if cloudflared is missing from PATH.
+/// Start a Cloudflared tunnel. The mode is read from persisted config:
+/// - **Quick**: spawns `cloudflared tunnel --url <local_url>` and waits for the
+///   random `*.trycloudflare.com` URL.
+/// - **Named**: reads the connector token from the keyring and spawns
+///   `cloudflared tunnel run --token <token>`.
+///
+/// Errors with "not_installed" if cloudflared is missing from PATH, or
+/// "no named config" if the user selected Named mode but hasn't saved a
+/// token/hostname yet.
 #[tauri::command]
 pub async fn companion_tunnel_start(
     state: State<'_, CompanionServerState>,
     local_url: String,
 ) -> Result<TunnelInfo, String> {
-    state
-        .tunnel
-        .start(&local_url)
-        .await
-        .map_err(|e| match e {
-            tunnel::TunnelError::NotInstalled => {
-                "cloudflared not found in PATH (install: https://developers.cloudflare.com/cloudflared/install/)".to_string()
-            }
-            other => other.to_string(),
-        })
+    let config = super::tunnel_config::load_config(state.data_dir());
+    match config.mode {
+        super::tunnel_config::TunnelMode::Named => {
+            let token = super::tunnel_config::load_token()
+                .map_err(|e: String| e)?
+                .ok_or("named tunnel token not found — save config first")?;
+            let named = config
+                .named
+                .ok_or("named tunnel hostname not configured")?;
+            state
+                .tunnel
+                .start_named(&token, &named)
+                .await
+                .map_err(map_tunnel_error)
+        }
+        super::tunnel_config::TunnelMode::Quick => {
+            state
+                .tunnel
+                .start(&local_url)
+                .await
+                .map_err(map_tunnel_error)
+        }
+    }
+}
+
+fn map_tunnel_error(e: tunnel::TunnelError) -> String {
+    match e {
+        tunnel::TunnelError::NotInstalled => {
+            "cloudflared not found in PATH (install: https://developers.cloudflare.com/cloudflared/install/)".to_string()
+        }
+        other => other.to_string(),
+    }
 }
 
 /// Stop the Cloudflared tunnel. No-op if not running.
 #[tauri::command]
 pub fn companion_tunnel_stop(state: State<'_, CompanionServerState>) {
     state.tunnel.stop();
+}
+
+/// Return the active tunnel info, or null when no tunnel is running.
+#[tauri::command]
+pub fn companion_tunnel_current(state: State<'_, CompanionServerState>) -> Option<TunnelInfo> {
+    state.tunnel.current()
+}
+
+/// Save a named tunnel configuration: token goes to the OS keyring,
+/// hostname + mode switch go to the config file.
+#[tauri::command]
+pub fn companion_tunnel_save_named_config(
+    state: State<'_, CompanionServerState>,
+    token: String,
+    hostname: String,
+) -> Result<(), String> {
+    super::tunnel_config::save_named(state.data_dir(), &token, &hostname)
+        .map_err(|e: String| e)?;
+    state
+        .tunnel
+        .set_named_config(super::tunnel_config::NamedTunnelConfig { hostname });
+    Ok(())
+}
+
+/// Get the current tunnel config summary (mode, hostname, hasToken).
+/// The secret token itself is NOT returned.
+#[tauri::command]
+pub fn companion_tunnel_get_config(
+    state: State<'_, CompanionServerState>,
+) -> super::tunnel_config::TunnelConfigSummary {
+    super::tunnel_config::summarize(state.data_dir())
+}
+
+/// Switch tunnel mode. When switching to Quick, the named config and token
+/// are cleared from persistence.
+#[tauri::command]
+pub fn companion_tunnel_set_mode(
+    state: State<'_, CompanionServerState>,
+    mode: super::tunnel_config::TunnelMode,
+) -> Result<(), String> {
+    match mode {
+        super::tunnel_config::TunnelMode::Quick => {
+            super::tunnel_config::clear_named(state.data_dir()).map_err(|e: String| e)?;
+            state.tunnel.stop();
+        }
+        super::tunnel_config::TunnelMode::Named => {
+            super::tunnel_config::save_config(
+                state.data_dir(),
+                &super::tunnel_config::TunnelConfigFile {
+                    mode: super::tunnel_config::TunnelMode::Named,
+                    named: super::tunnel_config::load_config(state.data_dir()).named,
+                },
+            )
+            .map_err(|e: String| e)?;
+        }
+    }
+    Ok(())
+}
+
+/// Clear the named tunnel config (token + hostname) while keeping the mode
+/// set to Named. This lets the user wipe credentials and re-enter them
+/// without toggling the mode radio.
+#[tauri::command]
+pub fn companion_tunnel_clear_named(state: State<'_, CompanionServerState>) -> Result<(), String> {
+    super::tunnel_config::clear_named(state.data_dir()).map_err(|e: String| e)?;
+    state.tunnel.stop();
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -824,12 +929,6 @@ pub async fn companion_test_local_reachability(
     // Silence unused warning on the fingerprint when it's not consumed.
     let _ = fp;
     Ok(out)
-}
-
-/// Return the active tunnel info, or null when no tunnel is running.
-#[tauri::command]
-pub fn companion_tunnel_current(state: State<'_, CompanionServerState>) -> Option<TunnelInfo> {
-    state.tunnel.current()
 }
 
 /// Best-effort detect a routable LAN IPv4 address.  Returns `None` when the

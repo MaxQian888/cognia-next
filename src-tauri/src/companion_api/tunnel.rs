@@ -1,9 +1,11 @@
-//! Cloudflared tunnel launcher (Wave 1.6).
+//! Cloudflared tunnel launcher (Wave 1.6 + named tunnel extension).
 //!
-//! Spawns `cloudflared tunnel --url <local>` as a child process and parses
-//! the trycloudflare URL out of stderr. Surfaces the URL via a Tauri
-//! command so the QR pair payload (Wave 1.7) can encode the public URL
-//! when the user opts in.
+//! Two launch modes:
+//! - **Quick** (`launch`): spawns `cloudflared tunnel --url <local>` and parses
+//!   the random `*.trycloudflare.com` URL from stderr. Ephemeral — URL changes
+//!   on every restart.
+//! - **Named** (`launch_named`): spawns `cloudflared tunnel run --token <token>`;
+//!   the public hostname is fixed in the Cloudflare dashboard. Persistent.
 //!
 //! cloudflared MUST already be installed on the host (`brew install
 //! cloudflared` / `winget install cloudflare.cloudflared` / apt). We don't
@@ -141,25 +143,104 @@ pub async fn launch(local_url: &str) -> Result<Arc<TunnelHandle>, TunnelError> {
     Ok(handle)
 }
 
+/// Launch `cloudflared tunnel run --token <token>`. The connector registers
+/// with Cloudflare's edge; the public hostname is fixed in the dashboard.
+/// We wait for `Registered tunnel connection` in stderr to confirm liveness,
+/// then return a handle with the user-provided `public_url` as the hostname.
+pub async fn launch_named(token: &str, public_url: &str) -> Result<Arc<TunnelHandle>, TunnelError> {
+    let mut cmd = Command::new("cloudflared");
+    cmd.arg("tunnel")
+        .arg("run")
+        .arg("--no-autoupdate")
+        .arg("--token")
+        .arg(token);
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            TunnelError::NotInstalled
+        } else {
+            TunnelError::Io(e)
+        }
+    })?;
+
+    let stderr = child.stderr.take().expect("stderr piped");
+    let (tx, rx) = watch::channel::<Option<TunnelInfo>>(None);
+    let public_for_task = public_url.to_string();
+
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        let connected_re = Regex::new(r"Registered tunnel connection").unwrap();
+        while let Ok(Some(line)) = reader.next_line().await {
+            log::debug!("cloudflared: {line}");
+            if connected_re.is_match(&line) {
+                let info = TunnelInfo {
+                    public_url: public_for_task.clone(),
+                    local_url: String::new(), // not used for named tunnels
+                };
+                let _ = tx.send(Some(info));
+                // Keep draining so the pipe doesn't block.
+            }
+        }
+    });
+
+    let handle = Arc::new(TunnelHandle {
+        child: Mutex::new(Some(child)),
+        info: Mutex::new(None),
+        info_rx: rx,
+    });
+
+    let handle_clone = handle.clone();
+    let mut update_rx = handle.info_rx.clone();
+    tokio::spawn(async move {
+        while update_rx.changed().await.is_ok() {
+            let v = update_rx.borrow().clone();
+            *handle_clone.info.lock() = v;
+        }
+    });
+
+    Ok(handle)
+}
+
 /// Tauri-managed wrapper so the tunnel lifecycle follows the companion
 /// server's start/stop. Exactly one tunnel can run at a time per app.
 pub struct TunnelState {
     inner: Mutex<Option<Arc<TunnelHandle>>>,
+    /// Cached named config so `current()` can report the public URL even
+    /// when the tunnel process was started by a previous session.
+    named_config: Mutex<Option<super::tunnel_config::NamedTunnelConfig>>,
 }
 
 impl TunnelState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            named_config: Mutex::new(None),
         }
     }
 
+    /// Start a Quick Tunnel (`cloudflared tunnel --url`).
     pub async fn start(&self, local_url: &str) -> Result<TunnelInfo, TunnelError> {
-        // Stop any existing tunnel first so the contract is "one at a time".
         self.stop();
         let handle = launch(local_url).await?;
         let info = handle.wait_for_url(20).await?;
         *self.inner.lock() = Some(handle);
+        Ok(info)
+    }
+
+    /// Start a Named Tunnel (`cloudflared tunnel run --token`).
+    pub async fn start_named(
+        &self,
+        token: &str,
+        config: &super::tunnel_config::NamedTunnelConfig,
+    ) -> Result<TunnelInfo, TunnelError> {
+        self.stop();
+        let handle = launch_named(token, &config.hostname).await?;
+        let info = handle.wait_for_url(20).await?;
+        *self.inner.lock() = Some(handle);
+        *self.named_config.lock() = Some(config.clone());
         Ok(info)
     }
 
@@ -173,11 +254,18 @@ impl TunnelState {
         self.inner.lock().as_ref().and_then(|h| h.info())
     }
 
-    /// Whether a tunnel is currently being managed by this state. The tunnel
-    /// may not yet have a public URL — query [`Self::current`] for that.
-    /// Test-only: in production, the wait-for-url timeout in `start` means
-    /// there's no observable "running but no URL yet" window — `current()`
-    /// is the lifecycle signal.
+    /// Set the cached named config (used when loading persisted config at
+    /// boot so `current()` reports the hostname without re-starting).
+    pub fn set_named_config(&self, config: super::tunnel_config::NamedTunnelConfig) {
+        *self.named_config.lock() = Some(config);
+    }
+
+    /// Public URL from the named config cache, if any.
+    pub fn named_public_url(&self) -> Option<String> {
+        self.named_config.lock().as_ref().map(|c| c.hostname.clone())
+    }
+
+    /// Whether a tunnel is currently being managed by this state.
     #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.inner.lock().is_some()

@@ -1,0 +1,45 @@
+# Cloudflare Worker deployment for the cognia signaling rendezvous (ADR-0021).
+#
+# Build:   worker-build --release   (produces build/worker/shim.mjs)
+# Dev:     wrangler dev
+# Deploy:  wrangler deploy
+#
+# Durable Objects are available on the Workers Free plan when SQLite-backed
+# (`new_sqlite_classes`), which is why the migration below uses it even though
+# the relay keeps no SQL rows — per-connection state lives on WebSocket
+# attachments. Per-IP connection limiting (the axum server's `ip_limits.rs`,
+# 50/IP) is intentionally NOT reimplemented here: configure a Cloudflare Rate
+# Limiting rule on the `/v1/signaling` route instead.
+name = "cognia-signaling"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-11-01"
+
+# Custom domain — THE single place to set the deploy hostname. Keep it in sync
+# with the app's signaling URL (the `NEXT_PUBLIC_SIGNALING_URL` build var, or
+# the `DEFAULT_SIGNALING_URL` fallback in lib/signaling/types.ts). On `wrangler
+# deploy` this provisions the hostname + route automatically — it REQUIRES the
+# matching zone (here `cognia.cn`) to be active on this Cloudflare account.
+# Change it to your own domain, or comment the line out to deploy to the
+# `*.workers.dev` subdomain only.
+routes = [{ pattern = "signaling.cognia.cn", custom_domain = true }]
+
+[build]
+command = "worker-build --release"
+
+[durable_objects]
+bindings = [{ name = "ROOM", class_name = "RoomDurableObject" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject"]
+
+[observability]
+enabled = true
+
+# Per-event metrics → Workers Analytics Engine (the Cloudflare-native
+# replacement for the axum server's Prometheus `/metrics`). The DO writes one
+# data point per event (see `RoomDurableObject::record`); writes are
+# best-effort, so removing this binding degrades cleanly to the `console_log!`
+# breadcrumbs. Query via the AE SQL API.
+[[analytics_engine_datasets]]
+binding = "METRICS"

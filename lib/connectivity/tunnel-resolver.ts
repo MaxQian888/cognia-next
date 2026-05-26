@@ -11,6 +11,12 @@ export interface TunnelInfo {
   localUrl: string
 }
 
+export interface TunnelConfigSummary {
+  mode: "quick" | "named"
+  hostname?: string
+  hasToken: boolean
+}
+
 export interface TauriInvoker {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>
 }
@@ -73,5 +79,48 @@ export async function getTunnelInfo(
     return await invoker.invoke<TunnelInfo | null>("companion_tunnel_current")
   } catch {
     return null
+  }
+}
+
+export async function getTunnelConfig(
+  loader: () => Promise<TauriInvoker | null> = tauriInvoker
+): Promise<TunnelConfigSummary | null> {
+  const invoker = await loader()
+  if (!invoker) return null
+  try {
+    return await invoker.invoke<TunnelConfigSummary>("companion_tunnel_get_config")
+  } catch {
+    return null
+  }
+}
+
+export async function saveNamedTunnelConfig(
+  token: string,
+  hostname: string,
+  loader: () => Promise<TauriInvoker | null> = tauriInvoker
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  const invoker = await loader()
+  if (!invoker) return { kind: "error", message: "Tauri not available" }
+  try {
+    await invoker.invoke("companion_tunnel_save_named_config", { token, hostname })
+    return { kind: "ok" }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { kind: "error", message: msg }
+  }
+}
+
+export async function setTunnelMode(
+  mode: "quick" | "named",
+  loader: () => Promise<TauriInvoker | null> = tauriInvoker
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  const invoker = await loader()
+  if (!invoker) return { kind: "error", message: "Tauri not available" }
+  try {
+    await invoker.invoke("companion_tunnel_set_mode", { mode })
+    return { kind: "ok" }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { kind: "error", message: msg }
   }
 }

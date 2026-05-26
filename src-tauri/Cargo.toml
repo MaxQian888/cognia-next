@@ -61,6 +61,11 @@ tauri-build = { version = "2.5.0", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+# Shared signaling wire protocol (ADR-0021). Single source of truth for the
+# frame/envelope types, also consumed by the standalone signaling-server and
+# its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
+# own HMAC/replay logic but reuses these structs to prevent wire-format drift.
+cognia-signaling-core = { path = "../signaling-server/core" }
 log = "0.4"
 tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"

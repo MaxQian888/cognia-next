@@ -44,6 +44,9 @@ function isTauriRenderer(): boolean {
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+// Leaf `types` module (constants only) — avoids the `@/lib/signaling` barrel
+// and its TDZ cycle described above.
+import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
 
 interface DeviceRegistration {
   deviceId: string
@@ -64,7 +67,6 @@ interface SignalingConfigPatch {
   turnServers: IceServerSpec[]
 }
 
-const DEFAULT_SIGNALING_URL = "wss://signaling.cognia.app/v1/signaling"
 const DEFAULT_STUN: IceServerSpec[] = [
   { urls: ["stun:stun.l.google.com:19302"] },
   { urls: ["stun:stun.cloudflare.com:3478"] },

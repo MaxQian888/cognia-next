@@ -57,6 +57,7 @@ pub mod mdns;
 pub mod signaling;
 pub mod tls;
 pub mod tunnel;
+pub mod tunnel_config;
 pub mod ws;
 pub mod ws_terminal;
 pub mod ws_terminal_test;
@@ -219,6 +220,9 @@ use server::ServerHandle;
 /// Mirrors the pattern in `mcp_server/mod.rs::McpServerState`.
 pub struct CompanionServerState {
     inner: Mutex<CompanionServerInner>,
+    /// Data directory for file-backed persistence (push tokens, tunnel config).
+    /// `None` in headless mode when the directory hasn't been established yet.
+    data_dir: Option<std::path::PathBuf>,
     /// The deny list is kept here (behind `Arc`) so Tauri commands can reach it
     /// regardless of whether the HTTP server is currently running.  When the
     /// server is started, the same `Arc<DenyList>` is cloned into the
@@ -304,12 +308,20 @@ impl CompanionServerState {
             Some(dir) => push::PushTokenRegistry::with_persistence(dir),
             None => push::PushTokenRegistry::new(),
         };
+        // Load persisted tunnel config so `current()` reports the hostname
+        // for named tunnels without requiring a re-start.
+        let tunnel_config = tunnel_config::load_config(data_dir.as_deref());
+        let tunnel = tunnel::TunnelState::new();
+        if let Some(ref named) = tunnel_config.named {
+            tunnel.set_named_config(named.clone());
+        }
         Self {
             inner: Mutex::new(CompanionServerInner {
                 handle: None,
                 bound_port: None,
                 bind_mode: None,
             }),
+            data_dir,
             deny_list: Arc::new(DenyList::new()),
             sync_bridge: sync_bridge::SyncBridge::new(),
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
@@ -319,7 +331,7 @@ impl CompanionServerState {
             push_tokens,
             pair_code_lru: Arc::new(PairCodeLru::new()),
             mdns: mdns::BroadcasterState::new(),
-            tunnel: tunnel::TunnelState::new(),
+            tunnel,
         }
     }
 
@@ -381,6 +393,11 @@ impl CompanionServerState {
         // Mirror the bind state in the process-global so /healthz responses
         // reflect "server stopped" rather than a stale port.
         set_advertised_port(0);
+    }
+
+    /// Data directory for file-backed persistence (tunnel config, etc.).
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.data_dir.as_deref()
     }
 
     /// Whether the most recent `start` was loopback-only.  `None` if the

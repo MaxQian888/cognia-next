@@ -1,0 +1,30 @@
+# Cloudflare Worker build of the signaling rendezvous (ADR-0021).
+#
+# Excluded from the `signaling-server` workspace (see ../Cargo.toml) because it
+# targets wasm32 with Worker-only dependencies that must never be compiled for
+# the host. Built independently via `worker-build` (see wrangler.toml).
+[package]
+name = "signaling-worker"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Cloudflare Durable Objects build of the cognia WebRTC signaling rendezvous (ADR-0021)"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = "0.8"
+# Shared wire protocol + token bucket, also used by the native axum server.
+cognia-signaling-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1

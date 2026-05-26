@@ -44,8 +44,14 @@ use crate::companion_api::SharedState;
 const RECONNECT_DEVICE_MIN_SPACING: Duration = Duration::from_secs(5);
 
 /// Default signaling URL when the renderer hasn't pushed an override yet.
-/// Matches `AppSettings.signalingUrl` default in `lib/claude/types.ts`.
-pub const DEFAULT_SIGNALING_URL: &str = "wss://signaling.cognia.app/v1/signaling";
+/// Build-time overridable via `NEXT_PUBLIC_SIGNALING_URL` (the same env var the
+/// frontend reads in `lib/signaling/types.ts`, so a single build var configures
+/// both sides), falling back to the project's hosted endpoint. Runtime
+/// overrides still arrive from the renderer via `AppSettings.signalingUrl`.
+pub const DEFAULT_SIGNALING_URL: &str = match option_env!("NEXT_PUBLIC_SIGNALING_URL") {
+    Some(url) => url,
+    None => "wss://signaling.cognia.cn/v1/signaling",
+};
 
 /// Default STUN servers (Google + Cloudflare public). Mirrored in the
 /// renderer's WebRtcCard component default population.

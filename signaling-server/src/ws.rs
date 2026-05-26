@@ -153,7 +153,11 @@ async fn handle_socket(state: AppState, socket: WebSocket, _ip_guard: Acquired) 
                         .await;
                     continue;
                 }
-                if !bucket.try_take() {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64() * 1000.0)
+                    .unwrap_or(0.0);
+                if !bucket.try_take(now_ms) {
                     warn!(target: "signaling", peer_id, "rate limited");
                     state.metrics.frame_rejected(RejectReason::Rate);
                     let _ = tx

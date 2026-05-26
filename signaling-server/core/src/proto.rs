@@ -35,6 +35,17 @@ impl PeerRole {
             PeerRole::Mobile => "mobile",
         }
     }
+
+    /// Parse a role off the wire. Only the two canonical values are accepted;
+    /// anything else is a protocol violation the caller must drop (the
+    /// signaling server only ever routes `"desktop"` / `"mobile"`).
+    pub fn from_wire(s: &str) -> Option<PeerRole> {
+        match s {
+            "desktop" => Some(PeerRole::Desktop),
+            "mobile" => Some(PeerRole::Mobile),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -241,5 +252,14 @@ mod tests {
         // role→wire mapping here directly.
         assert_eq!(PeerRole::Desktop.as_str(), "desktop");
         assert_eq!(PeerRole::Mobile.as_str(), "mobile");
+    }
+
+    #[test]
+    fn peer_role_from_wire_parses_canonical_only() {
+        assert_eq!(PeerRole::from_wire("desktop"), Some(PeerRole::Desktop));
+        assert_eq!(PeerRole::from_wire("mobile"), Some(PeerRole::Mobile));
+        assert_eq!(PeerRole::from_wire("DESKTOP"), None);
+        assert_eq!(PeerRole::from_wire(""), None);
+        assert_eq!(PeerRole::from_wire("server"), None);
     }
 }

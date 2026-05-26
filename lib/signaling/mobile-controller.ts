@@ -25,9 +25,9 @@ import { isCapacitor, transport } from "@/lib/tauri"
 import { CompanionTransport, hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
 import type { AppSettings } from "@/lib/claude/types"
 
-const DEFAULT_SIGNALING_URL = "wss://signaling.cognia.app/v1/signaling"
 const DEFAULT_STUN: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun.cloudflare.com:3478" },

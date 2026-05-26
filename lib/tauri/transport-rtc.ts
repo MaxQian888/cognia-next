@@ -111,7 +111,7 @@ export interface RtcEvent {
 // ---------------------------------------------------------------------------
 
 export interface TransportRtcOptions {
-  /** Public signaling endpoint URL (`wss://signaling.cognia.app/v1/signaling`). */
+  /** Public signaling endpoint URL (e.g. `wss://signaling.cognia.cn/v1/signaling`). */
   signalingUrl: string
   /** Rendezvous id minted at pair time, baked into CompanionConfig. */
   rendezvousId: string

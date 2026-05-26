@@ -63,10 +63,12 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets -- -D warnings
+        # `--workspace` covers the shared `core/` crate (the Worker is excluded
+        # from the workspace and built in the separate `worker` job below).
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test with coverage (>=90% lines)
-        run: cargo llvm-cov --all-targets --fail-under-lines 90 --summary-only
+        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 90 --summary-only
 
       - name: Coverage summary
         if: always()
@@ -75,3 +77,48 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cargo llvm-cov report >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # Cloudflare Worker build (ADR-0021). Excluded from the workspace above
+  # because it targets wasm32 with Worker-only deps. The FFI glue (Durable
+  # Object handlers) isn't host-measurable, so it is type-checked + linted on
+  # the wasm target here rather than covered by the >=90% line gate; the relay
+  # decision logic it relies on lives in `core/` and is covered above.
+  # ==========================================================================
+  worker:
+    name: Worker (wasm typecheck)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: signaling-server/worker
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Cache cargo + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            signaling-server/worker/target
+          key: ${{ runner.os }}-signaling-worker-${{ hashFiles('signaling-server/worker/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-signaling-worker-
+
+      - name: Clippy (wasm, deny warnings)
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Check (wasm)
+        run: cargo check --target wasm32-unknown-unknown

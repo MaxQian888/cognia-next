@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use cognia_signaling_core::proto::{ClientFrame, ServerFrame};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{
@@ -180,40 +180,12 @@ impl std::fmt::Display for SessionError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Wire frames (mirrors `signaling-server/src/proto.rs`).
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-enum ClientFrame<'a> {
-    Subscribe {
-        rendezvous_id: &'a str,
-        role: &'a str,
-        client_nonce: &'a str,
-    },
-    Relay {
-        rendezvous_id: &'a str,
-        payload: String,
-    },
-    Ping,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-#[allow(dead_code)] // `rendezvous_id` is informational; the client already knows its room.
-enum ServerFrame {
-    Subscribed { rendezvous_id: String, peers: Value },
-    PeerJoined { rendezvous_id: String, role: String },
-    PeerLeft { rendezvous_id: String, role: String },
-    Relay {
-        rendezvous_id: String,
-        from_role: String,
-        payload: String,
-    },
-    Pong,
-    Error { code: String, message: String },
-}
+// Wire frames are the single source of truth in `cognia-signaling-core` (also
+// used by the signaling server + its Cloudflare Worker), imported above so the
+// desktop peer can never drift from the server's frame schema. `ClientFrame`
+// is serialize-only here (we send Subscribe/Relay/Ping); `ServerFrame` is
+// deserialize-only. The desktop ignores `Subscribed.peers` and the informational
+// `rendezvous_id` on each frame — it already knows its room.
 
 // ---------------------------------------------------------------------------
 // Single-connection session
@@ -225,8 +197,11 @@ async fn run_one_session(
     app: tauri::AppHandle,
     mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
-    let request = config
-        .signaling_url
+    // Append the room id as `?rid=` so the Cloudflare Worker can route the
+    // upgrade to the per-room Durable Object before the socket is accepted.
+    // The axum server ignores the query param (backward compatible).
+    let connect_url = append_rid(&config.signaling_url, &config.rendezvous_id);
+    let request = connect_url
         .as_str()
         .into_client_request()
         .map_err(|e| SessionError::Websocket(format!("invalid URL: {e}")))?;
@@ -238,9 +213,9 @@ async fn run_one_session(
     // Subscribe immediately. Server replies `Subscribed`.
     let nonce = fresh_nonce();
     let subscribe = ClientFrame::Subscribe {
-        rendezvous_id: &config.rendezvous_id,
-        role: "desktop",
-        client_nonce: &nonce,
+        rendezvous_id: config.rendezvous_id.clone(),
+        role: PeerRole::Desktop,
+        client_nonce: nonce,
     };
     write
         .send(Message::Text(
@@ -376,24 +351,26 @@ async fn run_one_session(
                             }
                             ServerFrame::PeerJoined { role, .. } => {
                                 log::info!(
-                                    "signaling::client[{}]: peer-joined role={role}",
-                                    config.device_id
+                                    "signaling::client[{}]: peer-joined role={}",
+                                    config.device_id,
+                                    role.as_str()
                                 );
-                                if role == "mobile" {
+                                if role == PeerRole::Mobile {
                                     config.tier_writer.set(DeviceTier::Negotiating);
                                 }
                             }
                             ServerFrame::PeerLeft { role, .. } => {
                                 log::info!(
-                                    "signaling::client[{}]: peer-left role={role}",
-                                    config.device_id
+                                    "signaling::client[{}]: peer-left role={}",
+                                    config.device_id,
+                                    role.as_str()
                                 );
                                 // Mobile dropped — tear down our peer too.
                                 teardown(peer_session.take(), dispatcher.take()).await;
                                 peer_ice_rx = None;
                                 peer_state_rx = None;
                                 peer_data_rx = None;
-                                if role == "mobile" {
+                                if role == PeerRole::Mobile {
                                     config.tier_writer.set(DeviceTier::Awaiting);
                                 }
                             }
@@ -401,7 +378,7 @@ async fn run_one_session(
                                 from_role, payload, ..
                             } => {
                                 handle_relay(
-                                    &from_role,
+                                    from_role,
                                     &payload,
                                     config,
                                     &state,
@@ -456,7 +433,7 @@ async fn push_relay(
         serde_json::to_vec(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
     let payload = URL_SAFE_NO_PAD.encode(env_bytes);
     let frame = ClientFrame::Relay {
-        rendezvous_id,
+        rendezvous_id: rendezvous_id.to_string(),
         payload,
     };
     let text = serde_json::to_string(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
@@ -475,6 +452,14 @@ fn should_reuse_peer_for_offer(ice_restart: bool, has_peer: bool) -> bool {
     ice_restart && has_peer
 }
 
+/// Append the rendezvous room id to the signaling URL as `?rid=`. The room id
+/// is a URL-safe UUID minted at pair time, so it needs no percent-encoding.
+/// Preserves any pre-existing query string (`&` vs `?`).
+fn append_rid(url: &str, rendezvous_id: &str) -> String {
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}rid={rendezvous_id}")
+}
+
 fn envelope_err(e: EnvelopeError) -> SessionError {
     SessionError::Protocol(format!("envelope: {e}"))
 }
@@ -484,7 +469,7 @@ fn envelope_err(e: EnvelopeError) -> SessionError {
 /// tear down an existing one (on `rtc:close`).
 #[allow(clippy::too_many_arguments)]
 async fn handle_relay(
-    from_role: &str,
+    from_role: PeerRole,
     payload_b64: &str,
     config: &ClientConfig,
     state: &SharedState,
@@ -511,18 +496,9 @@ async fn handle_relay(
         );
         return Ok(());
     }
-    let Some(typed_role) = PeerRole::from_wire(from_role) else {
-        // The signaling server only routes `"desktop"` and `"mobile"` values
-        // (signaling-server/src/proto.rs::PeerRole). Anything else is a
-        // protocol violation — drop the frame rather than scoping replay
-        // under an attacker-controlled string.
-        log::warn!(
-            "signaling::client[{}]: dropping envelope from unknown role {from_role:?}",
-            config.device_id
-        );
-        return Ok(());
-    };
-    if let Err(e) = replay.observe(typed_role, envelope.seq, &envelope.nonce) {
+    // `from_role` is already the typed `PeerRole` off the wire frame — the
+    // server only routes `desktop`/`mobile`, and the frame type enforces that.
+    if let Err(e) = replay.observe(from_role, envelope.seq, &envelope.nonce) {
         log::warn!(
             "signaling::client[{}]: replay detected: {e}",
             config.device_id
@@ -533,8 +509,9 @@ async fn handle_relay(
     match envelope.kind {
         EnvelopeKind::Hello => {
             log::debug!(
-                "signaling::client[{}]: hello from {from_role}",
-                config.device_id
+                "signaling::client[{}]: hello from {}",
+                config.device_id,
+                from_role.as_str()
             );
         }
         EnvelopeKind::RtcOffer => {
@@ -634,8 +611,9 @@ async fn handle_relay(
             // We are always the answerer in the desktop role. Receiving an
             // answer suggests the mobile is confused; log + drop.
             log::warn!(
-                "signaling::client[{}]: unexpected rtc:answer from {from_role}",
-                config.device_id
+                "signaling::client[{}]: unexpected rtc:answer from {}",
+                config.device_id,
+                from_role.as_str()
             );
         }
         EnvelopeKind::RtcIce => {
@@ -706,54 +684,34 @@ mod tests {
     }
 
     #[test]
-    fn client_frame_subscribe_serializes_camel_case() {
+    fn append_rid_adds_query_param() {
+        assert_eq!(
+            append_rid("wss://host/v1/signaling", "r1"),
+            "wss://host/v1/signaling?rid=r1"
+        );
+    }
+
+    #[test]
+    fn append_rid_preserves_existing_query() {
+        assert_eq!(
+            append_rid("wss://host/v1/signaling?x=1", "r1"),
+            "wss://host/v1/signaling?x=1&rid=r1"
+        );
+    }
+
+    // Wire-format round-trips for the shared frame types live in
+    // `cognia-signaling-core::proto`; this keeps just the desktop-specific
+    // contract: a Subscribe built with `PeerRole::Desktop` must hit the wire as
+    // the `"desktop"` literal the server routes on.
+    #[test]
+    fn desktop_subscribe_frame_serializes_with_desktop_role() {
         let frame = ClientFrame::Subscribe {
-            rendezvous_id: "r1",
-            role: "desktop",
-            client_nonce: "n1",
+            rendezvous_id: "r1".into(),
+            role: PeerRole::Desktop,
+            client_nonce: "n1".into(),
         };
         let text = serde_json::to_string(&frame).unwrap();
         assert!(text.contains(r#""kind":"subscribe""#));
-        assert!(text.contains(r#""rendezvousId":"r1""#));
         assert!(text.contains(r#""role":"desktop""#));
-        assert!(text.contains(r#""clientNonce":"n1""#));
-    }
-
-    #[test]
-    fn client_frame_relay_serializes_camel_case() {
-        let frame = ClientFrame::Relay {
-            rendezvous_id: "r1",
-            payload: "abc".into(),
-        };
-        let text = serde_json::to_string(&frame).unwrap();
-        assert!(text.contains(r#""kind":"relay""#));
-        assert!(text.contains(r#""payload":"abc""#));
-    }
-
-    #[test]
-    fn server_frame_relay_deserializes_camel_case() {
-        let raw = r#"{"kind":"relay","rendezvousId":"r1","fromRole":"mobile","payload":"x"}"#;
-        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
-        match frame {
-            ServerFrame::Relay { from_role, payload, .. } => {
-                assert_eq!(from_role, "mobile");
-                assert_eq!(payload, "x");
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn server_frame_subscribed_deserializes() {
-        let raw = r#"{"kind":"subscribed","rendezvousId":"r1","peers":[]}"#;
-        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
-        assert!(matches!(frame, ServerFrame::Subscribed { .. }));
-    }
-
-    #[test]
-    fn server_frame_pong_round_trip() {
-        let raw = r#"{"kind":"pong"}"#;
-        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
-        assert!(matches!(frame, ServerFrame::Pong));
     }
 }

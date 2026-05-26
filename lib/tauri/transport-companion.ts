@@ -22,6 +22,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "mcp_server_status",
   "read_agent_config",
   "session_list",
+  "companion_can_control",
 ])
 
 // ---------------------------------------------------------------------------

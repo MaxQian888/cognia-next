@@ -251,6 +251,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     // Resolve a host computer-use consent prompt from a remote device.
     // Calls the automation ConsentBroker directly (not via writes-bridge).
     "automation_consent_respond",
+    // Read-only capability probe — lets a paired device learn whether it holds
+    // the remote-control capability without attempting (and 403-ing on) a
+    // gated RPC. NOT a CONTROL_COMMAND: every paired device may query its own
+    // standing.
+    "companion_can_control",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -287,6 +292,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
+    // Read-only remote-control capability probe (drives the mobile
+    // computer-use consent sheet). Pure read of the process-global allow list.
+    "companion_can_control",
 ];
 
 // ---------------------------------------------------------------------------
@@ -324,6 +332,18 @@ fn is_control_command(name: &str) -> bool {
 #[allow(dead_code)] // referenced from tests only.
 pub fn control_commands() -> &'static [&'static str] {
     CONTROL_COMMANDS
+}
+
+/// Read-only response body for `companion_can_control` — reports whether
+/// `device_id` currently holds the remote-control capability.
+///
+/// Factored out of the dispatch arm so it is unit-testable without an
+/// `AppHandle`: in test mode `state.app_handle` is `None`, so the HTTP path
+/// short-circuits to 503 before reaching the `match`, and `dispatch` itself
+/// cannot be called without a real handle. This pure helper lets the
+/// `{ allowed }` logic be asserted directly.
+fn can_control_response(device_id: &str) -> Value {
+    serde_json::json!({ "allowed": super::control_allow_list::global().is_allowed(device_id) })
 }
 
 /// Allowlisted patch keys for `app_settings_update`. The mobile client may
@@ -1003,6 +1023,15 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        // Remote Session Control — read-only capability probe. A paired device
+        // calls this once (on the mobile shell) to learn whether it may resolve
+        // host computer-use consent, so observe-only clients hide the consent
+        // sheet entirely instead of surfacing a prompt that 403s on tap. `app`
+        // is unused; this is a pure read of the process-global allow list, and
+        // is deliberately absent from CONTROL_COMMANDS so every paired device
+        // can query its own standing.
+        "companion_can_control" => Ok(can_control_response(device_id)),
+
         "app_settings_update" => {
             // Allowlist enforcement — phone may only mutate user-facing
             // preferences, never transport / sidecar / provider keys.
@@ -1199,6 +1228,37 @@ mod tests {
         // app_handle yields 503 — the point is the gate let it through.
         assert_ne!(resp.status().as_u16(), 403);
         super::super::control_allow_list::global().disallow(device);
+    }
+
+    #[test]
+    fn can_control_response_reflects_allow_list() {
+        // Unique device id — the allow list is process-global and shared
+        // across parallel tests.
+        let device = "dev-cancontrol-helper-001";
+        super::super::control_allow_list::global().disallow(device);
+        assert_eq!(can_control_response(device), json!({ "allowed": false }));
+
+        super::super::control_allow_list::global().allow(device.to_string());
+        assert_eq!(can_control_response(device), json!({ "allowed": true }));
+
+        super::super::control_allow_list::global().disallow(device);
+    }
+
+    #[tokio::test]
+    async fn companion_can_control_is_not_control_gated() {
+        // A device with no remote-control grant must still be able to PROBE its
+        // capability — `companion_can_control` is deliberately absent from
+        // CONTROL_COMMANDS. Past the gate it hits the missing-app_handle 503 in
+        // test mode; the point is it is neither 404 (unwired) nor 403 (gated).
+        let device = "dev-cancontrol-ungated-001";
+        super::super::control_allow_list::global().disallow(device);
+
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(router, "companion_can_control", json!({}), &jwt, None).await;
+        assert_ne!(resp.status().as_u16(), 404);
+        assert_ne!(resp.status().as_u16(), 403);
     }
 
     #[tokio::test]
@@ -1492,6 +1552,11 @@ mod tests {
     #[tokio::test]
     async fn dispatch_coverage_claude_interrupt() {
         assert_not_404!("claude_interrupt", json!({ "session_id": "s" }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_companion_can_control() {
+        assert_not_404!("companion_can_control", json!({}));
     }
 
     #[tokio::test]

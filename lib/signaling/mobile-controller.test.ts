@@ -68,7 +68,7 @@ describe("applySettings", () => {
     const tx = new FakeTransport()
     await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
     expect(tx.enableCalls.length).toBe(1)
-    expect(tx.enableCalls[0].signalingUrl).toBe("wss://signaling.cognia.app/v1/signaling")
+    expect(tx.enableCalls[0].signalingUrl).toBe("wss://signaling.cognia.cn/v1/signaling")
     expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun.cloudflare.com:3478" },

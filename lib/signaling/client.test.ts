@@ -113,6 +113,24 @@ describe("SignalingClient", () => {
     expect(events).toEqual(["connecting", "subscribed"])
   })
 
+  it("appends the rendezvous id as a rid query param on connect", () => {
+    const client = makeClient()
+    client.connect()
+    expect(instances[0].url).toBe("wss://signaling.test/v1/signaling?rid=room-1")
+  })
+
+  it("uses & when the signaling url already has a query string", () => {
+    const client = new SignalingClient({
+      url: "wss://signaling.test/v1/signaling?region=eu",
+      rendezvousId: "room-1",
+      rendezvousSecret: SECRET,
+      role: "mobile",
+      webSocketFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+    })
+    client.connect()
+    expect(instances[0].url).toBe("wss://signaling.test/v1/signaling?region=eu&rid=room-1")
+  })
+
   it("emits peerJoined and peerLeft", () => {
     const client = makeClient()
     const joined: string[] = []

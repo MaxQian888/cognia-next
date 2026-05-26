@@ -172,10 +172,22 @@ export class SignalingClient {
 
   // ── socket lifecycle ───────────────────────────────────────────────────
 
+  /**
+   * Connect URL with the room id appended as `?rid=`. The Cloudflare Worker
+   * deployment needs the room before the WebSocket is accepted (it routes the
+   * upgrade to a per-room Durable Object via `idFromName(rid)`), so the id can
+   * no longer wait for the first `Subscribe` frame. The axum server ignores
+   * the query param, so the same client works against either backend.
+   */
+  private connectUrl(): string {
+    const sep = this.opts.url.includes("?") ? "&" : "?"
+    return `${this.opts.url}${sep}rid=${encodeURIComponent(this.opts.rendezvousId)}`
+  }
+
   private openSocket(): void {
     if (this.destroyed) return
     this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting")
-    const ws = this.opts.webSocketFactory(this.opts.url)
+    const ws = this.opts.webSocketFactory(this.connectUrl())
     this.ws = ws
 
     ws.onopen = () => {

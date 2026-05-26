@@ -17,10 +17,12 @@ jest.mock("@/lib/tauri", () => ({
 const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockCurrent = jest.fn()
+const mockConfig = jest.fn()
 jest.mock("@/lib/connectivity/tunnel-resolver", () => ({
   startTunnel: (...args: unknown[]) => mockStart(...args),
   stopTunnel: () => mockStop(),
   getTunnelInfo: () => mockCurrent(),
+  getTunnelConfig: () => mockConfig(),
 }))
 
 jest.mock("sonner", () => ({
@@ -41,6 +43,8 @@ beforeEach(async () => {
   mockStop.mockReset()
   mockCurrent.mockReset()
   mockCurrent.mockResolvedValue(null)
+  mockConfig.mockReset()
+  mockConfig.mockResolvedValue(null)
 })
 
 function wrap(ui: React.ReactElement) {

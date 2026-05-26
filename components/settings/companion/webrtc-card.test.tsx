@@ -196,7 +196,7 @@ describe("WebRtcCard — form & i18n", () => {
   it("populates the default signaling URL on first paint", async () => {
     renderCard()
     const input = await screen.findByLabelText(/Signaling server/i)
-    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.app/v1/signaling"))
+    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v1/signaling"))
   })
 
   it("places the TURN textarea placeholder via the translation key, not a literal", async () => {
@@ -241,7 +241,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: false,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: [],
         })
       }
@@ -259,7 +259,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: [],
         })
       }
@@ -299,7 +299,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -345,7 +345,7 @@ describe("WebRtcCard — poll-failure banner", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: [],
         })
       }
@@ -523,7 +523,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -588,7 +588,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
           registeredDevices: ["r1"],
         })
       }

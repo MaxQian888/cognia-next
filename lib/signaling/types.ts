@@ -95,3 +95,15 @@ export const SIGNALING_PING_INTERVAL_MS = 25_000
 
 /** Default DataChannel label, matched on both sides. */
 export const DATACHANNEL_LABEL = "cognia.v1"
+
+/**
+ * Default public signaling rendezvous endpoint. Customizable on three levels:
+ *  1. Build time — set `NEXT_PUBLIC_SIGNALING_URL` (inlined into the static
+ *     export, so it applies to the browser, Tauri, and Capacitor shells alike).
+ *  2. Runtime, per install — `AppSettings.signalingUrl` (Settings → Companion →
+ *     WebRTC) overrides this default.
+ *  3. The code fallback below is the only hard-coded value — change it (and the
+ *     Worker's `wrangler.toml` route) if you operate a different domain.
+ */
+export const DEFAULT_SIGNALING_URL =
+  process.env.NEXT_PUBLIC_SIGNALING_URL ?? "wss://signaling.cognia.cn/v1/signaling"

@@ -151,6 +151,29 @@ async function getTunnelInfo(): Promise<TunnelInfo | null> {
   return transport.call<TunnelInfo | null>("companion_tunnel_current")
 }
 
+async function getTunnelConfig(): Promise<{
+  mode: "quick" | "named"
+  hostname?: string
+  hasToken: boolean
+} | null> {
+  if (!isTauri()) return null
+  return transport.call<{ mode: "quick" | "named"; hostname?: string; hasToken: boolean }>(
+    "companion_tunnel_get_config"
+  )
+}
+
+async function saveNamedConfig(token: string, hostname: string): Promise<void> {
+  return transport.call<void>("companion_tunnel_save_named_config", { token, hostname })
+}
+
+async function setTunnelMode(mode: "quick" | "named"): Promise<void> {
+  return transport.call<void>("companion_tunnel_set_mode", { mode })
+}
+
+async function clearNamedConfig(): Promise<void> {
+  return transport.call<void>("companion_tunnel_clear_named")
+}
+
 // ---------------------------------------------------------------------------
 // Top-level section
 // ---------------------------------------------------------------------------
@@ -179,13 +202,25 @@ function TunnelCard() {
   const t = useTranslations("mobile.companion.tunnel")
   const desktop = isTauri()
   const [info, setInfo] = useState<TunnelInfo | null>(null)
+  const [config, setConfig] = useState<{
+    mode: "quick" | "named"
+    hostname?: string
+    hasToken: boolean
+  } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [hostnameInput, setHostnameInput] = useState("")
+  const [tokenInput, setTokenInput] = useState("")
 
   useEffect(() => {
     let cancelled = false
-    void getTunnelInfo()
-      .then((current) => {
-        if (!cancelled) setInfo(current)
+    void Promise.all([getTunnelInfo(), getTunnelConfig()])
+      .then(([current, cfg]) => {
+        if (!cancelled) {
+          setInfo(current)
+          setConfig(cfg)
+          if (cfg?.hostname) setHostnameInput(cfg.hostname)
+        }
       })
       .catch(() => {})
     return () => {
@@ -224,27 +259,175 @@ function TunnelCard() {
     [desktop, t]
   )
 
+  const onModeChange = useCallback(
+    async (mode: "quick" | "named") => {
+      if (!desktop) return
+      setBusy(true)
+      try {
+        await setTunnelMode(mode)
+        const next = await getTunnelConfig()
+        setConfig(next)
+        if (next?.hostname) setHostnameInput(next.hostname)
+        if (mode === "quick") {
+          await stopTunnel()
+          setInfo(null)
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        toast.error(msg)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [desktop]
+  )
+
+  const onSaveNamed = useCallback(async () => {
+    if (!desktop || !hostnameInput.trim() || !tokenInput.trim()) return
+    setSaving(true)
+    try {
+      await saveNamedConfig(tokenInput.trim(), hostnameInput.trim())
+      const next = await getTunnelConfig()
+
+      console.log("[TunnelCard] saveNamedConfig -> getTunnelConfig:", next)
+      setConfig(next)
+      toast.success(t("saved"))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }, [desktop, hostnameInput, tokenInput, t])
+
+  const onClearNamed = useCallback(async () => {
+    if (!desktop) return
+    setBusy(true)
+    try {
+      await clearNamedConfig()
+      const next = await getTunnelConfig()
+      setConfig(next)
+      setHostnameInput("")
+      setTokenInput("")
+      setInfo(null)
+      toast.success(t("cleared"))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(msg)
+    } finally {
+      setBusy(false)
+    }
+  }, [desktop, t])
+
+  const mode = config?.mode ?? "quick"
+  const namedReady = config?.hasToken && config?.hostname
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
           <span className="flex items-center gap-2">{t("title")}</span>
-          <Switch
-            checked={!!info}
-            onCheckedChange={onToggle}
-            disabled={!desktop || busy}
-            aria-label={t("enableLabel")}
-          />
         </CardTitle>
         <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
-      <CardContent className="text-xs text-muted-foreground">
-        {info ? (
-          <p className="break-all font-mono" data-testid="tunnel-public-url">
-            {info.publicUrl}
-          </p>
-        ) : (
-          <p>{t("off")}</p>
+      <CardContent className="space-y-3 text-xs text-muted-foreground">
+        <RadioGroup
+          value={mode}
+          onValueChange={(v) => void onModeChange(v as "quick" | "named")}
+          className="flex gap-4"
+          disabled={!desktop || busy}
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="quick" id="tunnel-mode-quick" disabled={!desktop || busy} />
+            <Label htmlFor="tunnel-mode-quick" className="text-xs font-normal">
+              {t("modeQuick")}
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="named" id="tunnel-mode-named" disabled={!desktop || busy} />
+            <Label htmlFor="tunnel-mode-named" className="text-xs font-normal">
+              {t("modeNamed")}
+            </Label>
+          </div>
+        </RadioGroup>
+
+        {mode === "quick" && (
+          <div className="flex items-center justify-between gap-2">
+            <span>{info ? info.publicUrl : t("off")}</span>
+            <Switch
+              checked={!!info}
+              onCheckedChange={onToggle}
+              disabled={!desktop || busy}
+              aria-label={t("enableLabel")}
+            />
+          </div>
+        )}
+
+        {mode === "named" && (
+          <div className="space-y-2">
+            {/* 统一行：状态/hostname/off + Switch（未配置时禁用） */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="break-all">
+                {info ? info.publicUrl : namedReady ? config!.hostname : t("off")}
+              </span>
+              <Switch
+                checked={!!info}
+                onCheckedChange={onToggle}
+                disabled={!desktop || busy || !namedReady}
+                aria-label={t("enableLabel")}
+              />
+            </div>
+            {/* 配置表单始终可见 */}
+            <div className="space-y-1">
+              <Label htmlFor="tunnel-hostname" className="text-xs">
+                {t("hostnameLabel")}
+              </Label>
+              <Input
+                id="tunnel-hostname"
+                type="url"
+                placeholder={t("hostnamePlaceholder")}
+                value={hostnameInput}
+                onChange={(e) => setHostnameInput(e.target.value)}
+                disabled={!desktop || saving}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="tunnel-token" className="text-xs">
+                {t("tokenLabel")}
+              </Label>
+              <Input
+                id="tunnel-token"
+                type="password"
+                placeholder={t("tokenPlaceholder")}
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                disabled={!desktop || saving}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => void onSaveNamed()}
+                disabled={!desktop || saving || !hostnameInput.trim() || !tokenInput.trim()}
+                className="flex-1"
+              >
+                {saving ? t("saving") : t("saveButton")}
+              </Button>
+              {namedReady && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void onClearNamed()}
+                  disabled={busy || saving}
+                  aria-label={t("clearAria")}
+                >
+                  {t("clearButton")}
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>
