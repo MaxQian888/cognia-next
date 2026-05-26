@@ -22,6 +22,8 @@ import { LarkConfigDialog } from "../forms/lark-config"
 import { DiscordConfigDialog } from "../forms/discord-config"
 import { SlackConfigDialog } from "../forms/slack-config"
 import { OneBotConfigDialog } from "../forms/onebot-config"
+import { WeComConfigDialog } from "../forms/wecom-config"
+import { WeChatPersonalConfigDialog } from "../forms/wechat-personal-config"
 import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
 import { AdapterListRow } from "../adapters/adapter-list-row"
 import { useSelectedAdapter } from "../adapters/use-selected-adapter"
@@ -29,13 +31,36 @@ import { useSelectedAdapter } from "../adapters/use-selected-adapter"
 // Platform kinds whose configuration dialog is wired into this tab.
 // All five platforms ship with a dialog under `../forms/`; the dispatcher
 // below picks the right one by `row.type`.
-type ConfigurableKind = "telegram" | "lark" | "discord" | "slack" | "onebot"
+type ConfigurableKind =
+  | "telegram"
+  | "lark"
+  | "discord"
+  | "slack"
+  | "onebot"
+  | "wecom"
+  | "wechat-personal"
 
-const CONFIGURABLE_KINDS: ConfigurableKind[] = ["telegram", "lark", "discord", "slack", "onebot"]
+const CONFIGURABLE_KINDS: ConfigurableKind[] = [
+  "telegram",
+  "lark",
+  "discord",
+  "slack",
+  "onebot",
+  "wecom",
+  "wechat-personal",
+]
 
 // Display order of the "Add adapter" menu. Labels resolve from
 // `platforms.<kind>` so they stay i18n-wired and shared with the row.
-const ADAPTER_MENU: ConfigurableKind[] = ["telegram", "lark", "discord", "slack", "onebot"]
+const ADAPTER_MENU: ConfigurableKind[] = [
+  "telegram",
+  "lark",
+  "discord",
+  "slack",
+  "onebot",
+  "wecom",
+  "wechat-personal",
+]
 
 function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
   return (CONFIGURABLE_KINDS as PlatformKind[]).includes(kind)
@@ -192,6 +217,16 @@ export function AdaptersTab() {
         open={editing?.kind === "onebot"}
         onOpenChange={closeDialog}
         row={editing?.kind === "onebot" ? editing.row : null}
+      />
+      <WeComConfigDialog
+        open={editing?.kind === "wecom"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "wecom" ? editing.row : null}
+      />
+      <WeChatPersonalConfigDialog
+        open={editing?.kind === "wechat-personal"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "wechat-personal" ? editing.row : null}
       />
     </div>
   )

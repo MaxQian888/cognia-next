@@ -208,6 +208,79 @@ describe("installRuntime — ai-run (happy path)", () => {
   })
 })
 
+describe("installRuntime — ai-run (streamReply weaving)", () => {
+  it("passes onPartial to runAndCapture when the target adapter implements streamReply", async () => {
+    const streamReply = jest.fn(async () => undefined)
+    // A capture mock that drives two partial chunks through cap.onPartial,
+    // mirroring how runAndCaptureAssistantReply fires it during a turn.
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      await cap?.onPartial?.("partial one")
+      await cap?.onPartial?.("partial one two")
+      return { text: "final text", messageId: "uuid-stream-1" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    // Register a stub adapter for the event's adapterId so the runtime
+    // detects the streamReply capability.
+    bus.registerAdapter({
+      id: "adapter_1",
+      get meta() {
+        return {
+          type: "telegram" as const,
+          displayName: "stub",
+          version: "0",
+          capabilities: [],
+          transportModes: ["stub" as const],
+          configSchema: {},
+        }
+      },
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: () => ({ state: "running" as const }),
+      send: async () => ({ ok: true }),
+      streamReply,
+      a2uiCapability: () => ({}) as never,
+    })
+
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_stream",
+      conversationRef: { platform: "telegram", adapterId: "adapter_1", chatId: "c1" },
+    })
+    await callHandler(event, "ai-run")
+
+    // onPartial fired twice → streamReply called twice with the growing text.
+    expect(streamReply).toHaveBeenCalledTimes(2)
+    expect(streamReply).toHaveBeenNthCalledWith(1, {
+      conversationRef: event.conversationRef,
+      text: "partial one",
+    })
+    expect(streamReply).toHaveBeenNthCalledWith(2, {
+      conversationRef: event.conversationRef,
+      text: "partial one two",
+    })
+    // Final authoritative message still enqueued for durable delivery.
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].idempotencyKey).toBe("airun:uuid-stream-1")
+  })
+
+  it("does not pass onPartial when the adapter has no streamReply", async () => {
+    let receivedCap: unknown = "untouched"
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      receivedCap = cap
+      return { text: "final", messageId: "uuid-nostream" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    // No adapter registered for adapter_1 → getAdapter returns undefined.
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_nostream" })
+    await callHandler(event, "ai-run")
+    expect(receivedCap).toBeUndefined()
+  })
+})
+
 describe("installRuntime — ai-run (suppression gate)", () => {
   it("skips capture + enqueue and writes inbound.deferred_muted when adapter is muted", async () => {
     await seedAdapter("adapter_muted", { muted: true })

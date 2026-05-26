@@ -14,10 +14,12 @@ import type { LucideIcon } from "lucide-react"
 import {
   BirdIcon,
   BotIcon,
+  BuildingIcon,
   HashIcon,
   MessageCircleIcon,
   MessagesSquareIcon,
   SendIcon,
+  SmartphoneIcon,
 } from "lucide-react"
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -34,6 +36,8 @@ const META: Partial<Record<PlatformKind, PlatformMeta>> = {
   slack: { labelKey: "slack", Icon: HashIcon },
   lark: { labelKey: "lark", Icon: BirdIcon },
   onebot: { labelKey: "onebot", Icon: BotIcon },
+  wecom: { labelKey: "wecom", Icon: BuildingIcon },
+  "wechat-personal": { labelKey: "wechat-personal", Icon: SmartphoneIcon },
 }
 
 const FALLBACK: PlatformMeta = { labelKey: "unknown", Icon: MessageCircleIcon }

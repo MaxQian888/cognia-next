@@ -53,7 +53,16 @@ import { getBus } from "./bus"
 export type RunAndCaptureFn = (
   sessionId: string,
   prompt: SendContent,
-  options?: import("@/lib/claude/types").SendOptions
+  options?: import("@/lib/claude/types").SendOptions,
+  /**
+   * Optional capture controls. The runtime passes `onPartial` here when the
+   * target adapter implements `streamReply`, so the assistant's incremental
+   * output can drive platform-side streaming (WeCom 智能机器人 stream frames)
+   * while the authoritative final message still flows through the durable
+   * outbound queue. Production wires this to `runAndCaptureAssistantReply`,
+   * whose 4th `RunAndCaptureOptions` arg is a structural superset.
+   */
+  cap?: import("@/lib/claude/run-and-capture").RunAndCaptureOptions
 ) => Promise<{
   text: string
   messageId: string
@@ -379,10 +388,29 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         }
 
         // ── Capture the assistant reply via the injected wrapper ──
+        // When the target adapter supports incremental replies (WeCom
+        // 智能机器人), wire `onPartial` so the assistant's growing text drives
+        // platform-side stream frames in real time. The authoritative final
+        // message still flows through `enqueueOutbound` below for audit +
+        // idempotency, finalising the same platform-side stream. The preview
+        // is best-effort — a streamReply failure never aborts the turn.
+        const targetAdapter = bus.getAdapter(event.adapterId)
+        const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions | undefined =
+          typeof targetAdapter?.streamReply === "function"
+            ? {
+                onPartial: (text: string) => {
+                  void targetAdapter.streamReply!({
+                    conversationRef: event.conversationRef,
+                    text,
+                  }).catch(() => undefined)
+                },
+              }
+            : undefined
+
         const prompt = inboundEventToSendContent(event)
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
-          captured = await opts.runAndCapture(session.id, prompt, sendOptions)
+          captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)
         } catch (err) {
           await appendAudit({
             adapterId: event.adapterId,

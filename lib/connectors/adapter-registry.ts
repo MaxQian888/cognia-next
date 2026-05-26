@@ -20,6 +20,9 @@ import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
 import { createOneBotAdapter } from "./adapters/onebot"
+import { createWeComAdapter } from "./adapters/wecom"
+import type { WeComAdapterSettings } from "./adapters/wecom/welcome"
+import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
 import { getTenantAccessToken } from "./adapters/lark/auth"
 
 /**
@@ -41,6 +44,10 @@ export async function buildAdapterFromRow(
       return buildLarkAdapter(row)
     case "onebot":
       return buildOneBotAdapter(row)
+    case "wecom":
+      return buildWeComAdapter(row)
+    case "wechat-personal":
+      return buildWechatPersonalAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -277,6 +284,43 @@ export async function buildOneBotAdapter(row: AdapterInstanceRow): Promise<Platf
     expectedClient: settings.expectedClient,
     transportMode,
     forwardWsUrl: settings.forwardWsUrl,
+  })
+}
+
+/**
+ * Instantiate a WeCom 智能机器人 PlatformAdapter from a persisted row.
+ *
+ * Reads `botId` + `secret` from the keyring (the long-connection credentials)
+ * and passes the non-secret settings (welcome message) through. No identity
+ * probe is needed — the bot's `aibotid` arrives on the first inbound frame and
+ * the adapter captures it as `selfId`.
+ */
+export async function buildWeComAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  return createWeComAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    botId: () => connectorsKeyringGet(row.id, "botId").then((v) => v ?? ""),
+    secret: () => connectorsKeyringGet(row.id, "secret").then((v) => v ?? ""),
+    settings: (row.settings ?? {}) as WeComAdapterSettings,
+  })
+}
+
+/**
+ * Instantiate a personal-WeChat (iLink) PlatformAdapter from a persisted row.
+ *
+ * Reads the iLink `botToken` from the keyring (obtained via the QR-login
+ * wizard) and the per-session `baseUrl` from non-secret settings. iLink is a
+ * reply-only HTTP long-poll channel; no identity probe.
+ */
+export async function buildWechatPersonalAdapter(
+  row: AdapterInstanceRow
+): Promise<PlatformAdapter> {
+  const settings = (row.settings ?? {}) as { baseUrl?: string }
+  return createWechatPersonalAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    token: () => connectorsKeyringGet(row.id, "botToken").then((v) => v ?? ""),
+    baseUrl: async () => settings.baseUrl ?? "",
   })
 }
 

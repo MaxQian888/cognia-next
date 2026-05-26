@@ -105,6 +105,7 @@ export async function safeSendPrompt(
   return runAndCaptureAssistantReply(sessionId, prompt, options, {
     signal: opts.signal,
     timeoutMs: opts.timeoutMs,
+    onPartial: opts.onPartial,
   })
 }
 

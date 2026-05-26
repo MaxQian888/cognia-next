@@ -632,6 +632,16 @@ export class ConnectorBus {
     return Array.from(this.adapters.values())
   }
 
+  /**
+   * Look up a registered adapter instance by id. Returns `undefined` when
+   * no adapter with that id is registered. Used by the runtime to detect
+   * optional adapter capabilities (e.g. `streamReply`) before driving an
+   * AI turn so it can wire incremental platform-side streaming.
+   */
+  getAdapter(adapterId: string): PlatformAdapter | undefined {
+    return this.adapters.get(adapterId)
+  }
+
   /** Test-only: inspect or reset policy state. */
   __getPolicyStateForTesting(): PolicyEvalState {
     return this.policyState

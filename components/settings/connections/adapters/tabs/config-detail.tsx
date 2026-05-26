@@ -24,6 +24,8 @@ import { TelegramConfigDialog } from "../../forms/telegram-config"
 import { DiscordConfigDialog } from "../../forms/discord-config"
 import { SlackConfigDialog } from "../../forms/slack-config"
 import { OneBotConfigDialog } from "../../forms/onebot-config"
+import { WeComConfigDialog } from "../../forms/wecom-config"
+import { WeChatPersonalConfigDialog } from "../../forms/wechat-personal-config"
 import { LarkWhoamiPanel } from "../../forms/lark/lark-whoami-panel"
 import { AdapterWhoamiPanel } from "../../forms/shared/adapter-whoami-panel"
 import { SendTestMessageSection } from "../../forms/shared/send-test-message-section"
@@ -143,6 +145,20 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
           if (!open) setEditing(false)
         }}
         row={row.type === "onebot" ? row : null}
+      />
+      <WeComConfigDialog
+        open={editing && row.type === "wecom"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "wecom" ? row : null}
+      />
+      <WeChatPersonalConfigDialog
+        open={editing && row.type === "wechat-personal"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "wechat-personal" ? row : null}
       />
     </div>
   )

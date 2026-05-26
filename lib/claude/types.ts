@@ -1180,6 +1180,14 @@ export interface AppSettings {
    */
   signalingUrl?: string
   /**
+   * Base URL of the Cloudflare-hosted public share service. Default: the
+   * `DEFAULT_SHARE_URL` from `lib/share/config.ts` (`NEXT_PUBLIC_SHARE_URL`
+   * build var, else `https://share.cognia.cn`). Users self-deploy the share
+   * worker and point this at their own domain. The upload bearer secret is
+   * stored separately in the OS keyring, not here.
+   */
+  shareUrl?: string
+  /**
    * Additional ICE servers presented to the browser's `RTCPeerConnection`.
    * STUN entries only — TURN goes in {@link turnServers} so the UI can
    * render them separately. Defaults to two public STUN servers when

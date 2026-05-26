@@ -181,6 +181,17 @@ export interface RunAndCaptureOptions {
    * disable the timeout entirely.
    */
   timeoutMs?: number
+  /**
+   * Optional incremental-output callback. Fired each time the accumulated
+   * assistant text grows (every streamed `assistant` event carries the full
+   * text-so-far for our use case, so this receives the running total, not a
+   * delta). Used by the connector runtime to drive platform-side streaming
+   * replies (WeCom 智能机器人 `aibot_respond_msg` stream frames). Best-effort:
+   * a throwing or rejecting callback is swallowed and never affects capture.
+   * Default `undefined` → zero behaviour change for chat / non-streaming
+   * connectors.
+   */
+  onPartial?: (accumulatedText: string) => void | Promise<void>
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -209,6 +220,9 @@ export async function runAndCaptureAssistantReply(
     // case), we keep the last non-empty one.
     let assembledText = ""
     let lastMessageId = ""
+    // Tracks the last text handed to `cap.onPartial` so we only fire the
+    // callback when the accumulated reply actually grows.
+    let lastEmittedPartial = ""
     const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
 
     const cleanup = () => {
@@ -367,6 +381,20 @@ export async function runAndCaptureAssistantReply(
               assembledText = text
               if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
                 lastMessageId = inner.uuid
+              }
+              // Fire the incremental-output callback when the accumulated
+              // text actually grew. Best-effort: a throwing / rejecting
+              // callback must never break the capture loop.
+              if (cap?.onPartial && text !== lastEmittedPartial) {
+                lastEmittedPartial = text
+                try {
+                  const r = cap.onPartial(text)
+                  if (r && typeof (r as Promise<void>).catch === "function") {
+                    void (r as Promise<void>).catch(() => undefined)
+                  }
+                } catch {
+                  /* swallow — partial preview is best-effort */
+                }
               }
             } else if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
               // tool-only assistant turn (no text) — still remember the

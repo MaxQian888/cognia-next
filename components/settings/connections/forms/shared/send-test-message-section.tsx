@@ -47,6 +47,8 @@ const PLATFORM_PLACEHOLDER: Partial<Record<PlatformKind, string>> = {
   slack: "C0123ABC456",
   lark: "oc_xxxxxxxxxxxxxxxx",
   onebot: "987654321",
+  wecom: "userid (single) / chatid (group)",
+  "wechat-personal": "reply-only — cannot test proactively",
 }
 
 function placeholderFor(platform: PlatformKind): string {

@@ -58,6 +58,15 @@ async function dispatchProbe(adapterId: string, platform: PlatformKind): Promise
       // `settings.selfBotUin`. The panel renders that statically without
       // hitting the network.
       return
+    case "wecom":
+      // No identity probe — WeCom 智能机器人 exposes no getMe-style API; the
+      // bot's `aibotid` only arrives on the first inbound frame. The probe
+      // button is hidden (see `probeSupported`).
+      return
+    case "wechat-personal":
+      // No identity probe — iLink identity is the scanned account; no
+      // getMe-style endpoint. Probe button hidden (see `probeSupported`).
+      return
     default:
       throw new Error(`No whoami probe wired for platform: ${platform}`)
   }
@@ -81,7 +90,8 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
   const [probing, setProbing] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const desktop = isTauri()
-  const probeSupported = platform !== "onebot"
+  const probeSupported =
+    platform !== "onebot" && platform !== "wecom" && platform !== "wechat-personal"
 
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
     () =>

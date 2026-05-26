@@ -1,6 +1,6 @@
 import type { PlatformKind } from "./platform-kind"
 import type { A2UICapabilityMatrix, Capability } from "./capability"
-import type { NormalizedInboundEvent } from "./event"
+import type { ConversationReference, NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 
 export type TransportMode =
@@ -66,6 +66,25 @@ export interface HistoryFetchOpts {
   max?: number
 }
 
+/**
+ * A single incremental reply chunk pushed to the platform while the
+ * assistant turn is still generating. Carried by the optional
+ * {@link PlatformAdapter.streamReply} method.
+ *
+ * `conversationRef` is the inbound event's opaque ref (the same one the
+ * authoritative final message flows through via `send()`), so the adapter
+ * can derive a stable platform-side stream id and correlate the live
+ * preview frames with the terminal `send()`. `text` is the accumulated
+ * reply so far — adapters that update a single platform-side message in
+ * place (WeCom 智能机器人 `aibot_respond_msg` stream frames) replace the
+ * content on each call rather than appending.
+ */
+export interface StreamReplyRequest {
+  conversationRef: ConversationReference
+  /** Accumulated assistant reply text so far (full text, not a delta). */
+  text: string
+}
+
 export interface AdapterContext {
   /** Push a normalized inbound event to the bus. */
   emit: (event: NormalizedInboundEvent) => Promise<void>
@@ -122,6 +141,22 @@ export interface PlatformAdapter {
   health(): AdapterHealth
 
   send(req: OutboundRequest): Promise<OutboundResult>
+  /**
+   * Stream an incremental reply chunk to the platform while the assistant
+   * turn is still generating (e.g. WeCom 智能机器人 `aibot_respond_msg`
+   * stream frames with `finish:false`). Optional — only adapters whose
+   * platform supports updating a message in place implement it.
+   *
+   * The connector runtime calls this from `runAndCapture`'s `onPartial`
+   * callback ONLY when (a) the target adapter implements `streamReply` and
+   * (b) the turn is a live reply (the inbound `conversationRef` is still
+   * correlatable). The authoritative final message ALWAYS flows through the
+   * durable outbound queue via `send()`; `streamReply` is a best-effort live
+   * preview that shares the same platform-side stream id, so `send()`
+   * finalises the stream (`finish:true`) without duplicating the message.
+   * A throwing `streamReply` must never break the turn — callers swallow it.
+   */
+  streamReply?(req: StreamReplyRequest): Promise<void>
   edit?(messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   delete?(messageId: string): Promise<void>
   setTyping?(conversationKey: string, on: boolean): Promise<void>

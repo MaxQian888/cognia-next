@@ -11,6 +11,7 @@ describe("PlatformKind", () => {
       "dingtalk",
       "wecom",
       "wechat-oa",
+      "wechat-personal",
       "qq-official",
       "email",
       "matrix",

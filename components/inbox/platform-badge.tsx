@@ -36,6 +36,7 @@ const PLATFORM_CONFIG: Record<PlatformKind, PlatformConfig> = {
   dingtalk: { label: "DT", icon: MessageCircleIcon, colorClass: "text-blue-600" },
   wecom: { label: "WC", icon: MessageCircleIcon, colorClass: "text-green-600" },
   "wechat-oa": { label: "WO", icon: MessageCircleIcon, colorClass: "text-green-500" },
+  "wechat-personal": { label: "WX", icon: MessageCircleIcon, colorClass: "text-green-500" },
   "qq-official": { label: "QQ", icon: MessageCircleIcon, colorClass: "text-blue-500" },
   email: { label: "EM", icon: MailIcon, colorClass: "text-amber-600" },
   matrix: { label: "MX", icon: GridIcon, colorClass: "text-neutral-500" },

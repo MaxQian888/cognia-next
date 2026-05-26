@@ -13,6 +13,9 @@ export const ALL_PLATFORM_KINDS = [
   "dingtalk",
   "wecom",
   "wechat-oa",
+  // Personal WeChat via the iLink (智联) half-official bot gateway
+  // (`ilinkai.weixin.qq.com`). Distinct from `wechat-oa` (Official Account).
+  "wechat-personal",
   "qq-official",
   "email",
   "matrix",

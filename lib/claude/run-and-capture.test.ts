@@ -371,4 +371,70 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.a2uiSurfaceOrder).toEqual([])
     expect(result.text).toBe("hi")
   })
+
+  // ── onPartial incremental-output callback (streaming connectors) ──────
+
+  it("fires onPartial with the growing accumulated text", async () => {
+    const partials: string[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPartial: (t) => {
+        partials.push(t)
+      },
+    })
+    await Promise.resolve()
+    // Three streamed assistant events with the SAME uuid carrying the
+    // full text-so-far (mirrors how the SDK streams partial messages).
+    fire(assistantEvent("Hel", { uuid: "u1" }))
+    fire(assistantEvent("Hello", { uuid: "u1" }))
+    fire(assistantEvent("Hello, world!", { uuid: "u1" }))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("Hello, world!")
+    expect(partials).toEqual(["Hel", "Hello", "Hello, world!"])
+  })
+
+  it("does not re-fire onPartial when the accumulated text is unchanged", async () => {
+    const partials: string[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPartial: (t) => {
+        partials.push(t)
+      },
+    })
+    await Promise.resolve()
+    fire(assistantEvent("same", { uuid: "u1" }))
+    fire(assistantEvent("same", { uuid: "u1" }))
+    fire(sessionEnded())
+    await promise
+    expect(partials).toEqual(["same"])
+  })
+
+  it("swallows a throwing onPartial without breaking capture", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPartial: () => {
+        throw new Error("callback boom")
+      },
+    })
+    await Promise.resolve()
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("Hello")
+  })
+
+  it("swallows a rejecting async onPartial without breaking capture", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onPartial: async () => {
+        throw new Error("async boom")
+      },
+    })
+    await Promise.resolve()
+    fire(assistantEvent("Hello"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("Hello")
+  })
 })
