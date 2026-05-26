@@ -1078,29 +1078,55 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
   }
 }
 
-/* Mobile pair-page radar — `<ScanRadar>` renders two concentric rings that
- * pulse outward while the LAN scan runs. The animation is paused when the
- * radar is idle and respects the global `data-reduce-motion` switch above. */
+/* Mobile pair-page radar — `<ScanRadar>` renders three concentric rings that
+ * pulse outward in a staggered sonar sweep while the LAN scan runs, with the
+ * centre WiFi badge breathing in time. The animation is paused when the radar
+ * is idle and respects the global reduce-motion guard above (which collapses
+ * all keyframes to a static stroke). */
 @keyframes pair-radar-pulse {
   0% {
-    transform: scale(0.85);
-    opacity: 0.65;
+    transform: scale(0.78);
+    opacity: 0.7;
   }
   70% {
     opacity: 0;
   }
   100% {
-    transform: scale(1.4);
+    transform: scale(1.5);
     opacity: 0;
   }
 }
 
 .pair-radar-ring--active {
-  animation: pair-radar-pulse 2s ease-out infinite;
+  animation: pair-radar-pulse 2.4s cubic-bezier(0.32, 0.72, 0, 1) infinite;
 }
 
-.pair-radar-ring--active.pair-radar-ring--inner {
-  animation-delay: 0.6s;
+/* Staggered launch so the three rings read as a continuous sweep rather than
+ * one thick band. */
+.pair-radar-ring--active.pair-radar-ring--d1 {
+  animation-delay: 0.5s;
+}
+
+.pair-radar-ring--active.pair-radar-ring--d2 {
+  animation-delay: 1s;
+}
+
+/* Centre badge breathing — gentle scale + halo that pulses in sync with the
+ * rings so the icon feels alive without adding a second spinner. */
+@keyframes pair-radar-core {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 7px color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+}
+
+.pair-radar-core--active {
+  animation: pair-radar-core 2.4s ease-in-out infinite;
 }
 
 /* Workflow editor — Spotlight search result pulse. Brief ring highlight on
