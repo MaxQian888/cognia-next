@@ -1,4 +1,186 @@
 {
+  "goal": {
+    "console": {
+      "title": "Goals",
+      "subtitle": "Persistent objectives the agent works toward automatically.",
+      "newGoal": "New goal",
+      "activeEmpty": "No active goals. Start one with the /goal command in a chat.",
+      "openGoalsHeading": "Open goals",
+      "statActive": "{count} active",
+      "statPaused": "{count} paused",
+      "statDone": "{count} done",
+      "tabs": {
+        "history": "History",
+        "templates": "Templates",
+        "defaults": "Defaults",
+        "tracker": "Tracker"
+      }
+    },
+    "card": {
+      "elapsed": "{minutes}m",
+      "turns": "Turns",
+      "tokens": "Tokens"
+    },
+    "launcher": {
+      "title": "Goals",
+      "description": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+      "open": "Open Goals console"
+    },
+    "status": {
+      "active": "active",
+      "paused": "paused",
+      "completed": "completed",
+      "stopped": "stopped",
+      "budget_limited": "budget limited",
+      "turn_limited": "turn limited",
+      "timed_out": "timed out",
+      "preempted": "preempted"
+    },
+    "pill": {
+      "ariaActiveGoal": "Active goal: {objective}",
+      "progress": "{turns}/{maxTurns} turns · {tokens}k tok",
+      "continue": "Continue goal",
+      "pause": "Pause goal",
+      "resume": "Resume goal",
+      "stop": "Stop goal",
+      "details": "Open goal details"
+    },
+    "detailSheet": {
+      "title": "Goal · {status}",
+      "tabs": {
+        "overview": "Overview",
+        "subgoals": "Subgoals",
+        "activity": "Activity",
+        "settings": "Settings"
+      }
+    },
+    "overview": {
+      "objective": "Objective",
+      "statusBadge": "Status: {status}",
+      "createdBadge": "Created: {date}",
+      "endedBadge": "Ended: {date}",
+      "turns": "Turns",
+      "tokens": "Tokens",
+      "lastJudgeReason": "Last judge reason",
+      "exitReason": "Exit reason",
+      "turnBudgetAria": "Turn budget used",
+      "tokenBudgetAria": "Token budget used"
+    },
+    "activity": {
+      "loading": "Loading…",
+      "empty": "No activity yet.",
+      "goal_created": "Created with {turns}-turn / {tokens}-token budget",
+      "objective_updated": "Objective replaced",
+      "turn_started": "Turn {n} started",
+      "turn_completed": "Turn {n} completed ({tokens} tok)",
+      "judge_evaluated": "done={done} — {reason}",
+      "judge_parse_failed": "Parse failure #{n}",
+      "exit_triggered": "{exit} — {reason}",
+      "user_paused": "User paused",
+      "user_resumed": "User resumed",
+      "user_stopped": "User stopped",
+      "config_updated": "Config updated"
+    },
+    "subgoals": {
+      "title": "Subgoals — Phase 2",
+      "body": "Automatic subgoal decomposition is deferred to a later release. For now the goal runs as a single objective; the judge decides when it's complete."
+    },
+    "config": {
+      "maxTurns": "Max turns",
+      "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
+      "maxTokens": "Max tokens",
+      "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
+      "maxJudgeFailures": "Max judge failures",
+      "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause (fail-OPEN).",
+      "timeout": "Timeout (minutes)",
+      "timeoutHint": "Wall-clock cap from goal creation.",
+      "inlineStop": "Inline stop condition",
+      "inlineStopHint": "Appended to the system prompt. Example: 'or after producing 3 haikus'.",
+      "save": "Save changes",
+      "saving": "Saving…"
+    },
+    "defaults": {
+      "maxTurns": "Default max turns",
+      "maxTurnsHint": "Hard cap on continuation turns for a new goal.",
+      "maxTokens": "Default max tokens",
+      "maxTokensHint": "Cumulative input + output tokens billed against the goal.",
+      "maxJudgeFailures": "Default max judge failures",
+      "maxJudgeFailuresHint": "Consecutive JSON parse failures before auto-pause.",
+      "timeout": "Default timeout (minutes)",
+      "timeoutHint": "Wall-clock cap from goal creation.",
+      "startPaused": "Start new goals paused",
+      "startPausedHint": "When on, new goals require a /goal resume before the loop begins.",
+      "save": "Save defaults",
+      "saving": "Saving…"
+    },
+    "judge": {
+      "heading": "Judge",
+      "model": "Judge model",
+      "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
+      "useChatModel": "Use chat model",
+      "temperature": "Judge temperature",
+      "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
+      "maxTokens": "Judge max tokens",
+      "maxTokensHint": "Cap on the judge's reply. The judge answers in one line — 200 is plenty.",
+      "promptOverride": "Judge prompt override",
+      "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict."
+    },
+    "pacing": {
+      "heading": "Pacing",
+      "manualContinue": "Manual continue",
+      "manualContinueHint": "When on, the loop waits for you to click Continue on the goal pill each turn.",
+      "interval": "Min seconds between turns",
+      "intervalHint": "Throttle auto-continuation. 0 means no delay.",
+      "quietHoursEnable": "Quiet hours",
+      "quietHoursHint": "Pause auto-continuation during this window (uses your timezone).",
+      "quietHoursFrom": "From",
+      "quietHoursTo": "To"
+    },
+    "templates": {
+      "heading": "Goal templates",
+      "empty": "No templates yet.",
+      "add": "New template",
+      "use": "Use",
+      "edit": "Edit",
+      "delete": "Delete",
+      "favorite": "Favourite",
+      "builtinBadge": "Built-in",
+      "titleField": "Title",
+      "objectiveField": "Objective",
+      "save": "Save template",
+      "cancel": "Cancel",
+      "needSession": "Open a chat session first, then use a template."
+    },
+    "tracker": {
+      "loading": "Loading…",
+      "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
+      "systemPrompt": "System prompt",
+      "permissionMode": "Permission mode: {mode}",
+      "builtin": "Built-in (cannot be deleted)",
+      "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker."
+    },
+    "history": {
+      "objective": "Objective",
+      "status": "Status",
+      "turns": "Turns",
+      "tokens": "Tokens",
+      "created": "Created",
+      "empty": "No goals yet. Use the /goal command in a chat to start one."
+    },
+    "commands": {
+      "needSession": "Start a chat session first — /goal operates inside an active session.",
+      "streaming": "The current turn is still streaming — let it finish, then run /goal.",
+      "createUsage": "Usage: type /goal followed by what you want to accomplish.",
+      "created": "🎯 **Goal active** — {maxTurns} turn budget, {maxTokensK}k token budget.",
+      "noActiveGoal": "No active goal in this session. Start one with the /goal command.",
+      "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} turns · {tokens} tokens · {minutes}m elapsed",
+      "recentActivity": "Recent activity:",
+      "paused": "Goal paused — {turns}/{maxTurns} turns used. Resume with /goal resume.",
+      "resumed": "Goal resumed. The loop will continue on the next turn.",
+      "stopped": "Goal stopped after {turns} turn(s).",
+      "objectiveUpdated": "Objective updated. The model will be told on the next turn."
+    }
+  },
   "featureShell": {
     "openLeft": "Open {name}",
     "openRight": "Open {name}"
@@ -4594,6 +4776,7 @@
         "copied": "Copied",
         "copyFailed": "Couldn't copy",
         "copiedCommand": "Command copied",
+        "modeNamed": "Named tunnel",
         "install": {
           "title": "Install cloudflared",
           "description": "Run one of the following on your {platform} host, then start the tunnel.",
@@ -7773,6 +7956,120 @@
       "fatal": "Fatal"
     }
   },
+  "performance": {
+    "title": "Performance",
+    "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+    "desktopOnly": {
+      "title": "Performance panel is desktop-only",
+      "description": "Runtime and process metrics are sampled from the native Rust backend, which only runs in the desktop app."
+    },
+    "tabs": {
+      "overview": "Performance",
+      "processes": "Processes",
+      "hotspots": "Hotspots",
+      "runtime": "Async runtime"
+    },
+    "toolbar": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "reset": "Reset hotspots",
+      "intervalLabel": "Sampling interval",
+      "intervalValue": "{seconds}s",
+      "export": {
+        "label": "Export",
+        "json": "Snapshot (JSON)",
+        "processes": "Processes (CSV)",
+        "hotspots": "Hotspots (CSV)",
+        "done": "Exported {filename}"
+      }
+    },
+    "metrics": {
+      "cpu": "App CPU",
+      "memory": "App memory",
+      "runtimeBusy": "Runtime busy",
+      "tasks": "Async tasks",
+      "diskIo": "Disk I/O"
+    },
+    "overview": {
+      "selectMetric": "Select a metric"
+    },
+    "memoryPressure": {
+      "title": "Memory pressure",
+      "low": "Normal",
+      "moderate": "Moderate",
+      "high": "Critical"
+    },
+    "process": {
+      "empty": "No processes sampled yet.",
+      "searchPlaceholder": "Search processes…",
+      "noMatch": "No processes match your search.",
+      "summary": {
+        "processes": "Processes",
+        "totalCpu": "Total CPU",
+        "totalMemory": "Total memory",
+        "totalDisk": "Disk I/O"
+      },
+      "columns": {
+        "name": "Name",
+        "pid": "PID",
+        "role": "Role",
+        "cpu": "CPU",
+        "trend": "Trend",
+        "memory": "Memory",
+        "uptime": "Uptime",
+        "diskRead": "Disk read",
+        "diskWrite": "Disk write"
+      },
+      "roles": {
+        "main": "Main",
+        "sidecar": "Sidecar",
+        "child": "Child"
+      }
+    },
+    "hotspots": {
+      "empty": "No hotspots recorded yet.",
+      "hint": "Run an operation (send a message, run an OCR, execute a workflow) to populate the table.",
+      "columns": {
+        "name": "Operation",
+        "calls": "Calls",
+        "avg": "Avg",
+        "p50": "p50",
+        "p95": "p95",
+        "distribution": "Distribution",
+        "max": "Max",
+        "total": "Total",
+        "errors": "Errors"
+      }
+    },
+    "runtime": {
+      "empty": "Waiting for the first runtime sample…",
+      "groups": {
+        "workers": "Workers",
+        "tasks": "Tasks",
+        "queues": "Queues",
+        "throughput": "Throughput"
+      },
+      "workers": "Worker threads",
+      "aliveTasks": "Alive tasks",
+      "globalQueue": "Global queue",
+      "busy": "Busy",
+      "blockingThreads": "Blocking threads",
+      "blockingQueue": "Blocking queue",
+      "spawned": "Spawned (total)",
+      "forcedYields": "Forced yields",
+      "steal": "Steals",
+      "park": "Parks",
+      "overflow": "Overflows",
+      "perWorker": "Per-worker busy",
+      "workerN": "Worker {n}",
+      "traces": {
+        "title": "Flight-recorder traces",
+        "description": "dial9 writes binary async traces to disk for offline analysis.",
+        "open": "Open folder",
+        "empty": "No trace files yet."
+      }
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",
@@ -9164,6 +9461,8 @@
       "plugins": "Plugins",
       "agentTeams": "Agent teams",
       "scheduler": "Scheduler",
+      "goals": "Goals",
+      "performance": "Performance",
       "logs": "Logs",
       "me": "Me",
       "featuresGroup": "Features",
@@ -11750,19 +12049,33 @@
         "subtitle": "Pick a server below, or skip to enter details manually.",
         "scanning": "Scanning the local network…",
         "rescanCta": "Rescan",
+        "scanQrCta": "Scan QR code",
         "skipToManual": "Enter manually",
+        "recentTitle": "Recent",
+        "nearbyTitle": "On this network",
         "foundCount": "{count, plural, =0 {No servers found} =1 {1 server} other {# servers}}",
         "emptyTitle": "No servers detected",
         "emptyDescription": "Make sure the desktop is on the same network with the companion server enabled.",
+        "precheckOk": "Reachable · v{version} · {ms} ms",
+        "precheckUnreachable": "Couldn't reach this server. Make sure it's online.",
         "backToDiscover": "Back to discover",
         "baseUrlLocked": "URL locked from discovery",
         "latencyMs": "{ms} ms",
         "tlsPinned": "Identity verified",
+        "tlsMismatch": "Identity changed",
         "tlsUnverified": "Unverified",
         "viaPaired": "Paired",
         "viaMdns": "mDNS",
         "viaProbe": "LAN probe",
-        "viaHistory": "History"
+        "viaHistory": "History",
+        "help": {
+          "trigger": "Can't find your desktop?",
+          "tipSameNetwork": "Both devices must be on the same Wi-Fi network.",
+          "tipFirewall": "Allow Cognia through the desktop firewall.",
+          "tipEnableServer": "Turn on the companion server in desktop Settings → Companion.",
+          "docsCta": "Read the setup guide",
+          "openSettings": "Open system settings"
+        }
       },
       "permissions": {
         "localNetwork": {
@@ -11833,6 +12146,15 @@
       "helpRow": "Help & docs",
       "feedbackRow": "Feedback & diagnostics",
       "deviceInfoRow": "Device info",
+      "terminalRow": "Terminal",
+      "remoteSessionsRow": "Remote sessions",
+      "search": "Search settings",
+      "searchAria": "Search settings",
+      "searchResults": "Results",
+      "searchEmpty": "No matching settings.",
+      "sectionFavorites": "Favorites",
+      "pinned": "Pinned to favorites",
+      "unpinned": "Removed from favorites",
       "profile": {
         "fallbackName": "Signed-out",
         "fallbackPlan": "Local account",
@@ -11857,7 +12179,8 @@
         "sessions": "Sessions",
         "drafts": "Drafts",
         "backup": "Last backup",
-        "backupNever": "Never"
+        "backupNever": "Never",
+        "storage": "Storage"
       },
       "appearanceLink": "Theme & wallpaper",
       "appearanceBackAria": "Back to Me",
@@ -11984,6 +12307,15 @@
         "deny": "Deny"
       }
     },
+    "automation": {
+      "consent": {
+        "sheetDescription": "The connected desktop wants to run an action. Review it, then allow or reject.",
+        "biometricTitle": "Confirm remote action",
+        "biometricReason": "Approve the desktop computer-use action",
+        "biometricDescription": "Allowing lets the connected desktop run this action.",
+        "biometricBlocked": "Approval not completed ({reason})."
+      }
+    },
     "companion": {
       "tunnel": {
         "title": "Cloudflared tunnel",
@@ -11993,7 +12325,20 @@
         "notInstalled": "cloudflared not found — install via brew/winget/apt first.",
         "off": "Off. Turning the switch on launches cloudflared as a subprocess.",
         "onlyDesktop": "Tunnel control is desktop-only.",
-        "enableLabel": "Enable cloudflared tunnel"
+        "enableLabel": "Enable cloudflared tunnel",
+        "modeQuick": "Quick (random URL)",
+        "modeNamed": "Named (persistent URL)",
+        "hostnameLabel": "Public hostname",
+        "hostnamePlaceholder": "https://cognia.example.com",
+        "tokenLabel": "Connector token",
+        "tokenPlaceholder": "eyJ...",
+        "saveButton": "Save",
+        "saving": "Saving...",
+        "saved": "Saved.",
+        "clearButton": "Clear",
+        "clearAria": "Clear named tunnel configuration",
+        "cleared": "Configuration cleared.",
+        "namedConfigured": "Named tunnel configured. Toggle to start cloudflared."
       },
       "mdns": {
         "title": "LAN auto-discovery (mDNS)",
@@ -12038,7 +12383,7 @@
         "enableHelp": "When on, the mobile app reaches this desktop directly via WebRTC after pairing — falling back to LAN or the cloudflared tunnel only when WebRTC can't open.",
         "description": "Third transport tier (ADR-0021). Lets paired phones reach this desktop from anywhere without a tunnel, using a stateless rendezvous and HMAC-signed envelopes.",
         "signalingUrlLabel": "Signaling server URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.app/v1/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
         "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
         "iceServersLabel": "STUN servers",
         "iceServersHelp": "One stun: URL per line. Public STUN is enough for most home networks; add more if NAT traversal stalls.",
@@ -12198,7 +12543,8 @@
           "twinProfile": "Twin profile",
           "plugins": "Plugins",
           "adapterInstances": "Connectors",
-          "settings": "App settings"
+          "settings": "App settings",
+          "conversationOverrides": "Conversation overrides"
         }
       }
     },
@@ -12254,6 +12600,7 @@
       "activeBadge": "Active",
       "landscapeHint": "Rotate for full graph",
       "runsHeader": "Recent runs",
+      "runsBackAria": "Back to workflow",
       "noRuns": "No runs yet.",
       "statusRunning": "Running",
       "statusSucceeded": "Succeeded",
@@ -12265,7 +12612,37 @@
       "pinned": "Pinned",
       "pinned_added": "Pinned.",
       "pinned_removed": "Unpinned.",
-      "graphViewerEmpty": "No nodes in this workflow."
+      "graphViewerEmpty": "No nodes in this workflow.",
+      "editor": {
+        "back": "Back to workflows",
+        "modeRead": "View",
+        "modeEdit": "Edit",
+        "run": "Run",
+        "save": "Save",
+        "saved": "Saved.",
+        "savedWithIssues": "Saved — {count} node(s) need attention.",
+        "saveFailed": "Save failed.",
+        "menu": "More actions",
+        "undo": "Undo",
+        "redo": "Redo",
+        "autoLayout": "Auto-arrange",
+        "autoLayoutFailed": "Auto-arrange unavailable.",
+        "fitView": "Fit to screen",
+        "snapOn": "Snap to grid: on",
+        "snapOff": "Snap to grid: off",
+        "export": "Export JSON",
+        "exported": "Workflow exported.",
+        "import": "Import JSON",
+        "imported": "Workflow imported.",
+        "importFailed": "Import failed",
+        "dirty": "Unsaved",
+        "savedBadge": "Saved",
+        "inspectorTitle": "Node settings",
+        "connect": "Connect",
+        "connectTarget": "Tap a node to connect",
+        "cancelConnect": "Cancel",
+        "addNode": "Add node"
+      }
     },
     "workflowList": {
       "swipe": {
@@ -12352,7 +12729,9 @@
       "exportBiometricReason": "Authenticate to export an encrypted backup.",
       "biometricBlocked": "Biometric check failed. Export cancelled.",
       "passphraseRequiredHint": "Required so the encrypted archive can be opened later.",
-      "webModeNote": "Web mode: backup downloads as a regular file."
+      "webModeNote": "Web mode: backup downloads as a regular file.",
+      "shareFile": "Share file",
+      "shareTitle": "Cognia Backup"
     },
     "shareTarget": {
       "title": "Share via cognia",
@@ -13908,6 +14287,24 @@
         "sessionId": {
           "label": "Session id (optional)",
           "hint": "Limit to a single chat session. Empty fires on any session for the character."
+        }
+      },
+      "goalCompletedTrigger": {
+        "goalId": {
+          "label": "Goal id (optional)",
+          "hint": "Limit to a specific goal. Empty fires for every goal that finishes."
+        },
+        "status": {
+          "label": "Terminal status (optional)",
+          "hint": "Limit to one outcome, e.g. completed, stopped, budget, turn, timeout. Empty fires on any.",
+          "placeholder": "completed"
+        },
+        "sessionId": {
+          "label": "Session id (optional)",
+          "hint": "Limit to goals started in a single chat session."
+        },
+        "characterId": {
+          "label": "Character (optional)"
         }
       },
       "characterSend": {

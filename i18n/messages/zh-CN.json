@@ -1,4 +1,186 @@
 {
+  "goal": {
+    "console": {
+      "title": "目标",
+      "subtitle": "智能体自动推进的长期目标。",
+      "newGoal": "新建目标",
+      "activeEmpty": "暂无活跃目标。在聊天里用 /goal 命令开始一个。",
+      "openGoalsHeading": "进行中的目标",
+      "statActive": "{count} 进行中",
+      "statPaused": "{count} 已暂停",
+      "statDone": "{count} 已完成",
+      "tabs": {
+        "history": "历史",
+        "templates": "模板",
+        "defaults": "默认值",
+        "tracker": "Tracker"
+      }
+    },
+    "card": {
+      "elapsed": "{minutes} 分钟",
+      "turns": "回合",
+      "tokens": "Tokens"
+    },
+    "launcher": {
+      "title": "目标",
+      "description": "持久聊天目标（ADR-0019）。用 /goal 设定目标，智能体会自动续跑，直到判定完成、或触发预算 / 超时。",
+      "open": "打开目标控制台"
+    },
+    "status": {
+      "active": "进行中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "stopped": "已停止",
+      "budget_limited": "预算耗尽",
+      "turn_limited": "回合耗尽",
+      "timed_out": "已超时",
+      "preempted": "已抢占"
+    },
+    "pill": {
+      "ariaActiveGoal": "活跃目标：{objective}",
+      "progress": "{turns}/{maxTurns} 回合 · {tokens}k tok",
+      "continue": "继续目标",
+      "pause": "暂停目标",
+      "resume": "恢复目标",
+      "stop": "停止目标",
+      "details": "打开目标详情"
+    },
+    "detailSheet": {
+      "title": "目标 · {status}",
+      "tabs": {
+        "overview": "概览",
+        "subgoals": "子目标",
+        "activity": "活动",
+        "settings": "设置"
+      }
+    },
+    "overview": {
+      "objective": "目标",
+      "statusBadge": "状态：{status}",
+      "createdBadge": "创建于：{date}",
+      "endedBadge": "结束于：{date}",
+      "turns": "回合",
+      "tokens": "Tokens",
+      "lastJudgeReason": "最近判定理由",
+      "exitReason": "退出原因",
+      "turnBudgetAria": "已用回合预算",
+      "tokenBudgetAria": "已用 token 预算"
+    },
+    "activity": {
+      "loading": "加载中…",
+      "empty": "暂无活动。",
+      "goal_created": "已创建，预算 {turns} 回合 / {tokens} token",
+      "objective_updated": "目标已替换",
+      "turn_started": "第 {n} 回合开始",
+      "turn_completed": "第 {n} 回合完成（{tokens} tok）",
+      "judge_evaluated": "done={done} — {reason}",
+      "judge_parse_failed": "解析失败 #{n}",
+      "exit_triggered": "{exit} — {reason}",
+      "user_paused": "用户暂停",
+      "user_resumed": "用户恢复",
+      "user_stopped": "用户停止",
+      "config_updated": "配置已更新"
+    },
+    "subgoals": {
+      "title": "子目标 — Phase 2",
+      "body": "自动子目标拆解将在后续版本提供。目前目标作为单一任务运行，由判定决定何时完成。"
+    },
+    "config": {
+      "maxTurns": "最大回合数",
+      "maxTurnsHint": "续跑回合硬上限。1–100。",
+      "maxTokens": "最大 token 数",
+      "maxTokensHint": "记到该目标账上的累计 token 硬上限。",
+      "maxJudgeFailures": "最大判定失败次数",
+      "maxJudgeFailuresHint": "连续 JSON 解析失败多少次后自动暂停（fail-OPEN）。",
+      "timeout": "超时（分钟）",
+      "timeoutHint": "从目标创建起的挂钟上限。",
+      "inlineStop": "内联停止条件",
+      "inlineStopHint": "追加到系统提示。例如：'或在产出 3 首俳句后停止'。",
+      "save": "保存修改",
+      "saving": "保存中…"
+    },
+    "defaults": {
+      "maxTurns": "默认最大回合数",
+      "maxTurnsHint": "新目标的续跑回合硬上限。",
+      "maxTokens": "默认最大 token 数",
+      "maxTokensHint": "记到目标账上的累计输入 + 输出 token。",
+      "maxJudgeFailures": "默认最大判定失败次数",
+      "maxJudgeFailuresHint": "连续 JSON 解析失败多少次后自动暂停。",
+      "timeout": "默认超时（分钟）",
+      "timeoutHint": "从目标创建起的挂钟上限。",
+      "startPaused": "新目标默认暂停",
+      "startPausedHint": "开启后，新目标需先 /goal resume 才会开始循环。",
+      "save": "保存默认值",
+      "saving": "保存中…"
+    },
+    "judge": {
+      "heading": "判定",
+      "model": "判定模型",
+      "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
+      "useChatModel": "使用聊天模型",
+      "temperature": "判定温度",
+      "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
+      "maxTokens": "判定最大 token",
+      "maxTokensHint": "判定回复的上限。判定只回一行——200 足够。",
+      "promptOverride": "判定提示覆盖",
+      "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。"
+    },
+    "pacing": {
+      "heading": "节奏",
+      "manualContinue": "手动继续",
+      "manualContinueHint": "开启后，每回合循环会等你点击目标徽章上的“继续”。",
+      "interval": "回合最小间隔（秒）",
+      "intervalHint": "限制自动续跑速度。0 表示不延迟。",
+      "quietHoursEnable": "安静时段",
+      "quietHoursHint": "在该时段内暂停自动续跑（使用你的时区）。",
+      "quietHoursFrom": "从",
+      "quietHoursTo": "到"
+    },
+    "templates": {
+      "heading": "目标模板",
+      "empty": "暂无模板。",
+      "add": "新建模板",
+      "use": "使用",
+      "edit": "编辑",
+      "delete": "删除",
+      "favorite": "收藏",
+      "builtinBadge": "内置",
+      "titleField": "标题",
+      "objectiveField": "目标",
+      "save": "保存模板",
+      "cancel": "取消",
+      "needSession": "请先打开一个聊天会话，再使用模板。"
+    },
+    "tracker": {
+      "loading": "加载中…",
+      "missing": "Goal Tracker 角色缺失——重新播种内置项以恢复。",
+      "systemPrompt": "系统提示",
+      "permissionMode": "权限模式：{mode}",
+      "builtin": "内置（不可删除）",
+      "customise": "想自定义该智能体的提示？打开 设置 → 角色 并复制 Goal Tracker。"
+    },
+    "history": {
+      "objective": "目标",
+      "status": "状态",
+      "turns": "回合",
+      "tokens": "Tokens",
+      "created": "创建时间",
+      "empty": "暂无目标。在聊天里用 /goal 命令开始一个。"
+    },
+    "commands": {
+      "needSession": "请先开始一个聊天会话——/goal 在活跃会话内运行。",
+      "streaming": "当前回合仍在流式输出——等它结束后再运行 /goal。",
+      "createUsage": "用法：输入 /goal，后面跟上你想完成的事。",
+      "created": "🎯 **目标已激活** — {maxTurns} 回合预算，{maxTokensK}k token 预算。",
+      "noActiveGoal": "该会话没有活跃目标。用 /goal 命令开始一个。",
+      "statusHeader": "🎯 **{emoji} {status}** — {turns}/{maxTurns} 回合 · {tokens} tokens · 已用 {minutes} 分钟",
+      "recentActivity": "近期活动：",
+      "paused": "目标已暂停——已用 {turns}/{maxTurns} 回合。用 /goal resume 恢复。",
+      "resumed": "目标已恢复。循环将在下一回合继续。",
+      "stopped": "目标已停止，共用 {turns} 回合。",
+      "objectiveUpdated": "目标已更新。模型将在下一回合获知。"
+    }
+  },
   "featureShell": {
     "openLeft": "打开{name}",
     "openRight": "打开{name}"
@@ -4594,6 +4776,7 @@
         "copied": "已复制",
         "copyFailed": "复制失败",
         "copiedCommand": "命令已复制",
+        "modeNamed": "命名隧道",
         "install": {
           "title": "安装 cloudflared",
           "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",
@@ -7773,6 +7956,120 @@
       "fatal": "致命"
     }
   },
+  "performance": {
+    "title": "性能",
+    "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+    "desktopOnly": {
+      "title": "性能面板仅在桌面端可用",
+      "description": "运行时与进程指标来自原生 Rust 后端，仅在桌面应用中运行。"
+    },
+    "tabs": {
+      "overview": "性能",
+      "processes": "进程",
+      "hotspots": "热点",
+      "runtime": "异步运行时"
+    },
+    "toolbar": {
+      "pause": "暂停",
+      "resume": "继续",
+      "reset": "重置热点",
+      "intervalLabel": "采样间隔",
+      "intervalValue": "{seconds} 秒",
+      "export": {
+        "label": "导出",
+        "json": "快照（JSON）",
+        "processes": "进程（CSV）",
+        "hotspots": "热点（CSV）",
+        "done": "已导出 {filename}"
+      }
+    },
+    "metrics": {
+      "cpu": "应用 CPU",
+      "memory": "应用内存",
+      "runtimeBusy": "运行时繁忙",
+      "tasks": "异步任务",
+      "diskIo": "磁盘 I/O"
+    },
+    "overview": {
+      "selectMetric": "选择指标"
+    },
+    "memoryPressure": {
+      "title": "内存压力",
+      "low": "正常",
+      "moderate": "中等",
+      "high": "严重"
+    },
+    "process": {
+      "empty": "尚未采样到进程。",
+      "searchPlaceholder": "搜索进程…",
+      "noMatch": "没有匹配的进程。",
+      "summary": {
+        "processes": "进程数",
+        "totalCpu": "总 CPU",
+        "totalMemory": "总内存",
+        "totalDisk": "磁盘 I/O"
+      },
+      "columns": {
+        "name": "名称",
+        "pid": "PID",
+        "role": "角色",
+        "cpu": "CPU",
+        "trend": "趋势",
+        "memory": "内存",
+        "uptime": "运行时长",
+        "diskRead": "磁盘读",
+        "diskWrite": "磁盘写"
+      },
+      "roles": {
+        "main": "主进程",
+        "sidecar": "侧载进程",
+        "child": "子进程"
+      }
+    },
+    "hotspots": {
+      "empty": "尚未记录到热点。",
+      "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。",
+      "columns": {
+        "name": "操作",
+        "calls": "调用次数",
+        "avg": "平均",
+        "p50": "p50",
+        "p95": "p95",
+        "distribution": "分布",
+        "max": "最大",
+        "total": "合计",
+        "errors": "错误"
+      }
+    },
+    "runtime": {
+      "empty": "正在等待首个运行时采样…",
+      "groups": {
+        "workers": "工作线程",
+        "tasks": "任务",
+        "queues": "队列",
+        "throughput": "吞吐"
+      },
+      "workers": "工作线程",
+      "aliveTasks": "存活任务",
+      "globalQueue": "全局队列",
+      "busy": "繁忙",
+      "blockingThreads": "阻塞线程",
+      "blockingQueue": "阻塞队列",
+      "spawned": "累计派生",
+      "forcedYields": "强制让出",
+      "steal": "窃取",
+      "park": "驻留",
+      "overflow": "溢出",
+      "perWorker": "各工作线程繁忙度",
+      "workerN": "工作线程 {n}",
+      "traces": {
+        "title": "飞行记录 trace",
+        "description": "dial9 将二进制异步 trace 写入磁盘以供离线分析。",
+        "open": "打开文件夹",
+        "empty": "暂无 trace 文件。"
+      }
+    }
+  },
   "common": {
     "cancel": "取消",
     "save": "保存",
@@ -9164,6 +9461,8 @@
       "plugins": "插件",
       "agentTeams": "智能体团队",
       "scheduler": "调度器",
+      "goals": "目标",
+      "performance": "性能",
       "logs": "日志",
       "me": "我的",
       "featuresGroup": "功能",
@@ -11750,19 +12049,33 @@
         "subtitle": "选择下方的服务器，或跳过手动输入。",
         "scanning": "正在扫描局域网…",
         "rescanCta": "重新扫描",
+        "scanQrCta": "扫描二维码",
         "skipToManual": "手动输入",
+        "recentTitle": "最近连接",
+        "nearbyTitle": "本网络内",
         "foundCount": "{count, plural, =0 {未发现服务器} other {发现 # 台}}",
         "emptyTitle": "未发现服务器",
         "emptyDescription": "请确认桌面与手机连在同一网络，且桌面端已开启 Companion 服务。",
+        "precheckOk": "可连接 · v{version} · {ms} 毫秒",
+        "precheckUnreachable": "无法连接该服务器，请确认它已在线。",
         "backToDiscover": "返回扫描列表",
         "baseUrlLocked": "地址已从扫描结果锁定",
         "latencyMs": "{ms} 毫秒",
         "tlsPinned": "身份已验证",
+        "tlsMismatch": "身份已变更",
         "tlsUnverified": "未验证",
         "viaPaired": "已配对",
         "viaMdns": "mDNS",
         "viaProbe": "局域网探测",
-        "viaHistory": "历史"
+        "viaHistory": "历史",
+        "help": {
+          "trigger": "找不到桌面？",
+          "tipSameNetwork": "两台设备需连接到同一 Wi-Fi 网络。",
+          "tipFirewall": "请在桌面防火墙中允许 Cognia 通过。",
+          "tipEnableServer": "在桌面端 设置 → Companion 中开启 Companion 服务。",
+          "docsCta": "查看配置指南",
+          "openSettings": "打开系统设置"
+        }
       },
       "permissions": {
         "localNetwork": {
@@ -11833,6 +12146,15 @@
       "helpRow": "帮助与文档",
       "feedbackRow": "反馈与诊断",
       "deviceInfoRow": "设备信息",
+      "terminalRow": "终端",
+      "remoteSessionsRow": "远程会话",
+      "search": "搜索设置",
+      "searchAria": "搜索设置",
+      "searchResults": "结果",
+      "searchEmpty": "没有匹配的设置。",
+      "sectionFavorites": "常用",
+      "pinned": "已置顶到常用",
+      "unpinned": "已从常用移除",
       "profile": {
         "fallbackName": "未登录",
         "fallbackPlan": "本机账号",
@@ -11857,7 +12179,8 @@
         "sessions": "会话",
         "drafts": "草稿",
         "backup": "上次备份",
-        "backupNever": "从未"
+        "backupNever": "从未",
+        "storage": "存储"
       },
       "appearanceLink": "主题与壁纸",
       "appearanceBackAria": "返回个人",
@@ -11984,6 +12307,15 @@
         "deny": "拒绝"
       }
     },
+    "automation": {
+      "consent": {
+        "sheetDescription": "已连接的桌面请求执行一个操作。请确认后选择允许或拒绝。",
+        "biometricTitle": "确认远程操作",
+        "biometricReason": "批准桌面的 computer-use 操作",
+        "biometricDescription": "允许后，已连接的桌面将执行此操作。",
+        "biometricBlocked": "批准未完成（{reason}）。"
+      }
+    },
     "companion": {
       "tunnel": {
         "title": "Cloudflared 隧道",
@@ -11993,7 +12325,20 @@
         "notInstalled": "找不到 cloudflared，先 brew/winget/apt 安装。",
         "off": "关闭中。开关打开后会以子进程方式拉起 cloudflared。",
         "onlyDesktop": "隧道仅在桌面运行时可用。",
-        "enableLabel": "启用 cloudflared 隧道"
+        "enableLabel": "启用 cloudflared 隧道",
+        "modeQuick": "Quick（随机 URL）",
+        "modeNamed": "Named（固定 URL）",
+        "hostnameLabel": "公网主机名",
+        "hostnamePlaceholder": "https://cognia.example.com",
+        "tokenLabel": "Connector token",
+        "tokenPlaceholder": "eyJ...",
+        "saveButton": "保存",
+        "saving": "保存中...",
+        "saved": "已保存。",
+        "clearButton": "清除",
+        "clearAria": "清除命名隧道配置",
+        "cleared": "配置已清除。",
+        "namedConfigured": "命名隧道已配置。打开开关即可启动 cloudflared。"
       },
       "mdns": {
         "title": "LAN 自动发现 (mDNS)",
@@ -12038,7 +12383,7 @@
         "enableHelp": "开启后，移动端在配对完成后会通过 WebRTC 直接连接到本桌面；只有在 WebRTC 无法打通时才会回退到 LAN 或 Cloudflared 隧道。",
         "description": "第三层传输通道（ADR-0021）。基于无状态汇合点和 HMAC 签名信封，让已配对的手机在任意网络下都能直连本桌面，无需依赖隧道。",
         "signalingUrlLabel": "信令服务器 URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.app/v1/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v1/signaling",
         "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
         "iceServersLabel": "STUN 服务器",
         "iceServersHelp": "每行一个 stun: URL。多数家庭网络下公共 STUN 已经够用；NAT 打洞失败时再追加备用。",
@@ -12198,7 +12543,8 @@
           "twinProfile": "数字孪生",
           "plugins": "插件",
           "adapterInstances": "连接器",
-          "settings": "应用设置"
+          "settings": "应用设置",
+          "conversationOverrides": "会话覆盖"
         }
       }
     },
@@ -12254,6 +12600,7 @@
       "activeBadge": "活跃",
       "landscapeHint": "横屏阅读大图",
       "runsHeader": "最近运行",
+      "runsBackAria": "返回工作流",
       "noRuns": "暂无运行记录。",
       "statusRunning": "运行中",
       "statusSucceeded": "成功",
@@ -12265,7 +12612,37 @@
       "pinned": "置顶",
       "pinned_added": "已置顶。",
       "pinned_removed": "已取消置顶。",
-      "graphViewerEmpty": "工作流中没有节点。"
+      "graphViewerEmpty": "工作流中没有节点。",
+      "editor": {
+        "back": "返回工作流",
+        "modeRead": "查看",
+        "modeEdit": "编辑",
+        "run": "运行",
+        "save": "保存",
+        "saved": "已保存。",
+        "savedWithIssues": "已保存 — {count} 个节点需要处理。",
+        "saveFailed": "保存失败。",
+        "menu": "更多操作",
+        "undo": "撤销",
+        "redo": "重做",
+        "autoLayout": "自动排布",
+        "autoLayoutFailed": "无法自动排布。",
+        "fitView": "适配屏幕",
+        "snapOn": "网格吸附：开",
+        "snapOff": "网格吸附：关",
+        "export": "导出 JSON",
+        "exported": "工作流已导出。",
+        "import": "导入 JSON",
+        "imported": "工作流已导入。",
+        "importFailed": "导入失败",
+        "dirty": "未保存",
+        "savedBadge": "已保存",
+        "inspectorTitle": "节点设置",
+        "connect": "连线",
+        "connectTarget": "点按一个节点完成连线",
+        "cancelConnect": "取消",
+        "addNode": "添加节点"
+      }
     },
     "workflowList": {
       "swipe": {
@@ -12352,7 +12729,9 @@
       "exportBiometricReason": "通过生物识别验证后导出加密备份。",
       "biometricBlocked": "生物识别失败，已取消导出。",
       "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。",
-      "webModeNote": "Web 模式：备份会以普通文件下载。"
+      "webModeNote": "Web 模式：备份会以普通文件下载。",
+      "shareFile": "分享文件",
+      "shareTitle": "Cognia 备份"
     },
     "shareTarget": {
       "title": "通过 cognia 分享",
@@ -13908,6 +14287,24 @@
         "sessionId": {
           "label": "会话 ID（可选）",
           "hint": "限定单个聊天会话。留空时该角色的任意会话都会触发。"
+        }
+      },
+      "goalCompletedTrigger": {
+        "goalId": {
+          "label": "目标 ID（可选）",
+          "hint": "限定指定目标。留空时任意完成的目标都会触发。"
+        },
+        "status": {
+          "label": "终止状态（可选）",
+          "hint": "限定单一结果，如 completed、stopped、budget、turn、timeout。留空时任意状态都会触发。",
+          "placeholder": "completed"
+        },
+        "sessionId": {
+          "label": "会话 ID（可选）",
+          "hint": "限定在单个聊天会话中启动的目标。"
+        },
+        "characterId": {
+          "label": "角色（可选）"
         }
       },
       "characterSend": {
