@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import type { A2UIComponentProps, A2UIListComponent } from "@/types/a2ui/schema"
 import { useA2UIData, useA2UIActions } from "@/hooks/a2ui"
 import { resolveArrayOrPath, getValueByPath } from "@/lib/a2ui/data-model"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 import { getItemKey, getItemDisplayText } from "@/lib/a2ui/list-utils"
 import { useA2UIListNavigation } from "@/hooks/a2ui/use-a2ui-keyboard"
 

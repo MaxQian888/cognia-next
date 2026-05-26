@@ -6,12 +6,12 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import {
   A2UIRenderer,
-  A2UIChildRenderer,
   withA2UIContext,
   registerBuiltInComponent,
   isComponentRegistered,
   getRegisteredComponentTypes,
 } from "./a2ui-renderer"
+import { A2UIChildRenderer } from "./a2ui-child-renderer"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
 // Mock the context

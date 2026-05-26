@@ -184,29 +184,16 @@ describe("WelcomeA2UIDemoCompact", () => {
     onAction: jest.fn(),
   }
 
-  beforeEach(() => {
-    jest.clearAllMocks()
-    mockGetSurface.mockReturnValue(mockSurface)
+  it("always returns null on mobile", () => {
+    const { container } = render(<WelcomeA2UIDemoCompact {...defaultProps} />)
+
+    expect(container.firstChild).toBeNull()
   })
 
-  it("renders compact surface", () => {
-    render(<WelcomeA2UIDemoCompact {...defaultProps} />)
-
-    expect(screen.getByTestId("a2ui-surface")).toBeInTheDocument()
-  })
-
-  it("applies custom className", () => {
+  it("ignores className prop", () => {
     const { container } = render(
       <WelcomeA2UIDemoCompact {...defaultProps} className="compact-class" />
     )
-
-    expect(container.firstChild).toHaveClass("compact-class")
-  })
-
-  it("returns null when surface is not ready", () => {
-    mockGetSurface.mockReturnValue(undefined as unknown as typeof mockSurface)
-
-    const { container } = render(<WelcomeA2UIDemoCompact {...defaultProps} />)
 
     expect(container.firstChild).toBeNull()
   })

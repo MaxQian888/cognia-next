@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import type { A2UIComponentProps, A2UIDialogComponent } from "@/types/a2ui/schema"
 import { useA2UIData, useA2UIActions } from "../a2ui-context"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 import { useA2UIFocusTrap } from "@/hooks/a2ui/use-a2ui-keyboard"
 
 export const A2UIDialog = memo(function A2UIDialog({

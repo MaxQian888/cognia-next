@@ -8,7 +8,7 @@
 import React, { memo, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 import { useA2UIForm, type ValidationRule } from "@/hooks/a2ui/use-a2ui-form"
 
 export interface A2UIFormGroupComponent extends A2UIBaseComponent {

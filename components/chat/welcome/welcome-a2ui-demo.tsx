@@ -323,64 +323,11 @@ export function WelcomeA2UIDemo({
 }
 
 /**
- * Compact version of the A2UI demo for mobile/limited space
+ * Compact version of the A2UI demo for mobile/limited space.
+ * Intentionally returns null — mobile welcome does not show quick-start / try-prompt surfaces.
  */
-export function WelcomeA2UIDemoCompact({ className, onAction }: WelcomeA2UIDemoProps) {
-  const { createQuickSurface, getSurface, deleteSurface } = useA2UI({
-    onAction,
-  })
-
-  const compactSurfaceId = "welcome-demo-compact"
-
-  useEffect(() => {
-    const components: A2UIComponent[] = [
-      {
-        id: "root",
-        component: "Row",
-        children: ["btn-quick-1", "btn-quick-2"],
-        className: "gap-2",
-      },
-      {
-        id: "btn-quick-1",
-        component: "Button",
-        text: "✨ Quick Start",
-        variant: "default",
-        action: "quick-start",
-      },
-      {
-        id: "btn-quick-2",
-        component: "Button",
-        text: "📚 Examples",
-        variant: "outline",
-        action: "show-examples",
-      },
-    ] as A2UIComponent[]
-
-    createQuickSurface(
-      compactSurfaceId,
-      components,
-      {},
-      {
-        type: "inline",
-      }
-    )
-
-    return () => {
-      deleteSurface(compactSurfaceId)
-    }
-  }, [createQuickSurface, deleteSurface])
-
-  const surface = getSurface(compactSurfaceId)
-
-  if (!surface) {
-    return null
-  }
-
-  return (
-    <div className={cn("a2ui-welcome-demo-compact", className)}>
-      <A2UIInlineSurface surfaceId={compactSurfaceId} />
-    </div>
-  )
+export function WelcomeA2UIDemoCompact(_props: WelcomeA2UIDemoProps) {
+  return null
 }
 
 export default WelcomeA2UIDemo

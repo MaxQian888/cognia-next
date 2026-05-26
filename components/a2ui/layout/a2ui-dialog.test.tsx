@@ -45,7 +45,7 @@ jest.mock("../a2ui-context", () => ({
 }))
 
 // Mock the child renderer
-jest.mock("../a2ui-renderer", () => ({
+jest.mock("../a2ui-child-renderer", () => ({
   A2UIChildRenderer: ({ childIds }: { childIds: string[] }) => (
     <div data-testid="child-renderer">{childIds.join(", ")}</div>
   ),

@@ -8,7 +8,7 @@
 import React, { memo } from "react"
 import { cn } from "@/lib/utils"
 import type { A2UIComponentProps, A2UIRowComponent } from "@/types/a2ui/schema"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 
 const alignStyles: Record<string, string> = {
   start: "items-start",

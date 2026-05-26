@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/card"
 import type { A2UIComponentProps, A2UICardComponent } from "@/types/a2ui/schema"
 import { useA2UIData } from "../a2ui-context"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 
 export const A2UICard = memo(function A2UICard({
   component,

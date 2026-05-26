@@ -22,12 +22,12 @@ export type { A2UISurfaceContainerProps } from "@/types/a2ui/renderer"
 // Renderer
 export {
   A2UIRenderer,
-  A2UIChildRenderer,
   withA2UIContext,
   registerBuiltInComponent,
   isComponentRegistered,
   getRegisteredComponentTypes,
 } from "./a2ui-renderer"
+export { A2UIChildRenderer } from "./a2ui-child-renderer"
 
 // Error Boundary
 export { A2UIErrorBoundary } from "./a2ui-error-boundary"

@@ -14,7 +14,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import type { A2UIComponentProps, A2UIAccordionComponent } from "@/types/a2ui/schema"
-import { A2UIChildRenderer } from "../a2ui-renderer"
+import { A2UIChildRenderer } from "../a2ui-child-renderer"
 import { useA2UIKeyboard } from "@/hooks/a2ui/use-a2ui-keyboard"
 
 export const A2UIAccordion = memo(function A2UIAccordion({
