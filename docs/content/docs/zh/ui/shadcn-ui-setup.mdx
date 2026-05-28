@@ -7,19 +7,6 @@ description: shadcn/ui v3（new-york 风格 + RSC + Tailwind v4），57 个组�
 
 cognia-next 的所有 UI 原子（按钮、对话框、输入框、表格、Sheet、Drawer、Sidebar……）来自 [shadcn/ui](https://ui.shadcn.com/)。这一页是 shadcn 在本仓库的**所有约定与配置**的单一参考：风格选项、已装组件清单、添加新组件的命令、主题 token 与全局 Provider。
 
-## TL;DR
-
-<TLDR>
-
-- 配置文件：`components.json` —— `style: "new-york"`, `rsc: true`, `baseColor: "neutral"`, `iconLibrary: "lucide"`。
-- Tailwind 版本 = **v4**（PostCSS 插件，无 `tailwind.config.{js,ts}`，配置全在 `app/globals.css` 的 `@theme inline` 块）。
-- **57 个组件**已预装在 `components/ui/`；直接 import，不要再 `shadcn add`。
-- 主题 token 用 **oklch 色彩空间** + CSS 变量；亮/暗模式由 `<html>` 上的 `.dark` 类切换。
-- `TooltipProvider` 已挂在 `app/layout.tsx`，组件内**不要**再包一层。
-- `components/ui/` **不写测试**，**不算覆盖率**（与 `components/ai-elements/` 一样属于 vendored 例外）。
-
-</TLDR>
-
 ## components.json
 
 ```json title="components.json"

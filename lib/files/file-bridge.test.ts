@@ -19,9 +19,24 @@ jest.mock("@/lib/claude/ipc", () => ({
   writeTextFile: jest.fn(),
 }))
 
+const mockReadBinary = jest.fn()
+jest.mock(
+  "@tauri-apps/plugin-fs",
+  () => ({
+    readFile: (...args: unknown[]) => mockReadBinary(...args),
+  }),
+  { virtual: true }
+)
+
 import { isTauri } from "@/lib/tauri"
 import { defaultExportDir, readTextFile, writeTextFile } from "@/lib/claude/ipc"
-import { pickAndReadFiles, saveFileAs, pickDirectory, saveFilesToDir } from "./file-bridge"
+import {
+  pickAndReadFiles,
+  pickAndReadBinaryFiles,
+  saveFileAs,
+  pickDirectory,
+  saveFilesToDir,
+} from "./file-bridge"
 
 const mockedIsTauri = isTauri as unknown as jest.Mock
 const mockedDefaultExportDir = defaultExportDir as unknown as jest.Mock
@@ -35,6 +50,7 @@ beforeEach(() => {
   mockedWrite.mockReset()
   mockOpen.mockReset()
   mockSave.mockReset()
+  mockReadBinary.mockReset()
 })
 
 describe("pickAndReadFiles — Tauri branch", () => {
@@ -178,6 +194,110 @@ describe("pickAndReadFiles — browser branch", () => {
     })
     expect(fakeInput.accept).toBe(".md,.markdown")
     expect(out).toEqual([{ name: "a.txt", path: "", content: "AAA" }])
+    spy.mockRestore()
+  })
+})
+
+describe("pickAndReadBinaryFiles — Tauri branch", () => {
+  beforeEach(() => mockedIsTauri.mockReturnValue(true))
+
+  it("returns [] when the user cancels", async () => {
+    mockOpen.mockResolvedValue(null)
+    const out = await pickAndReadBinaryFiles()
+    expect(out).toEqual([])
+  })
+
+  it("reads single picked file via the Tauri fs plugin", async () => {
+    mockOpen.mockResolvedValue("/abs/path/skill.zip")
+    mockReadBinary.mockResolvedValue(new Uint8Array([0x50, 0x4b, 0x03, 0x04]))
+    const out = await pickAndReadBinaryFiles({
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    })
+    expect(out).toHaveLength(1)
+    expect(out[0].name).toBe("skill.zip")
+    expect(out[0].path).toBe("/abs/path/skill.zip")
+    expect(Array.from(out[0].bytes)).toEqual([0x50, 0x4b, 0x03, 0x04])
+    expect(mockOpen).toHaveBeenCalledWith({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    })
+  })
+
+  it("reads multiple picked files and silently skips errored reads", async () => {
+    mockOpen.mockResolvedValue(["/a.zip", "/b.zip"])
+    mockReadBinary
+      .mockResolvedValueOnce(new Uint8Array([1]))
+      .mockRejectedValueOnce(new Error("nope"))
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const out = await pickAndReadBinaryFiles({ multiple: true })
+    expect(out).toHaveLength(1)
+    expect(Array.from(out[0].bytes)).toEqual([1])
+    consoleSpy.mockRestore()
+  })
+})
+
+describe("pickAndReadBinaryFiles — browser branch", () => {
+  beforeEach(() => mockedIsTauri.mockReturnValue(false))
+
+  it("returns [] on cancel", async () => {
+    const fakeInput = {
+      type: "",
+      multiple: false,
+      accept: "",
+      files: null as FileList | null,
+      onchange: null as null | (() => Promise<void>),
+      oncancel: null as null | (() => void),
+      click() {
+        this.oncancel?.()
+      },
+    }
+    const spy = jest
+      .spyOn(document, "createElement")
+      .mockReturnValueOnce(fakeInput as unknown as HTMLElement)
+    const out = await pickAndReadBinaryFiles()
+    expect(out).toEqual([])
+    spy.mockRestore()
+  })
+
+  it("reads file bytes via File.arrayBuffer()", async () => {
+    const fakeFile = {
+      name: "bundle.zip",
+      arrayBuffer: jest.fn(async () => new Uint8Array([0xde, 0xad, 0xbe, 0xef]).buffer),
+    }
+    const fakeInput: {
+      type: string
+      multiple: boolean
+      accept: string
+      files: FileList | null
+      onchange: null | (() => Promise<void>)
+      oncancel: null | (() => void)
+      click(): void
+    } = {
+      type: "",
+      multiple: true,
+      accept: "",
+      files: null,
+      onchange: null,
+      oncancel: null,
+      click() {
+        const list = [fakeFile] as unknown as FileList
+        Object.assign(list, { length: 1 })
+        this.files = list
+        ;(this.onchange as () => Promise<void>)?.()
+      },
+    }
+    const spy = jest
+      .spyOn(document, "createElement")
+      .mockReturnValueOnce(fakeInput as unknown as HTMLElement)
+    const out = await pickAndReadBinaryFiles({
+      multiple: true,
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    })
+    expect(fakeInput.accept).toBe(".zip")
+    expect(out).toHaveLength(1)
+    expect(out[0].name).toBe("bundle.zip")
+    expect(Array.from(out[0].bytes)).toEqual([0xde, 0xad, 0xbe, 0xef])
     spy.mockRestore()
   })
 })

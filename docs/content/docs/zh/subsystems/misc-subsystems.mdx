@@ -6,15 +6,6 @@ description: TTS、推送、二维码、网络代理、连通性探测、队列�
 # 其他子系统
 
 这页汇总几个规模相对较小、但任何一个少了都明显缺东西的子系统。每个小节先讲它做什么，再列关键文件，最后给关联文档。结构上比其他子系统页扁平 —— 这些模块各自相对独立，没必要按一份大的统一模型组织。
-
-<TLDR>
-  TTS（9 个 provider + Edge-TTS WSS 桥）、Push（移动端推送注册）、QR（配对二维码 +
-  条码扫描）、Network（代理配置）、Connectivity（mDNS / LAN 扫描 /
-  tunnel）、Queue（带退避的可重试发送队列）、Wallpaper（用户壁纸持久化）、Proxy Config（Rust
-  侧反向代理状态）、LaTeX（KaTeX 缓存）、Monaco（编辑器选项 +
-  工作台上下文）、Media（插件媒体落地）、Time（极简相对时间）。
-</TLDR>
-
 ## 速览
 
 | 子系统              | 角色                                     | 涉及位置                                |
@@ -386,16 +377,16 @@ export function formatRelative(epochMs: number, now = Date.now()): string {
     href="./theming-and-i18n"
     description="Wallpaper / LaTeX / Monaco 影响渲染表面"
   />
-  <Card title="存储" href="./storage" description="壁纸 / 队列 / 媒体落地的 Dexie 表" />
+  <Card title="存储" href="../data/storage" description="壁纸 / 队列 / 媒体落地的 Dexie 表" />
   <Card
     title="运行时 & Tauri"
-    href="./runtime-and-tauri"
+    href="../core/runtime-and-tauri"
     description="Proxy / Wallpaper / TTS 的 Tauri 命令"
   />
-  <Card title="搜索系统" href="./search-system" description="Network proxy 影响所有外部 fetch" />
+  <Card title="搜索系统" href="../data/search-system" description="Network proxy 影响所有外部 fetch" />
   <Card
     title="聊天与技能"
-    href="./chat-and-skills"
+    href="../chat/chat-and-skills"
     description="TTS / Media / LaTeX 在 send 链路里的位置"
   />
   <Card

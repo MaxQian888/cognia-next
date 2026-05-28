@@ -13,7 +13,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, LoaderIcon, PuzzleIcon } from "lucide-react"
+import { PuzzleIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +26,11 @@ import {
 } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
+import { InstallButton } from "@/components/plugins/_shared/install-button"
+import { InstalledMarker } from "@/components/plugins/_shared/installed-marker"
+import { PluginEmptyState } from "@/components/plugins/_shared/plugin-empty-state"
+import { PluginErrorCard } from "@/components/plugins/_shared/plugin-error-card"
+import { PluginVersionBadge } from "@/components/plugins/_shared/plugin-version-badge"
 
 export interface PluginMarketplaceSheetProps {
   /**
@@ -81,7 +86,7 @@ export function PluginMarketplaceSheet({
       </SheetTrigger>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-3 sm:max-w-md"
+        className="flex w-full flex-col gap-3 sm:max-w-md lg:max-w-2xl"
         data-testid="discover-marketplace-sheet"
       >
         <SheetHeader>
@@ -141,23 +146,11 @@ function MarketplaceListings({
     )
   }
   if (market.state.kind === "error") {
-    return (
-      <p
-        className="py-6 text-center text-sm text-destructive"
-        data-testid="discover-marketplace-error"
-      >
-        {market.state.error}
-      </p>
-    )
+    return <PluginErrorCard message={market.state.error} dataTestId="discover-marketplace-error" />
   }
   if (entries.length === 0) {
     return (
-      <p
-        className="py-6 text-center text-sm text-muted-foreground"
-        data-testid="discover-marketplace-empty"
-      >
-        {t("marketplace.empty")}
-      </p>
+      <PluginEmptyState hint={t("marketplace.empty")} dataTestId="discover-marketplace-empty" />
     )
   }
 
@@ -215,42 +208,30 @@ function MarketplaceRow({
               {t("marketplace.verified")}
             </Badge>
           ) : null}
-          {entry.version ? (
-            <Badge variant="secondary" className="text-[10px]">
-              v{entry.version}
-            </Badge>
-          ) : null}
+          {entry.version ? <PluginVersionBadge version={entry.version} /> : null}
         </div>
         {entry.description ? (
           <span className="line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>
         ) : null}
-        {disabled ? (
+        {disabled && !installed ? (
           <span className="text-xs text-muted-foreground">{t("marketplace.desktopOnly")}</span>
         ) : null}
       </div>
-      {installed ? (
-        <Badge variant="secondary" data-testid={`discover-marketplace-installed-${entry.id}`}>
-          {t("marketplace.installed")}
-        </Badge>
-      ) : (
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          disabled={disabled || installing}
-          aria-disabled={disabled || installing}
-          onClick={onInstall}
-          data-testid={`discover-marketplace-install-${entry.id}`}
-          className="gap-1"
-        >
-          {installing ? (
-            <LoaderIcon className="size-4 animate-spin" />
-          ) : (
-            <DownloadIcon className="size-4" />
-          )}
-          {t("marketplace.install")}
-        </Button>
-      )}
+      <div className="flex shrink-0 items-center gap-1">
+        {installed ? (
+          <InstalledMarker data-testid={`discover-marketplace-installed-${entry.id}`} />
+        ) : (
+          <InstallButton
+            installed={false}
+            installing={installing}
+            onInstall={onInstall}
+            disabled={disabled}
+            variant="default"
+            installLabel={t("marketplace.install")}
+            dataTestId={`discover-marketplace-install-${entry.id}`}
+          />
+        )}
+      </div>
     </div>
   )
 }

@@ -13,7 +13,13 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircleIcon, AlertTriangleIcon, InfoIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  InfoIcon,
+  TerminalIcon,
+  ExternalLinkIcon,
+} from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -31,13 +37,15 @@ import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
+import { openUrl } from "@/lib/native/opener"
 import type {
   PreInstallConflict,
   PreInstallPermissionPayload,
   PreInstallConfigPayload,
+  PreInstallBinaryPayload,
 } from "@/lib/plugin/marketplace/install-flow"
 
-export type PreInstallStepId = "conflict" | "permission" | "config"
+export type PreInstallStepId = "conflict" | "permission" | "binaries" | "config"
 
 export interface PreInstallTarget {
   pluginId: string
@@ -47,6 +55,8 @@ export interface PreInstallTarget {
   conflict?: PreInstallConflict
   /** Filled when `step === "permission"`. */
   permission?: PreInstallPermissionPayload
+  /** Filled when `step === "binaries"`. */
+  binaries?: PreInstallBinaryPayload
   /** Filled when `step === "config"`. */
   config?: PreInstallConfigPayload
   /** 1-based step counter for the badge — total steps for this run. */
@@ -92,6 +102,13 @@ export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) 
             {target.step === "permission" && target.permission && (
               <PermissionStep
                 permission={target.permission}
+                onContinue={() => onContinue()}
+                onCancel={onCancel}
+              />
+            )}
+            {target.step === "binaries" && target.binaries && (
+              <BinariesStep
+                binaries={target.binaries}
                 onContinue={() => onContinue()}
                 onCancel={onCancel}
               />
@@ -228,6 +245,77 @@ function PermissionListCard({ title, perms }: { title: string; perms: PluginPerm
         })}
       </ul>
     </Card>
+  )
+}
+
+// =============================================================================
+// Step 2.5 — Binary requirements
+// =============================================================================
+
+function BinariesStep({
+  binaries,
+  onContinue,
+  onCancel,
+}: {
+  binaries: PreInstallBinaryPayload
+  onContinue: () => void
+  onCancel: () => void
+}) {
+  const t = useTranslations("plugins.preInstall")
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{t("binariesHint")}</p>
+      <Card className="p-0">
+        <ScrollArea className="max-h-[40vh]">
+          <ul className="divide-y" data-testid="pre-install-binaries-list">
+            {binaries.missing.map((bin) => (
+              <li key={bin.name} className="flex items-start gap-2 px-3 py-2 text-sm">
+                <TerminalIcon
+                  className="size-4 text-muted-foreground mt-0.5 shrink-0"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <code className="font-mono">{bin.name}</code>
+                    {bin.minVersion && (
+                      <Badge variant="outline" className="text-[10px]">
+                        ≥ {bin.minVersion}
+                      </Badge>
+                    )}
+                  </div>
+                  {bin.detectedVersion ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("binariesFoundOld", { version: bin.detectedVersion })}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{t("binariesNotFound")}</p>
+                  )}
+                  {bin.documentation && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => void openUrl(bin.documentation!)}
+                    >
+                      <ExternalLinkIcon className="mr-1 size-3" aria-hidden="true" />
+                      {t("binariesDocs")}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </ScrollArea>
+      </Card>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel} data-testid="pre-install-binaries-cancel">
+          {t("cancel")}
+        </Button>
+        <Button onClick={onContinue} data-testid="pre-install-binaries-continue">
+          {t("binariesRetry")}
+        </Button>
+      </DialogFooter>
+    </>
   )
 }
 

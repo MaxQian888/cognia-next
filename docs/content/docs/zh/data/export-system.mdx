@@ -5,26 +5,6 @@ description: 单会话 5 种格式 + 批量 ZIP 导出 —— Markdown / JSON / 
 
 # 导出系统
 
-<Status variant="stable" />
-
-<TLDR>
-  统一入口 `renderSingleExport({ format, session, messages })` 派发到 5 种格式：
-  rich Markdown、rich JSON、plain text、beautiful HTML（8 套主题 + 自定义 tokens）、
-  animated HTML（淡入 + 逐字打字效果）。批量导出 (`exportBatch`) 把多个会话打成 ZIP，
-  JSZip 懒加载。所有 HTML 自包含 —— 内联样式 + 内联脚本 + 零外部请求。
-</TLDR>
-
-<StatGrid>
-  <Stat label="单会话格式" value="5" hint="markdown · json · text · html · animated" />
-  <Stat
-    label="HTML 主题"
-    value="8"
-    hint="light · dark · sepia · github · dracula · nord · solarized · monokai"
-  />
-  <Stat label="自定义" value="是" hint="ThemeTokens 11 个 token，可在 dialog 内即时编辑" />
-  <Stat label="批量" value="ZIP" hint="懒加载 jszip" />
-</StatGrid>
-
 ## 适用场景
 
 | 场景                                        | 格式                                                                |
@@ -267,13 +247,13 @@ export { exportToAnimatedHtml as exportToAnimatedHTML } from "./html/animated-ht
 ## 关联子系统
 
 <Cards>
-  <Card title="聊天与技能" href="./chat-and-skills" description="导出的源头是聊天会话 + 消息" />
+  <Card title="聊天与技能" href="../chat/chat-and-skills" description="导出的源头是聊天会话 + 消息" />
   <Card
     title="备份与数据"
     href="./backup-and-data"
     description="加密整库快照走另一条 BackupPackageV3 流水线"
   />
-  <Card title="调度器" href="./scheduler" description="批量导出可挂载到定时任务" />
+  <Card title="调度器" href="../subsystems/scheduler" description="批量导出可挂载到定时任务" />
 </Cards>
 
 ## 关联 ADR

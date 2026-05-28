@@ -38,6 +38,17 @@ export {
   type NativeTransportOptions,
 } from "./native-transport"
 export {
+  AgentTraceTransport,
+  createAgentTraceTransport,
+  type AgentTraceTransportOptions,
+} from "./agent-trace-transport"
+export {
+  OtlpHttpTransport,
+  createOtlpHttpTransport,
+  grafanaCloudHeaders,
+  type OtlpHttpTransportOptions,
+} from "./otlp-http-transport"
+export {
   IndexedDBRemoteRetryQueueStore,
   createRemoteRetryQueueStore,
   type RemoteRetryQueueStore,

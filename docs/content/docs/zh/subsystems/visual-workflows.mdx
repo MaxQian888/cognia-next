@@ -4,30 +4,6 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
 ---
 
 # 可视化工作流
-
-<Status variant="stable" />
-
-<TLDR>
-  React Flow v12 编辑器 + Zustand+zundo store + elkjs 自动布局， 38 种节点类型分布在 7
-  个分类。运行时拆成 Rust（cron 守护、webhook 接收器、 SQLite 镜像）+
-  TS（编排、节点执行）混合执行，事件日志可断点续跑。 schema v22 引入 4 张 Dexie 表，10 套内置模板。
-</TLDR>
-
-<StatGrid>
-  <Stat
-    label="节点种类"
-    value="38"
-    hint="7 个分类 · trigger / action / ai / flow / data / io / annotation"
-  />
-  <Stat label="内置执行器" value="32" hint="action / ai / flow / data / io" />
-  <Stat label="内置模板" value="10" hint="Phase 1 4 套 + Phase 5 6 套" />
-  <Stat
-    label="Dexie 表"
-    value="4"
-    hint="workflows · workflowRuns · workflowRunEvents · workflowTriggers"
-  />
-</StatGrid>
-
 cognia-next 借这层把已经成熟的运行时实体 —— [角色](../chat/chat-and-skills)、[Agent
 团队](../chat/agent-teams)、[技能](../chat/skills-system)、[员工孪生](./employee-twin)、
 [平台连接器](./platform-connectors)、MCP 服务器、[插件](./plugin-system)
@@ -300,12 +276,12 @@ stateDiagram-v2
   <Card title="调度器" href="./scheduler" description="cron 触发器复用 Rust 调度抽象" />
   <Card
     title="技能系统"
-    href="./skills-system"
+    href="../chat/skills-system"
     description="action.skill.invoke / action.skill.upsert 的目标"
   />
   <Card
     title="Agent 团队"
-    href="./agent-teams"
+    href="../chat/agent-teams"
     description="action.team.run 驱动 runTeamLifecycle"
   />
   <Card

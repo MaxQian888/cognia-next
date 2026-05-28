@@ -5,22 +5,6 @@ description: 本地 127.0.0.1 axum HTTP 监听器 + HMAC 签名出站 webhook �
 
 # 远程控制
 
-<Status variant="stable" />
-
-<TLDR>
-  Tauri Rust 起一个 axum 0.7 HTTP 服务器，绑 127.0.0.1:&lt;port&gt;（默认 47821）， 暴露 3 个 v1
-  端点：health / 触发任务 / 触发事件。Bearer + IP allowlist + 限流 + 8 KiB body 限。 出站方向给
-  scheduler webhook 通道加 HMAC-SHA256 + 自定义 headers。 Secrets 进 OS
-  keyring（`com.cognia.remote-control`）。**默认 off**，opt-in 启用。
-</TLDR>
-
-<StatGrid>
-  <Stat label="入站端点" value="3" hint="/api/v1/health · /api/v1/tasks/:id/run · /api/v1/events" />
-  <Stat label="默认端口" value="47821" hint="127.0.0.1 binding only" />
-  <Stat label="Body 限制" value="8 KiB" hint="tower-http RequestBodyLimitLayer" />
-  <Stat label="默认限流" value="60/min" hint="fixed-window per-token" />
-</StatGrid>
-
 ## 适用场景
 
 | 场景               | 触发方                                                                               |
@@ -282,7 +266,7 @@ sequenceDiagram
   />
   <Card
     title="备份与数据"
-    href="./backup-and-data"
+    href="../data/backup-and-data"
     description="远程触发的 backup:needed 事件去触发自动备份"
   />
 </Cards>

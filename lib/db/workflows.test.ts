@@ -170,6 +170,21 @@ describe("deleteWorkflow", () => {
   it("is a no-op on missing ids", async () => {
     await expect(deleteWorkflow("wf_missing")).resolves.toBeUndefined()
   })
+
+  it("cascades to drop orphan fan-out subscriptions", async () => {
+    const { createFanoutSubscription, listForWorkflow } =
+      await import("@/lib/db/workflow-fanout-subscriptions")
+    const wf = await createWorkflow({ name: "ToDelete" })
+    await createFanoutSubscription({
+      workflowId: wf.id,
+      adapterId: "lark:a",
+      conversationKey: "lark:lark:a:c1",
+      createdBy: "settings-ui",
+    })
+    expect(await listForWorkflow(wf.id, { includeDisabled: true })).toHaveLength(1)
+    await deleteWorkflow(wf.id)
+    expect(await listForWorkflow(wf.id, { includeDisabled: true })).toHaveLength(0)
+  })
 })
 
 describe("duplicateWorkflow", () => {

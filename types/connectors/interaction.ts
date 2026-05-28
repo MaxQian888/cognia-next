@@ -147,6 +147,33 @@ export interface ConnectorCallbackEvent {
  *                          deferred `{skillId, args}` in `payload`; on
  *                          inbound callback the bus reads the payload and
  *                          re-fires the skill with HITL bypass.
+ *   - `"wf_approve"`     — A2UI Approve button on a workflow-by-name
+ *                          run prompt. Payload carries `{workflowId,
+ *                          runParams, triggeredFrom}`; on click the bus
+ *                          dispatches into `startWorkflowFromIM` and
+ *                          enqueues a "started" outbound — no model turn.
+ *   - `"wf_cancel"`      — A2UI Cancel button companion to `"wf_approve"`.
+ *                          Payload mirrors `"wf_approve"` so the cancel
+ *                          handler can confirm provenance before enqueuing
+ *                          the "cancelled" outbound and deleting the
+ *                          sibling approve binding.
+ *   - `"numeric_action"` — Personal WeChat A2UI fallback. Mirror text
+ *                          carries "1) … 2) …" numeric markers; the
+ *                          payload stores `{numeric, conversationKey}` so
+ *                          the (future) parser-side resolver can route an
+ *                          inbound "1" / "2" reply back to the original
+ *                          component. Outbound binding-write only in v1;
+ *                          inbound dispatch lands later.
+ *   - `"wf_fanout_approve"` — A2UI Approve button on the workflow
+ *                            fan-out confirmation card. Payload carries
+ *                            `{workflowId, workflowName, target:{adapterId,
+ *                            conversationKey}, createdBy}`; on click the
+ *                            bus writes the `workflowFanoutSubscriptions`
+ *                            row + enqueues a "✅ 已订阅" outbound. No
+ *                            model turn.
+ *   - `"wf_fanout_cancel"`  — A2UI Cancel companion to `wf_fanout_approve`.
+ *                            Drops both binding rows + enqueues "⊘
+ *                            已取消".
  */
 export type ConnectorCallbackBindingKind =
   | "callback_query"
@@ -154,6 +181,11 @@ export type ConnectorCallbackBindingKind =
   | "modal_open"
   | "block_action"
   | "skill_invoke"
+  | "wf_approve"
+  | "wf_cancel"
+  | "numeric_action"
+  | "wf_fanout_approve"
+  | "wf_fanout_cancel"
 
 /**
  * Persisted association between an outbound A2UI surface and the

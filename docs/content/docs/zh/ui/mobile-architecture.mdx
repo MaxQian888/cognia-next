@@ -1,11 +1,11 @@
 ---
 title: 移动端架构
-description: Capacitor 7 移动壳：复用 Next.js 静态导出、Transport 三态选择、JWT 配对、SecureStorage、TLS 指纹钉绑、mDNS 发现与原生插件桥。
+description: Capacitor 8 移动壳：复用 Next.js 静态导出、Transport 三态选择、JWT 配对、SecureStorage、TLS 指纹钉绑、mDNS 发现与原生插件桥。
 ---
 
 # 移动端架构
 
-cognia-next 的移动客户端**不是**一个独立的 React Native 应用，也**不是**桌面版的简化版。它是同一份 Next.js 静态导出（`out/`），被 **Capacitor 7** 装进 iOS / Android 的原生 WebView，再通过 HTTP/WS 连回桌面端的 `/api/v1/*`。一份 JS bundle，三种壳（Tauri、Capacitor、Web），同一套 React 代码。
+cognia-next 的移动客户端**不是**一个独立的 React Native 应用，也**不是**桌面版的简化版。它是同一份 Next.js 静态导出（`out/`），被 **Capacitor 8** 装进 iOS / Android 的原生 WebView，再通过 HTTP/WS 连回桌面端的 `/api/v1/*`。一份 JS bundle，三种壳（Tauri、Capacitor、Web），同一套 React 代码。
 
 <Callout type="info">
   本页对应 ADR：[0014 — Capacitor 移动壳](../adr/0014-capacitor-mobile-shell)、 [0015 — 移动 V2
@@ -13,27 +13,13 @@ cognia-next 的移动客户端**不是**一个独立的 React Native 应用，�
   抽象](../adr/0012-transport-abstraction)、 [0013 — 命令清单](../adr/0013-command-manifest)。
 </Callout>
 
-## TL;DR
-
-<TLDR>
-
-- 移动客户端 = **Capacitor 7 + 同一份 `out/` 静态导出**；不重写 UI、不并行维护组件库。
-- 三态 `Transport` 在模块加载时决定：`TauriTransport`（桌面）/ `CompanionTransport`（手机）/ `WebStubTransport`（纯浏览器）。
-- 桌面端是真正的"服务器"——sidecar、向量库、MCP、订阅、连接器全在桌面侧；手机是受信任的客户端。
-- 设备 JWT 落 OS keystore（iOS Keychain / Android Keystore），通过 `capacitor-secure-storage-plugin` 写入。
-- `lib/capacitor/*` 16 个原生插件包装（haptics、camera、share、deeplink、barcode、biometric……）走同一套 `withPlugin` 模板。
-- TLS 自签证书（10 年有效）+ SubjectPublicKeyInfo 指纹钉绑，通过 QR 配对载荷 v2 分发到手机。
-- mDNS 广播 `_cognia._tcp.local.` + Cloudflared 隧道 + 已缓存 URL = 三层连接候选。
-
-</TLDR>
-
 ## 设计动机
 
 | 选项               | 评估                                                                                              | 结论 |
 | ------------------ | ------------------------------------------------------------------------------------------------- | ---- |
 | **Tauri 2 Mobile** | 移动端缺 sidecar 支持（Tauri issues #11454 / #9774），Claude Agent SDK sidecar 是桌面运行时核心。 | 拒绝 |
 | **React Native**   | 重写 57 个 shadcn/ui 组件到 RN 原语，数周工作量、无功能增益。                                     | 拒绝 |
-| **Capacitor 7**    | 把现有 Next.js 静态导出装进原生 WebView，零 UI 重写。                                             | 选用 |
+| **Capacitor 8**    | 把现有 Next.js 静态导出装进原生 WebView，零 UI 重写。                                             | 选用 |
 
 更深的判断：手机**永远**不是 sidecar 的运行环境。Claude Agent SDK 需要 Node ≥ 20、原生扩展、keyring crate 也不覆盖移动端 keystore，连接器 webhook 服务在 NAT 后的手机上也无法暴露公网 URL。承认这五个子系统是"桌面专属"是平台事实，不是框架选型遗留。
 
@@ -369,7 +355,7 @@ cd mobile/android
 # 产物：app/build/outputs/apk/debug/app-debug.apk（≈22 MB）
 ```
 
-`compileSdk` / `targetSdk` = 35（Capacitor 7 默认），`minSdk` = 24，debug-only `usesCleartextTraffic="true"` 仅在 `app/src/debug/AndroidManifest.xml`，release 构建走默认安全策略。
+`compileSdk` / `targetSdk` = 35（Capacitor 8 默认），`minSdk` = 24，debug-only `usesCleartextTraffic="true"` 仅在 `app/src/debug/AndroidManifest.xml`，release 构建走默认安全策略。
 
 iOS（需 macOS + Xcode）：
 
@@ -406,17 +392,17 @@ iOS（需 macOS + Xcode）：
 <Cards>
   <Card
     title="Companion API"
-    href="./companion-api"
+    href="../subsystems/companion-api"
     description="服务器端：RPC 路由、WS 协议、推送、JWT 颁发"
   />
   <Card
     title="平台连接器"
-    href="./platform-connectors"
+    href="../subsystems/platform-connectors"
     description="桌面侧的 Telegram / Discord / Lark 适配器，与移动 push 协同"
   />
   <Card
     title="远程控制"
-    href="./remote-control"
+    href="../subsystems/remote-control"
     description="另一种『客户端』语义：桌面把会话借给另一端"
   />
   <Card

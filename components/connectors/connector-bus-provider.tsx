@@ -49,6 +49,7 @@ import {
   startCallbackBindingCleanupSchedule,
   type CallbackBindingCleanupHandle,
 } from "@/lib/connectors/callback-binding-cleanup"
+import { startWorkflowProgressRunner } from "@/lib/connectors/a2ui-bridge/workflow-progress-runner"
 
 export function ConnectorBusProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -59,6 +60,7 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     const startedAdapters: PlatformAdapter[] = []
     let cleanupHandle: CallbackBindingCleanupHandle | null = null
     let heartbeatSweep: HeartbeatSweepHandle | null = null
+    let stopWorkflowProgressRunner: (() => void) | null = null
 
     /**
      * Boot a single adapter through the full lifecycle: build its
@@ -233,6 +235,13 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
         cleanupHandle = startCallbackBindingCleanupSchedule()
       }
 
+      // Workflow → IM fan-out runner: subscribes to `workflowRunEvents` for
+      // IM-triggered runs and pushes step progress + a terminal summary
+      // through the same outbound queue that everything else uses.
+      if (!cancelled) {
+        stopWorkflowProgressRunner = startWorkflowProgressRunner()
+      }
+
       // Credentials hot-reload: when Settings/Connections saves a form,
       // re-queue the matching running adapter so the keyring rotation
       // takes effect without restarting the app. The handler audits each
@@ -253,6 +262,8 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       cleanupHandle = null
       heartbeatSweep?.dispose()
       heartbeatSweep = null
+      stopWorkflowProgressRunner?.()
+      stopWorkflowProgressRunner = null
       // Tear down every running adapter through the lifecycle registry so
       // the per-adapter abort signals get cleaned up too. Swallow
       // per-adapter errors so a bad stop() can't crash the

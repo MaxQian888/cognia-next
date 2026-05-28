@@ -1,5 +1,10 @@
-import { parseIlinkMessage, type WechatPersonalConversationRef } from "./parse"
+import {
+  parseIlinkMessage,
+  tryParseNumericCallback,
+  type WechatPersonalConversationRef,
+} from "./parse"
 import { ILINK_ITEM, ILINK_MSG, type IlinkMessage } from "./protocol"
+import { __resetNumericActionRegistryForTesting, setNumericAction } from "./numeric-action-registry"
 
 const ADP = "wx1"
 
@@ -49,5 +54,87 @@ describe("parseIlinkMessage", () => {
 
   it("returns null when no item produces content", () => {
     expect(parseIlinkMessage(ADP, msg({ item_list: [] }))).toBeNull()
+  })
+})
+
+describe("tryParseNumericCallback", () => {
+  const CONV = "wechat-personal:wx1:alice@im.wechat"
+  beforeEach(() => {
+    __resetNumericActionRegistryForTesting()
+  })
+
+  it("returns null when the text is not a single digit", () => {
+    setNumericAction(CONV, 1, "a2ui:s:y:confirm")
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "hi" } }] })
+      )
+    ).toBeNull()
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "12" } }] })
+      )
+    ).toBeNull()
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "0" } }] })
+      )
+    ).toBeNull()
+  })
+
+  it("returns null when no live binding matches the digit", () => {
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }] })
+      )
+    ).toBeNull()
+  })
+
+  it("emits a ConnectorCallbackEvent and consumes the registry on a digit hit", () => {
+    setNumericAction(CONV, 1, "a2ui:sfc1:yes:confirm")
+    const ev = tryParseNumericCallback(
+      ADP,
+      msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: " 1 " } }] }),
+      9999
+    )
+    expect(ev).not.toBeNull()
+    expect(ev!.triggerId).toBe("a2ui:sfc1:yes:confirm")
+    expect(ev!.actionType).toBe("button")
+    expect(ev!.value).toBe("1")
+    expect(ev!.conversationKey).toBe(CONV)
+    // Second tap on the same digit no longer fires.
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }] }),
+        9999
+      )
+    ).toBeNull()
+  })
+
+  it("routes a wfapp:* registered binding through the same path", () => {
+    setNumericAction(CONV, 2, "wfapp:bind1")
+    const ev = tryParseNumericCallback(
+      ADP,
+      msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "2" } }] })
+    )
+    expect(ev!.triggerId).toBe("wfapp:bind1")
+  })
+
+  it("ignores bot-direction messages even when text is a digit", () => {
+    setNumericAction(CONV, 1, "a2ui:s:y:confirm")
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({
+          message_type: ILINK_MSG.fromBot,
+          item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }],
+        })
+      )
+    ).toBeNull()
   })
 })

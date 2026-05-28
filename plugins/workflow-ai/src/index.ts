@@ -20,6 +20,7 @@ import { buildReadTools } from "./tools/read-tools"
 import { buildMutateTools } from "./tools/mutate-tools"
 import { buildLayoutTools } from "./tools/layout-tools"
 import { buildRunTools } from "./tools/run-tools"
+import { buildRunByNameTools } from "./tools/run-by-name-tools"
 import { buildProposeTools } from "./tools/propose-tools"
 import { buildTemplateTools } from "./tools/template-tools"
 import { buildResourceTools } from "./tools/resource-tools"
@@ -36,6 +37,7 @@ export function buildWorkflowAiTools(): PluginTool[] {
     ...buildTemplateTools(),
     ...buildLayoutTools(),
     ...buildRunTools(),
+    ...buildRunByNameTools(),
     ...buildResourceTools(),
     ...buildNodeKindTools(),
     ...buildDiagnosticTools(),

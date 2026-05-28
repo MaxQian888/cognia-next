@@ -5,26 +5,6 @@ description: 一次性内容产物：iframe 隔离的 HTML / SVG / React 预览�
 
 # Artifacts / Sandbox
 
-<Status variant="stable" />
-
-<TLDR>
-  当模型生成 HTML / SVG / React / Mermaid / Chart / Math / Jupyter 时，cognia-next 把它包成
-  `Artifact` 行写进 Zustand store，再用 9 种 renderer 之一渲染到 UI。 HTML / SVG / React 走 iframe +
-  DOMPurify + CSP 三重隔离；其余类型走 React inline renderer。`lib/sandbox/`
-  是独立的代码执行沙箱表层——目前 Web 端是 stub，桌面端 Python 路径在 [./canvas](./canvas) 里实现。
-</TLDR>
-
-<StatGrid>
-  <Stat
-    label="Artifact 类型"
-    value="9"
-    hint="code · document · svg · html · react · mermaid · chart · math · jupyter"
-  />
-  <Stat label="Iframe 沙箱类型" value="3" hint="html · svg · react" />
-  <Stat label="预览友好类型" value="8" hint="PREVIEWABLE_TYPES" />
-  <Stat label="可设计类型" value="3" hint="html · react · svg" />
-</StatGrid>
-
 ## 概念区分
 
 cognia-next 里有三个相关但不同的概念，先理清：
@@ -375,5 +355,5 @@ interface ArtifactStoreState {
     href="./plugin-system"
     description="Worker 沙箱 + 自定义 artifact renderer"
   />
-  <Card title="聊天 & 技能" href="./chat-and-skills" description="消息流如何驱动 artifact 创建" />
+  <Card title="聊天 & 技能" href="../chat/chat-and-skills" description="消息流如何驱动 artifact 创建" />
 </Cards>

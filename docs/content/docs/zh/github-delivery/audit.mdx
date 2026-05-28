@@ -5,13 +5,6 @@ description: audit 表的 schema、capped 行为、运行时与 Settings UI 的�
 
 # 审计与工单
 
-<TLDR>
-  GitHub Delivery 把每一次策略决定(允许 + 拒绝)写到命名空间下的 `audit` 表; 表容量上限 5000
-  行,溢出时按 `at` 升序剔除最旧的几行。Issue → PR 闭环的状态机 则反映在 `workOrders` 表中,在
-  `/github-delivery` 独立页面以 6 列看板展示。 两张表都通过 M0 的"插件 Dexie 表"机制存放,实际全名带
-  `github-delivery:` 前缀。
-</TLDR>
-
 ## `audit` 表
 
 ### Schema

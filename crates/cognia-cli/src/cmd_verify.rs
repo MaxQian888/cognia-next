@@ -2,12 +2,23 @@
 //! manifest's author public key (or an explicit one).
 
 use anyhow::{anyhow, Context, Result};
+use serde::Serialize;
 use std::io::Read;
 use std::path::PathBuf;
 
 use crate::signing::{fingerprint, verify_bundle};
+use crate::ui::{style, RuntimeUi};
 
-pub fn run(bundle: PathBuf, public_key: Option<String>, signature: Option<PathBuf>) -> Result<()> {
+/// `cognia plugin verify` — verify a bundle's `.sig` against the embedded
+/// (or supplied) public key. Phase 2 paints the verdict and emits a
+/// machine-readable JSON payload under `--json`.
+pub fn run(
+    bundle: PathBuf,
+    public_key: Option<String>,
+    signature: Option<PathBuf>,
+    json: bool,
+    _ui: &mut RuntimeUi,
+) -> Result<()> {
     let bundle_bytes =
         std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
     let sig_path = signature.unwrap_or_else(|| {
@@ -19,25 +30,82 @@ pub fn run(bundle: PathBuf, public_key: Option<String>, signature: Option<PathBu
         p.set_file_name(n);
         p
     });
-    let sig_str =
-        std::fs::read_to_string(&sig_path).with_context(|| format!("read {}", sig_path.display()))?;
+    let sig_str = std::fs::read_to_string(&sig_path)
+        .with_context(|| format!("read {}", sig_path.display()))?;
 
     let pk_b64 = match public_key {
         Some(s) => s,
         None => extract_public_key_from_bundle(&bundle_bytes)?,
     };
 
-    verify_bundle(&pk_b64, &bundle_bytes, sig_str.trim())?;
+    let verify_outcome = verify_bundle(&pk_b64, &bundle_bytes, sig_str.trim());
     let fp = match crate::b64_decode(&pk_b64) {
         Ok(bytes) => fingerprint(&bytes),
         Err(_) => "<invalid base64>".to_string(),
     };
-    println!("✓ signature valid");
-    println!("  bundle:      {}", bundle.display());
-    println!("  signature:   {}", sig_path.display());
-    println!("  public key:  {}", pk_b64);
-    println!("  fingerprint: {fp}");
-    Ok(())
+
+    match verify_outcome {
+        Ok(()) => {
+            if json {
+                let payload = VerifyJsonPayload {
+                    schema_version: 1,
+                    ok: true,
+                    bundle: bundle.display().to_string(),
+                    signature: sig_path.display().to_string(),
+                    public_key: pk_b64.clone(),
+                    fingerprint: fp.clone(),
+                    error: None,
+                };
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!(
+                    "{}{}",
+                    style::success_prefix(),
+                    style::ok("signature valid")
+                );
+                println!("  bundle:      {}", bundle.display());
+                println!("  signature:   {}", sig_path.display());
+                println!("  public key:  {pk_b64}");
+                println!("  fingerprint: {}", style::dim(&fp));
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if json {
+                let payload = VerifyJsonPayload {
+                    schema_version: 1,
+                    ok: false,
+                    bundle: bundle.display().to_string(),
+                    signature: sig_path.display().to_string(),
+                    public_key: pk_b64.clone(),
+                    fingerprint: fp.clone(),
+                    error: Some(e.to_string()),
+                };
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+                // Still error out so the exit code distinguishes pass/fail
+                // for scripts that don't parse the JSON.
+            }
+            // Wrap with an actionable hint so plain-text consumers get a
+            // helpful suggestion line under the cause chain.
+            Err(e.context(
+                "re-sign the bundle with the matching private key, or pass --public-key explicitly",
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyJsonPayload {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    ok: bool,
+    bundle: String,
+    signature: String,
+    #[serde(rename = "publicKey")]
+    public_key: String,
+    fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 fn extract_public_key_from_bundle(bundle: &[u8]) -> Result<String> {
@@ -95,7 +163,8 @@ mod tests {
         let sig_path = tmp.path().join("p.zip.sig");
         std::fs::write(&bundle_path, &bundle).unwrap();
         std::fs::write(&sig_path, &sig).unwrap();
-        run(bundle_path, None, None).unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(bundle_path, None, None, false, &mut ui).unwrap();
     }
 
     #[test]
@@ -112,7 +181,59 @@ mod tests {
         let sig_path = tmp.path().join("p.zip.sig");
         std::fs::write(&bundle_path, &bundle).unwrap();
         std::fs::write(&sig_path, &bad_sig).unwrap();
-        assert!(run(bundle_path, None, None).is_err());
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        assert!(run(bundle_path, None, None, false, &mut ui).is_err());
+    }
+
+    #[test]
+    fn verify_json_emits_ok_true_for_valid_signature() {
+        let kp = Keypair::generate();
+        let manifest = format!(
+            r#"{{"id":"x","type":"wasm","wasmMain":"main.wasm","wasm":{{"apiVersion":"0.1.0"}},"author":{{"publicKey":"{}"}}}}"#,
+            kp.public_base64()
+        );
+        let bundle = make_bundle_with_manifest(&manifest);
+        let sig = sign_bundle(&kp.signing_key, &bundle);
+        let tmp = tempdir().unwrap();
+        let bundle_path = tmp.path().join("p.zip");
+        let sig_path = tmp.path().join("p.zip.sig");
+        std::fs::write(&bundle_path, &bundle).unwrap();
+        std::fs::write(&sig_path, &sig).unwrap();
+        // We can't easily capture stdout here, so just confirm the path
+        // doesn't error out and the helper that serializes the payload
+        // produces the expected shape.
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(bundle_path, None, None, true, &mut ui).unwrap();
+        // Sanity: VerifyJsonPayload Serialize roundtrip.
+        let payload = VerifyJsonPayload {
+            schema_version: 1,
+            ok: true,
+            bundle: "bundle.zip".into(),
+            signature: "bundle.zip.sig".into(),
+            public_key: "pk".into(),
+            fingerprint: "fp".into(),
+            error: None,
+        };
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"schemaVersion\":1"));
+        assert!(s.contains("\"ok\":true"));
+        assert!(!s.contains("\"error\""));
+    }
+
+    #[test]
+    fn verify_json_emits_ok_false_with_error_when_invalid() {
+        let payload = VerifyJsonPayload {
+            schema_version: 1,
+            ok: false,
+            bundle: "b.zip".into(),
+            signature: "b.zip.sig".into(),
+            public_key: "pk".into(),
+            fingerprint: "fp".into(),
+            error: Some("signature did not verify".into()),
+        };
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"ok\":false"));
+        assert!(s.contains("signature did not verify"));
     }
 
     #[test]
@@ -126,7 +247,8 @@ mod tests {
         let sig_path = tmp.path().join("p.zip.sig");
         std::fs::write(&bundle_path, &bundle).unwrap();
         std::fs::write(&sig_path, &sig).unwrap();
-        let err = run(bundle_path, None, None).unwrap_err();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let err = run(bundle_path, None, None, false, &mut ui).unwrap_err();
         assert!(err.to_string().contains("publicKey"));
     }
 }

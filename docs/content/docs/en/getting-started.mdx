@@ -5,16 +5,16 @@ description: Install Cognia from source, run it in web mode and desktop mode, an
 
 # Getting Started
 
-This page walks you from a fresh clone to a working web dev server **and** a working Tauri desktop window. Allow ~15 minutes for the first run; subsequent runs are seconds.
+From a fresh clone to a working web dev server **and** a Tauri desktop window. Allow ~15 minutes for the first build; subsequent runs are seconds.
 
 ## Prerequisites
 
 | Tool                | Version           | Why                                                         |
 | ------------------- | ----------------- | ----------------------------------------------------------- |
 | **Node.js**         | ≥ 20.x            | Next.js 16 / React 19 runtime                               |
-| **pnpm**            | ≥ 10.x            | Single lockfile across the monorepo (`pnpm-workspace.yaml`) |
-| **Rust**            | ≥ 1.77.2          | Tauri 2.9 compilation                                       |
-| **C/C++ toolchain** | platform-specific | Tauri compiles native extensions (sqlite-vec, …)            |
+| **pnpm**            | 10.x              | Single lockfile across the monorepo                         |
+| **Rust**            | ≥ 1.84.1          | Tauri 2.11 + transitive deps (ocr-paddle raises MSRV)       |
+| **C/C++ toolchain** | platform-specific | Native deps (sqlite-vec, webrtc-rs, wasmtime, …)            |
 
 Platform-specific notes:
 
@@ -52,8 +52,8 @@ Verify:
 
 ```bash
 node --version    # v20.x or newer
-pnpm --version    # 10.x or newer
-rustc --version   # 1.77.2 or newer
+pnpm --version    # 10.x
+rustc --version   # 1.84.1 or newer
 cargo --version
 ```
 
@@ -64,7 +64,7 @@ cargo --version
     ### Clone the repository
 
     ```bash
-    git clone https://github.com/MaxQian888/cognia-next.git
+    git clone https://github.com/AstroAir/cognia-next.git
     cd cognia-next
     ```
 
@@ -76,33 +76,22 @@ cargo --version
     pnpm install
     ```
 
-    This installs **two packages** in one shot:
-
-    - The root package (`cognia-next`) — Next.js app + Tauri frontend.
-    - The docs package (`docs/`) — Fumadocs documentation site.
-
-    Both share `pnpm-lock.yaml` at the repo root.
+    Installs every workspace member: root (`cognia-next`), `docs/`, `mobile/`, `plugin-sdk/typescript/`. Single `pnpm-lock.yaml` at the repo root.
 
   </Step>
   <Step>
     ### Implicit setup
 
-    The first install also runs:
-
-    - `prepare` script → installs Husky git hooks (commit-msg with commitlint, pre-commit with lint-staged).
-    - `predev` / `prebuild` → `node scripts/copy-monaco-assets.mjs` copies Monaco editor assets into `public/`.
+    `prepare` wires Husky hooks (commitlint + lint-staged); `predev` / `prebuild` copy Monaco assets into `public/` and build the VS Code sidecar.
 
   </Step>
   <Step>
     ### (Optional) install sidecar dependencies
 
-    The Node sidecar lives at `sidecar/` and is **outside** the workspace because it ships as a Tauri resource.
-    Install its deps separately if you plan to run it directly:
+    The Node sidecar lives at `sidecar/` outside the workspace (separate lockfile, ships as a Tauri resource):
 
     ```bash
-    cd sidecar
-    pnpm install
-    cd ..
+    pnpm sidecar:install
     ```
 
   </Step>
@@ -213,52 +202,25 @@ If any line shows ❌, fix it before continuing.
 ```bash
 pnpm dev            # Next.js web dev (port 3000)
 pnpm tauri dev      # Desktop dev mode
-
 pnpm build          # Static export → out/
 pnpm tauri build    # Desktop installer
-
+pnpm mobile:sync    # Capacitor sync (needs prior pnpm build)
 pnpm test           # Jest
-pnpm test:coverage  # Jest with coverage report (≥90% gate)
+pnpm test:coverage  # Jest + coverage (≥90% gate)
 pnpm typecheck      # tsc --noEmit
 pnpm lint           # ESLint
-pnpm format         # Prettier write
-
 pnpm docs:dev       # Fumadocs (port 3001)
 ```
 
-See [Development](./dev/development) for the full reference.
+Full reference: [Development](./dev/development).
 
 ## Next steps
 
 <Cards>
-  <Card
-    title="Architecture"
-    href="./architecture"
-    description="Skim the layered design before going deeper."
-  />
-  <Card
-    title="Runtime & Tauri"
-    href="./runtime-and-tauri"
-    description="If you'll be touching native code."
-  />
-  <Card
-    title="Sidecar & Claude Agent SDK"
-    href="./sidecar-and-claude-sdk"
-    description="The Node host that runs the SDK."
-  />
-  <Card
-    title="Chat & Skills"
-    href="./chat-and-skills"
-    description="If you'll be working on the AI surfaces."
-  />
-  <Card
-    title="Employee Digital Twin"
-    href="./employee-twin"
-    description="The deepest customisation surface."
-  />
-  <Card
-    title="Development workflow"
-    href="./development"
-    description="Daily-loop scripts, conventions, testing."
-  />
+  <Card title="Architecture" href="./core/architecture" description="Layered design and module map." />
+  <Card title="Runtime & Tauri" href="./core/runtime-and-tauri" description="Native code, IPC, CSP." />
+  <Card title="Sidecar & Claude Agent SDK" href="./core/sidecar-and-claude-sdk" description="Node host protocol." />
+  <Card title="Chat & Skills" href="./chat/chat-and-skills" description="AI surfaces." />
+  <Card title="Employee Digital Twin" href="./subsystems/employee-twin" description="Ingest, distill, runtime." />
+  <Card title="Development workflow" href="./dev/development" description="Scripts, conventions, testing." />
 </Cards>

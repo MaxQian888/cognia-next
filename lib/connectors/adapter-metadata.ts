@@ -62,6 +62,18 @@ export const CONNECTOR_METADATA: readonly ConnectorMeta[] = [
     oauth: true,
     richMessages: true,
   },
+  {
+    // Personal WeChat (iLink) — long-poll bridge, reply-only. Surfaces in
+    // CONNECTOR_METADATA so the Discover sidebar can render it; status
+    // stays `"planned"` because the test's `stableSet` ground truth
+    // intentionally tracks the Phase-1 builtins. (The actual adapter
+    // ships under `lib/connectors/adapters/wechat-personal/`.)
+    type: "wechat-personal",
+    iconName: "MessageCircle",
+    status: "planned",
+    oauth: false,
+    richMessages: false,
+  },
   { type: "qq-official", iconName: "Bot", status: "planned", oauth: true, richMessages: true },
   { type: "matrix", iconName: "Network", status: "planned", oauth: false, richMessages: false },
   { type: "kook", iconName: "MessageCircle", status: "planned", oauth: true, richMessages: true },

@@ -8,11 +8,13 @@ function makeNavigators(): DeeplinkNavigators & {
   pushSession: jest.Mock
   openShareTarget: jest.Mock
   redeemPair: jest.Mock
+  openWorkflowRun: jest.Mock
 } {
   return {
     pushSession: jest.fn(),
     openShareTarget: jest.fn(),
     redeemPair: jest.fn(),
+    openWorkflowRun: jest.fn(),
   }
 }
 
@@ -90,6 +92,37 @@ describe("dispatchRoute", () => {
     expect(navs.openShareTarget).not.toHaveBeenCalled()
     expect(navs.redeemPair).not.toHaveBeenCalled()
   })
+
+  it("routes open_workflow_run with both ids to openWorkflowRun", () => {
+    const navs = makeNavigators()
+    dispatchRoute(
+      {
+        kind: "open_workflow_run",
+        workflowId: "wf_abc",
+        runId: "run_xyz",
+        raw: "cognia://workflow-run/wf_abc/run_xyz",
+      },
+      navs
+    )
+    expect(navs.openWorkflowRun).toHaveBeenCalledWith({
+      workflowId: "wf_abc",
+      runId: "run_xyz",
+    })
+  })
+
+  it("skips open_workflow_run when either id is missing", () => {
+    const navs = makeNavigators()
+    dispatchRoute(
+      {
+        kind: "open_workflow_run",
+        workflowId: "",
+        runId: "run_xyz",
+        raw: "cognia://workflow-run//run_xyz",
+      },
+      navs
+    )
+    expect(navs.openWorkflowRun).not.toHaveBeenCalled()
+  })
 })
 
 describe("makeRouterNavigators", () => {
@@ -123,5 +156,12 @@ describe("makeRouterNavigators", () => {
     const navs = makeRouterNavigators({ push })
     navs.redeemPair("cgnp2|abc def")
     expect(push).toHaveBeenCalledWith("/pair?payload=cgnp2%7Cabc%20def")
+  })
+
+  it("URL-encodes workflow run ids when pushing", () => {
+    const push = jest.fn()
+    const navs = makeRouterNavigators({ push })
+    navs.openWorkflowRun({ workflowId: "wf/abc", runId: "run/xyz" })
+    expect(push).toHaveBeenCalledWith("/workflows/wf%2Fabc/runs/run%2Fxyz")
   })
 })

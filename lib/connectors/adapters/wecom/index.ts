@@ -43,6 +43,7 @@ import {
   buildStreamRespondFrame,
   buildTemplateCardRespondFrame,
   buildWelcomeFrame,
+  buildWelcomeCardFrame,
   buildUpdateCardFrame,
   buildSendMsgFrame,
   newReqId,
@@ -56,6 +57,9 @@ import { serializeSegments, type WeComMediaSegment } from "./serialize"
 import { buildWeComTemplateCard, parseTemplateCardEvent, buildAckUpdateCard } from "./a2ui-mapper"
 import { uploadWeComMedia, fetchAndDecryptMedia, bytesToBase64 } from "./media"
 import { resolveWelcomeMessage, type WeComAdapterSettings } from "./welcome"
+import { buildMenuClickInboundEvent, buildWeComMenuCard, parseMenuButtonClick } from "./menu-card"
+import { normalizeQuickCommandList, resolveQuickCommand } from "@/lib/connectors/quick-commands"
+import type { IMQuickCommand } from "@/lib/connectors/quick-commands/types"
 
 type UnlistenFn = () => void
 
@@ -80,6 +84,26 @@ const WECOM_CONFIG_SCHEMA = {
   required: [],
   properties: {
     welcomeMessage: { type: "string", title: "Welcome message (enter_chat)" },
+    quickCommands: {
+      type: "array",
+      title: "Quick commands (menu card buttons)",
+      items: {
+        type: "object",
+        required: ["triggerKey", "action"],
+        properties: {
+          triggerKey: { type: "string" },
+          label: { type: "string" },
+          action: {
+            type: "object",
+            required: ["type", "value"],
+            properties: {
+              type: { enum: ["prompt", "slash"] },
+              value: { type: "string" },
+            },
+          },
+        },
+      },
+    },
   },
   additionalProperties: true,
 }
@@ -87,6 +111,10 @@ const WECOM_CONFIG_SCHEMA = {
 const REQ_TTL_MS = 10 * 60 * 1000 // reply window per the protocol
 
 export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
+  // Normalise persisted quick-commands at factory time so the inbound
+  // menu-button lookup runs against canonical `triggerKey` rows even when
+  // older Dexie rows still carry the legacy `eventKey` field.
+  const quickCommands: IMQuickCommand[] = normalizeQuickCommandList(opts.settings?.quickCommands)
   let healthState: AdapterHealthState = "starting"
   let healthReason: string | undefined
   let lastActivityAt: number | undefined
@@ -196,6 +224,18 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     if (!selfId && body.aibotid) selfId = body.aibotid
     const type = body.event.eventtype
     if (type === "enter_chat") {
+      // Quick-commands have priority over the plain-text welcome — they
+      // give the user something to TAP, which is the whole point. Falls
+      // back to the text welcome when no commands are configured.
+      if (quickCommands.length > 0 && reqId) {
+        const card = buildWeComMenuCard(quickCommands, {
+          desc: resolveWelcomeMessage(opts.settings) ?? undefined,
+        })
+        if (card) {
+          await rawSend(buildWelcomeCardFrame(reqId, card)).catch(() => undefined)
+          return
+        }
+      }
       const welcome = resolveWelcomeMessage(opts.settings)
       if (welcome && reqId) {
         await rawSend(buildWelcomeFrame(reqId, welcome)).catch(() => undefined)
@@ -208,6 +248,22 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
         await rawSend(buildUpdateCardFrame(reqId, buildAckUpdateCard(body, "✓"))).catch(
           () => undefined
         )
+      }
+      // Quick-command (menu) buttons live in the `qc:` namespace — check
+      // them BEFORE falling through to the generic A2UI callback dispatch
+      // so the resolver doesn't try to look up a non-existent binding.
+      const menuClick = parseMenuButtonClick(body)
+      if (menuClick) {
+        recordActiveReq(reqId)
+        const cmd = resolveQuickCommand(quickCommands, menuClick.triggerKey)
+        if (cmd) {
+          const event = buildMenuClickInboundEvent(opts.id, selfId, body, cmd)
+          if (event && (await gateInboundEvent(opts.id, event))) {
+            lastActivityAt = Date.now()
+            await ctx?.emit(event)
+          }
+        }
+        return
       }
       const callback = parseTemplateCardEvent(opts.id, selfId, body)
       if (callback) {

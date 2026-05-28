@@ -109,6 +109,14 @@ interface SettingsState {
    */
   setRoutingFallbackEnabled: (enabled: boolean) => Promise<void>
 
+  /**
+   * Update one or both skill-bundle mirror toggles. Defaults are
+   * `{ claude: true, codex: true }` so the writer can rely on a complete
+   * pair after this call. The cognia-owned canonical at
+   * `<appData>/cognia/skills/<id>/` is always written and is not toggleable.
+   */
+  setSkillBundleMirrors: (patch: { claude?: boolean; codex?: boolean }) => Promise<void>
+
   // ---- Web search actions (all persist via saveSettings) ----
   setSearchEnabled: (v: boolean) => Promise<void>
   setSearchMaxResults: (n: number) => Promise<void>
@@ -406,6 +414,24 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
   }
 }
 
+/**
+ * Resolve the skill bundle mirror toggles with defaults applied. The
+ * canonical `<appData>/cognia/skills/<id>/` write is always on; only the
+ * `~/.claude/skills/` and `~/.agents/skills/` mirrors are user-toggleable.
+ * Exported as a pure helper so the sync layer can call it without
+ * subscribing to the store (the sync layer runs from non-React contexts).
+ */
+export function resolveSkillBundleMirrors(settings: AppSettings | null | undefined): {
+  claude: boolean
+  codex: boolean
+} {
+  const raw = settings?.skillBundleMirrors
+  return {
+    claude: raw?.claude ?? true,
+    codex: raw?.codex ?? true,
+  }
+}
+
 export const useSettingsStore = create<SettingsState>((rawSet, get) => {
   // Intercept every state update: if the update modifies `settings`, also
   // re-derive the plugin-facing flat fields. This keeps the two views
@@ -526,6 +552,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     // ---- Built-in agent runtime ----
     setRoutingFallbackEnabled: async (routingFallbackEnabled) => {
       const next = await saveSettings({ routingFallbackEnabled })
+      set({ settings: next })
+    },
+
+    setSkillBundleMirrors: async (patch) => {
+      const cur = get().settings?.skillBundleMirrors ?? { claude: true, codex: true }
+      const skillBundleMirrors = {
+        claude: patch.claude ?? cur.claude ?? true,
+        codex: patch.codex ?? cur.codex ?? true,
+      }
+      const next = await saveSettings({ skillBundleMirrors })
       set({ settings: next })
     },
 

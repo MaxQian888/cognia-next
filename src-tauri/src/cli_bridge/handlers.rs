@@ -76,6 +76,52 @@ pub async fn health(State(_state): State<SharedState>) -> Response {
     Json(json!({ "ok": true })).into_response()
 }
 
+/// Wire shape for `GET /api/v1/dev/plugins/installed` — a privacy-safe
+/// subset of [`PluginRuntimeSnapshot`]. Only the fields the CLI needs
+/// for a preflight install collision check are exposed; runtime_state
+/// (which may carry per-plugin secrets) is **never** sent.
+#[derive(Debug, Serialize)]
+struct InstalledPluginInfo {
+    #[serde(rename = "pluginId")]
+    plugin_id: String,
+    version: String,
+    status: String,
+    #[serde(rename = "installPath")]
+    install_path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ListInstalledResponse {
+    ok: bool,
+    plugins: Vec<InstalledPluginInfo>,
+}
+
+/// `GET /api/v1/dev/plugins/installed` — list currently-loaded plugins.
+///
+/// Used by `cognia plugin install` for the same-id preflight prompt; also
+/// surfaced for future scripting use. **Never** returns `runtime_state`
+/// because plugins may stash secrets / tokens / per-user IDs there.
+pub async fn list_installed(State(state): State<SharedState>) -> Response {
+    let plugins = list_installed_inner(&state);
+    Json(ListInstalledResponse { ok: true, plugins }).into_response()
+}
+
+/// Inner reader — keep private so the wire shape isn't part of any
+/// public surface. The axum handler lives in the same module.
+fn list_installed_inner(state: &SharedState) -> Vec<InstalledPluginInfo> {
+    let plugin_state = state.app_handle.state::<PluginRuntimeState>();
+    let guard = plugin_state.plugins.read();
+    guard
+        .values()
+        .map(|record| InstalledPluginInfo {
+            plugin_id: record.snapshot.plugin_id.clone(),
+            version: record.snapshot.version.clone(),
+            status: record.snapshot.status.clone(),
+            install_path: record.snapshot.install_path.clone(),
+        })
+        .collect()
+}
+
 pub async fn install(
     State(state): State<SharedState>,
     Json(req): Json<InstallRequest>,
@@ -152,9 +198,18 @@ pub async fn reload(
     if let Some(bundle_path) = req.bundle_path.as_deref() {
         match install_inner(&state, bundle_path).await {
             Ok((plugin_id, _)) => {
+                // Per-plugin channel for callers that already know the id
+                // (used by hot-reload contracts shipped before the global
+                // channel existed), plus a single global channel the
+                // renderer's `use-cli-bridge-events` hook subscribes to
+                // once and dispatches into the hot-reload history store.
                 let _ = state.app_handle.emit(
                     &format!("plugin-hot-reload:{plugin_id}"),
                     json!({ "source": "cli-bridge" }),
+                );
+                let _ = state.app_handle.emit(
+                    "plugin-hot-reload",
+                    json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "install" }),
                 );
                 return Json(OkResponse {
                     ok: true,
@@ -193,6 +248,10 @@ pub async fn reload(
         &format!("plugin-hot-reload:{plugin_id}"),
         json!({ "source": "cli-bridge" }),
     );
+    let _ = state.app_handle.emit(
+        "plugin-hot-reload",
+        json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "reload" }),
+    );
     Json(OkResponse {
         ok: true,
         plugin_id: Some(plugin_id),
@@ -228,13 +287,75 @@ pub async fn install_inner(
     std::fs::create_dir_all(&target_dir)?;
     extract_zip_into(&bytes, &target_dir)?;
 
+    register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
+    log::info!("cli_bridge installed {plugin_id} from {}", bundle.display());
+    Ok((plugin_id, vec![]))
+}
+
+/// Copy a directory tree (containing a `plugin.json`) into the host's plugin
+/// directory and register it the same way the zip-based install does. Used by
+/// the new `plugin_install_from_directory` Tauri command for "Load unpacked"
+/// in the renderer.
+///
+/// Behaves identically to `install_inner` post-extraction: idempotent
+/// replacement of any prior install of the same id, snapshot insertion into
+/// `PluginRuntimeState`, log line keyed by source path.
+pub async fn install_from_directory_inner<P: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<P>,
+    source_dir: &str,
+) -> anyhow::Result<(String, Vec<String>)> {
+    let source = PathBuf::from(source_dir);
+    if !source.is_absolute() {
+        anyhow::bail!("source_dir must be absolute");
+    }
+    if !source.exists() {
+        anyhow::bail!("source directory not found at {}", source.display());
+    }
+    if !source.is_dir() {
+        anyhow::bail!("source path is not a directory: {}", source.display());
+    }
+    let manifest_path = source.join("plugin.json");
+    if !manifest_path.exists() {
+        anyhow::bail!(
+            "plugin.json not found in {} — pass the directory that contains the manifest",
+            source.display()
+        );
+    }
+    let manifest_bytes = std::fs::read(&manifest_path)?;
+    let (manifest, plugin_id) = read_manifest_from_bytes(&manifest_bytes)?;
+
+    let plugin_state = app_handle.state::<PluginRuntimeState>();
+    let target_dir = plugin_state.plugin_dir(&plugin_id);
+    if target_dir.exists() {
+        std::fs::remove_dir_all(&target_dir)?;
+    }
+    std::fs::create_dir_all(&target_dir)?;
+    copy_dir_recursive(&source, &target_dir)?;
+
+    register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
+    log::info!(
+        "cli_bridge installed {plugin_id} from directory {}",
+        source.display()
+    );
+    Ok((plugin_id, vec![]))
+}
+
+/// Shared between the zip and directory install paths. Builds the runtime
+/// snapshot and inserts the plugin row, so the two surfaces can never drift
+/// on what counts as an "installed" record.
+fn register_installed_plugin(
+    plugin_state: &PluginRuntimeState,
+    plugin_id: &str,
+    manifest: &serde_json::Value,
+    target_dir: &Path,
+) {
     let version = manifest
         .get("version")
         .and_then(|v| v.as_str())
         .unwrap_or("0.0.0")
         .to_string();
     let snapshot = PluginRuntimeSnapshot {
-        plugin_id: plugin_id.clone(),
+        plugin_id: plugin_id.to_string(),
         version,
         status: "installed".into(),
         last_error: None,
@@ -242,14 +363,12 @@ pub async fn install_inner(
         install_path: target_dir.to_string_lossy().into_owned(),
     };
     plugin_state.plugins.write().insert(
-        plugin_id.clone(),
+        plugin_id.to_string(),
         PluginRecord {
             snapshot,
             runtime_state: serde_json::Value::Null,
         },
     );
-    log::info!("cli_bridge installed {plugin_id} from {}", bundle.display());
-    Ok((plugin_id, vec![]))
 }
 
 pub async fn uninstall_inner(
@@ -290,7 +409,14 @@ fn read_manifest_from_zip(bytes: &[u8]) -> anyhow::Result<(serde_json::Value, St
         .map_err(|e| anyhow::anyhow!("plugin.json not found in bundle: {e}"))?;
     let mut buf = String::new();
     entry.read_to_string(&mut buf)?;
-    let parsed: serde_json::Value = serde_json::from_str(&buf)?;
+    read_manifest_from_bytes(buf.as_bytes())
+}
+
+/// Parse a raw `plugin.json` byte buffer into (manifest, plugin_id). Shared
+/// by the zip-based install (after the entry is extracted) and the
+/// directory-based install (which reads `plugin.json` straight off disk).
+fn read_manifest_from_bytes(bytes: &[u8]) -> anyhow::Result<(serde_json::Value, String)> {
+    let parsed: serde_json::Value = serde_json::from_slice(bytes)?;
     let id = parsed
         .get("id")
         .and_then(|v| v.as_str())
@@ -300,6 +426,31 @@ fn read_manifest_from_zip(bytes: &[u8]) -> anyhow::Result<(serde_json::Value, St
         anyhow::bail!("plugin.json `id` is empty");
     }
     Ok((parsed, id))
+}
+
+/// Recursively copy `src` into `dst`. Skips entries whose canonical path
+/// would escape `src` (defensive — `walkdir` follows symlinks otherwise).
+/// Used by `install_from_directory_inner` so the rendered "Load unpacked"
+/// flow stays faithful to the manifest the author shipped.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        std::fs::create_dir_all(dst)?;
+    }
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let file_name = entry.file_name();
+        let target = dst.join(&file_name);
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry_path, &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(&entry_path, &target)?;
+        }
+        // Symlinks deliberately skipped — we don't want a "Load unpacked"
+        // affordance to walk out of the source tree via a stale link.
+    }
+    Ok(())
 }
 
 /// Extract all entries of `bytes` into `target_dir`. Skips entries
@@ -397,6 +548,42 @@ mod tests {
         assert!(tmp.path().join("README.md").exists());
         let content = std::fs::read_to_string(tmp.path().join("dist/index.js")).unwrap();
         assert!(content.contains("console.log"));
+    }
+
+    #[test]
+    fn read_manifest_from_bytes_round_trips_a_plain_plugin_json() {
+        let bytes = br#"{"id":"loose","name":"Loose","version":"0.2.0","type":"frontend"}"#;
+        let (m, id) = read_manifest_from_bytes(bytes).unwrap();
+        assert_eq!(id, "loose");
+        assert_eq!(m["version"], serde_json::Value::String("0.2.0".into()));
+    }
+
+    #[test]
+    fn read_manifest_from_bytes_rejects_empty_id() {
+        let err = read_manifest_from_bytes(br#"{"id":"","name":"X","version":"0.1.0"}"#).unwrap_err();
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn copy_dir_recursive_copies_nested_layout() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(src.path().join("nested")).unwrap();
+        std::fs::write(
+            src.path().join("plugin.json"),
+            r#"{"id":"x","version":"0.1.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(src.path().join("nested").join("inner.js"), b"hi").unwrap();
+
+        copy_dir_recursive(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("plugin.json").exists());
+        assert!(dst.path().join("nested").join("inner.js").exists());
+        assert_eq!(
+            std::fs::read(dst.path().join("nested").join("inner.js")).unwrap(),
+            b"hi"
+        );
     }
 
     #[test]

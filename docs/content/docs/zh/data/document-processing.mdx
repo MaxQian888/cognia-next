@@ -6,15 +6,6 @@ description: 把用户文件转成可嵌入文本——PDF / Word / Excel / 演�
 # 文档处理
 
 `lib/document/` 是 Cognia 的"读文件"层。它把十一种主流格式折叠成同一份 `ProcessedDocument`：原文 + 可嵌入文本 + 结构化元数据 + 解析诊断。Twin ingest、知识库、画板的"导入文档"操作都走这一层；上层调用方不需要为每种格式写自己的 parser。
-
-<TLDR>
-  统一入口 `processDocument()`（同步，仅文本格式）与 `processDocumentAsync()`（异步，含 PDF / DOCX /
-  XLSX / PPTX / EPUB / RTF）。类型识别按文件名后缀（`support-matrix.ts`），异步路径按 type 动态
-  import 具体 parser（PDF 走 pdfjs-dist；Word 走 mammoth；Excel 走
-  xlsx；其余各自的库），把结果归一化到 `ProcessedDocument`。可选生成 chunks 喂给向量库；可选导出
-  `parseSummary` 做面包屑/目录展示。
-</TLDR>
-
 ## 总览
 
 ```mermaid
@@ -286,10 +277,10 @@ UI 入口：`components/document/document-format-toolbar.tsx` 是 markdown 编�
 <Cards>
   <Card
     title="员工数字孪生"
-    href="./employee-twin"
+    href="../subsystems/employee-twin"
     description="Twin ingest 复用本模块的 parse 阶段"
   />
-  <Card title="artifacts 沙箱" href="./artifacts-sandbox" description="生成的文档落地" />
+  <Card title="artifacts 沙箱" href="../subsystems/artifacts-sandbox" description="生成的文档落地" />
   <Card title="向量库" href="./vector-store" description="chunks 的下一站" />
   <Card title="存储" href="./storage" description="文件如何落到 Dexie / 文件系统" />
 </Cards>

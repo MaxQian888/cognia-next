@@ -20,6 +20,7 @@ import { getAllContributions } from "@/lib/plugin/contracts/capability-contribut
 import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
+import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 
 interface Props {
   plugin: PluginRow
@@ -101,7 +102,7 @@ export function PluginCard({
             <div className="block w-full min-w-0">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="font-medium truncate">{plugin.name}</span>
-                <span className="text-xs text-muted-foreground shrink-0">v{plugin.version}</span>
+                <PluginVersionBadge version={plugin.version} className="shrink-0" />
                 {updateAvailable && (
                   <Badge variant="secondary" className="text-xs shrink-0">
                     {t("updateBadge")}
@@ -125,7 +126,12 @@ export function PluginCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        {contributions.slice(0, 4).map((contribution) => (
+        {/* Unified 3-chip cap matches the marketplace card so the same
+         *  plugin renders consistently across "browse" and "installed"
+         *  surfaces. The richer per-contribution hover preview lives in
+         *  the bespoke CardCapabilityChip below — _shared/capability-chips
+         *  doesn't carry the count + entries axis. */}
+        {contributions.slice(0, 3).map((contribution) => (
           <CardCapabilityChip
             key={contribution.capability}
             capability={String(contribution.capability)}
@@ -133,9 +139,9 @@ export function PluginCard({
             entries={contribution.entries}
           />
         ))}
-        {contributions.length > 4 && (
+        {contributions.length > 3 && (
           <Badge variant="outline" className="text-xs">
-            +{contributions.length - 4}
+            +{contributions.length - 3}
           </Badge>
         )}
       </div>

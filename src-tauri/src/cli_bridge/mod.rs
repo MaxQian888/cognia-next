@@ -38,7 +38,10 @@
 //! never echo it back, never log it). It's effectively a session-bound
 //! HMAC for the bridge's lifetime.
 
+pub mod detect;
+pub mod download;
 pub mod handlers;
+pub mod release_key;
 pub mod server;
 
 use ::anyhow::{Context, Result};
@@ -203,6 +206,77 @@ pub fn cli_bridge_status(state: tauri::State<'_, CliBridgeServerState>) -> CliBr
         running: state.is_running(),
         bound_port: state.bound_port(),
         endpoint_file: endpoint_file_path().map(|p| p.display().to_string()),
+    }
+}
+
+/// Receipt returned to the renderer after a successful "Load unpacked"
+/// install. Mirrors the shape of the bridge's HTTP `OkResponse` so the
+/// TS layer can use one envelope across both surfaces.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallReceipt {
+    pub plugin_id: String,
+    pub warnings: Vec<String>,
+}
+
+/// IPC surface — read and parse `plugin.json` at `<source>/plugin.json`
+/// without installing it. Used by the "Load unpacked" UI to preview the
+/// permissions and capabilities before the user approves the install,
+/// and by the offline manifest validator panel.
+#[tauri::command]
+pub async fn preview_local_manifest(source_dir: String) -> Result<serde_json::Value, String> {
+    use std::path::PathBuf;
+    let source = PathBuf::from(&source_dir);
+    if !source.is_absolute() {
+        return Err("source_dir must be absolute".to_string());
+    }
+    if !source.exists() {
+        return Err(format!("source directory not found at {}", source.display()));
+    }
+    let manifest_path = if source.is_dir() {
+        source.join("plugin.json")
+    } else {
+        // Allow passing the plugin.json directly (the validator panel
+        // surface lets the user drop a single file in).
+        source.clone()
+    };
+    if !manifest_path.exists() {
+        return Err(format!(
+            "plugin.json not found at {}",
+            manifest_path.display()
+        ));
+    }
+    let bytes = std::fs::read(&manifest_path).map_err(|e| e.to_string())?;
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("invalid plugin.json: {e}"))?;
+    Ok(parsed)
+}
+
+/// IPC surface — install a plugin from an on-disk directory containing
+/// `plugin.json`. Used by the "Load unpacked" UI in DevTools. Emits the
+/// same `cli-bridge:plugin-installed` event as the loopback HTTP bridge
+/// so the renderer's bridge-events hook picks it up without branching.
+#[tauri::command]
+pub async fn plugin_install_from_directory(
+    app: tauri::AppHandle,
+    source_dir: String,
+) -> Result<PluginInstallReceipt, String> {
+    use tauri::Emitter;
+    match handlers::install_from_directory_inner(&app, &source_dir).await {
+        Ok((plugin_id, warnings)) => {
+            let _ = app.emit(
+                "cli-bridge:plugin-installed",
+                serde_json::json!({ "plugin_id": plugin_id }),
+            );
+            Ok(PluginInstallReceipt {
+                plugin_id,
+                warnings,
+            })
+        }
+        Err(err) => {
+            log::warn!("plugin_install_from_directory failed: {err:#}");
+            Err(err.to_string())
+        }
     }
 }
 

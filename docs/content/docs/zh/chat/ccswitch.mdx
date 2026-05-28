@@ -5,25 +5,7 @@ description: 只读访问 CCSwitch 的 SQLite 数据库，一键切换 50+ 第�
 
 # CCSwitch 互操作
 
-<Status variant="stable">stable</Status>
-
-<TLDR>
-  CCSwitch 是社区开源的 Claude 多账号切换器。Cognia 以只读方式打开它的
-  `~/.cc-switch/cc-switch.db`，把 50+ 服务商、MCP server、prompt、skill 直接呈现在 Settings
-  里，并能在同一动作内同时切换 cognia-next 自己 + 任意一组外部 agent （目前 v1 只写 `claude-code` 的
-  `~/.claude/settings.json`）。我们 **从不写** CCSwitch 的数据库。
-</TLDR>
-
-<StatGrid>
-  <Stat label="只读 IPC" value="5" hint="status / list 4 种" />
-  <Stat label="写动作" value="1" hint="write_claude_settings_env" />
-  <Stat
-    label="Settings tab"
-    value="6"
-    hint="overview / providers / mcp / prompts / skills / sync"
-  />
-  <Stat label="可切换的 agent" value="1" hint="claude-code（v1）" />
-</StatGrid>
+CCSwitch 是社区开源的 Claude 多账号切换器。Cognia 以只读方式打开它的 `~/.cc-switch/cc-switch.db`，把 50+ 服务商、MCP server、prompt、skill 直接呈现在 Settings 里，并能在同一动作内同时切换 cognia-next 自己 + 任意一组外部 agent（目前 v1 只写 `claude-code` 的 `~/.claude/settings.json`）。我们 **从不写** CCSwitch 的数据库。
 
 CCSwitch 互操作有两个独立 capability：
 

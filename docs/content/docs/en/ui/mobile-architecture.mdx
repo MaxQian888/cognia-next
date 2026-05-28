@@ -1,11 +1,11 @@
 ---
 title: Mobile Architecture
-description: Capacitor 7 mobile shell reuses Next.js static export, Transport tri-state selection, JWT pairing, SecureStorage, TLS pinning, mDNS discovery, and native plugin bridge.
+description: Capacitor 8 mobile shell reuses Next.js static export, Transport tri-state selection, JWT pairing, SecureStorage, TLS pinning, mDNS discovery, and native plugin bridge.
 ---
 
 # Mobile Architecture
 
-cognia-next's mobile client is **not** a standalone React Native app, nor is it a stripped-down desktop version. It is the **same** Next.js static export (`out/`), wrapped by **Capacitor 7** inside an iOS / Android native WebView, then connected back to the desktop's `/api/v1/*` via HTTP/WS. One JS bundle, three shells (Tauri, Capacitor, Web), one shared React codebase.
+cognia-next's mobile client is **not** a standalone React Native app, nor is it a stripped-down desktop version. It is the **same** Next.js static export (`out/`), wrapped by **Capacitor 8** inside an iOS / Android native WebView, then connected back to the desktop's `/api/v1/*` via HTTP/WS. One JS bundle, three shells (Tauri, Capacitor, Web), one shared React codebase.
 
 <Callout type="info">
   This page corresponds to ADRs: [0014 — Capacitor Mobile
@@ -19,7 +19,7 @@ cognia-next's mobile client is **not** a standalone React Native app, nor is it 
 
 <TLDR>
 
-- Mobile client = **Capacitor 7 + the same `out/` static export**; no UI rewrite, no parallel component library.
+- Mobile client = **Capacitor 8 + the same `out/` static export**; no UI rewrite, no parallel component library.
 - Tri-state `Transport` is chosen at module load time: `TauriTransport` (desktop) / `CompanionTransport` (mobile) / `WebStubTransport` (browser-only).
 - Desktop is the true "server" — sidecar, vector store, MCP, subscription, and connectors all live on the desktop; the phone is a trusted client.
 - Device JWT is stored in the OS keystore (iOS Keychain / Android Keystore) via `capacitor-secure-storage-plugin`.
@@ -35,7 +35,7 @@ cognia-next's mobile client is **not** a standalone React Native app, nor is it 
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | -------- |
 | **Tauri 2 Mobile** | Mobile lacks sidecar support (Tauri issues #11454 / #9774); Claude Agent SDK sidecar is a core desktop runtime. | Rejected |
 | **React Native**   | Rewriting 57 shadcn/ui components to RN primitives would take weeks with zero functional gain.                  | Rejected |
-| **Capacitor 7**    | Drop the existing Next.js static export into a native WebView — zero UI rewrite.                                | Adopted  |
+| **Capacitor 8**    | Drop the existing Next.js static export into a native WebView — zero UI rewrite.                                | Adopted  |
 
 Deeper insight: the phone is **never** a sidecar runtime. Claude Agent SDK requires Node >= 20, native extensions, and the `keyring` crate doesn't cover mobile keystores; connector webhook services can't expose a public URL from behind NAT on a phone. Accepting these five subsystems as "desktop-only" is a platform reality, not a framework legacy.
 
@@ -371,7 +371,7 @@ cd mobile/android
 # Output: app/build/outputs/apk/debug/app-debug.apk (~22 MB)
 ```
 
-`compileSdk` / `targetSdk` = 35 (Capacitor 7 default), `minSdk` = 24, debug-only `usesCleartextTraffic="true"` only in `app/src/debug/AndroidManifest.xml`; release builds use the default security policy.
+`compileSdk` / `targetSdk` = 35 (Capacitor 8 default), `minSdk` = 24, debug-only `usesCleartextTraffic="true"` only in `app/src/debug/AndroidManifest.xml`; release builds use the default security policy.
 
 iOS (requires macOS + Xcode):
 
@@ -406,24 +406,8 @@ Overall coverage threshold matches the main repo — every source file >= 90% (l
 ## Related Pages
 
 <Cards>
-  <Card
-    title="Companion API"
-    href="./companion-api"
-    description="Server side: RPC routes, WS protocol, push, JWT issuance"
-  />
-  <Card
-    title="Platform Connectors"
-    href="./platform-connectors"
-    description="Desktop-side Telegram / Discord / Lark adapters, coordinated with mobile push"
-  />
-  <Card
-    title="Remote Control"
-    href="./remote-control"
-    description="Another 'client' semantics: desktop lends a session to another endpoint"
-  />
-  <Card
-    title="Settings UI"
-    href="./settings-ui"
-    description="Mobile settings panel lives under the same settings-shell framework"
-  />
+  <Card title="Companion API" href="../subsystems/companion-api" description="Server side: RPC routes, WS protocol, push, JWT issuance" />
+  <Card title="Platform Connectors" href="../subsystems/platform-connectors" description="Desktop-side adapters, coordinated with mobile push" />
+  <Card title="Remote Control" href="../subsystems/remote-control" description="Another 'client' semantics: desktop lends a session to another endpoint" />
+  <Card title="Settings UI" href="./settings-ui" description="Mobile settings panel lives under the same settings-shell framework" />
 </Cards>

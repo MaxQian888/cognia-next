@@ -5,18 +5,6 @@ description: 把 Cognia 源码生成成模块级 Markdown wiki 的离线流水�
 
 # Wiki 生成器
 
-<Status variant="stable">Phase 1 已实现 · cognia-self scope</Status>
-
-<TLDR>
-  `lib/wiki/` 是 External Bridge 的"内容生产端" —— 把 Cognia 自己的 `lib/` `app/` `components/`
-  `hooks/` `types/` 走一遍，输出每模块一篇 Markdown 文章存进 `wikiArticles` +
-  `wikiSections`。流水线四步：FileWalker 过滤 → buildMerkleMap 算 SHA-256 → diffManifest
-  算出新增/变更/删除 → 复用 [Twin chunker](./employee-twin) 切码块 → 跑四个 LLM 子 Agent（RepoMap 算
-  pageRank、ModuleArticle 一模块一调、CrossRef 在 prose 里插 `[[slug]]` 链接、IndexPage
-  写顶层导航）→ 写库。增量是默认行为：未变文件直接跳过；force=true 走全量。Web 模式不可用 ——
-  需要真实文件系统访问。
-</TLDR>
-
 ## 适用场景
 
 - 给 [External Bridge](./external-bridge) 的 `wiki_search` / `wiki_read` / `rag_search` 提供检索数据源。
@@ -303,7 +291,7 @@ Wiki 流水线只复用 Twin 的**切码块器**，不复用其他部分：
   <Card title="数字孪生" href="./employee-twin" description="本流水线复用其 chunker 与 LlmClient" />
   <Card
     title="存储"
-    href="./storage"
+    href="../data/storage"
     description="wikiArticles / wikiSections / wikiManifest 的完整 schema"
   />
   <Card

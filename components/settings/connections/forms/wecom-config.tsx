@@ -23,7 +23,9 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { QuickCommandsEditor } from "./_shared/quick-commands-editor"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import { normalizeQuickCommandList, type IMQuickCommand } from "@/lib/connectors/quick-commands"
 
 interface WeComConfigDialogProps {
   open: boolean
@@ -34,13 +36,19 @@ interface WeComConfigDialogProps {
 
 export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialogProps) {
   const t = useTranslations("settings.connections.wecom")
+  const tHelp = useTranslations("settings.connections.wecom.quickCommands")
   const isNew = row === null
-  const settings = (row?.settings ?? {}) as { welcomeMessage?: string }
+  const settings = (row?.settings ?? {}) as {
+    welcomeMessage?: string
+    quickCommands?: unknown
+  }
+  const persistedQuickCommands = normalizeQuickCommandList(settings.quickCommands)
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botId, setBotId] = useState("")
   const [secret, setSecret] = useState("")
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage ?? "")
+  const [quickCommands, setQuickCommands] = useState<IMQuickCommand[]>(persistedQuickCommands)
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [saving, setSaving] = useState(false)
@@ -51,6 +59,7 @@ export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialog
     botId.length > 0 ||
     secret.length > 0 ||
     welcomeMessage.trim() !== (settings.welcomeMessage ?? "") ||
+    JSON.stringify(quickCommands) !== JSON.stringify(persistedQuickCommands) ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -72,7 +81,10 @@ export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialog
 
     setSaving(true)
     try {
-      const wecomSettings = { welcomeMessage: welcomeMessage.trim() || undefined }
+      const wecomSettings = {
+        welcomeMessage: welcomeMessage.trim() || undefined,
+        ...(quickCommands.length > 0 ? { quickCommands } : {}),
+      }
       let adapterId: string
 
       if (isNew) {
@@ -189,6 +201,21 @@ export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialog
     ),
   }
 
+  const quickCommandsSection: FormSection = {
+    id: "quick-commands",
+    label: t("sectionQuickCommands"),
+    description: t("sectionQuickCommandsDesc"),
+    children: (
+      <QuickCommandsEditor
+        value={quickCommands}
+        onChange={setQuickCommands}
+        helpText={tHelp("help")}
+        disabled={saving}
+        testIdPrefix="wqc"
+      />
+    ),
+  }
+
   const advancedSection: FormSection = {
     id: "advanced",
     label: t("sectionAdvanced"),
@@ -213,7 +240,7 @@ export function WeComConfigDialog({ open, onOpenChange, row }: WeComConfigDialog
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
-            sections={[identitySection, advancedSection]}
+            sections={[identitySection, quickCommandsSection, advancedSection]}
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}

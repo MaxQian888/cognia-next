@@ -4,26 +4,6 @@ description: 跨平台调度器，把任务从应用内 cron 提升到原生 OS 
 ---
 
 # 调度器
-
-<Status variant="stable" />
-
-<TLDR>
-  双层调度器 —— 应用内 cron 循环负责"只在 Cognia
-  打开时才需要跑"的任务，原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd /
-  systemd，应用关闭时也能触发。 内置 9 个 executor，并支持运行时注册自定义 executor。
-</TLDR>
-
-<StatGrid>
-  <Stat label="trigger 类型" value="4" hint="cron · interval · once · event" />
-  <Stat
-    label="内置 executor"
-    value="9"
-    hint="chat · agent · skill · external-agent · script · plugin · backup · twin · custom"
-  />
-  <Stat label="原生平台" value="3" hint="Windows · macOS · Linux" />
-  <Stat label="历史上限" value="200" hint="每任务" />
-</StatGrid>
-
 Cognia 自带的调度器子系统跑在两层：
 
 - **应用内层** —— `lib/scheduler/` 在应用运行时按 cron 触发任务。
@@ -276,7 +256,7 @@ registerTaskExecutor("custom-daily-report", async (task) => {
 <Cards>
   <Card
     title="Agent 团队"
-    href="./agent-teams"
+    href="../chat/agent-teams"
     description="agent / skill executor 服务的角色 / 团队体系"
   />
   <Card

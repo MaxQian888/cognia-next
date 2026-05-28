@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   FolderDownIcon,
+  FolderIcon,
   MoreHorizontalIcon,
+  PackageIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -23,15 +25,21 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { pickAndReadFiles } from "@/lib/files/file-bridge"
+import { useSettingsStore } from "@/stores/settings"
+import { resolveSkillBundleMirrors } from "@/stores/settings/settings-store"
+import { pickAndReadBinaryFiles, pickAndReadFiles, pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
+import { loadBundle } from "@/lib/skills/bundle/loader"
 import { listSkills } from "@/lib/db/skills"
 import { nameFromFilename, parseSkillMarkdown } from "@/lib/claude/skills-io"
-import { scanClaudeSkills } from "@/lib/claude/ipc"
+import { scanClaudeSkills, skillsEmptyTrash, skillsListTrash } from "@/lib/claude/ipc"
 import { useSkillsStore } from "@/stores/skills"
 import type { ImportStaging } from "@/stores/skills"
 import { useSkillSync } from "@/hooks/skills"
@@ -39,6 +47,17 @@ import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { loggers } from "@/lib/logging"
 
 const SKILL_FILE_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }]
+const BUNDLE_FILE_FILTERS = [{ name: "Skill bundle", extensions: ["zip"] }]
+
+function slug(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "skill"
+  )
+}
 
 export function SkillPanelToolbar() {
   const t = useTranslations("skills.toolbar")
@@ -51,6 +70,50 @@ export function SkillPanelToolbar() {
   const openCreate = useSkillsStore((s) => s.openCreate)
   const setImportStaging = useSkillsStore((s) => s.setImportStaging)
   const sync = useSkillSync()
+  // Select the raw field so Zustand's referential equality holds across
+  // renders — wrapping `resolveSkillBundleMirrors` in the selector creates
+  // a fresh object every read and triggers an update loop in React 19.
+  const rawMirrors = useSettingsStore((s) => s.settings?.skillBundleMirrors)
+  const mirrorSettings = resolveSkillBundleMirrors(
+    rawMirrors ? ({ skillBundleMirrors: rawMirrors } as never) : null
+  )
+  const setMirror = useSettingsStore((s) => s.setSkillBundleMirrors)
+  const [trashCount, setTrashCount] = useState(0)
+
+  // Refresh the trash badge on mount. Tauri-only — outside Tauri the listing
+  // call is a no-op error. setTrashCount runs only after the awaited IPC call,
+  // so it never fires synchronously during the effect commit.
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const entries = await skillsListTrash()
+        if (!cancelled) setTrashCount(entries.length)
+      } catch {
+        if (!cancelled) setTrashCount(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleEmptyTrash = async () => {
+    if (!isTauri()) return
+    setBusy(true)
+    try {
+      const removed = await skillsEmptyTrash()
+      setTrashCount(0)
+      toast.success(tSync("trashEmptied", { count: removed }))
+      loggers.skills.info("trash emptied", { removed })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("empty trash failed", err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const handleImportFromMarkdown = async () => {
     setBusy(true)
@@ -100,6 +163,106 @@ export function SkillPanelToolbar() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
       loggers.skills.error("import.markdown failed", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleImportFromBundleZip = async () => {
+    setBusy(true)
+    try {
+      const files = await pickAndReadBinaryFiles({
+        filters: BUNDLE_FILE_FILTERS,
+        multiple: false,
+      })
+      if (files.length === 0) return
+      const picked = files[0]
+      const fallback = picked.name.replace(/\.zip$/i, "")
+      const result = await loadBundle({
+        kind: "zip-blob",
+        bytes: picked.bytes,
+        fallbackName: fallback,
+      })
+      const draft: ImportStaging["drafts"][number] = {
+        name: result.draft.name,
+        description: result.draft.description,
+        content: result.draft.content,
+        tags: result.draft.tags,
+        allowedTools: result.draft.allowedTools,
+        category: result.draft.category,
+        canonicalId: `bundle:zip:${slug(result.draft.name)}`,
+        resources: result.resources,
+        validationErrors:
+          result.nonFatalValidationErrors.length > 0 ? result.nonFatalValidationErrors : undefined,
+      }
+      setImportStaging({
+        drafts: [draft],
+        sourceLabel: picked.name,
+        parseErrors: [],
+        flavor: result.flavor,
+      })
+      loggers.skills.info("import.bundleZip staged", {
+        name: result.draft.name,
+        flavor: result.flavor,
+        resources: result.resources.length,
+        warnings: result.warnings.length,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("import.bundleZip failed", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleImportFromBundleFolder = async () => {
+    if (!isTauri()) {
+      toast.error(tToasts("importFromClaudeDesktopOnly"))
+      return
+    }
+    setBusy(true)
+    try {
+      const dir = await pickDirectory()
+      if (!dir) return
+      const fallback =
+        dir
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter((s) => s.length > 0)
+          .pop() ?? "skill"
+      const result = await loadBundle({
+        kind: "folder",
+        path: dir,
+        fallbackName: fallback,
+      })
+      const draft: ImportStaging["drafts"][number] = {
+        name: result.draft.name,
+        description: result.draft.description,
+        content: result.draft.content,
+        tags: result.draft.tags,
+        allowedTools: result.draft.allowedTools,
+        category: result.draft.category,
+        canonicalId: `bundle:folder:${slug(result.draft.name)}`,
+        resources: result.resources,
+        validationErrors:
+          result.nonFatalValidationErrors.length > 0 ? result.nonFatalValidationErrors : undefined,
+        nativeDirectory: dir,
+      }
+      setImportStaging({
+        drafts: [draft],
+        sourceLabel: dir,
+        parseErrors: [],
+        flavor: result.flavor,
+      })
+      loggers.skills.info("import.bundleFolder staged", {
+        name: result.draft.name,
+        flavor: result.flavor,
+        resources: result.resources.length,
+        warnings: result.warnings.length,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("import.bundleFolder failed", err)
     } finally {
       setBusy(false)
     }
@@ -205,6 +368,31 @@ export function SkillPanelToolbar() {
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem
+            onSelect={() => void handleImportFromBundleZip()}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-import-bundle-zip"
+          >
+            <PackageIcon className="mr-2 size-3.5" />
+            <div className="flex flex-col gap-0.5">
+              <span>{t("importFromBundle")}</span>
+              <span className="text-[10px] text-muted-foreground">{t("importFromBundleHint")}</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void handleImportFromBundleFolder()}
+            disabled={!isTauri()}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-import-bundle-folder"
+          >
+            <FolderIcon className="mr-2 size-3.5" />
+            <div className="flex flex-col gap-0.5">
+              <span>{t("importFromBundleFolder")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("importFromBundleFolderHint")}
+              </span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onSelect={() => void handleImportFromClaudeCode()}
             disabled={!isTauri()}
             className="text-xs"
@@ -255,7 +443,7 @@ export function SkillPanelToolbar() {
             {tCommon("syncLabel")}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-64">
           <DropdownMenuItem onSelect={() => void sync.push()} className="text-xs">
             <RefreshCwIcon className="mr-2 size-3.5" />
             {tSync("pushAll")}
@@ -263,6 +451,36 @@ export function SkillPanelToolbar() {
           <DropdownMenuItem onSelect={() => void sync.pull()} className="text-xs">
             <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
             {tSync("pullAll")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            {tSync("mirrorTargetsLabel")}
+          </DropdownMenuLabel>
+          <DropdownMenuCheckboxItem
+            checked={mirrorSettings.claude}
+            onCheckedChange={(v) => void setMirror({ claude: !!v })}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-mirror-claude"
+          >
+            {tSync("mirrorClaude")}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={mirrorSettings.codex}
+            onCheckedChange={(v) => void setMirror({ codex: !!v })}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-mirror-codex"
+          >
+            {tSync("mirrorCodex")}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => void handleEmptyTrash()}
+            disabled={!isTauri() || trashCount === 0 || busy}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-empty-trash"
+          >
+            <FolderDownIcon className="mr-2 size-3.5" />
+            <span>{tSync("emptyTrash", { count: trashCount })}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

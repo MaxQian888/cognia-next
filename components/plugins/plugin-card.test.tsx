@@ -53,13 +53,14 @@ describe("PluginCard", () => {
     expect(screen.getByText("plugin_test")).toBeInTheDocument()
   })
 
-  it("renders capability chips with overflow indicator beyond 4", () => {
+  it("renders capability chips with overflow indicator beyond the 3-chip cap", () => {
     const cb = callbacks()
     render(<PluginCard plugin={baseRow} selected={false} {...cb} />)
     expect(screen.getByText("tools")).toBeInTheDocument()
     expect(screen.getByText("commands")).toBeInTheDocument()
-    // 5 caps total, 4 shown + "+1"
-    expect(screen.getByText("+1")).toBeInTheDocument()
+    // 5 caps total, 3 shown + "+2" — aligned with the marketplace card
+    // so the same plugin renders consistently across browse vs library.
+    expect(screen.getByText("+2")).toBeInTheDocument()
   })
 
   it("renders permission count badge", () => {

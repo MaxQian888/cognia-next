@@ -24,6 +24,12 @@ export type DeeplinkRoute =
   | { kind: "pair_qr"; payload: string; raw: string }
   | { kind: "open_session"; sessionId: string; raw: string }
   | { kind: "share_target"; text?: string; url?: string; raw: string }
+  | {
+      kind: "open_workflow_run"
+      workflowId: string
+      runId: string
+      raw: string
+    }
   | { kind: "unknown"; raw: string }
 
 interface AppShape {
@@ -82,6 +88,17 @@ export function parseDeeplink(rawUrl: string): DeeplinkRoute {
       url: params.get("url") ?? undefined,
       raw: rawUrl,
     }
+  }
+  // cognia://workflow-run/<workflowId>/<runId>
+  // Emitted by `buildFinalSurface` so the IM user can jump from a terminal
+  // status card straight to the Workflows tab's run-detail view. On the
+  // mobile shell the URL pushes the same client-side route; on web /
+  // Tauri the OS hands the deep link to the running renderer.
+  if (host === "workflow-run") {
+    const parts = path.split("/").filter(Boolean)
+    const workflowId = parts[0] ?? params.get("workflowId") ?? ""
+    const runId = parts[1] ?? params.get("runId") ?? ""
+    return { kind: "open_workflow_run", workflowId, runId, raw: rawUrl }
   }
   return { kind: "unknown", raw: rawUrl }
 }

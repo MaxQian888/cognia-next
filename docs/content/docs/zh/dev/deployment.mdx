@@ -4,15 +4,6 @@ description: 把 Cognia 打包为 Web、桌面（按平台）和文档站点，�
 ---
 
 # 部署
-
-<Status variant="stable" />
-
-<TLDR>
-  三种发布形式：Web（静态导出，托管在任意 CDN）、桌面（Tauri 在 Windows / macOS / Linux
-  出三套安装包）、 文档（Fumadocs 全服务模式）。GitHub Actions 已配好 quality / test / build-tauri /
-  release / deploy 五条工作流。 应用内更新默认禁用，等签名密钥就绪后启用。
-</TLDR>
-
 Cognia 有三种发布形式：
 
 1. **Web** —— 静态导出，可部署到任意静态托管。
@@ -356,13 +347,13 @@ Cognia 在 `package.json` 与 `Cargo.toml` 都用 **semver**，需手动同步�
   <Card title="概览" href="./" description="回到中文文档首页" />
   <Card
     title="移动端架构"
-    href="./mobile-architecture"
+    href="../ui/mobile-architecture"
     description="Capacitor + Web 一体化的移动客户端"
   />
-  <Card title="伴随 API" href="./companion-api" description="远端 / 云端客户端对应的服务端协议" />
+  <Card title="伴随 API" href="../subsystems/companion-api" description="远端 / 云端客户端对应的服务端协议" />
   <Card
     title="运行时 & Tauri"
-    href="./runtime-and-tauri"
+    href="../core/runtime-and-tauri"
     description="桌面运行时的 IPC、命令、事件模型"
   />
 </Cards>

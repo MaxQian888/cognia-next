@@ -4,23 +4,6 @@ description: 把文档、聊天、代码蒸馏成可对话的孪生，发送时�
 ---
 
 # 员工数字孪生
-
-<Status variant="beta">Beta · phase 8</Status>
-
-<TLDR>
-  把文档、聊天导出与代码蒸馏成一个可对话的孪生。发送时召回 top-K 相关 chunk
-  与风格少样本，让助手保持作者语气。 PII 在**任何** embed 或 LLM 调用之前被替换为占位符 ——
-  逆向映射加密落盘。Team chat 通过 `precomputedQueryEmbedding` 在多个孪生成员间共享一次 embed
-  调用。每个 distill agent 有 90 s 超时与降级路径，单 agent 卡死不会拖死整次蒸馏。
-</TLDR>
-
-<StatGrid>
-  <Stat label="流水线阶段" value="7" hint="ingest" />
-  <Stat label="蒸馏 agent" value="5" hint="同一编排器下" />
-  <Stat label="Dexie 表" value="5" hint="schema v14" />
-  <Stat label="工作台 tab" value="4" hint="Sources / Jobs / Drafts / Settings" />
-</StatGrid>
-
 **员工数字孪生** 是 Cognia 最深的定制化层。它把用户的文档、聊天导出与代码蒸馏成：
 
 - **知识索引（RAG）** —— 发送时检索相关片段。
@@ -421,14 +404,10 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 ## 相关
 
 <Cards>
-  <Card title="向量库" href="./vector-store" description="RAG 的真正执行层 + collection 设计" />
-  <Card
-    title="文档处理"
-    href="./document-processing"
-    description="parse 阶段委派的 document-processor"
-  />
-  <Card title="聊天 & 技能" href="./chat-and-skills" description="启用孪生的角色 / 技能绑定" />
-  <Card title="Agent Teams" href="./agent-teams" description="team chat embedding 共享路径" />
-  <Card title="备份 & 数据传输" href="./backup-and-data" description="孪生表是备份载荷的一部分" />
-  <Card title="存储" href="./storage" description="5 张 Dexie 孪生表细节" />
+  <Card title="向量库" href="../data/vector-store" description="RAG 的真正执行层 + collection 设计。" />
+  <Card title="文档处理" href="../data/document-processing" description="parse 阶段委派的 document-processor。" />
+  <Card title="聊天 & 技能" href="../chat/chat-and-skills" description="启用孪生的角色 / 技能绑定。" />
+  <Card title="Agent Teams" href="../chat/agent-teams" description="team chat embedding 共享路径。" />
+  <Card title="备份 & 数据传输" href="../data/backup-and-data" description="孪生表是备份载荷的一部分。" />
+  <Card title="存储" href="../data/storage" description="孪生 Dexie 表细节。" />
 </Cards>

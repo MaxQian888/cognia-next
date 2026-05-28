@@ -40,6 +40,7 @@ import type {
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
 import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
+import { emitFinishedSpan } from "@/lib/agent-trace/emitter"
 
 // =============================================================================
 // Plugin hook failure telemetry
@@ -81,6 +82,63 @@ export function getRecentPluginHookErrors(): readonly PluginHookErrorRecord[] {
 /** Test-only: clear the captured plugin-hook failure buffer. */
 export function __resetPluginHookErrorsForTesting(): void {
   pluginHookErrors.length = 0
+}
+
+/** Pull a sessionId out of a hook payload when one is present. Every team
+ * payload type carries it under one of `sessionId` / `chatSessionId` /
+ * `id` (consensus events). Returns undefined for hooks with no chat scope. */
+function extractSessionIdFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined
+  const p = payload as Record<string, unknown>
+  const candidates = [p.sessionId, p.chatSessionId]
+  for (const c of candidates) {
+    if (typeof c === "string" && c.length > 0) return c
+  }
+  return undefined
+}
+
+/**
+ * Emit a finished agent-trace span for a single plugin-hook handler run.
+ * Caller measures duration themselves (the team-hook dispatcher already
+ * runs handlers inside `queueMicrotask`, so start/end pairing here would
+ * fight the fire-and-forget model). On failure, also routes through
+ * `recordPluginHookError` to keep the legacy ring buffer populated.
+ *
+ * `sessionId` defaults to `"plugin-runtime"` for hooks that aren't bound to
+ * a chat session (lifecycle hooks, theme hooks, etc.). Caller can pass a
+ * concrete sessionId when one is available (team / agent / message hooks).
+ */
+export function recordPluginHookEvent(args: {
+  pluginId: string
+  hookName: string
+  startTime: number
+  durationMs: number
+  sessionId?: string
+  error?: unknown
+}): void {
+  if (args.error) {
+    recordPluginHookError(args.pluginId, args.hookName, args.error)
+  }
+  try {
+    emitFinishedSpan({
+      operationName: "execute_tool",
+      providerName: "cognia.plugin",
+      sessionId: args.sessionId ?? "plugin-runtime",
+      surface: "plugin-hook",
+      toolName: args.hookName,
+      pluginId: args.pluginId,
+      startTime: args.startTime,
+      durationMs: Math.max(0, args.durationMs),
+      errorType: args.error ? "plugin_hook_error" : undefined,
+      errorMessage: args.error
+        ? args.error instanceof Error
+          ? args.error.message
+          : String(args.error)
+        : undefined,
+    })
+  } catch {
+    // emit is best-effort; never break the host loop
+  }
 }
 
 // =============================================================================
@@ -816,17 +874,28 @@ export class PluginLifecycleHooks {
     name: K,
     payload: Parameters<NonNullable<PluginHooks[K]>>[0]
   ): void {
+    const sessionId = extractSessionIdFromPayload(payload)
     for (const pluginId of this.hookExecutionOrder) {
       const registered = this.registeredHooks.get(pluginId)
       const handler = registered?.hooks[name] as ((p: typeof payload) => void) | undefined
       if (!handler) continue
       queueMicrotask(() => {
+        const startTime = Date.now()
+        let caught: unknown
         try {
           handler(payload)
         } catch (error) {
+          caught = error
           loggers.hooks.error(`Error in plugin ${pluginId} ${name}:`, error)
-          recordPluginHookError(pluginId, String(name), error)
         }
+        recordPluginHookEvent({
+          pluginId,
+          hookName: String(name),
+          startTime,
+          durationMs: Date.now() - startTime,
+          sessionId,
+          error: caught,
+        })
       })
     }
   }

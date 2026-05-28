@@ -236,12 +236,19 @@ function parseList(v: unknown): string[] | undefined {
 // ---- Plugin skill IO (M4) -----------------------------------------------
 //
 // Plugins shipping the `skills` capability (`PluginSkillDef`) supply skill
-// content through one of three sources: `inline` markdown, an Anthropic
-// managed container skill (referenced by id, no body to read), or a
-// `local-folder` path containing a `SKILL.md`. `resolveSkillMarkdown` is
-// the single entry point the runtime uses to fetch the body — it returns
-// `undefined` for the managed flavour so the caller routes it via the
-// sidecar's `containerSkillIds` channel instead.
+// content through one of five sources today: `inline` markdown, an
+// Anthropic-managed container skill (referenced by id, no body to read),
+// a `local-folder` path containing a `SKILL.md`, a `local-bundle` path
+// expected to carry sibling `scripts/`/`references/`/`assets/` directories,
+// or an `archive` (`.zip`) of that same bundle layout.
+// `resolveSkillMarkdown` is the single entry point the runtime uses to
+// fetch the body for the system prompt — it returns `undefined` for the
+// managed flavour so the caller routes it via the sidecar's
+// `containerSkillIds` channel instead. Resource materialisation for
+// `local-bundle` / `archive` flows happens on disk via the disk-mirror
+// pipeline (`lib/skills/sync.ts` → `src-tauri/src/skills/install.rs`); the
+// system-prompt body is intentionally narrow because Claude's context is
+// the SKILL.md body alone.
 
 /**
  * Read the SKILL.md body for a plugin-contributed skill.
@@ -249,36 +256,71 @@ function parseList(v: unknown): string[] | undefined {
  * - `inline`: return the markdown verbatim.
  * - `anthropic-managed`: returns `undefined` (the skill content lives in
  *   Anthropic's container and is referenced by `containerSkillId` instead).
- * - `local-folder`: read `<path>/SKILL.md` off disk. Tauri only. In browser
- *   mode this returns `undefined` (the resolver caller filters undefined
- *   bodies out of the rendered system prompt, so the user gets nothing
- *   appended rather than an inline `[skill … not available]` placeholder
- *   leaking into Claude's context). A `console.warn` is emitted so the
- *   developer console surfaces the dropped skill. The same `undefined`
- *   path is used when fs read fails so resolver callers never see a
- *   thrown error.
+ * - `local-folder` / `local-bundle`: read `<path>/SKILL.md` off disk.
+ *   Tauri only. In browser mode this returns `undefined` (the resolver
+ *   caller filters undefined bodies out of the rendered system prompt, so
+ *   the user gets nothing appended rather than an inline `[skill … not
+ *   available]` placeholder leaking into Claude's context). A
+ *   `console.warn` is emitted so the developer console surfaces the
+ *   dropped skill. The same `undefined` path is used when fs read fails
+ *   so resolver callers never see a thrown error.
+ * - `archive`: read the `.zip` from disk and parse just the SKILL.md
+ *   body via the bundle loader. Resources inside the archive are NOT
+ *   pulled into the system prompt — that would defeat the point of the
+ *   on-disk extraction step. They land in Dexie / `<appData>/cognia/
+ *   skills/<id>/` via the disk-mirror pipeline once the plugin is enabled.
  */
 export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string | undefined> {
-  if (def.source.kind === "inline") return def.source.markdown
-  if (def.source.kind === "anthropic-managed") return undefined
-  if (def.source.kind === "local-folder") {
-    if (!isTauri()) {
-      console.warn(
-        `[skills-io] skill "${def.id}" has a local-folder source; dropped in browser mode`
-      )
+  const source = def.source
+  switch (source.kind) {
+    case "inline":
+      return source.markdown
+    case "anthropic-managed":
       return undefined
+    case "local-folder":
+    case "local-bundle": {
+      if (!isTauri()) {
+        console.warn(
+          `[skills-io] skill "${def.id}" has a ${source.kind} source; dropped in browser mode`
+        )
+        return undefined
+      }
+      try {
+        const { readTextFile } = await import("@tauri-apps/plugin-fs")
+        const root = source.path.replace(/[/\\]+$/, "")
+        const fullPath = `${root}/SKILL.md`
+        return await readTextFile(fullPath)
+      } catch (err) {
+        console.warn(
+          `[skills-io] skill "${def.id}" SKILL.md read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`
+        )
+        return undefined
+      }
     }
-    try {
-      const { readTextFile } = await import("@tauri-apps/plugin-fs")
-      const root = def.source.path.replace(/[/\\]+$/, "")
-      const fullPath = `${root}/SKILL.md`
-      return await readTextFile(fullPath)
-    } catch (err) {
-      console.warn(
-        `[skills-io] skill "${def.id}" SKILL.md read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`
-      )
+    case "archive": {
+      if (!isTauri()) {
+        console.warn(`[skills-io] skill "${def.id}" has an archive source; dropped in browser mode`)
+        return undefined
+      }
+      try {
+        // Lazy-import to keep the bundle loader out of the chat-send hot
+        // path when no plugin ships an archive skill.
+        const { loadBundle } = await import("@/lib/skills/bundle/loader")
+        const result = await loadBundle({ kind: "zip-path", path: source.path })
+        return result.draft.content
+      } catch (err) {
+        console.warn(
+          `[skills-io] skill "${def.id}" archive read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`
+        )
+        return undefined
+      }
+    }
+    default: {
+      // Exhaustive narrowing. New PluginSkillSource variants must be
+      // handled here; the compiler flags missing arms.
+      const exhaustive: never = source
+      console.warn(`[skills-io] skill "${def.id}" has an unknown source kind`, exhaustive)
       return undefined
     }
   }
-  return undefined
 }

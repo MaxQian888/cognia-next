@@ -5,29 +5,7 @@ description: 内置 70+ 服务商的目录、API key 持久化、动态注册表
 
 # Provider 系统
 
-<Status variant="stable">stable</Status>
-
-<TLDR>
-  Cognia 用一份静态 catalog 维护 70+ 内置服务商（OpenAI / Anthropic / Google / DeepSeek / 本地
-  Ollama …）， 按 6 个 protocol family 把它们映射到 5 个
-  adapter；插件可以动态注册自己的服务商；最后由一个 pure-function 投影层把内置 + 自定义 + 本地 +
-  插件四条路径合并成 UI 用的扁平数组。
-</TLDR>
-
-<StatGrid>
-  <Stat label="内置服务商" value="70+" hint="cloud + local 合计" />
-  <Stat
-    label="Adapter id"
-    value="5"
-    hint="openai-compatible / anthropic / gemini / openrouter / local"
-  />
-  <Stat
-    label="Provider family"
-    value="6"
-    hint="openai-compatible / anthropic-native / gemini-native / openrouter / local / proxy"
-  />
-  <Stat label="Routing preset" value="3" hint="budget / performance / reliability" />
-</StatGrid>
+Cognia 用一份静态 catalog 维护 70+ 内置服务商（OpenAI / Anthropic / Google / DeepSeek / 本地 Ollama …），按 6 个 protocol family 映射到 5 个 adapter；插件可以动态注册自己的服务商；最后由一个 pure-function 投影层把内置 + 自定义 + 本地 + 插件四条路径合并成 UI 用的扁平数组。
 
 Provider 系统覆盖五条职责：
 
@@ -287,7 +265,7 @@ settings UI 不直接读 catalog 或 registry——这种 fan-in 把分散来源
   />
   <Card
     title="向量存储"
-    href="./vector-store"
+    href="../data/vector-store"
     description="embedding provider 注册表是它的主要消费者。"
   />
 </Cards>

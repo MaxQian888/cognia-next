@@ -76,6 +76,16 @@ export type AuditKind =
   | "builtin_skill_hitl_approved"
   | "builtin_skill_hitl_rejected"
   | "builtin_skill_failed"
+  // Workflow Approve / Cancel A2UI callback path failed before
+  // `handleWorkflowApprovalCallback` could finish (binding read,
+  // orchestrator start, or sibling-binding delete threw). Audited
+  // exactly once per dispatched callback so the operator can see why
+  // the in-chat surface didn't progress past the tap.
+  | "workflow_approval_failed"
+  // Workflow fan-out subscription Approve / Cancel A2UI callback failed
+  // (binding decode, Dexie write, or sibling-binding cleanup threw).
+  // Same shape contract as `workflow_approval_failed`.
+  | "workflow_fanout_failed"
 
 export interface AuditEntry {
   id: string

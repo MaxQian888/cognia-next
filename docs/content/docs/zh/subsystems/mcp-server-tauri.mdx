@@ -5,12 +5,6 @@ description: Rust 端用 axum 提供的 HTTP MCP 服务，bearer 鉴权 + 长生
 
 # MCP 服务（Tauri 端）
 
-<Status variant="stable">M3 已落地 · axum + bearer auth</Status>
-
-<TLDR>
-`src-tauri/src/mcp_server/` 是 External Bridge 的 HTTP 传输实现：axum 在 `127.0.0.1:<port>` 监听，bearer token 用 `subtle` 库做恒时比较防时序攻击，认证通过后把 JSON-RPC 请求按行喂给一个长生命的 Node sidecar（`node cognia-mcp.js`），读一行响应再回写。整条链路是顺序的（一把 mutex 串起 stdin/stdout），跟 MCP SDK 的 `StdioServerTransport` 同构。四个 Tauri 命令 `mcp_server_start / stop / restart / status` 把生命周期暴露给 React 前端。HTTP 限 1 MiB body，`/healthz` 不需鉴权，`/mcp/sse` 在 Phase 1 返回 501（SSE 留给 Phase 2）。
-</TLDR>
-
 ## 适用场景
 
 - 外部编码 Agent（Cursor、Claude Desktop、自定义 HTTP 客户端）通过 HTTP 而非 stdio 接入 Cognia 知识。
@@ -233,7 +227,7 @@ export async function startMcpServer(args: StartArgs): Promise<number> {
   />
   <Card
     title="Sidecar & Claude SDK"
-    href="./sidecar-and-claude-sdk"
+    href="../core/sidecar-and-claude-sdk"
     description="claude-host.mjs 的总览 —— 区别于本页讨论的 cognia-mcp.js"
   />
 </Cards>

@@ -5,14 +5,9 @@ description: 技能解析流水线、原生磁盘沙箱、双向同步、市场�
 
 # 技能系统
 
-技能（Skill）是 Cognia 中最小的"可携带能力"单位 —— 一个 Markdown 片段、一组允许的工具、可选的脚本/引用/资源捆绑。本页是技能子系统的深度剖析；如果你想先看技能在聊天里如何被启用，请回到[聊天、角色、技能 & 团队](./chat-and-skills)。
+技能（Skill）是 Cognia 中最小的"可携带能力"单位 —— 一个 Markdown 片段、一组允许的工具、可选的脚本/引用/资源捆绑。本页是技能子系统的深度剖析；技能在聊天里如何被启用见 [聊天、角色、技能 & 团队](./chat-and-skills)。
 
-<TLDR>
-技能 = SKILL.md（YAML frontmatter + body）+ scripts/ + references/ + assets/。
-浏览器端的真理源是 Dexie；可选双向同步到 `~/.claude/skills/<dir>/`。
-市场来自 `skills-lock.json` 注册表与 SkillsMP API，安装时走 `parseSkillMarkdown → createSkill`。
-所有保存路径都强制走 `validateSkill` + Rust 端的 `skills_scan_security`。
-</TLDR>
+技能 = `SKILL.md`（YAML frontmatter + body）+ `scripts/` + `references/` + `assets/`。浏览器端真理源在 Dexie；可选双向同步到 `~/.claude/skills/<dir>/`。市场来自 `skills-lock.json` 注册表与 SkillsMP API，安装走 `parseSkillMarkdown → createSkill`。所有保存路径都强制走 `validateSkill` + Rust 端 `skills_scan_security`。
 
 ## 适用场景
 

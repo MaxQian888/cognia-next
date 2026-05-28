@@ -17,20 +17,22 @@ This page collects several relatively small subsystems that would each be a noti
 
 ## At a Glance
 
-| Subsystem           | Role                                                | Locations                               |
-| ------------------- | --------------------------------------------------- | --------------------------------------- |
-| TTS                 | Text-to-speech, 9 providers + Edge WSS bridge       | `lib/tts/` · `src-tauri/src/tts/`       |
-| Push                | Mobile push notifications (APNs/FCM)                | `lib/push/`                             |
-| QR & Barcode        | Pairing QR + mobile scan                            | `lib/qr/`                               |
-| Network             | Browser-side proxy config + proxy-aware fetch       | `lib/network/`                          |
-| Proxy Config (Rust) | Process-level proxy state + reqwest/WSS integration | `src-tauri/src/proxy_config/`           |
-| Connectivity        | mDNS / LAN /24 probe / cloudflared tunnel           | `lib/connectivity/`                     |
-| Queue               | Mobile outbound queue + backoff + deadletter        | `lib/queue/`                            |
-| Wallpaper           | User wallpaper file persistence                     | `src-tauri/src/wallpaper/`              |
-| LaTeX               | KaTeX render LRU cache + macros                     | `lib/latex/`                            |
-| Monaco / Workbench  | Canvas Monaco options + active editor registry      | `lib/monaco/` · `lib/editor-workbench/` |
-| Media               | Plugin-generated media landing interface            | `lib/media/`                            |
-| Time                | Minimal relative time formatter                     | `lib/time/`                             |
+| Subsystem           | Role                                                | Locations                                       |
+| ------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| TTS                 | Text-to-speech, 9 providers + Edge WSS bridge       | `lib/tts/` · `src-tauri/src/tts/`               |
+| Push                | Mobile push notifications (APNs/FCM)                | `lib/push/`                                     |
+| QR & Barcode        | Pairing QR + mobile scan                            | `lib/qr/`                                       |
+| Network             | Browser-side proxy config + proxy-aware fetch       | `lib/network/`                                  |
+| Proxy Config (Rust) | Process-level proxy state + reqwest/WSS integration | `src-tauri/src/proxy_config/`                   |
+| Connectivity        | mDNS / LAN /24 probe / cloudflared tunnel           | `lib/connectivity/`                             |
+| Queue               | Mobile outbound queue + backoff + deadletter        | `lib/queue/`                                    |
+| Wallpaper           | User wallpaper file persistence                     | `src-tauri/src/wallpaper/`                      |
+| LaTeX               | KaTeX render LRU cache + macros                     | `lib/latex/`                                    |
+| Monaco / Workbench  | Canvas Monaco options + active editor registry      | `lib/monaco/` · `lib/editor-workbench/`         |
+| Media               | Plugin-generated media landing interface            | `lib/media/`                                    |
+| Time                | Minimal relative time formatter                     | `lib/time/`                                     |
+| Perf dashboard      | Streamed CPU/RAM/event samples (ADR-0035)           | `src-tauri/src/perf/` · `app/performance/`     |
+| Public share links  | Zero-knowledge share via Cloudflare Worker          | `lib/share/` · `share-server/` · ADR-0037       |
 
 ## TTS
 
@@ -381,31 +383,11 @@ Adjacent subsystems each section cares about:
     href="./platform-connectors"
     description="Queue / Push / Connectivity are for mobile"
   />
-  <Card
-    title="Theming & i18n"
-    href="./theming-and-i18n"
-    description="Wallpaper / LaTeX / Monaco affect rendering surfaces"
-  />
-  <Card
-    title="Storage"
-    href="./storage"
-    description="Dexie tables for wallpaper / queue / media landing"
-  />
-  <Card
-    title="Runtime & Tauri"
-    href="./runtime-and-tauri"
-    description="Tauri commands for Proxy / Wallpaper / TTS"
-  />
-  <Card
-    title="Search System"
-    href="./search-system"
-    description="Network proxy affects all external fetch"
-  />
-  <Card
-    title="Chat & Skills"
-    href="./chat-and-skills"
-    description="Where TTS / Media / LaTeX sit in the send pipeline"
-  />
+  <Card title="Theming & i18n" href="../ui/theming-and-i18n" description="Wallpaper / LaTeX / Monaco affect rendering surfaces" />
+  <Card title="Storage" href="../data/storage" description="Dexie tables for wallpaper / queue / media landing" />
+  <Card title="Runtime & Tauri" href="../core/runtime-and-tauri" description="Tauri commands for Proxy / Wallpaper / TTS" />
+  <Card title="Search System" href="../data/search-system" description="Network proxy affects all external fetch" />
+  <Card title="Chat & Skills" href="../chat/chat-and-skills" description="Where TTS / Media / LaTeX sit in the send pipeline" />
   <Card
     title="Plugin System"
     href="./plugin-system"

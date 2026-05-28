@@ -11,7 +11,7 @@ description: Bring PR auto-review, Issue → PR loops, and Release automation in
   shell `plugins/github-delivery/`. Credentials go to the OS keyring, events arrive via webhook or
   ETag polling, and every write operation is intercepted by `lib/github/policy-gate.ts` with the
   decision written to the namespaced `audit` table. The full architecture is in
-  [ADR-0012](/en/adr/0012-github-delivery).
+  [ADR-0018](../adr/0018-github-delivery).
 </TLDR>
 
 ## What It Solves
@@ -38,31 +38,13 @@ author allowlist, quiet hours.
 ## Sub-page Index
 
 <Cards>
-  <Card title="Setup & Credentials" href="/en/github-delivery/setup">
-    GitHub App vs PAT, webhook URL (one-click expose via cloudflared), polling fallback, first-time
-    plugin activation.
-  </Card>
-  <Card title="Policy Reference" href="/en/github-delivery/policies">
-    Full `GhPolicy` fields, decision paths for 6 action kinds, HITL approval branch, quiet-hours
-    algorithm.
-  </Card>
-  <Card title="13 action.github.* Nodes" href="/en/github-delivery/nodes">
-    Parameter tables, output shapes, policy actions, error surfaces, and Inspector examples for each
-    node.
-  </Card>
-  <Card title="8 Built-in Templates" href="/en/github-delivery/templates">
-    PR auto-review, Issue triage, full Release suite (three modes), CI failure diagnosis.
-  </Card>
-  <Card title="Audit & Work Orders" href="/en/github-delivery/audit">
-    `audit` table schema, card fields, `workOrders` 6-column kanban, recent event stream.
-  </Card>
-  <Card title="Usage & Quotas" href="/en/github-delivery/usage">
-    Octokit throttling / retry plugins, `GET /rate_limit` history, safe rate-limit recommendations.
-  </Card>
-  <Card title="FAQ" href="/en/github-delivery/faq">
-    Common errors, signature verification failures, App vs PAT trade-offs, cloudflared
-    troubleshooting, web-mode degradation.
-  </Card>
+  <Card title="Setup & Credentials" href="./setup" description="GitHub App vs PAT, webhook URL via cloudflared, polling fallback, first-time plugin activation." />
+  <Card title="Policy Reference" href="./policies" description="`GhPolicy` fields, decision paths for 6 action kinds, HITL branch, quiet-hours algorithm." />
+  <Card title="13 action.github.* Nodes" href="./nodes" description="Parameter tables, output shapes, policy actions, error surfaces, Inspector examples." />
+  <Card title="8 Built-in Templates" href="./templates" description="PR auto-review, Issue triage, Release suite (3 modes), CI failure diagnosis." />
+  <Card title="Audit & Work Orders" href="./audit" description="`audit` schema, card fields, `workOrders` 6-column kanban, recent event stream." />
+  <Card title="Usage & Quotas" href="./usage" description="Octokit throttling / retry, `GET /rate_limit` history, safe rate-limit recommendations." />
+  <Card title="FAQ" href="./faq" description="Common errors, signature failures, App vs PAT, cloudflared troubleshooting, web-mode degradation." />
 </Cards>
 
 ## Key Concepts
@@ -120,7 +102,7 @@ flowchart LR
 
 ### Dexie Namespace
 
-Per the ADR-0011 + M0 "plugin Dexie tables" convention, all tables are stored
+Per the ADR-0018 "plugin Dexie tables" convention, all tables are stored
 as `github-delivery:<name>`. Plugin code accesses them via
 `ctx.dexie.table<T>(name)`; external code (e.g. the `/github-delivery` kanban)
 accesses them directly by full name as `db.table("github-delivery:workOrders")`.

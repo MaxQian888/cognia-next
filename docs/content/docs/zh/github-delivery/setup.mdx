@@ -5,13 +5,6 @@ description: 在 cognia 里启用 GitHub Delivery 插件、配置 GitHub App 或
 
 # 安装与凭据
 
-<TLDR>
-  在 Settings → Plugins → Marketplace 启用 `github-delivery` 插件,然后在 Settings → GitHub Delivery
-  → Credentials 选择凭据模式(App 推荐 / PAT 快通道) 并把仓库添加到 Repos Tab。Webhook URL 由 Tauri
-  Rust 接收器随机分配端口,可通过 cloudflared 一键暴露;若机器没有公网入口,改用 ETag 轮询(每 5
-  分钟一次)即可。
-</TLDR>
-
 ## 前置条件
 
 | 条件                                    | 必需 | 说明                                                                      |

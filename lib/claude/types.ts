@@ -333,6 +333,17 @@ export interface SendOptions {
     }>
     degraded: boolean
   }
+
+  /**
+   * Agent-trace correlation identifiers — set by the chat hook before the
+   * sidecar call so downstream events (tool spans, sub-agent spans,
+   * connector callbacks) can attach to the same trace. Both are W3C-style
+   * lower-case hex (`traceId` = 32 chars / 16 bytes, `spanId` = 16 chars /
+   * 8 bytes). Sidecar-protocol metadata: the sidecar passes them through
+   * untouched and does not depend on them for correctness.
+   */
+  traceId?: string
+  spanId?: string
 }
 
 /**
@@ -852,6 +863,18 @@ export interface AppSettings {
    * available regardless. Trailing slash is stripped at read time.
    */
   skillsMpBaseUrl?: string
+  /**
+   * Skill bundle mirror targets. The cognia-owned canonical at
+   * `<appData>/cognia/skills/<id>/` is always written; these toggles
+   * control whether the on-enable push also mirrors to
+   * `~/.claude/skills/<slug>/` (for Claude Code CLI visibility) and
+   * `~/.agents/skills/<slug>/` (for Codex CLI visibility). Defaults are
+   * `{ claude: true, codex: true }` and are applied at read time in
+   * `stores/settings/settings-store.ts` so existing installs pick them up
+   * without a Dexie migration. Per-mirror absence (e.g. Codex CLI not
+   * installed) degrades to an info toast rather than an error.
+   */
+  skillBundleMirrors?: { claude?: boolean; codex?: boolean }
   /**
    * Workflow ids the user has pinned in the mobile Workflows tab. Surfaced
    * as a "Pinned" section above the main list. Lives in settings JSON to

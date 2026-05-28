@@ -6,6 +6,15 @@ export interface OutboundRequest {
   segments: MessageSegment[]
   replyTo?: { messageId: string }
   threadId?: string
+  /**
+   * When set, the outbound runner edits this existing platform message id
+   * instead of sending a new one — the dispatch goes to `adapter.edit()`
+   * rather than `adapter.send()`. Adapters that do not implement
+   * `edit()` fall through to a new send (the runner detects via the
+   * adapter capability check and audits the fallback). Used by the
+   * workflow-progress-runner for in-place status card refresh.
+   */
+  editTargetMessageId?: string
   metadata: {
     /** Stable across retries; required. */
     idempotencyKey: string

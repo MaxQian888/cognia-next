@@ -4,7 +4,7 @@
 // optionally call `pushAllToNative()` to project it onto disk.
 
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
-import { createSkill, listSkills, updateSkill } from "@/lib/db/skills"
+import { listSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import { fetchRegistrySkillContent } from "./marketplace-registry"
 import { fetchSkillsMpSkillContent } from "./marketplace-skillsmp"
 import { validateSkill } from "./validate"
@@ -58,9 +58,16 @@ export async function installMarketplaceItem(
   // to keep it out of the send-time enabled-skills query until the user
   // fixes it.
   const status: SkillStatus = validationErrors.length > 0 ? "error" : "enabled"
-  const existing = (await listSkills()).find((s) => s.canonicalId === fetched.canonicalId)
-  if (existing) {
-    await updateSkill(existing.id, {
+  // Delegate the find-by-canonicalId + idempotent upsert to the shared
+  // helper so the marketplace, the bundle dialog, and the plugin
+  // resolution path all stay in lock-step. Marketplace adapters always
+  // supply a canonicalId (it's the dedupe key surfaced in the Browse UI);
+  // fall back to a synthesised one if a future adapter ever omits it so
+  // the row still lands somewhere stable rather than silently going
+  // through the no-canonical path.
+  const canonicalId = fetched.canonicalId ?? `${item.source}:${item.sourceId ?? item.id}`
+  const { skill, created } = await upsertSkillByCanonicalId({
+    draft: {
       name: draft.name,
       description: draft.description ?? item.description,
       content: draft.content,
@@ -71,31 +78,13 @@ export async function installMarketplaceItem(
       author: draft.author ?? item.author,
       license: draft.license ?? item.license,
       source: "marketplace",
-      canonicalId: fetched.canonicalId,
       marketplaceSkillId: fetched.marketplaceSkillId,
       validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
       status,
-    })
-    const refreshed = (await listSkills()).find((s) => s.id === existing.id)
-    return { skill: refreshed ?? existing, created: false, validationErrors }
-  }
-  const created = await createSkill({
-    name: draft.name,
-    description: draft.description ?? item.description,
-    content: draft.content,
-    allowedTools: draft.allowedTools,
-    tags: draft.tags ?? item.tags,
-    category: draft.category ?? item.category,
-    version: draft.version,
-    author: draft.author ?? item.author,
-    license: draft.license ?? item.license,
-    source: "marketplace",
-    canonicalId: fetched.canonicalId,
-    marketplaceSkillId: fetched.marketplaceSkillId,
-    validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-    status,
+    },
+    canonicalId,
   })
-  return { skill: created, created: true, validationErrors }
+  return { skill, created, validationErrors }
 }
 
 /**

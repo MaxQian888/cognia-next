@@ -59,6 +59,17 @@ function defaultBootstrap() {
         minLevel: "warn",
       },
       opentelemetryConfig: { endpoint: "", serviceName: "cognia-ai", addAsSpanEvents: true },
+      agentTrace: true,
+      agentTraceOtlp: false,
+      agentTraceConfig: { captureContent: false, maxPreviewBytes: 4096, retentionDays: 7 },
+      agentTraceOtlpConfig: {
+        preset: "off",
+        endpoint: "",
+        headers: {},
+        serviceName: "cognia-ai",
+        environment: "",
+        grafanaCloud: { instanceId: "", apiToken: "" },
+      },
     },
     retention: { maxEntries: 10000, maxAgeDays: 7 },
   }
@@ -439,5 +450,134 @@ describe("LogSettings — Transport per-config inputs", () => {
     const hostInput = screen.getByPlaceholderText("https://cloud.langfuse.com") as HTMLInputElement
     fireEvent.change(hostInput, { target: { value: "https://eu.langfuse.com" } })
     expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+
+  it("renders agent-trace capture-content + retention controls when agentTrace enabled", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: { ...defaultBootstrap().transports, agentTrace: true },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    expect(screen.getByTestId("agent-trace-capture-content-switch")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-trace-retention-slider")).toBeInTheDocument()
+  })
+
+  it("flipping the agent-trace capture-content switch marks Unsaved", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: { ...defaultBootstrap().transports, agentTrace: true },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    const sw = screen.getByTestId("agent-trace-capture-content-switch")
+    fireEvent.click(sw)
+    expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+
+  it("renders OTLP exporter preset + endpoint + headers fields when agentTraceOtlp is enabled", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: { ...defaultBootstrap().transports, agentTraceOtlp: true },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    expect(screen.getByTestId("agent-trace-otlp-preset")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-trace-otlp-endpoint")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-trace-otlp-headers")).toBeInTheDocument()
+  })
+
+  it("changing the OTLP endpoint marks Unsaved", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: { ...defaultBootstrap().transports, agentTraceOtlp: true },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    const endpointInput = screen.getByTestId("agent-trace-otlp-endpoint") as HTMLInputElement
+    fireEvent.change(endpointInput, {
+      target: { value: "http://localhost:4318/v1/traces" },
+    })
+    expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+
+  it("typing into the OTLP headers field parses into a key/value record on save", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: { ...defaultBootstrap().transports, agentTraceOtlp: true },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    const headersInput = screen.getByTestId("agent-trace-otlp-headers") as HTMLInputElement
+    fireEvent.change(headersInput, {
+      target: { value: "Authorization: Basic abc==, X-Tenant: prod" },
+    })
+    fireEvent.click(screen.getByText("Save"))
+    expect(mockApplyLoggingSettings).toHaveBeenCalled()
+    const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
+      { transports?: { agentTraceOtlpConfig?: { headers: Record<string, string> } } },
+    ]
+    expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({
+      Authorization: "Basic abc==",
+      "X-Tenant": "prod",
+    })
+  })
+
+  it("shows Grafana instance ID + API token fields when preset is grafana-cloud (hides raw headers)", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: {
+        ...defaultBootstrap().transports,
+        agentTraceOtlp: true,
+        agentTraceOtlpConfig: {
+          ...defaultBootstrap().transports.agentTraceOtlpConfig,
+          preset: "grafana-cloud",
+        },
+      },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    expect(screen.getByTestId("agent-trace-otlp-grafana-instance-id")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-trace-otlp-grafana-api-token")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-trace-otlp-headers")).not.toBeInTheDocument()
+  })
+
+  it("persists Grafana credentials separately from headers on save", () => {
+    mockGetBootstrap.mockReturnValue({
+      ...defaultBootstrap(),
+      transports: {
+        ...defaultBootstrap().transports,
+        agentTraceOtlp: true,
+        agentTraceOtlpConfig: {
+          ...defaultBootstrap().transports.agentTraceOtlpConfig,
+          preset: "grafana-cloud",
+        },
+      },
+    })
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
+    fireEvent.change(screen.getByTestId("agent-trace-otlp-grafana-instance-id"), {
+      target: { value: "1234567" },
+    })
+    fireEvent.change(screen.getByTestId("agent-trace-otlp-grafana-api-token"), {
+      target: { value: "glc_secret" },
+    })
+    fireEvent.click(screen.getByText("Save"))
+    const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
+      {
+        transports?: {
+          agentTraceOtlpConfig?: {
+            grafanaCloud?: { instanceId: string; apiToken: string }
+            headers: Record<string, string>
+          }
+        }
+      },
+    ]
+    expect(call[0].transports?.agentTraceOtlpConfig?.grafanaCloud).toEqual({
+      instanceId: "1234567",
+      apiToken: "glc_secret",
+    })
+    // Raw `headers` stays empty — bootstrap.ts builds Authorization at apply time.
+    expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({})
   })
 })

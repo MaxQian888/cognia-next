@@ -21,6 +21,7 @@
     "---技术参考---",
     "adr",
     "connectors",
-    "plugins"
+    "plugins",
+    "audits"
   ]
 }

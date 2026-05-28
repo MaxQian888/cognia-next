@@ -86,6 +86,39 @@ pub fn load_endpoint() -> Result<EndpointFile> {
     Ok(endpoint)
 }
 
+/// GET JSON from `<base_url><path>` with the dev token header. Returns
+/// the parsed JSON response (or an error if status != 2xx).
+///
+/// Used by `cognia plugin install` to preflight a same-id collision via
+/// `GET /api/v1/dev/plugins/installed`.
+pub fn get_json<R: for<'de> Deserialize<'de>>(
+    endpoint: &EndpointFile,
+    path: &str,
+) -> Result<R> {
+    let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
+    let agent = ureq::Agent::new();
+    let response = agent
+        .get(&url)
+        .set("X-Cognia-Dev-Token", &endpoint.dev_token)
+        .call();
+    match response {
+        Ok(resp) => {
+            let parsed: R = resp.into_json().context("decode response JSON body")?;
+            Ok(parsed)
+        }
+        Err(ureq::Error::Status(code, resp)) => {
+            let body = resp.into_string().unwrap_or_default();
+            Err(anyhow!(
+                "GET {} → HTTP {}\nresponse: {}",
+                url,
+                code,
+                body.lines().take(20).collect::<Vec<_>>().join("\n")
+            ))
+        }
+        Err(other) => Err(anyhow!("GET {} failed: {}", url, other)),
+    }
+}
+
 /// POST JSON to `<base_url><path>` with the dev token header. Returns
 /// the parsed JSON response (or an error if status != 2xx).
 pub fn post_json<R: for<'de> Deserialize<'de>>(

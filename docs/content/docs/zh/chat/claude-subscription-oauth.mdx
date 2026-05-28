@@ -5,21 +5,9 @@ description: 把 Claude Pro/Max 订阅或 Console 账户接入 sidecar——OAut
 
 # Claude 订阅 OAuth
 
-<Status variant="stable">stable · ADR-0010</Status>
+> 架构细节见 [ADR-0010](../adr/0010-claude-subscription-oauth)。
 
-<TLDR>
-  通过粘贴回授权码的 PKCE 流程登录 Claude Pro/Max 或 Console；凭据由 OS keyring 保管， sidecar 通过
-  `CLAUDE_CODE_OAUTH_TOKEN` 环境变量自动获得 Bearer 鉴权。每次真实 `/v1/messages` 响应都会被
-  `fetch-interceptor.mjs` 拦截，解析 `anthropic-ratelimit-unified-*` 头并写入 Dexie，5h / 7d
-  进度条因此免费可见。
-</TLDR>
-
-<StatGrid>
-  <Stat label="OAuth 模式" value="2" hint="subscription / console" />
-  <Stat label="Tauri 命令" value="3" hint="save / load / clear" />
-  <Stat label="Dexie 表 (v20)" value="1" hint="subscriptionUsage · 1000 行" />
-  <Stat label="Settings tab" value="4" hint="overview / account / usage / settings" />
-</StatGrid>
+通过粘贴回授权码的 PKCE 流程登录 Claude Pro/Max 或 Console；凭据由 OS keyring 保管，sidecar 通过 `CLAUDE_CODE_OAUTH_TOKEN` 环境变量自动获得 Bearer 鉴权。每次真实 `/v1/messages` 响应都会被 `fetch-interceptor.mjs` 拦截，解析 `anthropic-ratelimit-unified-*` 头并写入 Dexie，5h / 7d 进度条因此免费可见。
 
 订阅 OAuth 子系统让 Cognia 与官方 `claude login` CLI 平行存在，互不污染：
 
@@ -347,7 +335,7 @@ if let Some(token) = api_key_state.get_oauth_bearer().await {
   />
   <Card
     title="Sidecar & Claude SDK"
-    href="./sidecar-and-claude-sdk"
+    href="../core/sidecar-and-claude-sdk"
     description="env 变量如何流向 SDK。"
   />
 </Cards>

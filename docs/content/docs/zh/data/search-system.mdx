@@ -6,15 +6,6 @@ description: 十个 Web 搜索 provider 的统一接入层——查询优化、�
 # 搜索系统
 
 Cognia 把"让 AI 上网搜东西"这件事抽象成一个 provider 总线：上层只看到 `search(query, options)`，底下挂着十个 provider（Tavily / Perplexity / Exa / SearchAPI / Serper / SerpAPI / Bing / Google / Google AI / Brave），各自带 general/news/images/videos/academic 几种能力。所有 provider 走同一份 `SearchResponse` 形状，调用方拿到的结果格式始终一致。
-
-<TLDR>
-  统一搜索入口 `lib/search/search-service.ts:search()`，自动按设置选 provider + 故障回退。查询前用
-  `optimizeSearchQuery` 剥离客套话与冗余前缀；命中 LRU 缓存（`search-cache.ts`）直接返回；未命中按
-  `SearchType` 路由（`search-type-router.ts`）到具体 provider；结果可选过 `source-verification.ts`
-  打可信度分。Provider 接口在 `lib/search/providers/`，每个 provider
-  一个文件，连接测试函数随主搜索函数一起导出。
-</TLDR>
-
 ## 总览
 
 ```mermaid
@@ -282,7 +273,7 @@ void recordUsage(providerConfig.providerId, Date.now() - startTime, true /* or f
 <Cards>
   <Card title="存储" href="./storage" description="Dexie schema 里的搜索设置位置" />
   <Card title="向量库" href="./vector-store" description="向量检索 vs. web 搜索的分工" />
-  <Card title="聊天与技能" href="./chat-and-skills" description="send 路径如何拼搜索结果" />
+  <Card title="聊天与技能" href="../chat/chat-and-skills" description="send 路径如何拼搜索结果" />
   <Card title="文档处理" href="./document-processing" description="本地文档解析；与 web 搜索互补" />
 </Cards>
 

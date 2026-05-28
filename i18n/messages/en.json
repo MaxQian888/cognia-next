@@ -4442,6 +4442,24 @@
         }
       }
     },
+    "workflow": {
+      "fanout": {
+        "title": "Run progress fan-out",
+        "help": "Operator-configured mirror: every run of this workflow pushes its step progress + terminal status into the listed channels. Originating channel is included automatically — adding it again has no effect.",
+        "addSectionLabel": "Add a mirror",
+        "adapterLabel": "Adapter",
+        "adapterPlaceholder": "Pick a connected adapter",
+        "conversationKeyLabel": "Conversation key",
+        "conversationKeyPlaceholder": "e.g. lark:lark:ad1:oc_xxx",
+        "addButton": "Add subscription",
+        "addMissingFields": "Adapter and conversation key are required.",
+        "addSuccess": "Subscription added.",
+        "removeAria": "Remove subscription",
+        "removeSuccess": "Subscription removed.",
+        "enabledAria": "Toggle subscription",
+        "empty": "No mirrors configured. Runs only push progress to the originating channel."
+      }
+    },
     "a2ui": {
       "title": "A2UI",
       "description": "Configure how agents render interactive surfaces and review the live event stream.",
@@ -5283,20 +5301,7 @@
           "helpText": "Paste the Lark chat_id (starts with oc_…). Find it via the audit log or the Lark client's chat URL."
         },
         "quickCommands": {
-          "title": "Bot menu / quick commands",
-          "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only.",
-          "eventKeyLabel": "Event key",
-          "eventKeyPlaceholder": "event_key (from the bot menu)",
-          "labelLabel": "Label (optional)",
-          "labelPlaceholder": "Label",
-          "actionTypeLabel": "Action type",
-          "actionTypePrompt": "Prompt",
-          "actionTypeSlash": "Slash command",
-          "valueLabel": "Action value",
-          "valuePlaceholder": "Prompt text, or /command args",
-          "addAria": "Add quick command",
-          "empty": "No quick commands mapped yet.",
-          "removeAria": "Remove {key}"
+          "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only."
         }
       },
       "adapterFormSections": {
@@ -5304,6 +5309,21 @@
         "saving": "Saving…",
         "cancel": "Cancel",
         "errorBadge": "Error"
+      },
+      "quickCommands": {
+        "title": "Quick commands",
+        "triggerKeyLabel": "Trigger key",
+        "triggerKeyPlaceholder": "Trigger key (event_key / button key)",
+        "labelLabel": "Label (optional)",
+        "labelPlaceholder": "Label",
+        "actionTypeLabel": "Action type",
+        "actionTypePrompt": "Prompt",
+        "actionTypeSlash": "Slash command",
+        "valueLabel": "Action value",
+        "valuePlaceholder": "Prompt text, or /command args",
+        "addAria": "Add quick command",
+        "empty": "No quick commands mapped yet.",
+        "removeAria": "Remove {key}"
       },
       "onebot": {
         "titleNew": "Add OneBot (QQ) Adapter",
@@ -5384,6 +5404,11 @@
         "sectionIdentityDesc": "The 智能机器人 BotID + long-connection Secret, plus an optional welcome message.",
         "sectionAdvanced": "Advanced",
         "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "sectionQuickCommands": "Quick commands",
+        "sectionQuickCommandsDesc": "Buttons pushed on enter_chat as a template_card menu — each maps a trigger key to a prompt or slash command.",
+        "quickCommands": {
+          "help": "WeCom 智能机器人 has no persistent menu surface. We approximate one by pushing a template_card on enter_chat — each row below becomes a button. Pick a stable trigger key (you'll never see it as a user; it's only how the click is wired)."
+        },
         "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
         "adapterCreated": "WeCom bot created. The long connection starts once enabled.",
         "adapterUpdated": "WeCom bot updated.",
@@ -5804,6 +5829,10 @@
       "importFromMarkdownHint": "Pick one or more SKILL.md files.",
       "importFromClaudeCode": "From Claude Code",
       "importFromClaudeCodeHint": "Scan ~/.claude/skills/ (desktop only).",
+      "importFromBundle": "From a skill bundle (.zip)…",
+      "importFromBundleHint": "Anthropic or Codex bundle — SKILL.md + scripts/references/assets.",
+      "importFromBundleFolder": "From a skill bundle folder…",
+      "importFromBundleFolderHint": "Point at an unzipped bundle directory (desktop only).",
       "exportAll": "Export all",
       "syncNative": "Sync with ~/.claude/skills/",
       "syncNativeDesktopOnly": "Native sync requires desktop mode.",
@@ -5905,7 +5934,13 @@
       "applying": "Importing…",
       "stagedCount": "{count, plural, =1 {1 skill staged} other {# skills staged}}",
       "parseErrorsLine": "{count, plural, =1 {1 file failed to parse: {first}} other {# files failed to parse: {first}}}",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "bundle": {
+        "flavorAnthropic": "Anthropic",
+        "flavorCodex": "Codex",
+        "resourcesCount": "{count, plural, =1 {1 resource} other {# resources}}",
+        "warnings": "{count, plural, =1 {1 warning} other {# warnings}}"
+      }
     },
     "delete": {
       "title": "Remove skill?",
@@ -6015,7 +6050,14 @@
       "lastAt": "Last: {when}",
       "desktopOnly": "Sync is only available in the desktop app.",
       "pushAll": "Push all to native",
-      "pullAll": "Pull all from native"
+      "pullAll": "Pull all from native",
+      "mirrorTargetsLabel": "Mirror targets",
+      "mirrorClaude": "Mirror to ~/.claude/skills/",
+      "mirrorCodex": "Mirror to ~/.agents/skills/ (Codex)",
+      "codexNotInstalled": "Codex CLI directory not detected; the mirror was created.",
+      "tooLargeForDisk": "Resource {path} is larger than the 2 MB on-disk cap; the mirror skipped it.",
+      "emptyTrash": "Empty trash ({count})",
+      "trashEmptied": "{count, plural, =0 {Trash was already empty.} =1 {Removed 1 trashed skill.} other {Removed # trashed skills.}}"
     },
     "panel": {
       "headerTitle": "Skills",
@@ -6478,7 +6520,9 @@
     "toolbar": {
       "install": "Install",
       "groupManifest": "Manifest",
+      "groupLocal": "Local plugin",
       "groupWasm": "WASM bundle",
+      "loadUnpacked": "Load unpacked…",
       "fromFile": "From file…",
       "fromUrl": "From URL…",
       "fromLocalWasm": "From local file…",
@@ -6498,6 +6542,78 @@
         "emptyError": "Please enter a URL.",
         "error": "Failed to fetch manifest: {message}"
       }
+    },
+    "loadUnpacked": {
+      "label": "Load unpacked",
+      "directoryPickerTitle": "Pick a plugin directory",
+      "tauriRequiredError": "Loading local plugins requires the Cognia desktop app.",
+      "installSuccess": "{name} installed from disk."
+    },
+    "devtools": {
+      "dropzone": {
+        "title": "Drop a plugin folder here",
+        "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace."
+      },
+      "validator": {
+        "title": "Manifest validator",
+        "description": "Validate a plugin.json against the host schema without installing.",
+        "pickButton": "Pick plugin.json or folder",
+        "validating": "Validating…",
+        "valid": "Manifest is valid.",
+        "invalid": "Manifest has {count, plural, one {# error} other {# errors}}.",
+        "errorsHeading": "Errors",
+        "warningsHeading": "Warnings",
+        "permissionsHeading": "Declared permissions",
+        "noPermissions": "No permissions declared.",
+        "tauriRequiredError": "The manifest validator requires the Cognia desktop app.",
+        "readError": "Couldn't read the manifest: {message}"
+      },
+      "hotReload": {
+        "title": "Hot-reload activity",
+        "empty": "No reloads yet this session. Run `cognia plugin dev` to see live updates.",
+        "clear": "Clear",
+        "kindInstall": "Installed",
+        "kindUninstall": "Uninstalled",
+        "kindHotReload": "Hot-reloaded",
+        "statusSuccess": "Success",
+        "statusFailed": "Failed",
+        "statusInProgress": "In progress"
+      }
+    },
+    "cliStatus": {
+      "title": "cognia CLI",
+      "description": "The plugin-author CLI scaffolds, builds, signs, and hot-reloads plugins.",
+      "probing": "Checking…",
+      "installedUnknownVersion": "Installed",
+      "bridgeRunning": "Bridge connected",
+      "bridgeDown": "Bridge offline",
+      "reveal": "Reveal",
+      "docs": "Docs",
+      "missingHint": "Not found on your PATH. Install it to scaffold and hot-reload plugins.",
+      "install": "Install cognia CLI",
+      "chipReady": "cognia CLI ready",
+      "chipBridgeDown": "cognia CLI installed (bridge offline)",
+      "chipMissing": "cognia CLI not installed"
+    },
+    "cliInstall": {
+      "title": "Install the cognia CLI",
+      "description": "Pick the install method that fits your setup.",
+      "tabDownload": "Download",
+      "tabSource": "Build from source",
+      "tabTarball": "Release page",
+      "downloadHint": "Download a prebuilt binary for your platform, verified by checksum and signature.",
+      "downloadButton": "Download & install",
+      "downloadStarting": "Starting…",
+      "downloadSuccess": "cognia CLI installed.",
+      "downloadSuccessSigned": "cognia CLI installed and signature-verified.",
+      "sourceHint": "Build and install with Cargo:",
+      "sourcePrereq": "Requires Rust 1.82+ on your PATH.",
+      "tarballHint": "Download a release archive manually from GitHub.",
+      "openReleases": "Open releases page",
+      "copy": "Copy command",
+      "copied": "Command copied.",
+      "copyFailed": "Couldn't copy to clipboard.",
+      "verifyNote": "Downloads are checksum-verified; signature verification activates once a release key is published."
     },
     "wasmInstall": {
       "capabilityGrantSheet": {
@@ -6618,6 +6734,33 @@
       "manualReason": "Plugin enable failed",
       "retryHint": "Open the plugin settings to inspect the error and retry."
     },
+    "errors": {
+      "install": "Couldn't install {pluginName}",
+      "installRollback": "Couldn't roll back {pluginName} after install failure",
+      "load": "Couldn't load {pluginName}",
+      "enable": "Couldn't enable {pluginName}",
+      "disable": "Couldn't disable {pluginName}",
+      "uninstall": "Couldn't uninstall {pluginName}",
+      "config": "Couldn't apply settings for {pluginName}",
+      "activation": "Couldn't activate {pluginName}",
+      "permissionRegister": "Couldn't register permissions for {pluginName}",
+      "wasmPreload": "WASM preload failed for {pluginName}",
+      "hotReload": "Hot reload failed for {pluginName}",
+      "localInstall": "Couldn't install local plugin {pluginName}"
+    },
+    "shared": {
+      "installing": "Installing…",
+      "uninstalling": "Uninstalling…",
+      "install": "Install",
+      "uninstall": "Uninstall",
+      "retry": "Retry",
+      "emptyTitle": "Nothing here yet",
+      "emptyHint": "Try a different search or section.",
+      "errorTitle": "Something went wrong",
+      "capabilityOverflow": "+{count} more",
+      "installedDesktopOnly": "Desktop only — install requires the native app",
+      "installed": "Installed"
+    },
     "consent": {
       "title": "Plugin requesting permission",
       "ariaLabel": "Plugin consent dialog",
@@ -6677,6 +6820,12 @@
       "permissionsDeclared": "Manifest-declared",
       "permissionsOptional": "Optional",
       "permissionsNone": "No permissions declared.",
+      "stepBinaries": "Requirements",
+      "binariesHint": "This plugin needs the following command-line tools, which weren't found on your system. Install them, then retry.",
+      "binariesNotFound": "Not found on your PATH.",
+      "binariesFoundOld": "Found {version}, which is below the required version.",
+      "binariesDocs": "Install guide",
+      "binariesRetry": "I installed it — retry",
       "configHint": "Fill in any required configuration before the plugin is enabled.",
       "configNone": "This plugin has no configurable fields.",
       "back": "Back",
@@ -7598,6 +7747,69 @@
       "traceView": "Trace View",
       "agentTraceModule": "Agent Trace",
       "noTraceEvents": "No agent trace events",
+      "agentTrace": {
+        "statsBar": {
+          "title": "Agent traces",
+          "loading": "Loading agent trace stats…",
+          "regionLabel": "Agent trace stats — {window}",
+          "totalCost": "Cost",
+          "inputTokens": "Input tokens",
+          "cacheHitRate": "Cache hit rate",
+          "toolCalls": "Tool calls",
+          "errors": "Errors",
+          "totalSpansHint": "{count} spans total",
+          "outputHint": "Output: {count}",
+          "cacheReadHint": "Cache reads: {count}",
+          "toolFailuresHint": "{count} failures",
+          "avgLatencyHint": "Avg latency {ms} ms",
+          "windows": {
+            "today": "Today",
+            "week": "Last 7 days",
+            "month": "Last 30 days",
+            "all": "All time"
+          }
+        },
+        "tree": {
+          "title": "Trace",
+          "loading": "Loading trace…",
+          "empty": "No spans for this trace yet.",
+          "treeLabel": "Span tree"
+        },
+        "settings": {
+          "title": "Agent trace",
+          "description": "Record one span per chat turn, tool call, and teammate handoff. Spans persist to local Dexie; opt-in content capture passes previews through the project PII gate.",
+          "enabled": "Persist agent trace spans",
+          "enabledHint": "When off, span emission is dropped at the transport boundary — instrumented code still calls the emitter but no row is written.",
+          "captureContent": "Capture prompt / output previews",
+          "captureContentHint": "Off by default. When on, the first {bytes} bytes of each preview pass through the PII redactor; fields with leaks are dropped before persistence.",
+          "retentionDays": "Retention (days)",
+          "retentionDaysHint": "Spans older than this are pruned on each flush. Set to 0 to disable pruning."
+        }
+      },
+      "agentTraceOtlp": {
+        "preset": "Preset",
+        "presetOptions": {
+          "off": "Off",
+          "grafanaCloud": "Grafana Cloud",
+          "selfHosted": "Self-hosted Tempo / Collector",
+          "custom": "Custom OTLP/HTTP"
+        },
+        "endpoint": "OTLP traces endpoint",
+        "endpointPlaceholder": {
+          "grafanaCloud": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
+          "selfHosted": "http://localhost:4318/v1/traces"
+        },
+        "headers": "Headers",
+        "headersHint": "Comma-separated `Name: Value` pairs. For Grafana Cloud paste `Authorization: Basic base64(instanceId:token)`.",
+        "headersPlaceholder": "Authorization: Basic ABC=, X-Tenant: prod",
+        "serviceName": "Service name",
+        "environment": "Environment",
+        "grafanaInstanceId": "Grafana instance ID",
+        "grafanaInstanceIdPlaceholder": "1234567",
+        "grafanaApiToken": "Grafana access policy token",
+        "grafanaApiTokenPlaceholder": "glc_eyJ…",
+        "grafanaCloudHint": "Both fields are required. We build `Authorization: Basic base64(instanceId:token)` automatically — never paste the encoded form here."
+      },
       "presets": "Presets",
       "noPreset": "No preset",
       "savePreset": "Save current filters as preset",
@@ -7961,6 +8173,10 @@
         "langfuseMinLevel": "Minimum Level",
         "opentelemetry": "OpenTelemetry",
         "opentelemetryDesc": "Integrate logs with OpenTelemetry tracing",
+        "agentTrace": "Agent trace",
+        "agentTraceDesc": "Persist one span per chat turn, tool call, and teammate handoff to local Dexie. Powers the /logs Agent Trace tab.",
+        "agentTraceOtlp": "OTLP exporter (Grafana)",
+        "agentTraceOtlpDesc": "Push agent-trace spans to an OTel-compatible backend (Grafana Cloud, Tempo, Honeycomb, Datadog, or a self-hosted collector).",
         "otelEndpoint": "OTLP Endpoint",
         "otelEndpointPlaceholder": "http://localhost:4318/v1/traces",
         "otelServiceName": "Service Name",

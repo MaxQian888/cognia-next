@@ -5,10 +5,10 @@ description: How to write a cognia-next plugin that contributes a new messaging-
 
 # Extending Platform Connectors with Plugins
 
-cognia-next ships five built-in platform adapters (Telegram, Discord, Slack, Lark, OneBot). The
-**Plugin Connector Bridge** (`lib/plugin/bridge/connectors-bridge.ts`) lets any installed plugin
-contribute additional adapters—like Mastodon, Bluesky, Matrix, or any internal messaging system—
-without touching the cognia-next source.
+cognia-next ships seven built-in platform adapters (Telegram, Discord, Slack, Lark, OneBot, WeCom,
+personal WeChat). The **Plugin Connector Bridge** (`lib/plugin/bridge/connectors-bridge.ts`) lets
+any installed plugin contribute additional adapters — like Mastodon, Bluesky, Matrix, or any
+internal messaging system — without touching the cognia-next source.
 
 ## How it works
 

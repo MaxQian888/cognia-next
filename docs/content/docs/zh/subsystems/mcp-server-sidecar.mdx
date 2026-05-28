@@ -5,18 +5,6 @@ description: Node sidecar 里跑的两类 MCP 服务 —— in-process 内建工
 
 # MCP 服务（Sidecar 端）
 
-<Status variant="stable">A2UI v0.9 · cognia-tools 内建工具</Status>
-
-<TLDR>
-  `sidecar/` 目录里有两类完全不同的 MCP 服务：**in-process** 的 SDK MCP server（由 `claude-host.mjs`
-  在每个 Claude Agent SDK 会话里挂起，承载 `builtin-tools/` 的五个分类工具与 `a2ui-tools/` 的 A2UI
-  桥），以及 **standalone stdio** 的 `a2ui-mcp.mjs`（用于让 Cognia 进程**之外**的外部 Agent ——
-  Claude Code CLI / Cursor / Codex —— 也能创建 A2UI 表面）。两者共用一套工具
-  schema，但通信方式不同：前者通过 SDK 的 `createSdkMcpServer` 走进程内消息总线，后者用 JSON-RPC
-  over newline-delimited stdin/stdout，并通过 `COGNIA_BRIDGE_SOCKET` 的 Unix domain socket 把
-  dispatch 事件转回 Cognia 渲染进程的 Zustand store。
-</TLDR>
-
 ## 适用场景
 
 - 给当前 Claude Agent SDK 会话挂"扩展工具"：git 只读查询、process 列表、文件级 hash/diff、shell 受控执行、environment 读取。
@@ -227,7 +215,7 @@ A2UI 是协议，扩展操作意味着同时改：
   />
   <Card
     title="Sidecar & Claude SDK"
-    href="./sidecar-and-claude-sdk"
+    href="../core/sidecar-and-claude-sdk"
     description="claude-host.mjs 总览、stdio JSON-lines 协议、provider 调度"
   />
   <Card
@@ -237,7 +225,7 @@ A2UI 是协议，扩展操作意味着同时改：
   />
   <Card
     title="技能系统"
-    href="./skills-system"
+    href="../chat/skills-system"
     description="技能可以约束 character.allowedTools 来收紧本页讨论的工具集"
   />
 </Cards>

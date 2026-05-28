@@ -553,6 +553,81 @@ export class ConnectorBus {
       },
     })
 
+    // ── Step 4-pre-b: wf_fanout_approve / wf_fanout_cancel short-circuit ──
+    //
+    // Companion to wf_approve/wf_cancel below. The fan-out flow writes
+    // a `workflowFanoutSubscriptions` row on Approve and a confirmation
+    // outbound text. Cancel just drops the bindings + sends "已取消".
+    if (
+      resolvedBinding?.kind === "wf_fanout_approve" ||
+      resolvedBinding?.kind === "wf_fanout_cancel"
+    ) {
+      const cancelled =
+        resolvedBinding.kind === "wf_fanout_cancel" ||
+        (event.value ?? "").toLowerCase() === "cancel" ||
+        event.actionType === "dismiss"
+      try {
+        const { handleWorkflowFanoutCallback } = await import("@/lib/a2ui/workflow-fanout-handler")
+        await handleWorkflowFanoutCallback({
+          binding: resolvedBinding,
+          cancelled,
+          adapterId: event.adapterId,
+          platform: event.platform,
+          conversationKey: resolvedConversationKey ?? undefined,
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "workflow_fanout_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return
+    }
+
+    // ── Step 4-pre-a: wf_approve / wf_cancel short-circuit ───────────
+    //
+    // When the binding is an A2UI workflow approval card, drive the run
+    // start (or cancellation acknowledgement) directly and enqueue the
+    // outbound confirmation through the standard outbound queue. The
+    // bus DOES NOT call `runConnectorDigestTurn` — IM users expect a
+    // tight "✅ Started" reply, not a synthesised model turn that says
+    // the same thing in three paragraphs. Subsequent progress + final
+    // surfaces are emitted by `workflow-progress-runner` via the same
+    // outbound queue.
+    if (resolvedBinding?.kind === "wf_approve" || resolvedBinding?.kind === "wf_cancel") {
+      const cancelled =
+        resolvedBinding.kind === "wf_cancel" ||
+        (event.value ?? "").toLowerCase() === "cancel" ||
+        event.actionType === "dismiss"
+      try {
+        const { handleWorkflowApprovalCallback } =
+          await import("@/lib/a2ui/workflow-approval-handler")
+        await handleWorkflowApprovalCallback({
+          binding: resolvedBinding,
+          cancelled,
+          adapterId: event.adapterId,
+          platform: event.platform,
+          conversationKey: resolvedConversationKey ?? undefined,
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "workflow_approval_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return
+    }
+
     // ── Step 4a: skill_invoke short-circuit (ADR-0026) ───────────────
     //
     // When the binding is a deferred built-in-skill invocation, route

@@ -1,522 +1,298 @@
-# Cognia
+<h1 align="center">Cognia</h1>
 
-Cognia is an AI desktop client for Claude Code — and a runtime for plugins, visual workflows, employee digital twins, platform connectors, computer-use automation, OCR, and WAN-grade mobile companion access. The same Next.js 16 static export powers three shells: a browser dev server, a Tauri 2.9 desktop app, and a Capacitor 7 mobile shell, all backed by a Rust core and a Node sidecar.
+<p align="center">
+  An AI desktop client for Claude Code — with a plugin runtime, visual workflows,
+  digital twins, IM connectors, computer-use automation, OCR, and a WAN-grade mobile companion.
+</p>
 
-[中文文档](./README_zh.md) · [Architecture Decision Records](./docs/content/docs/en/adr/) · `productName`: **Cognia** · `identifier`: `com.reactquickstarter.desktop`
+<p align="center">
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
+  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white">
+  <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10.30-F69220?logo=pnpm&logoColor=white">
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-black?logo=next.js">
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.11-FFC131?logo=tauri&logoColor=black">
+  <img alt="Capacitor" src="https://img.shields.io/badge/Capacitor-8-119EFF?logo=capacitor&logoColor=white">
+</p>
 
-## Highlights
+<p align="center">
+  <a href="./README_zh.md">中文</a> ·
+  <a href="./docs/content/docs/en/adr/">Architecture decisions</a> ·
+  <a href="./CLAUDE.md">Working rules</a>
+</p>
 
-- **Plugin platform** — first-party in-tree plugins for computer-use, GitHub delivery, OCR, clipboard, screenshot, web tools, prompt templates, Anthropic skills, Stagehand, Playwright MCP, e2b sandbox, and more. WASM plugin runtime built on `wasmtime` 26 + WIT bindings.
-- **Visual workflow editor** — React Flow editor with 38 node kinds and 32 executors; hybrid TypeScript + Rust runtime; cron / webhook / connector / chat triggers; team-aware concurrency scheduler and budget guard.
-- **Employee Digital Twin** — 7-stage ingest → 5-agent distillation → runtime RAG + style few-shot, all behind a PII redaction gate.
-- **Platform connectors** — Telegram / Discord / Slack / Lark / OneBot with a shared ConnectorBus, outbound runner (quiet-hours, circuit breaker, idempotency), and an A2UI ⇄ IM bridge that auto-downgrades rich content per platform.
-- **Computer Use** — Anthropic native tool calls dispatched to per-platform automation (Windows UIA, macOS AX, Linux AT-SPI) with a 3-tier permission model and an HITL consent overlay.
-- **OCR subsystem** — 17 providers (4 cloud-doc, 3 LLM-vision, 4 specialist, Lark, 5 local — Tesseract, Windows.Media.Ocr, Apple Vision, ocrs, PaddleOCR PP-OCRv5) behind one `extract()` API with a Dexie-backed result cache.
-- **Unified subscription module** — one provider trait, three providers (Claude PKCE / Codex device-code / OpenCode paste-Zen-key) with multi-account vaults and encrypted import/export.
-- **WAN mobile transport** — Capacitor mobile client over LAN/HTTPS, mDNS discovery, JWT pairing, and an optional WebRTC data-channel tier with a standalone signaling server and TURN BYO.
-- **GitHub delivery** — PR review, Issue→PR, and Release flows modeled as policy-gated workflows with full audit logs.
-- **/goal command** — self-driving chat loop with 7 exit conditions, PII-redacted judge, and `generationId` guard.
+---
 
-## Architecture at a glance
+## Overview
+
+Cognia ships a single Next.js 16 static export to three shells — browser, Tauri 2 desktop, and
+Capacitor 8 mobile — sharing one UI, one i18n catalog, and one set of business logic. A Rust core
+runs the long-lived services (HTTP, scheduler, vector store, automation, OCR, MCP server), and a
+bundled Node sidecar hosts the Claude Agent SDK.
+
+## Features
+
+- **Claude Code, in a desktop app** — chat surface, slash commands, agents, skills, MCP, hooks.
+- **Plugin runtime** — 20+ first-party plugins (computer-use, OCR, GitHub delivery, clipboard,
+  screenshot, Stagehand/Playwright MCP, e2b sandbox, prompt templates, Zhihu pipeline, …) backed
+  by a WASM host (`wasmtime` + WIT bindings).
+- **Visual workflows** — React Flow editor with a hybrid TypeScript/Rust runtime; cron, webhook,
+  connector, chat, and `/goal`-completed triggers.
+- **Employee Digital Twin** — staged ingest, multi-agent distillation, runtime RAG + style
+  few-shot, gated by a shared PII redactor.
+- **IM connectors** — Telegram, Discord, Slack, Lark, OneBot, WeCom and personal WeChat behind one
+  `ConnectorBus`, with quiet-hours, circuit breakers, and an A2UI ⇄ IM bridge that downgrades rich
+  content per platform.
+- **Computer Use** — Anthropic native tool calls dispatched to per-OS automation (Windows UIA,
+  macOS AX, Linux AT-SPI) with a 3-tier permission model and HITL consent overlay.
+- **OCR** — 17 providers (cloud-doc, LLM-vision, specialist, Lark, and 5 local backends) behind a
+  single `extract()` API with a Dexie-backed cache.
+- **Mobile + WAN** — Capacitor client over LAN/HTTPS with mDNS discovery and JWT pairing, plus an
+  optional WebRTC tier with a standalone signaling server.
+- **Zero-knowledge share links** — Cloudflare Worker + R2/KV, key in URL fragment, decrypted in
+  the viewer.
+
+## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│  Next.js 16 (static export → out/) ◄── shared by all 3 shells       │
-│  app/  components/  hooks/  lib/  plugins/  i18n/                  │
-└────────────────────────────────────────────────────────────────────┘
-        │                       │                       │
-        ▼                       ▼                       ▼
-   Browser dev          Tauri 2.9 desktop          Capacitor 7
-   (pnpm dev)           (src-tauri/, Rust          (mobile/, wraps
-                         core + axum HTTP +         ../out, LAN /
-                         scheduler + connectors     tunnel client of
-                         + automation + OCR +       the headless server)
-                         vector DB)
-                              │
-                              ▼
-                      Node sidecar (sidecar/)
-                      • claude-host.mjs (Claude Code SDK host)
-                      • a2ui-mcp.mjs   (A2UI bridge MCP server)
-                      • dispatch/, builtin-tools/
-                      • bundled with the desktop app
+┌──────────────────────────────────────────────────────────────┐
+│  Next.js 16 (App Router, static export → out/)               │
+│  app/  components/  hooks/  lib/  plugins/  i18n/            │
+└──────────────────────────────────────────────────────────────┘
+        │                   │                   │
+        ▼                   ▼                   ▼
+   Browser dev        Tauri 2 desktop      Capacitor 8 mobile
+   (pnpm dev)         (src-tauri/, Rust    (mobile/, wraps
+                       core + axum HTTP +   ../out, LAN /
+                       scheduler + agents   WAN client of the
+                       + automation + OCR)  headless server)
+                            │
+                            ▼
+                    Node sidecar (sidecar/)
+                    Claude Agent SDK + A2UI MCP
 ```
 
-A separate `signaling-server/` package provides the standalone WebRTC rendezvous service used by the optional WAN transport.
+Two standalone services live alongside the monorepo:
 
-## Subsystem map
+- `signaling-server/` — WebRTC rendezvous (axum + workers-rs).
+- `share-server/` — Cloudflare Worker + Vite viewer for public share links.
 
-Every row has a full ADR under `docs/content/docs/en/adr/` — read the ADR before non-trivial work.
+The full subsystem catalogue, with one ADR per topic, lives under
+[`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
 
-| Subsystem                                                                        | Lives in                                                                                       | ADR                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Data backup / transfer (`BackupPackageV3`, AES-GCM envelopes, scheduled backups) | `lib/data/`, `components/settings/data/`, `lib/db/backup-history.ts`                           | [0001](./docs/content/docs/en/adr/0001-backup-schema-v3.md)                                                                                                                                                                                                                |
-| Scheduler full-agent resolution                                                  | `src-tauri/src/scheduler/`, `lib/scheduler/`                                                   | [0002](./docs/content/docs/en/adr/0002-scheduler-full-agent-resolution.md)                                                                                                                                                                                                 |
-| Employee Digital Twin (ingest → distill → runtime RAG, PII redaction)            | `lib/twin/`, `types/twin/`, `components/twin/`, `app/twin/`                                    | [0003](./docs/content/docs/en/adr/0003-employee-digital-twin.md)                                                                                                                                                                                                           |
-| Native vector backend (sqlite-vec) + cloud backends in Rust                      | `src-tauri/src/vector/`, `lib/vector/`                                                         | [0004](./docs/content/docs/en/adr/0004-vector-native-backend.md), [0023](./docs/content/docs/en/adr/0023-vector-cloud-backends-in-rust.md)                                                                                                                                 |
-| Remote control & companion API                                                   | `src-tauri/src/remote_control/`, `src-tauri/src/companion_api/`                                | [0005](./docs/content/docs/en/adr/0005-remote-control.md)                                                                                                                                                                                                                  |
-| Plugin system (manifest, slots, dexie tables, WASM runtime)                      | `plugins/`, `lib/plugin/`, `src-tauri/src/plugin_api/`                                         | [0006](./docs/content/docs/en/adr/0006-plugin-system.md), [0013 (WASM)](./docs/content/docs/en/adr/0013-wasm-plugins.md), [0016](./docs/content/docs/en/adr/0016-plugin-system-completion.md), [0017](./docs/content/docs/en/adr/0017-workflow-plugin-extension-points.md) |
-| External Bridge (wiki indexer + MCP server: 4 tools, 3 resource families)        | `lib/external-bridge/`, `lib/wiki/`, `src-tauri/src/mcp_server/`                               | [0008](./docs/content/docs/en/adr/0008-external-bridge.md)                                                                                                                                                                                                                 |
-| Platform connectors (Telegram/Discord/Slack/Lark/OneBot) + A2UI ⇄ IM bridge      | `lib/connectors/`, `app/inbox/`, `src-tauri/src/connectors/`, `src-tauri/src/a2ui_bridge/`     | [0009](./docs/content/docs/en/adr/0009-platform-connectors.md), [0025 (A2UI)](./docs/content/docs/en/adr/0025-a2ui-im-bridge.md)                                                                                                                                           |
-| Unified subscription module (Claude / Codex / OpenCode)                          | `lib/subscription/`, `src-tauri/src/subscription/`, `components/settings/subscription/`        | [0010](./docs/content/docs/en/adr/0010-claude-subscription-oauth.md), [0025](./docs/content/docs/en/adr/0025-unified-subscription-module.md)                                                                                                                               |
-| Visual workflows (React Flow editor + hybrid TS/Rust runtime)                    | `lib/workflow/`, `types/workflow/visual.ts`, `components/workflow/`, `src-tauri/src/workflow/` | [0011](./docs/content/docs/en/adr/0011-workflows-subsystem.md)                                                                                                                                                                                                             |
-| Transport abstraction                                                            | `lib/tauri/transport-*.ts`                                                                     | [0012](./docs/content/docs/en/adr/0012-transport-abstraction.md)                                                                                                                                                                                                           |
-| Command manifest                                                                 | `lib/slash-commands/`, `lib/skills/`                                                           | [0013](./docs/content/docs/en/adr/0013-command-manifest.md)                                                                                                                                                                                                                |
-| Capacitor mobile shell + V2 headless server                                      | `mobile/`, `lib/mobile/`, `lib/api/v1/`, `src-tauri/src/bin/cognia-server.rs`                  | [0014](./docs/content/docs/en/adr/0014-capacitor-mobile-shell.md), [0015](./docs/content/docs/en/adr/0015-mobile-v2-completion.md)                                                                                                                                         |
-| GitHub Delivery (PR review / Issue→PR / Release as policy-gated workflows)       | `lib/github/`, `plugins/github-delivery/`                                                      | [0018](./docs/content/docs/en/adr/0018-github-delivery.md)                                                                                                                                                                                                                 |
-| `/goal` command (self-driving chat loop)                                         | `lib/goal/`, `components/goal/`, `lib/slash-commands/actions/goal.ts`                          | [0019](./docs/content/docs/en/adr/0019-goal-command.md)                                                                                                                                                                                                                    |
-| Computer Use (Anthropic native tools + per-platform automation)                  | `src-tauri/src/automation/`, `lib/automation/`, `plugins/computer-use/`                        | [0020](./docs/content/docs/en/adr/0020-computer-use-completeness.md)                                                                                                                                                                                                       |
-| WebRTC DataChannel WAN transport + signaling server                              | `signaling-server/`, `lib/signaling/`, `lib/tauri/transport-rtc.ts`                            | [0021](./docs/content/docs/en/adr/0021-webrtc-datachannel-wan-transport.md)                                                                                                                                                                                                |
-| Agent-team runtime hardening (BudgetGuard, TeammatePool, ConcurrencyController)  | `lib/agent-team/`, `src-tauri/src/agents/`                                                     | [0022](./docs/content/docs/en/adr/0022-agent-team-runtime-hardening.md)                                                                                                                                                                                                    |
-| OCR subsystem (17 providers + Dexie result cache + PDF text-layer fast-path)     | `lib/ocr/`, `lib/db/ocr-results.ts`, `src-tauri/src/ocr/`, `plugins/ocr/`                      | [0024](./docs/content/docs/en/adr/0024-ocr-subsystem.md)                                                                                                                                                                                                                   |
-
-## Tech stack
-
-| Layer            | Tools                                                                                                                                                                                                 |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend         | Next.js 16 (App Router, static export), React 19, TypeScript 5, Tailwind v4 (`@tailwindcss/postcss`), shadcn/ui (`new-york`), Radix UI, `next-intl`                                                   |
-| State / data     | Zustand 5, Dexie 4 + `dexie-react-hooks`, `zundo`, React Hook Form, Zod 4                                                                                                                             |
-| Editor / visuals | React Flow (`@xyflow/react`), Monaco, CodeMirror, Mermaid, KaTeX, three / r3f, Recharts, `motion`                                                                                                     |
-| AI               | `ai` (Vercel AI SDK v6), `@ai-sdk/{anthropic,openai,google,mistral,cohere}`, `@modelcontextprotocol/sdk`, `@anthropic-ai/claude-agent-sdk` (sidecar), `@opencode-ai/sdk`, `@huggingface/transformers` |
-| Desktop core     | Tauri 2.11, Rust 1.84.1+, `axum` (companion / MCP HTTP), `tokio`, `rusqlite` + `sqlite-vec`, `webrtc-rs`, `wasmtime` 26 (+ WASI), `keyring`, `git2`, `qdrant-client`, optional `ocrs` / `oar-ocr`     |
-| Mobile shell     | Capacitor 7 (iOS / Android), `@capacitor-mlkit/barcode-scanning`, biometric / secure storage / voice-recorder plugins                                                                                 |
-| Sidecar          | Node 20+ ESM, Anthropic Claude Agent SDK, AI SDK providers, `fast-glob`, `diff`                                                                                                                       |
-| Quality          | Jest 30 + RTL, Playwright (E2E, mobile, Tauri), ESLint 9, Prettier 3, Husky + lint-staged + commitlint (`config-conventional`)                                                                        |
-| Docs             | Fumadocs (`docs/`, port 3001)                                                                                                                                                                         |
-
-## Prerequisites
-
-### For the web / desktop app
-
-- **Node.js** 20.x or later
-- **pnpm** 10.x (the lockfile is pnpm-only; do not use npm/yarn at the workspace root)
-  ```bash
-  npm install -g pnpm
-  ```
-- **Rust** 1.84.1 or later (Tauri MSRV, raised by the optional `ocr-paddle` feature)
-  ```bash
-  rustc --version
-  cargo --version
-  ```
-- Platform build deps:
-  - **Windows** — Visual Studio C++ Build Tools (`Desktop development with C++`)
-  - **macOS** — Xcode Command Line Tools
-  - **Linux** — see [Tauri prerequisites](https://tauri.app/start/prerequisites/)
-
-### For the mobile shell
-
-- **Xcode** 15+ (iOS) or **Android Studio** Hedgehog+ (Android)
-- CocoaPods (`brew install cocoapods`) on macOS for iOS builds
-- A successful `pnpm build` first — the Capacitor shell wraps `../out`
-
-### For optional features
-
-- **Cloudflared** — auto-spawned by Tauri's shell plugin for the GitHub Delivery webhook receiver
-- **TURN credentials** — only if you self-host WebRTC TURN (stored in OS keyring, never plaintext)
-- **CMake + C++ toolchain** — only if you build the `ocr-tesseract` feature
-
-## Installation
+## Quick start
 
 ```bash
 git clone https://github.com/AstroAir/cognia-next
 cd cognia-next
-
-# Install workspace (main app + docs + mobile + plugin-sdk/typescript)
-pnpm install
-
-# Install the Node sidecar (separate package, no workspace)
-pnpm sidecar:install
-
-# Build the bundled VS Code extension-host sidecar
-pnpm sidecars:build
-
-# Copy Monaco editor assets (also runs automatically via predev/prebuild)
-pnpm monaco:copy
+pnpm install                   # workspace (main + docs + mobile + plugin-sdk)
+pnpm sidecar:install           # Node sidecar (separate lockfile)
+pnpm dev                       # browser dev server → http://localhost:3000
 ```
 
-Husky installs the `pre-commit` (lint-staged) and `commit-msg` (commitlint) hooks via the root `prepare` script — no extra step needed.
-
-## Development
-
-### Web (browser, port 3000)
+For the desktop and mobile shells:
 
 ```bash
-pnpm dev
+pnpm tauri dev                 # desktop window
+pnpm build && pnpm mobile:sync # mobile (then mobile:open:ios / :android)
 ```
 
-Open <http://localhost:3000>. `predev` copies Monaco assets automatically.
+> Husky hooks are wired automatically through the root `prepare` script — no extra setup.
 
-### Desktop (Tauri)
+## Requirements
 
-```bash
-pnpm tauri dev      # starts Next.js + launches the Tauri window
-pnpm tauri info     # print Tauri/Rust toolchain info
-pnpm tauri build    # production desktop bundle
-```
+| Target  | Requirements                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| Web     | Node.js ≥ 20, pnpm 10                                                                                  |
+| Desktop | Rust ≥ 1.84.1 (Tauri 2) + platform C/C++ toolchain ([prereqs](https://tauri.app/start/prerequisites/)) |
+| Mobile  | Xcode 15+ (iOS) or Android Studio Hedgehog+ (Android); CocoaPods for iOS                               |
 
-Tauri's `beforeDevCommand` is `pnpm dev` and `beforeBuildCommand` is `pnpm build`; both shells consume `out/`.
+Optional: `cloudflared` (auto-spawned for the GitHub Delivery webhook), TURN credentials for
+self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
 
-### Mobile (Capacitor)
-
-```bash
-pnpm build              # produces out/ first — required
-pnpm mobile:sync        # copy out/ into the native iOS/Android projects
-pnpm mobile:open:ios    # opens Xcode
-pnpm mobile:open:android # opens Android Studio
-```
-
-For LAN/WAN connectivity to a desktop instance see ADR-0014 / ADR-0021 and the `app/(mobile-onboard)/` flow.
-
-### Docs (Fumadocs, port 3001)
-
-```bash
-pnpm docs:dev
-pnpm docs:build
-pnpm docs:start
-```
-
-The docs site is a full Next.js server app, independent from the main app's static export.
-
-### Sidecars
-
-```bash
-pnpm sidecar:start          # run the Claude Code host sidecar standalone
-pnpm sidecar:smoke          # smoke test
-pnpm sidecar:test           # node --test sidecar/builtin-tools + dispatch
-pnpm sidecar:vscode:build   # build the VS Code extension-host sidecar
-```
-
-### Signaling server
-
-```bash
-pnpm webrtc:smoke           # smoke test the signaling-server WebSocket protocol
-```
-
-The signaling-server itself is a standalone Node package — see `signaling-server/README.md`.
-
-## Available scripts
-
-### Frontend
-
-| Command                                                                                  | Description                                                             |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `pnpm dev`                                                                               | Next.js dev server on port 3000                                         |
-| `pnpm build`                                                                             | Production build → `out/` (static export consumed by Tauri & Capacitor) |
-| `pnpm start`                                                                             | Next.js production server                                               |
-| `pnpm lint` / `lint:fix`                                                                 | ESLint 9                                                                |
-| `pnpm format` / `format:check`                                                           | Prettier 3                                                              |
-| `pnpm typecheck`                                                                         | TypeScript no-emit type-check                                           |
-| `pnpm test` / `test:watch` / `test:coverage`                                             | Jest 30 with React Testing Library                                      |
-| `pnpm test:e2e`                                                                          | Playwright (all projects)                                               |
-| `pnpm test:e2e:workflows` / `:workflows:nodes` / `:workflows:editor` / `:workflows:runs` | Workflow editor / runtime suites                                        |
-| `pnpm test:e2e:mobile` / `:mobile:ios`                                                   | Mobile viewport / iOS WebKit                                            |
-| `pnpm test:e2e:tauri`                                                                    | Drives the actual Tauri debug bundle                                    |
-| `pnpm test:e2e:install` / `:report`                                                      | Install Chromium+WebKit / open HTML report                              |
-| `pnpm monaco:copy`                                                                       | Copy Monaco worker assets into `public/`                                |
-
-### Repo gates
-
-| Command                                            | Description                                               |
-| -------------------------------------------------- | --------------------------------------------------------- |
-| `pnpm audit:slots`                                 | Validate the plugin slot manifest                         |
-| `pnpm audit:silent-flags`                          | Detect silent-failure code paths                          |
-| `pnpm lint:i18n`                                   | Diff `i18n/messages/{en,zh-CN}.json` against the baseline |
-| `pnpm lint:i18n:baseline`                          | Rewrite the i18n baseline after intentional changes       |
-| `pnpm sync:plugin-sdk-wit` / `lint:plugin-sdk-wit` | Keep the plugin SDK WIT bindings in sync                  |
-
-### Tauri / Mobile / Docs
-
-| Command                                                        | Description          |
-| -------------------------------------------------------------- | -------------------- |
-| `pnpm tauri dev` / `build` / `info`                            | Tauri desktop        |
-| `pnpm mobile:sync` / `mobile:open:ios` / `mobile:open:android` | Capacitor mobile     |
-| `pnpm docs:dev` / `docs:build` / `docs:start`                  | Fumadocs (port 3001) |
-
-### Sidecars / WebRTC
-
-| Command                                                       | Description                                 |
-| ------------------------------------------------------------- | ------------------------------------------- |
-| `pnpm sidecar:install` / `sidecar:start` / `sidecar:smoke`    | Claude Code host sidecar                    |
-| `pnpm sidecar:test` (`:builtin` + `:dispatch`)                | `node --test` suites                        |
-| `pnpm sidecar:vscode:install` / `:build` / `:test` / `:clean` | VS Code extension-host sidecar              |
-| `pnpm sidecars:install` / `sidecars:build` / `sidecars:test`  | All sidecars                                |
-| `pnpm webrtc:smoke`                                           | Smoke test the signaling-server WS protocol |
-
-### Adding shadcn/ui components
-
-```bash
-pnpm dlx shadcn@latest add card
-pnpm dlx shadcn@latest add button card dialog
-```
-
-## Project structure
+## Project layout
 
 ```
 cognia-next/
-├── app/                      # Next.js App Router
-│   ├── (mobile-onboard)/    # Mobile onboarding route group
-│   ├── a2ui/  agent-teams/  canvas/  discover/
-│   ├── github-delivery/  inbox/  logs/  me/
-│   ├── plugins/  scheduler/  settings/  share-target/
-│   ├── skills/  twin/  workflows/
-│   └── layout.tsx           # Root layout (TooltipProvider, next-intl provider)
-├── components/
-│   ├── ui/                  # 57 pre-installed shadcn/ui primitives (no tests)
-│   ├── ai-elements/         # Vendored AI Elements (no tests)
-│   ├── automation/  chat/  connectors/  goal/  inbox/
-│   ├── plugins/  settings/  twin/  workflow/  workflows/
-│   └── …                    # All other first-party components ship with *.test.tsx
-├── hooks/                    # Reusable React hooks
-├── lib/                      # All business logic
-│   ├── a2ui/  agent-team/  ai-sdk/  automation/
-│   ├── claude/  connectors/  data/  db/  external-bridge/
-│   ├── github/  goal/  mobile/  ocr/  plugin/  scheduler/
-│   ├── signaling/  skills/  slash-commands/  subscription/
-│   ├── tauri/  twin/  vector/  wiki/  workflow/  …
-│   ├── browser-stubs/       # Empty stubs for server-only deps
-│   └── utils.ts             # cn() = clsx + tailwind-merge
-├── plugins/                  # In-tree first-party plugins
-│   ├── anthropic-skills/  clipboard-history/  clipboard-tools/
-│   ├── computer-use/  e2b-sandbox/  github-delivery/  ocr/
-│   ├── playwright-mcp/  prompt-templates/  screenshot/
-│   ├── stagehand-mcp/  test-lsp-contribution/
-│   ├── wasm-example-formatter/  web-tools/  workflow-ai/
-│   └── workspace-tools/
-├── plugin-sdk/typescript/    # Published plugin SDK (workspace package)
-├── i18n/                     # next-intl
-│   ├── request.ts  config.ts
-│   └── messages/en.json  messages/zh-CN.json
-├── src-tauri/                # Tauri 2.11 Rust core
-│   ├── src/
-│   │   ├── automation/  canvas/  ccswitch/  claude/
-│   │   ├── companion_api/  connectors/  external_agent/
-│   │   ├── hooks/  logging/  mcp_server/  plugin_api/
-│   │   ├── proxy_config/  remote_control/  scheduler/
-│   │   ├── skills/  subscription/  tts/  vector/
-│   │   ├── wallpaper/  workflow/  a2ui_bridge/
-│   │   ├── bin/cognia-server.rs   # Headless V2 server binary
-│   │   ├── main.rs  lib.rs  commands.rs  menu.rs
-│   │   └── …
-│   ├── icons/  capabilities/  resources/
-│   ├── tauri.conf.json
-│   └── Cargo.toml
-├── sidecar/                  # Node sidecar (NOT in pnpm workspace)
-│   ├── claude-host.mjs       # Claude Agent SDK host
-│   ├── a2ui-mcp.mjs          # A2UI bridge MCP server
-│   ├── dispatch/  builtin-tools/  fetch-interceptor.mjs
-│   ├── vscode-ext-host/      # VS Code extension-host sidecar
-│   └── package.json          # Separate lockfile, separate install
-├── mobile/                   # Capacitor 7 shell (workspace package)
-├── docs/                     # Fumadocs site (workspace package, port 3001)
-│   └── content/docs/{en,zh}/adr/   # Architecture Decision Records
-├── signaling-server/         # Standalone WebRTC rendezvous service
-├── tests/e2e/                # Playwright suites (workflows, mobile, tauri)
-├── scripts/                  # Build/audit helpers (copy-monaco, audit-slots,
-│                             #   lint-i18n, build-vscode-ext-host-sidecar, …)
-├── components.json           # shadcn/ui config
-├── next.config.ts            # withNextIntl + static export + Node-builtin stubs
-├── pnpm-workspace.yaml       # docs, mobile, plugin-sdk/typescript
-└── package.json
+├── app/                   Next.js App Router (static export)
+├── components/            React components (ui/ = shadcn, ai-elements/ = vendored)
+├── hooks/  lib/  types/   Business logic, hooks, shared types
+├── plugins/               First-party in-tree plugins
+├── plugin-sdk/typescript/ Published plugin SDK (workspace package)
+├── i18n/                  next-intl request + messages (en, zh-CN)
+├── src-tauri/             Tauri 2 Rust core (axum HTTP, scheduler, automation, OCR, …)
+├── sidecar/               Node sidecar (Claude Agent SDK host, A2UI MCP) — separate lockfile
+├── mobile/                Capacitor 8 shell (workspace package)
+├── docs/                  Fumadocs site + ADRs (workspace package, port 3001)
+├── signaling-server/      Standalone WebRTC rendezvous service
+├── share-server/          Cloudflare Worker + Vite viewer for share links
+├── tests/e2e/             Playwright suites (workflows, mobile, tauri)
+└── scripts/               Build, audit, and migration helpers
+```
+
+## Scripts
+
+```bash
+# App
+pnpm dev | build | start | lint | format | typecheck
+pnpm test | test:watch | test:coverage
+
+# Desktop
+pnpm tauri dev | build | info
+
+# Mobile (run pnpm build first — Capacitor wraps out/)
+pnpm mobile:sync
+pnpm mobile:open:ios | mobile:open:android
+
+# Docs (Fumadocs, port 3001)
+pnpm docs:dev | docs:build | docs:start
+
+# Sidecars
+pnpm sidecar:install | sidecar:start | sidecar:smoke | sidecar:test
+pnpm sidecars:build                       # all sidecars
+
+# E2E (Playwright)
+pnpm test:e2e                             # all projects
+pnpm test:e2e:workflows | :mobile | :tauri
+pnpm test:e2e:install | :report
+
+# Repo gates
+pnpm audit:slots                          # plugin slot manifest
+pnpm audit:silent-flags                   # silent-failure code paths
+pnpm lint:i18n | lint:i18n:baseline       # next-intl key parity
+pnpm lint:plugin-sdk-wit                  # plugin SDK WIT bindings
+
+# Other
+pnpm webrtc:smoke                         # signaling-server protocol smoke test
+pnpm dlx shadcn@latest add <component>
 ```
 
 ## Configuration
 
-### Environment variables
+- **Environment** — `cp .env.example .env.local`. `NEXT_PUBLIC_*` vars are exposed to the browser;
+  `lib/env.ts` validates required vars at first access. Never commit `.env.local`.
+- **Tauri** — `src-tauri/tauri.conf.json` defines product name (`Cognia`), identifier
+  (`com.reactquickstarter.desktop`), deep-link scheme (`cognia://`), a hard `'self'` CSP, the
+  custom title bar, and the bundled sidecar resources.
+- **Path aliases** — `@/components`, `@/lib`, `@/ui`, `@/hooks`, `@/utils`.
+- **Styling** — Tailwind v4 via `@tailwindcss/postcss`, oklch CSS variables, class-based dark
+  mode (`@custom-variant dark (&:is(.dark *))`).
 
-```bash
-cp .env.example .env.local
-```
+## Conventions
 
-- Variables prefixed `NEXT_PUBLIC_` are exposed to the browser
-- Never commit `.env.local`
-- `lib/env.ts` validates required vars at first access
+These are project-level hard rules — see [`CLAUDE.md`](./CLAUDE.md) for the full ruleset.
 
-### Tauri configuration
-
-`src-tauri/tauri.conf.json` already ships sensible defaults for Cognia:
-
-- `productName: "Cognia"`, identifier `com.reactquickstarter.desktop`
-- Deep link scheme: `cognia://`
-- Custom title bar (`decorations: false`, overlay traffic lights on macOS)
-- Hard CSP locked to `'self'` + `ipc:`, no remote script/style sources
-- Bundled sidecar resources: `claude-host.mjs`, `a2ui-mcp.mjs`, the VS Code extension-host build, and their `node_modules`
-- CLI args: optional `workspace` path + `--new-chat` / `-n` flag
-
-### Path aliases
-
-```ts
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
-```
-
-- `@/components` → `components/`
-- `@/lib` → `lib/`
-- `@/ui` → `components/ui/`
-- `@/hooks` → `hooks/`
-- `@/utils` → `lib/utils.ts`
-
-### Tailwind v4
-
-- `@tailwindcss/postcss` + CSS variables in `app/globals.css`
-- Class-based dark mode (`@custom-variant dark (&:is(.dark *))`)
-- oklch color tokens
-
-## Working rules (read before touching code)
-
-The full ruleset lives in `CLAUDE.md`. Highlights:
-
-1. **Research before implementing.** Search `lib/`, `components/`, `hooks/`, `src-tauri/`, and ADRs for existing implementations before writing a new utility, hook, or component.
-2. **No simplifications.** Implement the full behavior — no stubs, mocks, or `// TODO later` production paths. Surface blockers instead of silently degrading scope.
-3. **Every component ships with a unit test.** Files under `components/**`, `hooks/**`, `lib/**`, or `src-tauri/src/**` need a co-located `*.test.ts(x)` or in-file `#[cfg(test)]` test. Coverage must stay ≥90% lines/branches/functions. `components/ui/` (shadcn) and `components/ai-elements/` (vendored) are excluded.
-4. **i18n is mandatory.** No hard-coded user-facing strings in `.tsx`. Use `next-intl`'s `useTranslations()` / `getTranslations()`, add keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, and run `pnpm lint:i18n` to confirm parity. Aria labels, placeholders, toasts and error messages count as user-facing.
-5. **Cross-cutting hooks — reuse, don't reinvent.** PII redaction (`lib/twin/ingest/redact.ts`), quiet hours (`lib/connectors/outbound-runner`), the build-options pipeline (`lib/claude/build-options.ts:resolveSendOptions`), and the A2UI ⇄ IM bridge (`lib/connectors/a2ui-bridge/`) are shared entry points — touch them, don't fork them.
+1. **Research before implementing.** Search `lib/`, `components/`, `hooks/`, `src-tauri/`, and the
+   relevant ADR before writing a new utility, hook, or component. Reuse first.
+2. **No silent simplifications.** Ship the full behavior or surface the blocker — never stub,
+   mock, or `// TODO later` a production path.
+3. **Tests are not optional.** Every new file under `components/**`, `hooks/**`, `lib/**`, or
+   `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) ships with a
+   co-located test. Coverage stays ≥ 90 % lines / branches / functions.
+4. **i18n is mandatory.** No hard-coded user-facing strings in `.tsx`. Add keys to **both**
+   `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, then `pnpm lint:i18n`.
+5. **Reuse shared hooks.** PII redaction (`lib/twin/ingest/redact.ts`), quiet-hours
+   (`lib/connectors/outbound-runner`), the build-options pipeline
+   (`lib/claude/build-options.ts`), and the A2UI ⇄ IM bridge (`lib/connectors/a2ui-bridge/`) are
+   shared entry points — touch them, don't fork them.
 
 ## Testing
 
-- **Co-located** — `xxx.test.ts(x)` next to source. No `__tests__/` or `tests/` directories for unit tests.
-- **Coverage gate** — ≥90% lines / branches / functions; verify with `pnpm test:coverage`.
-- **Rust** — in-file `#[cfg(test)] mod tests { ... }`; integration tests under `src-tauri/tests/`.
-- **Sidecar** — `pnpm sidecar:test` uses Node's built-in `node --test` (not Jest).
-- **E2E** — Playwright with dedicated projects for `mobile-pixel-7`, `mobile-iphone-13`, and `tauri`. The Tauri project runs a real debug bundle (`pretest:e2e:tauri` builds it first).
+- **Co-located** — `*.test.ts(x)` next to source; no `__tests__/` or `tests/` directories for
+  unit tests.
+- **Coverage** — `pnpm test:coverage` (Jest 30 + RTL).
+- **Rust** — in-file `#[cfg(test)] mod tests { … }`; integration tests under `src-tauri/tests/`.
+- **Sidecar** — `pnpm sidecar:test` (Node's built-in `node --test`, not Jest).
+- **E2E** — Playwright with dedicated projects for `mobile-pixel-7`, `mobile-iphone-13`, and
+  `tauri`. The Tauri project drives a real debug bundle (`pretest:e2e:tauri` builds it first).
 
 ## Commit hooks
 
-Husky is wired via the root `prepare` script — `pnpm install` once and it's live.
+- `pre-commit` → `lint-staged` (`eslint --fix` + `prettier --write` on staged files).
+- `commit-msg` → `commitlint` (`@commitlint/config-conventional`) — Conventional Commits enforced.
 
-- `pre-commit` → `lint-staged` (`eslint --fix` + `prettier --write` on staged files)
-- `commit-msg` → `commitlint` with `@commitlint/config-conventional`
+Never bypass with `--no-verify`. If a hook fails, fix the root cause, re-stage, and create a
+**new** commit — the failed commit was never created, so `--amend` would modify the wrong one.
 
-Never bypass with `--no-verify`. If a hook fails, fix the root cause, re-stage, and create a **new** commit — the failed one was never created, so `--amend` would modify the wrong commit.
-
-## Building for production
-
-### Web / static export
+## Building
 
 ```bash
+# Web / static export → out/  (consumed by Tauri and Capacitor)
 pnpm build
-# → out/  (consumed by Tauri's frontendDist AND by Capacitor's webDir)
-```
 
-### Desktop
-
-```bash
+# Desktop → target/release/bundle/{msi,nsis,dmg,app,appimage,deb,rpm}/
 pnpm tauri build
-# Outputs (workspace root target/):
-# - Windows: target/release/bundle/msi/  (and nsis/)
-# - macOS:   target/release/bundle/dmg/  (and app/)
-# - Linux:   target/release/bundle/{appimage,deb,rpm}/
-```
 
-Optional OCR features are gated by Cargo feature flags — see `src-tauri/Cargo.toml` for `ocr-tesseract`, `ocr-windows`, `ocr-apple`, `ocr-ocrs`, `ocr-paddle`. Default build ships placeholder backends so the dispatch table compiles everywhere.
-
-### Mobile
-
-```bash
+# Mobile — sync, then sign and archive in Xcode / Android Studio
 pnpm mobile:sync
-pnpm mobile:open:ios       # build / sign / archive in Xcode
-pnpm mobile:open:android   # build / sign / bundle in Android Studio
-```
+pnpm mobile:open:ios | mobile:open:android
 
-### Docs
-
-```bash
+# Docs (Next.js server app) → docs/.next/
 pnpm docs:build
-# Output: docs/.next/   — deploy to any Node.js host. On Vercel, set root directory to docs/.
 ```
 
-## Deployment
+Optional OCR backends are gated by Cargo feature flags — see `src-tauri/Cargo.toml` for
+`ocr-tesseract`, `ocr-windows`, `ocr-apple`, `ocr-ocrs`, `ocr-paddle`. The default build ships
+placeholder backends so the dispatch table compiles everywhere.
 
-- **Desktop** — distribute the `.msi` / `.dmg` / `.AppImage` from `target/release/bundle/` (workspace root). Code-signing is project-specific.
-- **Mobile** — submit via App Store Connect / Google Play after `pnpm mobile:sync`.
-- **Docs** — `docs/` is a full Next.js server app (NOT static export); deploy to Vercel / Railway / Fly.io / self-hosted Node.
-- **Signaling server** — deploy `signaling-server/` to any Node host that supports WebSockets. Set TURN credentials via the OS keyring on the desktop client; never ship them in code.
+## Tech stack
 
-## Troubleshooting
-
-**Port 3000 already in use**
-
-```powershell
-# Windows (PowerShell)
-Get-NetTCPConnection -LocalPort 3000 | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
-```
-
-```bash
-# macOS / Linux
-lsof -ti:3000 | xargs kill -9
-```
-
-**Tauri build fails**
-
-```bash
-pnpm tauri info
-rustup update
-cd src-tauri && cargo clean
-```
-
-**Module not found errors**
-
-```bash
-rm -rf .next
-rm -rf node_modules docs/node_modules mobile/node_modules pnpm-lock.yaml
-pnpm install
-pnpm sidecar:install
-```
-
-**`Cannot find module 'collections/server'` in docs**
-
-```bash
-pnpm docs:dev    # generates docs/.source/ once
-```
-
-**i18n parity check fails**
-
-```bash
-pnpm lint:i18n             # diff against the baseline
-pnpm lint:i18n:baseline    # only after you've intentionally added/removed keys
-```
-
-**Monaco assets missing**
-
-```bash
-pnpm monaco:copy           # also runs automatically via predev/prebuild
-```
+| Layer        | Tools                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend     | Next.js 16, React 19, TypeScript, Tailwind v4, shadcn/ui (`new-york`), Radix UI, `next-intl`                                         |
+| State / data | Zustand 5, Dexie 4 + `dexie-react-hooks`, `zundo`, React Hook Form, Zod 4                                                            |
+| Editor / viz | React Flow, Monaco, CodeMirror, Mermaid, KaTeX, three / r3f, Recharts, `motion`                                                      |
+| AI           | Vercel AI SDK v6, `@ai-sdk/*` providers, `@modelcontextprotocol/sdk`, `@anthropic-ai/claude-agent-sdk` (sidecar), `@opencode-ai/sdk` |
+| Desktop core | Tauri 2.11, Rust 1.84.1+, `axum`, `tokio`, `rusqlite` + `sqlite-vec`, `webrtc-rs`, `wasmtime` 26, `keyring`, `git2`                  |
+| Mobile       | Capacitor 8 (iOS / Android), barcode scanner, biometric / secure-storage / voice-recorder plugins                                    |
+| Sidecar      | Node 20+ ESM, Claude Agent SDK, AI SDK providers                                                                                     |
+| Quality      | Jest 30 + RTL, Playwright, ESLint 9, Prettier 3, Husky + lint-staged + commitlint                                                    |
 
 ## Critical notes
 
 - **pnpm only** — install from the repo root. The lockfile is pnpm-format.
-- **Do not remove `output: "export"` in `next.config.ts`** — both Tauri and Capacitor builds consume `out/`. `docs/next.config.ts` is a full server app; keep them separate.
-- **Static export caveat** — `app/api/` does not exist at runtime. Anything that needs an HTTP server (MCP HTTP, webhook receiver, cron daemon, headless V2 API) lives in Tauri Rust (axum), not Next.js routes.
-- **Server-only packages** — vector-DB SDKs and `simple-git` are aliased to `lib/browser-stubs/empty.js` in `next.config.ts`. Add new server-only deps to **both** `SERVER_ONLY_PACKAGES` and `serverExternalPackages`; truly Node-only built-ins go in `NODE_ONLY_MODULES`. Wrong setup blows up the mobile bundle.
-- **Native vector store** — sqlite-vec at `<app_data>/cognia/vectors.sqlite`. Web mode hides the native option and forces a cloud backend.
-- **Rust toolchain** — 1.84.1+ (Tauri MSRV is 1.77.2; the `ocr-paddle` opt-in feature raises it).
-- **Conventional Commits** are enforced by the `commit-msg` hook.
+- **Do not remove `output: "export"` in `next.config.ts`** — both Tauri and Capacitor consume
+  `out/`. `docs/next.config.ts` is a full server app; keep them separate.
+- **No `app/api/` at runtime.** HTTP servers (MCP HTTP, webhook receiver, headless V2 API) live
+  in Tauri Rust (axum), not Next.js routes.
+- **Server-only deps** — vector-DB SDKs and `simple-git` are aliased to
+  `lib/browser-stubs/empty.js`. Add new server-only deps to both `SERVER_ONLY_PACKAGES` and
+  `serverExternalPackages`; truly Node-only built-ins go in `NODE_ONLY_MODULES`.
 
-## Learn more
+## Troubleshooting
 
-- **ADRs** — `docs/content/docs/en/adr/` (rendered at <http://localhost:3001> once `pnpm docs:dev` is running)
-- **Plugin SDK** — `plugin-sdk/typescript/` + `docs/content/docs/en/plugin-dev/`
-- **CLAUDE.md** — full development rules + subsystem map for AI-assisted contributors
-- **Tauri** — [Tauri 2 docs](https://tauri.app/)
-- **Next.js 16** — [Next.js docs](https://nextjs.org/docs)
-- **Fumadocs** — [Fumadocs docs](https://fumadocs.dev/)
-- **shadcn/ui** — [shadcn/ui docs](https://ui.shadcn.com/) (`new-york` style, RSC mode)
-- **Capacitor 7** — [Capacitor docs](https://capacitorjs.com/docs)
+| Symptom                                        | Fix                                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Port 3000 already in use                       | Windows: `Get-NetTCPConnection -LocalPort 3000 \| % { Stop-Process -Id $_.OwningProcess -Force }` · macOS/Linux: `lsof -ti:3000 \| xargs kill -9` |
+| Tauri build fails                              | `pnpm tauri info && rustup update && (cd src-tauri && cargo clean)`                                                                               |
+| Module not found                               | `rm -rf node_modules docs/node_modules mobile/node_modules pnpm-lock.yaml && pnpm install`                                                        |
+| Docs `Cannot find module 'collections/server'` | `pnpm docs:dev` once to generate `docs/.source/`                                                                                                  |
+| i18n parity check fails                        | `pnpm lint:i18n` to diff · `pnpm lint:i18n:baseline` after intentional changes                                                                    |
+| Monaco assets missing                          | `pnpm monaco:copy` (also runs via `predev` / `prebuild`)                                                                                          |
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feat/your-feature`) — follow `<type>/<short-kebab>` naming
-3. Make focused, surgical changes (see Working Rules above)
-4. Add or update the co-located tests
-5. Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and any relevant `pnpm test:e2e:*`
-6. Commit with Conventional Commits (the hook will reject non-conforming messages)
-7. Open a PR — link related ADRs
+1. Fork and create a feature branch — `<type>/<short-kebab>` (e.g. `feat/connector-wecom`).
+2. Make focused, surgical changes — see [Conventions](#conventions).
+3. Add or update co-located tests.
+4. Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and any relevant `pnpm test:e2e:*`.
+5. Commit with Conventional Commits and open a PR linking related ADRs.
+
+## Learn more
+
+- **ADRs** — [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/) (rendered at
+  <http://localhost:3001> once `pnpm docs:dev` is running)
+- **Plugin SDK** — [`plugin-sdk/typescript/`](./plugin-sdk/typescript/)
+- **Working rules** — [`CLAUDE.md`](./CLAUDE.md)
+- **External docs** — [Tauri 2](https://tauri.app/) · [Next.js 16](https://nextjs.org/docs) ·
+  [shadcn/ui](https://ui.shadcn.com/) · [Capacitor](https://capacitorjs.com/docs) ·
+  [Fumadocs](https://fumadocs.dev/)
 
 ## License
 
-AGPL-3.0-or-later — see [LICENSE](./LICENSE).
+[AGPL-3.0-or-later](./LICENSE).
 
 ## Support
 
-- Read the relevant ADR under `docs/content/docs/en/adr/`
-- Check the [Troubleshooting](#troubleshooting) section
-- Open an issue on GitHub: <https://github.com/AstroAir/cognia-next/issues>
+- Read the relevant ADR under [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
+- File an issue: <https://github.com/AstroAir/cognia-next/issues>.

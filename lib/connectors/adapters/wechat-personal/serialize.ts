@@ -11,11 +11,17 @@
 import type { MessageSegment } from "@/types/connectors/segment"
 import { isA2UISegment } from "@/types/connectors/segment"
 import type { SegmentDowngrade } from "@/types/connectors/outbound"
+import { buildIlinkA2UISurface } from "./a2ui-mapper"
 
 export interface WechatPersonalSerialized {
   /** Plain-text chunks (≤2000 chars each), in order. */
   textChunks: string[]
   downgrades: SegmentDowngrade[]
+}
+
+export interface WechatPersonalSerializeContext {
+  adapterId: string
+  conversationKey: string
 }
 
 const MAX_CHARS = 2000
@@ -27,13 +33,34 @@ function chunkText(text: string): string[] {
   return chunks
 }
 
-export function serializeIlinkSegments(segments: MessageSegment[]): WechatPersonalSerialized {
+/**
+ * Serialise outbound segments for iLink. Accepts an optional `ctx` so
+ * A2UI segments can be routed through the per-adapter mapper that records
+ * `connectorCallbackBindings` rows + populates the numeric-action
+ * registry for future inbound digit replies. Without `ctx` the function
+ * falls back to the legacy "drop in seg.plainTextMirror" path so unit
+ * tests that don't care about A2UI bindings can keep their existing call
+ * shape.
+ */
+export async function serializeIlinkSegments(
+  segments: MessageSegment[],
+  ctx?: WechatPersonalSerializeContext
+): Promise<WechatPersonalSerialized> {
   const lines: string[] = []
   const downgrades: SegmentDowngrade[] = []
 
   for (const seg of segments) {
     if (isA2UISegment(seg)) {
-      if (seg.plainTextMirror) lines.push(seg.plainTextMirror)
+      if (ctx) {
+        const { textMirror } = await buildIlinkA2UISurface({
+          adapterId: ctx.adapterId,
+          conversationKey: ctx.conversationKey,
+          segment: seg,
+        })
+        if (textMirror) lines.push(textMirror)
+      } else if (seg.plainTextMirror) {
+        lines.push(seg.plainTextMirror)
+      }
       continue
     }
     switch (seg.type) {

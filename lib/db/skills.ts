@@ -1,6 +1,16 @@
-import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import type {
+  Skill,
+  SkillCategory,
+  SkillSource,
+  SkillStatus,
+  SkillValidationError,
+} from "@/lib/claude/types"
 import { getDb } from "./schema"
-import { deleteResourcesForSkill } from "./skill-resources"
+import {
+  deleteResourcesForSkill,
+  replaceResourcesForSkill,
+  type SkillResourceDraft,
+} from "./skill-resources"
 
 function newId() {
   return "skill_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -40,7 +50,17 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
       | "syncFingerprint"
       | "validationErrors"
     >
-  >
+  > & {
+    /**
+     * Optional resource bundle that should land in the `skillResources`
+     * table alongside the row itself. When a draft carries resources, the
+     * persistence layer (`createSkill` / `upsertSkillByCanonicalId` /
+     * `bulkImportSkills`) replaces the existing resource set rather than
+     * appending — matching the bundle-loader's "what's in the zip is what
+     * lives in Dexie" semantics. `skillId` is filled in by the persister.
+     */
+    resources?: Array<Omit<SkillResourceDraft, "skillId">>
+  }
 
 export async function createSkill(draft: SkillDraft): Promise<Skill> {
   const now = Date.now()
@@ -62,11 +82,15 @@ export async function createSkill(draft: SkillDraft): Promise<Skill> {
     nativeDirectory: draft.nativeDirectory,
     syncOrigin: draft.syncOrigin ?? "frontend",
     syncFingerprint: draft.syncFingerprint,
+    validationErrors: draft.validationErrors,
     usageCount: 0,
     createdAt: now,
     updatedAt: now,
   }
   await getDb().skills.put(skill)
+  if (draft.resources && draft.resources.length > 0) {
+    await replaceResourcesForSkill(skill.id, draft.resources)
+  }
   return skill
 }
 
@@ -164,6 +188,60 @@ export function inferSource(skill: Skill): SkillSource {
   return skill.isBuiltIn ? "builtin" : "custom"
 }
 
+/**
+ * Idempotent upsert by `canonicalId`. The function looks up the existing
+ * skill row (if any) by canonicalId and either updates it in place or
+ * creates a new one. The id stays stable across re-imports, which keeps
+ * `TeamCapabilityBundle.skillIds` and workflow node refs intact.
+ *
+ * When `draft.resources` is supplied, the resource table is rewritten via
+ * `replaceResourcesForSkill` — old entries vanish, new entries land. The
+ * caller (bundle import, marketplace install) decides whether to attach
+ * resources at all; pure-text installs (most marketplace SKILL.md) just
+ * omit the field.
+ *
+ * Used by `installMarketplaceItem` (marketplace) and `bulkImportSkills`
+ * (bundle dialog, when the draft carries a canonicalId) so the
+ * "find-by-canonicalId, replace, never duplicate" semantics live in one
+ * place rather than two slightly-different copies.
+ */
+export async function upsertSkillByCanonicalId(input: {
+  draft: SkillDraft
+  canonicalId: string
+}): Promise<{ skill: Skill; created: boolean }> {
+  const { draft, canonicalId } = input
+  const db = getDb()
+  const existing = (await db.skills.toArray()).find((s) => s.canonicalId === canonicalId)
+  if (existing) {
+    await updateSkill(existing.id, {
+      name: draft.name,
+      description: draft.description,
+      content: draft.content,
+      allowedTools: draft.allowedTools,
+      tags: draft.tags,
+      category: draft.category ?? existing.category,
+      source: draft.source ?? existing.source,
+      status: draft.status ?? existing.status,
+      version: draft.version ?? existing.version,
+      author: draft.author ?? existing.author,
+      license: draft.license ?? existing.license,
+      canonicalId,
+      marketplaceSkillId: draft.marketplaceSkillId ?? existing.marketplaceSkillId,
+      nativeDirectory: draft.nativeDirectory ?? existing.nativeDirectory,
+      syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
+      syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,
+      validationErrors: draft.validationErrors,
+    })
+    if (draft.resources) {
+      await replaceResourcesForSkill(existing.id, draft.resources)
+    }
+    const refreshed = await db.skills.get(existing.id)
+    return { skill: refreshed ?? existing, created: false }
+  }
+  const created = await createSkill({ ...draft, canonicalId })
+  return { skill: created, created: true }
+}
+
 /** What to do when a draft's name collides with an existing custom skill. */
 export type ImportConflictStrategy = "skip" | "duplicate" | "overwrite"
 
@@ -201,6 +279,20 @@ export async function bulkImportSkills(
       if (!draft.name?.trim()) {
         throw new Error("Skill is missing a name.")
       }
+      // Drafts with a `canonicalId` (bundle import, marketplace) take the
+      // idempotent upsert path so re-import of the same source keeps
+      // `Skill.id` stable and never duplicates. Name-collision strategies
+      // only apply to drafts without a canonicalId.
+      if (draft.canonicalId) {
+        const { skill, created } = await upsertSkillByCanonicalId({
+          draft,
+          canonicalId: draft.canonicalId,
+        })
+        byName.set(skill.name.toLowerCase(), skill)
+        if (created) result.created += 1
+        else result.updated += 1
+        continue
+      }
       const collision = byName.get(draft.name.trim().toLowerCase())
       if (!collision) {
         const created = await createSkill(draft)
@@ -224,6 +316,9 @@ export async function bulkImportSkills(
           author: draft.author ?? collision.author,
           license: draft.license ?? collision.license,
         })
+        if (draft.resources) {
+          await replaceResourcesForSkill(collision.id, draft.resources)
+        }
         result.updated += 1
         continue
       }

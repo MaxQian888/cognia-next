@@ -43,6 +43,30 @@ describe("defineSkill", () => {
     })
   })
 
+  it("narrows the new bundle-shaped variants without losing field shape", () => {
+    const bundle: PluginSkillDef = {
+      id: "bundle",
+      name: "Bundle",
+      description: "Folder bundle with sibling resources",
+      source: { kind: "local-bundle", path: "./skills/bundle" },
+    }
+    expect(defineSkill(bundle).source).toEqual({
+      kind: "local-bundle",
+      path: "./skills/bundle",
+    })
+
+    const archive: PluginSkillDef = {
+      id: "archive",
+      name: "Archive",
+      description: "Zipped bundle extracted on enable",
+      source: { kind: "archive", path: "./skills/bundle.zip" },
+    }
+    expect(defineSkill(archive).source).toEqual({
+      kind: "archive",
+      path: "./skills/bundle.zip",
+    })
+  })
+
   it("preserves optional scope and attach lists", () => {
     const def: PluginSkillDef = {
       id: "with-scope",

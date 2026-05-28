@@ -8,23 +8,8 @@ description: Read-only access to CCSwitch's SQLite database, one-click switching
 <Status variant="stable">stable</Status>
 
 <TLDR>
-  CCSwitch is a community open-source Claude multi-account switcher. Cognia opens its
-  `~/.cc-switch/cc-switch.db` in read-only mode, surfacing 50+ providers, MCP servers, prompts, and
-  skills directly in Settings, and can simultaneously switch cognia-next itself plus any set of
-  external agents in a single action (v1 currently only writes `claude-code`'s
-  `~/.claude/settings.json`). We **never write** to the CCSwitch database.
+CCSwitch is a community open-source Claude multi-account switcher. Cognia opens its `~/.cc-switch/cc-switch.db` read-only, surfaces 50+ providers, MCP servers, prompts, and skills directly in Settings, and switches cognia-next itself plus any checked external agents in one action (v1 only writes `claude-code`'s `~/.claude/settings.json`). We **never write** to the CCSwitch database.
 </TLDR>
-
-<StatGrid>
-  <Stat label="Read-only IPC" value="5" hint="status / list 4 kinds" />
-  <Stat label="Write action" value="1" hint="write_claude_settings_env" />
-  <Stat
-    label="Settings tab"
-    value="6"
-    hint="overview / providers / mcp / prompts / skills / sync"
-  />
-  <Stat label="Switchable agents" value="1" hint="claude-code (v1)" />
-</StatGrid>
 
 CCSwitch interop has two independent capabilities:
 

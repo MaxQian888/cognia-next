@@ -107,4 +107,60 @@ describe("PluginMarketplace", () => {
     fireEvent.click(installButtons[0])
     await waitFor(() => expect(install).toHaveBeenCalled())
   })
+
+  it("renders Load more when results exceed PAGE_SIZE and expands on click", async () => {
+    // PAGE_SIZE = 12, so 14 entries → 12 visible + a Load-more CTA;
+    // click reveals the remaining two.
+    const many = Array.from({ length: 14 }, (_, i) => ({
+      id: `plug-${i}`,
+      name: `Plugin ${i}`,
+      version: "1.0.0",
+      type: "plugin",
+      description: `entry ${i}`,
+    }))
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => many),
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => []),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+      uninstallPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    await waitFor(() =>
+      expect(screen.getByTestId("plugin-marketplace-load-more")).toBeInTheDocument()
+    )
+    expect(screen.getByText("Plugin 0")).toBeInTheDocument()
+    expect(screen.getByText("Plugin 11")).toBeInTheDocument()
+    expect(screen.queryByText("Plugin 12")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("plugin-marketplace-load-more"))
+    await waitFor(() => expect(screen.getByText("Plugin 12")).toBeInTheDocument())
+    expect(screen.getByText("Plugin 13")).toBeInTheDocument()
+  })
+
+  it("switching sections swaps the entry list and resets pagination", async () => {
+    // Distinct entries per source so the section toggle has something
+    // observable to flip between. After switching to "popular", we should
+    // see the popular-only id and stop seeing the search-only ones.
+    const searchOnly = [{ id: "search-1", name: "SearchOne", version: "1.0.0", type: "plugin" }]
+    const popularOnly = [{ id: "popular-1", name: "PopularOne", version: "1.0.0", type: "plugin" }]
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => searchOnly),
+      getFeaturedPlugins: jest.fn(async () => []),
+      getPopularPlugins: jest.fn(async () => popularOnly),
+      getRecentPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+      uninstallPlugin: jest.fn(async () => undefined),
+    })
+    render(<PluginMarketplace />)
+    await waitFor(() => expect(screen.getByText("SearchOne")).toBeInTheDocument())
+    expect(screen.queryByText("PopularOne")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText("sections.popular"))
+    await waitFor(() => expect(screen.getByText("PopularOne")).toBeInTheDocument())
+    expect(screen.queryByText("SearchOne")).not.toBeInTheDocument()
+  })
 })

@@ -812,3 +812,70 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })
+
+describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
+  it("send() injects traceId + spanId into the SendOptions echoed to the sidecar", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
+    const call = sendPromptMock.mock.calls.at(-1) as [string, unknown, Record<string, unknown>]
+    const options = call[2]
+    expect(typeof options.traceId).toBe("string")
+    expect(typeof options.spanId).toBe("string")
+    expect(String(options.traceId)).toMatch(/^[0-9a-f]{32}$/)
+    expect(String(options.spanId)).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it("setLastSend caches the trace identifiers so session_ended can finalise the span", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(chatState.setLastSend).toHaveBeenCalled()
+    const lastCall = chatState.setLastSend.mock.calls.at(-1) as [
+      string,
+      { options: Record<string, unknown> },
+    ]
+    expect(typeof lastCall[1].options.spanId).toBe("string")
+    expect(typeof lastCall[1].options.traceId).toBe("string")
+  })
+
+  it("preserves a caller-provided spanId instead of generating a new one", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", {
+        spanId: "1111222233334444",
+        traceId: "deadbeefdeadbeefdeadbeefdeadbeef",
+      } as never)
+    })
+    const call = sendPromptMock.mock.calls.at(-1) as [string, unknown, Record<string, unknown>]
+    expect(call[2].spanId).toBe("1111222233334444")
+    expect(call[2].traceId).toBe("deadbeefdeadbeefdeadbeefdeadbeef")
+  })
+
+  it("ends the span with errorType when send() throws before the sidecar gets the call", async () => {
+    const { setAgentTraceWriter, __resetAgentTraceEmitterForTesting } =
+      await import("@/lib/agent-trace/emitter")
+    const captured: Array<Record<string, unknown>> = []
+    __resetAgentTraceEmitterForTesting()
+    setAgentTraceWriter((s) => {
+      captured.push(s as unknown as Record<string, unknown>)
+    })
+    sendPromptMock.mockRejectedValueOnce(new Error("network down"))
+
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("ping")
+    })
+    expect(captured).toHaveLength(1)
+    expect(captured[0].errorType).toBe("send_failed")
+    expect(captured[0].errorMessage).toBe("network down")
+    setAgentTraceWriter(null)
+  })
+})

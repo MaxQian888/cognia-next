@@ -9,6 +9,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+const mockOpenUrl = jest.fn()
+jest.mock("@/lib/native/opener", () => ({
+  openUrl: (...args: unknown[]) => mockOpenUrl(...args),
+}))
+
 import { PluginPreInstallDialog, type PreInstallTarget } from "./plugin-pre-install-dialog"
 
 const conflictTarget: PreInstallTarget = {
@@ -58,6 +63,21 @@ const configTarget: PreInstallTarget = {
   },
 }
 
+const binariesTarget: PreInstallTarget = {
+  pluginId: "p",
+  pluginName: "Plugin P",
+  step: "binaries",
+  stepNumber: 2,
+  totalSteps: 4,
+  binaries: {
+    pluginId: "p",
+    missing: [
+      { name: "git", minVersion: "2.0.0", documentation: "https://git-scm.com" },
+      { name: "cargo-component", detectedVersion: "cargo-component 0.0.1" },
+    ],
+  },
+}
+
 describe("PluginPreInstallDialog", () => {
   it("does not render content when target is null", () => {
     render(<PluginPreInstallDialog target={null} onContinue={() => {}} onCancel={() => {}} />)
@@ -88,6 +108,33 @@ describe("PluginPreInstallDialog", () => {
     )
     expect(screen.getByText("clipboard:read")).toBeInTheDocument()
     expect(screen.getByText("network:fetch")).toBeInTheDocument()
+  })
+
+  it("renders the binaries step listing each missing tool", () => {
+    render(
+      <PluginPreInstallDialog target={binariesTarget} onContinue={() => {}} onCancel={() => {}} />
+    )
+    expect(screen.getByTestId("pre-install-binaries-list")).toBeInTheDocument()
+    expect(screen.getByText("git")).toBeInTheDocument()
+    expect(screen.getByText("cargo-component")).toBeInTheDocument()
+  })
+
+  it("binaries retry button calls onContinue without args", () => {
+    const onContinue = jest.fn()
+    render(
+      <PluginPreInstallDialog target={binariesTarget} onContinue={onContinue} onCancel={() => {}} />
+    )
+    fireEvent.click(screen.getByTestId("pre-install-binaries-continue"))
+    expect(onContinue).toHaveBeenCalledWith()
+  })
+
+  it("binaries cancel button calls onCancel", () => {
+    const onCancel = jest.fn()
+    render(
+      <PluginPreInstallDialog target={binariesTarget} onContinue={() => {}} onCancel={onCancel} />
+    )
+    fireEvent.click(screen.getByTestId("pre-install-binaries-cancel"))
+    expect(onCancel).toHaveBeenCalled()
   })
 
   it("renders config step with parsed fields and submits values", () => {

@@ -5,7 +5,7 @@ description: A layered view of Cognia — frontend, IPC bridge, Rust backend, an
 
 # Architecture
 
-Cognia has four collaborating layers. Understanding which layer a piece of work belongs in is the single most important architectural decision when contributing.
+Cognia has four collaborating layers. Picking the right layer for a change is the single most important architectural decision when contributing.
 
 ```mermaid
 flowchart TB
@@ -17,12 +17,12 @@ flowchart TB
   end
 
   subgraph Storage["🗄️ Browser-only storage"]
-    Dexie["Dexie schema v15 (lib/db/)<br/>sessions · messages · characters · skills · teams<br/>twin* · plugins · a2ui* · canvas* · ..."]
+    Dexie["Dexie schema v54 (lib/db/)<br/>sessions · messages · characters · skills · teams<br/>twin* · plugins · a2ui* · canvas* · workflows · ocr · …"]
   end
 
   subgraph Rust["🦀 Rust layer · src-tauri/src/ — cognia-next crate"]
     direction TB
-    RustMods["claude · scheduler (Win/macOS/Linux) · vector (sqlite-vec)<br/>tts · hooks · agents · external_agent · a2ui_bridge<br/>canvas · skills · files · shell · settings · api_key · logging · tray · menu"]
+    RustMods["claude · scheduler · vector (sqlite-vec) · automation · ocr · workflow<br/>connectors · companion_api (axum) · mcp_server · perf · terminal · subscription<br/>tts · hooks · agents · external_agent · a2ui_bridge · plugin_api (wasmtime)<br/>canvas · skills · files · shell · settings · api_key · crash · logging · tray · menu"]
   end
 
   subgraph Sidecar["📦 Node sidecar · sidecar/ (Tauri resource, Node ≥ 20)"]
@@ -88,25 +88,29 @@ The wrappers re-export from `lib/tauri/index.ts`, which groups by plugin (clipbo
 
 ## Layer 3 — Rust backend (`src-tauri/src/`)
 
-The `cognia-next` crate is the production Rust backend. Top-level modules:
+The `cognia-next` crate hosts roughly thirty submodules. The biggest:
 
 | Module                                             | Purpose                                                                                                                                                        |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude`                                           | Spawns and supervises the Node sidecar (`SidecarState`); restarts on key change.                                                                               |
-| `scheduler`                                        | Cross-platform native scheduler — `windows.rs` (Task Scheduler), `macos.rs` (launchd), `linux.rs` (systemd), with a sqlite-backed metadata store for recovery. |
+| `claude`                                           | Spawns and supervises the Node sidecar; restarts on key change.                                                                                                |
+| `scheduler`                                        | Native scheduler — Task Scheduler (Win), launchd (macOS), systemd (Linux), sqlite metadata store.                                                              |
 | `vector`                                           | sqlite-vec backend; loads the FFI extension before any connection opens.                                                                                       |
-| `tts`                                              | Provider key vault (keyring), Edge-TTS WebSocket bridge, generic HTTP proxy.                                                                                   |
-| `hooks`                                            | Lifecycle hooks (chat send, response, error).                                                                                                                  |
-| `agents` / `external_agent`                        | Agent team coordination, external CLI agents.                                                                                                                  |
-| `a2ui_bridge`                                      | Bridge between the webview and the A2UI MCP sidecar.                                                                                                           |
-| `canvas`                                           | File-backed canvas document storage.                                                                                                                           |
-| `skills`                                           | Skill resource resolution + sandbox setup.                                                                                                                     |
-| `files`, `shell`, `settings`, `api_key`, `logging` | Filesystem ops, shell exec, settings persistence, key store, fern → native log dispatch.                                                                       |
-| `tray`, `menu`, `window_behavior`                  | Desktop chrome (system tray, menu bar, window state).                                                                                                          |
+| `automation`                                       | Computer Use (Win UIA, macOS AX, Linux AT-SPI) with the 3-tier permission model.                                                                               |
+| `ocr`                                              | OCR dispatch table (Tesseract / Windows.Media.Ocr / Apple Vision / ocrs / Paddle).                                                                             |
+| `workflow`                                         | Visual workflow runtime (cron daemon + execution shards).                                                                                                      |
+| `connectors`                                       | Platform connector adapters (Lark long-conn, WeCom WS, …).                                                                                                    |
+| `companion_api`                                    | axum HTTP/WS server for mobile + remote clients (`/api/v1/*`).                                                                                                 |
+| `mcp_server`                                       | MCP HTTP server for external clients (External Bridge).                                                                                                        |
+| `plugin_api`                                       | WASM plugin runtime (wasmtime 26 + WIT bindings).                                                                                                              |
+| `signaling`, `webrtc`                              | WAN transport peer for the mobile shell.                                                                                                                       |
+| `terminal`                                         | PTY-backed integrated terminal (portable-pty / ConPTY).                                                                                                        |
+| `subscription`                                     | Claude Code OAuth + unified subscription module.                                                                                                               |
+| `perf`                                             | Streamed perf samples for the Rust performance dashboard (ADR-0035).                                                                                           |
+| `tts`, `hooks`, `agents`, `external_agent`, `a2ui_bridge`, `canvas`, `skills`, `files`, `shell`, `settings`, `api_key`, `crash`, `logging`, `tray`, `menu` | Smaller leaf modules.                                                                                                                                          |
 
-Plus Tauri plugins registered in `lib.rs`: `single-instance`, `deep-link`, `autostart`, `global-shortcut`, `cli`, `store`, `updater`, `dialog`, `fs`, `notification`, `clipboard-manager`, `opener`, `os`, `process`, `log`, `window-state`.
+Plus the Tauri plugins registered in `lib.rs`: `single-instance`, `deep-link`, `autostart`, `global-shortcut`, `cli`, `store`, `updater`, `dialog`, `fs`, `notification`, `clipboard-manager`, `opener`, `os`, `process`, `shell`, `positioner`, `upload`, `persisted-scope`, `log`, `window-state`.
 
-Native-only modules are gated by `cfg(desktop)` and `cfg(not(any(target_os = "android", target_os = "ios")))` — Cognia targets desktop only.
+Native-only modules are gated by `cfg(desktop)` and `cfg(not(any(target_os = "android", target_os = "ios")))`.
 
 ## Layer 4 — Node sidecar (`sidecar/`)
 
@@ -152,20 +156,8 @@ This means a single `logger.error(...)` call from React reaches the OS-native lo
 ## Next
 
 <Cards>
-  <Card
-    title="Runtime & Tauri"
-    href="./runtime-and-tauri"
-    description="How the IPC bridge actually works in practice."
-  />
-  <Card
-    title="Sidecar & Claude Agent SDK"
-    href="./sidecar-and-claude-sdk"
-    description="The JSON-lines protocol over stdio."
-  />
-  <Card title="Storage" href="./storage" description="Dexie schema v15 in detail." />
-  <Card
-    title="Plugin system"
-    href="./plugin-system"
-    description="The sandbox + permissions model."
-  />
+  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="How the IPC bridge actually works." />
+  <Card title="Sidecar & Claude Agent SDK" href="./sidecar-and-claude-sdk" description="The JSON-lines stdio protocol." />
+  <Card title="Storage" href="../data/storage" description="Dexie schema in detail." />
+  <Card title="Plugin system" href="../subsystems/plugin-system" description="Sandbox + permissions model." />
 </Cards>

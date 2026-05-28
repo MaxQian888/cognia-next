@@ -29,6 +29,32 @@ wasmparser = "0.221"
 ureq = { version = "2", default-features = false, features = ["json"] }
 directories = "5"
 parking_lot = "0.12"
+# ── UX/TUI stack (Phase 1 — see plans/cli-tui-majestic-quokka.md) ─────────
+# `eyre` + `color-eyre` provide the top-level error report with severity
+# colors, cause chains, and suggestion sections. anyhow stays internal —
+# we convert at the main() boundary.
+eyre = "0.6"
+color-eyre = { version = "0.6", default-features = false, features = ["track-caller"] }
+# Spinner / progress bar / MultiProgress (for `plugin build` & `plugin dev`).
+indicatif = "0.17"
+# Confirm / Input / Select / MultiSelect prompts.
+dialoguer = { version = "0.11", default-features = false, features = ["completion", "fuzzy-select"] }
+# Unicode-aware table layout for `plugin info`.
+comfy-table = "7"
+# Color macros that honor NO_COLOR / FORCE_COLOR / set_override.
+owo-colors = { version = "4", features = ["supports-colors"] }
+# TTY detection — std::io::IsTerminal would also work, but is-terminal
+# is already a transitive dep via dialoguer/indicatif and gives uniform
+# behavior on Windows console.
+is-terminal = "0.4"
+# Cross-platform Ctrl+C handler for `plugin dev` double-press exit.
+# Used as a one-shot installer (`set_handler`) and communicates with the
+# event loop via `AtomicU8` so the handler stays signal-safe.
+ctrlc = "3"
+# Used by `plugin dev` to stamp build outcomes with a wall-clock time on
+# the sticky status panel. `default-features = false` keeps timezone
+# parsing & serde out of the binary — we only need `Local::now()`.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [dev-dependencies]
 tempfile = "3"

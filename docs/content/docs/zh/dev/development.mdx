@@ -4,22 +4,6 @@ description: 日常脚本、代码约定、测试规范、commit 卫生，以及
 ---
 
 # 开发工作流
-
-<Status variant="stable" />
-
-<TLDR>
-  从仓库根用 **pnpm**。<Kbd>pnpm dev</Kbd> 跑 Web，<Kbd>pnpm tauri dev</Kbd>
-  跑桌面。测试与源同目录，≥90% 覆盖率阈值。Pre-commit 钩子（Husky + lint-staged +
-  commitlint）保证代码树整洁。
-</TLDR>
-
-<StatGrid>
-  <Stat label="覆盖率阈值" value="90%" hint="行 · 分支 · 函数" />
-  <Stat label="shadcn/ui 组件" value="57" hint="均已预装" />
-  <Stat label="路径别名" value="6" hint="@/components、@/lib、@/ui、……" />
-  <Stat label="语言" value="2" hint="en + zh-CN" />
-</StatGrid>
-
 本页覆盖在 Cognia 代码库中高效工作所需的一切：日常脚本、约定、钩子、测试。
 
 ## 日常脚本
@@ -113,7 +97,7 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
       <Folder name="workflow" />
       <Folder name="external-bridge" />
       <Folder name="anthropic-subscription" />
-      <Folder name="db">— Dexie schema v26</Folder>
+      <Folder name="db">— Dexie schema v54</Folder>
       <Folder name="ai" />
       <Folder name="appearance" />
       <Folder name="i18n" />
@@ -448,8 +432,8 @@ pnpm typecheck
 ## 下一篇
 
 <Cards>
-  <Card title="可观测性" href="./observability" description="日志、追踪、Sentry 接线" />
-  <Card title="shadcn/ui 接入" href="./shadcn-ui-setup" description="57 个组件的工程约定" />
+  <Card title="可观测性" href="../subsystems/observability" description="日志、追踪、Sentry 接线" />
+  <Card title="shadcn/ui 接入" href="../ui/shadcn-ui-setup" description="57 个组件的工程约定" />
   <Card title="部署" href="./deployment" description="Web、桌面、文档站点的构建" />
-  <Card title="架构" href="./architecture" description="所有约定背后的分层设计" />
+  <Card title="架构" href="../core/architecture" description="所有约定背后的分层设计" />
 </Cards>

@@ -55,6 +55,11 @@ import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
+import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
+import {
+  clearToolSpansForSession,
+  handleSdkEventForToolSpans,
+} from "@/lib/agent-trace/chat-tool-spans"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import {
@@ -545,6 +550,25 @@ export function useClaudeChat() {
           const preview = contentPreview(effectiveContent, 40)
           if (preview) await updateSession(sessionId, { title: preview })
         }
+        // Open an agent-trace span for this chat turn. The traceId / spanId
+        // are echoed through SendOptions so the sidecar (and later, tool +
+        // sub-agent spans) can attach as children. `endSpan` runs in the
+        // result / error branches of `handleEvent` keyed off the cached
+        // sendOptions, so the span is finalized regardless of which path
+        // closes the turn.
+        if (!sendOptions.spanId) {
+          const handle = startSpan({
+            operationName: "invoke_agent",
+            providerName: "anthropic",
+            sessionId,
+            surface: "chat",
+            requestModel: sendOptions.model,
+            agentId: session?.characterId,
+            metadata: sendOptions.provider ? { provider: sendOptions.provider } : undefined,
+            inputPreview: effectiveText || undefined,
+          })
+          sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
+        }
         await sendPrompt(sessionId, effectiveContent, sendOptions)
         // Cache the post-routing send so a transient `session_ended.error`
         // can re-issue the turn against the next entry in the alias's
@@ -561,6 +585,14 @@ export function useClaudeChat() {
         store.getState().setError(error.message)
         // Notify plugins; fire-and-forget — host already surfaced the error.
         dispatchPluginChatError(sessionId, error)
+        // Local pre-sidecar failure — close the agent-trace span we just
+        // opened so it doesn't dangle (no result event will ever land).
+        if (sendOptions.spanId) {
+          endSpan(sendOptions.spanId, {
+            errorType: "send_failed",
+            errorMessage: error.message,
+          })
+        }
       }
     },
     [store]
@@ -845,6 +877,10 @@ async function handleEvent(
       // The turn is over — cancel any backstop deny still pending for a
       // remote-routed approval on this session (Remote Session Control).
       clearApprovalBackstops(evt.sessionId)
+      // Drop any open tool spans for this session — every tool_use should
+      // have already paired with its tool_result, but cleanup keeps the
+      // module-scope map from leaking entries when the SDK aborts mid-turn.
+      clearToolSpansForSession(evt.sessionId)
       const isActive = evt.sessionId === activeRef.current
       if (isActive) {
         if (evt.error) {
@@ -856,6 +892,17 @@ async function handleEvent(
           const retried = await attemptRoutingFallback(evt.sessionId, evt.error)
           if (!retried) {
             useChatStore.getState().setError(evt.error)
+            // End the agent-trace span on permanent failure (no retry). The
+            // success path closes the span via the `sdkResult` branch in
+            // case "event" instead.
+            const cached = useChatStore.getState().lastSendBySession[evt.sessionId]
+            const spanId = cached?.options.spanId
+            if (spanId) {
+              endSpan(spanId, {
+                errorType: "turn_error",
+                errorMessage: evt.error,
+              })
+            }
             useChatStore.getState().clearLastSend(evt.sessionId)
           }
         } else {
@@ -942,6 +989,20 @@ async function handleEvent(
         turnComplete,
         result: sdkResult,
       } = applySdkEvent(current, env.event)
+
+      // Emit `execute_tool` child spans for every `tool_use` / `tool_result`
+      // pair in this SDK event. The parent invoke_agent span was opened by
+      // `send()` and its ids live on the cached SendOptions — we read them
+      // here so child spans nest correctly under the same trace.
+      const turnSpanForTools = useChatStore.getState().lastSendBySession[sessionId]?.options
+      if (turnSpanForTools?.spanId && turnSpanForTools.traceId) {
+        handleSdkEventForToolSpans({
+          sessionId,
+          traceId: turnSpanForTools.traceId,
+          parentSpanId: turnSpanForTools.spanId,
+          event: env.event as unknown as Parameters<typeof handleSdkEventForToolSpans>[0]["event"],
+        })
+      }
 
       // If `regenerate` queued a branch tag for this session, stamp it onto
       // the freshly-appended assistant message. The tag is one-shot — once
@@ -1033,6 +1094,36 @@ async function handleEvent(
             result: sdkResult,
           }).catch((err) => {
             console.warn("recordResultUsage failed", err)
+          })
+        }
+        // Finalise the agent-trace span we opened in `send`. The spanId is
+        // cached on `lastSendBySession.options` (set right after
+        // `sendPrompt` in `send`). `endSpan` is idempotent — fallback retries
+        // that reuse the same spanId are safe.
+        const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
+        const turnSpanId = lastSendForSpan?.options.spanId
+        if (turnSpanId) {
+          const usage = extractUsage(sdkResult)
+          const sdkResultObj = sdkResult as unknown as {
+            total_cost_usd?: number
+            stop_reason?: string
+          }
+          endSpan(turnSpanId, {
+            usage: usage
+              ? {
+                  inputTokens: usage.inputTokens ?? 0,
+                  outputTokens: usage.outputTokens ?? 0,
+                  cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,
+                  cacheReadTokens: usage.cacheReadInputTokens ?? 0,
+                }
+              : undefined,
+            costUsdEstimate:
+              typeof sdkResultObj.total_cost_usd === "number"
+                ? sdkResultObj.total_cost_usd
+                : undefined,
+            finishReasons:
+              typeof sdkResultObj.stop_reason === "string" ? [sdkResultObj.stop_reason] : undefined,
+            responseModel: lastSendForSpan?.options.model,
           })
         }
       }

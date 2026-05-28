@@ -5,14 +5,9 @@ description: 三层来源（built-in / custom / plugin）的统一斜杠命令�
 
 # 斜杠命令
 
-斜杠命令（slash commands）是聊天里 `/<name> [args]` 形式的"快捷指令"。Cognia 把三种来源 —— 内置 Action、本地 `.md` 模板、插件贡献 —— 统一在一张注册表里，由 composer 在用户敲 `/` 时弹出 picker，并按"Action vs Template"两种路径分派。
+斜杠命令（slash commands）是聊天里 `/<name> [args]` 形式的快捷指令。Cognia 把三种来源 —— 内置 Action、本地 `.md` 模板、插件贡献 —— 统一在一张注册表里，由 composer 在用户敲 `/` 时弹出 picker，并按 "Action vs Template" 两种路径分派。
 
-<TLDR>
-  单一注册表（`lib/slash-commands/registry.ts`）+ 内置命令（`builtin.ts`）+ 自定义
-  markdown（`custom.ts`，扫 `.claude/commands/*.md`）+ 插件贡献。Composer 弹 picker → Action
-  立刻执行（`SlashContext`），Template 插入文本框并支持 `$1..$9` / `$ARGUMENTS` 占位符替换。Rust 端
-  `slash_commands_scan` 走 frontmatter 解析与递归目录扫描。
-</TLDR>
+单一注册表（`lib/slash-commands/registry.ts`）+ 内置命令（`builtin.ts`）+ 自定义 markdown（`custom.ts`，扫 `.claude/commands/*.md`）+ 插件贡献。Composer 弹 picker → Action 立刻执行（`SlashContext`），Template 插入文本框并支持 `$1..$9` / `$ARGUMENTS` 占位符替换。Rust 端 `slash_commands_scan` 走 frontmatter 解析与递归目录扫描。
 
 ## 适用场景
 

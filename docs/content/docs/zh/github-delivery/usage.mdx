@@ -5,13 +5,6 @@ description: GitHub API 速率限制策略、Octokit throttling/retry 插件配�
 
 # 用量与配额
 
-<TLDR>
-  GitHub App 给的是 **5K 调用/小时 per installation**,PAT 是 **5K/小时 per token**。 cognia 给所有
-  Octokit 实例统一挂 `@octokit/plugin-throttling` 和 `@octokit/plugin-retry`,
-  触发主速率限制时最多重试 3 次,触发次级速率限制时只观察不阻塞。Usage Tab 在 M4 阶段
-  仅占位,实时配额历史(`GET /rate_limit` 周期采样)是 ADR-0018 的开放问题。
-</TLDR>
-
 ## GitHub 速率限制基线
 
 | 凭据                 | 限额                                    | 备注                                                          |

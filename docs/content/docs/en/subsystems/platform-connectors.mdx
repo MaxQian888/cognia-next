@@ -8,16 +8,11 @@ description: Turn AI characters into real bots on Telegram, Discord, Slack, Lark
 <Status variant="stable" />
 
 <TLDR>
-  Five built-in adapters (Telegram / Discord / Slack / Lark / OneBot v11) + a singleton ConnectorBus
-  for fan-in / fan-out + Dexie-backed outbound FIFO (circuit breaker, token bucket, exponential
-  backoff, dead letter, idempotent LRU). Three modes: auto (AI auto-reply) / manual (human typed) /
-  draft (AI drafts, human reviews). Eight Dexie tables added in v18 schema; Inbox UI lives in
-  `app/inbox/`; plugins can contribute additional adapters.
+Seven built-in adapters (Telegram / Discord / Slack / Lark / OneBot v11 / WeCom 企业微信 / personal WeChat) + a singleton ConnectorBus for fan-in / fan-out + Dexie-backed outbound FIFO (circuit breaker, token bucket, exponential backoff, dead letter, idempotent LRU). Three modes: auto (AI auto-reply) / manual (human typed) / draft (AI drafts, human reviews). Inbox UI in `app/inbox/`; plugins can contribute additional adapters.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Built-in Adapters" value="5" hint="telegram · discord · slack · lark · onebot" />
-  <Stat label="Dexie Tables" value="8" hint="v18 schema" />
+  <Stat label="Built-in Adapters" value="7" hint="telegram · discord · slack · lark · onebot · wecom · wechat-personal" />
   <Stat label="Runtime Modes" value="3" hint="auto · manual · draft" />
   <Stat label="Audit Cap" value="5000" hint="connectorAudit capped ring" />
 </StatGrid>
@@ -373,7 +368,7 @@ See [Scheduler](./scheduler).
   />
   <Card
     title="Mobile Architecture"
-    href="./mobile-architecture"
+    href="../ui/mobile-architecture"
     description="Phones are also connector receivers"
   />
   <Card

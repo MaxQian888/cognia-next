@@ -113,11 +113,14 @@ export async function deleteResourcesForSkill(skillId: string): Promise<void> {
  */
 export async function replaceResourcesForSkill(
   skillId: string,
-  drafts: SkillResourceDraft[]
+  drafts: Array<Omit<SkillResourceDraft, "skillId"> | SkillResourceDraft>
 ): Promise<SkillResource[]> {
   await deleteResourcesForSkill(skillId)
   const created: SkillResource[] = []
   for (const draft of drafts) {
+    // Skill id always comes from the caller; if a fully-shaped draft was
+    // passed in, the `skillId` on the draft is overridden so a resource
+    // can't accidentally end up under a different skill.
     created.push(await createResource({ ...draft, skillId }))
   }
   return created

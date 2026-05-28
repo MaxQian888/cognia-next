@@ -234,7 +234,7 @@ describe("createLarkAdapter", () => {
       appSecret: async () => "secret-menu",
       verificationToken: async () => "token-menu",
       selfBotOpenId: "ou_bot_menu",
-      quickCommands: [{ eventKey: "agenda", action: { type: "slash", value: "/agenda today" } }],
+      quickCommands: [{ triggerKey: "agenda", action: { type: "slash", value: "/agenda today" } }],
       transport: "long-connection",
     })
 

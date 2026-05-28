@@ -17,6 +17,7 @@ import {
   seedBuiltInSkills,
   setSkillStatus,
   updateSkill,
+  upsertSkillByCanonicalId,
 } from "./skills"
 import { createResource, listResourcesForSkill } from "./skill-resources"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -270,6 +271,162 @@ describe("bulkImportSkills", () => {
     ])
     expect(result.errored.length).toBe(2)
     expect(result.errored[0].error).toMatch(/missing a name/)
+  })
+
+  it("dispatches drafts with a canonicalId to the idempotent upsert path", async () => {
+    const r1 = await bulkImportSkills([
+      { name: "Reviewer", content: "v1", canonicalId: "bundle:demo" },
+    ])
+    expect(r1.created).toBe(1)
+    const created = (await listSkills()).find((s) => s.canonicalId === "bundle:demo")!
+    expect(created).toBeDefined()
+    const r2 = await bulkImportSkills([
+      { name: "Reviewer 2", content: "v2", canonicalId: "bundle:demo" },
+    ])
+    expect(r2.created).toBe(0)
+    expect(r2.updated).toBe(1)
+    const refreshed = await getSkill(created.id)
+    expect(refreshed?.content).toBe("v2")
+    expect(refreshed?.name).toBe("Reviewer 2")
+  })
+
+  it("persists resources alongside the row when the draft carries them", async () => {
+    const result = await bulkImportSkills([
+      {
+        name: "WithResources",
+        content: "body",
+        canonicalId: "bundle:resources",
+        resources: [
+          { kind: "script", name: "check.sh", path: "scripts/check.sh", content: "#!/bin/bash\n" },
+          {
+            kind: "reference",
+            name: "notes.md",
+            path: "references/notes.md",
+            content: "# notes\n",
+          },
+        ],
+      },
+    ])
+    expect(result.created).toBe(1)
+    const created = (await listSkills()).find((s) => s.canonicalId === "bundle:resources")!
+    const resources = await listResourcesForSkill(created.id)
+    expect(resources).toHaveLength(2)
+    expect(resources.map((r) => r.path).sort()).toEqual(["references/notes.md", "scripts/check.sh"])
+  })
+
+  it("rewrites the resource table on overwrite via canonicalId upsert", async () => {
+    await bulkImportSkills([
+      {
+        name: "R",
+        content: "v1",
+        canonicalId: "bundle:rewrite",
+        resources: [{ kind: "script", name: "a.sh", path: "scripts/a.sh", content: "old" }],
+      },
+    ])
+    await bulkImportSkills([
+      {
+        name: "R",
+        content: "v2",
+        canonicalId: "bundle:rewrite",
+        resources: [{ kind: "reference", name: "b.md", path: "references/b.md", content: "new" }],
+      },
+    ])
+    const skill = (await listSkills()).find((s) => s.canonicalId === "bundle:rewrite")!
+    const resources = await listResourcesForSkill(skill.id)
+    expect(resources).toHaveLength(1)
+    expect(resources[0].path).toBe("references/b.md")
+  })
+
+  it("also rewrites resources on the name-collision overwrite branch", async () => {
+    const existing = await createSkill({ name: "Same", content: "old" })
+    await createResource({
+      skillId: existing.id,
+      kind: "script",
+      name: "old.sh",
+      path: "scripts/old.sh",
+      content: "old",
+    })
+    await bulkImportSkills(
+      [
+        {
+          name: "Same",
+          content: "new",
+          resources: [
+            { kind: "reference", name: "new.md", path: "references/new.md", content: "new" },
+          ],
+        },
+      ],
+      "overwrite"
+    )
+    const resources = await listResourcesForSkill(existing.id)
+    expect(resources.map((r) => r.path)).toEqual(["references/new.md"])
+  })
+})
+
+describe("upsertSkillByCanonicalId", () => {
+  it("creates a row when no canonicalId matches", async () => {
+    const { skill, created } = await upsertSkillByCanonicalId({
+      draft: { name: "Fresh", content: "body" },
+      canonicalId: "bundle:fresh",
+    })
+    expect(created).toBe(true)
+    expect(skill.canonicalId).toBe("bundle:fresh")
+  })
+
+  it("updates in place when the canonicalId matches; id stays stable", async () => {
+    const first = await upsertSkillByCanonicalId({
+      draft: { name: "Stable", content: "v1" },
+      canonicalId: "bundle:stable",
+    })
+    const second = await upsertSkillByCanonicalId({
+      draft: { name: "Stable", content: "v2" },
+      canonicalId: "bundle:stable",
+    })
+    expect(second.created).toBe(false)
+    expect(second.skill.id).toBe(first.skill.id)
+    expect(second.skill.content).toBe("v2")
+  })
+
+  it("preserves the previous canonicalId-bearing row when fields are partially supplied", async () => {
+    await upsertSkillByCanonicalId({
+      draft: {
+        name: "Keep",
+        content: "body",
+        author: "alice",
+        license: "MIT",
+        category: "development",
+      },
+      canonicalId: "bundle:keep",
+    })
+    const after = await upsertSkillByCanonicalId({
+      draft: { name: "Keep", content: "body2" },
+      canonicalId: "bundle:keep",
+    })
+    expect(after.skill.author).toBe("alice")
+    expect(after.skill.license).toBe("MIT")
+    expect(after.skill.category).toBe("development")
+  })
+
+  it("replaces the resource set when supplied (old resources gone)", async () => {
+    const created = await upsertSkillByCanonicalId({
+      draft: {
+        name: "R",
+        content: "body",
+        resources: [{ kind: "script", name: "a.sh", path: "scripts/a.sh", content: "old" }],
+      },
+      canonicalId: "bundle:res-replace",
+    })
+    await upsertSkillByCanonicalId({
+      draft: {
+        name: "R",
+        content: "body",
+        resources: [{ kind: "reference", name: "b.md", path: "references/b.md", content: "new" }],
+      },
+      canonicalId: "bundle:res-replace",
+    })
+    const resources = await listResourcesForSkill(created.skill.id)
+    expect(resources).toHaveLength(1)
+    expect(resources[0].path).toBe("references/b.md")
   })
 })
 

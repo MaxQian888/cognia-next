@@ -135,6 +135,94 @@ describe("Plugin Validation", () => {
       )
     })
 
+    describe("requires.binaries", () => {
+      it("accepts a valid requires.binaries block", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = {
+          binaries: [
+            { name: "cognia", minVersion: "0.1.0", documentation: "https://x" },
+            { name: "git" },
+          ],
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it("accepts a manifest with no requires block (additive)", () => {
+        const manifest = createValidManifest()
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+      })
+
+      it("rejects requires that is not an object", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = ["git"]
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([expect.objectContaining({ code: "manifest.requires.invalid" })])
+        )
+      })
+
+      it("rejects requires.binaries that is not an array", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = { binaries: {} }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.requires.binaries.invalid" }),
+          ])
+        )
+      })
+
+      it("rejects a binary entry missing name", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = {
+          binaries: [{ minVersion: "1.0.0" }],
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.requires.binaries.name.missing" }),
+          ])
+        )
+      })
+
+      it("rejects a non-semver minVersion", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = {
+          binaries: [{ name: "git", minVersion: "latest" }],
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: "manifest.requires.binaries.minVersion.invalid",
+            }),
+          ])
+        )
+      })
+
+      it("rejects a non-string documentation field", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = {
+          binaries: [{ name: "git", documentation: 42 }],
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: "manifest.requires.binaries.documentation.invalid",
+            }),
+          ])
+        )
+      })
+    })
+
     it("should reject invalid plugin type", () => {
       const manifest = createValidManifest()
       ;(manifest as unknown as Record<string, unknown>).type = "invalid"

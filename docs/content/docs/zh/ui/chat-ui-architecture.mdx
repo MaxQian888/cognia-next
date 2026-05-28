@@ -9,19 +9,6 @@ description: ChatPane 主面板、Composer 输入器、消息渲染流水线、a
 
 本页讲清楚组件分层、消息渲染流水线、Composer 行为，以及桌面壳与移动壳如何复用同一个 `ChatPane`。
 
-## TL;DR
-
-<TLDR>
-
-- 视图入口 = `ChatPane`（`components/chat/chat-view.tsx`），平台无关；外面套桌面 `DesktopChatWorkspace` 或移动 `AppShellMobile`。
-- 渲染核心 = `MessageList` + `MessageRenderer`，按 `UIMessage.parts[]` 派发不同 part 渲染器。
-- AI 元件 = `components/ai-elements/`，vendored 自 ai-elements 库（不写测试，不算覆盖率）；包括 Message、Reasoning、Task、Tool、Artifact、Conversation、ErrorTrace 等复合组件。
-- 输入器 = `Composer`，水平布局：附件按钮 → Textarea → Submit；流式期间替换为停止按钮。
-- 触发器 = slash/@/!/#：`composer-trigger.ts` 检测 → 弹 popover → 走对应 registry（slash 命令、角色、技能、引用）。
-- 命令面板 = `CommandPalette`（`Ctrl+K`），跨 section 跳转，挂在桌面壳层。
-
-</TLDR>
-
 ## 三个壳，一个 Pane
 
 ```mermaid
@@ -357,15 +344,15 @@ import {
 <Cards>
   <Card
     title="聊天 & 技能"
-    href="./chat-and-skills"
+    href="../chat/chat-and-skills"
     description="会话/角色/技能的领域模型与生命周期"
   />
   <Card title="主题 & i18n" href="./theming-and-i18n" description="oklch token + next-intl 翻译" />
   <Card title="shadcn/ui 配置" href="./shadcn-ui-setup" description="本页用到的所有 UI 原子" />
-  <Card title="画板（Canvas）" href="./canvas" description="Artifact 'open' 态跳转的目标" />
+  <Card title="画板（Canvas）" href="../subsystems/canvas" description="Artifact 'open' 态跳转的目标" />
   <Card
     title="Artifacts 沙箱"
-    href="./artifacts-sandbox"
+    href="../subsystems/artifacts-sandbox"
     description="嵌入式 iframe 沙箱的 CSP 与运行时"
   />
 </Cards>

@@ -4,32 +4,10 @@ description: 桌面端原生 sqlite-vec，加 5 种云端后端 —— Cognia �
 ---
 
 # 向量库
-
-<Status variant="stable">Stable</Status>
-
-<TLDR>
-  Cognia 在一层薄抽象 `IVectorStore`（`lib/vector/store.ts`）后面，分发到 6 种后端 —— 桌面默认
-  sqlite-vec（原生 Rust + auto-extension），云端 Pinecone / Qdrant / Weaviate / Chroma / Milvus。
-  接口除了 CRUD 之外还覆盖 scroll（大规模迭代）、import/export（后端迁移）、stats（健康检查）。 孪生
-  collection 形如 `cognia_twin_{twinId}`，每条 chunk 都打上 `vectorBackend` + `vectorCollection`
-  标签，便于将来 re-host 时不必重 embed。
-</TLDR>
-
 Cognia 的 [员工数字孪生](../subsystems/employee-twin) 需要向量索引来支持 RAG。整个向量库藏在 `IVectorStore`
 （`lib/vector/store.ts`）后面，应用其余部分不必关心活动后端是哪一个。
 
 完整设计原由参见 [ADR-0004](../adr/0004-vector-native-backend)。
-
-<StatGrid>
-  <Stat label="支持后端" value="6" hint="chroma · pinecone · qdrant · milvus · native · weaviate" />
-  <Stat
-    label="支持 embedding 供应商"
-    value="5"
-    hint="openai · google · cohere · mistral · transformersjs"
-  />
-  <Stat label="接口方法" value="14+" hint="CRUD · scroll · export · import · stats" />
-</StatGrid>
-
 ## 后端
 
 | 后端                     | 适用       | 备注                                                    |
@@ -401,10 +379,10 @@ Runtime 查询时拿到一批 `vectorDocId`，调 `getTwinChunksByVectorDocIds` 
 ## 相关
 
 <Cards>
-  <Card title="员工数字孪生" href="./employee-twin" description="向量库的最大消费者" />
+  <Card title="员工数字孪生" href="../subsystems/employee-twin" description="向量库的最大消费者" />
   <Card
     title="Provider 系统"
-    href="./provider-system"
+    href="../chat/provider-system"
     description="embedding provider 选择 + alias"
   />
   <Card title="搜索系统" href="./search-system" description="非向量的关键字 / FTS 搜索路径" />

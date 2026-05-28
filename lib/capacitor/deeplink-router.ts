@@ -26,6 +26,8 @@ export interface DeeplinkNavigators {
   openShareTarget(opts: { text?: string; url?: string }): void
   /** Hand a pair QR payload to the `/pair` page for redemption. */
   redeemPair(payload: string): void
+  /** Navigate to a workflow run detail (`/workflows/<wfId>/runs/<runId>`). */
+  openWorkflowRun(opts: { workflowId: string; runId: string }): void
 }
 
 export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigators): void {
@@ -38,6 +40,13 @@ export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigato
       return
     case "pair_qr":
       navigators.redeemPair(route.payload)
+      return
+    case "open_workflow_run":
+      if (route.workflowId && route.runId) {
+        navigators.openWorkflowRun({ workflowId: route.workflowId, runId: route.runId })
+      } else {
+        log.warn("deeplink-router: workflow-run missing ids", { raw: route.raw })
+      }
       return
     case "oauth_callback":
       // Resolved by lib/oauth/mobile-flow.ts:awaitCallback — no nav.
@@ -72,6 +81,9 @@ export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigator
     },
     redeemPair: (payload) => {
       router.push(`/pair?payload=${encodeURIComponent(payload)}`)
+    },
+    openWorkflowRun: ({ workflowId, runId }) => {
+      router.push(`/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}`)
     },
   }
 }

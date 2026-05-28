@@ -6,17 +6,6 @@ description: 统一日志栈、OpenTelemetry 薄壳、原生平台日志桥（Wi
 # 可观测性
 
 Cognia 把"日志能去哪里、查得到哪条"这件事抽成一条统一管线：浏览器侧 `lib/logging/` 是单一入口，几路 transport（console / IndexedDB / remote / native / OTel / Langfuse）按运行时按需挂载；Rust 侧 `src-tauri/src/logging/` 接管 fern 分发 + tauri-plugin-log，把记录再镜像到 OS 平台日志器。这页讲清楚谁负责哪一层、日志怎么从一次 `logger.info(...)` 走到 Windows 事件查看器。
-
-<TLDR>
-  浏览器侧：`createLogger("module")` 拿到 `Logger`；调 `logger.info / warn / error / fatal` 时进入
-  `core.ts` 的统一管线，做模块注册、采样、PII 脱敏、源位置抓取，然后扇出到注册过的
-  transport。Transport 包括
-  console、IndexedDB（在浏览器持久化）、remote（带重试队列）、native（Tauri
-  事件桥）、OTel（OpenTelemetry）、Langfuse。Rust 侧用 `fern` + `tauri-plugin-log`
-  把同一份记录分发到 stdout / 文件 / webview（回到前端）/ 平台日志器。设置 UI 实时切换 transport
-  与采样率；日志面板 `components/logging/log-panel.tsx` 聚合多源记录、支持过滤分组导出。
-</TLDR>
-
 ## 总览
 
 ```mermaid
@@ -291,10 +280,10 @@ export function bootstrapLogger(settings: AppSettings) {
 ## 关联文档
 
 <Cards>
-  <Card title="开发" href="./development" description="本地调试 + 在浏览器/Tauri 控制台读日志" />
+  <Card title="开发" href="../dev/development" description="本地调试 + 在浏览器/Tauri 控制台读日志" />
   <Card title="插件系统" href="./plugin-system" description="插件日志走哪个 origin" />
-  <Card title="存储" href="./storage" description="IndexedDB 里日志表的位置" />
-  <Card title="运行时 & Tauri" href="./runtime-and-tauri" description="log://log 事件 + 命令接口" />
+  <Card title="存储" href="../data/storage" description="IndexedDB 里日志表的位置" />
+  <Card title="运行时 & Tauri" href="../core/runtime-and-tauri" description="log://log 事件 + 命令接口" />
 </Cards>
 
 ## 在哪里入手

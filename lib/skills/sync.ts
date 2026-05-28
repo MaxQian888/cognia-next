@@ -8,11 +8,14 @@
 // only ones whose `nativeDirectory` we recorded.
 
 import {
+  skillsInstallMirrored,
   skillsInstallNative,
   skillsScanNative,
+  type InstallSkillMirroredRequest,
   type InstallSkillRequest,
   type NativeSkill,
   type NativeSkillResource,
+  type SkillsTarget,
 } from "@/lib/claude/ipc"
 import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import {
@@ -22,6 +25,7 @@ import {
 } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown, serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { isTauri } from "@/lib/tauri"
+import { resolveSkillBundleMirrors, useSettingsStore } from "@/stores/settings/settings-store"
 import type { Skill, SkillResource } from "@/lib/claude/types"
 
 export interface SyncResult {
@@ -47,8 +51,12 @@ function slug(name: string): string {
  * Hash skill + resources. Used for `syncFingerprint`. Web-mode runs use
  * `crypto.subtle`; if unavailable we fall back to a stringified hash so
  * the function is callable in tests too.
+ *
+ * Exported so the bundle loader and the upsert helper compute the same
+ * value off the same canonical representation — re-imports that produce
+ * a matching fingerprint can short-circuit before any disk write.
  */
-async function fingerprint(skill: Skill, resources: SkillResource[]): Promise<string> {
+export async function fingerprint(skill: Skill, resources: SkillResource[]): Promise<string> {
   const md = serializeSkill(skill)
   const stable = JSON.stringify({
     md,
@@ -107,11 +115,33 @@ function fromNativeResources(
 }
 
 /**
- * Push a single skill to ~/.claude/skills/. Mirrors `pushAllToNative`'s loop
- * body, returning the same SyncResult envelope so callers (per-card UI
- * buttons + the batch caller) can compose results identically.
+ * Resolve the active set of mirror targets for the push pipeline. Cognia
+ * is always on; Claude / Codex respect the per-user toggle in
+ * `AppSettings.skillBundleMirrors` (defaults `{ claude: true, codex: true }`).
+ * Exposed as a tiny helper so the test suite can stub the settings read.
+ */
+export function activeMirrorTargets(): SkillsTarget[] {
+  const settings = useSettingsStore.getState().settings
+  const flags = resolveSkillBundleMirrors(settings)
+  const targets: SkillsTarget[] = ["cognia"]
+  if (flags.claude) targets.push("claude")
+  if (flags.codex) targets.push("codex")
+  return targets
+}
+
+/**
+ * Push a single skill to its enabled mirrors. Cognia is always written;
+ * Claude / Codex respect `AppSettings.skillBundleMirrors`. Mirrors the
+ * legacy single-target shape so callers (per-card UI button + the batch
+ * caller) compose results identically.
  *
  * Built-ins are skipped (returns skipped=1). Web-mode returns an "(env)" error.
+ *
+ * Fingerprint precheck: when the row's current `syncFingerprint` matches
+ * a freshly-computed value, we skip the disk write entirely — re-pushing
+ * an unchanged skill is a no-op and counts as `skipped`. This is the
+ * idempotency hook the bundle dialog relies on for "re-import same zip ⇒
+ * nothing happens" semantics.
  */
 export async function pushOneToNative(skillId: string): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, skipped: 0, errors: [] }
@@ -127,19 +157,32 @@ export async function pushOneToNative(skillId: string): Promise<SyncResult> {
   }
   try {
     const resources = await listResourcesForSkill(skill.id)
+    const fp = await fingerprint(skill, resources)
+    // Re-pushing an unchanged skill is a no-op. The disk-side fingerprint
+    // assumption is "if our recorded value matches and the canonical
+    // directory we'd write to is recorded on the row, nothing's drifted".
+    // This shortcuts the cost of a clean+write on every "Sync now" click.
+    if (skill.syncFingerprint === fp && skill.nativeDirectory) {
+      return { ...result, skipped: 1 }
+    }
     const dirName = skill.nativeDirectory
       ? skill.nativeDirectory.split(/[\\/]/).pop() || slug(skill.name)
       : slug(skill.name)
-    const request: InstallSkillRequest = {
+    const request: InstallSkillMirroredRequest = {
       dirName,
       content: serializeSkill(skill),
       resources: toNativeResources(resources),
       clean: true,
+      targets: activeMirrorTargets(),
+      trashBeforeClean: !!skill.syncFingerprint && skill.syncFingerprint !== fp,
     }
-    const response = await skillsInstallNative(request)
-    const fp = await fingerprint(skill, resources)
+    const response = await skillsInstallMirrored(request)
+    // Prefer the cognia outcome as the row's `nativeDirectory`: the
+    // cognia copy is canonical, the others are throwaway projections.
+    const cognia = response.targets.find((t) => t.target === "cognia")
+    const directory = cognia?.directory ?? response.targets[0]?.directory ?? ""
     await updateSkill(skill.id, {
-      nativeDirectory: response.directory,
+      nativeDirectory: directory,
       syncOrigin: "frontend",
       syncFingerprint: fp,
       lastSyncedAt: Date.now(),
@@ -155,6 +198,11 @@ export async function pushOneToNative(skillId: string): Promise<SyncResult> {
     return { ...result, errors: [{ name: skill.name, error: message }] }
   }
 }
+
+// Keep the legacy single-target writer reachable for backward-compat with
+// any caller that hasn't migrated to the mirrored path. Currently unused
+// internally; exported via re-export below.
+void skillsInstallNative
 
 /**
  * Push every Dexie skill (excluding built-ins) to ~/.claude/skills/. Updates

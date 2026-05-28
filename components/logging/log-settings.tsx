@@ -57,6 +57,29 @@ export interface LogSettingsProps {
 }
 
 const LOG_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"]
+
+/** Convert an HTTP headers map to a single-line text form that fits a
+ * single-row Input. Mirror parser below tolerates trailing commas and
+ * whitespace so users can paste from a curl example. */
+function serializeHeaders(headers: Record<string, string>): string {
+  return Object.entries(headers)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ")
+}
+
+function parseHeaders(value: string): Record<string, string> {
+  if (!value || !value.trim()) return {}
+  const out: Record<string, string> = {}
+  for (const chunk of value.split(",")) {
+    const colon = chunk.indexOf(":")
+    if (colon <= 0) continue
+    const k = chunk.slice(0, colon).trim()
+    const v = chunk.slice(colon + 1).trim()
+    if (k.length > 0) out[k] = v
+  }
+  return out
+}
+
 const DEFAULT_SAMPLING_RULES = [
   { modulePrefix: "mouse", percentage: 1 },
   { modulePrefix: "keyboard", percentage: 10 },
@@ -175,7 +198,17 @@ export function LogSettings({ className }: LogSettingsProps) {
     },
   }))
   const [transportExpanded, setTransportExpanded] = useState<
-    Record<"console" | "indexedDB" | "native" | "remote" | "langfuse" | "opentelemetry", boolean>
+    Record<
+      | "console"
+      | "indexedDB"
+      | "native"
+      | "remote"
+      | "langfuse"
+      | "opentelemetry"
+      | "agentTrace"
+      | "agentTraceOtlp",
+      boolean
+    >
   >({
     console: bootstrapState.transports.console,
     indexedDB: bootstrapState.transports.indexedDB,
@@ -183,6 +216,8 @@ export function LogSettings({ className }: LogSettingsProps) {
     remote: bootstrapState.transports.remote,
     langfuse: bootstrapState.transports.langfuse,
     opentelemetry: bootstrapState.transports.opentelemetry,
+    agentTrace: bootstrapState.transports.agentTrace,
+    agentTraceOtlp: bootstrapState.transports.agentTraceOtlp,
   })
 
   // Retention settings
@@ -214,7 +249,13 @@ export function LogSettings({ className }: LogSettingsProps) {
   }
 
   const handleTransportDetailChange = <
-    TTransport extends "nativeConfig" | "remoteConfig" | "langfuseConfig" | "opentelemetryConfig",
+    TTransport extends
+      | "nativeConfig"
+      | "remoteConfig"
+      | "langfuseConfig"
+      | "opentelemetryConfig"
+      | "agentTraceConfig"
+      | "agentTraceOtlpConfig",
     TKey extends keyof LoggingTransportSettings[TTransport],
   >(
     transport: TTransport,
@@ -319,6 +360,8 @@ export function LogSettings({ className }: LogSettingsProps) {
       remote: false,
       langfuse: false,
       opentelemetry: false,
+      agentTrace: true,
+      agentTraceOtlp: false,
       nativeConfig: {
         minLevel: "warn",
         batchSize: 10,
@@ -342,6 +385,19 @@ export function LogSettings({ className }: LogSettingsProps) {
         serviceName: "cognia-ai",
         addAsSpanEvents: true,
       },
+      agentTraceConfig: {
+        captureContent: false,
+        maxPreviewBytes: 4096,
+        retentionDays: 7,
+      },
+      agentTraceOtlpConfig: {
+        preset: "off",
+        endpoint: "",
+        headers: {},
+        serviceName: "cognia-ai",
+        environment: "",
+        grafanaCloud: { instanceId: "", apiToken: "" },
+      },
     })
     setTransportExpanded({
       console: true,
@@ -350,6 +406,8 @@ export function LogSettings({ className }: LogSettingsProps) {
       remote: false,
       langfuse: false,
       opentelemetry: false,
+      agentTrace: true,
+      agentTraceOtlp: false,
     })
     setSamplingRules(DEFAULT_SAMPLING_RULES)
     setNewSamplingRule({ modulePrefix: "", percentage: 100 })
@@ -696,6 +754,18 @@ export function LogSettings({ className }: LogSettingsProps) {
                     icon: Cloud,
                     title: t("settings.transports.opentelemetry"),
                     description: t("settings.transports.opentelemetryDesc"),
+                  },
+                  {
+                    key: "agentTrace",
+                    icon: Database,
+                    title: t("settings.transports.agentTrace"),
+                    description: t("settings.transports.agentTraceDesc"),
+                  },
+                  {
+                    key: "agentTraceOtlp",
+                    icon: Cloud,
+                    title: t("settings.transports.agentTraceOtlp"),
+                    description: t("settings.transports.agentTraceOtlpDesc"),
                   },
                 ] as const
               ).map((transportDef) => {
@@ -1055,6 +1125,227 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   }
                                 />
                               </div>
+                            </div>
+                          </div>
+                        )}
+                        {transportDef.key === "agentTrace" && (
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-2 sm:col-span-2">
+                              <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+                                <div className="flex-1 min-w-0">
+                                  <Label className="text-sm">
+                                    {t("panel.agentTrace.settings.captureContent")}
+                                  </Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    {t("panel.agentTrace.settings.captureContentHint", {
+                                      bytes: transports.agentTraceConfig.maxPreviewBytes,
+                                    })}
+                                  </p>
+                                </div>
+                                <Switch
+                                  data-testid="agent-trace-capture-content-switch"
+                                  checked={transports.agentTraceConfig.captureContent}
+                                  onCheckedChange={(checked) =>
+                                    handleTransportDetailChange(
+                                      "agentTraceConfig",
+                                      "captureContent",
+                                      checked
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-2 sm:col-span-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <Label className="text-sm">
+                                  {t("panel.agentTrace.settings.retentionDays")}
+                                </Label>
+                                <span className="text-xs font-mono">
+                                  {transports.agentTraceConfig.retentionDays === 0
+                                    ? "∞"
+                                    : `${transports.agentTraceConfig.retentionDays}d`}
+                                </span>
+                              </div>
+                              <Slider
+                                data-testid="agent-trace-retention-slider"
+                                value={[transports.agentTraceConfig.retentionDays]}
+                                onValueChange={([value]) =>
+                                  handleTransportDetailChange(
+                                    "agentTraceConfig",
+                                    "retentionDays",
+                                    value
+                                  )
+                                }
+                                min={0}
+                                max={90}
+                                step={1}
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                {t("panel.agentTrace.settings.retentionDaysHint")}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        {transportDef.key === "agentTraceOtlp" && (
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label className="text-sm">{t("panel.agentTraceOtlp.preset")}</Label>
+                              <Select
+                                value={transports.agentTraceOtlpConfig.preset}
+                                onValueChange={(value) =>
+                                  handleTransportDetailChange(
+                                    "agentTraceOtlpConfig",
+                                    "preset",
+                                    value as "off" | "grafana-cloud" | "self-hosted" | "custom"
+                                  )
+                                }
+                              >
+                                <SelectTrigger data-testid="agent-trace-otlp-preset">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="off">
+                                    {t("panel.agentTraceOtlp.presetOptions.off")}
+                                  </SelectItem>
+                                  <SelectItem value="grafana-cloud">
+                                    {t("panel.agentTraceOtlp.presetOptions.grafanaCloud")}
+                                  </SelectItem>
+                                  <SelectItem value="self-hosted">
+                                    {t("panel.agentTraceOtlp.presetOptions.selfHosted")}
+                                  </SelectItem>
+                                  <SelectItem value="custom">
+                                    {t("panel.agentTraceOtlp.presetOptions.custom")}
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-sm">
+                                {t("panel.agentTraceOtlp.serviceName")}
+                              </Label>
+                              <Input
+                                value={transports.agentTraceOtlpConfig.serviceName}
+                                onChange={(event) =>
+                                  handleTransportDetailChange(
+                                    "agentTraceOtlpConfig",
+                                    "serviceName",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="cognia-ai"
+                              />
+                            </div>
+                            <div className="space-y-2 sm:col-span-2">
+                              <Label className="text-sm">
+                                {t("panel.agentTraceOtlp.endpoint")}
+                              </Label>
+                              <Input
+                                data-testid="agent-trace-otlp-endpoint"
+                                value={transports.agentTraceOtlpConfig.endpoint}
+                                onChange={(event) =>
+                                  handleTransportDetailChange(
+                                    "agentTraceOtlpConfig",
+                                    "endpoint",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder={t(
+                                  `panel.agentTraceOtlp.endpointPlaceholder.${
+                                    transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+                                      ? "grafanaCloud"
+                                      : "selfHosted"
+                                  }`
+                                )}
+                              />
+                            </div>
+                            {transports.agentTraceOtlpConfig.preset === "grafana-cloud" ? (
+                              <>
+                                <div className="space-y-2">
+                                  <Label className="text-sm">
+                                    {t("panel.agentTraceOtlp.grafanaInstanceId")}
+                                  </Label>
+                                  <Input
+                                    data-testid="agent-trace-otlp-grafana-instance-id"
+                                    value={transports.agentTraceOtlpConfig.grafanaCloud.instanceId}
+                                    onChange={(event) =>
+                                      handleTransportDetailChange(
+                                        "agentTraceOtlpConfig",
+                                        "grafanaCloud",
+                                        {
+                                          ...transports.agentTraceOtlpConfig.grafanaCloud,
+                                          instanceId: event.target.value,
+                                        }
+                                      )
+                                    }
+                                    placeholder={t(
+                                      "panel.agentTraceOtlp.grafanaInstanceIdPlaceholder"
+                                    )}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label className="text-sm">
+                                    {t("panel.agentTraceOtlp.grafanaApiToken")}
+                                  </Label>
+                                  <Input
+                                    data-testid="agent-trace-otlp-grafana-api-token"
+                                    type="password"
+                                    value={transports.agentTraceOtlpConfig.grafanaCloud.apiToken}
+                                    onChange={(event) =>
+                                      handleTransportDetailChange(
+                                        "agentTraceOtlpConfig",
+                                        "grafanaCloud",
+                                        {
+                                          ...transports.agentTraceOtlpConfig.grafanaCloud,
+                                          apiToken: event.target.value,
+                                        }
+                                      )
+                                    }
+                                    placeholder={t(
+                                      "panel.agentTraceOtlp.grafanaApiTokenPlaceholder"
+                                    )}
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground sm:col-span-2">
+                                  {t("panel.agentTraceOtlp.grafanaCloudHint")}
+                                </p>
+                              </>
+                            ) : (
+                              <div className="space-y-2 sm:col-span-2">
+                                <Label className="text-sm">
+                                  {t("panel.agentTraceOtlp.headers")}
+                                </Label>
+                                <Input
+                                  data-testid="agent-trace-otlp-headers"
+                                  value={serializeHeaders(transports.agentTraceOtlpConfig.headers)}
+                                  onChange={(event) =>
+                                    handleTransportDetailChange(
+                                      "agentTraceOtlpConfig",
+                                      "headers",
+                                      parseHeaders(event.target.value)
+                                    )
+                                  }
+                                  placeholder={t("panel.agentTraceOtlp.headersPlaceholder")}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  {t("panel.agentTraceOtlp.headersHint")}
+                                </p>
+                              </div>
+                            )}
+                            <div className="space-y-2 sm:col-span-2">
+                              <Label className="text-sm">
+                                {t("panel.agentTraceOtlp.environment")}
+                              </Label>
+                              <Input
+                                value={transports.agentTraceOtlpConfig.environment}
+                                onChange={(event) =>
+                                  handleTransportDetailChange(
+                                    "agentTraceOtlpConfig",
+                                    "environment",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="production"
+                              />
                             </div>
                           </div>
                         )}

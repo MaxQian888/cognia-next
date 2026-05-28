@@ -508,6 +508,64 @@ export function validatePluginManifest(
     }
   }
 
+  // requires.binaries — external CLI/binary prerequisites probed by the
+  // pre-install chain. Additive: a manifest with no `requires` block is
+  // unaffected. We validate shape (name required string; minVersion, when
+  // present, must be semver; documentation must be a string) so a typo'd
+  // requirement surfaces at author time rather than silently never gating.
+  if (m.requires !== undefined) {
+    if (typeof m.requires !== "object" || m.requires === null || Array.isArray(m.requires)) {
+      pushError("requires", "manifest.requires.invalid", '"requires" must be an object')
+    } else {
+      const requires = m.requires as Record<string, unknown>
+      if (requires.binaries !== undefined) {
+        if (!Array.isArray(requires.binaries)) {
+          pushError(
+            "requires.binaries",
+            "manifest.requires.binaries.invalid",
+            '"requires.binaries" must be an array'
+          )
+        } else {
+          requires.binaries.forEach((entry, i) => {
+            const field = `requires.binaries[${i}]`
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+              pushError(
+                field,
+                "manifest.requires.binaries.entry.invalid",
+                `${field} must be an object`
+              )
+              return
+            }
+            const bin = entry as Record<string, unknown>
+            if (!bin.name || typeof bin.name !== "string") {
+              pushError(
+                `${field}.name`,
+                "manifest.requires.binaries.name.missing",
+                `${field} requires a non-empty "name" string`
+              )
+            }
+            if (bin.minVersion !== undefined) {
+              if (typeof bin.minVersion !== "string" || !VERSION_PATTERN.test(bin.minVersion)) {
+                pushError(
+                  `${field}.minVersion`,
+                  "manifest.requires.binaries.minVersion.invalid",
+                  `${field}.minVersion must be semver format (e.g., 0.1.0)`
+                )
+              }
+            }
+            if (bin.documentation !== undefined && typeof bin.documentation !== "string") {
+              pushError(
+                `${field}.documentation`,
+                "manifest.requires.binaries.documentation.invalid",
+                `${field}.documentation must be a string URL`
+              )
+            }
+          })
+        }
+      }
+    }
+  }
+
   if (m.configSchema) {
     const schemaResult = validateConfigSchema(m.configSchema)
     for (const error of schemaResult.errors) {

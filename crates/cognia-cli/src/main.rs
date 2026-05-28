@@ -36,6 +36,17 @@
 //!
 //!   cognia plugin embed-version <wasm> <ver>
 //!     Manually inject the api-version custom section (normally automatic).
+//!
+//! Global flags (apply to every subcommand):
+//!
+//!   --color [auto|always|never]   Color mode (default: auto).
+//!   --no-color                    Shortcut for `--color=never`.
+//!   --quiet, -q                   Suppress non-error output.
+//!   --verbose, -v                 Increase log verbosity (repeatable, max -vv).
+//!   --yes, -y                     Pre-confirm any prompt; required for CI.
+//!
+//! Per-command flags marked `--json` switch the human report to a
+//! machine-readable JSON payload (currently: `lint`, `info`, `verify`).
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
@@ -56,12 +67,40 @@ mod cmd_uninstall;
 mod cmd_verify;
 mod http_client;
 mod packaging;
+// Source of truth for the release-signing public key. Mirrored into
+// src-tauri + the renderer by scripts/release-sync-keys.mjs. Not yet
+// consumed by a CLI subcommand (self-update is future work), so the
+// constant + helper are allowed to be unused here.
+#[allow(dead_code)]
+mod release_key;
 mod signing;
 mod template;
+mod ui;
+
+use ui::runtime::{ColorMode, UiFlags};
+use ui::RuntimeUi;
 
 #[derive(Parser, Debug)]
 #[command(name = "cognia", version, about, long_about = None)]
 struct Cli {
+    /// Color mode for stdout/stderr (default: auto — on when a TTY,
+    /// off otherwise; respects NO_COLOR and FORCE_COLOR env vars).
+    #[arg(long, value_name = "MODE", default_value = "auto", global = true)]
+    color: String,
+    /// Shortcut for `--color=never`. Higher priority than `--color`.
+    #[arg(long, global = true)]
+    no_color: bool,
+    /// Suppress non-error output (no spinners, no progress, no info chatter).
+    #[arg(long, short = 'q', global = true)]
+    quiet: bool,
+    /// Increase log verbosity (repeatable, e.g. `-vv` for debug-level).
+    #[arg(long, short = 'v', global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
+    /// Pre-confirm every interactive prompt (`uninstall --purge-data`,
+    /// overwrite prompts, etc.). Required for CI usage.
+    #[arg(long, short = 'y', global = true)]
+    yes: bool,
+
     #[command(subcommand)]
     command: TopCommand,
 }
@@ -80,13 +119,27 @@ pub(crate) enum PluginCommand {
     /// Scaffold a new plugin from a bundled template.
     New {
         /// Name of the plugin (becomes the crate/package name and plugin.json id).
-        name: String,
+        /// Optional: when omitted on a TTY, an interactive wizard collects it.
+        name: Option<String>,
         /// Directory to create. Defaults to ./<name>.
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Template kind: `wasm` (default) or `ts` (frontend TypeScript).
-        #[arg(long, default_value = "wasm")]
-        kind: String,
+        #[arg(long)]
+        kind: Option<String>,
+        /// Author display name (recorded in plugin.json `author.name`).
+        #[arg(long)]
+        author: Option<String>,
+        /// Author email (recorded in plugin.json `author.email`).
+        #[arg(long)]
+        author_email: Option<String>,
+        /// Plugin description (recorded in plugin.json `description`).
+        #[arg(long)]
+        description: Option<String>,
+        /// Run `keygen` and embed the public key in plugin.json (yes/no).
+        /// When omitted on a TTY, the wizard asks; non-TTY defaults to false.
+        #[arg(long)]
+        with_keygen: Option<bool>,
     },
     /// Validate plugin.json against the host's manifest schema.
     Lint {
@@ -113,6 +166,12 @@ pub(crate) enum PluginCommand {
     Info {
         /// Bundle to inspect.
         bundle: PathBuf,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+        /// Show every detail (full file list, signature breakdown).
+        #[arg(long)]
+        detailed: bool,
     },
     /// Sign a bundle with an Ed25519 private key, producing `<bundle>.sig`.
     Sign {
@@ -136,6 +195,9 @@ pub(crate) enum PluginCommand {
         /// Optional explicit `.sig` path. Defaults to `<bundle>.sig`.
         #[arg(long)]
         signature: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
     },
     /// Generate a fresh Ed25519 keypair. Saves the private key to `.cognia/`
     /// and prints the public key (base64) for embedding in `plugin.json`.
@@ -178,39 +240,117 @@ pub(crate) enum PluginCommand {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
-    match cli.command {
-        TopCommand::Plugin { command } => dispatch_plugin(command),
-    }
+
+    // Resolve the color mode + install color-eyre BEFORE building any
+    // RuntimeUi so its formatter respects the user's choice.
+    let color_mode = if cli.no_color {
+        ColorMode::Never
+    } else {
+        ColorMode::parse(&cli.color).map_err(|e| eyre::eyre!(e))?
+    };
+    let flags = UiFlags {
+        color: color_mode,
+        quiet: cli.quiet,
+        verbose: cli.verbose,
+        yes: cli.yes,
+        json: false, // set per-command from the subcommand's own --json flag
+    };
+    let mut ui = RuntimeUi::new(flags);
+    ui.apply_color_override();
+    ui::error::install()?;
+
+    // Run the command, converting anyhow's chain into an eyre::Report so
+    // color-eyre's formatter renders it with severity colors + cause chain
+    // + (with RUST_BACKTRACE=1) backtrace.
+    let result: Result<()> = match cli.command {
+        TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+    };
+    result.map_err(anyhow_to_eyre)?;
+    Ok(())
 }
 
-fn dispatch_plugin(command: PluginCommand) -> Result<()> {
+/// Convert an `anyhow::Error` chain into an `eyre::Report` so the
+/// color-eyre formatter installed in `main()` can render it with severity
+/// colors and the full cause chain.
+fn anyhow_to_eyre(err: anyhow::Error) -> eyre::Report {
+    let causes: Vec<String> = err.chain().map(|c| c.to_string()).collect();
+    let mut iter = causes.into_iter().rev();
+    let innermost = iter.next().unwrap_or_else(|| "unknown error".to_string());
+    let mut report = eyre::eyre!("{innermost}");
+    for outer in iter {
+        report = report.wrap_err(outer);
+    }
+    report
+}
+
+fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
     match command {
-        PluginCommand::New { name, dir, kind } => {
-            let kind = template::TemplateKind::parse(&kind)?;
-            cmd_new::run(name, dir, kind)
+        PluginCommand::New {
+            name,
+            dir,
+            kind,
+            author,
+            author_email,
+            description,
+            with_keygen,
+        } => cmd_new::run(
+            name,
+            dir,
+            kind,
+            author,
+            author_email,
+            description,
+            with_keygen,
+            ui,
+        ),
+        PluginCommand::Lint { path, json } => {
+            ui.flags.json = json;
+            cmd_lint::run(path, json, ui)
         }
-        PluginCommand::Lint { path, json } => cmd_lint::run(path, json),
-        PluginCommand::Build { path, out, skip_build } => cmd_build::run(path, out, skip_build),
-        PluginCommand::Info { bundle } => cmd_info::run(bundle),
-        PluginCommand::Sign { bundle, key, out } => cmd_sign::run(bundle, key, out),
-        PluginCommand::Verify { bundle, public_key, signature } => {
-            cmd_verify::run(bundle, public_key, signature)
+        PluginCommand::Build {
+            path,
+            out,
+            skip_build,
+        } => cmd_build::run(path, out, skip_build, ui),
+        PluginCommand::Info {
+            bundle,
+            json,
+            detailed,
+        } => {
+            ui.flags.json = json;
+            cmd_info::run(bundle, json, detailed, ui)
         }
-        PluginCommand::Keygen { out_dir } => cmd_keygen::run(out_dir),
-        PluginCommand::Install { bundle } => cmd_install::run(bundle),
-        PluginCommand::Uninstall { plugin_id, purge_data } => {
-            cmd_uninstall::run(plugin_id, purge_data)
+        PluginCommand::Sign { bundle, key, out } => cmd_sign::run(bundle, key, out, ui),
+        PluginCommand::Verify {
+            bundle,
+            public_key,
+            signature,
+            json,
+        } => {
+            ui.flags.json = json;
+            cmd_verify::run(bundle, public_key, signature, json, ui)
         }
-        PluginCommand::Dev { path, reload_url } => cmd_dev::run(path, reload_url),
+        PluginCommand::Keygen { out_dir } => cmd_keygen::run(out_dir, ui),
+        PluginCommand::Install { bundle } => cmd_install::run(bundle, ui),
+        PluginCommand::Uninstall {
+            plugin_id,
+            purge_data,
+        } => cmd_uninstall::run(plugin_id, purge_data, ui),
+        PluginCommand::Dev { path, reload_url } => cmd_dev::run(path, reload_url, ui),
         PluginCommand::EmbedVersion { wasm, version, out } => {
-            cmd_embed_version(wasm, version, out)
+            cmd_embed_version(wasm, version, out, ui)
         }
     }
 }
 
-fn cmd_embed_version(wasm: PathBuf, version: String, out: Option<PathBuf>) -> Result<()> {
+fn cmd_embed_version(
+    wasm: PathBuf,
+    version: String,
+    out: Option<PathBuf>,
+    _ui: &mut RuntimeUi,
+) -> Result<()> {
     if !looks_like_semver(&version) {
         bail!("--version must be MAJOR.MINOR.PATCH (got `{version}`)");
     }
@@ -259,6 +399,24 @@ mod tests {
         assert!(!looks_like_semver("v0.1.0"));
         assert!(!looks_like_semver("0.1.0-beta"));
         assert!(!looks_like_semver(""));
+    }
+
+    #[test]
+    fn anyhow_to_eyre_preserves_chain() {
+        let inner = anyhow::anyhow!("primary failure");
+        let wrapped = inner.context("during read").context("during init");
+        let report = anyhow_to_eyre(wrapped);
+        let dbg = format!("{report:?}");
+        assert!(dbg.contains("primary failure"), "missing inner: {dbg}");
+        assert!(dbg.contains("during read"), "missing mid-cause: {dbg}");
+        assert!(dbg.contains("during init"), "missing outer: {dbg}");
+    }
+
+    #[test]
+    fn anyhow_to_eyre_handles_bare_error() {
+        let bare = anyhow::anyhow!("just one");
+        let report = anyhow_to_eyre(bare);
+        assert!(format!("{report}").contains("just one"));
     }
 }
 

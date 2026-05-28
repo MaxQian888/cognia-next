@@ -8,10 +8,7 @@ description: A complete guide to the skill parsing pipeline, native disk sandbox
 A Skill is the smallest portable capability unit in Cognia — a Markdown snippet, a set of allowed tools, and optional bundled scripts/references/assets. This page is a deep dive into the skills subsystem; if you want to see how skills are enabled in chat first, go back to [Chat, Characters, Skills & Teams](./chat-and-skills).
 
 <TLDR>
-Skill = SKILL.md (YAML frontmatter + body) + scripts/ + references/ + assets/.
-The browser-side source of truth is Dexie; optional bidirectional sync to `~/.claude/skills/<dir>/`.
-The marketplace comes from the `skills-lock.json` registry and the SkillsMP API; installation goes through `parseSkillMarkdown → createSkill`.
-All save paths are gated by `validateSkill` + Rust-side `skills_scan_security`.
+Skill = `SKILL.md` (YAML frontmatter + body) + `scripts/` + `references/` + `assets/`. Browser source of truth is Dexie, with optional bidirectional sync to `~/.claude/skills/<dir>/`. Marketplace = `skills-lock.json` registry + SkillsMP API; install goes through `parseSkillMarkdown → createSkill`. Every save path is gated by `validateSkill` + Rust-side `skills_scan_security`.
 </TLDR>
 
 ## Use Cases

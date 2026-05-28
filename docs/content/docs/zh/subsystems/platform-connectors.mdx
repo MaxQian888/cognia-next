@@ -1,27 +1,11 @@
 ---
 title: 平台连接器
-description: 让 AI 角色变成 Telegram / Discord / Slack / Lark / OneBot 上的真实机器人 —— ConnectorBus、三种模式、FIFO 出站队列。
+description: 让 AI 角色变成 Telegram / Discord / Slack / Lark / OneBot / 企业微信 / 个人微信上的真实机器人 —— ConnectorBus、三种模式、FIFO 出站队列。
 ---
 
 # 平台连接器
 
-<Status variant="stable" />
-
-<TLDR>
-  五个内置适配器（Telegram / Discord / Slack / Lark / OneBot v11）+ ConnectorBus 单例 做扇入扇出 +
-  Dexie-backed 出站 FIFO（断路器、令牌桶、指数退避、死信、幂等 LRU）。 三种模式：auto（AI 自动回）/
-  manual（人手敲）/ draft（AI 起草、人审核）。 Dexie v18 新增 8 张表；Inbox UI 在
-  `app/inbox/`；插件可贡献额外适配器。
-</TLDR>
-
-<StatGrid>
-  <Stat label="内置适配器" value="5" hint="telegram · discord · slack · lark · onebot" />
-  <Stat label="Dexie 表" value="8" hint="v18 schema" />
-  <Stat label="运行模式" value="3" hint="auto · manual · draft" />
-  <Stat label="审计上限" value="5000" hint="connectorAudit capped ring" />
-</StatGrid>
-
-本页是**架构总览**。平台一键接入指南请见兄弟文档：
+本页是**架构总览**。平台一键接入指南见兄弟文档（含企业微信、个人微信 —— 详见 [ADR-0036](../adr/0036-wechat-wecom-connectors)）：
 
 <Cards>
   <Card title="Slack 接入" href="../connectors/slack-setup" />
@@ -53,6 +37,8 @@ flowchart TB
     SL[Slack]
     LK[Lark]
     OB[OneBot 客户端<br/>NapCat / Lagrange]
+    WCom[企业微信 智能机器人]
+    WCh[个人微信 iLink]
   end
 
   subgraph Rust["🦀 Rust 层 · src-tauri/src/connectors/"]
@@ -370,7 +356,7 @@ interface PluginConnectorDef {
     href="./visual-workflows"
     description="trigger.connector.inbound + action.connector.send"
   />
-  <Card title="移动端架构" href="./mobile-architecture" description="手机也是连接器的接收端之一" />
+  <Card title="移动端架构" href="../ui/mobile-architecture" description="手机也是连接器的接收端之一" />
   <Card title="调度器" href="./scheduler" description="定时出站 / 定期 digest 走调度器" />
   <Card title="插件系统" href="./plugin-system" description="贡献新平台连接器" />
   <Card title="Slack 接入" href="../connectors/slack-setup" />

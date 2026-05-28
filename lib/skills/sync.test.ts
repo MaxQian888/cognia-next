@@ -3,7 +3,12 @@ jest.mock("@/lib/tauri", () => ({
 }))
 jest.mock("@/lib/claude/ipc", () => ({
   skillsInstallNative: jest.fn(),
+  skillsInstallMirrored: jest.fn(),
   skillsScanNative: jest.fn(),
+}))
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: () => ({ settings: null }) },
+  resolveSkillBundleMirrors: () => ({ claude: true, codex: true }),
 }))
 jest.mock("@/lib/db/skills", () => ({
   bulkImportSkills: jest.fn(),
@@ -23,14 +28,14 @@ jest.mock("@/lib/claude/skills-io", () => ({
 
 import { pushAllToNative, pullAllFromNative, pushOneToNative, suggestedFilename } from "./sync"
 import { isTauri } from "@/lib/tauri"
-import { skillsInstallNative, skillsScanNative } from "@/lib/claude/ipc"
+import { skillsInstallMirrored, skillsScanNative } from "@/lib/claude/ipc"
 import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import type { Skill, SkillResource } from "@/lib/claude/types"
 
 const mockedIsTauri = isTauri as unknown as jest.Mock
-const mockedInstall = skillsInstallNative as unknown as jest.Mock
+const mockedInstall = skillsInstallMirrored as unknown as jest.Mock
 const mockedScan = skillsScanNative as unknown as jest.Mock
 const mockedListSkills = listSkills as unknown as jest.Mock
 const mockedUpdateSkill = updateSkill as unknown as jest.Mock
@@ -74,7 +79,10 @@ describe("pushAllToNative", () => {
       { id: "d", name: "Other", source: "builtin" },
     ])
     mockedListRes.mockResolvedValue([] as SkillResource[])
-    mockedInstall.mockResolvedValue({ directory: "/dir/Custom" })
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "/dir/Custom", writtenFiles: [] }],
+      trashedFrom: null,
+    })
     mockedUpdateSkill.mockResolvedValue(undefined)
     const r = await pushAllToNative()
     expect(r.skipped).toBe(2)
@@ -100,7 +108,10 @@ describe("pushAllToNative", () => {
       },
     ])
     mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({ directory: "/abs/path/OldDir" })
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "/abs/path/OldDir", writtenFiles: [] }],
+      trashedFrom: null,
+    })
     await pushAllToNative()
     expect(mockedInstall).toHaveBeenCalledWith(
       expect.objectContaining({ dirName: "OldDir", clean: true })
@@ -118,7 +129,10 @@ describe("pushAllToNative", () => {
       },
     ])
     mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({ directory: "trailing/" })
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "trailing/", writtenFiles: [] }],
+      trashedFrom: null,
+    })
     await pushAllToNative()
     expect(mockedInstall).toHaveBeenCalledWith(expect.objectContaining({ dirName: "edge-case" }))
   })
@@ -150,19 +164,30 @@ describe("pushAllToNative", () => {
   it("falls back to length-based hash when crypto is unavailable", async () => {
     const orig = (globalThis as unknown as { crypto?: unknown }).crypto
     ;(globalThis as unknown as { crypto?: unknown }).crypto = undefined
-    mockedIsTauri.mockReturnValue(true)
-    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
-    mockedListRes.mockResolvedValue([
-      { path: "x", kind: "file", content: "c" },
-    ] as unknown as SkillResource[])
-    mockedInstall.mockResolvedValue({ directory: "/x" })
-    mockedUpdateSkill.mockResolvedValue(undefined)
-    const r = await pushAllToNative()
-    expect(r.pushed).toBe(1)
-    ;(globalThis as unknown as { crypto?: unknown }).crypto = orig
+    try {
+      mockedIsTauri.mockReturnValue(true)
+      mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+      mockedListRes.mockResolvedValue([
+        { path: "x", kind: "file", content: "c" },
+      ] as unknown as SkillResource[])
+      mockedInstall.mockResolvedValue({
+        targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
+        trashedFrom: null,
+      })
+      mockedUpdateSkill.mockResolvedValue(undefined)
+      const r = await pushAllToNative()
+      expect(r.pushed).toBe(1)
+    } finally {
+      ;(globalThis as unknown as { crypto?: unknown }).crypto = orig
+    }
   })
 
   it("uses crypto.subtle digest when available", async () => {
+    // jsdom may delete or replace `globalThis.crypto` between tests; make
+    // sure we have something to attach `.subtle` to before mutating it.
+    if (!(globalThis as { crypto?: unknown }).crypto) {
+      ;(globalThis as unknown as { crypto: { subtle?: SubtleCrypto } }).crypto = {}
+    }
     // jsdom's `crypto` global lacks `.subtle`; patch a stub that returns a
     // deterministic ArrayBuffer so the fingerprint() function exercises the
     // hex-encoding branch.
@@ -174,7 +199,10 @@ describe("pushAllToNative", () => {
     mockedIsTauri.mockReturnValue(true)
     mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
     mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({ directory: "/x" })
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
+      trashedFrom: null,
+    })
     mockedUpdateSkill.mockResolvedValue(undefined)
     const r = await pushAllToNative()
     expect(r.pushed).toBe(1)
@@ -385,7 +413,21 @@ describe("pushOneToNative", () => {
       source: "custom",
     })
     mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({ directory: "/u/.claude/skills/custom" })
+    mockedInstall.mockResolvedValue({
+      targets: [
+        {
+          target: "cognia",
+          directory: "/data/cognia/skills/custom",
+          writtenFiles: [],
+        },
+        {
+          target: "claude",
+          directory: "/u/.claude/skills/custom",
+          writtenFiles: [],
+        },
+      ],
+      trashedFrom: null,
+    })
     mockedUpdateSkill.mockResolvedValue(undefined)
     const result = await pushOneToNative("c")
     expect(result.pushed).toBe(1)
@@ -393,11 +435,61 @@ describe("pushOneToNative", () => {
     expect(mockedUpdateSkill).toHaveBeenCalledWith(
       "c",
       expect.objectContaining({
-        nativeDirectory: "/u/.claude/skills/custom",
+        // Cognia outcome wins — that's the canonical directory the row
+        // should track. The Claude / Codex mirrors are throwaway.
+        nativeDirectory: "/data/cognia/skills/custom",
         syncOrigin: "frontend",
         lastSyncError: null,
       })
     )
+    expect(mockedInstall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targets: ["cognia", "claude", "codex"],
+        trashBeforeClean: false,
+      })
+    )
+  })
+
+  it("skips the IPC write entirely when the recorded fingerprint matches the freshly computed value", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    // Compute the fingerprint the implementation would compute for this
+    // (skill, []) pair so we can pre-stamp it on the row.
+    const { fingerprint } = await import("./sync")
+    const skill = {
+      id: "c",
+      name: "Custom",
+      source: "custom",
+      nativeDirectory: "/data/cognia/skills/custom",
+    }
+    const fp = await fingerprint(skill as never, [])
+    mockedGetSkill.mockResolvedValue({
+      ...skill,
+      syncFingerprint: fp,
+    })
+    mockedListRes.mockResolvedValue([])
+    const result = await pushOneToNative("c")
+    expect(result.skipped).toBe(1)
+    expect(result.pushed).toBe(0)
+    expect(mockedInstall).not.toHaveBeenCalled()
+  })
+
+  it("requests trashBeforeClean when the recorded fingerprint differs from the freshly computed value", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "c",
+      name: "Custom",
+      source: "custom",
+      nativeDirectory: "/data/cognia/skills/custom",
+      syncFingerprint: "stale-fp",
+    })
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "/data/cognia/skills/custom", writtenFiles: [] }],
+      trashedFrom: "/data/cognia/skills/.trash/custom-1700000000",
+    })
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    await pushOneToNative("c")
+    expect(mockedInstall).toHaveBeenCalledWith(expect.objectContaining({ trashBeforeClean: true }))
   })
 
   it("returns errors=[error] and writes lastSyncError on failure", async () => {
@@ -455,9 +547,14 @@ describe("pushOneToNative", () => {
       name: "OldName",
       source: "custom",
       nativeDirectory: "/abs/path/OldDir",
+      // No prior fingerprint → precheck doesn't short-circuit.
+      syncFingerprint: undefined,
     })
     mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({ directory: "/abs/path/OldDir" })
+    mockedInstall.mockResolvedValue({
+      targets: [{ target: "cognia", directory: "/abs/path/OldDir", writtenFiles: [] }],
+      trashedFrom: null,
+    })
     await pushOneToNative("x")
     expect(mockedInstall).toHaveBeenCalledWith(
       expect.objectContaining({ dirName: "OldDir", clean: true })

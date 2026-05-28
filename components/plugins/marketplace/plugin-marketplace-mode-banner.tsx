@@ -28,20 +28,21 @@ export function PluginMarketplaceModeBanner({ mode: override, className }: Props
 
   if (mode === "remote") return null
 
+  // Colour bands use semantic tokens with opacity layering so dark mode
+  // inherits the theme automatically — the previous hardcoded
+  // `dark:text-blue-300` overrides left the banner drifting from the rest
+  // of the marketplace surface when the user retuned their primary hue.
   if (mode === "demo") {
     return (
       <Card
         role="status"
-        className={cn("p-3 flex items-start gap-2 border-blue-500/40 bg-blue-500/5", className)}
+        className={cn("p-3 flex items-start gap-2 border-primary/40 bg-primary/5", className)}
         data-testid="plugin-marketplace-mode-banner-demo"
       >
-        <FlaskConicalIcon
-          className="size-4 mt-0.5 shrink-0 text-blue-700 dark:text-blue-300"
-          aria-hidden
-        />
+        <FlaskConicalIcon className="size-4 mt-0.5 shrink-0 text-primary" aria-hidden />
         <div className="space-y-0.5 min-w-0">
-          <p className="text-sm font-medium text-blue-900 dark:text-blue-100">{t("demoTitle")}</p>
-          <p className="text-xs text-blue-800/80 dark:text-blue-200/80">{t("demoHint")}</p>
+          <p className="text-sm font-medium text-foreground">{t("demoTitle")}</p>
+          <p className="text-xs text-muted-foreground">{t("demoHint")}</p>
         </div>
       </Card>
     )
@@ -50,18 +51,13 @@ export function PluginMarketplaceModeBanner({ mode: override, className }: Props
   return (
     <Card
       role="status"
-      className={cn("p-3 flex items-start gap-2 border-amber-500/40 bg-amber-500/5", className)}
+      className={cn("p-3 flex items-start gap-2 border-destructive/40 bg-destructive/5", className)}
       data-testid="plugin-marketplace-mode-banner-degraded"
     >
-      <AlertTriangleIcon
-        className="size-4 mt-0.5 shrink-0 text-amber-700 dark:text-amber-300"
-        aria-hidden
-      />
+      <AlertTriangleIcon className="size-4 mt-0.5 shrink-0 text-destructive" aria-hidden />
       <div className="space-y-0.5 min-w-0">
-        <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-          {t("degradedTitle")}
-        </p>
-        <p className="text-xs text-amber-800/80 dark:text-amber-200/80">{t("degradedHint")}</p>
+        <p className="text-sm font-medium text-foreground">{t("degradedTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("degradedHint")}</p>
       </div>
     </Card>
   )

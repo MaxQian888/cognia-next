@@ -247,6 +247,61 @@ pub fn skills_scan_dir(path: String) -> Result<Vec<NativeSkill>, String> {
     Ok(out)
 }
 
+/// Resolve `~/.agents/skills/` (the Codex CLI default) and scan it. Empty
+/// Vec when the directory doesn't exist — Codex CLI may simply not be
+/// installed.
+#[tauri::command]
+pub fn skills_scan_codex() -> Result<Vec<NativeSkill>, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Err("could not resolve home directory".into());
+    };
+    let dir = home.join(".agents").join("skills");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    skills_scan_dir(dir.to_string_lossy().to_string())
+}
+
+/// Move a cognia-owned skill directory at
+/// `<appData>/cognia/skills/<dir_name>/` into the trash subdirectory at
+/// `<appData>/cognia/skills/.trash/<dir_name>-<ts>/`. Returns the new path.
+///
+/// Used by the bundle-import flow when a re-import would overwrite an
+/// existing copy: the prior copy goes to trash so the user can manually
+/// recover via the Settings → Skills → Empty Trash button. No background
+/// retention sweep is run; the trash grows until the user clears it.
+#[tauri::command]
+pub fn skills_move_to_trash(
+    app: tauri::AppHandle,
+    dir_name: String,
+) -> Result<String, String> {
+    if dir_name.contains('/') || dir_name.contains('\\') || dir_name.contains("..") {
+        return Err(format!("invalid dir_name: {}", dir_name));
+    }
+    use tauri::Manager;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {}", e))?;
+    let cognia_root = app_data.join("cognia").join("skills");
+    let target = cognia_root.join(&dir_name);
+    if !target.is_dir() {
+        return Err(format!("skill dir not found: {}", target.display()));
+    }
+    let trash_root = cognia_root.join(".trash");
+    std::fs::create_dir_all(&trash_root)
+        .map_err(|e| format!("mkdir {}: {}", trash_root.display(), e))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dest = trash_root.join(format!("{}-{}", dir_name, stamp));
+    std::fs::rename(&target, &dest).map_err(|e| {
+        format!("trash mv {} -> {}: {}", target.display(), dest.display(), e)
+    })?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
 /// Resolve `~/.claude/skills/` and scan it. Empty Vec when the directory
 /// doesn't exist (e.g., user has never used Claude Code).
 #[tauri::command]

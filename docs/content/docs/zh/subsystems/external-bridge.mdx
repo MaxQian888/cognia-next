@@ -5,18 +5,6 @@ description: 通过 MCP 协议向外部编码 Agent 暴露 Cognia 自身知识�
 
 # 外部桥
 
-<Status variant="stable">Phase 1 已实现 · stdio + HTTP 双传输</Status>
-
-<TLDR>
-  External Bridge 把 Cognia 自己生成的代码 Wiki、RAG 切片与运行时实体（skills / characters / twins /
-  plugins / agent-teams）通过 MCP 协议暴露给外部编码 Agent（Claude
-  Code、Cursor、Cline、Codex）。所有调用经 **permission-gate** 与白名单比对，默认仅开启
-  `wiki:cognia` + `rag:cognia` 两个公共代码 scope，其他 scope 必须在 Settings
-  里手动打开。每次调用都会写一行 `mcpAuditLog`（封顶 5000 条），用户可在 Settings → External Bridge
-  看到外部 Agent 究竟问了什么。stdio 传输跑在 Node sidecar 里，HTTP 传输由 Tauri
-  Rust（axum）承载，两条路通向同一份 `lib/external-bridge/` 代码。
-</TLDR>
-
 ## 适用场景
 
 - 在 IDE 里跑 Claude Code / Cursor，需要让它"了解"Cognia 自己的代码结构（"Cognia 的 twin distill pipeline 是怎么工作的？"）。
@@ -305,7 +293,7 @@ export interface ExternalBridgeSettings {
     description="与 External Bridge 不同的另一条 MCP 通路（UI 绘制）"
   />
   <Card title="数字孪生" href="./employee-twin" description="rag:twin scope 暴露的 chunks 来源" />
-  <Card title="存储" href="./storage" description="Dexie v17 新增 4 张表的完整 schema" />
+  <Card title="存储" href="../data/storage" description="Dexie v17 新增 4 张表的完整 schema" />
 </Cards>
 
 ## 关联 ADR

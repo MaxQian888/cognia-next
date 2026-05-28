@@ -45,6 +45,7 @@ import type {
   ConnectorAttachmentRow,
   ConnectorCallbackBindingRow,
   ConnectorHeartbeatRow,
+  WorkflowFanoutSubscriptionRow,
 } from "./connector-types"
 import type {
   WorkflowRow,
@@ -63,6 +64,7 @@ import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-
 import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow } from "@/lib/sync/types"
 import type { SharedLinkRow } from "./shared-links"
+import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -139,6 +141,10 @@ export class CogniaDB extends Dexie {
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
+  // v55 — Workflow run fan-out subscriptions (im-a2ui-abstract-anchor
+  // Phase 7). Operator-configured "every run of workflow X mirrors
+  // progress to channel Y". See `connector-types.ts` for the row shape.
+  workflowFanoutSubscriptions!: Table<WorkflowFanoutSubscriptionRow, string>
   // v23 — Mobile companion paired devices (ADR 0012 → M2). One row per phone
   // that completed the QR pairing flow (POST /api/v1/auth/pair, M2.3). The
   // owner can soft-delete (revoke) any row from the desktop's "Mobile
@@ -223,6 +229,17 @@ export class CogniaDB extends Dexie {
    * Per-row type + CRUD live in `./shared-links.ts`. Pure additive table.
    */
   sharedLinks!: Table<SharedLinkRow, string>
+  /**
+   * v55 — Agent-trace span rows (ADR pending). One row per finished span
+   * emitted by `lib/agent-trace/emitter.ts:endSpan` and persisted by
+   * `lib/logging/transports/agent-trace-transport.ts`. Indexed by
+   * `[sessionId+startTime]` for newest-first chat-side queries, by `traceId`
+   * for trace-timeline rendering, by `[traceId+startTime]` so trace views
+   * can sort without a second pass, and by `parentSpanId` for child-span
+   * lookup. Per-row type lives in `@/types/agent-trace/span.ts`; CRUD +
+   * aggregation helpers in `./agent-traces.ts`.
+   */
+  agentTraces!: Table<AgentTraceSpan, string>
 
   constructor() {
     super("cognia-claude")
@@ -1492,6 +1509,38 @@ export class CogniaDB extends Dexie {
     // expired-row prune. `revoked` (boolean) is filtered in-memory, not indexed.
     this.version(54).stores({
       sharedLinks: "&id, &code, kind, createdAt, expiresAt",
+    })
+
+    // v55 — Agent-trace span rows. Additive only; no upgrade hook. Indexes:
+    // `sessionId` and `[sessionId+startTime]` drive the per-session timeline
+    // query; `traceId` and `[traceId+startTime]` drive the trace-grouped
+    // detail view; `parentSpanId` lets the renderer pull child spans
+    // without scanning; `surface` is filterable so the Settings →
+    // Observability → Agent Trace tab can scope to one origin.
+    this.version(55).stores({
+      agentTraces:
+        "&id, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface",
+    })
+
+    // v56 — Workflow run fan-out subscriptions (im-a2ui-abstract-anchor
+    // Phase 7). One row per "mirror progress for workflow X into channel
+    // (adapter, conversation)". Additive only — no upgrade hook because
+    // no pre-existing rows could carry this shape. Indexes:
+    //   • `&id`               — uuid primary
+    //   • `workflowId`        — runtime hot path: the progress-runner
+    //                            queries by workflowId at watcher
+    //                            creation to seed the fan-out channels.
+    //   • `[workflowId+enabled]` — same query filtered to live rows so
+    //                            the runner skips disabled subscriptions
+    //                            without an in-memory pass.
+    //   • `enabled`           — global "all live mirrors" view in
+    //                            settings.
+    //   • `adapterId` + `conversationKey` — the operator-side "what does
+    //                            this channel mirror?" lookup.
+    //   • `createdAt`         — newest-first sort in the settings list.
+    this.version(56).stores({
+      workflowFanoutSubscriptions:
+        "&id, workflowId, [workflowId+enabled], enabled, adapterId, conversationKey, createdAt",
     })
   }
 

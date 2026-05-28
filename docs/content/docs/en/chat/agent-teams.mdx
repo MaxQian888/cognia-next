@@ -8,14 +8,7 @@ description: Workbench, lifecycle runtime, external CLI agent integration, plan 
 Agent Teams allow multiple AI roles to be grouped into a "squad", coordinated by a lead and executed in parallel by teammates. This page is a deep dive into the agent-teams subsystem; for how teams are referenced from the chat side, see [Chat, Characters, Skills & Teams](./chat-and-skills).
 
 <TLDR>
-Team = lead + teammates + tasks + execution report. The lead may go through a
-"plan approval" step; teammates are dispatched in parallel with limited
-concurrency. Runtime is driven by `runTeamLifecycle` and cancelled via
-`abortTeam`. Each teammate's runtime can be Claude / Codex / a custom
-external agent CLI (ACP / OpenCode), where external agents are spawned by
-the Rust-side process manager. `@<name>` mentions in workspace chat are
-routed through `dispatchTeamMention` to the target runtime, with messages
-streamed back in place.
+Team = lead + teammates + tasks + execution report. The lead may go through a "plan approval" step; teammates are dispatched in parallel with a concurrency cap. Runtime is driven by `runTeamLifecycle` and cancelled via `abortTeam`. Each teammate's runtime can be Claude, Codex, or an external CLI (ACP / OpenCode); external agents are spawned by the Rust process manager. `@<name>` mentions in workspace chat route through `dispatchTeamMention`.
 </TLDR>
 
 ## Use Cases

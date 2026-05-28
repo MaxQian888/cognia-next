@@ -8,9 +8,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { AlertTriangleIcon } from "lucide-react"
 import { toast } from "sonner"
-import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -30,6 +28,8 @@ import { ScrollShadowRow } from "../scroll-shadow-row"
 import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
 import { PluginComparisonSheet, PluginComparisonTrigger } from "../dialogs/plugin-comparison-sheet"
 import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
+import { PluginEmptyState } from "../_shared/plugin-empty-state"
+import { PluginErrorCard } from "../_shared/plugin-error-card"
 
 type Section = "all" | "featured" | "popular" | "recent" | "builtin"
 
@@ -95,20 +95,10 @@ export function PluginMarketplace() {
   }
   if (market.state.kind === "error") {
     return (
-      <Card className="p-4 border-destructive">
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertTriangleIcon className="size-4" />
-          <span className="text-sm">{t("error", { message: market.state.error })}</span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto"
-            onClick={() => void market.refresh()}
-          >
-            {t("retry")}
-          </Button>
-        </div>
-      </Card>
+      <PluginErrorCard
+        message={t("error", { message: market.state.error })}
+        onRetry={() => void market.refresh()}
+      />
     )
   }
 
@@ -172,7 +162,7 @@ export function PluginMarketplace() {
       </div>
 
       {sectionEntries.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">{t("emptySection")}</Card>
+        <PluginEmptyState hint={t("emptySection")} />
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

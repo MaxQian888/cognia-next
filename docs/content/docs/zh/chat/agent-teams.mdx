@@ -5,16 +5,9 @@ description: Lead + Teammate 团队的工作台、生命周期 runtime、外部 
 
 # Agent 团队
 
-Agent 团队（Agent Teams）允许把多个 AI 角色聚合成一个"团"，由一个 lead 协调、若干个 teammate 并行执行。本页是 agent-teams 子系统的深度剖析；关于团队在聊天侧如何被引用，请回看[聊天、角色、技能 & 团队](./chat-and-skills)。
+Agent 团队（Agent Teams）允许把多个 AI 角色聚合成一个"团"，由一个 lead 协调、若干个 teammate 并行执行。本页是 agent-teams 子系统的深度剖析；团队在聊天侧如何被引用见 [聊天、角色、技能 & 团队](./chat-and-skills)。
 
-<TLDR>
-团队 = lead + teammates + tasks + 执行报告。Lead 可走「计划审批」环节，
-teammates 以受限并发被并行派工。Runtime 通过 `runTeamLifecycle` 推进、
-`abortTeam` 撤销。每个 teammate 的 runtime 可选 Claude / Codex / 自定义
-external agent CLI（ACP / OpenCode），其中 external agent 由 Rust 端
-进程管理器拉起。`@<name>` 提及在 workspace chat 中走 `dispatchTeamMention`
-分派给目标 runtime 并流式回填消息。
-</TLDR>
+团队 = lead + teammates + tasks + 执行报告。Lead 可走"计划审批"环节，teammates 以受限并发被并行派工。Runtime 通过 `runTeamLifecycle` 推进、`abortTeam` 撤销。每个 teammate 的 runtime 可选 Claude / Codex / 自定义 external agent CLI（ACP / OpenCode），其中 external agent 由 Rust 端进程管理器拉起。`@<name>` 提及在 workspace chat 中走 `dispatchTeamMention` 分派给目标 runtime 并流式回填消息。
 
 ## 适用场景
 

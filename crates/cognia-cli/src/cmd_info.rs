@@ -6,21 +6,43 @@
 //! the embedded `cognia:api-version` custom section.
 
 use anyhow::{anyhow, Context, Result};
+use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
+use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::{
     b64_decode,
     signing::{fingerprint, verify_bundle},
+    ui::{style, RuntimeUi},
 };
 
 const API_VERSION_SECTION: &str = "cognia:api-version";
 
-pub fn run(bundle: PathBuf) -> Result<()> {
+/// `cognia plugin info` — inspect a built bundle.
+///
+/// Phase 2 surfaces:
+///   * `--json` ⇒ structured JSON with `schemaVersion: 1`.
+///   * `--detailed` ⇒ comfy-table file list + full signature breakdown.
+///   * default ⇒ compact human report: manifest summary, file count +
+///                 total size, one-line signature status.
+pub fn run(
+    bundle: PathBuf,
+    json: bool,
+    detailed: bool,
+    _ui: &mut RuntimeUi,
+) -> Result<()> {
     let bundle_bytes =
         std::fs::read(&bundle).with_context(|| format!("read {}", bundle.display()))?;
     let report = inspect(&bundle, &bundle_bytes)?;
-    print_human(&report);
+    if json {
+        let payload = report.to_json_payload();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else if detailed {
+        print_detailed(&report);
+    } else {
+        print_compact(&report);
+    }
     Ok(())
 }
 
@@ -34,9 +56,10 @@ pub struct BundleReport {
     pub wasm_api_version: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct EntryInfo {
     pub name: String,
+    #[serde(rename = "sizeBytes")]
     pub size_bytes: u64,
 }
 
@@ -50,6 +73,77 @@ pub enum SignatureStatus {
     Valid { public_key: String, fingerprint: String },
     /// `.sig` present but verification failed (mismatch / corrupt).
     Invalid { reason: String, public_key: Option<String> },
+}
+
+/// Wire shape for `--json`. Versioned so future changes are non-breaking.
+#[derive(Debug, Serialize)]
+pub struct InfoJsonPayload<'a> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    path: String,
+    #[serde(rename = "sizeBytes")]
+    size_bytes: u64,
+    manifest: &'a serde_json::Value,
+    files: &'a [EntryInfo],
+    signature: JsonSignature<'a>,
+    #[serde(rename = "wasmApiVersion", skip_serializing_if = "Option::is_none")]
+    wasm_api_version: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status")]
+pub enum JsonSignature<'a> {
+    #[serde(rename = "no-sidecar")]
+    NoSidecar,
+    #[serde(rename = "no-public-key")]
+    NoPublicKey,
+    #[serde(rename = "valid")]
+    Valid {
+        #[serde(rename = "publicKey")]
+        public_key: &'a str,
+        fingerprint: &'a str,
+    },
+    #[serde(rename = "invalid")]
+    Invalid {
+        reason: &'a str,
+        #[serde(rename = "publicKey", skip_serializing_if = "Option::is_none")]
+        public_key: Option<&'a str>,
+    },
+}
+
+impl BundleReport {
+    /// Project the report into the wire shape used by `--json`.
+    pub fn to_json_payload(&self) -> InfoJsonPayload<'_> {
+        let signature = match &self.signature {
+            SignatureStatus::NoSidecar => JsonSignature::NoSidecar,
+            SignatureStatus::NoPublicKey => JsonSignature::NoPublicKey,
+            SignatureStatus::Valid {
+                public_key,
+                fingerprint,
+            } => JsonSignature::Valid {
+                public_key,
+                fingerprint,
+            },
+            SignatureStatus::Invalid { reason, public_key } => JsonSignature::Invalid {
+                reason,
+                public_key: public_key.as_deref(),
+            },
+        };
+        InfoJsonPayload {
+            schema_version: 1,
+            path: self.path.display().to_string(),
+            size_bytes: self.size_bytes,
+            manifest: &self.manifest,
+            files: &self.files,
+            signature,
+            wasm_api_version: self.wasm_api_version.as_deref(),
+        }
+    }
+
+    /// Total size of all enumerated entries (excludes the zip overhead).
+    pub fn total_entry_bytes(&self) -> u64 {
+        self.files.iter().map(|f| f.size_bytes).sum()
+    }
 }
 
 pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<BundleReport> {
@@ -202,17 +296,66 @@ fn find_custom_section(wasm: &[u8], target_name: &str) -> Option<String> {
     }
 }
 
-fn print_human(report: &BundleReport) {
-    println!("Bundle: {}", report.path.display());
-    println!("Size:   {} bytes", report.size_bytes);
+/// Compact human report — default mode. Shows the manifest summary, a
+/// one-line file/size rollup, and a one-line signature verdict. Designed
+/// to fit in a terminal-height paging buffer for the common case.
+fn print_compact(report: &BundleReport) {
+    println!("Bundle: {}", style::bold(report.path.display().to_string()));
+    println!(
+        "Size:   {} bytes  ({} files, {} bytes inside)",
+        report.size_bytes,
+        report.files.len(),
+        report.total_entry_bytes()
+    );
     println!();
+    print_manifest_summary(&report.manifest);
+    if let Some(ver) = &report.wasm_api_version {
+        println!();
+        println!(
+            "WASM contract: cognia:api-version = {}",
+            style::bold(ver)
+        );
+    }
+    println!();
+    print_signature_line(&report.signature);
+}
 
-    let m = &report.manifest;
+/// Detailed human report — `--detailed`. Adds the full comfy-table file
+/// list and the multi-line signature breakdown.
+fn print_detailed(report: &BundleReport) {
+    print_compact(report);
+    println!();
+    println!("Files:");
+    let mut t = Table::new();
+    t.load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(["Path", "Size (bytes)"]);
+    for f in &report.files {
+        t.add_row([f.name.as_str(), &f.size_bytes.to_string()]);
+    }
+    println!("{t}");
+    println!();
+    print_signature_block(&report.signature);
+}
+
+fn print_manifest_summary(m: &serde_json::Value) {
     println!("Manifest");
-    println!("  id:          {}", m.get("id").and_then(|v| v.as_str()).unwrap_or("<missing>"));
-    println!("  name:        {}", m.get("name").and_then(|v| v.as_str()).unwrap_or("<missing>"));
-    println!("  version:     {}", m.get("version").and_then(|v| v.as_str()).unwrap_or("<missing>"));
-    println!("  type:        {}", m.get("type").and_then(|v| v.as_str()).unwrap_or("<missing>"));
+    println!(
+        "  id:          {}",
+        style::bold(m.get("id").and_then(|v| v.as_str()).unwrap_or("<missing>"))
+    );
+    println!(
+        "  name:        {}",
+        m.get("name").and_then(|v| v.as_str()).unwrap_or("<missing>")
+    );
+    println!(
+        "  version:     {}",
+        m.get("version").and_then(|v| v.as_str()).unwrap_or("<missing>")
+    );
+    println!(
+        "  type:        {}",
+        m.get("type").and_then(|v| v.as_str()).unwrap_or("<missing>")
+    );
     if let Some(desc) = m.get("description").and_then(|v| v.as_str()) {
         println!("  description: {desc}");
     }
@@ -230,38 +373,76 @@ fn print_human(report: &BundleReport) {
             .collect();
         println!("  permissions:  [{}]", perms.join(", "));
     }
-    println!();
+}
 
-    if let Some(ver) = &report.wasm_api_version {
-        println!("WASM contract: cognia:api-version = {ver}");
-        println!();
+fn print_signature_line(sig: &SignatureStatus) {
+    match sig {
+        SignatureStatus::NoSidecar => {
+            println!(
+                "Signature: {} unsigned (no `<bundle>.sig` next to the bundle)",
+                style::dim("·")
+            );
+        }
+        SignatureStatus::NoPublicKey => {
+            println!(
+                "Signature: {}{}",
+                style::warn_prefix(),
+                "`.sig` present but plugin.json lacks `author.publicKey`"
+            );
+        }
+        SignatureStatus::Valid { fingerprint, .. } => {
+            println!(
+                "Signature: {}valid  fingerprint:{}",
+                style::success_prefix(),
+                style::dim(format!(" {fingerprint}"))
+            );
+        }
+        SignatureStatus::Invalid { reason, .. } => {
+            println!(
+                "Signature: {}INVALID — {reason}",
+                style::error_prefix()
+            );
+        }
     }
+}
 
-    println!("Files ({}):", report.files.len());
-    for f in &report.files {
-        println!("  {:>10} bytes  {}", f.size_bytes, f.name);
-    }
-    println!();
-
+fn print_signature_block(sig: &SignatureStatus) {
     println!("Signature:");
-    match &report.signature {
+    match sig {
         SignatureStatus::NoSidecar => {
             println!("  no `<bundle>.sig` next to the bundle (unsigned)");
         }
         SignatureStatus::NoPublicKey => {
-            println!("  `.sig` present but plugin.json lacks `author.publicKey`");
-            println!("  → cannot verify; pass --public-key explicitly to `cognia plugin verify`");
+            println!(
+                "  {}`.sig` present but plugin.json lacks `author.publicKey`",
+                style::warn_prefix()
+            );
+            println!(
+                "  {}cognia plugin verify --public-key <base64>",
+                style::hint_prefix()
+            );
         }
-        SignatureStatus::Valid { public_key, fingerprint } => {
-            println!("  ✓ valid");
+        SignatureStatus::Valid {
+            public_key,
+            fingerprint,
+        } => {
+            println!("  {}{}", style::success_prefix(), style::ok("valid"));
             println!("  public key:  {public_key}");
-            println!("  fingerprint: {fingerprint}");
+            println!("  fingerprint: {}", style::dim(fingerprint));
         }
         SignatureStatus::Invalid { reason, public_key } => {
-            println!("  ✗ INVALID — {reason}");
+            println!(
+                "  {}{} — {reason}",
+                style::error_prefix(),
+                style::error("INVALID")
+            );
             if let Some(pk) = public_key {
                 println!("  manifest public key was: {pk}");
             }
+            println!(
+                "  {}re-sign the bundle with the matching private key, or pass --public-key explicitly",
+                style::hint_prefix()
+            );
         }
     }
 }
@@ -412,5 +593,77 @@ mod tests {
     #[test]
     fn find_custom_section_returns_none_on_non_wasm() {
         assert!(find_custom_section(b"not wasm at all", "cognia:api-version").is_none());
+    }
+
+    #[test]
+    fn json_payload_carries_schema_version_and_signature_status() {
+        let manifest =
+            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
+        let bundle = make_bundle(manifest, &[("d.js", b"x")]);
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("p.zip");
+        std::fs::write(&path, &bundle).unwrap();
+        let report = inspect(&path, &bundle).unwrap();
+        let payload = report.to_json_payload();
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"schemaVersion\":1"), "got: {s}");
+        // No `.sig` file beside the bundle → status "no-sidecar".
+        assert!(s.contains("\"status\":\"no-sidecar\""), "got: {s}");
+        assert!(s.contains("\"sizeBytes\""), "got: {s}");
+    }
+
+    #[test]
+    fn json_payload_emits_valid_signature_block() {
+        let kp = Keypair::generate();
+        let manifest = format!(
+            r#"{{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js","author":{{"publicKey":"{}"}}}}"#,
+            kp.public_base64()
+        );
+        let bundle = make_bundle(&manifest, &[("d.js", b"x")]);
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("p.zip");
+        std::fs::write(&path, &bundle).unwrap();
+        let sig = sign_bundle(&kp.signing_key, &bundle);
+        std::fs::write(tmp.path().join("p.zip.sig"), &sig).unwrap();
+        let report = inspect(&path, &bundle).unwrap();
+        let payload = report.to_json_payload();
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"status\":\"valid\""), "got: {s}");
+        assert!(s.contains("\"publicKey\""), "got: {s}");
+        assert!(s.contains("\"fingerprint\""), "got: {s}");
+    }
+
+    #[test]
+    fn json_payload_emits_invalid_signature_block_with_reason() {
+        let kp = Keypair::generate();
+        let manifest = format!(
+            r#"{{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js","author":{{"publicKey":"{}"}}}}"#,
+            kp.public_base64()
+        );
+        let bundle = make_bundle(&manifest, &[("d.js", b"x")]);
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("p.zip");
+        std::fs::write(&path, &bundle).unwrap();
+        let bad_sig = sign_bundle(&kp.signing_key, b"different");
+        std::fs::write(tmp.path().join("p.zip.sig"), &bad_sig).unwrap();
+        let report = inspect(&path, &bundle).unwrap();
+        let payload = report.to_json_payload();
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"status\":\"invalid\""), "got: {s}");
+        assert!(s.contains("\"reason\""), "got: {s}");
+    }
+
+    #[test]
+    fn total_entry_bytes_sums_file_sizes() {
+        let manifest =
+            r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"d.js"}"#;
+        let bundle = make_bundle(manifest, &[("a.js", b"1234"), ("b.js", b"56")]);
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("p.zip");
+        std::fs::write(&path, &bundle).unwrap();
+        let report = inspect(&path, &bundle).unwrap();
+        // plugin.json (manifest len) + 4 + 2.
+        let m_size = manifest.as_bytes().len() as u64;
+        assert_eq!(report.total_entry_bytes(), m_size + 4 + 2);
     }
 }

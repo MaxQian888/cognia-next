@@ -26,6 +26,9 @@ import {
 } from "@/lib/db/skills"
 import type { ImportStaging } from "@/stores/skills"
 import { loggers } from "@/lib/logging"
+import { isTauri } from "@/lib/tauri"
+import { useSkillSync } from "@/hooks/skills"
+import { getSkill } from "@/lib/db/skills"
 
 interface Props {
   staging: ImportStaging
@@ -35,8 +38,14 @@ interface Props {
 
 export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
   const t = useTranslations("skills.import")
+  const tBundle = useTranslations("skills.import.bundle")
   const [strategy, setStrategy] = useState<ImportConflictStrategy>("skip")
   const [running, setRunning] = useState(false)
+  const sync = useSkillSync()
+
+  const totalResources = staging.drafts.reduce((acc, d) => acc + (d.resources?.length ?? 0), 0)
+  const hasResources = totalResources > 0
+  const bundleFlavor = staging.flavor
 
   const apply = async () => {
     setRunning(true)
@@ -49,6 +58,12 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
         allowedTools: d.allowedTools,
         category: d.category,
         source: "imported",
+        // Forward bundle-only fields so `bulkImportSkills` can dispatch to
+        // the canonical-id upsert path and persist resources.
+        canonicalId: d.canonicalId,
+        resources: d.resources,
+        validationErrors: d.validationErrors,
+        nativeDirectory: d.nativeDirectory,
       }))
       const report = await bulkImportSkills(drafts, strategy)
       loggers.skills.info("bulk import ok", {
@@ -58,7 +73,35 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
         updated: report.updated,
         skipped: report.skipped,
         errored: report.errored.length,
+        flavor: bundleFlavor,
+        bundleResources: totalResources,
       })
+
+      // Auto-mirror to disk for Tauri bundle imports. Skipping for web /
+      // mobile keeps the resources in Dexie as an inline bundle; the
+      // mobile-sync orchestrator picks them up on the next sync to a
+      // Tauri device and materialises then.
+      if (isTauri() && hasResources && (report.created > 0 || report.updated > 0)) {
+        const allSkills = await Promise.all(
+          drafts
+            .filter((d) => d.canonicalId)
+            .map(async (d) => {
+              if (!d.canonicalId) return undefined
+              // The upsert helper keyed off canonicalId stores the row at
+              // a stable id, but the import dialog doesn't see that id —
+              // re-look up by canonicalId to fire the per-skill push.
+              const { listSkills } = await import("@/lib/db/skills")
+              const all = await listSkills()
+              return all.find((s) => s.canonicalId === d.canonicalId)?.id
+            })
+        )
+        const targetIds = allSkills.filter((id): id is string => typeof id === "string")
+        for (const id of targetIds) {
+          if (!(await getSkill(id))) continue
+          await sync.pushOne(id)
+        }
+      }
+
       onComplete(report)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -81,9 +124,31 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
 
         <div className="space-y-3">
           <Card className="p-3">
-            <p className="mb-1 text-xs font-medium">
-              {t("stagedCount", { count: staging.drafts.length })}
-            </p>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-xs font-medium">
+                {t("stagedCount", { count: staging.drafts.length })}
+              </p>
+              <div className="flex items-center gap-1">
+                {bundleFlavor && (
+                  <Badge
+                    variant="outline"
+                    className="h-4 text-[9px]"
+                    data-testid="skill-import-dialog-flavor"
+                  >
+                    {bundleFlavor === "codex" ? tBundle("flavorCodex") : tBundle("flavorAnthropic")}
+                  </Badge>
+                )}
+                {hasResources && (
+                  <Badge
+                    variant="secondary"
+                    className="h-4 text-[9px]"
+                    data-testid="skill-import-dialog-resources"
+                  >
+                    {tBundle("resourcesCount", { count: totalResources })}
+                  </Badge>
+                )}
+              </div>
+            </div>
             <ScrollArea className="h-40">
               <div className="space-y-1.5">
                 {staging.drafts.map((d, i) => (

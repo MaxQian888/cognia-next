@@ -32,6 +32,54 @@ export interface NativeTransportDetailSettings {
   flushInterval: number
 }
 
+export interface AgentTraceTransportDetailSettings {
+  /**
+   * Persist `inputPreview` / `outputPreview` payloads on spans. Off by
+   * default — when on, the transport runs each preview through
+   * `lib/twin/ingest/redact.ts:hasNoLeakingPii` and drops fields that leak
+   * PII before they hit Dexie.
+   */
+  captureContent: boolean
+  /** Per-field byte cap when content capture is on. */
+  maxPreviewBytes: number
+  /** Days of retention before the periodic prune drops a span. */
+  retentionDays: number
+}
+
+/**
+ * OTLP/HTTP exporter — pushes finished agent-trace spans to an external
+ * OTel-compatible backend (Grafana Cloud / Tempo / Honeycomb / Datadog
+ * OTLP / a self-hosted OTel Collector). When enabled with a non-empty
+ * endpoint, spans dispatched through the agent-trace writer are also
+ * POSTed there in JSON form.
+ */
+export interface OtlpExporterPreset {
+  kind: "off" | "grafana-cloud" | "self-hosted" | "custom"
+}
+
+export interface AgentTraceOtlpSettings {
+  /** Preset shape used to pre-fill / validate the endpoint + headers. */
+  preset: OtlpExporterPreset["kind"]
+  /** Full URL of the OTLP traces endpoint. Empty disables. */
+  endpoint: string
+  /** Headers map sent on every batch. Auth token typically lives here. */
+  headers: Record<string, string>
+  /** Resource attribute `service.name`. */
+  serviceName: string
+  /** Optional `deployment.environment.name`. */
+  environment: string
+  /**
+   * Grafana Cloud preset credentials. Stored separately from `headers` so
+   * the user doesn't have to base64-encode them by hand — `bootstrap.ts`
+   * computes the `Authorization: Basic ...` header at apply time when
+   * `preset === "grafana-cloud"`. Empty values short-circuit (no header).
+   */
+  grafanaCloud: {
+    instanceId: string
+    apiToken: string
+  }
+}
+
 export interface LoggingTransportSettings {
   console: boolean
   indexedDB: boolean
@@ -39,10 +87,14 @@ export interface LoggingTransportSettings {
   remote: boolean
   langfuse: boolean
   opentelemetry: boolean
+  agentTrace: boolean
+  agentTraceOtlp: boolean
   nativeConfig: NativeTransportDetailSettings
   remoteConfig: RemoteTransportDetailSettings
   langfuseConfig: LangfuseTransportDetailSettings
   opentelemetryConfig: OpenTelemetryTransportDetailSettings
+  agentTraceConfig: AgentTraceTransportDetailSettings
+  agentTraceOtlpConfig: AgentTraceOtlpSettings
 }
 
 export interface LoggingRetentionSettings {

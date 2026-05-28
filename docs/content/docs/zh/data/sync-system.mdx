@@ -5,26 +5,6 @@ description: 桌面 ↔ 手机的 sync-down 协议 —— 手机是桌面 Dexie 
 
 # 同步系统
 
-<Status variant="beta" />
-
-<TLDR>
-  桌面是 source of truth，手机是只读 cache。手机通过 `POST /api/v1/_rpc/sync_pull` 拉 delta， 桌面
-  Rust 转发给 webview，webview 查 Dexie 返回 `SyncDelta`，回到 Rust 再回到手机。 9 张 mirrorable
-  表，每表独立 cursor，三种触发方式（手动 / foreground / WS 事件驱动）。 V1 不带 tombstone ——
-  删除依赖 V2 的 `deletedAt` 索引。
-</TLDR>
-
-<StatGrid>
-  <Stat
-    label="可同步表"
-    value="9"
-    hint="characters · skills · sessions · messages · workflows · twinProfile · plugins · adapterInstances · settings"
-  />
-  <Stat label="触发方式" value="3" hint="manual · foreground · event-driven" />
-  <Stat label="messages 上限" value="200" hint="单次拉最多最新 200 行（chronological）" />
-  <Stat label="V1 tombstone" value="否" hint="V2 加 deletedAt 索引" />
-</StatGrid>
-
 ## 适用场景
 
 | 场景                  | 表与策略                                                                           |

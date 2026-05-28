@@ -314,6 +314,33 @@ export interface InstallSkillResponse {
   writtenFiles: string[]
 }
 
+export type SkillsTarget = "cognia" | "claude" | "codex"
+
+/**
+ * Bundle-import-aware install request. Wraps the legacy single-target
+ * payload with a `targets` list (cognia + claude + codex toggleable) and
+ * a `trashBeforeClean` flag that moves the prior cognia copy into
+ * `<appData>/cognia/skills/.trash/` before overwriting.
+ */
+export interface InstallSkillMirroredRequest extends InstallSkillRequest {
+  targets: SkillsTarget[]
+  trashBeforeClean: boolean
+}
+
+export interface MirrorTargetOutcome {
+  target: SkillsTarget
+  directory: string
+  writtenFiles: string[]
+  /** Set when a target was requested but degraded (e.g. no home dir). */
+  note?: string | null
+}
+
+export interface InstallSkillMirroredResponse {
+  targets: MirrorTargetOutcome[]
+  /** Path of the trashed prior cognia copy, when applicable. */
+  trashedFrom?: string | null
+}
+
 export interface SkillScanIssue {
   severity: "low" | "medium" | "high"
   kind: string
@@ -329,10 +356,32 @@ export async function skillsScanDir(path: string): Promise<NativeSkill[]> {
   return transport.call<NativeSkill[]>("skills_scan_dir", { path })
 }
 
+export async function skillsScanCodex(): Promise<NativeSkill[]> {
+  return transport.call<NativeSkill[]>("skills_scan_codex")
+}
+
+export async function skillsMoveToTrash(dirName: string): Promise<string> {
+  return transport.call<string>("skills_move_to_trash", { dirName })
+}
+
+export async function skillsListTrash(): Promise<string[]> {
+  return transport.call<string[]>("skills_list_trash")
+}
+
+export async function skillsEmptyTrash(): Promise<number> {
+  return transport.call<number>("skills_empty_trash")
+}
+
 export async function skillsInstallNative(
   request: InstallSkillRequest
 ): Promise<InstallSkillResponse> {
   return transport.call<InstallSkillResponse>("skills_install_native", { request })
+}
+
+export async function skillsInstallMirrored(
+  request: InstallSkillMirroredRequest
+): Promise<InstallSkillMirroredResponse> {
+  return transport.call<InstallSkillMirroredResponse>("skills_install_mirrored", { request })
 }
 
 export async function skillsUninstallNative(

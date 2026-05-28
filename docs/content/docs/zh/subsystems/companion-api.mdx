@@ -4,23 +4,6 @@ description: 桌面上的 axum HTTP/WS 服务器——QR-code 配对、device JW
 ---
 
 # Companion API
-
-<Status variant="beta">beta · M2 完成</Status>
-
-<TLDR>
-  Tauri 桌面端启动一个 axum HTTPS 服务（默认端口 7890），把精选过的 Tauri 命令子集
-  通过 `POST /api/v1/_rpc/<name>` 暴露给配对过的移动客户端。配对走"扫 QR → 粘贴 pair JWT
-  → 服务端发 device JWT"的链路；事件经 `GET /ws/v1/events` 实时推送；同 LAN 通过 mDNS
-  发现，远程通过 Cloudflared 隧道。
-</TLDR>
-
-<StatGrid>
-  <Stat label="HTTP 路由" value="3" hint="/auth/pair · /auth/pair/issue · /_rpc/:name" />
-  <Stat label="WS 端点" value="1" hint="/ws/v1/events" />
-  <Stat label="允许的 RPC 命令" value="~40" hint="手写 allowlist" />
-  <Stat label="默认端口" value="7890" hint="可在 Settings 调整" />
-</StatGrid>
-
 Companion API 是 cognia-next 的 "Server" 化分支——桌面变服务器，移动设备变客户端。
 设计依据三条 ADR：
 
@@ -319,7 +302,7 @@ mobile 客户端做证书 pinning——所以"自签"对手机不是问题，但
 <Cards>
   <Card
     title="移动架构"
-    href="./mobile-architecture"
+    href="../ui/mobile-architecture"
     description="server-client 视图：Capacitor 壳 + LAN/tunnel + JWT 配对。"
   />
   <Card

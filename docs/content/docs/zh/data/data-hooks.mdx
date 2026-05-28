@@ -6,15 +6,6 @@ description: DataAdapter 抽象——让聊天组件以同一份代码跑在 Dex
 # 数据 Hooks
 
 `lib/data-hooks/` 是聊天 UI 与持久层之间的"插槽"。它把组件原本直连 Dexie 的写法（`useLiveQuery(() => listCharacters())`）抽到一个名为 `DataAdapter` 的接口背后，由 `<DataAdapterProvider adapter={...}>` 注入。桌面注入 Dexie 实现，移动端 PWA 之后将注入 WebSocket 桥实现 —— 同一份组件代码两个形态都能跑。
-
-<TLDR>
-  `types.ts` 定义 `DataAdapter` 接口（4 个反应式 `use*` 读 + 4 个一次性 mutation）。`context.tsx` 是
-  React Context + 一组便捷 hooks（`useCharacters / useCharacter / useSkillsByIds / usePresets`
-  等），消费方只需要这些 hooks，不感知底下是谁。`dexie-adapter.tsx` 是桌面端的产线实现，直接复用
-  `lib/db/*` 的现成函数，反应式读用 `dexie-react-hooks` 的 `useLiveQuery`。所有 hooks 都做 SSR
-  guard（`typeof window !== "undefined"`），可以在 `output: "export"` 下安全使用。
-</TLDR>
-
 ## 设计动机
 
 cognia-next 的桌面端把数据放 Dexie（IndexedDB），聊天组件直接 `useLiveQuery(() => listCharacters())` 读得到。但移动端 PWA 不能复制 Dexie —— 数据要保留在桌面机器上，手机通过 LAN/tunnel 走 WebSocket 拿。同一个 `ChatHeader / Composer / MessageRenderer` 不该有两份代码。
@@ -234,8 +225,8 @@ export function ChatHeader({ sessionId }: { sessionId: string }) {
     href="./backup-and-data"
     description="DataAdapter 影响不到备份层 —— 备份直读 Dexie"
   />
-  <Card title="架构" href="./architecture" description="Provider 链中 DataAdapter 的相对位置" />
-  <Card title="聊天与技能" href="./chat-and-skills" description="DataAdapter 的主要消费方" />
+  <Card title="架构" href="../core/architecture" description="Provider 链中 DataAdapter 的相对位置" />
+  <Card title="聊天与技能" href="../chat/chat-and-skills" description="DataAdapter 的主要消费方" />
 </Cards>
 
 ## 在哪里入手

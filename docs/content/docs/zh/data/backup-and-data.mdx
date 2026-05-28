@@ -4,23 +4,6 @@ description: Schema v3 备份格式（AES-GCM 加密）、定时自动备份、2
 ---
 
 # 备份 & 数据传输
-
-<Status variant="stable">schema v3</Status>
-
-<TLDR>
-  AES-GCM 加密、含 SHA-256 完整性校验的备份，包格式为 **v3**。
-  每设备自动密钥（无需密码）或用户密码（可移植）。 按域传输覆盖 20
-  个域（技能、MCP、预设、角色、团队、主题、画板、A2UI、外部 agent、插件……）， 只搬一个切片。ChatGPT
-  / Claude / Gemini 三个导入器把外部导出映射到 Cognia 的聊天形态。
-</TLDR>
-
-<StatGrid>
-  <Stat label="Schema" value="v3" hint="v1 导入时迁移" />
-  <Stat label="KDF 迭代" value="60 万" hint="PBKDF2-SHA256" />
-  <Stat label="按域传输" value="20" hint="见下表" />
-  <Stat label="第三方导入" value="3" hint="ChatGPT · Claude · Gemini" />
-</StatGrid>
-
 Cognia 在 `lib/data/` 下提供完整的备份 / 还原 / 传输系统。当前包格式是 **v3**（`BackupPackageV3`）；v1 文件经由 `migrateEnvelope` 边界导入，老用户依然可用。
 
 完整设计原由参见 [ADR-0001](../adr/0001-backup-schema-v3)。
@@ -400,7 +383,7 @@ interface DomainExportFile {
 ## 下一篇
 
 <Cards>
-  <Card title="存储" href="./storage" description="底层 Dexie schema v26" />
+  <Card title="存储" href="./storage" description="底层 Dexie schema。" />
   <Card title="导出系统" href="./export-system" description="单会话导出与 HTML 美化" />
   <Card title="数据 hooks" href="./data-hooks" description="dexie-react-hooks 的实战模式" />
   <Card

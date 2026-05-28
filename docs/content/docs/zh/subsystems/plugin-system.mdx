@@ -4,22 +4,6 @@ description: Cognia 的插件运行时 —— 清单、权限、API 命名空间
 ---
 
 # 插件系统
-
-<Status variant="experimental" />
-
-<TLDR>
-  每插件一个沙箱化 Web Worker、声明式 + 用户同意的权限、版本化 API 的 RPC 桥、丰富的扩展点矩阵，
-  以及供分发的市场。插件以签名的 `.cognia-plugin` 归档发布，与宿主 DOM 隔离运行。 共 15 个 API
-  命名空间、上百条扩展点合同（contracts），并能注册工作流节点、连接器适配器。
-</TLDR>
-
-<StatGrid>
-  <Stat label="Dexie 表" value="5" hint="v15 引入，沿用至 v26" />
-  <Stat label="API 命名空间" value="15" hint="见下表" />
-  <Stat label="清单版本" value="v1" hint="Zod 校验" />
-  <Stat label="沙箱" value="Worker" hint="postMessage RPC 桥" />
-</StatGrid>
-
 Cognia 提供沙箱化的插件运行时，让第三方代码扩展应用而不必 fork。插件可以：
 
 - 在面板、聊天、画布、状态栏等扩展点注入 UI。
@@ -59,7 +43,7 @@ lib/db/
 components/plugins/        # 设置 UI + 市场
 ```
 
-5 张插件表在 [Dexie schema v15 引入](../data/storage#v15-插件表)，并在后续版本中无修改地保留至 v26。
+5 张插件表在 [Dexie schema v15 引入](../data/storage)，并在后续版本中无修改地保留。
 
 ## 清单格式
 
@@ -313,8 +297,8 @@ stateDiagram-v2
 ## 下一篇
 
 <Cards>
-  <Card title="设置 UI" href="./settings-ui" description="插件设置入口、扩展点的可视形态" />
-  <Card title="技能系统" href="./skills-system" description="插件可贡献内置技能与资源" />
+  <Card title="设置 UI" href="../ui/settings-ui" description="插件设置入口、扩展点的可视形态" />
+  <Card title="技能系统" href="../chat/skills-system" description="插件可贡献内置技能与资源" />
   <Card title="可视化工作流" href="./visual-workflows" description="插件如何贡献 workflow 节点" />
   <Card title="平台连接器" href="./platform-connectors" description="插件如何贡献连接器适配器" />
   <Card

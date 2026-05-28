@@ -1,26 +1,11 @@
 ---
-title: 存储（Dexie schema v26）
-description: 完整 IndexedDB schema、v1–v26 按版本演进、40+ 张表的索引清单与新增表 / 迁移流程。
+title: 存储（Dexie schema）
+description: 完整 IndexedDB schema、按版本演进、表索引清单与新增表 / 迁移流程。
 ---
 
-# 存储（Dexie schema v26）
+# 存储（Dexie schema）
 
-<Status variant="stable">v26</Status>
-
-<TLDR>
-  所有浏览器侧状态通过 Dexie 存在 IndexedDB，库名 `cognia-claude`。 Schema 版本只增不改 ——
-  每次发版加新 `.version(n)` 块，旧的永不修改。 当前版本 **v26**，共 40+
-  张表；本页按版本逐一记录索引列表与迁移意图。
-</TLDR>
-
-<StatGrid>
-  <Stat label="Schema 版本" value="26" hint="2024–2026" />
-  <Stat label="表数" value="40+" hint="跨所有版本累计" />
-  <Stat label="数据库名" value="cognia-claude" hint="历史值，保持不变" />
-  <Stat label="单例表" value="1" hint="settings 表" />
-</StatGrid>
-
-Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v26**。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
+Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v54**。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
 
 ## 数据库标识
 
@@ -197,6 +182,7 @@ timeline
   v24  : + sessionUsage
   v25  : + mobileOutboundQueue
   v26  : + chatDrafts
+  v27+ : ocr / goal / agent-team / overlay / share-links / ... (见 schema.ts)
 ```
 
 `lib/db/schema.ts` 中每个 `.version(n)` 块的语义：
@@ -229,6 +215,7 @@ timeline
 | **v24** | 每消息用量 + 成本     | + `sessionUsage`（由 SDK adapter 在每次 `result` 事件写入）。                                                                                                         |
 | **v25** | 移动出站队列          | + `mobileOutboundQueue`（手机端写操作离线队列，最多重试 5 次）。                                                                                                      |
 | **v26** | 聊天草稿              | + `chatDrafts`（每会话未发送的 Composer 内容）。                                                                                                                      |
+| **v27 – v54** | 后续追加              | OCR 结果、Goal 跟踪、Agent Team 持久化、角色 pack overlay、GitHub Delivery 状态、external agent 配置、移动同步游标、性能采样、终端会话、WeChat/WeCom 适配、公共分享链等。具体差异以 `lib/db/schema.ts` 为准。 |
 
 <Callout type="info" title="幂等升级">
   每个版本都幂等 —— 打开旧库会自动按顺序升级到最新版本。Dexie 按顺序应用。 **永远不要修改之前的
@@ -392,18 +379,18 @@ pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expir
 <Cards>
   <Card title="备份 & 数据传输" href="./backup-and-data" description="基于这些表构建备份载荷" />
   <Card title="数据 hooks" href="./data-hooks" description="dexie-react-hooks 的实战模式" />
-  <Card title="插件系统" href="./plugin-system" description="使用 v15 插件 5 张表" />
-  <Card title="员工数字孪生" href="./employee-twin" description="使用 v14 孪生 5 张表" />
+  <Card title="插件系统" href="../subsystems/plugin-system" description="使用 v15 插件 5 张表" />
+  <Card title="员工数字孪生" href="../subsystems/employee-twin" description="使用 v14 孪生 5 张表" />
   <Card
     title="平台连接器"
-    href="./platform-connectors"
+    href="../subsystems/platform-connectors"
     description="使用 v18 / v19 / v21 连接器 8 张表"
   />
-  <Card title="可视化工作流" href="./visual-workflows" description="使用 v22 工作流 4 张表" />
+  <Card title="可视化工作流" href="../subsystems/visual-workflows" description="使用 v22 工作流 4 张表" />
   <Card
     title="External Bridge"
-    href="./external-bridge"
+    href="../subsystems/external-bridge"
     description="使用 v17 Wiki + 审计 4 张表"
   />
-  <Card title="移动端架构" href="./mobile-architecture" description="使用 v23 / v25 移动 2 张表" />
+  <Card title="移动端架构" href="../ui/mobile-architecture" description="使用 v23 / v25 移动 2 张表" />
 </Cards>

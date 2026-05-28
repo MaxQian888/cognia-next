@@ -1,18 +1,11 @@
 ---
 title: 聊天、角色、技能 & 团队
-description: 会话、消息、角色、技能、团队、agent 模式、斜杠命令、MCP 服务器如何组合成聊天工作台。
+description: 会话、消息、角色、技能、团队、Agent Mode、斜杠命令、MCP 服务器如何组合成聊天工作台。
 ---
 
 # 聊天、角色、技能 & 团队
 
-<Status variant="stable">Stable</Status>
-
-<TLDR>
-  聊天工作台是 Cognia 最大的用户面。会话 / 消息 / 角色 / 技能 / 团队 / MCP
-  服务器六个概念可组合；发送时 `resolveSendOptions` 把所有层（角色 + Agent Mode + 技能 + A2UI + 孪生
-  + 路由）压成一份 sidecar payload。 斜杠命令、Agent Mode、Provider Routing Engine
-  是新加入的三条编排轴。
-</TLDR>
+聊天工作台是 Cognia 最大的用户面，围绕六个可组合概念构建。发送时 `resolveSendOptions` 把所有层（角色 + Agent Mode + 技能 + A2UI + 孪生 + 路由）压成一份 sidecar payload。
 
 ## 概念速览
 
@@ -418,24 +411,12 @@ HTML 形式使用 `lib/themes/` 渲染当前主题；用户也可以加载自定
 ## 相关
 
 <Cards>
-  <Card
-    title="Sidecar & 多供应商 SDK"
-    href="./sidecar-and-claude-sdk"
-    description="处理 claude_send 的 Node 主机"
-  />
-  <Card
-    title="技能系统"
-    href="./skills-system"
-    description="技能 lifecycle、market、sync 的深度细节"
-  />
-  <Card
-    title="Agent Teams"
-    href="./agent-teams"
-    description="团队 orchestration / mention / streamer"
-  />
-  <Card title="斜杠命令" href="./slash-commands" description="统一 registry 与三类来源" />
-  <Card title="Provider 系统" href="./provider-system" description="alias 解析 + fallback chain" />
-  <Card title="员工数字孪生" href="./employee-twin" description="最深的角色 / 发送时定制层" />
-  <Card title="插件系统" href="./plugin-system" description="插件如何扩展技能 / 角色 / MCP" />
-  <Card title="存储" href="./storage" description="支撑聊天 / 角色 / 技能 / 团队的 Dexie 表" />
+  <Card title="Sidecar & Claude Agent SDK" href="../core/sidecar-and-claude-sdk" description="处理 claude_send 的 Node 主机。" />
+  <Card title="技能系统" href="./skills-system" description="技能生命周期、market、sync 细节。" />
+  <Card title="Agent Teams" href="./agent-teams" description="团队 orchestration / mention / streamer。" />
+  <Card title="斜杠命令" href="./slash-commands" description="统一 registry 与三类来源。" />
+  <Card title="Provider 系统" href="./provider-system" description="alias 解析 + fallback chain。" />
+  <Card title="员工数字孪生" href="../subsystems/employee-twin" description="最深的角色 / 发送时定制层。" />
+  <Card title="插件系统" href="../subsystems/plugin-system" description="插件如何扩展技能 / 角色 / MCP。" />
+  <Card title="存储" href="../data/storage" description="支撑聊天 / 角色 / 技能 / 团队的 Dexie 表。" />
 </Cards>

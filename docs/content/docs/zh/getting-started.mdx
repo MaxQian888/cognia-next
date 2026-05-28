@@ -5,30 +5,22 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
 
 # 快速开始
 
-本页带你从一份新鲜 clone 走到一个能跑的 Web 开发服务器**和**一个能弹出窗口的 Tauri 桌面应用。首次运行约需 15 分钟；之后只需几秒。
-
-<TLDR>
-  - **三个 workspace**：根包（Next.js + Tauri
-  前端）、`docs/`（Fumadocs）、`mobile/`（Capacitor）。一份 lockfile。 - **Node 20+ / pnpm 10.30.x /
-  Rust 1.77.2+** 是硬要求。 - **凭证有两条路**：API key（`.env.local` 或 keyring）或 Claude Pro/Max
-  OAuth（订阅设置面板内）。 - **第三方依赖**：Node sidecar 有独立 `pnpm install`；首次构建需要
-  `docs:dev` 跑一次以生成 `.source/`。
-</TLDR>
+从全新 clone 到能跑的 Web 开发服务器**和**一个能弹出窗口的 Tauri 桌面应用。首次构建约 15 分钟，之后只需几秒。
 
 ## 前置要求
 
 | 工具             | 版本       | 用途                                                                |
 | ---------------- | ---------- | ------------------------------------------------------------------- |
 | **Node.js**      | ≥ 20.x     | Next.js 16 / React 19 运行时                                        |
-| **pnpm**         | ≥ 10.30.x  | `package.json` 锁定 `pnpm@10.30.3`，整个 monorepo 共用一个 lockfile |
-| **Rust**         | ≥ 1.77.2   | Tauri 2.9 + `cognia-server` headless 二进制                         |
-| **C/C++ 工具链** | 因平台而异 | Tauri 编译原生扩展（如 sqlite-vec、`mdns-sd`、`ring`）需要          |
+| **pnpm**         | 10.x       | 整个 monorepo 单一 lockfile                                         |
+| **Rust**         | ≥ 1.84.1   | Tauri 2.11 + 传递依赖（`ocr-paddle` 抬高 MSRV）                     |
+| **C/C++ 工具链** | 因平台而异 | 编译原生依赖（sqlite-vec、webrtc-rs、wasmtime 等）                  |
 
 平台特定说明：
 
 <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
   <Tab value="Windows">
-    安装 **Visual Studio Build Tools**（包含"C++ 桌面开发"工作负载）。**WebView2 Runtime** 在 Windows 11 上已自带；Windows 10 请从 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
+    安装 **Visual Studio Build Tools**（含 "C++ 桌面开发" 工作负载）。**WebView2 Runtime** 在 Windows 11 上已自带；Windows 10 请从 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) 安装。
   </Tab>
   <Tab value="macOS">
     安装 Xcode 命令行工具：
@@ -37,11 +29,11 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
     xcode-select --install
     ```
 
-    Apple Silicon 与 Intel 都不需要其他设置。
+    Apple Silicon 与 Intel 都无需额外设置。
 
   </Tab>
   <Tab value="Linux">
-    安装 GTK / WebKitGTK / libsoup，按发行版参见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)。
+    按发行版安装 GTK / WebKitGTK / libsoup，参见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)。
 
     Ubuntu / Debian：
 
@@ -57,22 +49,10 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
 
 ```bash
 node --version    # v20.x 或更新
-pnpm --version    # 10.30.x 或更新
-rustc --version   # 1.77.2 或更新
+pnpm --version    # 10.x
+rustc --version   # 1.84.1 或更新
 cargo --version
 ```
-
-## Workspace 拓扑
-
-Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加上根包总共三个：
-
-| 包       | 路径      | 端口 | 角色                                                                                     |
-| -------- | --------- | ---- | ---------------------------------------------------------------------------------------- |
-| 根包     | `/`       | 3000 | Next.js 16 + Tauri 前端（`output: "export"`）                                            |
-| 文档站点 | `docs/`   | 3001 | Fumadocs（全功能 server 模式）                                                           |
-| 移动壳   | `mobile/` | -    | Capacitor 7 包装器，用 iOS/Android 项目配置（详见 [移动架构](./ui/mobile-architecture)） |
-
-根 `pnpm-lock.yaml` 是唯一锁文件——**所有 `pnpm install` 都从仓库根目录跑**。
 
 ## Clone 与安装
 
@@ -81,7 +61,7 @@ Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加
     ### 克隆仓库
 
     ```bash
-    git clone https://github.com/MaxQian888/cognia-next.git
+    git clone https://github.com/AstroAir/cognia-next.git
     cd cognia-next
     ```
 
@@ -93,31 +73,23 @@ Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加
     pnpm install
     ```
 
-    一次性安装**三个包**：根包、`docs/`、`mobile/`。它们共享根目录 `pnpm-lock.yaml`。
+    安装所有 workspace 成员：根包（`cognia-next`）、`docs/`、`mobile/`、`plugin-sdk/typescript/`。仓库根目录唯一 `pnpm-lock.yaml`。
 
   </Step>
   <Step>
     ### 隐式步骤
 
-    首次安装还会执行：
-
-    - `prepare` 脚本 → 安装 Husky git hooks（commitlint 校验 commit-msg、lint-staged 处理 pre-commit）。
-    - `predev` / `prebuild` → `node scripts/copy-monaco-assets.mjs`，把 Monaco 编辑器资源拷贝到 `public/`。
+    `prepare` 接上 Husky 钩子（commitlint + lint-staged）；`predev` / `prebuild` 把 Monaco 资源拷到 `public/`，并构建 VS Code sidecar。
 
   </Step>
   <Step>
     ### （可选）安装 sidecar 依赖
 
-    Node sidecar 位于 `sidecar/`，**不在** workspace 内，因为它会作为 Tauri 资源打包。
-    如需直接调试 sidecar，请单独安装其依赖：
+    Node sidecar 位于 `sidecar/`，**不在** workspace 内（独立 lockfile，作为 Tauri 资源打包）：
 
     ```bash
-    cd sidecar
-    pnpm install
-    cd ..
+    pnpm sidecar:install
     ```
-
-    完整协议详见 [Sidecar & Claude SDK](./core/sidecar-and-claude-sdk)。
 
   </Step>
 </Steps>
@@ -128,17 +100,13 @@ Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加
 pnpm dev
 ```
 
-在 [http://localhost:3000](http://localhost:3000) 启动 Next.js 开发服务器。Web 模式适合：
+在 [http://localhost:3000](http://localhost:3000) 启动 Next.js 开发服务器。适合：
 
-- 与 Tauri API 无关的 UI 开发。
+- 不依赖 Tauri API 的 UI 开发。
 - 写测试。
 - 快速迭代，不必承担 Rust 编译开销。
 
-Web 模式下，`invoke()` 调用都被 `isTauri()`（`lib/tauri.ts`）守护，会在浏览器中变成 no-op。多个子系统会优雅降级：
-
-- 原生向量库选项在 Twin 设置中会被隐藏（仅保留云端后端）。
-- 平台连接器、Companion API、远程控制、MCP HTTP 服务器、工作流 cron 守护进程、订阅 OAuth 都不可用。详见 [运行时 & Tauri](./core/runtime-and-tauri)。
-- 桌面同步源（[同步系统](./data/sync-system)）也被替换为浏览器内的 stub。
+Web 模式下，`invoke()` 调用都被 `isTauri()`（`lib/tauri.ts`）守护，在浏览器中变 no-op。Twin 设置中的原生向量库选项也会被隐藏（仅保留云端后端）。
 
 ## 在桌面模式下运行
 
@@ -146,23 +114,13 @@ Web 模式下，`invoke()` 调用都被 `isTauri()`（`lib/tauri.ts`）守护，
 pnpm tauri dev
 ```
 
-它会并行运行 `beforeDevCommand: pnpm dev`，然后编译并启动 Tauri 窗口。首次编译需要几分钟（下载并编译约 300 个 Rust crate）；后续只需几秒。
+并行运行 `beforeDevCommand: pnpm dev`，然后编译并启动 Tauri 窗口。首次编译需要几分钟（下载并编译约 300 个 Rust crate）；之后只需几秒。
 
-如果窗口弹出，说明安装无误。从这里你可以：
+窗口弹出即表明安装无误。从这里你可以：
 
 - 调整大小、拖动、最小化 —— 窗口状态由 `tauri-plugin-window-state` 持久化。
-- `Ctrl/Cmd+Q` 干净退出；sidecar 由 `src-tauri/src/lib.rs` 中的生命周期处理器关闭。
+- `Ctrl/Cmd+Q` 干净退出；sidecar 由 `src-tauri/src/lib.rs` 的生命周期处理器关闭。
 - 在系统托盘菜单中打开 DevTools（仅 debug 构建）。
-
-### 在移动模式下运行（可选）
-
-```bash
-pnpm mobile:sync          # 静态导出 + Capacitor 同步
-pnpm mobile:open:ios      # 用 Xcode 打开 iOS 项目
-pnpm mobile:open:android  # 用 Android Studio 打开
-```
-
-`mobile/` 包通过 Capacitor 把 Next.js 静态导出包到 iOS/Android。运行时通过 LAN 或 Tunnel 连回桌面的 Companion API。详见 [移动架构](./ui/mobile-architecture)。
 
 ## 验证工具链
 
@@ -176,45 +134,13 @@ pnpm tauri info
 - 所需 Tauri 插件是否齐全。
 - WebView2 / WebKitGTK 版本。
 
-如果有 ❌，先解决再继续。
+若有 ❌，先解决再继续。
 
-## 凭证：API key vs OAuth
-
-Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥路径——选哪条都行，但每条都有自己的配置位置。
-
-<Tabs groupId="cred" persist items={["API key", "Claude Pro/Max OAuth"]}>
-  <Tab value="API key">
-    最直接的方式 —— 把 key 放到 `.env.local`（dev）或环境变量（生产）：
-
-    ```bash title=".env.local"
-    ANTHROPIC_API_KEY=sk-ant-...
-    # 可选 — 自定义 base URL（兼容 Anthropic API 的代理）
-    ANTHROPIC_BASE_URL=https://api.anthropic.com
-    ```
-
-    UI 路径：**Settings → System → Providers** 也可以把 key 写进 OS keyring（推荐生产用），不落盘。详见 [提供商系统](./chat/provider-system) 与 [CCSwitch](./chat/ccswitch)。
-
-  </Tab>
-  <Tab value="Claude Pro/Max OAuth">
-    Cognia 实现了"粘贴码"PKCE 流，使用 Claude Code 公开 client id。流程：
-
-    1. UI 路径：**Settings → System → Claude Subscription**。
-    2. 选择 *Subscription* 或 *Console* 模式，复制授权链接到浏览器登录。
-    3. 把回调里的授权码粘贴回 UI，Cognia 用 PKCE 兑换成 access + refresh token，存进 OS keyring。
-    4. Sidecar 重启时 Rust 侧把 `CLAUDE_CODE_OAUTH_TOKEN` 环境变量喂给子进程（同时主动 unset `ANTHROPIC_API_KEY`）；官方 SDK 自动加 Bearer + `oauth-2025-04-20` beta header。
-
-    完整流程、5h/7d 速率限制可视化、用量采样见 [Claude 订阅 OAuth](./chat/claude-subscription-oauth)。
-
-  </Tab>
-</Tabs>
-
-如果两种都没有，sidecar 仍能启动，但 `claude_send` 会返回 `no credentials` 错误。
-
-## 常见首次问题
+## 首次常见问题
 
 <Accordions type="single">
   <Accordion title="`Cannot find module 'collections/server'`" id="collections-server">
-    文档包需要先运行一次 `pnpm docs:dev`（或 `pnpm docs:build`），由 fumadocs-mdx 生成 `docs/.source/`。没有这个目录，TypeScript 无法解析 `docs/lib/source.ts` 中的 `collections/server` 别名。
+    文档包需要 `pnpm docs:dev`（或 `pnpm docs:build`）跑**一次**，由 fumadocs-mdx 生成 `docs/.source/`。没有这个目录，TypeScript 无法解析 `docs/lib/source.ts` 中的 `collections/server` 别名。
 
     ```bash
     pnpm docs:dev   # 保持运行，或首次编译完后 Ctrl+C
@@ -222,18 +148,12 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
 
   </Accordion>
   <Accordion title="Sidecar 启动失败（无凭证）" id="sidecar-credentials">
-    Sidecar 从两个来源之一读取凭证：
+    Sidecar 从 Claude Code 同样的源读取凭证（`ANTHROPIC_API_KEY`、`~/.claude/` 中的 OAuth token）。全新机器上若未登录 Claude Code，sidecar 仍能启动，但每个 `claude_send` 都返回 "no credentials"。
 
-    - `ANTHROPIC_API_KEY` 环境变量或 Settings → Providers 中写入 keyring 的 API key。
-    - Claude Pro/Max 的 OAuth bearer（保存在 `com.cognia.claude-subscription/v1` keyring 条目）。
-
-    Cognia **不**读写 `~/.claude/.credentials.json`——那是 `claude login` CLI 的私有文件。两种登录方式在 Cognia 里完全独立。
-
-    三种解决方案：
+    二选一：
 
     - 在 `.env.local` 设置 `ANTHROPIC_API_KEY`，**或**
-    - 在 Settings → Providers 中粘贴 API key，**或**
-    - 走 Settings → Claude Subscription 完成 OAuth 流（详见 [Claude 订阅 OAuth](./chat/claude-subscription-oauth)）。
+    - 跑一次 `claude login`（官方 Claude Code CLI）以填充 `~/.claude/`。
 
   </Accordion>
   <Accordion title="端口 3000 已被占用" id="port-3000">
@@ -261,20 +181,10 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
     pnpm tauri dev
     ```
 
-    <Callout type="warn" title="sqlite-vec / rcgen / aes-gcm 编译失败">
-      如果看到 `error: failed to run custom build command ...`，
-      多半是缺少 C 编译器 —— 按"前置要求"安装平台工具链。
-      新近引入的 `rcgen`、`axum-server`、`aes-gcm` 也都要本地 C 工具链。
+    <Callout type="warn" title="sqlite-vec 编译失败">
+      若看到 `error: failed to run custom build command for sqlite-vec ...`，说明缺少 C 编译器 —— 按上文 "前置要求" 安装平台工具链。
     </Callout>
 
-  </Accordion>
-  <Accordion title="`workflow webhook router start failed` 警告" id="workflow-webhook">
-    Tauri 启动时会拉起一个 axum 监听器，把端口 0 让 OS 分配给工作流 webhook 路由。
-    若端口分配失败或防火墙拦截，会在日志里看到这条警告——不影响 cron 触发器、手动运行、`chat.message` 触发器；但 Webhook 触发器会变成 no-op。
-    详见 [可视化工作流](./subsystems/visual-workflows)。
-  </Accordion>
-  <Accordion title="`remote-control auto-start skipped`" id="remote-control">
-    `remote_control` 模块默认禁用。只有当 `inbound.enabled=true` **且** keyring 还有令牌时它才会启动监听器。fresh install 看到这条信息是正常的——参见 [远程控制](./subsystems/remote-control)。
   </Accordion>
 </Accordions>
 
@@ -288,16 +198,12 @@ pnpm build          # 静态导出 → out/
 pnpm tauri build    # 桌面安装包
 
 pnpm test           # Jest
-pnpm test:coverage  # Jest 覆盖率（≥90% 阈值）
+pnpm test:coverage  # Jest 覆盖率（≥ 90 % 门槛）
 pnpm typecheck      # tsc --noEmit
 pnpm lint           # ESLint
 pnpm format         # Prettier 写入
 
 pnpm docs:dev       # Fumadocs（端口 3001）
-
-pnpm mobile:sync    # 同步静态导出到 mobile/ 的 Capacitor 项目
-pnpm mobile:open:ios
-pnpm mobile:open:android
 ```
 
 完整脚本参考见 [开发](./dev/development)。
@@ -305,19 +211,10 @@ pnpm mobile:open:android
 ## 下一步
 
 <Cards>
-  <Card title="架构" href="./architecture" description="先看分层设计再深入" />
-  <Card title="运行时 & Tauri" href="./runtime-and-tauri" description="如要修改原生代码" />
-  <Card
-    title="Sidecar & Claude SDK"
-    href="./sidecar-and-claude-sdk"
-    description="承载 SDK 的 Node 主机"
-  />
-  <Card
-    title="Claude 订阅 OAuth"
-    href="./claude-subscription-oauth"
-    description="Pro/Max 登录路径"
-  />
-  <Card title="聊天 & 技能" href="./chat-and-skills" description="如要做 AI 表层" />
-  <Card title="员工数字孪生" href="./employee-twin" description="最深的定制化层" />
-  <Card title="开发工作流" href="./development" description="日常脚本、约定、测试" />
+  <Card title="架构" href="./core/architecture" description="先看分层设计再深入。" />
+  <Card title="运行时 & Tauri" href="./core/runtime-and-tauri" description="如要修改原生代码。" />
+  <Card title="Sidecar & Claude Agent SDK" href="./core/sidecar-and-claude-sdk" description="承载 SDK 的 Node 主机。" />
+  <Card title="聊天 & 技能" href="./chat/chat-and-skills" description="如要做 AI 表层。" />
+  <Card title="员工数字孪生" href="./subsystems/employee-twin" description="最深的定制化层。" />
+  <Card title="开发工作流" href="./dev/development" description="日常脚本、约定、测试。" />
 </Cards>

@@ -118,6 +118,19 @@ export async function deleteWorkflow(id: string): Promise<void> {
     throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
   }
   await getDb().workflows.delete(id)
+  // Cascade-drop orphan fan-out subscriptions so they don't accumulate
+  // in Dexie pointing at a workflow that no longer exists. Best-effort —
+  // a failure here must not block the workflow delete. Lazy import keeps
+  // `lib/db/workflows.ts` free of a module-init dependency on the
+  // fan-out CRUD.
+  try {
+    const { deleteSubscriptionsForWorkflow } = await import("./workflow-fanout-subscriptions")
+    await deleteSubscriptionsForWorkflow(id)
+  } catch {
+    // Swallow — orphan rows are harmless at runtime (the
+    // progress-runner only queries by live workflows that have IM-
+    // triggered runs).
+  }
 }
 
 /**

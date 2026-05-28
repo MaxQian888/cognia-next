@@ -43,6 +43,25 @@ describe("parseDeeplink", () => {
     })
   })
 
+  it("parses workflow-run open with workflowId + runId path", () => {
+    const route = parseDeeplink("cognia://workflow-run/wf_abc/run_xyz")
+    expect(route).toEqual({
+      kind: "open_workflow_run",
+      workflowId: "wf_abc",
+      runId: "run_xyz",
+      raw: "cognia://workflow-run/wf_abc/run_xyz",
+    })
+  })
+
+  it("falls back to query params when workflow-run path is missing one id", () => {
+    const route = parseDeeplink("cognia://workflow-run?workflowId=wf_abc&runId=run_xyz")
+    expect(route).toMatchObject({
+      kind: "open_workflow_run",
+      workflowId: "wf_abc",
+      runId: "run_xyz",
+    })
+  })
+
   it("unknown for unrelated scheme", () => {
     const route = parseDeeplink("https://example.com/foo")
     expect(route.kind).toBe("unknown")

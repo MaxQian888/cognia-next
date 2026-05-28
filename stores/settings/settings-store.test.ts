@@ -437,6 +437,57 @@ describe("simple search setters delegating to saveSettings", () => {
   })
 })
 
+// ---- Skill bundle mirrors ----
+
+describe("setSkillBundleMirrors", () => {
+  it("applies defaults (both on) when no prior value exists", async () => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSkillBundleMirrors({ codex: false })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillBundleMirrors: { claude: true, codex: false },
+    })
+  })
+
+  it("merges with existing partial value rather than replacing", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ skillBundleMirrors: { claude: false, codex: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSkillBundleMirrors({ codex: false })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillBundleMirrors: { claude: false, codex: false },
+    })
+  })
+})
+
+describe("resolveSkillBundleMirrors", () => {
+  it("returns both-on defaults when settings is null", async () => {
+    const { resolveSkillBundleMirrors } = await import("./settings-store")
+    expect(resolveSkillBundleMirrors(null)).toEqual({ claude: true, codex: true })
+    expect(resolveSkillBundleMirrors(undefined)).toEqual({ claude: true, codex: true })
+  })
+
+  it("returns both-on when skillBundleMirrors is missing", async () => {
+    const { resolveSkillBundleMirrors } = await import("./settings-store")
+    expect(resolveSkillBundleMirrors(baseSettings())).toEqual({ claude: true, codex: true })
+  })
+
+  it("preserves user-set false values", async () => {
+    const { resolveSkillBundleMirrors } = await import("./settings-store")
+    expect(
+      resolveSkillBundleMirrors(
+        baseSettings({ skillBundleMirrors: { claude: false, codex: false } })
+      )
+    ).toEqual({ claude: false, codex: false })
+  })
+})
+
 // ---- Per-provider mutators ----
 
 describe("setSearchProviderEnabled / ApiKey / Priority / Settings", () => {

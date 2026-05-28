@@ -6,27 +6,34 @@
  * Feishu exposes no OpenAPI to create menus, so "registering" a quick command
  * in cognia-next means mapping that `event_key` to an action — a prompt or a
  * slash-command line — that the assistant turn should run.
+ *
+ * Schema-wise this is now a wrapper around the cross-adapter
+ * `IMQuickCommand` type (`triggerKey` replaces the legacy `eventKey`). Old
+ * persisted rows that still carry `eventKey` are upgraded at read time by
+ * `normalizeQuickCommandList`, so no Dexie migration is required.
  */
+
+import {
+  resolveQuickCommand as resolveSharedQuickCommand,
+  type IMQuickCommand,
+} from "@/lib/connectors/quick-commands"
 
 export type LarkQuickCommandActionType = "prompt" | "slash"
 
-export interface LarkQuickCommand {
-  /** The `event_key` configured on the Feishu bot-menu item. */
-  eventKey: string
-  /** Optional human label shown in settings; also the unmapped-key fallback text. */
-  label?: string
-  action: {
-    type: LarkQuickCommandActionType
-    /** Prompt text, or a slash-command line (e.g. "/agenda today"). */
-    value: string
-  }
-}
+/**
+ * @deprecated Use `IMQuickCommand` directly. Kept as a structural alias
+ * for v53-era callers that still type their settings shapes locally.
+ */
+export type LarkQuickCommand = IMQuickCommand
 
-/** First-match lookup of `eventKey` in the configured quick-command list. */
+/**
+ * First-match lookup of the Feishu `event_key` against the configured
+ * quick-command list. Thin wrapper over the shared resolver so the Lark
+ * adapter doesn't have to import from two paths.
+ */
 export function resolveQuickCommand(
-  commands: LarkQuickCommand[] | undefined,
+  commands: IMQuickCommand[] | undefined,
   eventKey: string
-): LarkQuickCommand | undefined {
-  if (!commands || commands.length === 0) return undefined
-  return commands.find((c) => c.eventKey === eventKey)
+): IMQuickCommand | undefined {
+  return resolveSharedQuickCommand(commands, eventKey)
 }

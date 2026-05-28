@@ -415,4 +415,217 @@ describe("runMarketplaceInstall", () => {
     // than silently dropping the user's input.
     expect(client.installPlugin).toHaveBeenCalledTimes(1)
   })
+
+  it("invokes the rollback hook when setPluginConfig throws after install success", async () => {
+    setPluginConfig.mockRejectedValueOnce(new Error("indexeddb full"))
+    const rollback = jest.fn().mockResolvedValue(undefined)
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+      rollback,
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(rollback).toHaveBeenCalledTimes(1)
+    expect(rollback).toHaveBeenCalledWith("demo-plugin", expect.stringContaining("indexeddb full"))
+    expect(result).toEqual({
+      status: "failed",
+      stage: "install",
+      message: "indexeddb full",
+    })
+  })
+
+  it("returns install-rollback failure when the rollback hook itself throws", async () => {
+    setPluginConfig.mockRejectedValueOnce(new Error("indexeddb full"))
+    const rollback = jest.fn().mockRejectedValue(new Error("uninstall locked"))
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+      rollback,
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({
+      status: "failed",
+      stage: "install-rollback",
+      message: "uninstall locked",
+    })
+  })
+
+  it("does not invoke the rollback hook when client.installPlugin itself failed", async () => {
+    // installPlugin throw means the manager's own rollback already ran
+    // (or never installed at all). The orchestrator must NOT double-roll-back.
+    const rollback = jest.fn().mockResolvedValue(undefined)
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockRejectedValue(new Error("net down")),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+      rollback,
+    })
+
+    await runMarketplaceInstall(opts)
+    expect(rollback).not.toHaveBeenCalled()
+  })
+
+  it("skips rollback entirely when opts.rollback is explicitly null", async () => {
+    setPluginConfig.mockRejectedValueOnce(new Error("indexeddb full"))
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+      rollback: null,
+    })
+
+    const result = await runMarketplaceInstall(opts)
+    expect(result).toEqual({
+      status: "failed",
+      stage: "install",
+      message: "indexeddb full",
+    })
+  })
+
+  describe("requires.binaries gate", () => {
+    const manifestWithBinary = () =>
+      makeManifest({
+        requires: { binaries: [{ name: "git", minVersion: "2.0.0" }] },
+      } as never)
+
+    it("skips the gate when the manifest declares no binaries", async () => {
+      const detectBinary = jest.fn()
+      const opts = makeOpts({ detectBinary })
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+      expect(detectBinary).not.toHaveBeenCalled()
+    })
+
+    it("proceeds when all required binaries are present and satisfy minVersion", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({ manifest: manifestWithBinary(), name: "Demo" }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const detectBinary = jest
+        .fn()
+        .mockResolvedValue({ available: true, version: "git version 2.43.0" })
+      const requestBinaryReview = jest.fn()
+      const opts = makeOpts({ client, detectBinary, requestBinaryReview })
+
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+      expect(detectBinary).toHaveBeenCalledWith("git")
+      expect(requestBinaryReview).not.toHaveBeenCalled()
+    })
+
+    it("prompts the binary dialog when a required binary is missing", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({ manifest: manifestWithBinary(), name: "Demo" }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const detectBinary = jest.fn().mockResolvedValue({ available: false, version: null })
+      const requestBinaryReview = jest.fn().mockResolvedValue("proceed")
+      const opts = makeOpts({ client, detectBinary, requestBinaryReview })
+
+      const result = await runMarketplaceInstall(opts)
+      expect(requestBinaryReview).toHaveBeenCalledTimes(1)
+      expect(requestBinaryReview.mock.calls[0][0]).toMatchObject({
+        pluginId: "demo-plugin",
+        missing: [expect.objectContaining({ name: "git", minVersion: "2.0.0" })],
+      })
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+    })
+
+    it("treats a below-minVersion binary as missing", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({ manifest: manifestWithBinary(), name: "Demo" }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const detectBinary = jest
+        .fn()
+        .mockResolvedValue({ available: true, version: "git version 1.9.0" })
+      const requestBinaryReview = jest.fn().mockResolvedValue("proceed")
+      const opts = makeOpts({ client, detectBinary, requestBinaryReview })
+
+      await runMarketplaceInstall(opts)
+      expect(requestBinaryReview).toHaveBeenCalledTimes(1)
+      expect(requestBinaryReview.mock.calls[0][0].missing[0]).toMatchObject({
+        name: "git",
+        detectedVersion: "git version 1.9.0",
+      })
+    })
+
+    it("cancels at binary-requirements when the user backs out", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({ manifest: manifestWithBinary(), name: "Demo" }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const detectBinary = jest.fn().mockResolvedValue({ available: false, version: null })
+      const requestBinaryReview = jest.fn().mockResolvedValue("cancel")
+      const opts = makeOpts({ client, detectBinary, requestBinaryReview })
+
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "cancelled", stage: "binary-requirements" })
+      expect(client.installPlugin).not.toHaveBeenCalled()
+    })
+
+    it("blocks the install when no binary-review UI is wired and a binary is missing", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({ manifest: manifestWithBinary(), name: "Demo" }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const detectBinary = jest.fn().mockResolvedValue({ available: false, version: null })
+      const opts = makeOpts({ client, detectBinary })
+      // requestBinaryReview intentionally omitted.
+
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "cancelled", stage: "binary-requirements" })
+      expect(client.installPlugin).not.toHaveBeenCalled()
+    })
+  })
 })

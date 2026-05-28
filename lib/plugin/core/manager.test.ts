@@ -512,6 +512,190 @@ describe("PluginManager", () => {
     })
   })
 
+  describe("installPlugin rollback (PR1)", () => {
+    // Helpers — build a fresh store mock that records which lifecycle calls
+    // landed so the rollback assertions can check we walked the right tape.
+    function makeStore() {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+        uninstallPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) {
+            store.plugins[pluginId] = {
+              ...p,
+              status: "installed",
+              installedAt: new Date(),
+            }
+          }
+        }),
+        uninstallPlugin: jest.fn(async (pluginId: string) => {
+          delete store.plugins[pluginId]
+        }),
+      }
+      return store
+    }
+
+    it("rolls back backend install + store row when signature verification fails", async () => {
+      const store = makeStore()
+      mockGetState.mockReturnValue(store)
+      // Configure verifier to demand signatures + reject this plugin.
+      mockVerifier.getConfig.mockReturnValueOnce({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "bad sig" })
+
+      const manifest = createManifest("sig-fail-plugin")
+      mockInvoke
+        // 1st invoke: plugin_install (backend succeeds)
+        .mockResolvedValueOnce({
+          manifest,
+          path: "/plugins/sig-fail-plugin",
+        })
+        // 2nd invoke (during rollback): plugin_uninstall
+        .mockResolvedValueOnce(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.installPlugin("/tmp/sig-fail")).rejects.toThrow(
+        /Failed to install plugin/i
+      )
+
+      // Backend install was undone via plugin_uninstall.
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+        pluginId: "sig-fail-plugin",
+        pluginPath: "/plugins/sig-fail-plugin",
+      })
+      // Store discovery + install never landed (signature check is before
+      // those), so no store cleanup expected.
+      expect(store.discoverPlugin).not.toHaveBeenCalled()
+      expect(store.installPlugin).not.toHaveBeenCalled()
+      expect(store.uninstallPlugin).not.toHaveBeenCalled()
+    })
+
+    it("rolls back store row + backend install when permission registration throws", async () => {
+      const store = makeStore()
+      mockGetState.mockReturnValue(store)
+      const manifest = {
+        ...createManifest("perm-fail-plugin"),
+        permissions: ["filesystem:read"],
+      }
+      mockInvoke
+        .mockResolvedValueOnce({ manifest, path: "/plugins/perm-fail" })
+        .mockResolvedValueOnce(undefined) // plugin_uninstall during rollback
+
+      // registerPlugin on the permission guard throws — exercises the
+      // try/catch that promotes silent permission-registration failures
+      // to a rollback-worthy error.
+      mockGuard.registerPlugin.mockImplementationOnce(() => {
+        throw new Error("dexie write blew up")
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.installPlugin("/tmp/perm-fail")).rejects.toThrow(
+        /Permission registration failed/i
+      )
+
+      // Store row was cleaned up.
+      expect(store.uninstallPlugin).toHaveBeenCalledWith(
+        "perm-fail-plugin",
+        expect.objectContaining({ skipFileRemoval: true })
+      )
+      // Backend uninstall ran.
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+        pluginId: "perm-fail-plugin",
+        pluginPath: "/plugins/perm-fail",
+      })
+    })
+
+    it("does not call plugin_uninstall when backend install itself never succeeded", async () => {
+      const store = makeStore()
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockRejectedValueOnce(new Error("disk full"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.installPlugin("/tmp/never")).rejects.toThrow(/Failed to install/i)
+
+      // The only invoke call was the failed plugin_install — no rollback
+      // call should have followed.
+      const uninstallCalls = mockInvoke.mock.calls.filter((call) => call[0] === "plugin_uninstall")
+      expect(uninstallCalls).toHaveLength(0)
+      expect(store.discoverPlugin).not.toHaveBeenCalled()
+    })
+
+    it("rollback step failures do not prevent the install error from surfacing", async () => {
+      const store = makeStore()
+      mockGetState.mockReturnValue(store)
+      mockVerifier.getConfig.mockReturnValueOnce({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "bad sig" })
+
+      const manifest = createManifest("noisy-rollback-plugin")
+      mockInvoke
+        .mockResolvedValueOnce({ manifest, path: "/plugins/noisy" })
+        // Backend plugin_uninstall ALSO fails — we still expect the
+        // original install error to reach the caller.
+        .mockRejectedValueOnce(new Error("disk locked"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.installPlugin("/tmp/noisy")).rejects.toThrow(/Failed to install plugin/i)
+    })
+
+    it("public rollbackInstallation cleans an already-installed plugin row", async () => {
+      const store = makeStore()
+      // Pretend an earlier install already left a row in place.
+      const manifest = createManifest("public-rollback")
+      store.plugins["public-rollback"] = {
+        manifest,
+        status: "installed",
+        source: "local" as never,
+        path: "/plugins/public-rollback",
+        config: {},
+        installedAt: new Date(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValueOnce(undefined) // plugin_uninstall
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.rollbackInstallation("public-rollback", "config persist failed")
+
+      expect(store.uninstallPlugin).toHaveBeenCalledWith(
+        "public-rollback",
+        expect.objectContaining({ skipFileRemoval: true })
+      )
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+        pluginId: "public-rollback",
+        pluginPath: "/plugins/public-rollback",
+      })
+    })
+
+    it("public rollbackInstallation is a no-op when the plugin row no longer exists", async () => {
+      const store = makeStore()
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.rollbackInstallation("ghost-plugin", "config persist failed")
+      expect(store.uninstallPlugin).not.toHaveBeenCalled()
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+  })
+
   describe("scanPlugins", () => {
     it("discovers browser built-ins without calling native directory scan in browser runtime", async () => {
       const store: {

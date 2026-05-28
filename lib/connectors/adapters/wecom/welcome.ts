@@ -8,9 +8,17 @@
  * (`settings.welcomeMessage`). When unset, we skip the welcome reply.
  */
 
+import type { IMQuickCommand } from "@/lib/connectors/quick-commands/types"
+
 export interface WeComAdapterSettings {
   /** Optional operator-configured greeting sent on enter_chat. */
   welcomeMessage?: string
+  /**
+   * Quick-command list. Each entry becomes a button on the persistent
+   * menu card pushed on `enter_chat`. Empty/undefined → no menu card.
+   * See `lib/connectors/quick-commands/types.ts:IMQuickCommand`.
+   */
+  quickCommands?: IMQuickCommand[]
   [k: string]: unknown
 }
 

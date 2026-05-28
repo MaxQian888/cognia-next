@@ -4442,6 +4442,24 @@
         }
       }
     },
+    "workflow": {
+      "fanout": {
+        "title": "运行进度同步",
+        "help": "运维配置的镜像规则：该工作流的每次运行都会把 step 进度和终态推送到所列的频道。发起会话自动包含——重复添加无效果。",
+        "addSectionLabel": "添加镜像",
+        "adapterLabel": "适配器",
+        "adapterPlaceholder": "选择已连接的适配器",
+        "conversationKeyLabel": "会话键",
+        "conversationKeyPlaceholder": "例如 lark:lark:ad1:oc_xxx",
+        "addButton": "添加订阅",
+        "addMissingFields": "适配器和会话键都是必填项。",
+        "addSuccess": "已添加订阅。",
+        "removeAria": "移除订阅",
+        "removeSuccess": "已移除订阅。",
+        "enabledAria": "切换订阅",
+        "empty": "尚未配置任何镜像。运行只推送到发起会话。"
+      }
+    },
     "a2ui": {
       "title": "A2UI",
       "description": "配置代理如何渲染交互界面，并实时查看事件流。",
@@ -5283,20 +5301,7 @@
           "helpText": "粘贴飞书 chat_id（以 oc_… 开头）。可从审计日志或飞书客户端的会话 URL 中找到。"
         },
         "quickCommands": {
-          "title": "机器人菜单 / 快捷指令",
-          "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。",
-          "eventKeyLabel": "Event key",
-          "eventKeyPlaceholder": "event_key（来自机器人菜单）",
-          "labelLabel": "标签（可选）",
-          "labelPlaceholder": "标签",
-          "actionTypeLabel": "动作类型",
-          "actionTypePrompt": "提示词",
-          "actionTypeSlash": "斜杠命令",
-          "valueLabel": "动作内容",
-          "valuePlaceholder": "提示词文本，或 /命令 参数",
-          "addAria": "添加快捷指令",
-          "empty": "尚未映射任何快捷指令。",
-          "removeAria": "移除 {key}"
+          "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。"
         }
       },
       "adapterFormSections": {
@@ -5304,6 +5309,21 @@
         "saving": "保存中…",
         "cancel": "取消",
         "errorBadge": "错误"
+      },
+      "quickCommands": {
+        "title": "快捷指令",
+        "triggerKeyLabel": "触发键",
+        "triggerKeyPlaceholder": "触发键（event_key / 按钮 key）",
+        "labelLabel": "标签（可选）",
+        "labelPlaceholder": "标签",
+        "actionTypeLabel": "动作类型",
+        "actionTypePrompt": "提示词",
+        "actionTypeSlash": "斜杠命令",
+        "valueLabel": "动作内容",
+        "valuePlaceholder": "提示词文本，或 /命令 参数",
+        "addAria": "添加快捷指令",
+        "empty": "尚未映射任何快捷指令。",
+        "removeAria": "移除 {key}"
       },
       "onebot": {
         "titleNew": "添加 OneBot (QQ) 适配器",
@@ -5384,6 +5404,11 @@
         "sectionIdentityDesc": "智能机器人 BotID + 长连接 Secret，以及可选的欢迎语。",
         "sectionAdvanced": "高级",
         "sectionAdvancedDesc": "出站回复的勿扰时段与全局静音。",
+        "sectionQuickCommands": "快捷指令",
+        "sectionQuickCommandsDesc": "进入会话（enter_chat）时推送一张 template_card 菜单卡，每行映射到一个提示词或斜杠命令。",
+        "quickCommands": {
+          "help": "企业微信智能机器人没有持久菜单。在 enter_chat 时推送一张 template_card 模拟——下面每行变成一个按钮。触发键稳定即可（用户看不到，仅用于回链按钮）。"
+        },
         "quietHoursIncomplete": "免打扰时段需要同时填写开始、结束与时区。",
         "adapterCreated": "企业微信机器人已创建。启用后长连接将自动建立。",
         "adapterUpdated": "企业微信机器人已更新。",
@@ -5804,6 +5829,10 @@
       "importFromMarkdownHint": "选择一个或多个 SKILL.md 文件。",
       "importFromClaudeCode": "从 Claude Code 导入",
       "importFromClaudeCodeHint": "扫描 ~/.claude/skills/（仅桌面）。",
+      "importFromBundle": "从技能包（.zip）导入…",
+      "importFromBundleHint": "支持 Anthropic 或 Codex 包，含 SKILL.md + scripts/references/assets。",
+      "importFromBundleFolder": "从技能包文件夹导入…",
+      "importFromBundleFolderHint": "选择已解压的技能包目录（仅桌面）。",
       "exportAll": "导出全部",
       "syncNative": "与 ~/.claude/skills/ 同步",
       "syncNativeDesktopOnly": "本地同步需要桌面端。",
@@ -5905,7 +5934,13 @@
       "applying": "导入中…",
       "stagedCount": "已暂存 {count} 个技能",
       "parseErrorsLine": "{count} 个文件解析失败：{first}",
-      "cancel": "取消"
+      "cancel": "取消",
+      "bundle": {
+        "flavorAnthropic": "Anthropic",
+        "flavorCodex": "Codex",
+        "resourcesCount": "{count} 个资源",
+        "warnings": "{count} 条警告"
+      }
     },
     "delete": {
       "title": "删除技能？",
@@ -6015,7 +6050,14 @@
       "lastAt": "上次：{when}",
       "desktopOnly": "同步仅在桌面端可用。",
       "pushAll": "全部推送到本地",
-      "pullAll": "全部从本地拉取"
+      "pullAll": "全部从本地拉取",
+      "mirrorTargetsLabel": "镜像目标",
+      "mirrorClaude": "镜像到 ~/.claude/skills/",
+      "mirrorCodex": "镜像到 ~/.agents/skills/（Codex）",
+      "codexNotInstalled": "未检测到 Codex CLI 目录，已自动创建镜像。",
+      "tooLargeForDisk": "资源 {path} 超出 2 MB 磁盘上限，已跳过该镜像。",
+      "emptyTrash": "清空回收站（{count}）",
+      "trashEmptied": "{count, plural, =0 {回收站本就为空。} other {已清理 # 个废弃技能。}}"
     },
     "panel": {
       "headerTitle": "技能",
@@ -6478,7 +6520,9 @@
     "toolbar": {
       "install": "安装",
       "groupManifest": "清单",
+      "groupLocal": "本地插件",
       "groupWasm": "WASM 包",
+      "loadUnpacked": "加载本地目录…",
       "fromFile": "从文件…",
       "fromUrl": "从 URL…",
       "fromLocalWasm": "从本地文件…",
@@ -6498,6 +6542,78 @@
         "emptyError": "请输入 URL。",
         "error": "获取清单失败：{message}"
       }
+    },
+    "loadUnpacked": {
+      "label": "加载本地插件目录",
+      "directoryPickerTitle": "选择插件目录",
+      "tauriRequiredError": "本地插件加载需要在桌面应用中使用。",
+      "installSuccess": "{name} 已从本地安装。"
+    },
+    "devtools": {
+      "dropzone": {
+        "title": "将插件目录拖到这里",
+        "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。"
+      },
+      "validator": {
+        "title": "清单校验器",
+        "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
+        "pickButton": "选择 plugin.json 或目录",
+        "validating": "校验中…",
+        "valid": "清单校验通过。",
+        "invalid": "清单存在 {count, plural, other {# 个错误}}。",
+        "errorsHeading": "错误",
+        "warningsHeading": "警告",
+        "permissionsHeading": "声明的权限",
+        "noPermissions": "未声明任何权限。",
+        "tauriRequiredError": "清单校验器需要在桌面应用中使用。",
+        "readError": "无法读取清单：{message}"
+      },
+      "hotReload": {
+        "title": "热重载活动",
+        "empty": "本次会话尚无重载记录。运行 `cognia plugin dev` 查看实时更新。",
+        "clear": "清空",
+        "kindInstall": "已安装",
+        "kindUninstall": "已卸载",
+        "kindHotReload": "已热重载",
+        "statusSuccess": "成功",
+        "statusFailed": "失败",
+        "statusInProgress": "进行中"
+      }
+    },
+    "cliStatus": {
+      "title": "cognia CLI",
+      "description": "插件作者 CLI 用于脚手架、构建、签名和热重载插件。",
+      "probing": "检测中…",
+      "installedUnknownVersion": "已安装",
+      "bridgeRunning": "桥接已连接",
+      "bridgeDown": "桥接离线",
+      "reveal": "在文件夹中显示",
+      "docs": "文档",
+      "missingHint": "未在 PATH 上找到。安装后即可脚手架和热重载插件。",
+      "install": "安装 cognia CLI",
+      "chipReady": "cognia CLI 就绪",
+      "chipBridgeDown": "cognia CLI 已安装（桥接离线）",
+      "chipMissing": "未安装 cognia CLI"
+    },
+    "cliInstall": {
+      "title": "安装 cognia CLI",
+      "description": "选择适合你环境的安装方式。",
+      "tabDownload": "下载",
+      "tabSource": "从源码构建",
+      "tabTarball": "发布页",
+      "downloadHint": "下载适配当前平台的预编译二进制，经校验和与签名验证。",
+      "downloadButton": "下载并安装",
+      "downloadStarting": "开始中…",
+      "downloadSuccess": "cognia CLI 已安装。",
+      "downloadSuccessSigned": "cognia CLI 已安装并通过签名验证。",
+      "sourceHint": "使用 Cargo 构建并安装：",
+      "sourcePrereq": "需要 PATH 上有 Rust 1.82+。",
+      "tarballHint": "从 GitHub 手动下载发布归档。",
+      "openReleases": "打开发布页",
+      "copy": "复制命令",
+      "copied": "命令已复制。",
+      "copyFailed": "无法复制到剪贴板。",
+      "verifyNote": "下载会做校验和验证；发布签名密钥上线后将启用签名验证。"
     },
     "wasmInstall": {
       "capabilityGrantSheet": {
@@ -6618,6 +6734,33 @@
       "manualReason": "启用插件时出错",
       "retryHint": "打开插件设置查看错误并重试。"
     },
+    "errors": {
+      "install": "{pluginName} 安装失败",
+      "installRollback": "{pluginName} 安装失败后回滚出错",
+      "load": "{pluginName} 加载失败",
+      "enable": "{pluginName} 启用失败",
+      "disable": "{pluginName} 禁用失败",
+      "uninstall": "{pluginName} 卸载失败",
+      "config": "{pluginName} 设置应用失败",
+      "activation": "{pluginName} 激活失败",
+      "permissionRegister": "{pluginName} 权限注册失败",
+      "wasmPreload": "{pluginName} WASM 预加载失败",
+      "hotReload": "{pluginName} 热重载失败",
+      "localInstall": "{pluginName} 本地插件安装失败"
+    },
+    "shared": {
+      "installing": "安装中…",
+      "uninstalling": "卸载中…",
+      "install": "安装",
+      "uninstall": "卸载",
+      "retry": "重试",
+      "emptyTitle": "暂无内容",
+      "emptyHint": "换个关键词或切换分区再试试。",
+      "errorTitle": "出错了",
+      "capabilityOverflow": "+{count} 项",
+      "installedDesktopOnly": "仅桌面端可安装",
+      "installed": "已安装"
+    },
     "consent": {
       "title": "插件请求权限",
       "ariaLabel": "插件授权对话框",
@@ -6677,6 +6820,12 @@
       "permissionsDeclared": "manifest 声明",
       "permissionsOptional": "可选",
       "permissionsNone": "未声明权限。",
+      "stepBinaries": "依赖工具",
+      "binariesHint": "此插件需要以下命令行工具，但系统中未找到。安装后再重试。",
+      "binariesNotFound": "未在 PATH 上找到。",
+      "binariesFoundOld": "找到 {version}，低于所需版本。",
+      "binariesDocs": "安装指南",
+      "binariesRetry": "已安装，重新检测",
       "configHint": "请填写必填的配置项，之后插件才会启用。",
       "configNone": "此插件无需额外配置。",
       "back": "上一步",
@@ -7598,6 +7747,69 @@
       "traceView": "追踪视图",
       "agentTraceModule": "Agent 追踪",
       "noTraceEvents": "暂无 Agent 追踪事件",
+      "agentTrace": {
+        "statsBar": {
+          "title": "Agent 追踪",
+          "loading": "正在加载 Agent 追踪统计…",
+          "regionLabel": "Agent 追踪统计 — {window}",
+          "totalCost": "成本",
+          "inputTokens": "输入 token",
+          "cacheHitRate": "缓存命中率",
+          "toolCalls": "工具调用",
+          "errors": "错误",
+          "totalSpansHint": "共 {count} 个 span",
+          "outputHint": "输出：{count}",
+          "cacheReadHint": "缓存命中：{count}",
+          "toolFailuresHint": "失败 {count} 次",
+          "avgLatencyHint": "平均延迟 {ms} ms",
+          "windows": {
+            "today": "今天",
+            "week": "近 7 天",
+            "month": "近 30 天",
+            "all": "全部时间"
+          }
+        },
+        "tree": {
+          "title": "Trace",
+          "loading": "正在加载 trace…",
+          "empty": "该 trace 暂无 span。",
+          "treeLabel": "Span 树"
+        },
+        "settings": {
+          "title": "Agent 追踪",
+          "description": "每个聊天回合、工具调用、队友派发记一条 span。Span 写入本地 Dexie；可选的内容采集会经过项目 PII 网关。",
+          "enabled": "持久化 Agent 追踪 span",
+          "enabledHint": "关闭后，span 在 transport 边界被丢弃 —— instrumented 代码仍调用 emitter，但不再落库。",
+          "captureContent": "采集 prompt / 输出预览",
+          "captureContentHint": "默认关闭。开启后，每个预览的前 {bytes} 字节会经过 PII 脱敏；含 PII 字段在写入前被丢弃。",
+          "retentionDays": "保留天数",
+          "retentionDaysHint": "每次 flush 时清除超过此天数的 span。设为 0 关闭清理。"
+        }
+      },
+      "agentTraceOtlp": {
+        "preset": "预设",
+        "presetOptions": {
+          "off": "关闭",
+          "grafanaCloud": "Grafana Cloud",
+          "selfHosted": "自部署 Tempo / Collector",
+          "custom": "自定义 OTLP/HTTP"
+        },
+        "endpoint": "OTLP traces 端点",
+        "endpointPlaceholder": {
+          "grafanaCloud": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
+          "selfHosted": "http://localhost:4318/v1/traces"
+        },
+        "headers": "请求头",
+        "headersHint": "用逗号分隔的 `Name: Value` 列表。Grafana Cloud 用 `Authorization: Basic base64(instanceId:token)`。",
+        "headersPlaceholder": "Authorization: Basic ABC=, X-Tenant: prod",
+        "serviceName": "Service 名称",
+        "environment": "环境名",
+        "grafanaInstanceId": "Grafana instance ID",
+        "grafanaInstanceIdPlaceholder": "1234567",
+        "grafanaApiToken": "Grafana access policy token",
+        "grafanaApiTokenPlaceholder": "glc_eyJ…",
+        "grafanaCloudHint": "两项均必填。系统会自动构造 `Authorization: Basic base64(instanceId:token)` —— 请勿在此处粘贴已编码的字符串。"
+      },
       "presets": "预设",
       "noPreset": "无预设",
       "savePreset": "保存当前筛选为预设",
@@ -7961,6 +8173,10 @@
         "langfuseMinLevel": "最小级别",
         "opentelemetry": "OpenTelemetry",
         "opentelemetryDesc": "将日志与 OpenTelemetry 追踪集成",
+        "agentTrace": "Agent 追踪",
+        "agentTraceDesc": "每个聊天回合、工具调用、队友派发记一条 span，写入本地 Dexie。驱动 /logs 的 Agent 追踪标签页。",
+        "agentTraceOtlp": "OTLP 导出（Grafana）",
+        "agentTraceOtlpDesc": "把 Agent 追踪 span 推到 OTel 兼容后端（Grafana Cloud、Tempo、Honeycomb、Datadog 或自部署 collector）。",
         "otelEndpoint": "OTLP 端点",
         "otelEndpointPlaceholder": "http://localhost:4318/v1/traces",
         "otelServiceName": "服务名称",

@@ -5,14 +5,6 @@ description: GhPolicy 字段定义、6 类 action 在 policy-gate.ts 中的判�
 
 # 策略门(Policy)
 
-<TLDR>
-`lib/github/policy-gate.ts:checkPolicy(action, ctx)` 是 GitHub Delivery 的统一策略门。
-它接收一个 `GhAction` 判别式和一个 `GhPolicyContext`,返回 `PolicyDecision`(`{ allow: true }`
-或 `{ allow: false, reason, mustWait?, needsApproval? }`)。其中带 `needsApproval: true` 的
-拒绝是"软拒绝",会被 `guardedExecutor` 路由到 Inbox HITL 草稿;其他拒绝是"硬拒绝",
-执行器立即跳过。默认策略在 `DEFAULT_GH_POLICY`,可仓库级或节点级覆盖。
-</TLDR>
-
 ## `GhPolicy` 字段
 
 <TypeTable

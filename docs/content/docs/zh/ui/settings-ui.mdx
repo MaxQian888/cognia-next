@@ -7,19 +7,6 @@ description: 设置子系统的导航注册表、URL 驱动的 ?section= 路由�
 
 cognia-next 的设置中心是一个**单页+侧栏导航**的子系统：左边是一个分组侧栏，右边是按 URL 参数动态加载的"section"。所有子系统的可配置项都通过这一入口暴露，使用同一套布局、同一套 i18n key、同一套 URL 协议（`?section=` 选 section，`?<sectionTab>=` 选其内部子 tab）。
 
-## TL;DR
-
-<TLDR>
-
-- 路由 = `/settings`，唯一一条路由；section 切换走 `?section=<id>` query，不刷新整页。
-- 导航源点：`components/settings/settings-nav-config.ts` —— 一个 `SETTINGS_NAV[]` 静态数组，加 section 就在这里加一行。
-- 每个 section 是一个独立组件，通过 `dynamic()` 异步加载，落进 `settings-shell.tsx` 的 `<SectionContent>` 大 switch。
-- 二级 tab 由 section 自己维护，URL key 用 `?<sectionName>Tab=`（如 `?dataTab=overview`、`?appearanceTab=theme`），便于深链。
-- 桌面与移动复用同一份 `SettingsShell`；移动壳在外面套抽屉、收紧间距。
-- 设置数据落在 Dexie `settings` 表（单行 key `"singleton"`），`SettingsSyncProvider` 启动时从 Rust 同步。
-
-</TLDR>
-
 ## 整体结构
 
 ```mermaid
@@ -382,53 +369,53 @@ const MySection = dynamic(() => import("./my-area/my-section").then((m) => m.MyS
 <Cards>
   <Card
     title="Provider 系统"
-    href="./provider-system"
+    href="../chat/provider-system"
     description="?section=providers 背后的 6+ 个 AI provider 注册"
   />
   <Card
     title="平台连接器"
-    href="./platform-connectors"
+    href="../subsystems/platform-connectors"
     description="?section=connections 的 5 个连接器适配"
   />
   <Card
     title="备份 & 数据"
-    href="./backup-and-data"
+    href="../data/backup-and-data"
     description="?section=data 的备份/恢复/域传输/维护"
   />
   <Card
     title="可视化工作流"
-    href="./visual-workflows"
+    href="../subsystems/visual-workflows"
     description="?section=workflows 的库 / 运行 / 模板 / 审计"
   />
-  <Card title="技能系统" href="./skills-system" description="?section=skills 的技能库管理" />
-  <Card title="角色管理" href="./chat-and-skills" description="?section=characters 的角色编辑" />
+  <Card title="技能系统" href="../chat/skills-system" description="?section=skills 的技能库管理" />
+  <Card title="角色管理" href="../chat/chat-and-skills" description="?section=characters 的角色编辑" />
   <Card
     title="MCP 服务器"
-    href="./misc-subsystems"
+    href="../subsystems/misc-subsystems"
     description="?section=mcp 的本地与远端 MCP 注册"
   />
   <Card title="A2UI" href="./a2ui-system" description="?section=a2ui 的 A2UI 工具面板" />
-  <Card title="插件系统" href="./plugin-system" description="?section=plugins 的本地插件安装" />
-  <Card title="调度器" href="./scheduler" description="?section=scheduled-tasks 的 cron 与历史" />
+  <Card title="插件系统" href="../subsystems/plugin-system" description="?section=plugins 的本地插件安装" />
+  <Card title="调度器" href="../subsystems/scheduler" description="?section=scheduled-tasks 的 cron 与历史" />
   <Card
     title="外部桥"
-    href="./external-bridge"
+    href="../subsystems/external-bridge"
     description="?section=external-bridge 的 MCP 服务器对外暴露"
   />
-  <Card title="远程控制" href="./remote-control" description="?section=remote-control 的设备链接" />
+  <Card title="远程控制" href="../subsystems/remote-control" description="?section=remote-control 的设备链接" />
   <Card
     title="伴生端 API"
-    href="./companion-api"
+    href="../subsystems/companion-api"
     description="?section=companion 的 LAN bind / pair JWT 管理"
   />
   <Card
     title="Claude 订阅 OAuth"
-    href="./claude-subscription-oauth"
+    href="../chat/claude-subscription-oauth"
     description="?section=subscription 的订阅登录与额度"
   />
   <Card
     title="CCSwitch"
-    href="./ccswitch"
+    href="../chat/ccswitch"
     description="?section=ccswitch 的 Claude Code profile 管理"
   />
   <Card
@@ -436,7 +423,7 @@ const MySection = dynamic(() => import("./my-area/my-section").then((m) => m.MyS
     href="./theming-and-i18n"
     description="?section=appearance 的主题/壁纸/字体/语言"
   />
-  <Card title="Slash 命令" href="./slash-commands" description="?section=slash-commands 的注册表" />
-  <Card title="语音" href="./misc-subsystems" description="?section=speech 的 TTS / STT 配置" />
-  <Card title="日志" href="./observability" description="?section=logs 与 ?section=diagnostics" />
+  <Card title="Slash 命令" href="../chat/slash-commands" description="?section=slash-commands 的注册表" />
+  <Card title="语音" href="../subsystems/misc-subsystems" description="?section=speech 的 TTS / STT 配置" />
+  <Card title="日志" href="../subsystems/observability" description="?section=logs 与 ?section=diagnostics" />
 </Cards>

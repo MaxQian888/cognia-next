@@ -395,6 +395,23 @@ export interface WorkflowTriggerBinding {
   goalId?: string
 }
 
+/**
+ * Origin of a run that did NOT come from the workflow's own trigger node.
+ * Today this means a Claude tool invocation (`wf_run_workflow_by_name`) fired
+ * from an IM session, or a desktop UI button, or an HTTP API call. Distinct
+ * from `WorkflowTriggerBinding` (which describes the trigger node payload):
+ * a manual run from IM has `triggerKind: "trigger.manual"` AND
+ * `triggeredBy.source: "im"`. The IM-side progress-runner subscribes to
+ * runs where `triggeredBy.source === "im"` and fans `workflowRunEvents` out
+ * to `triggeredBy.conversationKey` via `enqueueOutbound`.
+ */
+export interface WorkflowTriggeredFrom {
+  source: "im" | "ui" | "api"
+  adapterId?: string
+  conversationKey?: string
+  sessionId?: string
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Dexie row shapes (what `lib/db/schema.ts` v22 stores).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,6 +442,13 @@ export interface WorkflowRunRow {
   workflowSnapshot: VisualWorkflow
   /** Highest stepId successfully completed; resume picks up at the next one. */
   lastCompletedStepId?: string
+  /**
+   * Origin metadata for runs whose `trigger.kind === "trigger.manual"` was
+   * fired by an external surface (IM Claude tool, desktop button, HTTP API)
+   * rather than the workflow's own trigger node. Drives IM-side progress
+   * fan-out — see `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
+   */
+  triggeredBy?: WorkflowTriggeredFrom
 }
 
 export interface WorkflowRunError {

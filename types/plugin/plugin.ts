@@ -293,6 +293,21 @@ export type PluginPermissionPolicy = "ask" | "allow" | "deny"
 // =============================================================================
 
 /**
+ * A single external binary a plugin needs on the host machine. Declared
+ * under `manifest.requires.binaries[]`. The pre-install chain probes
+ * each via `detect_binary` and blocks the install (with a deep-linked
+ * dialog) when a required binary is missing.
+ */
+export interface PluginBinaryRequirement {
+  /** Executable name as it appears on PATH — e.g. "cognia", "git". */
+  name: string
+  /** Optional minimum semver. When absent, presence alone satisfies it. */
+  minVersion?: string
+  /** Optional URL the missing-binary dialog deep-links to for install help. */
+  documentation?: string
+}
+
+/**
  * Plugin manifest - describes a plugin's metadata and requirements
  */
 export interface PluginManifest {
@@ -422,6 +437,21 @@ export interface PluginManifest {
     cognia?: string
     node?: string
     python?: string
+  }
+
+  /**
+   * External tooling the plugin needs on the host machine to install or
+   * run — e.g. the `cognia` CLI for an author bundle, `git` for a repo
+   * plugin, `cargo-component` for a WASM build. The marketplace
+   * pre-install chain probes each entry (via the `detect_binary` Tauri
+   * command) and, when any is missing, surfaces a dialog deep-linking to
+   * `documentation` before letting the install proceed.
+   *
+   * Optional and additive — a plugin that declares nothing here installs
+   * exactly as before.
+   */
+  requires?: {
+    binaries?: PluginBinaryRequirement[]
   }
 
   /** Minimum host application version required to activate this plugin */

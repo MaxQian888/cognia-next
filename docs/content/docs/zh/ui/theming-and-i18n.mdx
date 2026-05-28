@@ -4,22 +4,6 @@ description: Tailwind v4、oklch token、基于 class 的暗色模式、双变�
 ---
 
 # 主题 & 国际化
-
-<Status variant="stable" />
-
-<TLDR>
-  Tailwind v4（无配置）+ oklch CSS 变量 + `next-themes` 切换 `.dark` class —— 三层堆叠就是 Cognia
-  的换肤管线。 自定义主题在 v16 起切到 **双变体** schema（同时存 light / dark token），缺失的一面由
-  OKLCH 算法自动推导。 国际化走 `next-intl`，目前内置 en + zh-CN。
-</TLDR>
-
-<StatGrid>
-  <Stat label="Tailwind" value="v4" hint="@tailwindcss/postcss，无配置" />
-  <Stat label="色彩空间" value="oklch" hint="感知一致" />
-  <Stat label="自定义主题" value="双变体" hint="v16+ tokens.light / tokens.dark" />
-  <Stat label="语言" value="2" hint="en + zh-CN" />
-</StatGrid>
-
 Cognia 完全可换肤，并自带英文与简体中文两种翻译。本页同时讲视觉主题流水线和 i18n 架构。
 
 ## Tailwind CSS v4
@@ -317,5 +301,5 @@ t("greeting", { name: "Alice" })
   />
   <Card title="Chat UI 架构" href="./chat-ui-architecture" description="聊天界面如何消费主题" />
   <Card title="设置 UI" href="./settings-ui" description="外观 / 语言 tab 的入口" />
-  <Card title="备份 & 数据传输" href="./backup-and-data" description="主题如何随用户迁移" />
+  <Card title="备份 & 数据传输" href="../data/backup-and-data" description="主题如何随用户迁移" />
 </Cards>

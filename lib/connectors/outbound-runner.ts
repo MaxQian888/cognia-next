@@ -481,9 +481,31 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       return
     }
 
+    // Edit-vs-send dispatch. When the request carries an
+    // `editTargetMessageId`, route to `adapter.edit()` so the platform
+    // updates the existing message in place. Adapters that don't
+    // implement `edit()` fall back to `send()` and audit the fallback so
+    // the caller can detect "you asked for in-place edit but this
+    // platform can't do it".
     let result: Awaited<ReturnType<PlatformAdapter["send"]>>
+    const editTargetId = request.editTargetMessageId
     try {
-      result = await adapter.send(request)
+      if (editTargetId && typeof adapter.edit === "function") {
+        result = await adapter.edit(editTargetId, request)
+      } else {
+        if (editTargetId) {
+          await appendAudit({
+            adapterId,
+            kind: "delivery.error",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: "edit_unsupported",
+            message: `${adapterId} adapter has no edit() — falling back to send()`,
+          })
+        }
+        result = await adapter.send(request)
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** job.attempts) + jitter()

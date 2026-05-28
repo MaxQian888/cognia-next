@@ -182,6 +182,31 @@ describe("useSkillsStore", () => {
       act(() => result.current.setImportStaging(staging))
       expect(result.current.importStaging?.parseErrors).toHaveLength(1)
     })
+
+    it("setImportStaging carries bundle-specific fields (resources, flavor, nativeDirectory, canonicalId)", () => {
+      const staging: ImportStaging = {
+        drafts: [
+          {
+            name: "Reviewer",
+            content: "body",
+            canonicalId: "bundle:zip:reviewer",
+            nativeDirectory: "/tmp/reviewer",
+            resources: [
+              { kind: "script", name: "x.sh", path: "scripts/x.sh", content: "#!/bin/bash\n" },
+            ],
+          },
+        ],
+        sourceLabel: "reviewer.zip",
+        parseErrors: [],
+        flavor: "codex",
+      }
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.setImportStaging(staging))
+      expect(result.current.importStaging?.flavor).toBe("codex")
+      expect(result.current.importStaging?.drafts[0].canonicalId).toBe("bundle:zip:reviewer")
+      expect(result.current.importStaging?.drafts[0].nativeDirectory).toBe("/tmp/reviewer")
+      expect(result.current.importStaging?.drafts[0].resources).toHaveLength(1)
+    })
   })
 
   describe("deleteTarget", () => {

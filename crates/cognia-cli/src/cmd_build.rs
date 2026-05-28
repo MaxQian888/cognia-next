@@ -18,15 +18,29 @@ use crate::{
     build_ts, cmd_lint,
     cmd_lint::Severity,
     packaging, read_plugin_manifest, run_streaming,
+    ui::{progress, style, RuntimeUi},
 };
 
-pub fn run(path: PathBuf, out: Option<PathBuf>, skip_build: bool) -> Result<()> {
+/// `cognia plugin build` — validate, then dispatch on manifest.type.
+///
+/// Phase 4 wraps the three logical steps (lint → build → pack) in
+/// `indicatif` spinners. The cargo / esbuild subprocess output still
+/// streams underneath the spinner, but each stage finishes with a
+/// `✓ done in <elapsed>` line so the user sees clean state transitions
+/// even on a many-minute WASM compile.
+pub fn run(
+    path: PathBuf,
+    out: Option<PathBuf>,
+    skip_build: bool,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     let crate_root = path
         .canonicalize()
         .with_context(|| format!("resolve {}", path.display()))?;
     let (manifest, _) = read_plugin_manifest(&crate_root)?;
 
     // ── lint first ─────────────────────────────────────────────────────
+    let lint_spinner = progress::make_spinner(ui, "Validating plugin.json");
     let lint = cmd_lint::validate_at(&crate_root)?;
     let errors: Vec<&cmd_lint::Diagnostic> = lint
         .diagnostics
@@ -34,19 +48,46 @@ pub fn run(path: PathBuf, out: Option<PathBuf>, skip_build: bool) -> Result<()> 
         .filter(|d| d.severity == Severity::Error)
         .collect();
     if !errors.is_empty() {
-        eprintln!("Manifest validation failed ({} error(s)):", errors.len());
+        lint_spinner.finish_and_clear();
+        eprintln!(
+            "{}{} ({} error(s)):",
+            style::error_prefix(),
+            style::error("Manifest validation failed"),
+            errors.len()
+        );
         for d in &errors {
-            eprintln!("  [{}] {}: {}", d.code, d.field, d.message);
+            eprintln!(
+                "  [{}] {}: {}",
+                style::dim(&d.code),
+                style::bold(&d.field),
+                d.message
+            );
             if let Some(h) = &d.hint {
-                eprintln!("       hint: {h}");
+                eprintln!("       {}{}", style::hint_prefix(), h);
             }
         }
         bail!(
-            "fix manifest issues before building; run `cognia plugin lint` for full report"
+            "fix manifest issues before building; run `cognia plugin lint` for the full report"
         );
     }
+    let warn_count = lint
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
+    lint_spinner.finish_with_message(format!(
+        "{}lint passed ({} warning{})",
+        style::success_prefix(),
+        warn_count,
+        if warn_count == 1 { "" } else { "s" }
+    ));
     for d in lint.diagnostics.iter().filter(|d| d.severity == Severity::Warning) {
-        eprintln!("warning: {} — {}", d.field, d.message);
+        eprintln!(
+            "  {}{} — {}",
+            style::warn_prefix(),
+            style::bold(&d.field),
+            d.message
+        );
     }
 
     // ── dispatch on type ───────────────────────────────────────────────
@@ -55,15 +96,41 @@ pub fn run(path: PathBuf, out: Option<PathBuf>, skip_build: bool) -> Result<()> 
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("plugin.json missing `type`"))?;
     match plugin_type {
-        "wasm" => build_wasm(&crate_root, &manifest, out, skip_build),
-        "frontend" => {
-            let _ = build_ts::build_and_pack(&crate_root, &manifest, out, skip_build)?;
-            Ok(())
-        }
+        "wasm" => build_wasm(&crate_root, &manifest, out, skip_build, ui),
+        "frontend" => build_frontend(&crate_root, &manifest, out, skip_build, ui),
         other => bail!(
             "cognia plugin build does not (yet) support `type: \"{other}\"`. Supported: wasm, frontend"
         ),
     }
+}
+
+fn build_frontend(
+    crate_root: &Path,
+    manifest: &serde_json::Value,
+    out: Option<PathBuf>,
+    skip_build: bool,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    if skip_build {
+        let pack_spinner = progress::make_spinner(ui, "Packing bundle (skipping esbuild)");
+        let path = build_ts::build_and_pack(crate_root, manifest, out, true)?;
+        pack_spinner.finish_with_message(format!(
+            "{}packed {}",
+            style::success_prefix(),
+            style::bold(path.display().to_string())
+        ));
+        return Ok(());
+    }
+    let build_spinner = progress::make_spinner(ui, "Building frontend (esbuild)");
+    // `build_and_pack` runs both esbuild AND packing under one helper.
+    // We split the spinner messaging at the boundaries we can observe.
+    let bundle_path = build_ts::build_and_pack(crate_root, manifest, out, false)?;
+    build_spinner.finish_with_message(format!(
+        "{}built + packed {}",
+        style::success_prefix(),
+        style::bold(bundle_path.display().to_string())
+    ));
+    Ok(())
 }
 
 fn build_wasm(
@@ -71,6 +138,7 @@ fn build_wasm(
     manifest: &serde_json::Value,
     out: Option<PathBuf>,
     skip_build: bool,
+    ui: &mut RuntimeUi,
 ) -> Result<()> {
     if !crate_root.join("Cargo.toml").exists() {
         bail!("Cargo.toml not found under {}", crate_root.display());
@@ -83,9 +151,22 @@ fn build_wasm(
         .to_string();
 
     if !skip_build {
-        run_cargo_component_build(crate_root)?;
+        // Spinner sits at the bottom while cargo's own output streams
+        // above it. `finish_with_message` clears the spinner before the
+        // success line lands, so the final state is a clean "✓ ...".
+        let build_spinner = progress::make_spinner(ui, "Building WASM component (cargo component build)");
+        let result = run_cargo_component_build(crate_root);
+        match &result {
+            Ok(_) => build_spinner.finish_with_message(format!(
+                "{}WASM component built",
+                style::success_prefix()
+            )),
+            Err(_) => build_spinner.finish_and_clear(),
+        }
+        result?;
     }
 
+    let pack_spinner = progress::make_spinner(ui, "Packing bundle");
     let plan = packaging::plan_bundle(crate_root, manifest)?;
 
     let wasm_bytes = std::fs::read(&plan.wasm_path)
@@ -111,8 +192,19 @@ fn build_wasm(
             .join(format!("{id}-{version}.zip"))
     });
     packaging::write_bundle(&bundle_path, &plan, manifest)?;
+    pack_spinner.finish_with_message(format!(
+        "{}packed {}",
+        style::success_prefix(),
+        style::bold(bundle_path.display().to_string())
+    ));
 
-    println!("Built {id} v{version} → {}", bundle_path.display());
+    println!(
+        "{}Built {} v{} → {}",
+        style::success_prefix(),
+        style::bold(id),
+        style::bold(version),
+        style::dim(bundle_path.display().to_string())
+    );
     Ok(())
 }
 
@@ -143,7 +235,8 @@ mod tests {
     fn build_errors_when_plugin_json_missing() {
         let tmp = tempdir().unwrap();
         // No plugin.json present → read_plugin_manifest errors out first.
-        let err = run(tmp.path().to_path_buf(), None, true).unwrap_err();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let err = run(tmp.path().to_path_buf(), None, true, &mut ui).unwrap_err();
         assert!(err.to_string().contains("plugin.json"));
     }
 
@@ -158,7 +251,8 @@ mod tests {
                 // missing name, version, description, type, capabilities
             }),
         );
-        let err = run(tmp.path().to_path_buf(), None, true).unwrap_err();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let err = run(tmp.path().to_path_buf(), None, true, &mut ui).unwrap_err();
         assert!(
             err.to_string().contains("fix manifest issues"),
             "got: {err}"
@@ -185,7 +279,8 @@ mod tests {
         );
         let out = root.join("hello-ts.zip");
         // skip_build=true bypasses the esbuild call so we don't need npx in tests.
-        run(root.to_path_buf(), Some(out.clone()), true).unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(root.to_path_buf(), Some(out.clone()), true, &mut ui).unwrap();
         assert!(out.exists());
     }
 
@@ -204,7 +299,8 @@ mod tests {
                 "pythonMain": "main.py"
             }),
         );
-        let err = run(tmp.path().to_path_buf(), None, true).unwrap_err();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        let err = run(tmp.path().to_path_buf(), None, true, &mut ui).unwrap_err();
         assert!(err.to_string().contains("does not (yet) support"), "got: {err}");
     }
 }

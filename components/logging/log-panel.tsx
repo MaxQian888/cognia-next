@@ -43,6 +43,7 @@ import {
 } from "@/hooks/logging/use-log-panel-filters"
 import { useLogPanelUrlSync } from "@/hooks/logging/use-log-panel-url-sync"
 import { LogPanelToolbar, type ExportFormat } from "./log-panel-toolbar"
+import { AgentTraceStatsBar } from "./agent-trace-stats-bar"
 import { LogPanelStatsBar, TransportHealthDetail, NativeLoggingDetail } from "./log-panel-stats-bar"
 import { VirtualizedLogList } from "./log-virtualized-list"
 import { LogStatsDashboard } from "./log-stats-dashboard"
@@ -885,6 +886,13 @@ export function LogPanel({
             onPageChange={handlePageChange}
             onPageSizeChange={handlePageSizeChange}
           />
+        )}
+
+        {/* Agent-trace stats — rendered whenever the user has scoped the
+            panel to the `agent.trace` module, so the cost / token / cache /
+            error headline numbers sit right above the trace list. */}
+        {filters.moduleFilter === AGENT_TRACE_MODULE && (
+          <AgentTraceStatsBar window="today" className="px-3 pt-2" />
         )}
 
         {/* Transport health detail */}

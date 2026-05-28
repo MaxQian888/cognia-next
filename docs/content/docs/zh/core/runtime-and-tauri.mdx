@@ -1,6 +1,6 @@
 ---
 title: 运行时模型 & Tauri 集成
-description: Web/桌面/移动 三运行时如何工作，如何添加新的 IPC 命令，以及保护用户的安全边界。
+description: Web/桌面/移动三种运行模式如何工作、如何新增 IPC 命令，以及守护用户的安全边界。
 ---
 
 # 运行时模型 & Tauri 集成
@@ -13,20 +13,10 @@ Cognia 的同一份 React 代码同时支持三种运行模式：
 
 绝大多数组件在三种模式下表现一致；少数差异通过 `lib/tauri.ts` 的两个守卫抹平。
 
-<TLDR>
-  - **`isTauri()` / `isCapacitor()`** —— 两个守卫互斥但都可能为 false（纯
-  Web）。三种模式可以同时存在，所以判断要写全。 - **"唯一调用点"规则** —— 只有 `lib/tauri.ts` 与
-  `lib/tauri/` 子模块能调 `invoke()`。其他地方一律走类型化封装。 - **Transport 矩阵** ——
-  `transport-tauri.ts`（桌面）/ `transport-companion.ts`（Capacitor / Web 桥接到 Companion）/
-  `transport-web.ts`（Web stub）。`transport-instance.ts` 启动时选一个。 - **CSP** ——
-  默认收紧，新外部源要显式加入 `connect-src`；详见本页"Tauri 配置"。 - **生命周期** —— `setup`
-  钩子里启动了 logging、workflow（cron 守护进程 + webhook 路由）、a2ui_bridge、remote-control
-  inbound、deep-link、CLI 转发、menu/tray。
-</TLDR>
-
 ## `isTauri()` 与 `isCapacitor()` 守卫
 
-```ts title="lib/tauri.ts"
+```ts
+// lib/tauri.ts
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
@@ -34,16 +24,10 @@ export function isTauri(): boolean {
 export function isCapacitor(): boolean {
   return (
     typeof window !== "undefined" &&
-    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-      ?.isNativePlatform === "function" &&
-    (
-      window as unknown as { Capacitor: { isNativePlatform: () => boolean } }
-    ).Capacitor.isNativePlatform() === true
+    (window as any).Capacitor?.isNativePlatform?.() === true
   )
 }
 ```
-
-两个守卫的含义：
 
 | 检测            | 桌面（Tauri） | 移动（Capacitor） | 纯 Web | SSR   |
 | --------------- | ------------- | ----------------- | ------ | ----- |
@@ -53,13 +37,12 @@ export function isCapacitor(): boolean {
 UI 模式分支的标准写法：
 
 ```tsx
-import { isTauri, isCapacitor, openExternal } from "@/lib/tauri"
+import { isTauri, openExternal } from "@/lib/tauri"
 
 function ExternalLink({ href, children }: Props) {
   if (isTauri()) {
     return <button onClick={() => openExternal(href)}>{children}</button>
   }
-  // Capacitor 与 Web 都用浏览器跳转
   return (
     <a href={href} target="_blank" rel="noreferrer">
       {children}
@@ -68,82 +51,52 @@ function ExternalLink({ href, children }: Props) {
 }
 ```
 
-在 SSR（Next.js 服务端组件）中，两个守卫都返回 `false`，因为 `window` 不存在。依赖 Tauri 或 Capacitor 的 UI 应包在客户端组件里（`"use client"`）。移动端的完整运行时差异参见 [移动架构](../ui/mobile-architecture)。
+SSR（Next.js 服务端组件）下两个守卫都返回 `false`，依赖 Tauri 或 Capacitor 的 UI 应包在客户端组件里（`"use client"`）。移动端完整差异参见 [移动架构](../ui/mobile-architecture)。
 
 ## 三态运行时图
 
 ```mermaid
 flowchart LR
-  Comp[React 组件] --> G1{isTauri()?}
-  G1 -->|true| W1[lib/tauri.ts 封装]
-  G1 -->|false| G2{isCapacitor()?}
+  Comp[React 组件] --> G1{"isTauri()?"}
+  G1 -->|true| W1[lib/tauri.ts 封装 → invoke]
+  G1 -->|false| G2{"isCapacitor()?"}
   G2 -->|true| W2[transport-companion<br/>via Companion API]
   G2 -->|false| W3[transport-web<br/>Web stub / 优雅降级]
-  W1 --> Rust[Rust 命令]
-  W2 --> Comp2[Companion HTTP]
-  W3 --> Browser[浏览器 API]
+  W1 --> Rust["#[tauri::command]<br/>Rust handler"]
+  W2 --> Comp2[Companion HTTP/WS]
 
   classDef layer fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class Comp,G1,G2,W1,W2,W3,Rust,Comp2,Browser layer
+  class Comp,G1,G2,W1,W2,W3,Rust,Comp2 layer
 ```
 
 ## "唯一调用点"规则
 
-**只有 `lib/tauri.ts` 及其 `lib/tauri/` 子模块允许调用 `invoke()`。** 每个 Rust 命令都必须有一个类型化封装。直接用法：
+**只有 `lib/tauri.ts` 及其 `lib/tauri/` 子模块允许调用 `invoke()`。** 每个 Rust 命令都必须有一个类型化封装：
 
-```ts title="lib/tauri.ts"
-import { transport } from "./tauri/transport-instance"
-
+```ts
+// lib/tauri.ts
 export async function greet(name: string): Promise<string> {
-  return transport.call<string>("greet", { name })
+  return invoke<string>("greet", { name })
 }
 ```
 
 为什么这样规定：
 
 - 唯一一处可以加请求校验、错误映射、遥测。
-- 业务代码保持可移植 —— transport 在桌面 / Companion / Web 之间切换，业务代码无感。
+- 业务代码保持可移植 —— 测试中容易 mock。
 - Rust API 重构只动 `lib/tauri.ts` 一处。
 
 代码评审时如果发现 `invoke()` 出现在这个文件夹之外，请把它搬回来。
 
-### `lib/tauri/` 的目录布局
-
-```text
-lib/tauri/
-├── transport-instance.ts   # 启动选 transport：tauri / companion / web
-├── transport-tauri.ts      # 桌面 — 直接 invoke()
-├── transport-companion.ts  # Capacitor / Web — 桥到 Companion
-├── transport-web.ts        # Web — stub
-├── transport-types.ts
-├── pinned-fetch.ts         # TLS 证书钉的 fetch（mobile → desktop 用）
-├── autostart.ts            # tauri-plugin-autostart 封装
-├── canvas.ts               # canvas_run_python
-├── cli.ts                  # tauri-plugin-cli 封装
-├── clipboard.ts            # tauri-plugin-clipboard-manager
-├── companion-storage.ts    # Companion 客户端的本地存储抽象
-├── deep-link.ts            # tauri-plugin-deep-link 事件
-├── events.ts               # Tauri events 简化 API
-├── notification.ts         # tauri-plugin-notification
-├── opener.ts               # tauri-plugin-opener
-├── os.ts                   # tauri-plugin-os
-├── remote-control.ts       # remote_control 命令封装
-├── store.ts                # tauri-plugin-store
-├── webview-zoom.ts         # 缩放控制
-└── index.ts                # barrel
-```
-
-`lib/tauri.ts` 用 `export * from "./tauri/index"` 把所有子模块的命名导出聚合，于是消费方一律写 `import { foo } from "@/lib/tauri"`。
-
-## 添加新的 IPC 命令
+## 新增 IPC 命令
 
 <Steps>
   <Step>
     ### 在 Rust 中定义命令
 
-    写在 `src-tauri/src/commands.rs`（或领域子模块如 `src-tauri/src/scheduler/commands.rs`、`src-tauri/src/workflow/commands.rs`）：
+    写在 `src-tauri/src/commands.rs`（或领域子模块如 `src-tauri/src/scheduler/commands.rs`）：
 
-    ```rust title="src-tauri/src/commands.rs"
+    ```rust
     #[tauri::command]
     pub async fn my_command(arg: String) -> Result<String, String> {
         Ok(format!("got {arg}"))
@@ -153,15 +106,14 @@ lib/tauri/
     <Callout type="info" title="约定">
       - 返回 `Result<T, E>`，让 Tauri 把错误序列化成 JS 可以 `catch` 的字符串。
       - 参数用 `String` 不用 `&str` —— Tauri 自己持有缓冲区。
-      - 长任务用 `tauri::Window` 参数发进度事件，或经由 `app.emit()` 发命名事件。
-      - 涉及共享状态时用 `tauri::State<'_, T>` 注入由 `manage()` 安装的状态。
+      - 长任务用 `tauri::Window` 参数发进度事件。
     </Callout>
 
   </Step>
   <Step>
     ### 在 `lib.rs` 中注册
 
-    ```rust title="src-tauri/src/lib.rs"
+    ```rust
     .invoke_handler(tauri::generate_handler![
         commands::greet,
         commands::my_command,
@@ -171,15 +123,15 @@ lib/tauri/
 
   </Step>
   <Step>
-    ### 在 `lib/tauri.ts` 或子模块中加类型封装
+    ### 在 `lib/tauri.ts` 加类型封装
 
-    ```ts title="lib/tauri.ts"
+    ```ts
     export async function myCommand(arg: string): Promise<string> {
-      return transport.call<string>("my_command", { arg })
+      return invoke<string>("my_command", { arg })
     }
     ```
 
-    如果该领域调用很多，可以放到 `lib/tauri/` 下的子模块（例如调度器相关全部放 `lib/tauri/scheduler.ts`）。
+    如果调用面较大，可放到 `lib/tauri/` 下的子模块（例如调度器相关全部放 `lib/tauri/scheduler.ts`）。
 
   </Step>
   <Step>
@@ -187,18 +139,18 @@ lib/tauri/
 
     <Tabs groupId="lang" persist items={["TypeScript", "Rust"]}>
       <Tab value="TypeScript">
-        同名 `lib/tauri.test.ts` 或子模块的 `*.test.ts`。Mock transport：
+        同位 `lib/tauri.test.ts`。Mock `@tauri-apps/api/core`：
 
         ```ts
-        jest.mock("./tauri/transport-instance", () => ({
-          transport: { call: jest.fn() },
+        jest.mock("@tauri-apps/api/core", () => ({
+          invoke: jest.fn(),
         }))
         ```
 
         然后断言封装传入了正确的命令名与参数。
       </Tab>
       <Tab value="Rust">
-        同文件 `#[cfg(test)] mod tests {}` 块（按项目测试规范，不另开测试文件）：
+        同文件内 `#[cfg(test)] mod tests {}`：
 
         ```rust
         #[cfg(test)]
@@ -221,7 +173,7 @@ lib/tauri/
 
 关键字段：
 
-```jsonc title="src-tauri/tauri.conf.json"
+```jsonc
 {
   "productName": "Cognia",
   "version": "0.1.0",
@@ -244,25 +196,16 @@ lib/tauri/
         "decorations": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 12 },
       },
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss:; object-src 'none'; frame-src 'self' blob:; base-uri 'self'; form-action 'self'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ...",
     },
-  },
-  "bundle": {
-    "resources": [
-      "../sidecar/claude-host.mjs",
-      "../sidecar/a2ui-mcp.mjs",
-      "../sidecar/package.json",
-      "../sidecar/node_modules/**/*",
-    ],
   },
   "plugins": {
     "deep-link": { "desktop": { "schemes": ["cognia"] } },
     "cli": {
-      /* CLI 参数定义：workspace, --new-chat */
+      /* CLI 参数定义 */
     },
     "updater": { "active": false },
   },
@@ -271,11 +214,10 @@ lib/tauri/
 
 ### 关于 bundle identifier
 
-<Callout type="warn" title="不要在没有迁移方案的情况下重命名">
-  `identifier` 是 `com.reactquickstarter.desktop` —— 历史遗留值，沿用至今。Tauri 用它推导
-  **每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
+<Callout type="error" title="不要在没有迁移方案的情况下重命名">
+  `identifier` 是 `com.reactquickstarter.desktop` —— 历史遗留值，沿用至今。Tauri 用它推导**每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
 
-**99% 的贡献者请让 `identifier` 保持原样。**
+**99 % 的贡献者请让 `identifier` 保持原样。**
 
 </Callout>
 
@@ -295,33 +237,11 @@ lib/tauri/
   <Step>### 在 `settings` 中标记迁移已完成，避免重复执行</Step>
 </Steps>
 
-### Content Security Policy（CSP）
+### Content Security Policy
 
-`app.security.csp` 决定 webview 允许加载什么。当前策略：
+`app.security.csp` 决定 webview 允许加载什么。当前策略允许 `'self'`、`wasm-unsafe-eval`（Monaco）、`blob:`（worker + iframe）、内联样式（Tailwind）。
 
-```text
-default-src 'self';
-script-src 'self' 'wasm-unsafe-eval' blob:;
-worker-src 'self' blob:;
-style-src 'self' 'unsafe-inline';
-img-src 'self' data: blob:;
-font-src 'self' data:;
-connect-src 'self' ipc: http://ipc.localhost ws: wss:;
-object-src 'none';
-frame-src 'self' blob:;
-base-uri 'self';
-form-action 'self'
-```
-
-要点：
-
-- `wasm-unsafe-eval` —— Monaco 编辑器 + WASM 词法分析需要。
-- `worker-src 'self' blob:` —— Monaco worker、PDF.js worker、Cognia 内部 worker。
-- `frame-src 'self' blob:` —— Artifacts 沙箱用 blob iframe；详见 [Artifacts 沙箱](../subsystems/artifacts-sandbox)。
-- `connect-src` —— `'self' ipc: http://ipc.localhost` 是 Tauri 与 IPC 的协议，`ws:`/`wss:` 给连接器 + Companion + MCP HTTP transport。
-- `object-src 'none'` / `base-uri 'self'` / `form-action 'self'` —— 安全收紧。
-
-**新增浏览器端的 HTTPS 来源（如模型供应商、遥测端点、OAuth 提供方、MCP HTTP transport）时**，请把来源加入 `connect-src`，否则生产构建会静默拦截请求：
+新增需要从浏览器调用的 HTTPS 来源（模型供应商、遥测端点、OAuth 提供方……）时，请把来源加入 `connect-src`，否则生产构建会静默拦截请求：
 
 ```jsonc
 "csp": "... connect-src 'self' ipc: http://ipc.localhost ws: wss: https://api.example.com; ..."
@@ -333,20 +253,14 @@ form-action 'self'
 
 ## 已使用的 Tauri 插件
 
-插件**在两个地方**起作用：
-
-1. `src-tauri/src/lib.rs` 中通过 `tauri::Builder::plugin(...)` 注册（运行时安装）。
-2. `src-tauri/tauri.conf.json` 的 `plugins` 块（编译期配置 + 元数据）。
-3. `src-tauri/capabilities/default.json` 中的 capability 项（运行时 allow-list）。
-
-任何 JS 侧能用的 API，必须在三个地方都齐全。
+在 `src-tauri/src/lib.rs` 注册。每个插件在 `src-tauri/capabilities/default.json` 中有对应的 allowlist 条目，限制 JS 侧可调用范围。
 
 | 插件                                                                           | 用途                                                                                        |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `single-instance`                                                              | 第二次启动时聚焦既有窗口并转发参数（CLI workspace 路径、deep-link URL）。**必须最先注册**。 |
 | `deep-link`                                                                    | 注册 `cognia://` URL 协议。Mac/Linux 把 URL 当作启动参数；Windows 借 single-instance 转发。 |
 | `autostart`                                                                    | 可选"开机自启"。默认关闭。                                                                  |
-| `global-shortcut`                                                              | 注册系统级快捷键：`Ctrl+Shift+Space` 切换主窗口、`Ctrl+Shift+L` 打开日志面板。              |
+| `global-shortcut`                                                              | 注册系统级快捷键；用户可配置。                                                              |
 | `cli`                                                                          | 解析 `--workspace <path>` 与 `-n`（新建会话）启动参数。                                     |
 | `store`                                                                        | 持久化 Rust 侧关心的设置（JS 侧用 Dexie）。                                                 |
 | `updater`                                                                      | 默认禁用（详见 `src-tauri/UPDATER.md`）。                                                   |
@@ -355,33 +269,18 @@ form-action 'self'
 
 按 Tauri 文档要求，single-instance 钩子必须**最先**注册：
 
-```rust title="src-tauri/src/lib.rs"
+```rust
 builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
     // 聚焦既有窗口、转发参数
-    let _ = app.emit("cli://second-instance", json!({ "args": args, "cwd": cwd }));
 }));
 ```
 
 ## 生命周期与关闭
 
-`src-tauri/src/lib.rs` 的 `setup` 钩子接线了大量后台子系统：
+`src-tauri/src/lib.rs` 接线：
 
-| 钩子                              | 作用                                                                                                                                   |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `logging::bootstrap`              | 安装 `tauri-plugin-log` 的 stdout / 文件 / webview 目标，并把记录镜像到 OS 原生日志后端。                                              |
-| `WorkflowState::open`             | 打开工作流 SQLite 镜像、启动 cron 守护进程、把 axum webhook 路由 spawn 到 tokio。详见 [可视化工作流](../subsystems/visual-workflows)。 |
-| `global_shortcut.register`        | 注册 `Ctrl+Shift+Space` / `Ctrl+Shift+L`。                                                                                             |
-| `app.deep_link()`                 | Linux / dev-Windows 上运行时注册 `cognia://`；emit `deep-link://received` 到前端。                                                     |
-| CLI matches 转发                  | 把第一次启动的 CLI 参数 emit 为 `cli://matches`。                                                                                      |
-| `menu::install` / `tray::install` | 构建应用菜单与系统托盘，事件通过 `tray://*` emit。                                                                                     |
-| 窗口关闭拦截                      | 按 `WindowBehavior::close_behavior()`：`Quit` 放行关闭；`Tray` 拦截 `CloseRequested` 并 `hide()`；`Ask` 拦截并 emit `app://close-requested`，由前端弹出退出确认框。 |
-| `a2ui_bridge::spawn`              | 启动 A2UI 桥 socket 监听器；详见 [A2UI 系统](../subsystems/a2ui-system)。                                                              |
-| `remote_control` 自启动           | 若用户启用过入站监听且 keyring 还有令牌，就 spawn 监听器。详见 [远程控制](../subsystems/remote-control)。                              |
-| Companion push 凭证恢复           | 重新挂载用户上次上传过的 FCM/APNs dispatcher。详见 [Companion API](../subsystems/companion-api)。                                      |
-
-退出路径：
-
-- **窗口关闭** —— 退出前 `kill_sidecar`，避免遗留 Node 进程；若启用"关闭到托盘"则改为 `hide()`。
+- **应用 ready** —— 初始化 `SidecarState`（lazy，首个 `claude_send` 时启动）、注册钩子、调度 readiness ping。
+- **窗口关闭** —— 退出前 `kill_sidecar`，避免遗留 Node 进程。
 - **single-instance 第二次启动** —— 聚焦既有窗口、转发 `args` 与 `cwd`。
 
 新增长任务原生子系统时，请在 `lib.rs` 里注册，并在 `RunEvent::ExitRequested` 时清理。
@@ -396,30 +295,10 @@ Cognia 采用**默认 allow-list** 策略（Tauri 2 capability）。`src-tauri/c
 
 插件在自身清单中申请额外权限（见 [插件系统](../subsystems/plugin-system)）。
 
-## 跨页参考
-
-| 想做的事                                  | 看这里                                                 |
-| ----------------------------------------- | ------------------------------------------------------ |
-| 用 Capacitor 把同一份代码跑在 iOS/Android | [移动架构](../ui/mobile-architecture)                  |
-| 暴露 Cognia 的 wiki/RAG 给外部代理        | [External Bridge](../subsystems/external-bridge)       |
-| 接 Telegram / Discord / Slack / Lark / QQ | [平台连接器](../subsystems/platform-connectors)        |
-| 跑在 headless 服务器（无 UI）             | [Companion API](../subsystems/companion-api)           |
-| 通过 HMAC 让其他设备远程触发指令          | [远程控制](../subsystems/remote-control)               |
-| 切换 Claude Code 提供商档案               | [CCSwitch](../chat/ccswitch)                           |
-| 用 Claude Pro/Max OAuth 而不是 API key    | [Claude 订阅 OAuth](../chat/claude-subscription-oauth) |
-| 把 cron 触发器装进 Rust 守护进程          | [可视化工作流](../subsystems/visual-workflows)         |
-| 暴露 Wiki 的 MCP 服务器在 HTTP 上跑       | [Tauri MCP 服务器](../subsystems/mcp-server-tauri)     |
-
 ## 下一篇
 
 <Cards>
-  <Card
-    title="Sidecar & Claude SDK"
-    href="./sidecar-and-claude-sdk"
-    description="Node sidecar 协议详解"
-  />
-  <Card title="插件系统" href="./plugin-system" description="插件如何申请权限" />
-  <Card title="架构" href="./architecture" description="本页所属的 4 层视图" />
-  <Card title="移动架构" href="./mobile-architecture" description="Capacitor 运行时与同步" />
-  <Card title="Companion API" href="./companion-api" description="移动配对 + LAN + 隧道" />
+  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="Node sidecar 协议详解。" />
+  <Card title="插件系统" href="../subsystems/plugin-system" description="第三方插件如何申请权限。" />
+  <Card title="架构" href="./architecture" description="本页所属的四层视图。" />
 </Cards>

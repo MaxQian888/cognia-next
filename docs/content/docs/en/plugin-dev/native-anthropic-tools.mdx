@@ -14,7 +14,7 @@ plugin that ships a `spreadsheet_20260601` tool the model can call
 directly with cell ranges and formulas.
 
 This page is the practical reference. For background, see
-[ADR-0020](/docs/en/adr/0020-computer-use-completeness).
+[ADR-0020](../adr/0020-computer-use-completeness).
 
 ## When to use a native tool vs a Plugin MCP tool
 
@@ -271,4 +271,4 @@ status depends on the manifest carrying the capability name.
 - SDK re-export: `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` — the published entry point this capability contract advertises.
 - Registry source: `lib/plugin/registries/native-anthropic-tool-registry.ts` — register / unregister / list / compute beta header.
 - Wire shape: `types/plugin/plugin-native-tool.ts` — `PluginNativeAnthropicToolDef`.
-- ADR: [ADR-0020 — Computer Use Completeness](/docs/en/adr/0020-computer-use-completeness).
+- ADR: [ADR-0020 — Computer Use Completeness](../adr/0020-computer-use-completeness).

@@ -278,7 +278,7 @@ describe("parseLarkEventEnvelope", () => {
 
 describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
   const QUICK_COMMANDS: LarkQuickCommand[] = [
-    { eventKey: "agenda", label: "今日日程", action: { type: "slash", value: "/agenda today" } },
+    { triggerKey: "agenda", label: "今日日程", action: { type: "slash", value: "/agenda today" } },
   ]
 
   function menuEnvelope(

@@ -1,0 +1,103 @@
+---
+title: "OCR 插件工具"
+description: "在自定义插件或外部 MCP 客户端中调用内置 ocr.extract 工具。"
+---
+
+# OCR 插件工具
+
+内置 `cognia-ocr` 插件（`plugins/ocr/`）暴露唯一一个 agent 工具 —— `ocr.extract`，在每一种 shell 中都接线。本指南覆盖：插件作者想把自己的工具链入 OCR 的调用 shape，以及如何从另一个插件调用斜杠命令。
+
+## 工具面
+
+```ts
+// 由 plugins/ocr/src/index.ts 注册的 schema
+{
+  name: "ocr.extract",
+  description: "从任意图片或 PDF 提取文本与结构化 Markdown。",
+  input_schema: {
+    type: "object",
+    properties: {
+      source: {
+        type: "object",
+        required: ["kind", "value"],
+        properties: {
+          kind: { type: "string", enum: ["attachment_id", "data_url", "file_path"] },
+          value: { type: "string" },
+        },
+      },
+      languages: { type: "array", items: { type: "string" } },
+      format: { type: "string", enum: ["markdown", "text", "blocks"] },
+      provider: { type: "string" },
+      pageRange: { type: "string" },
+    },
+    required: ["source"],
+  },
+}
+```
+
+成功返回 `{ ok: true, result }`，失败返回 `{ ok: false, error, code }`。`code` 取值：
+
+- `unsupported_shell`
+- `missing_credentials`
+- `rate_limited`
+- `provider_failed`
+- `unsupported_language`
+- `invalid_input`
+- `aborted`
+
+当 `provider` 缺失或为 `"auto"` 时，auto-router（`lib/ocr/auto-router.ts`）根据当前 shell 与用户设置挑选 provider。否则提供的 id 必须匹配 17 个已注册 provider 之一（见 ADR-0024）。
+
+## 从另一个插件调用
+
+```ts
+import type { PluginContext } from "@/types/plugin"
+
+export const myPlugin = {
+  manifest: {
+    /* ... */
+  },
+  activate: async (ctx: PluginContext) => {
+    ctx.agent?.registerTool?.({
+      name: "summarize_screenshot",
+      pluginId: ctx.pluginId,
+      definition: {
+        /* ... */
+      },
+      execute: async ({ attachment_id }: { attachment_id: string }) => {
+        // 链入 cognia-ocr 注册的工具。
+        const ocr = await ctx.agent?.invokeTool?.("ocr.extract", {
+          source: { kind: "attachment_id", value: attachment_id },
+          format: "markdown",
+        })
+        if (!ocr?.ok) return { error: ocr?.error ?? "OCR failed" }
+        return summarize(ocr.result.combinedMarkdown)
+      },
+    })
+  },
+}
+```
+
+`ctx.agent.invokeTool` 在两个插件在同一会话中激活时由插件 runtime 提供。
+
+## 斜杠命令
+
+`/ocr` 由同一插件注册。从另一插件内部可通过 `ctx.chat?.runSlashCommand?.("/ocr", argv)` 派发 —— argv 是命令名之后的原始字符串（例如 `"att_123 --provider mistral-ocr"`）。
+
+## 原生 OCR 后端
+
+Tauri 构建可通过 Cargo feature 选择原生 OCR 引擎：
+
+| Feature         | 后端                                                                          |
+| --------------- | ----------------------------------------------------------------------------- |
+| `ocr-tesseract` | 通过 `tesseract-rs` crate 的跨平台 Tesseract。                               |
+| `ocr-windows`   | 通过 `winocr` crate 的 `Windows.Media.Ocr`。需要 MSIX 构建。                  |
+| `ocr-apple`     | 通过 `src-tauri/sidecars/apple-vision-ocr/` 的 Swift sidecar 调 Apple Vision。 |
+
+未启用这些 feature 时，注册表广告占位后端，上报 `MissingBinding`。TS 层把它显示为 `unsupported_shell`，auto-router 跌穿到下一个候选。
+
+## 参见
+
+- ADR-0024 —— OCR 子系统
+- `lib/ocr/index.ts` —— 公开的 `extract()` 入口
+- `lib/ocr/auto-router.ts` —— 选择规则
+- `lib/db/ocr-results.ts` —— Dexie 缓存

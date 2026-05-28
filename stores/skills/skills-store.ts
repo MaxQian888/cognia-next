@@ -4,8 +4,14 @@
 // be persisted to localStorage.
 
 import { create } from "zustand"
-import type { SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import type {
+  SkillCategory,
+  SkillSource,
+  SkillStatus,
+  SkillValidationError,
+} from "@/lib/claude/types"
 import type { MonacoLanguage } from "@/components/skills/editor/language-from-path"
+import type { SkillResourceDraft } from "@/lib/db/skill-resources"
 
 export interface EditorFile {
   /** "main" for SKILL.md, otherwise the resource id. */
@@ -101,11 +107,34 @@ export interface ImportStaging {
     tags?: string[]
     allowedTools?: string[]
     category?: SkillCategory
+    /**
+     * Stable id used for upsert. Bundle imports derive this from the
+     * frontmatter `name` plus the import flavor (`bundle:zip:<slug>` or
+     * `bundle:folder:<slug>`); markdown / Claude Code imports leave it
+     * undefined and fall back to name-based collision detection.
+     */
+    canonicalId?: string
+    /**
+     * Resources discovered in the bundle (scripts/, references/, assets/).
+     * Persisted alongside the row via `replaceResourcesForSkill` after
+     * the upsert.
+     */
+    resources?: Array<Omit<SkillResourceDraft, "skillId">>
+    /** Non-fatal validation findings carried on the persisted row. */
+    validationErrors?: SkillValidationError[]
+    /**
+     * Pre-assigned native directory (the source folder for folder imports,
+     * or the cognia canonical path once materialized). Powers the
+     * auto-push-to-disk flow in the SkillImportDialog success handler.
+     */
+    nativeDirectory?: string
   }>
   /** Per-source label (e.g., "Markdown files (3)" or "~/.claude/skills/"). */
   sourceLabel: string
   /** Files that couldn't be parsed; surfaced in the dialog summary. */
   parseErrors: { name: string; error: string }[]
+  /** "anthropic" / "codex" for bundle imports — drives the flavor badge. */
+  flavor?: "anthropic" | "codex"
 }
 
 const DEFAULT_FILTERS: SkillFilters = {

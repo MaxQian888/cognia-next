@@ -1,4 +1,4 @@
 {
-  "title": "插件开发",
-  "pages": ["desktop-handlers"]
+  "title": "插件",
+  "pages": ["desktop-handlers", "ocr"]
 }

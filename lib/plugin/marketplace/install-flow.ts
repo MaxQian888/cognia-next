@@ -16,15 +16,27 @@
  * confirms every step.
  */
 
-import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import type { PluginBinaryRequirement, PluginManifest, PluginPermission } from "@/types/plugin"
 import { listPlugins, setPluginConfig } from "@/lib/db/plugins"
 import { ConflictDetector } from "@/lib/plugin/package/conflict-detector"
+import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
 // =============================================================================
 // Public types
 // =============================================================================
 
-export type PreInstallStage = "conflict" | "permission" | "config" | "install"
+export type PreInstallStage =
+  | "conflict"
+  | "permission"
+  | "binary-requirements"
+  | "config"
+  | "install"
+
+export interface PreInstallBinaryPayload {
+  pluginId: string
+  /** The binaries declared in `requires.binaries` that aren't satisfied. */
+  missing: Array<PluginBinaryRequirement & { detectedVersion?: string }>
+}
 
 export interface PreInstallConflict {
   /** Plugin id involved in the conflict (the install target). */
@@ -64,6 +76,22 @@ export interface RunMarketplaceInstallOpts {
   requestPermissionReview: (payload: PreInstallPermissionPayload) => Promise<"approve" | "cancel">
 
   /**
+   * Resolve the binary-requirements step. Invoked only when the manifest
+   * declares `requires.binaries` AND at least one is missing / below its
+   * minVersion. The dialog may re-probe internally ("I installed it");
+   * it resolves `"proceed"` when the user wants to continue (all satisfied
+   * or override) or `"cancel"` to abort. Optional — when absent, a missing
+   * binary aborts the install with a `cancelled/binary-requirements` result.
+   */
+  requestBinaryReview?: (payload: PreInstallBinaryPayload) => Promise<"proceed" | "cancel">
+
+  /**
+   * Probe a single binary's presence + version. Injected so tests don't
+   * shell out; defaults to the real `detectCli` from `lib/cli-bridge`.
+   */
+  detectBinary?: (name: string) => Promise<{ available: boolean; version: string | null }>
+
+  /**
    * Resolve the configuration step. Invoked only when the manifest carries a
    * non-empty `configSchema`. Returns `"save"` with the value, or `"cancel"`.
    */
@@ -80,12 +108,33 @@ export interface RunMarketplaceInstallOpts {
     getPlugin: (id: string) => Promise<{ manifest: PluginManifest; name?: string } | null>
     installPlugin: (id: string, version?: string) => Promise<unknown>
   }
+
+  /**
+   * Rollback hook for failures that happen AFTER `client.installPlugin`
+   * returns successfully — currently only the `setPluginConfig` step.
+   * The default implementation lazy-loads `getPluginManager()` and calls
+   * `rollbackInstallation` on it. Tests inject a spy to assert the call
+   * without dragging the full manager into the unit setup.
+   *
+   * `null` means "skip rollback" (used in tests that simulate the
+   * config-persist failure without exercising the manager). In
+   * production callers should leave this undefined so the default fires.
+   */
+  rollback?: ((pluginId: string, reason: string) => Promise<void>) | null
 }
+
+/**
+ * Discriminant for `failed` results. `install-rollback` is only emitted
+ * when the post-install rollback itself failed — the plugin row may
+ * still be in Dexie and the user must uninstall manually. The UI uses
+ * the distinction to escalate the toast severity.
+ */
+export type RunMarketplaceFailedStage = PreInstallStage | "install-rollback"
 
 export type RunMarketplaceInstallResult =
   | { status: "installed"; pluginId: string }
   | { status: "cancelled"; stage: PreInstallStage }
-  | { status: "failed"; stage: PreInstallStage; message: string }
+  | { status: "failed"; stage: RunMarketplaceFailedStage; message: string }
 
 // =============================================================================
 // Helpers
@@ -160,6 +209,47 @@ function hasConfigSchema(manifest: PluginManifest): boolean {
   return Object.keys(props).length > 0
 }
 
+/**
+ * Probe the manifest's `requires.binaries` and return the subset that
+ * isn't satisfied (absent, or present but below `minVersion`). Returns an
+ * empty array when the manifest declares no binaries or all are present.
+ *
+ * `detectBinary` is injected by the orchestrator (defaulting to the real
+ * `detectCli`) so this stays unit-testable without spawning processes.
+ */
+async function resolveMissingBinaries(
+  manifest: PluginManifest,
+  detectBinary: (name: string) => Promise<{ available: boolean; version: string | null }>
+): Promise<PreInstallBinaryPayload["missing"]> {
+  const required = manifest.requires?.binaries ?? []
+  if (required.length === 0) return []
+  const { satisfiesMinVersion } = await import("@/lib/cli-bridge/detect-cli")
+  const missing: PreInstallBinaryPayload["missing"] = []
+  for (const req of required) {
+    const probe = await detectBinary(req.name)
+    const ok = probe.available && satisfiesMinVersion(probe.version, req.minVersion)
+    if (!ok) {
+      missing.push({ ...req, detectedVersion: probe.version ?? undefined })
+    }
+  }
+  return missing
+}
+
+/** Default binary probe — lazy-loads the real detector. */
+async function defaultDetectBinary(
+  name: string
+): Promise<{ available: boolean; version: string | null }> {
+  try {
+    const { detectCli } = await import("@/lib/cli-bridge/detect-cli")
+    const r = await detectCli(name)
+    return { available: r.available, version: r.version }
+  } catch {
+    // If the detector can't load (web bundle without the command), treat
+    // as "not available" — the gate then surfaces the requirement.
+    return { available: false, version: null }
+  }
+}
+
 // =============================================================================
 // Orchestrator
 // =============================================================================
@@ -210,6 +300,24 @@ export async function runMarketplaceInstall(
     }
   }
 
+  // Step 2.5 — binary requirements (only when the manifest declares any
+  // and at least one is missing). The detector is injectable; the UI
+  // dialog may re-probe internally before resolving.
+  const missingBinaries = await resolveMissingBinaries(
+    manifest,
+    opts.detectBinary ?? defaultDetectBinary
+  )
+  if (missingBinaries.length > 0) {
+    if (!opts.requestBinaryReview) {
+      // No UI to resolve the requirement → block the install.
+      return { status: "cancelled", stage: "binary-requirements" }
+    }
+    const decision = await opts.requestBinaryReview({ pluginId, missing: missingBinaries })
+    if (decision === "cancel") {
+      return { status: "cancelled", stage: "binary-requirements" }
+    }
+  }
+
   // Step 3 — configuration (only when the manifest has parseable fields).
   // The user-provided value is persisted post-install via setPluginConfig so
   // the Dexie row reflects their edits before the plugin is enabled by the
@@ -252,13 +360,74 @@ export async function runMarketplaceInstall(
     try {
       await setPluginConfig(pluginId, configValue)
     } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      // The manager finished a successful install — the user's intent
+      // (install + configure) didn't fully complete, so leaving the row
+      // in place would surface the plugin as "installed" with stale
+      // config. Roll back to pre-install state so the user can retry
+      // with their config still in mind.
+      const rollbackFn =
+        opts.rollback === undefined ? await resolveDefaultRollback() : opts.rollback
+      if (rollbackFn) {
+        try {
+          await rollbackFn(pluginId, `Config persistence failed: ${reason}`)
+        } catch (rollbackErr) {
+          const rollbackReason =
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+          dispatchPluginError({
+            pluginId,
+            stage: "install-rollback",
+            message: rollbackReason,
+            severity: "error",
+            recoverable: false,
+          })
+          return {
+            status: "failed",
+            stage: "install-rollback",
+            message: rollbackReason,
+          }
+        }
+      }
       return {
         status: "failed",
         stage: "install",
-        message: err instanceof Error ? err.message : String(err),
+        message: reason,
       }
     }
   }
 
   return { status: "installed", pluginId }
+}
+
+/**
+ * Lazy-load the production rollback hook
+ * (`getPluginManager().rollbackInstallation`). Dynamic import so the
+ * install-flow module stays cheap to load in headless tests that never
+ * reach the post-install branch, and so the marketplace ⇄ manager edge
+ * stays one-directional at module-graph time.
+ *
+ * Returns `null` when the manager isn't initialized (which happens in
+ * tests that exercise install-flow in isolation) so the caller can
+ * fall through without crashing — the post-install row is left in
+ * Dexie and the test runner is expected to assert on the result.
+ */
+async function resolveDefaultRollback(): Promise<
+  ((pluginId: string, reason: string) => Promise<void>) | null
+> {
+  try {
+    const mod = await import("@/lib/plugin/core/manager")
+    // Probe `getPluginManager()` synchronously — when the host hasn't
+    // bootstrapped the singleton yet (tests, very early app startup)
+    // it throws, and we fall back to "no rollback hook" rather than
+    // letting the install-flow surface a misleading
+    // "install-rollback failed" result to the user.
+    try {
+      mod.getPluginManager()
+    } catch {
+      return null
+    }
+    return (pluginId, reason) => mod.getPluginManager().rollbackInstallation(pluginId, reason)
+  } catch {
+    return null
+  }
 }

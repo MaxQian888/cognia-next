@@ -156,3 +156,88 @@ describe("createWechatPersonalAdapter — outbound reply (reply-only)", () => {
     await a.stop()
   })
 })
+
+describe("createWechatPersonalAdapter — numeric reply → callback short-circuit", () => {
+  beforeEach(() => {
+    jest.resetModules()
+  })
+
+  it("dispatches a numeric reply through dispatchConnectorCallback when a binding is live", async () => {
+    const { __resetNumericActionRegistryForTesting, setNumericAction } =
+      await import("./numeric-action-registry")
+    __resetNumericActionRegistryForTesting()
+    const conv = "wechat-personal:wx1:alice@im.wechat"
+    setNumericAction(conv, 1, "a2ui:s1:y:confirm")
+
+    const dispatchSpy = jest.fn(async (_e: unknown) => undefined)
+    jest.doMock("@/lib/connectors/bus", () => ({
+      getBus: () => ({ dispatchConnectorCallback: dispatchSpy }),
+    }))
+    const { createWechatPersonalAdapter: factory } = await import("./index")
+
+    const emit = jest.fn(async () => undefined)
+    let call = 0
+    const { ctx } = makeCtx({
+      emit,
+      getUpdates: () => {
+        call += 1
+        if (call === 1) return { ret: 0, msgs: [userMsg("1")] }
+        return { ret: -14 }
+      },
+    })
+    const a = factory({
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => "tok",
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    })
+    await a.start(ctx)
+    for (let i = 0; i < 10 && dispatchSpy.mock.calls.length === 0; i++) await tick()
+
+    expect(dispatchSpy).toHaveBeenCalledTimes(1)
+    const ev = dispatchSpy.mock.calls[0][0] as { triggerId: string; conversationKey: string }
+    expect(ev.triggerId).toBe("a2ui:s1:y:confirm")
+    expect(ev.conversationKey).toBe(conv)
+    // Regular message emit must NOT fire for the same turn.
+    expect(emit).not.toHaveBeenCalled()
+    await a.stop()
+    jest.dontMock("@/lib/connectors/bus")
+  })
+
+  it("falls through to emit() when the digit has no live binding", async () => {
+    const { __resetNumericActionRegistryForTesting } = await import("./numeric-action-registry")
+    __resetNumericActionRegistryForTesting()
+
+    const dispatchSpy = jest.fn(async (_e: unknown) => undefined)
+    jest.doMock("@/lib/connectors/bus", () => ({
+      getBus: () => ({ dispatchConnectorCallback: dispatchSpy }),
+    }))
+    const { createWechatPersonalAdapter: factory } = await import("./index")
+
+    const emit = jest.fn(async () => undefined)
+    let call = 0
+    const { ctx } = makeCtx({
+      emit,
+      getUpdates: () => {
+        call += 1
+        if (call === 1) return { ret: 0, msgs: [userMsg("1")] }
+        return { ret: -14 }
+      },
+    })
+    const a = factory({
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => "tok",
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    })
+    await a.start(ctx)
+    for (let i = 0; i < 10 && emit.mock.calls.length === 0; i++) await tick()
+
+    expect(dispatchSpy).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledTimes(1)
+    await a.stop()
+    jest.dontMock("@/lib/connectors/bus")
+  })
+})

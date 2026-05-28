@@ -1,4 +1,4 @@
 {
   "title": "Dev & Deploy",
-  "pages": ["development", "deployment"]
+  "pages": ["development", "deployment", "cli-prerequisites"]
 }

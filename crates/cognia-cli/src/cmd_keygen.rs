@@ -1,32 +1,77 @@
 //! `cognia plugin keygen` — generate an Ed25519 keypair for plugin signing.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::path::PathBuf;
 
 use crate::signing::Keypair;
+use crate::ui::{style, RuntimeUi};
 
-pub fn run(out_dir: PathBuf) -> Result<()> {
+/// `cognia plugin keygen` — generate an Ed25519 keypair.
+///
+/// Phase 3 behaviors:
+///   * If `plugin.private.b64` or `plugin.public.b64` already exists in
+///     `out_dir`, prompt for overwrite (default N). `--yes` skips.
+///   * Output is rendered as a copy-paste box so the public-key snippet
+///     and the example `sign` command are visually distinct from any
+///     surrounding shell prompt / git status.
+pub fn run(out_dir: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
     std::fs::create_dir_all(&out_dir).with_context(|| format!("mkdir {}", out_dir.display()))?;
-    let kp = Keypair::generate();
     let priv_path = out_dir.join("plugin.private.b64");
     let pub_path = out_dir.join("plugin.public.b64");
+
+    // Overwrite gates — refuse silent clobber. Either existing file
+    // triggers a prompt; either "No" answer aborts the whole operation.
+    for (path, hint) in [
+        (&priv_path, "--yes to overwrite the existing private key"),
+        (&pub_path, "--yes to overwrite the existing public key"),
+    ] {
+        let proceed = ui
+            .confirm_overwrite(path, hint)
+            .map_err(|e| anyhow!("{e}"))?;
+        if !proceed {
+            bail!(
+                "keygen aborted: {} would be overwritten",
+                path.display()
+            );
+        }
+    }
+
+    let kp = Keypair::generate();
     std::fs::write(&priv_path, kp.private_base64())
         .with_context(|| format!("write {}", priv_path.display()))?;
     std::fs::write(&pub_path, kp.public_base64())
         .with_context(|| format!("write {}", pub_path.display()))?;
-    println!("Generated Ed25519 keypair:");
-    println!("  private key: {}", priv_path.display());
-    println!("  public key:  {}", pub_path.display());
+
+    let pub_b64 = kp.public_base64();
+    let fp = kp.fingerprint_hex();
+    println!(
+        "{}{} Ed25519 keypair generated",
+        style::success_prefix(),
+        style::ok("✓")
+    );
+    println!("  private key: {}", style::dim(priv_path.display().to_string()));
+    println!("  public key:  {}", style::dim(pub_path.display().to_string()));
+    println!("  fingerprint: {}", style::dim(&fp));
     println!();
-    println!("Embed the public key in your plugin.json:");
+    println!("{}", style::bold("Embed the public key in plugin.json:"));
+    println!("  ┌────────────────────────────────────────────────────────────────");
+    println!("  │ \"author\": {{");
+    println!("  │   \"name\": \"Your Name\",");
+    println!("  │   \"publicKey\": \"{pub_b64}\"");
+    println!("  │ }}");
+    println!("  └────────────────────────────────────────────────────────────────");
     println!();
-    println!("  \"author\": {{");
-    println!("    \"name\": \"Your Name\",");
-    println!("    \"publicKey\": \"{}\"", kp.public_base64());
-    println!("  }}");
+    println!("{}", style::bold("Sign a built bundle:"));
+    println!(
+        "  cognia plugin sign target/cognia/<id>-<version>.zip --key {}",
+        priv_path.display()
+    );
     println!();
-    println!("Keep the private key file safe. To sign a bundle:");
-    println!("  cognia plugin sign target/cognia/<id>-<version>.zip --key {}", priv_path.display());
+    println!(
+        "{}keep {} safe — anyone with that file can sign as you.",
+        style::warn_prefix(),
+        style::bold(priv_path.display().to_string())
+    );
     Ok(())
 }
 
@@ -39,7 +84,8 @@ mod tests {
     fn keygen_writes_both_files() {
         let tmp = tempdir().unwrap();
         let dir = tmp.path().join("keys");
-        run(dir.clone()).unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(dir.clone(), &mut ui).unwrap();
         assert!(dir.join("plugin.private.b64").exists());
         assert!(dir.join("plugin.public.b64").exists());
     }
@@ -48,7 +94,68 @@ mod tests {
     fn keygen_creates_missing_parent_dirs() {
         let tmp = tempdir().unwrap();
         let dir = tmp.path().join("nested").join("dir").join("keys");
-        run(dir.clone()).unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(dir.clone(), &mut ui).unwrap();
         assert!(dir.exists());
+    }
+
+    #[test]
+    fn keygen_aborts_on_existing_file_without_yes_or_consent() {
+        use crate::ui::prompter::{Answer, MockPrompter};
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("keys");
+        // Seed an existing private key file.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.private.b64"), "seeded").unwrap();
+        // Mock prompter says "no" to the overwrite confirmation.
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default())
+            .with_prompter(Box::new(MockPrompter::with_answers([Answer::Confirm(false)])));
+        let err = run(dir.clone(), &mut ui).unwrap_err();
+        assert!(
+            err.to_string().contains("keygen aborted"),
+            "got: {err}"
+        );
+        // Ensure the seeded file is preserved.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("plugin.private.b64")).unwrap(),
+            "seeded"
+        );
+    }
+
+    #[test]
+    fn keygen_overwrites_when_yes_flag_set() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("keys");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.private.b64"), "stale").unwrap();
+        std::fs::write(dir.join("plugin.public.b64"), "stale").unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags {
+            yes: true,
+            ..crate::ui::runtime::UiFlags::default()
+        });
+        run(dir.clone(), &mut ui).unwrap();
+        // Both files should be fresh base64-encoded 32-byte values (44 chars
+        // standard base64 with padding).
+        let priv_contents = std::fs::read_to_string(dir.join("plugin.private.b64")).unwrap();
+        assert_ne!(priv_contents, "stale");
+        assert_eq!(priv_contents.trim().len(), 44);
+    }
+
+    #[test]
+    fn keygen_proceeds_when_mock_confirms() {
+        use crate::ui::prompter::{Answer, MockPrompter};
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("keys");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.private.b64"), "stale").unwrap();
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default()).with_prompter(
+            Box::new(MockPrompter::with_answers([
+                Answer::Confirm(true), // overwrite private
+                // public file doesn't exist yet, so no second prompt fires.
+            ])),
+        );
+        run(dir.clone(), &mut ui).unwrap();
+        let priv_contents = std::fs::read_to_string(dir.join("plugin.private.b64")).unwrap();
+        assert_ne!(priv_contents, "stale");
     }
 }

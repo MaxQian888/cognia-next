@@ -5,7 +5,7 @@ description: Build, sign, install, and distribute cognia plugins. Covers both WA
 
 Cognia plugins are distributed as `.zip` bundles containing the manifest, code artifact, and any auxiliary assets. The `cognia` CLI (Rust crate at `crates/cognia-cli/`) builds, validates, signs, and installs them.
 
-> **Install the CLI once:**
+> **Install the CLI once** (see [CLI Prerequisites](/en/dev/cli-prerequisites) for prebuilt binaries and platform tabs):
 >
 > ```bash
 > cargo install --locked --path crates/cognia-cli
@@ -13,6 +13,28 @@ Cognia plugins are distributed as `.zip` bundles containing the manifest, code a
 > ```
 >
 > The same binary handles both plugin kinds described below; sub-commands dispatch on the `type` field in `plugin.json`.
+
+## Global flags
+
+Every `cognia plugin *` command accepts the same five global flags:
+
+| Flag                              | Effect                                                                                                                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--color [auto\|always\|never]`   | Color mode for stdout/stderr. Default `auto` follows TTY detection and the standard `NO_COLOR` / `FORCE_COLOR` env vars.                                                |
+| `--no-color`                      | Shortcut for `--color=never`. Takes precedence over `--color`.                                                                                                          |
+| `--quiet`, `-q`                   | Suppress spinners, progress bars, and informational chatter. Errors and JSON output still print.                                                                        |
+| `--verbose`, `-v`                 | Increase log verbosity. Repeatable: `-vv` enables debug-level traces. Today the flag is reserved — most subcommands don't yet read it but accept it for future wiring.  |
+| `--yes`, `-y`                     | Pre-confirm every interactive prompt. **Required for CI**. See [Confirmation prompts](#confirmation-prompts) for the list of gates this skips.                          |
+
+A subset of subcommands also accept `--json` (see [JSON output](#json-output)).
+
+## TTY vs non-TTY behavior
+
+The CLI auto-degrades on a non-TTY (CI, redirected stdout, `docker exec` without `-it`):
+
+- **No ANSI colors** — output stays grep-friendly even when `--color=auto` is in effect. `FORCE_COLOR=1` overrides if you want colors in piped output.
+- **No spinners or progress bars** — `plugin build` and `plugin dev` switch to plain `println!` lines so logs remain line-oriented.
+- **Prompts refuse to ask** — any subcommand that would have prompted (e.g. `plugin new` without `<name>`) exits with an actionable error pointing at the flag to pass instead. Pass that flag, or `--yes`, to script the command end-to-end.
 
 ## Scaffold
 
@@ -36,6 +58,33 @@ What you get:
 | **ts**   | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
 
 Run the CLI's printed next-steps to get a green build on either kind.
+
+### Interactive wizard
+
+Omitting `<name>` on a TTY drops into an interactive wizard that fills in the same fields you'd otherwise pass via flags. Each prompt has a default that mirrors the obvious choice:
+
+```text
+$ cognia plugin new
+  ? Plugin name       › my-plugin              # default: current directory's basename
+  ? Template kind     › ● wasm   ○ ts          # default: wasm
+  ? Short description › A cognia WASM plugin
+  ? Author name       › Max Qian               # default: git config user.name
+  ? Author email      ›                        # optional — blank to skip
+  ? Generate a signing keypair now and embed the public key? › Y/n
+```
+
+Each answer can also be supplied up front via the equivalent flag — when **all** flags are passed, the wizard never runs:
+
+| Field         | Flag                  | Default when missing on TTY        | Default when missing on non-TTY      |
+| ------------- | --------------------- | ---------------------------------- | ------------------------------------ |
+| Name          | _positional_          | _prompt_                           | error — required                     |
+| Kind          | `--kind wasm\|ts`     | _prompt_                           | `wasm`                               |
+| Description   | `--description "..."` | _prompt_                           | `A cognia <kind> plugin`             |
+| Author name   | `--author "..."`      | _prompt, defaults to git config_   | git config `user.name` or `Anonymous`|
+| Author email  | `--author-email "..."`| _prompt — optional_                | omitted                              |
+| With keygen   | `--with-keygen=Y\|N`  | _prompt, default Yes_              | `false`                              |
+
+When `--with-keygen` runs, the CLI generates an Ed25519 keypair under `<plugin>/.cognia/` and embeds the public key into `plugin.json`'s `author.publicKey` field — equivalent to running `cognia plugin keygen` separately and then pasting the value in by hand.
 
 ## Validate
 
@@ -84,8 +133,12 @@ Paths are relative to `plugin.json`. Missing files surface as build errors.
 `cognia plugin info <bundle.zip>` decompresses a bundle in memory and prints what the host would see at install time — manifest summary, declared capabilities + permissions, file list, signature status, public-key fingerprint, and (for WASM bundles) the embedded `cognia:api-version` section. Useful before shipping to confirm you packaged the right artifact.
 
 ```bash
-cognia plugin info target/cognia/my-plugin-0.1.0.zip
+cognia plugin info target/cognia/my-plugin-0.1.0.zip            # compact summary
+cognia plugin info target/cognia/my-plugin-0.1.0.zip --detailed  # full file table + sig breakdown
+cognia plugin info target/cognia/my-plugin-0.1.0.zip --json      # machine-readable payload
 ```
+
+The default mode is compact: manifest summary, file count + total inner bytes, one-line signature verdict. `--detailed` adds a comfy-table file listing and a multi-line signature breakdown. `--json` emits a versioned payload (see [JSON output](#json-output)).
 
 ## Signing
 
@@ -105,7 +158,11 @@ cognia plugin verify target/cognia/<id>-<version>.zip
 # ✓ valid; public key: ...; fingerprint: ...
 ```
 
-`cognia plugin verify` reads `author.publicKey` from the bundle's manifest by default. Pass `--public-key <b64>` to override (useful when verifying a bundle whose manifest you don't yet trust).
+`cognia plugin verify` reads `author.publicKey` from the bundle's manifest by default. Pass `--public-key <b64>` to override (useful when verifying a bundle whose manifest you don't yet trust). `--json` emits a versioned `{schemaVersion, ok, bundle, signature, publicKey, fingerprint, error?}` payload — convenient for scripted release gates.
+
+### Overwriting existing key / signature files
+
+By default, `cognia plugin keygen` and `cognia plugin sign` **refuse** to silently overwrite an existing `plugin.private.b64` / `plugin.public.b64` / `.sig` file. On a TTY the CLI prompts; on a non-TTY (no `--yes`) it bails with an actionable message. Pass `--yes` / `-y` to overwrite without prompting (CI flow). See [Confirmation prompts](#confirmation-prompts) for the full list.
 
 ## Install into a running cognia
 
@@ -121,6 +178,14 @@ The CLI discovers the running cognia by reading `<config_dir>/cognia/cli-endpoin
 
 **Security model:** the bridge binds to `127.0.0.1` only and gates every request on a per-launch dev token in the endpoint file. The token rotates each time the desktop launches, so a stale file from a previous run can't talk to a fresh instance.
 
+### Same-id preflight on `install`
+
+Before POSTing the bundle, `cognia plugin install` asks the bridge `GET /api/v1/dev/plugins/installed` for the currently loaded plugins. If your bundle's `id` matches one that's already installed, the CLI surfaces `<id> is already installed (v<from> → v<to>)` and prompts before replacing. Pass `--yes` to skip the prompt (equivalent to "yes, replace"). A failed preflight call is non-fatal — the CLI proceeds and lets the bridge enforce its own idempotency policy.
+
+### `--purge-data` confirmation on uninstall
+
+`cognia plugin uninstall <id>` without `--purge-data` is reversible (re-install the same bundle), so it runs straight through. **With** `--purge-data`, the CLI prints a preview (version, install dir, data scope, "no — Dexie wipe is one-way") and prompts for explicit confirmation. `--yes` skips the prompt for scripted teardowns.
+
 ## Dev loop (watch + auto-reload)
 
 ```bash
@@ -129,6 +194,50 @@ cognia plugin dev --reload-url <URL>      # rebuild + POST to a running cognia t
 ```
 
 If a running cognia is discoverable via the endpoint file, `cognia plugin dev` auto-fills `--reload-url` so the rebuild → reload loop works out of the box. Watches `src/`, `wit/`, `dist/`, `Cargo.toml`, `package.json`, and `plugin.json`.
+
+### Status panel
+
+On a TTY, `plugin dev` renders a 4-line sticky panel at the bottom of the terminal while cargo / esbuild output scrolls above:
+
+```text
+cognia plugin dev  /path/to/plugin
+  Status      Watching
+  Endpoint    http://127.0.0.1:5183/...
+  Last build  3.21s @07:14:22 ok
+  Rebuilds    7
+```
+
+The panel updates in place — no log spam — while every rebuild's full subprocess output prints above it. On a non-TTY (CI, redirected stdout), the panel collapses to plain `println!` lines (`[07:14:22] rebuild #7 ok in 3.21s`) so logs stay grep-friendly.
+
+### Quitting cleanly
+
+Press **Ctrl+C twice** to quit. The first press prints `Press Ctrl+C again to quit` and lets the in-flight rebuild finish; the second press exits the loop. This mirrors `cargo-watch` and `vitest --watch`.
+
+## Confirmation prompts
+
+The CLI guards five destructive or surprising operations behind an interactive prompt. Every prompt is skippable with `--yes` (global flag) — required for CI.
+
+| Command                              | Trigger                                                                | Default answer | Skip with |
+| ------------------------------------ | ---------------------------------------------------------------------- | -------------- | --------- |
+| `cognia plugin keygen`               | `plugin.private.b64` or `plugin.public.b64` already exists in out dir   | **No**         | `--yes`   |
+| `cognia plugin sign`                 | destination `<bundle>.sig` already exists                              | **No**         | `--yes`   |
+| `cognia plugin install`              | bridge reports same `id` already installed (preflight collision)        | **No**         | `--yes`   |
+| `cognia plugin uninstall --purge-data` | always — Dexie wipe is one-way                                       | **No**         | `--yes`   |
+| `cognia plugin dev`                  | first Ctrl+C press (graceful exit before second press)                 | _two presses_  | _N/A_     |
+
+A "No" answer (or a non-TTY without `--yes`) **aborts** the operation without writing anything. The prompts are intentionally cautious — the cost of an accidental clobber (lost keys, dropped tables) is much higher than the cost of typing `y`.
+
+## JSON output
+
+Three subcommands accept `--json` for machine-readable output:
+
+| Command                          | Schema                                                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `cognia plugin lint --json`      | `{schemaVersion, manifestPath, valid, diagnostics: [{severity, field, code, message, hint?}, ...]}`                |
+| `cognia plugin info --json`      | `{schemaVersion, path, sizeBytes, manifest, files, signature: {status, ...}, wasmApiVersion?}`                     |
+| `cognia plugin verify --json`    | `{schemaVersion, ok, bundle, signature, publicKey, fingerprint, error?}`                                          |
+
+Every payload carries a `schemaVersion` integer; new fields can be added without bumping it, but a breaking shape change will increment it. The other subcommands (`build`, `sign`, `new`, `keygen`, `install`, `uninstall`, `dev`) deliberately do not accept `--json` today — their primary use case is interactive — but the flag may extend to them in a future release if scripted use cases emerge.
 
 ## Manual / marketplace distribution
 

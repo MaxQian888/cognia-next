@@ -184,7 +184,15 @@ describe("startRunStatusBridge", () => {
 
     const run = makeRun("run_1", "wf_a", 1)
     await getDb().workflowRuns.put(run)
-    await tick()
+    // The first put's liveQuery emission is async — under fake-indexeddb
+    // a fixed 30 ms tick is sometimes shorter than the emission window,
+    // which races mockClear() past the first emit and lets the second
+    // assertion observe a stale call. Wait until the bridge has actually
+    // observed the first put before clearing the spy.
+    for (let i = 0; i < 20 && state.clearRunStatus.mock.calls.length === 0; i++) {
+      await tick(20)
+    }
+    expect(state.clearRunStatus).toHaveBeenCalled()
     state.clearRunStatus.mockClear()
 
     // Same run id, status patched — bridge should not treat it as a new run.

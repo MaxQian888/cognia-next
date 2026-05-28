@@ -94,6 +94,7 @@ import {
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
+import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
 // =============================================================================
 // Governance mode resolution
@@ -185,6 +186,30 @@ interface PluginRuntimeRollbackSnapshot {
   permissions: PluginPermission[]
   definition?: import("@/types/plugin").PluginDefinition
   moduleExports?: Record<string, unknown>
+}
+
+/**
+ * Mutable progress record passed through `installPlugin`. Each step the
+ * pipeline completes flips a boolean here; if a later step throws, the
+ * catch block uses this record to undo only the work that actually
+ * landed (no double-revoke, no remove-of-things-never-added).
+ *
+ * Kept narrow on purpose — install only needs to undo a handful of
+ * side effects (`plugin_install` Tauri call, store row, permission
+ * grants, WASM preload). The richer `PluginRuntimeRollbackSnapshot`
+ * applies to disable/unload/uninstall which have to restore activation
+ * state too.
+ */
+interface InstallTransactionState {
+  pluginId: string | null
+  pluginPath: string | null
+  manifest: PluginManifest | null
+  stepsCompleted: {
+    backendInstall: boolean
+    storeDiscovery: boolean
+    storeInstall: boolean
+    permissionRegistration: boolean
+  }
 }
 
 /** Python runtime information */
@@ -993,6 +1018,18 @@ export class PluginManager {
     const store = usePluginStore.getState()
     const type = options?.type || "local"
 
+    const txn: InstallTransactionState = {
+      pluginId: null,
+      pluginPath: null,
+      manifest: null,
+      stepsCompleted: {
+        backendInstall: false,
+        storeDiscovery: false,
+        storeInstall: false,
+        permissionRegistration: false,
+      },
+    }
+
     try {
       // Install via Tauri backend
       const result = await invoke<{
@@ -1005,6 +1042,10 @@ export class PluginManager {
         installType: type,
         pluginDir: this.config.pluginDirectory,
       })
+      txn.pluginId = result.manifest.id
+      txn.pluginPath = result.path
+      txn.manifest = result.manifest
+      txn.stepsCompleted.backendInstall = true
 
       // Validate manifest
       const validation = validatePluginManifest(result.manifest, {
@@ -1046,7 +1087,11 @@ export class PluginManager {
         compatibilityDiagnostics: projection.compatibilityDiagnostics,
         descriptor: projection.descriptor,
       })
+      txn.stepsCompleted.storeDiscovery = true
+
       await store.installPlugin(result.manifest.id)
+      txn.stepsCompleted.storeInstall = true
+
       this.recordPluginVerification(result.manifest.id, {
         status: "installed",
         action: "install",
@@ -1055,7 +1100,17 @@ export class PluginManager {
         resolvedVersion: result.manifest.version,
       })
 
-      this.registerPluginPermissions(result.manifest.id, result.manifest.permissions || [])
+      try {
+        this.registerPluginPermissions(result.manifest.id, result.manifest.permissions || [])
+        txn.stepsCompleted.permissionRegistration = true
+      } catch (error) {
+        // Permission registration is normally infallible (in-memory map +
+        // Dexie write); surface it explicitly so a misconfigured permission
+        // table doesn't silently leave the plugin half-armed.
+        throw new Error(
+          `Permission registration failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
 
       if (result.manifest.type === "wasm") {
         await this.preloadWasmComponent(result.manifest, result.path)
@@ -1063,25 +1118,134 @@ export class PluginManager {
 
       return store.plugins[result.manifest.id]
     } catch (error) {
-      const existingPluginId =
-        options?.name || (typeof source === "string" && store.plugins[source] ? source : undefined)
-      if (existingPluginId && store.plugins[existingPluginId]) {
-        this.recordPluginVerification(existingPluginId, {
-          status: "error",
-          action: "install",
-          stage: "installation",
-          successful: false,
-          diagnostics: [
-            {
-              code: "plugin.install.failed",
-              severity: "error",
-              message: error instanceof Error ? error.message : String(error),
-            },
-          ],
+      const reason = error instanceof Error ? error.message : String(error)
+      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
+        loggers.manager.error(
+          `[plugin:${txn.pluginId || "(unknown)"}] install rollback itself failed`,
+          rollbackErr
+        )
+      })
+      throw new Error(`Failed to install plugin: ${reason}`)
+    }
+  }
+
+  /**
+   * Undo whichever steps of `installPlugin` completed before a later
+   * step threw. Best-effort and idempotent — individual cleanup
+   * failures are logged but don't prevent the remaining steps from
+   * running, because the goal is to leave the system as close to its
+   * pre-install state as possible even when the host is partly
+   * misbehaving.
+   *
+   * Dispatches a `plugin:error` event so the UI sees a single toast
+   * for the failure instead of having to inspect the catch site.
+   */
+  private async performInstallRollback(
+    txn: InstallTransactionState,
+    reason: string
+  ): Promise<void> {
+    const store = usePluginStore.getState()
+    const pluginId = txn.pluginId
+    const pluginName = txn.manifest?.name
+
+    if (txn.stepsCompleted.permissionRegistration && pluginId) {
+      try {
+        await this.revokePluginPermissions(pluginId, txn.manifest?.permissions || [])
+        getPermissionGuard().unregisterPlugin(pluginId)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] rollback: revoke permissions failed`, err)
+      }
+    }
+
+    if (pluginId && txn.manifest?.type === "wasm") {
+      try {
+        clearWasmCapabilityGrant(pluginId)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] rollback: clear WASM grant failed`, err)
+      }
+    }
+
+    if (
+      (txn.stepsCompleted.storeDiscovery || txn.stepsCompleted.storeInstall) &&
+      pluginId &&
+      store.plugins[pluginId]
+    ) {
+      try {
+        await store.uninstallPlugin(pluginId, {
+          skipFileRemoval: true,
+          viaManager: false,
+        })
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] rollback: store cleanup failed`, err)
+      }
+    }
+
+    if (txn.stepsCompleted.backendInstall && pluginId && txn.pluginPath) {
+      try {
+        await invoke("plugin_uninstall", {
+          pluginId,
+          pluginPath: txn.pluginPath,
+        })
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] rollback: backend uninstall failed`, err)
+        dispatchPluginError({
+          pluginId,
+          pluginName,
+          stage: "install-rollback",
+          message: err instanceof Error ? err.message : String(err),
+          severity: "error",
+          recoverable: false,
         })
       }
-      throw new Error(`Failed to install plugin: ${error}`)
     }
+
+    if (pluginId) {
+      dispatchPluginError({
+        pluginId,
+        pluginName,
+        stage: "install",
+        message: reason,
+        severity: "error",
+        recoverable: true,
+      })
+    }
+  }
+
+  /**
+   * Public install-rollback hook for callers that succeeded at
+   * `manager.installPlugin` but then failed at a later step (e.g.
+   * `runMarketplaceInstall` persisting plugin config). Idempotent —
+   * safe to call even if the plugin already isn't there. The intended
+   * caller is `lib/plugin/marketplace/install-flow.ts`.
+   */
+  async rollbackInstallation(pluginId: string, reason: string): Promise<void> {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin) {
+      // Nothing to roll back. Still fire the error so the UI knows.
+      dispatchPluginError({
+        pluginId,
+        stage: "install",
+        message: reason,
+        severity: "error",
+        recoverable: true,
+      })
+      return
+    }
+    await this.performInstallRollback(
+      {
+        pluginId,
+        pluginPath: plugin.path,
+        manifest: plugin.manifest,
+        stepsCompleted: {
+          backendInstall: true,
+          storeDiscovery: true,
+          storeInstall: true,
+          permissionRegistration: true,
+        },
+      },
+      reason
+    )
   }
 
   /**
@@ -1125,7 +1289,17 @@ export class PluginManager {
       const message = error instanceof Error ? error.message : String(error)
       loggers.manager.warn(`[plugin:${manifest.id}] WASM preload failed`, { error: message })
       // Don't rethrow — install itself succeeded. Enable will surface the
-      // same error in a more actionable place if it persists.
+      // same error in a more actionable place if it persists. Promote to
+      // the user-facing error bus as a warning so the toast nudges the
+      // user toward checking the diagnostics rather than failing silently.
+      dispatchPluginError({
+        pluginId: manifest.id,
+        pluginName: manifest.name,
+        stage: "wasm-preload",
+        message,
+        severity: "warning",
+        recoverable: true,
+      })
     }
   }
 

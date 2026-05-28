@@ -262,9 +262,17 @@ export async function markSending(jobId: string): Promise<void> {
   })
 }
 
-/** Transition a job to "sent". */
-export async function markSent(jobId: string, _platformMessageId: string): Promise<void> {
-  await getDb().outboundQueue.update(jobId, { status: "sent" })
+/**
+ * Transition a job to "sent" and persist the platform-side message id so
+ * downstream consumers (workflow-progress-runner in-place edit, future
+ * reaction routing) can recover the handle from the row without a second
+ * adapter round-trip.
+ */
+export async function markSent(jobId: string, platformMessageId: string): Promise<void> {
+  await getDb().outboundQueue.update(jobId, {
+    status: "sent",
+    platformMessageId,
+  })
 }
 
 /** Transition a job to "failed" with error info and next retry time. */

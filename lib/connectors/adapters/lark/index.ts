@@ -24,6 +24,7 @@ import {
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
+import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   serializeOutbound,
@@ -54,8 +55,11 @@ export interface LarkAdapterOptions {
   /** Bot's own open_id; used to detect self-mentions. */
   selfBotOpenId: string
   /**
-   * Bot-menu (快捷指令) mappings: each `event_key` → an action the assistant
+   * Bot-menu (快捷指令) mappings: each trigger key → an action the assistant
    * turn should run when the user clicks the corresponding Feishu bot menu.
+   * Legacy persisted rows (`eventKey` instead of `triggerKey`) are upgraded
+   * at the adapter-registry boundary via `normalizeQuickCommandList`; the
+   * factory itself re-normalises as defense-in-depth.
    */
   quickCommands?: LarkQuickCommand[]
   transport: "webhook" | "long-connection"
@@ -90,6 +94,12 @@ const LARK_CONFIG_SCHEMA = {
 }
 
 export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
+  // Normalise quickCommands once at factory time so the inbound parse
+  // path receives canonical `triggerKey` rows even when the persisted
+  // Dexie shape still carries the legacy `eventKey` field.
+  const normalizedQuickCommands = normalizeQuickCommandList(opts.quickCommands)
+  opts = { ...opts, quickCommands: normalizedQuickCommands }
+
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
   let lastActivityAt: number | undefined = undefined

@@ -5,22 +5,6 @@ description: 基于 Monaco 的协作编辑器——AI 建议、版本历史、Py
 
 # Canvas
 
-<Status variant="stable" />
-
-<TLDR>
-  Canvas 是一个嵌入到 cognia-next 主 shell 的代码 / 富文本工作区：Monaco 编辑器 内核 + AI
-  操作工具栏（生成 / 重构 / 翻译 / 解释）+ 右侧侧面板（建议 / 历史 / 评论 / 协作 /
-  执行）。文档主存于 Zustand+localStorage，写穿到 Dexie 给备份用； CRDT + WebSocket
-  提供可选的实时协作；Python 代码用 Rust 端 spawn 真正的解释器 执行（沙箱化 + timeout）。
-</TLDR>
-
-<StatGrid>
-  <Stat label="Dexie 表" value="4" hint="documents · versions · comments · sessions" />
-  <Stat label="侧边栏标签" value="5" hint="建议 · 历史 · 评论 · 协作 · 执行" />
-  <Stat label="Feature flag" value="2" hint="aiWorkbench.v1 · collaboration.v1" />
-  <Stat label="支持语言" value="15+" hint="Monaco 语言映射" />
-</StatGrid>
-
 ## 它是什么
 
 Canvas 是 Cognia 风格的「Workspace」体验：用户从聊天发起一段代码 / 文档生成，点
@@ -374,6 +358,6 @@ Settings 里关掉的覆盖）。
     href="./artifacts-sandbox"
     description="一次性 UI 产物：iframe 隔离 + DOMPurify"
   />
-  <Card title="聊天 & 技能" href="./chat-and-skills" description="把代码升级到 Canvas 的入口" />
+  <Card title="聊天 & 技能" href="../chat/chat-and-skills" description="把代码升级到 Canvas 的入口" />
   <Card title="远程控制" href="./remote-control" description="跨设备共享会话与文档" />
 </Cards>

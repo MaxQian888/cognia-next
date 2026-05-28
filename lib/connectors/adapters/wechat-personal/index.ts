@@ -30,7 +30,12 @@ import {
   type IlinkGetUpdatesResponse,
   type IlinkMessage,
 } from "./protocol"
-import { parseIlinkMessage, type WechatPersonalConversationRef } from "./parse"
+import {
+  parseIlinkMessage,
+  tryParseNumericCallback,
+  type WechatPersonalConversationRef,
+} from "./parse"
+import { getBus } from "@/lib/connectors/bus"
 import { serializeIlinkSegments } from "./serialize"
 import { WECHAT_PERSONAL_CAPS, WECHAT_PERSONAL_A2UI_CAPABILITY } from "./capability"
 import { fetchAndDecryptIlinkMedia, bytesToBase64 } from "./media"
@@ -95,6 +100,25 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
   }
 
   async function handleMessage(msg: IlinkMessage): Promise<void> {
+    // Numeric reply → A2UI callback short-circuit. When the registry has
+    // a live binding for this conversation + digit we route to
+    // dispatchConnectorCallback (which the bus then routes to the
+    // wf_approve / generic callback handler depending on binding kind)
+    // and DO NOT also emit a regular message — the user's "1" was a tap,
+    // not a chat message.
+    const callback = tryParseNumericCallback(opts.id, msg)
+    if (callback) {
+      // Stash the context_token so the eventual outbound reply
+      // (workflow approval confirmation, assistant turn, etc.) has a
+      // live reply anchor. `tryParseNumericCallback` always populates
+      // `conversationKey`; narrow for the type system.
+      if (callback.conversationKey) {
+        contextTokens.set(callback.conversationKey, msg.context_token ?? "")
+      }
+      lastActivityAt = Date.now()
+      await getBus().dispatchConnectorCallback(callback)
+      return
+    }
     const event = parseIlinkMessage(opts.id, msg)
     if (!event) return
     contextTokens.set(
@@ -183,7 +207,22 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       }
     }
 
-    const serialized = serializeIlinkSegments(req.segments)
+    // ref.userId is non-null past the guard above, so conversationKey is
+    // always defined here — TypeScript still wants the explicit narrow.
+    if (!conversationKey) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_segment",
+          message: "missing conversation key",
+          retryable: false,
+        },
+      }
+    }
+    const serialized = await serializeIlinkSegments(req.segments, {
+      adapterId: opts.id,
+      conversationKey,
+    })
     if (serialized.textChunks.length === 0) {
       return {
         ok: false,

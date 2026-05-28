@@ -122,6 +122,74 @@ export async function pickDirectory(): Promise<string | null> {
   return Array.isArray(picked) ? (picked[0] ?? null) : picked
 }
 
+export interface PickedBinaryFile {
+  /** Filename only (basename), for fallback name derivation. */
+  name: string
+  /** Full path when running in Tauri. Empty in the browser. */
+  path: string
+  bytes: Uint8Array
+}
+
+/**
+ * Open a file picker and return each selected file as raw bytes. Use this
+ * sibling of `pickAndReadFiles` for zip / image / archive imports that
+ * can't ride on the utf-8 text path.
+ *
+ * Tauri uses the native dialog + the `@tauri-apps/plugin-fs` readFile
+ * binding (no new Rust command). Browser and Capacitor webviews fall back
+ * to a hidden `<input type="file">` plus `f.arrayBuffer()` — the same
+ * pattern works on both because Capacitor injects only its native bridge
+ * shim and not the file-picker plugin (see memory:
+ * `project_capacitor_plugins_unregistered_on_device`).
+ */
+export async function pickAndReadBinaryFiles(
+  opts: PickFilesOptions = {}
+): Promise<PickedBinaryFile[]> {
+  if (isTauri()) {
+    const picked = await open({
+      multiple: !!opts.multiple,
+      directory: false,
+      filters: opts.filters,
+    })
+    if (!picked) return []
+    const paths = Array.isArray(picked) ? picked : [picked]
+    const fs = await import("@tauri-apps/plugin-fs")
+    const out: PickedBinaryFile[] = []
+    for (const path of paths) {
+      try {
+        const bytes = await fs.readFile(path)
+        out.push({ name: basename(path), path, bytes })
+      } catch (err) {
+        console.error("read binary file failed", path, err)
+      }
+    }
+    return out
+  }
+  return new Promise<PickedBinaryFile[]>((resolve) => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.multiple = !!opts.multiple
+    if (opts.filters?.length) {
+      input.accept = opts.filters.flatMap((f) => f.extensions.map((e) => "." + e)).join(",")
+    }
+    input.onchange = async () => {
+      if (!input.files || input.files.length === 0) {
+        resolve([])
+        return
+      }
+      const files = Array.from(input.files)
+      const out: PickedBinaryFile[] = []
+      for (const f of files) {
+        const buf = await f.arrayBuffer()
+        out.push({ name: f.name, path: "", bytes: new Uint8Array(buf) })
+      }
+      resolve(out)
+    }
+    input.oncancel = () => resolve([])
+    input.click()
+  })
+}
+
 /**
  * Write multiple files into a directory. In Tauri, writes them under
  * `dir/<filename>` directly. In the browser falls back to one download per

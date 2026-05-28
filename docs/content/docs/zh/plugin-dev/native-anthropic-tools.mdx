@@ -1,0 +1,205 @@
+---
+title: 原生 Anthropic 工具
+description: 从插件注册自定义 Anthropic 原生工具（computer / bash / text_editor 风格）。包含 executeIpc Tauri 契约、按角色 allowedToolIds 过滤，以及一个完整的电子表格工具示例。
+---
+
+# 原生 Anthropic 工具
+
+ADR-0020（"Computer Use Completeness"）发布了 **原生 Anthropic 工具** 注册表 —— Anthropic API 原生认识的 `computer_20251124`、`bash_20250124`、`text_editor_20250728` 等 shape。Cognia 内置的 `cognia-computer-use` 插件使用这个面；但 **任意插件** 都可以贡献自己的原生工具：例如一个电子表格插件可以发布 `spreadsheet_20260601` 让模型直接用单元格范围 + 公式调用。
+
+本页是实操参考。设计原由见 [ADR-0020](../adr/0020-computer-use-completeness)。
+
+## 何时选原生工具 vs Plugin MCP 工具
+
+| 面                                | 何时用                                                                                                       | 代价                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| **原生 Anthropic 工具**           | Anthropic 已为你的领域发布预训练 shape（当前的 computer / bash / text_editor；未来还会增加），且希望拿到 API 层的提示加成。 | 需要为工具类型携带 `anthropic-beta` 头；只有 Anthropic 供应商支持。     |
+| **Plugin MCP 工具**（更常见）       | 你要发布一个没有供应商认识的自定义工具，或者需要跨供应商兼容（Claude Code SDK 把同一个 `cognia-plugin-tools` MCP server 暴露给每个聊天）。 | 标准 MCP 工具 —— 模型看到的是 `mcp__cognia-plugin-tools__<name>`。       |
+
+拿不准时先发 Plugin MCP 工具。等 Anthropic 给你的领域发布预训练 shape 再升格为原生工具。
+
+## 清单字段 —— `nativeAnthropicTools`
+
+原生工具在 `plugin.json` 中 **声明式** 注册，插件管理器会在启用时注册、在禁用时干净销毁。同一 shape 也可以在代码中用 `defineNativeAnthropicTool` 创建。
+
+```jsonc
+// plugin.json
+{
+  "id": "cognia-spreadsheet-tool",
+  "name": "Spreadsheet Tool",
+  "version": "0.1.0",
+  "type": "frontend",
+  "capabilities": ["native-anthropic-tool"],
+  "main": "src/index.ts",
+  "nativeAnthropicTools": [
+    {
+      "id": "spreadsheet",
+      "name": "spreadsheet",
+      "type": "spreadsheet_20260601",
+      "betaHeader": "spreadsheet-2026-06-01",
+      "executeIpc": { "invoke": "plugin_spreadsheet_execute" },
+      "permissionPolicy": "always-ask",
+    },
+  ],
+  "permissions": ["native:input"],
+}
+```
+
+### 字段参考
+
+| 字段                                                                  | 必需 | 说明                                                                                                                                              |
+| --------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                  | 是   | 注册表内稳定 id。`Character.computerUseSettings.allowedToolIds` 按此 id 过滤。                                                                    |
+| `name`                                                                | 是   | 模型看到的名字。应与 Anthropic 既有原生工具的 snake_case 习惯一致。                                                                               |
+| `type`                                                                | 是   | Anthropic 原生工具类型标签（如 `computer_20251124`、`text_editor_20250728`），驱动 `anthropic-beta` 头。                                          |
+| `betaHeader`                                                          | 可选 | 当工具类型不是 Cognia 默认映射中已知的，可覆盖 `anthropic-beta` 头值。                                                                            |
+| `displayWidthPx` / `displayHeightPx` / `displayNumber` / `enableZoom` | 可选 | 计算机类工具的显示元数据，非屏幕类工具忽略。                                                                                                      |
+| `executeIpc.invoke`                                                   | 是   | sidecar 把每次 `tool_use` 转发到的 Tauri 命令名。**由你实现** —— 见下一节。                                                                       |
+| `permissionPolicy`                                                    | 可选 | `"always-ask"`（默认）/ `"session-allow"` / `"preauth"`。给渲染器审批流程的提示；Rust 权限闸独立运行。                                            |
+
+## Tauri 命令契约 —— `executeIpc.invoke`
+
+每个原生工具都附带一个 Tauri 命令，接收模型的 `input` JSON 和可选的 `CallContext`，返回工具 schema 声明的结果。sidecar 把 `tool_use` 事件逐字转发给你的命令。
+
+```rust
+// src-tauri/src/plugins/spreadsheet/commands.rs（在你插件的 Rust workspace 中）
+use tauri::AppHandle;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallContext {
+    surface: Option<String>,          // "computerUse" | "mcp" | "workflow" | "plugin"
+    plugin_id: Option<String>,
+    process_name: Option<String>,
+    window_title: Option<String>,
+    force_tier: Option<String>,        // ADR-0020 W1 —— "perCall" 强制 consent
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SpreadsheetAction {
+    Read { range: String },
+    Write { range: String, value: serde_json::Value },
+    EvaluateFormula { range: String, formula: String },
+}
+
+#[tauri::command]
+pub async fn plugin_spreadsheet_execute(
+    _app: AppHandle,
+    action: SpreadsheetAction,
+    _ctx: Option<CallContext>,
+) -> Result<serde_json::Value, String> {
+    // 如果你的工具驱动桌面，先走宿主的 automation 权限闸 ——
+    // 参考 `automation::commands::command_body!` 的标准骨架。宿主闸会
+    // 自动为每个 `desktop_*` 命令触发；如果你的工具调用那些命令，
+    // 你自动继承该闸。
+    match action {
+        SpreadsheetAction::Read { range } => Ok(serde_json::json!({
+            "ok": true,
+            "value": read_range(&range)?,
+        })),
+        SpreadsheetAction::Write { range, value } => {
+            write_range(&range, value)?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
+        SpreadsheetAction::EvaluateFormula { range, formula } => Ok(serde_json::json!({
+            "ok": true,
+            "value": evaluate_formula(&range, &formula)?,
+        })),
+    }
+}
+```
+
+三条规则：
+
+1. **结果 shape 匹配 schema。** 模型看到的是命令返回值作为 `tool_result.content`。沿用 Anthropic 的 `{ ok, output, error, … }` 约定，让失败对模型可见。
+2. **非桌面调用的权限闸由你负责。** 宿主的 `automation::commands::command_body!` 宏会为每个 `desktop_*` Tauri 命令套上权限层；如果你的工具不驱动桌面，自己实现闸。
+3. **遵守 `ctx.force_tier == Some("perCall")`。** ADR-0020 W1 添加的字段，角色通过 `requireConsent: true` 设置。宿主的 `permission::maybe_upgrade_to_consent` 帮助函数为 automation 命令处理；如果你自己派发闸，请镜像它。
+
+## 代码侧注册（`manifest.nativeAnthropicTools` 的替代）
+
+如果你需要在运行时计算工具定义（例如根据当前显示器换 `displayWidthPx`），可在 `activate()` 中构建，而不在清单中声明：
+
+```ts
+// src/index.ts
+import { defineNativeAnthropicTool } from "cognia-plugin-sdk/api/native-anthropic-tool"
+import type { PluginContext, PluginDefinition } from "cognia-plugin-sdk"
+
+const definition: PluginDefinition = {
+  manifest: {
+    id: "cognia-spreadsheet-tool",
+    name: "Spreadsheet Tool",
+    version: "0.1.0",
+    type: "frontend",
+    capabilities: ["native-anthropic-tool"],
+    main: "src/index.ts",
+    permissions: ["native:input"],
+    // 没有 `nativeAnthropicTools` —— 在下面命令式注册。
+  } as never,
+  activate: async (ctx: PluginContext) => {
+    if (!ctx.agent?.registerNativeAnthropicTool) {
+      ctx.logger?.warn("agent.registerNativeAnthropicTool unavailable")
+      return
+    }
+    ctx.agent.registerNativeAnthropicTool(
+      defineNativeAnthropicTool({
+        id: "spreadsheet",
+        name: "spreadsheet",
+        type: "spreadsheet_20260601",
+        executeIpc: { invoke: "plugin_spreadsheet_execute" },
+        permissionPolicy: "always-ask",
+      })
+    )
+  },
+}
+
+export default definition
+```
+
+非必要不要走命令式 —— 清单路径在插件禁用 / 卸载时自动 teardown，命令式注册要求你在 `deactivate()` 中配套调用 `unregisterNativeAnthropicToolById`。
+
+## 按角色过滤 —— `allowedToolIds`
+
+`Character.computerUseSettings.allowedToolIds` 在发送时过滤注册表。角色编辑器（Settings → Characters → Edit）从 `listNativeAnthropicToolEntries()` 渲染一组复选框，用户像勾选内置 `computer` / `bash` / `text_editor` 一样勾选你的工具。插件无需额外工作 —— 注册表过滤器会做正确的事。
+
+操作员希望工具也走渲染器的浮层 consent 时，会把 `Character.computerUseSettings.requireConsent: true` 打开 —— 这会给本轮所有工具定义打上 `forceTier: "perCall"`，你的 Tauri 命令收到 `ctx.forceTier === "perCall"`。
+
+## 权限流一图
+
+```
+模型 emit tool_use ──► sidecar canUseTool ──► chat 侧审批 modal
+                                                         │
+                                                         ▼
+                                            Tauri 命令（你的代码）
+                                                         │
+                                                         ▼
+                                          （可选）宿主权限闸
+                                                         │
+                                                         ▼
+                                                  tool_result 回传
+```
+
+两道独立的闸：chat modal（由 `chatConsentMode` 控制）与宿主 Rust 闸（桌面调用走 `automation::commands::command_body!` 宏；非桌面调用走你的等价物）。渲染器侧的 `<ConsentOverlay />` 只在 Rust 闸判定 `RequireConsent` 时触发。ADR-0020 W3 的 session-grant 逻辑会在操作员本会话已批准过你的工具时抑制 chat modal —— 你的 Tauri 命令无需感知。
+
+## 审计
+
+每次经 `command_body!` 成功派发都会 emit `automation:event` Tauri 事件，渲染器把它镜像写入 Dexie `automationAuditLog` 表。如果你的工具走 `desktop_*` 就自动获得审计；如果它实现了自己的闸，就 emit 同样的事件 shape，让 Settings → Automation → Audit tab 与内置工具的调用并列呈现你的工具调用。
+
+## 能力证明
+
+`native-anthropic-tool` capability 契约锁定在 `runtime-proof-audit.test.ts`。当你的插件贡献原生工具时，确保 `plugin.json` 声明 `"capabilities": ["native-anthropic-tool"]` —— 证明的 `verified` 状态依赖清单携带 capability 名。
+
+## 常见错误
+
+- **`executeIpc.invoke` 指向不存在的 Tauri 命令。** 症状：每次工具调用失败 `Command not found`。修复：确保 `tauri::generate_handler![...]` 数组包含该命令名。
+- **Tauri 命令返回 String 而非 JSON 对象。** Claude Code SDK 逐字转发返回值；裸字符串会落到 `tool_result.content` 文本而无结构。永远返回形似 Anthropic `{ ok, output, error, … }` 的 `serde_json::Value`，让宿主的 `<ComputerUseCard />` 类渲染器能解码。
+- **忘了 `betaHeader`。** 没有正确的 `anthropic-beta` token，Anthropic 会拒绝 "unknown tool type"。注册表的 `computeAnthropicBetaHeaders` 在你的 `type` 字段使用已知 Anthropic shape 之一时会做正确的事；只有发布全新 type 时才需要覆盖 `betaHeader`。
+
+## 参考
+
+- 内置示例：[`plugins/computer-use/`](https://github.com/AstroAir/cognia-next/tree/master/plugins/computer-use) —— `computer_20251124` / `bash_20250124` / `text_editor_20250728` 的标准实现。
+- SDK 重导出：`plugin-sdk/typescript/src/api/native-anthropic-tool.ts` —— 此 capability 契约对外暴露的入口。
+- 注册表源：`lib/plugin/registries/native-anthropic-tool-registry.ts` —— register / unregister / list / 计算 beta 头。
+- Wire shape：`types/plugin/plugin-native-tool.ts` —— `PluginNativeAnthropicToolDef`。
+- ADR：[ADR-0020 — Computer Use 完整性](../adr/0020-computer-use-completeness)。

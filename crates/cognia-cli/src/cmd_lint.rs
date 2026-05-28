@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::read_plugin_manifest;
+use crate::ui::RuntimeUi;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Whitelist constants — keep in sync with lib/plugin/core/validation.ts
@@ -100,6 +101,10 @@ pub struct Diagnostic {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LintReport {
+    /// Bumped for breaking changes to the JSON shape so consumers can
+    /// version-pin without parsing the whole payload speculatively.
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u32,
     pub manifest_path: PathBuf,
     pub valid: bool,
     pub diagnostics: Vec<Diagnostic>,
@@ -127,13 +132,17 @@ impl LintReport {
 
 /// CLI entry: `cognia plugin lint`. Prints human-readable diagnostics by
 /// default or JSON when `as_json` is true.
-pub fn run(path: PathBuf, as_json: bool) -> Result<()> {
+///
+/// `_ui` is accepted but unused in Phase 1; Phase 2 paints diagnostics
+/// with severity color and uses `ui.json()` instead of the bool argument.
+pub fn run(path: PathBuf, as_json: bool, _ui: &mut RuntimeUi) -> Result<()> {
     let crate_root = path
         .canonicalize()
         .with_context(|| format!("resolve {}", path.display()))?;
     let (manifest, manifest_path) = read_plugin_manifest(&crate_root)?;
     let diagnostics = validate_manifest(&manifest);
     let report = LintReport {
+        schema_version: 1,
         manifest_path,
         valid: !diagnostics.iter().any(|d| d.severity == Severity::Error),
         diagnostics,
@@ -157,6 +166,7 @@ pub fn validate_at(path: &Path) -> Result<LintReport> {
     let (manifest, manifest_path) = read_plugin_manifest(path)?;
     let diagnostics = validate_manifest(&manifest);
     Ok(LintReport {
+        schema_version: 1,
         manifest_path,
         valid: !diagnostics.iter().any(|d| d.severity == Severity::Error),
         diagnostics,
@@ -164,28 +174,37 @@ pub fn validate_at(path: &Path) -> Result<LintReport> {
 }
 
 fn print_human(report: &LintReport) {
-    println!("Validating {}", report.manifest_path.display());
+    use crate::ui::style;
+    println!(
+        "Validating {}",
+        style::bold(report.manifest_path.display().to_string())
+    );
     if report.diagnostics.is_empty() {
-        println!("✓ no problems found");
+        println!("{}no problems found", style::success_prefix());
         return;
     }
     for d in &report.diagnostics {
         let tag = match d.severity {
-            Severity::Error => "ERROR",
-            Severity::Warning => "WARN ",
+            Severity::Error => style::error("ERROR"),
+            Severity::Warning => style::warn("WARN "),
         };
-        println!("  [{tag}] {}: {}", d.field, d.message);
+        println!("  [{tag}] {}: {}", style::bold(&d.field), d.message);
         if let Some(hint) = &d.hint {
-            println!("         hint: {hint}");
+            println!("         {}{hint}", style::hint_prefix());
         }
-        println!("         code: {}", d.code);
+        println!("         code: {}", style::dim(&d.code));
     }
     println!();
-    println!(
+    let summary = format!(
         "{} error(s), {} warning(s)",
         report.error_count(),
         report.warning_count()
     );
+    if report.valid {
+        println!("{}", style::warn(&summary));
+    } else {
+        println!("{}", style::error(&summary));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1057,6 +1076,7 @@ mod tests {
     #[test]
     fn report_serializes_to_json() {
         let report = LintReport {
+            schema_version: 1,
             manifest_path: PathBuf::from("/tmp/plugin.json"),
             valid: false,
             diagnostics: vec![Diagnostic {
@@ -1070,5 +1090,6 @@ mod tests {
         let json_str = serde_json::to_string(&report).unwrap();
         assert!(json_str.contains("\"valid\":false"));
         assert!(json_str.contains("\"severity\":\"error\""));
+        assert!(json_str.contains("\"schemaVersion\":1"), "got: {json_str}");
     }
 }

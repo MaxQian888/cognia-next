@@ -71,6 +71,7 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
     if (!resolver) return
     if (stepId === "conflict") resolver("continue")
     else if (stepId === "permission") resolver("approve")
+    else if (stepId === "binaries") resolver("proceed")
     else if (stepId === "config") resolver({ result: "save", value: value ?? {} })
   }, [])
 
@@ -83,6 +84,7 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
     if (!resolver) return
     if (stepId === "conflict") resolver("cancel")
     else if (stepId === "permission") resolver("cancel")
+    else if (stepId === "binaries") resolver("cancel")
     else if (stepId === "config") resolver({ result: "cancel" })
   }, [])
 
@@ -160,6 +162,17 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
                 pluginName,
                 step: "permission",
                 permission,
+                stepNumber: advanceStep(),
+                totalSteps,
+              })
+            }),
+          requestBinaryReview: (binaries) =>
+            awaitStep<"proceed" | "cancel">("binaries", () => {
+              setTarget({
+                pluginId,
+                pluginName,
+                step: "binaries",
+                binaries,
                 stepNumber: advanceStep(),
                 totalSteps,
               })

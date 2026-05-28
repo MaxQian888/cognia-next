@@ -210,6 +210,19 @@ export function buildWelcomeFrame(reqId: string, content: string): WeComFrameEnv
   }
 }
 
+/**
+ * Welcome reply variant carrying a template_card instead of text — used by
+ * the menu-card path. Same 5 s SLA as `buildWelcomeFrame`; the adapter
+ * picks one or the other based on whether quick-commands are configured.
+ */
+export function buildWelcomeCardFrame(reqId: string, card: WeComTemplateCard): WeComFrameEnvelope {
+  return {
+    cmd: "aibot_respond_welcome_msg",
+    headers: { req_id: reqId },
+    body: { msgtype: "template_card", template_card: card },
+  }
+}
+
 /** Template-card update fired on `template_card_event` — must land within 5 s. */
 export function buildUpdateCardFrame(reqId: string, card: WeComTemplateCard): WeComFrameEnvelope {
   return {

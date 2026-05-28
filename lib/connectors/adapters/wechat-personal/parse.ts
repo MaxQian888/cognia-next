@@ -12,7 +12,9 @@ import type { NormalizedInboundEvent, ConversationReference } from "@/types/conn
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
+import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import { ILINK_ITEM, ILINK_MSG, type IlinkItem, type IlinkMessage } from "./protocol"
+import { consumeNumericAction } from "./numeric-action-registry"
 
 export interface WechatPersonalConversationRef extends ConversationReference {
   platform: "wechat-personal"
@@ -100,5 +102,74 @@ export function parseIlinkMessage(
     timestamp: now,
     raw: msg,
     kind: "create",
+  }
+}
+
+const SINGLE_DIGIT_RE = /^\s*([1-9])\s*$/
+
+function extractTextForNumeric(msg: IlinkMessage): string {
+  const items = msg.item_list ?? []
+  for (const item of items) {
+    if (item.type === ILINK_ITEM.text && item.text_item?.text) {
+      return item.text_item.text
+    }
+  }
+  return ""
+}
+
+/**
+ * Detect a numeric-only reply that selects a previously-emitted button
+ * and project it into a `ConnectorCallbackEvent` keyed by the wireActionId
+ * the outbound mapper stashed in `numeric-action-registry`. Returns null
+ * for any non-numeric reply or when no live binding matches.
+ *
+ * The function CONSUMES the registry entry — a second tap on the same
+ * digit won't fire twice, matching native button behaviour.
+ *
+ * `surfaceId` / `componentId` are intentionally left empty; the bus's
+ * `resolveCallbackBinding(adapterId, triggerId)` reads the persisted
+ * binding row and fills both in before dispatching to the kind-specific
+ * handler. That keeps this parser ignorant of binding shape.
+ */
+export function tryParseNumericCallback(
+  adapterId: string,
+  msg: IlinkMessage,
+  now: number = Date.now()
+): ConnectorCallbackEvent | null {
+  if (msg.message_type !== ILINK_MSG.fromUser) return null
+  if (!msg.from_user_id || !msg.context_token) return null
+  const text = extractTextForNumeric(msg)
+  if (!text) return null
+  const match = SINGLE_DIGIT_RE.exec(text)
+  if (!match) return null
+  const numeric = Number.parseInt(match[1], 10)
+  const conversationKey = buildConversationKey("wechat-personal", adapterId, msg.from_user_id)
+  const wireActionId = consumeNumericAction(conversationKey, numeric, now)
+  if (!wireActionId) return null
+
+  const userId = msg.from_user_id
+  // Stable per-callback id so the bus's dedup ledger (`callback`
+  // namespace) drops a redelivered iLink poll. Using the wireActionId
+  // keeps the dedup tight even when the same digit is re-used across
+  // surfaces (each surface mints a fresh wireActionId).
+  const triggerId = wireActionId
+  return {
+    platform: "wechat-personal",
+    adapterId,
+    selfId: msg.to_user_id ?? "",
+    triggerId,
+    surfaceId: "",
+    componentId: undefined,
+    actionType: "button",
+    value: String(numeric),
+    conversationKey,
+    user: {
+      id: userId,
+      platform: "wechat-personal",
+      adapterId,
+      remoteUserId: userId,
+    },
+    timestamp: now,
+    raw: msg,
   }
 }

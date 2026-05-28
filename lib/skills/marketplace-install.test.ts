@@ -2,10 +2,9 @@ jest.mock("@/lib/claude/skills-io", () => ({
   parseSkillMarkdown: jest.fn(),
 }))
 jest.mock("@/lib/db/skills", () => ({
-  createSkill: jest.fn(),
   listSkills: jest.fn(),
-  updateSkill: jest.fn(),
   deleteSkill: jest.fn(),
+  upsertSkillByCanonicalId: jest.fn(),
 }))
 jest.mock("./marketplace-registry", () => ({
   fetchRegistrySkillContent: jest.fn(),
@@ -21,21 +20,22 @@ import {
   listInstalledCanonicalIds,
 } from "./marketplace-install"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
-import { createSkill, listSkills, updateSkill, deleteSkill } from "@/lib/db/skills"
+import { listSkills, deleteSkill, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import { fetchRegistrySkillContent } from "./marketplace-registry"
 import { fetchSkillsMpSkillContent } from "./marketplace-skillsmp"
 import type { MarketplaceItem } from "./marketplace-types"
 
 const mockedParse = parseSkillMarkdown as unknown as jest.Mock
 const mockedList = listSkills as unknown as jest.Mock
-const mockedCreate = createSkill as unknown as jest.Mock
-const mockedUpdate = updateSkill as unknown as jest.Mock
 const mockedDelete = deleteSkill as unknown as jest.Mock
+const mockedUpsert = upsertSkillByCanonicalId as unknown as jest.Mock
 const mockedRegFetch = fetchRegistrySkillContent as unknown as jest.Mock
 const mockedSmpFetch = fetchSkillsMpSkillContent as unknown as jest.Mock
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  // resetAllMocks (not clearAllMocks) so leftover `mockResolvedValueOnce`
+  // queues from one test don't bleed into the next.
+  jest.resetAllMocks()
 })
 
 const item = (overrides: Partial<MarketplaceItem> = {}): MarketplaceItem => ({
@@ -82,7 +82,7 @@ describe("fetchMarketplaceContent", () => {
 })
 
 describe("installMarketplaceItem", () => {
-  it("creates a fresh row when no existing canonicalId matches", async () => {
+  it("delegates to upsertSkillByCanonicalId with the fetched canonicalId and marketplace source", async () => {
     mockedRegFetch.mockResolvedValue({
       content: "MD",
       canonicalId: "registry:id-1",
@@ -101,35 +101,33 @@ describe("installMarketplaceItem", () => {
         license: "MIT",
       },
     })
-    mockedList.mockResolvedValue([])
-    mockedCreate.mockResolvedValue({ id: "new-1", name: "ParsedName" })
+    mockedUpsert.mockResolvedValue({
+      skill: { id: "new-1", name: "ParsedName" },
+      created: true,
+    })
     const out = await installMarketplaceItem(item())
     expect(out.created).toBe(true)
     expect(out.skill.id).toBe("new-1")
-    expect(mockedCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        canonicalId: "registry:id-1",
-        marketplaceSkillId: "id-1",
+    expect(mockedUpsert).toHaveBeenCalledWith({
+      canonicalId: "registry:id-1",
+      draft: expect.objectContaining({
         source: "marketplace",
-      })
-    )
+        marketplaceSkillId: "id-1",
+        name: "ParsedName",
+      }),
+    })
   })
 
-  it("falls back to item-level fields when draft fields are missing on create", async () => {
+  it("falls back to item-level fields when draft fields are missing", async () => {
     mockedRegFetch.mockResolvedValue({
       content: "MD",
       canonicalId: "registry:id-2",
       marketplaceSkillId: "id-2",
     })
     mockedParse.mockReturnValue({
-      draft: {
-        name: "BareName",
-        content: "BODY",
-        // description / tags / category / author / license missing → trigger fallback branches
-      },
+      draft: { name: "BareName", content: "BODY" },
     })
-    mockedList.mockResolvedValue([])
-    mockedCreate.mockResolvedValue({ id: "fallback", name: "BareName" })
+    mockedUpsert.mockResolvedValue({ skill: { id: "x" }, created: true })
     await installMarketplaceItem(
       item({
         sourceId: "id-2",
@@ -140,77 +138,19 @@ describe("installMarketplaceItem", () => {
         license: "Apache-2.0",
       })
     )
-    expect(mockedCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(mockedUpsert).toHaveBeenCalledWith({
+      canonicalId: "registry:id-2",
+      draft: expect.objectContaining({
         description: "ItemDesc",
         tags: ["it"],
         category: "communication",
         author: "ItemAuthor",
         license: "Apache-2.0",
-      })
-    )
+      }),
+    })
   })
 
-  it("falls back to item-level fields on update when draft fields are missing", async () => {
-    mockedRegFetch.mockResolvedValue({
-      content: "MD",
-      canonicalId: "registry:id-3",
-      marketplaceSkillId: "id-3",
-    })
-    mockedParse.mockReturnValue({
-      draft: {
-        name: "P",
-        content: "B",
-      },
-    })
-    const existing = { id: "exists", canonicalId: "registry:id-3" }
-    mockedList
-      .mockResolvedValueOnce([existing])
-      .mockResolvedValueOnce([{ id: "exists", name: "P" }])
-    await installMarketplaceItem(
-      item({
-        sourceId: "id-3",
-        description: "ItemDesc",
-        tags: ["it"],
-        category: "communication",
-        author: "ItemAuthor",
-        license: "Apache-2.0",
-      })
-    )
-    expect(mockedUpdate).toHaveBeenCalledWith(
-      "exists",
-      expect.objectContaining({
-        description: "ItemDesc",
-        tags: ["it"],
-        category: "communication",
-        author: "ItemAuthor",
-        license: "Apache-2.0",
-      })
-    )
-  })
-
-  it("updates existing row when canonicalId matches and returns refreshed row", async () => {
-    mockedRegFetch.mockResolvedValue({
-      content: "MD",
-      canonicalId: "registry:id-1",
-      marketplaceSkillId: "id-1",
-    })
-    mockedParse.mockReturnValue({
-      draft: { name: "P", content: "B" },
-    })
-    const existing = { id: "abc", canonicalId: "registry:id-1" }
-    const refreshed = { id: "abc", name: "P", canonicalId: "registry:id-1" }
-    mockedList.mockResolvedValueOnce([existing]).mockResolvedValueOnce([refreshed])
-    const out = await installMarketplaceItem(item())
-    expect(mockedUpdate).toHaveBeenCalledWith(
-      "abc",
-      expect.objectContaining({ canonicalId: "registry:id-1", source: "marketplace" })
-    )
-    expect(out.created).toBe(false)
-    expect(out.skill).toEqual(refreshed)
-  })
-
-  it("falls back to existing row when refreshed lookup misses", async () => {
+  it("propagates `created: false` from the helper when the upsert touched an existing row", async () => {
     mockedRegFetch.mockResolvedValue({
       content: "MD",
       canonicalId: "registry:id-1",
@@ -218,10 +158,32 @@ describe("installMarketplaceItem", () => {
     })
     mockedParse.mockReturnValue({ draft: { name: "P", content: "B" } })
     const existing = { id: "abc", canonicalId: "registry:id-1" }
-    mockedList.mockResolvedValueOnce([existing]).mockResolvedValueOnce([])
+    mockedUpsert.mockResolvedValue({ skill: existing, created: false })
     const out = await installMarketplaceItem(item())
-    expect(out.skill).toEqual(existing)
     expect(out.created).toBe(false)
+    expect(out.skill).toEqual(existing)
+  })
+
+  it("threads non-fatal validation errors onto the persisted draft and sets status='error'", async () => {
+    mockedRegFetch.mockResolvedValue({
+      content: "MD",
+      canonicalId: "registry:id-1",
+      marketplaceSkillId: "id-1",
+    })
+    // 80-char name violates the validator's length rule but isn't fatal.
+    const longName = "a".repeat(80)
+    mockedParse.mockReturnValue({ draft: { name: longName, content: "B" } })
+    mockedUpsert.mockResolvedValue({ skill: { id: "x" }, created: true })
+    const out = await installMarketplaceItem(item())
+    expect(out.validationErrors.length).toBeGreaterThan(0)
+    expect(mockedUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draft: expect.objectContaining({
+          status: "error",
+          validationErrors: expect.any(Array),
+        }),
+      })
+    )
   })
 })
 

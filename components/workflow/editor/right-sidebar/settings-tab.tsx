@@ -27,6 +27,7 @@ import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { WorkflowVariablesEditor } from "./settings/workflow-variables-editor"
 import { WorkflowCredentialsList } from "./settings/workflow-credentials-list"
 import { PluginCapabilitiesSection } from "./settings/plugin-capabilities-section"
+import { FanoutSubscriptionsPanel } from "@/components/workflow/library/fanout-subscriptions-panel"
 
 function num(value: string, fallback: number): number {
   const n = Number(value)
@@ -35,11 +36,20 @@ function num(value: string, fallback: number): number {
 
 export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   const t = useTranslations("workflowEditor.settings")
-  const { settings, variables, credentials, setSettings, setVariables, setCredentials } = useStore(
+  const {
+    settings,
+    variables,
+    credentials,
+    workflowId,
+    setSettings,
+    setVariables,
+    setCredentials,
+  } = useStore(
     useShallow((s: EditorState) => ({
       settings: s.baseWorkflow.settings,
       variables: s.baseWorkflow.variables,
       credentials: s.baseWorkflow.credentials,
+      workflowId: s.baseWorkflow.id,
       setSettings: s.setSettings,
       setVariables: s.setVariables,
       setCredentials: s.setCredentials,
@@ -224,6 +234,18 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
           </h4>
           <p className="text-[11px] text-muted-foreground">{t("plugins.hint")}</p>
           <PluginCapabilitiesSection />
+        </section>
+
+        <Separator />
+
+        {/*
+          Run-progress fan-out (im-a2ui-abstract-anchor Phase 7). The
+          panel queries `workflowFanoutSubscriptions` live, so adds /
+          removes are reflected immediately and the progress-runner
+          picks them up on the NEXT run.
+        */}
+        <section className="space-y-3">
+          <FanoutSubscriptionsPanel workflowId={workflowId} />
         </section>
       </div>
     </ScrollArea>

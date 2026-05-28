@@ -19,6 +19,7 @@ import { getAllContributions } from "@/lib/plugin/contracts/capability-contribut
 import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginStatusPill } from "../plugin-status-badge"
+import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 
 interface Props {
   plugin: PluginRow
@@ -97,7 +98,7 @@ export function PluginLibraryRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="font-medium truncate">{plugin.name}</span>
-            <span className="text-xs text-muted-foreground shrink-0">v{plugin.version}</span>
+            <PluginVersionBadge version={plugin.version} className="shrink-0" />
             {updateAvailable && (
               <Badge variant="secondary" className="text-xs shrink-0">
                 {t("updateBadge")}

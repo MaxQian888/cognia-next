@@ -34,6 +34,7 @@ import type {
   VisualWorkflow,
   WorkflowEdge,
   WorkflowRunRow,
+  WorkflowTriggeredFrom,
 } from "@/types/workflow/visual"
 // Importing the built-ins triggers their registration side effect.
 import "@/lib/workflow/nodes/built-ins"
@@ -71,6 +72,14 @@ export interface RunWorkflowInput {
    * compatible with existing call sites (sequential behavior preserved).
    */
   concurrency?: ConcurrencyController
+  /**
+   * Origin of this run when started from outside the workflow's own
+   * trigger node (e.g., IM Claude tool, desktop button, HTTP API). Persisted
+   * onto `WorkflowRunRow.triggeredBy` so the IM-side progress-runner can
+   * fan-out events to the originating conversation. See
+   * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
+   */
+  triggeredBy?: WorkflowTriggeredFrom
 }
 
 export interface RunWorkflowResult {
@@ -114,6 +123,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     triggerBinding: trigger.binding,
     startedAt,
     workflowSnapshot: validated as VisualWorkflow,
+    ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
   }
   // If we're resuming, the row may already exist — Dexie's `put` handles both.
   await getDb().workflowRuns.put(runRow)

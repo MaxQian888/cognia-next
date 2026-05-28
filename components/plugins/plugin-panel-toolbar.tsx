@@ -21,6 +21,7 @@ import {
   Loader2Icon,
   FilePlus2Icon,
   ShieldCheckIcon,
+  FolderOpenIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +37,8 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-install-from-url-dialog"
 import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
+import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
+import { CliStatusChip } from "./cli-status-chip"
 
 interface Props {
   /** Opens the update dialog (mounted by the parent panel). */
@@ -55,6 +58,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [signedUrlDialogOpen, setSignedUrlDialogOpen] = useState(false)
   const wasmLocal = useInstallWasmFromLocal()
+  const loadUnpacked = useLoadUnpackedFlow()
   const wasmAvailable = canUseTauriInvoke()
 
   const handleInstallFromFile = async () => {
@@ -133,6 +137,15 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             {wasmAvailable && (
               <>
                 <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t("groupLocal")}</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => void loadUnpacked.trigger()}
+                  disabled={loadUnpacked.busy}
+                >
+                  <FolderOpenIcon className="size-3.5 mr-2" />
+                  {t("loadUnpacked")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel>{t("groupWasm")}</DropdownMenuLabel>
                 <DropdownMenuItem
                   onClick={() => void wasmLocal.trigger()}
@@ -167,11 +180,19 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
           )}
           <span className="hidden lg:inline">{t("syncRegistry")}</span>
         </Button>
+        <div className="ml-auto">
+          <CliStatusChip />
+        </div>
       </div>
 
       {wasmLocal.error && (
         <p className="mt-1 text-xs text-destructive" role="alert">
           {wasmLocal.error}
+        </p>
+      )}
+      {loadUnpacked.error && (
+        <p className="mt-1 text-xs text-destructive" role="alert">
+          {loadUnpacked.error}
         </p>
       )}
 
@@ -183,6 +204,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
         />
       )}
       {wasmLocal.sheet}
+      {loadUnpacked.dialog}
     </>
   )
 }

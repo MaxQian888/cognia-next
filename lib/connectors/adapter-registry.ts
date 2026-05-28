@@ -24,6 +24,7 @@ import { createWeComAdapter } from "./adapters/wecom"
 import type { WeComAdapterSettings } from "./adapters/wecom/welcome"
 import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
 import { getTenantAccessToken } from "./adapters/lark/auth"
+import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 
 /**
  * Build and return a PlatformAdapter for the given row.
@@ -189,7 +190,13 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
   const settings = (row.settings ?? {}) as {
     transport?: "long-connection" | "webhook"
     selfBotOpenId?: string
-    quickCommands?: import("./adapters/lark/quick-commands").LarkQuickCommand[]
+    /**
+     * Persisted Dexie rows may carry the legacy `eventKey` shape from
+     * before the cross-adapter rename to `triggerKey`. We pass through
+     * `normalizeQuickCommandList` below so the factory always sees
+     * canonical rows.
+     */
+    quickCommands?: unknown
     [key: string]: unknown
   }
   const transport: "long-connection" | "webhook" =
@@ -249,7 +256,7 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     encryptKey: () => connectorsKeyringGet(row.id, "encryptKey").then((v) => v ?? ""),
     verificationToken: () => connectorsKeyringGet(row.id, "verificationToken").then((v) => v ?? ""),
     selfBotOpenId,
-    quickCommands: settings.quickCommands,
+    quickCommands: normalizeQuickCommandList(settings.quickCommands),
     transport,
   })
 }

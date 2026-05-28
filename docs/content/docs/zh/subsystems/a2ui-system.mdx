@@ -5,22 +5,6 @@ description: Agent-to-UI 协议——Claude 通过 MCP 工具创建可交互的 
 
 # A2UI 系统
 
-<Status variant="experimental" />
-
-<TLDR>
-  Claude（或任意外部 agent）通过四个 MCP 工具生成一棵声明式组件树；renderer 在 webview
-  内把它渲染成真正的 React 面板；用户操作 / 数据模型变更经事件总线回流给
-  agent。Renderer、catalog、parser、events 都跑在浏览器层；sidecar 端 MCP 服务器 + Rust 桥负责让外部
-  agent 也能接进来。
-</TLDR>
-
-<StatGrid>
-  <Stat label="MCP 工具" value="4" hint="create / update / dataModel / delete" />
-  <Stat label="组件目录" value="50+" hint="layout · display · form · data · overlay" />
-  <Stat label="Dexie 表" value="4" hint="apps · surfaces · templates · eventHistory" />
-  <Stat label="Schema 版本" value="v0.9" hint="lib/a2ui/mcp-tool-schemas.ts" />
-</StatGrid>
-
 ## 它解决什么
 
 模型不止能输出 markdown 文本——也能输出**真正的 UI**：一个表单、一张图表、一个仪表盘。
@@ -346,5 +330,5 @@ foreign object / data: URL 这些都要白名单过滤。
     href="./artifacts-sandbox"
     description="另一条 UI 路径：iframe 隔离的一次性内容"
   />
-  <Card title="聊天 & 技能" href="./chat-and-skills" description="A2UI 事件回灌进消息循环" />
+  <Card title="聊天 & 技能" href="../chat/chat-and-skills" description="A2UI 事件回灌进消息循环" />
 </Cards>

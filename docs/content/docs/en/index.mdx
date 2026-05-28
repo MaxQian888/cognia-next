@@ -1,169 +1,94 @@
 ---
 title: Overview
-description: Cognia is a Next.js 16 + Tauri 2.9 desktop client for Claude Code. This page introduces the project, its philosophy, and what the codebase ships.
+description: Cognia is a Next.js 16 + Tauri 2.11 + Capacitor 8 desktop and mobile client for Claude Code.
 ---
 
-# Cognia · Overview
+# Overview
 
-**Cognia** (codebase: `cognia-next`) is a desktop client for [Claude Code](https://claude.com/claude-code). It runs as a Tauri 2.9 application on Windows, macOS, and Linux, with a Next.js 16 + React 19 frontend and a Rust backend that hosts native subsystems (scheduler, vector store, file IO, TTS, deep links, …). A Node sidecar bundles the official `@anthropic-ai/claude-agent-sdk` and bridges it to the parent process over stdio.
+**Cognia** (codebase: `cognia-next`) is an AI client for [Claude Code](https://claude.com/claude-code). One Next.js 16 static export feeds three shells — browser, Tauri 2.11 desktop, Capacitor 8 mobile — sharing one UI, one i18n catalog, and one set of business logic. A Rust core hosts long-lived services (HTTP server, scheduler, vector store, automation, OCR, MCP), and a bundled Node sidecar runs the official Claude Agent SDK.
 
-This documentation reflects the **actual implementation** in the repo — every subsystem documented here corresponds to a directory under `lib/`, `components/`, or `src-tauri/src/` that you can read and modify.
-
-## Why "not a starter"
-
-Many `Next.js + Tauri` repos are templates to fork. cognia-next is the opposite — it is a full product that happens to use Next.js + Tauri. Concretely:
-
-- The Dexie schema is at **v15** with 25+ tables (chat, characters, skills, teams, twin, plugins, A2UI, canvas, …).
-- The Rust crate (`cognia-next`) registers ~16 modules: `claude` sidecar, `scheduler` (Windows Task Scheduler / launchd / systemd), `vector` (sqlite-vec), `tts`, `hooks`, `agents`, `external_agent`, `a2ui_bridge`, `canvas`, `skills`, `files`, `shell`, `settings`, `api_key`, `logging`, `tray`/`menu`, plus single-instance, deep-link, autostart, global-shortcut, store, updater plugins.
-- The Node sidecar (`sidecar/claude-host.mjs`, `sidecar/a2ui-mcp.mjs`) ships with its own `pnpm install` because it has Node-only deps and is bundled as a Tauri resource.
-- The frontend wires nine top-level providers in `app/layout.tsx` (locale gate, Tauri runtime, scheduler initializer, backup scheduler, canvas bridge, A2UI dispatch, data adapter, settings sync, theme, …).
-
-If you are reading this to "learn the starter", you are in the wrong repo — pick a smaller example. If you are working on or contributing to Cognia, this is the entry point.
+These docs reflect the **actual implementation** — every page corresponds to code under `lib/`, `components/`, `src-tauri/src/`, or `sidecar/` that you can read and modify.
 
 ## At a glance
 
 ```mermaid
 flowchart LR
-  Web[Web mode<br/>pnpm dev<br/>port 3000]
-  Desktop[Desktop mode<br/>pnpm tauri dev]
-  Docs[Docs site<br/>pnpm docs:dev<br/>port 3001]
+  Web[Browser<br/>pnpm dev<br/>:3000]
+  Desktop[Tauri 2.11<br/>pnpm tauri dev]
+  Mobile[Capacitor 8<br/>mobile/]
+  Docs[Docs site<br/>pnpm docs:dev<br/>:3001]
 
   subgraph Stack[Stack]
     Next[Next.js 16 + React 19]
-    Tauri[Tauri 2.9 · Rust]
+    Rust[Tauri Rust core<br/>axum + scheduler + ...]
     Sidecar[Node sidecar<br/>Claude Agent SDK]
   end
 
   Web --> Next
   Desktop --> Next
-  Desktop --> Tauri
-  Tauri --> Sidecar
+  Desktop --> Rust
+  Mobile --> Next
+  Rust --> Sidecar
   Docs --> Next
-
-  classDef mode fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
-  classDef stack fill:#312e81,stroke:#a78bfa,color:#ede9fe
-  classDef sidecar fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  class Web,Desktop,Docs mode
-  class Next,Tauri stack
-  class Sidecar sidecar
 ```
 
-## What's inside
+Two standalone services live alongside the monorepo:
 
-| Subsystem                                         | Where                                                                                                                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi-character / skill / team chat               | `app/`, `components/chat/`, `lib/chat/`, `lib/character/` (via `lib/claude/types.ts`), `lib/skills/`, `lib/db/{characters,skills,teams,sessions,messages}.ts` |
-| Claude Agent SDK + Node sidecar                   | `sidecar/claude-host.mjs`, `lib/claude/`, `src-tauri/src/claude/`                                                                                             |
-| Employee Digital Twin (RAG + style few-shot)      | `lib/twin/{ingest,distill,runtime}/`, `components/twin/`, `app/twin/`, `types/twin/`                                                                          |
-| Native vector store (sqlite-vec)                  | `src-tauri/src/vector/`, `lib/vector/`                                                                                                                        |
-| Encrypted backup / import (schema v3)             | `lib/data/`, `components/settings/data/`                                                                                                                      |
-| Cross-platform scheduler                          | `src-tauri/src/scheduler/`, `lib/scheduler/`, `components/scheduler/`                                                                                         |
-| Plugin system                                     | `lib/plugin/`, `lib/db/plugins.ts`, `components/plugins/`                                                                                                     |
-| A2UI / Canvas / Artifacts surfaces                | `lib/a2ui/`, `lib/canvas/`, `lib/artifacts/`, `components/{a2ui,canvas,artifacts}/`                                                                           |
-| TTS (Edge / OpenAI / Azure / ElevenLabs / native) | `src-tauri/src/tts/`, `lib/tts/`                                                                                                                              |
-| MCP servers + presets                             | `lib/claude/mcp-presets.ts`, `lib/db/mcp-servers.ts`                                                                                                          |
-| Theming (oklch + custom themes)                   | `lib/themes/`, `lib/theme/`, `app/globals.css`                                                                                                                |
-| i18n (next-intl)                                  | `lib/i18n/`, `i18n/messages/{en,zh-CN}.json`                                                                                                                  |
-
-Read the [Architecture](./core/architecture) page for how these layers fit together.
+- `signaling-server/` — WebRTC rendezvous (axum + workers-rs).
+- `share-server/` — Cloudflare Worker + Vite viewer for zero-knowledge share links.
 
 ## Quick navigation
 
 <Cards>
-  <Card
-    title="Getting Started"
-    href="./getting-started"
-    description="Install deps, run web mode, run desktop mode."
-  />
-  <Card
-    title="Architecture"
-    href="./architecture"
-    description="Four-layer view: frontend → IPC → Rust → sidecar."
-  />
-  <Card
-    title="Runtime & Tauri"
-    href="./runtime-and-tauri"
-    description="Dual web/desktop runtime, IPC pattern, CSP, identifiers."
-  />
-  <Card
-    title="Sidecar & Claude Agent SDK"
-    href="./sidecar-and-claude-sdk"
-    description="Node host protocol, lifecycle, hooks."
-  />
-  <Card
-    title="Chat & Skills"
-    href="./chat-and-skills"
-    description="Sessions, characters, skills, teams, MCP presets."
-  />
-  <Card
-    title="Employee Digital Twin"
-    href="./employee-twin"
-    description="Ingest / distill / runtime pipelines."
-  />
-  <Card
-    title="Vector store"
-    href="./vector-store"
-    description="Native sqlite-vec + 5 cloud backends."
-  />
-  <Card
-    title="Backup & data transfer"
-    href="./backup-and-data"
-    description="Schema v3, scheduled writes, imports."
-  />
-  <Card
-    title="Scheduler"
-    href="./scheduler"
-    description="Cron parsing, native promotion, task templates."
-  />
-  <Card
-    title="Plugin system"
-    href="./plugin-system"
-    description="Manifest, permissions, marketplace, scheduled jobs."
-  />
-  <Card
-    title="Storage"
-    href="./storage"
-    description="Dexie schema v15, settings table, migration discipline."
-  />
-  <Card
-    title="Theming & i18n"
-    href="./theming-and-i18n"
-    description="Tailwind v4, oklch theme tokens, locale switching."
-  />
-  <Card
-    title="Development"
-    href="./development"
-    description="Workflow, scripts, conventions, testing standards."
-  />
-  <Card
-    title="Deployment"
-    href="./deployment"
-    description="Building for web, desktop, and the docs site."
-  />
+  <Card title="Getting Started" href="./getting-started" description="Install deps, run web mode, run desktop mode." />
+  <Card title="Architecture" href="./core/architecture" description="Four-layer view: frontend, IPC, Rust, sidecar." />
+  <Card title="Runtime & Tauri" href="./core/runtime-and-tauri" description="Dual web/desktop runtime, IPC, CSP." />
+  <Card title="Sidecar & Claude Agent SDK" href="./core/sidecar-and-claude-sdk" description="Node host protocol, lifecycle, hooks." />
+  <Card title="Chat & Skills" href="./chat/chat-and-skills" description="Sessions, characters, skills, teams, MCP." />
+  <Card title="Storage" href="./data/storage" description="Dexie schema (v54), settings, migrations." />
+  <Card title="Vector store" href="./data/vector-store" description="Native sqlite-vec + cloud backends." />
+  <Card title="Backup & data transfer" href="./data/backup-and-data" description="Schema v3, scheduled writes, imports." />
+  <Card title="Plugin system" href="./subsystems/plugin-system" description="Manifest, permissions, marketplace, scheduled jobs." />
+  <Card title="Theming & i18n" href="./ui/theming-and-i18n" description="Tailwind v4, oklch tokens, locale switching." />
+  <Card title="Development" href="./dev/development" description="Workflow, scripts, conventions, testing." />
+  <Card title="Deployment" href="./dev/deployment" description="Building for web, desktop, mobile, and docs." />
 </Cards>
 
-<Callout type="info" title="More documentation in Chinese">
-  The Chinese version of these docs covers ~20 additional subsystem pages (visual workflows,
-  platform connectors, external bridge, MCP servers, mobile architecture, …) plus all 17
-  [Architecture Decision Records](/docs/adr/0001-backup-schema-v3). Use the language switcher in the
-  top bar to jump to 中文.
+<Callout type="info" title="ADRs">
+  Architecture Decision Records live under [`docs/content/docs/en/adr/`](./adr/0001-backup-schema-v3) — one
+  ADR per major decision. They are immutable historical records; if a doc page contradicts an ADR, the ADR wins.
 </Callout>
 
 ## Pick your runtime mode
 
-<Tabs items={["Web", "Desktop", "Docs site"]}>
+<Tabs items={["Web", "Desktop", "Mobile", "Docs site"]}>
   <Tab value="Web">
-    ```bash pnpm install pnpm dev # → http://localhost:3000 ``` Web mode runs only the Next.js dev
-    server. Tauri-only features (scheduler, native vector store, connectors, MCP servers) become
-    no-ops behind `isTauri()` guards.
+    ```bash
+    pnpm install
+    pnpm dev    # → http://localhost:3000
+    ```
+    Browser-only. Tauri-only features (scheduler, native vector store, connectors, MCP servers, computer use) no-op behind `isTauri()` guards.
   </Tab>
   <Tab value="Desktop">
-    ```bash pnpm install pnpm tauri dev ``` Full-featured desktop run. The Tauri shell starts the
-    Next.js dev server, spawns the Node sidecar, and registers all 27 Rust modules.
+    ```bash
+    pnpm install
+    pnpm tauri dev
+    ```
+    Full-featured. The Tauri shell starts the Next.js dev server, spawns the Node sidecar, and registers the Rust core.
+  </Tab>
+  <Tab value="Mobile">
+    ```bash
+    pnpm build
+    pnpm mobile:sync
+    pnpm mobile:open:ios       # or :android
+    ```
+    Capacitor 8 wraps `out/` and talks to a headless `cognia-server` over LAN/HTTPS or WebRTC.
   </Tab>
   <Tab value="Docs site">
-    ```bash pnpm docs:dev # → http://localhost:3001 ``` This site you're reading. Built with
-    Fumadocs — the dev server hot-reloads MDX edits instantly.
+    ```bash
+    pnpm docs:dev   # → http://localhost:3001
+    ```
+    This site. Fumadocs — MDX edits hot-reload instantly.
   </Tab>
 </Tabs>
 
@@ -172,22 +97,18 @@ Read the [Architecture](./core/architecture) page for how these layers fit toget
 <Steps>
   <Step>
     ### Read the architecture overview
-    [Architecture](./core/architecture) introduces the four-layer model
-    (Browser → IPC → Rust → sidecar) and where each subsystem lives.
+    [Architecture](./core/architecture) introduces the four-layer model (Browser → IPC → Rust → sidecar) and where each subsystem lives.
   </Step>
   <Step>
     ### Pick a subsystem
-    Find the page above that matches what you want to change. Each page links
-    back to its source folder under `lib/`, `components/`, or `src-tauri/src/`.
+    Each page links back to its source folder under `lib/`, `components/`, or `src-tauri/src/`, and cross-references the relevant ADR.
   </Step>
   <Step>
     ### Run with hot reload
-    `pnpm tauri dev` reloads the React side instantly; Rust changes recompile
-    on save.
+    `pnpm tauri dev` reloads React instantly; Rust changes recompile on save.
   </Step>
   <Step>
     ### Add tests
-    The project enforces ≥90% coverage. Co-locate tests as
-    `<file>.test.ts(x)` and run `pnpm test:coverage`.
+    Coverage gate is ≥90%. Co-locate tests as `<file>.test.ts(x)` and run `pnpm test:coverage`.
   </Step>
 </Steps>

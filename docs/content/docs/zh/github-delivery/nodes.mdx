@@ -5,15 +5,6 @@ description: 13 个 action.github.* 工作流节点的完整参数、输出形�
 
 # 节点参考
 
-<TLDR>
-GitHub Delivery 向工作流注入 **13 个 `action.github.*` 节点**,全部在
-`plugins/github-delivery/src/workflow/nodes.ts` 注册,通过 `guardedExecutor`
-统一处理 repo 解析、Octokit 获取、策略门、HITL 审批、审计写入。每个节点都接
-两个通用字段:`repoFullName`(`owner/name`)和可选的 `policyOverride`
-(`Partial<GhPolicy>`)。除 `generateChangelog` 是只读、`reviewPrInline` 自带 LLM 调用、
-`runIssueLoop` 跑长任务以外,其余节点都是单次 Octokit 请求的薄包装。
-</TLDR>
-
 ## 通用约定
 
 ### 共享字段

@@ -127,9 +127,88 @@ describe("outbound-runner — successful delivery", () => {
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs[0].status).toBe("sent")
+    // Phase 6 — `markSent` now persists the returned platformMessageId
+    // so the workflow-progress-runner can correlate the entry card
+    // back to its platform handle for in-place edits.
+    expect(jobs[0].platformMessageId).toBe("pm_1")
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
+  })
+})
+
+describe("outbound-runner — edit dispatch (Phase 6)", () => {
+  it("routes editTargetMessageId through adapter.edit() when the adapter supports it", async () => {
+    const adapterId = "a_edit"
+    const sendCalls: number[] = []
+    const editCalls: Array<[string, unknown]> = []
+    const adapter = makeAdapter(adapterId, async () => {
+      sendCalls.push(1)
+      return { ok: true, platformMessageId: "pm_send" }
+    }) as PlatformAdapter & {
+      edit: jest.Mock<Promise<OutboundResult>, [string, unknown]>
+    }
+    adapter.edit = jest.fn(async (messageId, patch) => {
+      editCalls.push([messageId, patch])
+      return { ok: true, platformMessageId: messageId }
+    })
+    const adapters = new Map([[adapterId, adapter]])
+
+    await enqueueOutbound({
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId },
+        segments: [{ type: "text", text: "updated" }],
+        editTargetMessageId: "pm_existing_42",
+        metadata: { idempotencyKey: crypto.randomUUID() },
+      },
+      source: "workflow",
+      sourceWorkflow: { workflowId: "wf", runId: "r", nodeId: "" },
+    })
+
+    await runOnce(adapters)
+
+    expect(editCalls).toHaveLength(1)
+    expect(editCalls[0][0]).toBe("pm_existing_42")
+    expect(sendCalls).toHaveLength(0)
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs[0].status).toBe("sent")
+    expect(jobs[0].platformMessageId).toBe("pm_existing_42")
+  })
+
+  it("falls back to send() + audits edit_unsupported when the adapter has no edit()", async () => {
+    const adapterId = "a_no_edit"
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: true,
+      platformMessageId: "pm_fallback",
+    }))
+    // No `edit` property — simulates WeCom / wechat-personal.
+    const adapters = new Map([[adapterId, adapter]])
+
+    await enqueueOutbound({
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId },
+        segments: [{ type: "text", text: "fallback" }],
+        editTargetMessageId: "pm_doesnt_matter",
+        metadata: { idempotencyKey: crypto.randomUUID() },
+      },
+      source: "workflow",
+      sourceWorkflow: { workflowId: "wf", runId: "r", nodeId: "" },
+    })
+
+    await runOnce(adapters)
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs[0].status).toBe("sent")
+    expect(jobs[0].platformMessageId).toBe("pm_fallback")
+    const audits = await listRecent(adapterId)
+    const fallbackAudit = audits.find(
+      (a) => a.kind === "delivery.error" && a.reason === "edit_unsupported"
+    )
+    expect(fallbackAudit).toBeDefined()
   })
 })
 

@@ -16,27 +16,39 @@ import type {
   LangfuseTransportDetailSettings,
   OpenTelemetryTransportDetailSettings,
   NativeTransportDetailSettings,
+  AgentTraceTransportDetailSettings,
+  AgentTraceOtlpSettings,
   LoggingTransportSettings,
   LoggingRetentionSettings,
   LoggingBootstrapState,
 } from "@/types/logging"
 import { configureSampling } from "./sampling"
 import {
+  AgentTraceTransport,
+  createAgentTraceTransport,
   createConsoleTransport,
   createIndexedDBTransport,
   createLangfuseTransport,
   createNativeTransport,
   createOtelTransport,
+  createOtlpHttpTransport,
   createRemoteTransport,
+  grafanaCloudHeaders,
   IndexedDBTransport,
+  OtlpHttpTransport,
 } from "./transports"
 import { setPlatformLoggingConfig } from "@/lib/native/native-logging"
+import { setAgentTraceWriter } from "@/lib/agent-trace/emitter"
+import { spanToLogEntry } from "@/lib/agent-trace/span-to-log-entry"
+import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
 export type {
   RemoteTransportDetailSettings,
   LangfuseTransportDetailSettings,
   OpenTelemetryTransportDetailSettings,
   NativeTransportDetailSettings,
+  AgentTraceTransportDetailSettings,
+  AgentTraceOtlpSettings,
   LoggingTransportSettings,
   LoggingRetentionSettings,
   LoggingBootstrapState,
@@ -62,6 +74,7 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   remote: true,
   langfuse: true,
   opentelemetry: true,
+  agentTrace: true,
   nativeConfig: {
     minLevel: "warn",
     batchSize: 10,
@@ -84,6 +97,20 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
     endpoint: "",
     serviceName: "cognia-ai",
     addAsSpanEvents: true,
+  },
+  agentTraceOtlp: false,
+  agentTraceConfig: {
+    captureContent: false,
+    maxPreviewBytes: 4096,
+    retentionDays: 7,
+  },
+  agentTraceOtlpConfig: {
+    preset: "off",
+    endpoint: "",
+    headers: {},
+    serviceName: "cognia-ai",
+    environment: "",
+    grafanaCloud: { instanceId: "", apiToken: "" },
   },
 }
 
@@ -130,6 +157,8 @@ function readTransportSettings(): LoggingTransportSettings {
       remoteConfig: { ...DEFAULT_TRANSPORT_SETTINGS.remoteConfig },
       langfuseConfig: { ...DEFAULT_TRANSPORT_SETTINGS.langfuseConfig },
       opentelemetryConfig: { ...DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig },
+      agentTraceConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig },
+      agentTraceOtlpConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig },
     }
   }
 
@@ -149,6 +178,14 @@ function readTransportSettings(): LoggingTransportSettings {
     raw.opentelemetryConfig && typeof raw.opentelemetryConfig === "object"
       ? (raw.opentelemetryConfig as Partial<OpenTelemetryTransportDetailSettings>)
       : {}
+  const agentTraceConfig: Partial<AgentTraceTransportDetailSettings> =
+    raw.agentTraceConfig && typeof raw.agentTraceConfig === "object"
+      ? (raw.agentTraceConfig as Partial<AgentTraceTransportDetailSettings>)
+      : {}
+  const agentTraceOtlpConfig: Partial<AgentTraceOtlpSettings> =
+    raw.agentTraceOtlpConfig && typeof raw.agentTraceOtlpConfig === "object"
+      ? (raw.agentTraceOtlpConfig as Partial<AgentTraceOtlpSettings>)
+      : {}
 
   return {
     console: typeof raw.console === "boolean" ? raw.console : DEFAULT_TRANSPORT_SETTINGS.console,
@@ -162,6 +199,12 @@ function readTransportSettings(): LoggingTransportSettings {
       typeof raw.opentelemetry === "boolean"
         ? raw.opentelemetry
         : DEFAULT_TRANSPORT_SETTINGS.opentelemetry,
+    agentTrace:
+      typeof raw.agentTrace === "boolean" ? raw.agentTrace : DEFAULT_TRANSPORT_SETTINGS.agentTrace,
+    agentTraceOtlp:
+      typeof raw.agentTraceOtlp === "boolean"
+        ? raw.agentTraceOtlp
+        : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlp,
     nativeConfig: {
       minLevel:
         typeof nativeConfig.minLevel === "string" &&
@@ -246,7 +289,80 @@ function readTransportSettings(): LoggingTransportSettings {
           ? opentelemetryConfig.addAsSpanEvents
           : DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig.addAsSpanEvents,
     },
+    agentTraceConfig: {
+      captureContent:
+        typeof agentTraceConfig.captureContent === "boolean"
+          ? agentTraceConfig.captureContent
+          : DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig.captureContent,
+      maxPreviewBytes: clampNumber(
+        agentTraceConfig.maxPreviewBytes,
+        256,
+        65_536,
+        DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig.maxPreviewBytes
+      ),
+      retentionDays: clampNumber(
+        agentTraceConfig.retentionDays,
+        0,
+        365,
+        DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig.retentionDays
+      ),
+    },
+    agentTraceOtlpConfig: {
+      preset: isValidOtlpPreset(agentTraceOtlpConfig.preset)
+        ? agentTraceOtlpConfig.preset
+        : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.preset,
+      endpoint:
+        typeof agentTraceOtlpConfig.endpoint === "string"
+          ? agentTraceOtlpConfig.endpoint
+          : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.endpoint,
+      headers: sanitizeOtlpHeaders(agentTraceOtlpConfig.headers),
+      serviceName:
+        typeof agentTraceOtlpConfig.serviceName === "string" &&
+        agentTraceOtlpConfig.serviceName.trim().length > 0
+          ? agentTraceOtlpConfig.serviceName
+          : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.serviceName,
+      environment:
+        typeof agentTraceOtlpConfig.environment === "string"
+          ? agentTraceOtlpConfig.environment
+          : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.environment,
+      grafanaCloud: sanitizeGrafanaCloud(agentTraceOtlpConfig.grafanaCloud),
+    },
   }
+}
+
+function sanitizeGrafanaCloud(value: unknown): AgentTraceOtlpSettings["grafanaCloud"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.grafanaCloud }
+  }
+  const v = value as Record<string, unknown>
+  return {
+    instanceId: typeof v.instanceId === "string" ? v.instanceId : "",
+    apiToken: typeof v.apiToken === "string" ? v.apiToken : "",
+  }
+}
+
+const VALID_OTLP_PRESETS: ReadonlySet<AgentTraceOtlpSettings["preset"]> = new Set([
+  "off",
+  "grafana-cloud",
+  "self-hosted",
+  "custom",
+])
+
+function isValidOtlpPreset(value: unknown): value is AgentTraceOtlpSettings["preset"] {
+  return (
+    typeof value === "string" && VALID_OTLP_PRESETS.has(value as AgentTraceOtlpSettings["preset"])
+  )
+}
+
+function sanitizeOtlpHeaders(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k === "string" && k.trim().length > 0 && typeof v === "string") {
+      out[k] = v
+    }
+  }
+  return out
 }
 
 function readRetentionSettings(): LoggingRetentionSettings {
@@ -520,6 +636,105 @@ function applyTransportSettings(
     )
   } else {
     removeTransport("opentelemetry")
+  }
+
+  if (transports.agentTrace) {
+    const existing = getTransport<AgentTraceTransport>("agent-trace")
+    if (existing && typeof existing.updateOptions === "function") {
+      existing.updateOptions({
+        captureContent: transports.agentTraceConfig.captureContent,
+        maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+        retentionDays: transports.agentTraceConfig.retentionDays,
+      })
+      addTransport(existing)
+    } else {
+      removeTransport("agent-trace")
+      addTransport(
+        createAgentTraceTransport({
+          captureContent: transports.agentTraceConfig.captureContent,
+          maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+          retentionDays: transports.agentTraceConfig.retentionDays,
+        })
+      )
+    }
+    setAgentTraceWriter(dispatchSpanToTransports)
+  } else {
+    removeTransport("agent-trace")
+    setAgentTraceWriter(transports.agentTraceOtlp ? dispatchSpanToTransports : null)
+  }
+
+  // OTLP exporter — independent toggle from the Dexie sink so users can run
+  // either alone or both together (Dexie powers the in-app UI, OTLP feeds
+  // Grafana / Tempo / Honeycomb / Datadog). Empty endpoint short-circuits
+  // to a `degraded` health status inside the transport itself.
+  if (transports.agentTraceOtlp) {
+    const otlpExisting = getTransport<OtlpHttpTransport>("agent-trace-otlp")
+    const otlpHeaders = buildOtlpHeaders(transports.agentTraceOtlpConfig)
+    const otlpOptions = {
+      endpoint: transports.agentTraceOtlpConfig.endpoint,
+      headers: otlpHeaders,
+      resource: {
+        serviceName: transports.agentTraceOtlpConfig.serviceName,
+        environment: transports.agentTraceOtlpConfig.environment || undefined,
+      },
+      captureContent: transports.agentTraceConfig.captureContent,
+      maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+    } as const
+    if (otlpExisting && typeof otlpExisting.updateOptions === "function") {
+      otlpExisting.updateOptions(otlpOptions)
+      addTransport(otlpExisting)
+    } else {
+      removeTransport("agent-trace-otlp")
+      addTransport(createOtlpHttpTransport(otlpOptions))
+    }
+    // Make sure the emitter writer is wired even when the Dexie sink is off
+    // — otherwise spans never reach any transport.
+    setAgentTraceWriter(dispatchSpanToTransports)
+  } else {
+    removeTransport("agent-trace-otlp")
+  }
+}
+
+/**
+ * Merge the Grafana Cloud-derived Authorization header onto the
+ * user-supplied headers when the OTLP preset is `grafana-cloud`. Manually
+ * authored `headers.Authorization` still wins so the user can override
+ * (e.g. when testing a self-issued token).
+ */
+function buildOtlpHeaders(config: AgentTraceOtlpSettings): Record<string, string> {
+  const base = { ...config.headers }
+  if (
+    config.preset === "grafana-cloud" &&
+    !base.Authorization &&
+    config.grafanaCloud.instanceId &&
+    config.grafanaCloud.apiToken
+  ) {
+    return {
+      ...base,
+      ...grafanaCloudHeaders({
+        instanceId: config.grafanaCloud.instanceId,
+        apiToken: config.grafanaCloud.apiToken,
+      }),
+    }
+  }
+  return base
+}
+
+/** Emit a finished span as a synthetic `StructuredLogEntry` to every
+ * registered transport. The trace transport recognises `data.kind ===
+ * "agent-trace-span"` and persists the embedded span row; other transports
+ * see it as a normal `module="agent.trace"` log line (the panel already has
+ * a filter preset for that module). Failures are swallowed so an unwired
+ * transport can't break an instrumented call site. */
+function dispatchSpanToTransports(span: AgentTraceSpan): void {
+  const entry = spanToLogEntry(span)
+  for (const t of getTransports()) {
+    try {
+      void t.log(entry)
+    } catch {
+      // Transports report their own diagnostics; the emitter contract
+      // forbids throwing back into instrumented code.
+    }
   }
 }
 

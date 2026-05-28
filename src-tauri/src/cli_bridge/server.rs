@@ -55,6 +55,17 @@ pub async fn spawn(state: SharedState) -> Result<(u16, watch::Sender<()>)> {
 pub fn build_router(state: SharedState) -> Router {
     Router::new()
         .route("/api/v1/dev/health", get(handlers::health))
+        // ── Read endpoints ──────────────────────────────────────────────
+        // `installed` returns the list of currently-loaded plugins so the
+        // `cognia plugin install` CLI can preflight a same-id collision
+        // and prompt the author before clobbering an existing version.
+        // Snapshot subset — never exposes runtime_state (may carry
+        // sensitive per-plugin secrets); see handlers::list_installed.
+        .route(
+            "/api/v1/dev/plugins/installed",
+            get(handlers::list_installed),
+        )
+        // ── Write endpoints ─────────────────────────────────────────────
         .route("/api/v1/dev/plugins/install", post(handlers::install))
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))

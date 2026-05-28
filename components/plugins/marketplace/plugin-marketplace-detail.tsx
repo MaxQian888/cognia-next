@@ -17,9 +17,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { InstallButton } from "../_shared/install-button"
+import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import {
   DANGEROUS_PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
@@ -75,16 +76,17 @@ export function PluginMarketplaceDetail({
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full sm:max-w-2xl lg:max-w-3xl overflow-y-auto">
+      {/* Width unified to `lg:max-w-3xl` to match the marketplace-sheet
+       *  audit recommendation; the old `sm:max-w-2xl` band caused a
+       *  visible jump when transitioning between widths on tablets. */}
+      <SheetContent className="w-full lg:max-w-3xl overflow-y-auto">
         {entry ? (
           <>
             <SheetHeader>
               <div className="flex items-center gap-2">
-                <SheetTitle className="flex-1 min-w-0">
-                  {entry.name}{" "}
-                  <span className="text-muted-foreground text-sm font-normal">
-                    v{entry.version}
-                  </span>
+                <SheetTitle className="flex-1 min-w-0 flex items-center gap-2">
+                  <span>{entry.name}</span>
+                  <PluginVersionBadge version={entry.version} />
                 </SheetTitle>
                 {entry.source === "builtin" && <PluginSourceBadge source="builtin" />}
                 <PluginSignatureBadge
@@ -211,9 +213,16 @@ function InstallSection({
 
   if (installed) {
     return (
-      <Button variant="ghost" onClick={() => onUninstall(entry.id)} disabled={installing}>
-        {installing ? t("uninstalling") : t("uninstall")}
-      </Button>
+      <InstallButton
+        installed
+        installing={installing}
+        onInstall={() => onInstall(entry.id, selected)}
+        onUninstall={() => onUninstall(entry.id)}
+        installLabel={t("install")}
+        installingLabel={t("installing")}
+        uninstallLabel={t("uninstall")}
+        uninstallingLabel={t("uninstalling")}
+      />
     )
   }
 
@@ -237,9 +246,14 @@ function InstallSection({
           </SelectContent>
         </Select>
       )}
-      <Button onClick={() => onInstall(entry.id, selected)} disabled={installing}>
-        {installing ? t("installing") : t("install")}
-      </Button>
+      <InstallButton
+        installed={false}
+        installing={installing}
+        onInstall={() => onInstall(entry.id, selected)}
+        installLabel={t("install")}
+        installingLabel={t("installing")}
+        variant="default"
+      />
     </>
   )
 }

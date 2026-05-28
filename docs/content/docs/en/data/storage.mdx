@@ -1,26 +1,23 @@
 ---
-title: Storage (Dexie schema v15)
-description: The complete IndexedDB schema, version-by-version, and how to add or migrate tables safely.
+title: Storage (Dexie schema)
+description: The IndexedDB schema, version evolution, and how to add or migrate tables safely.
 ---
 
-# Storage (Dexie schema v15)
+# Storage (Dexie schema)
 
-<Status variant="stable">v15</Status>
+<Status variant="stable">v54</Status>
 
 <TLDR>
-  All browser-side state lives in IndexedDB via Dexie under the database name `cognia-claude`.
-  Schema versions are append-only — every release adds new `.version(n)` blocks; old ones are never
-  edited. Migrations are idempotent and run on every database open.
+All browser-side state lives in IndexedDB via Dexie under the database name `cognia-claude`. Schema versions are append-only — every release adds new `.version(n)` blocks; old ones are never edited. Migrations are idempotent and run on every database open.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Schema version" value="15" hint="2024–2026" />
-  <Stat label="Tables" value="29" hint="across all versions" />
+  <Stat label="Schema version" value="54" hint="current" />
   <Stat label="Database name" value="cognia-claude" hint="historical, kept stable" />
   <Stat label="Singletons" value="1" hint="settings table" />
 </StatGrid>
 
-Cognia persists almost all browser-side state in **IndexedDB via Dexie**. The schema is defined in `lib/db/schema.ts` and is currently at **v15**. Schema versions are append-only — never mutate an existing `.version(n).stores({...})` block.
+All browser-side state is persisted in **IndexedDB via Dexie**. The schema is defined in `lib/db/schema.ts` and is currently at **v54**. Schema versions are append-only — never mutate an existing `.version(n).stores({...})` block.
 
 ## Database identity
 
@@ -30,7 +27,7 @@ super("cognia-claude")
 
 The Dexie database name is `cognia-claude` (the original codename — kept stable to avoid migrating existing installations). Don't change it. If you ever absolutely must, write a migration that copies from `cognia-claude` to the new name on first run, then deletes the old database.
 
-## Tables (v15)
+## Tables — original v15 baseline
 
 | Table                 | Type                      | Indexed columns                                    | Purpose                                     |
 | --------------------- | ------------------------- | -------------------------------------------------- | ------------------------------------------- |
@@ -105,11 +102,10 @@ Every `.version(n)` block in `lib/db/schema.ts`:
 | **v13** | `a2uiEventHistory`; index reshuffle.                                                                            |
 | **v14** | Twin tables — `twinSources`, `twinChunks`, `twinProfile`, `twinDrafts`, `twinJobs`.                             |
 | **v15** | Plugin tables — `plugins`, `pluginPermissions`, `pluginReviews`, `pluginAnalytics`, `pluginScheduledJobs`.      |
+| **v16–v54** | Subsequent additions: workflow tables, goal tracker, OCR results, subscription usage, sync cursors, share links, agent-team persistence, character pack overlays, GitHub delivery state, ext. agent configs, mobile sync, perf samples, terminal sessions, etc. Read `lib/db/schema.ts` for the exact diffs. |
 
 <Callout type="info" title="Idempotent upgrades">
-  Each version is idempotent — opening an old database upgrades it through every intermediate
-  version automatically. Dexie applies them in order. **Never modify a previous `.version(n)`
-  block.**
+Each version is idempotent — opening an old database upgrades it through every intermediate version automatically. Dexie applies them in order. **Never modify a previous `.version(n)` block.**
 </Callout>
 
 ## Upgrade hooks
@@ -176,7 +172,8 @@ Hooks must be:
     ### Bump the schema version
 
     ```ts
-    this.version(16).stores({
+    // Use the next free integer; check the latest `.version(n)` in schema.ts
+    this.version(55).stores({
       myNewTable: "id, indexedField, [indexedField+otherField]",
       // include only the NEW table; existing tables are inherited
     })
@@ -189,7 +186,7 @@ Hooks must be:
     If you need to seed built-in rows or backfill from existing tables:
 
     ```ts
-    this.version(16).stores({...}).upgrade(async tx => {
+    this.version(55).stores({...}).upgrade(async tx => {
       // idempotent migration
     })
     ```
@@ -264,15 +261,7 @@ Both run in a single Dexie transaction so the database stays consistent.
 ## Next
 
 <Cards>
-  <Card
-    title="Backup & data transfer"
-    href="./backup-and-data"
-    description="Builds backup payloads from these tables."
-  />
-  <Card title="Plugin system" href="./plugin-system" description="Uses the v15 plugin tables." />
-  <Card
-    title="Employee Digital Twin"
-    href="./employee-twin"
-    description="Uses the v14 twin tables."
-  />
+  <Card title="Backup & data transfer" href="./backup-and-data" description="Builds backup payloads from these tables." />
+  <Card title="Plugin system" href="../subsystems/plugin-system" description="Uses the v15 plugin tables." />
+  <Card title="Employee Digital Twin" href="../subsystems/employee-twin" description="Uses the v14 twin tables." />
 </Cards>

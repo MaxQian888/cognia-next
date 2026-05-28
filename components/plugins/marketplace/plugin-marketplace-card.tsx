@@ -14,6 +14,10 @@ import { PluginSourceBadge } from "../plugin-source-badge"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 import { cn } from "@/lib/utils"
+import { CapabilityChips } from "../_shared/capability-chips"
+import { InstallButton } from "../_shared/install-button"
+import { InstalledMarker } from "../_shared/installed-marker"
+import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 
 interface Props {
   entry: PluginMarketplaceEntry & {
@@ -69,7 +73,7 @@ export function PluginMarketplaceCard({
             <div className="block w-full min-w-0">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="font-medium truncate">{entry.name}</span>
-                <span className="text-xs text-muted-foreground shrink-0">v{entry.version}</span>
+                <PluginVersionBadge version={entry.version} className="shrink-0" />
               </div>
               <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.id}</div>
             </div>
@@ -83,16 +87,7 @@ export function PluginMarketplaceCard({
       )}
 
       <div className="flex flex-wrap items-center gap-1">
-        {(entry.capabilities ?? []).slice(0, 3).map((cap) => (
-          <Badge key={cap} variant="outline" className="text-xs">
-            {cap}
-          </Badge>
-        ))}
-        {(entry.capabilities ?? []).length > 3 && (
-          <Badge variant="outline" className="text-xs">
-            +{(entry.capabilities ?? []).length - 3}
-          </Badge>
-        )}
+        <CapabilityChips capabilities={entry.capabilities ?? []} limit={3} />
         {dangerous && (
           <Badge variant="destructive" className="text-xs gap-1">
             <AlertTriangleIcon className="size-3" />
@@ -120,6 +115,16 @@ export function PluginMarketplaceCard({
         <div className="flex items-center gap-1 shrink-0">
           {isBuiltin ? (
             <PluginSourceBadge source="builtin" />
+          ) : installed ? (
+            <>
+              <InstalledMarker />
+              <InstallButton
+                installed
+                installing={installing}
+                onInstall={() => onInstall(entry.id, entry.version)}
+                onUninstall={() => onUninstall(entry.id)}
+              />
+            </>
           ) : (
             <>
               <Button
@@ -140,25 +145,11 @@ export function PluginMarketplaceCard({
               >
                 <GitCompareIcon className="size-3.5" />
               </Button>
-              {installed ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onUninstall(entry.id)}
-                  disabled={installing}
-                >
-                  {installing ? t("uninstalling") : t("uninstall")}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onInstall(entry.id, entry.version)}
-                  disabled={installing}
-                >
-                  {installing ? t("installing") : t("install")}
-                </Button>
-              )}
+              <InstallButton
+                installed={false}
+                installing={installing}
+                onInstall={() => onInstall(entry.id, entry.version)}
+              />
             </>
           )}
         </div>

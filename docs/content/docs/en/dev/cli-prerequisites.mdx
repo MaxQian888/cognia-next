@@ -1,0 +1,121 @@
+---
+title: CLI Prerequisites
+description: Install the cognia plugin-author CLI and the external tools some plugins require, with platform-specific guidance and in-app detection.
+---
+
+# CLI Prerequisites
+
+Most of cognia works with zero command-line setup. Two situations need a CLI
+on your machine:
+
+1. **Authoring plugins** — the `cognia` CLI scaffolds, builds, signs, and
+   hot-reloads plugins.
+2. **Installing a plugin that declares external tool requirements** — e.g. a
+   Git-repo plugin needs `git`, a WASM build needs `cargo-component`.
+
+The desktop app detects these for you and offers guided installation. This
+page documents what each tool is and how to install it manually.
+
+## The cognia CLI
+
+The `cognia` CLI is a separate Rust binary that talks to a running desktop
+instance over a loopback bridge. Plugin DevTools shows a live status card —
+**Plugins → DevTools → cognia CLI** — with a one-click installer. You can also
+install it yourself:
+
+### Download a prebuilt binary (recommended)
+
+The DevTools install dialog downloads a prebuilt binary for your platform from
+[GitHub Releases](https://github.com/MaxQian888/cognia-next/releases), verifies
+its checksum (and signature, once a release key is published), and drops it into
+the app's managed directory — no PATH editing required.
+
+### Build from source
+
+Requires [Rust](https://rustup.rs/) 1.82 or newer:
+
+```bash
+cargo install --locked --git https://github.com/MaxQian888/cognia-next cognia-cli
+cognia --help
+```
+
+### Release tarball
+
+Download an archive from the
+[releases page](https://github.com/MaxQian888/cognia-next/releases), extract it,
+and place `cognia` somewhere on your `PATH`.
+
+## External tools plugins may require
+
+A plugin can declare prerequisites in its manifest under
+`requires.binaries`. When you install such a plugin, the pre-install review
+adds a **Requirements** step listing anything missing, with a link to the
+relevant install guide. Install the tool, then click **I installed it — retry**.
+
+### Node.js (≥ 20)
+
+Required by the desktop sidecar itself. Install from
+[nodejs.org](https://nodejs.org/) or via a version manager.
+
+import { Tab, Tabs } from "fumadocs-ui/components/tabs"
+
+<Tabs items={["Windows", "macOS", "Linux"]}>
+  <Tab value="Windows">
+    ```powershell
+    winget install OpenJS.NodeJS.LTS
+    ```
+  </Tab>
+  <Tab value="macOS">
+    ```bash
+    brew install node
+    ```
+  </Tab>
+  <Tab value="Linux">
+    ```bash
+    # Debian/Ubuntu
+    sudo apt install nodejs npm
+    ```
+  </Tab>
+</Tabs>
+
+### Git
+
+Required by Git-repo plugins and the `git_status` / `git_diff` tools.
+
+<Tabs items={["Windows", "macOS", "Linux"]}>
+  <Tab value="Windows">
+    ```powershell
+    winget install Git.Git
+    ```
+  </Tab>
+  <Tab value="macOS">
+    ```bash
+    brew install git
+    ```
+  </Tab>
+  <Tab value="Linux">
+    ```bash
+    sudo apt install git
+    ```
+  </Tab>
+</Tabs>
+
+### cargo-component
+
+Required to build WASM plugins from source:
+
+```bash
+rustup target add wasm32-wasip2
+cargo install --locked cargo-component
+```
+
+## Platform availability
+
+CLI detection and installation are **desktop-only**. On the web and mobile
+shells the DevTools surfaces show a "desktop only" hint because those runtimes
+can't spawn processes.
+
+## See also
+
+- [Plugin packaging](/plugin-dev/packaging) — bundling and signing
+- [WASM plugins](/plugin-dev/wasm-plugins) — the WASM authoring flow

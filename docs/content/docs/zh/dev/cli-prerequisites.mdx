@@ -1,0 +1,113 @@
+---
+title: CLI 前置依赖
+description: 安装 cognia 插件作者 CLI 以及部分插件所需的外部工具，附分平台指引与应用内检测。
+---
+
+# CLI 前置依赖
+
+cognia 的大部分功能无需任何命令行配置。以下两种情况需要在本机准备 CLI：
+
+1. **开发插件** —— `cognia` CLI 用于脚手架、构建、签名和热重载插件。
+2. **安装声明了外部工具依赖的插件** —— 例如 Git 仓库插件需要 `git`，WASM 构建需要
+   `cargo-component`。
+
+桌面应用会自动检测这些工具并提供引导安装。本页说明每个工具的用途与手动安装方式。
+
+## cognia CLI
+
+`cognia` CLI 是一个独立的 Rust 二进制，通过本地回环桥接与运行中的桌面实例通信。
+插件 DevTools 提供实时状态卡片 —— **插件 → DevTools → cognia CLI** —— 支持一键安装。
+你也可以自行安装：
+
+### 下载预编译二进制（推荐）
+
+DevTools 安装对话框会从
+[GitHub Releases](https://github.com/MaxQian888/cognia-next/releases)
+下载适配当前平台的预编译二进制，校验其校验和（发布签名密钥上线后还会校验签名），
+并放入应用的托管目录 —— 无需修改 PATH。
+
+### 从源码构建
+
+需要 [Rust](https://rustup.rs/) 1.82 或更高版本：
+
+```bash
+cargo install --locked --git https://github.com/MaxQian888/cognia-next cognia-cli
+cognia --help
+```
+
+### 发布归档
+
+从[发布页](https://github.com/MaxQian888/cognia-next/releases)下载归档，解压后将
+`cognia` 放到 `PATH` 上的任意目录。
+
+## 插件可能需要的外部工具
+
+插件可以在 manifest 的 `requires.binaries` 中声明前置依赖。安装这类插件时，
+安装前审查会增加一个 **依赖工具** 步骤，列出缺失项并附带对应安装指南的链接。
+安装工具后，点击 **已安装，重新检测**。
+
+### Node.js（≥ 20）
+
+桌面 sidecar 本身所需。从 [nodejs.org](https://nodejs.org/) 或版本管理器安装。
+
+import { Tab, Tabs } from "fumadocs-ui/components/tabs"
+
+<Tabs items={["Windows", "macOS", "Linux"]}>
+  <Tab value="Windows">
+    ```powershell
+    winget install OpenJS.NodeJS.LTS
+    ```
+  </Tab>
+  <Tab value="macOS">
+    ```bash
+    brew install node
+    ```
+  </Tab>
+  <Tab value="Linux">
+    ```bash
+    # Debian/Ubuntu
+    sudo apt install nodejs npm
+    ```
+  </Tab>
+</Tabs>
+
+### Git
+
+Git 仓库插件以及 `git_status` / `git_diff` 工具所需。
+
+<Tabs items={["Windows", "macOS", "Linux"]}>
+  <Tab value="Windows">
+    ```powershell
+    winget install Git.Git
+    ```
+  </Tab>
+  <Tab value="macOS">
+    ```bash
+    brew install git
+    ```
+  </Tab>
+  <Tab value="Linux">
+    ```bash
+    sudo apt install git
+    ```
+  </Tab>
+</Tabs>
+
+### cargo-component
+
+从源码构建 WASM 插件所需：
+
+```bash
+rustup target add wasm32-wasip2
+cargo install --locked cargo-component
+```
+
+## 平台可用性
+
+CLI 检测与安装**仅限桌面端**。在 Web 与移动端，DevTools 相关界面会显示
+"仅桌面端"提示，因为这些运行时无法启动进程。
+
+## 参见
+
+- [插件打包](/plugin-dev/packaging) —— 打包与签名
+- [WASM 插件](/plugin-dev/wasm-plugins) —— WASM 开发流程

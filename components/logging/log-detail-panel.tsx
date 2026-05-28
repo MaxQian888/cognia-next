@@ -44,6 +44,7 @@ import {
   getAgentTraceLogData,
   type AgentTraceLogData,
 } from "@/lib/agent-trace/log-adapter"
+import { AgentTraceTree } from "./agent-trace-tree"
 import {
   LIVE_TRACE_EVENT_ICONS,
   LIVE_TRACE_EVENT_COLORS,
@@ -582,6 +583,21 @@ export function LogDetailPanel({
               const traceData = getAgentTraceLogData(log)
               return traceData ? <AgentTraceDetailSection data={traceData} t={t} /> : null
             })()}
+
+          {/* Agent Trace Tree — parent → child span timeline for the same
+              traceId. Rendered alongside the single-span detail above so the
+              user can see the call graph at a glance. */}
+          {log.module === AGENT_TRACE_MODULE && log.traceId && (
+            <>
+              <Separator />
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-2">
+                  {t("panel.agentTrace.tree.title")}
+                </div>
+                <AgentTraceTree traceId={log.traceId} activeSpanId={log.id} />
+              </div>
+            </>
+          )}
 
           {/* Data (JSON tree) */}
           {log.data && !(log.module === AGENT_TRACE_MODULE) && (

@@ -266,3 +266,157 @@ describe("ConnectorBus.dispatchConnectorCallback — skill_invoke kind", () => {
     __resetSharedBuiltInSkillRegistry()
   })
 })
+
+describe("ConnectorBus.dispatchConnectorCallback — wf_approve / wf_cancel kinds", () => {
+  it("approve click does NOT invoke the generic handler and enqueues a workflow outbound", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Daily Standup" })
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "wfapp:trigwf1",
+      kind: "wf_approve",
+      surfaceId: "wfsurf:trigwf1",
+      componentId: "approve",
+      conversationKey,
+      payload: {
+        workflowId: wf.id,
+        workflowName: "Daily Standup",
+        runParams: {},
+        triggeredFrom: {
+          source: "im",
+          adapterId: "adp_tg",
+          conversationKey,
+          sessionId: "s1",
+        },
+      },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "wfapp:trigwf1", value: "approve", conversationKey })
+    )
+    expect(handler).not.toHaveBeenCalled()
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].source).toBe("workflow")
+    expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已启动")
+  })
+
+  it("cancel click skips the start path and enqueues a cancellation outbound", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Daily Standup" })
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "wfcan:trigwf2",
+      kind: "wf_cancel",
+      surfaceId: "wfsurf:trigwf2",
+      componentId: "cancel",
+      conversationKey,
+      payload: {
+        workflowId: wf.id,
+        workflowName: "Daily Standup",
+        runParams: {},
+        triggeredFrom: {
+          source: "im",
+          adapterId: "adp_tg",
+          conversationKey,
+          sessionId: "s1",
+        },
+      },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "wfcan:trigwf2", value: "cancel", conversationKey })
+    )
+    expect(handler).not.toHaveBeenCalled()
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已取消")
+    const runs = await getDb().workflowRuns.toArray()
+    expect(runs.find((r) => r.workflowId === wf.id)).toBeUndefined()
+  })
+})
+
+describe("ConnectorBus.dispatchConnectorCallback — wf_fanout_approve / wf_fanout_cancel kinds", () => {
+  it("approve click writes a workflowFanoutSubscriptions row + skips the digest handler", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Release Pipeline" })
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "wffanoutapp:trigsub1",
+      kind: "wf_fanout_approve",
+      surfaceId: "wffanout:trigsub1",
+      componentId: "approve",
+      conversationKey,
+      payload: {
+        workflowId: wf.id,
+        workflowName: "Release Pipeline",
+        target: { adapterId: "adp_tg", conversationKey },
+        createdBy: "claude-tool",
+      },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "wffanoutapp:trigsub1", value: "approve", conversationKey })
+    )
+    expect(handler).not.toHaveBeenCalled()
+
+    const subs = await getDb().workflowFanoutSubscriptions.toArray()
+    expect(subs).toHaveLength(1)
+    expect(subs[0]).toMatchObject({
+      workflowId: wf.id,
+      adapterId: "adp_tg",
+      conversationKey,
+      enabled: true,
+    })
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已订阅")
+  })
+
+  it("cancel click skips the subscription write + enqueues a cancellation outbound", async () => {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Release Pipeline" })
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "wffanoutcan:trigsub2",
+      kind: "wf_fanout_cancel",
+      surfaceId: "wffanout:trigsub2",
+      componentId: "cancel",
+      conversationKey,
+      payload: {
+        workflowId: wf.id,
+        workflowName: "Release Pipeline",
+        target: { adapterId: "adp_tg", conversationKey },
+        createdBy: "claude-tool",
+      },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "wffanoutcan:trigsub2", value: "cancel", conversationKey })
+    )
+    expect(handler).not.toHaveBeenCalled()
+
+    expect(await getDb().workflowFanoutSubscriptions.toArray()).toHaveLength(0)
+    const jobs = await getDb().outboundQueue.toArray()
+    expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已取消")
+  })
+})

@@ -286,6 +286,45 @@ export interface OutboundJobRow {
    * to render a workflow badge.
    */
   sourceWorkflow?: OutboundJobWorkflowSource
+  /**
+   * The platform-side message id returned by the adapter after a
+   * successful send/edit. Persisted so downstream consumers (notably the
+   * workflow-progress-runner's in-place card edit path) can correlate
+   * the original send back to the platform's message handle without
+   * re-querying the platform API. Non-indexed JSON column — no schema
+   * version bump required since IndexedDB stores extra keys
+   * transparently.
+   */
+  platformMessageId?: string
+}
+
+/**
+ * Operator-configured workflow run fan-out: "every run of workflow X
+ * mirrors progress to channel Y". Bound to `workflowId` (static rule —
+ * covers all future runs). One row per `(workflowId, adapterId,
+ * conversationKey)` triple; the writer enforces the uniqueness because
+ * Dexie doesn't support multi-column unique constraints.
+ *
+ * Originator channels are NOT stored here — the run's `triggeredBy`
+ * carries that. The progress-runner dedupes at watcher creation when an
+ * originator overlaps with a subscription so the user sees one card per
+ * conversation.
+ *
+ * Added in schema v55.
+ */
+export interface WorkflowFanoutSubscriptionRow {
+  id: string
+  workflowId: string
+  adapterId: string
+  conversationKey: string
+  enabled: boolean
+  /**
+   * Audit-only provenance — the UI flow it was created through. Free-form
+   * string so plugins can stamp their own value.
+   */
+  createdBy: "settings-ui" | "claude-tool" | string
+  createdAt: number
+  updatedAt: number
 }
 
 /**

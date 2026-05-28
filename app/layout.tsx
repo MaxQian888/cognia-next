@@ -41,6 +41,8 @@ import { ConsentOverlay } from "@/components/automation/consent-overlay"
 import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
+import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
+import { CliBridgeEventsBridge } from "@/components/plugins/cli-bridge-events"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {
   BackgroundApplier,
@@ -181,6 +183,18 @@ export default async function RootLayout({
                      * renders so `lib/plugin/core/manager.ts` can stay
                      * decoupled from next-intl. */}
                     <PluginEnableFailureToaster />
+                    {/* Generic toast surface for `plugin:error` CustomEvents
+                     * dispatched by the rest of the plugin pipeline (install,
+                     * config, WASM preload, hot-reload, etc.) via
+                     * `lib/plugin/error-bus.ts`. Coexists with the narrower
+                     * enable-failure toaster above. */}
+                    <PluginErrorToaster />
+                    {/* Subscribes to `cli-bridge:*` and global
+                     *  `plugin-hot-reload` events emitted by the
+                     *  desktop's CLI bridge so installs / uninstalls /
+                     *  hot-reloads driven by the `cognia` CLI surface
+                     *  in the renderer without a restart. */}
+                    <CliBridgeEventsBridge />
                     <ExposeTestGlobals />
                     {/* Dev-only perf HUD. In production it returns null
                      * unless `localStorage.cogniaPerfHud === "1"`. */}

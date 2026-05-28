@@ -7,9 +7,10 @@
 import { useTranslations } from "next-intl"
 import { SparklesIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { usePluginMarketplace } from "@/hooks/plugins"
+import { InstallButton } from "./_shared/install-button"
+import { PluginEmptyState } from "./_shared/plugin-empty-state"
+import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 
 interface Props {
   /**
@@ -32,12 +33,7 @@ export function PluginDiscovery({ onInstall }: Props) {
 
   const featured = market.featured.slice(0, 6)
   if (featured.length === 0) {
-    return (
-      <Card className="p-6 text-center space-y-2">
-        <SparklesIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </Card>
-    )
+    return <PluginEmptyState icon={<SparklesIcon className="size-5" />} hint={t("empty")} />
   }
 
   return (
@@ -57,17 +53,14 @@ export function PluginDiscovery({ onInstall }: Props) {
               <p className="text-xs text-muted-foreground line-clamp-3">{entry.description}</p>
             )}
             <div className="flex items-center justify-between gap-2 mt-auto pt-2">
-              <Badge variant="outline" className="text-xs">
-                v{entry.version}
-              </Badge>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onInstall(entry.id, entry.version)}
-                disabled={market.installingId === entry.id}
-              >
-                {market.installingId === entry.id ? t("installing") : t("install")}
-              </Button>
+              <PluginVersionBadge version={entry.version} variant="outline" />
+              <InstallButton
+                installed={false}
+                installing={market.installingId === entry.id}
+                onInstall={() => onInstall(entry.id, entry.version)}
+                installLabel={t("install")}
+                installingLabel={t("installing")}
+              />
             </div>
           </Card>
         ))}

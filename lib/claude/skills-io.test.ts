@@ -192,6 +192,54 @@ describe("resolveSkillMarkdown (M4)", () => {
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
+
+  it("treats local-bundle the same as local-folder for body purposes", async () => {
+    const def: PluginSkillDef = {
+      id: "bundle",
+      name: "Bundle",
+      description: "Resource-bearing bundle.",
+      source: { kind: "local-bundle", path: "/tmp/skills/bundle" },
+    }
+    mIsTauri.mockReturnValue(false)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("drops archive sources in browser mode and warns", async () => {
+    const def: PluginSkillDef = {
+      id: "zipped",
+      name: "Zipped",
+      description: "Archive bundle.",
+      source: { kind: "archive", path: "/tmp/skills/zipped.zip" },
+    }
+    mIsTauri.mockReturnValue(false)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    expect((warn.mock.calls[0]?.[0] as string).includes("zipped")).toBe(true)
+    warn.mockRestore()
+  })
+
+  it("dynamic-imports the bundle loader for archive sources in Tauri (and warns on failure)", async () => {
+    const def: PluginSkillDef = {
+      id: "zipped",
+      name: "Zipped",
+      description: "Archive bundle.",
+      source: { kind: "archive", path: "/no/such/archive.zip" },
+    }
+    mIsTauri.mockReturnValue(true)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    // In jsdom the `@tauri-apps/plugin-fs` lazy import inside the loader
+    // throws, which the resolver catches and reports via console.warn.
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })
 
 describe("parseSkillMarkdown — frontmatter warnings", () => {
