@@ -15,6 +15,7 @@ import type {
 } from "@/lib/claude/types"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
+import type { SandboxConnectionRow } from "./sandbox-connections"
 import type {
   CanvasDocumentRow,
   CanvasVersionRow,
@@ -1542,6 +1543,17 @@ export class CogniaDB extends Dexie {
       workflowFanoutSubscriptions:
         "&id, workflowId, [workflowId+enabled], enabled, adapterId, conversationKey, createdAt",
     })
+
+    // v57 — Computer-Use sandbox connection registry (ADR-0020 remote-target
+    // addendum). One row per cua desktop sandbox. Additive only — no upgrade
+    // hook (no pre-existing rows carry this shape). Indexes:
+    //   • `&id`        — uuid primary; the value target selectors reference.
+    //   • `name`       — settings-list lookups.
+    //   • `createdAt`  — newest-first sort in the Sandbox Connections tab.
+    //   • `updatedAt`  — data views.
+    this.version(57).stores({
+      sandboxConnections: "&id, name, createdAt, updatedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1552,6 +1564,8 @@ export class CogniaDB extends Dexie {
   syncCursors!: Table<SyncCursorRow, string>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
   inboxTelemetryEvents!: Table<InboxTelemetryEventRow, string>
+  // v57 — Computer-Use sandbox connections. See `lib/db/sandbox-connections.ts`.
+  sandboxConnections!: Table<SandboxConnectionRow, string>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */
