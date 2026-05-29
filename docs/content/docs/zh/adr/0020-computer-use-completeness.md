@@ -275,3 +275,47 @@ Schema 升级到 `v40`（仅新增，无迁移）。增加可选字段
 `Character.computerUseSettings.chatConsentMode`
 （`"always-ask" | "session-grant" | "auto"`，默认 `"always-ask"`）和
 `ClickOpts.count`（1/2/3）。既有行原样可读。
+
+## 附录 2026-05-29 — 远程执行目标（cua Docker 沙箱）
+
+新增一根**执行目标**轴：computer-use 的 GUI 动作可在由 cognia 编排的、隔离的
+[`trycua/cua`](https://github.com/trycua/cua)（MIT）Docker 桌面
+（`ghcr.io/trycua/cua-xfce`）里运行，而不是本机。这与 ADR-0028 的 `sandboxTier`
+轴（隔离 Bash/Edit/Write，命令执行契约）**正交**；GUI 目标是另一套契约，**不**走
+`dispatchSandbox`。cua 只当"手脚"——agent 循环仍是
+`@anthropic-ai/claude-agent-sdk`，**不**采用 cua 的 `ComputerAgent`/LiteLLM。
+
+### 架构（R3 路由）
+
+- **锚点实体** `sandboxConnection`（Dexie `v57`，`lib/db/sandbox-connections.ts`）；
+  所有目标选择器按 `id` 引用——存 id 而非裸标志，使未来收敛是纯加法。
+- **目标轴** `Character.computerUseTarget` / `ChatSession.computerUseTarget`
+  （`"local" | { connectionId }`），按 session → character → local 解析
+  （`lib/automation/sandbox-target.ts`），在 `resolveSendOptions` 按会话暂存
+  （`lib/claude/computer-use-target-state.ts`），由插件执行器盖到
+  `CallContext.sandboxConnectionId`。Workflow `desktop` 节点带 per-node `target`。
+- **路由（R3）** `src-tauri/src/automation/cua_route.rs` 是唯一路由层；
+  `dispatcher::execute_action` 与各 `desktop_*` 命令都在 `run_gated` 的 `do_call`
+  闭包内调用它，故权限闸 → consent → 审计对本地/远程一致生效。远程
+  （`sandboxConnectionId` 非空）派发到异步 `CuaRemoteClient`（tokio-tungstenite
+  WS → 容器 `computer-server`），否则走现有同步 COM worker。**不变量**：每个驱动/
+  读取动作都路由；无远程等价物的动作（`get_focus`/`find`/`invoke_pattern`/
+  `window_op`/`pick_at_point`）远程时返回 `UnsupportedPlatform`，绝不回落本机。
+- **生命周期** `src-tauri/src/cua_sandbox/`（模块名避开既有 `src-tauri/src/sandbox/`
+  的撞名）shell `docker run/stop/port`，持有按连接的 `CuaRemoteClient` 注册表；
+  `cua_sandbox_*` 命令 + 设置 → 自动化 → 沙箱页驱动。容器即隔离边界。
+- **能力位** `Capabilities.has_a11y_tree`（远程后端暴露跨平台 a11y 树）。
+
+### Phase 1 范围 / Non-Goals
+
+含：本地 Docker provider、GUI 动作路由、Character + workflow 节点目标选择器。
+延后：cua.ai 云 + Lume provider、`cua-driver` 后台驱动，以及与 ADR-0028 的**收敛**
+（未来 `sandboxTier: "cua-desktop"` 读同一 session→connectionId 绑定，把
+Bash/Edit/Write 也路由进同一容器）。因绑定已是一等实体，收敛纯加法、无迁移。
+会话级 composer 目标选择器是剩余 UI（会话字段 + 解析已端到端可用）。
+
+### Schema（远程目标）
+
+Dexie 升至 `v57`（仅新增，无升级钩子）——新增 `sandboxConnections` 表。
+`Character.computerUseTarget` / `ChatSession.computerUseTarget` 均可选；既有行
+原样可读。

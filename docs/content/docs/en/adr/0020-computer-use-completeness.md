@@ -403,3 +403,62 @@ Schema bump to `v40` (additive — no migration). Adds optional
 `Character.computerUseSettings.chatConsentMode`
 (`"always-ask" | "session-grant" | "auto"`, defaults to `"always-ask"`)
 and `ClickOpts.count` (1/2/3). Existing rows round-trip unchanged.
+
+## Addendum 2026-05-29 — Remote execution target (cua Docker sandbox)
+
+Adds a remote **execution target** axis: computer-use GUI actions can run
+inside an isolated, cognia-orchestrated [`trycua/cua`](https://github.com/trycua/cua)
+(MIT) Docker desktop (`ghcr.io/trycua/cua-xfce`) instead of the local host.
+This is *orthogonal* to the ADR-0028 `sandboxTier` axis (which isolates
+Bash/Edit/Write — a command-execution contract); the GUI target is a separate
+contract and does **not** ride `dispatchSandbox`. cua is used as the "hands"
+only — the agent loop stays in `@anthropic-ai/claude-agent-sdk`; cua's
+`ComputerAgent`/LiteLLM loop is **not** adopted.
+
+### Architecture (R3 routing)
+
+- **Anchor entity** — `sandboxConnection` (Dexie `v57`, `lib/db/sandbox-connections.ts`).
+  Every target selector references a connection by `id`. Storing a connection
+  id (never a bare flag) keeps a future convergence (below) a pure addition.
+- **Target axis** — `Character.computerUseTarget` and
+  `ChatSession.computerUseTarget` (`"local" | { connectionId }`), resolved
+  session → character → local by `lib/automation/sandbox-target.ts`, stashed
+  per-session (`lib/claude/computer-use-target-state.ts`) in `resolveSendOptions`,
+  and stamped onto `CallContext.sandboxConnectionId` by the computer-use plugin
+  executor. Workflow `desktop` nodes carry a per-node `target` param.
+- **Routing (R3)** — `src-tauri/src/automation/cua_route.rs` is the single
+  routing layer. Both backend-dispatch surfaces — `dispatcher::execute_action`
+  (canonical renderer `desktop.*` + chat Plugin-MCP path) and the granular
+  `desktop_*` commands — call it *inside* the `run_gated` `do_call` closure, so
+  the gate → consent → audit pipeline wraps local and remote paths identically.
+  A remote `CallContext` (non-empty `sandboxConnectionId`) dispatches to an
+  async `CuaRemoteClient` (`tokio-tungstenite` WS to the container's
+  `computer-server`); otherwise the existing synchronous COM worker runs.
+  **Invariant:** every driving/reading action is routed; actions with no remote
+  equivalent (`get_focus` / `find` / `invoke_pattern` / `window_op` /
+  `pick_at_point`) return `UnsupportedPlatform` when remote rather than silently
+  hitting the host.
+- **Lifecycle** — `src-tauri/src/cua_sandbox/` (module named to avoid the
+  existing `src-tauri/src/sandbox/` ADR-0028 collision) shells `docker run/stop/
+  port` and owns a per-connection `CuaRemoteClient` registry; `cua_sandbox_*`
+  Tauri commands + a Settings → Automation → Sandboxes tab drive it. The
+  container is the isolation boundary (same model as the e2b microvm tier).
+- **Capability** — `Capabilities.has_a11y_tree` (the remote backend exposes a
+  cross-platform `get_accessibility_tree`; local enigo backends do not).
+
+### Phase 1 scope / Non-Goals
+
+In: local Docker provider, GUI action routing, Character + workflow-node target
+pickers. Deferred: cua.ai Cloud + Lume providers, the `cua-driver` background
+host driver, and **convergence** with ADR-0028 — a future `sandboxTier:
+"cua-desktop"` that routes Bash/Edit/Write into the *same* container's
+`run_command`/`read_text`/`write_text` by reading the same session→connectionId
+binding. Because the binding is already a first-class entity, that convergence
+is purely additive (no migration). A per-session composer target picker is the
+remaining UI surface (the session field + resolution already work end-to-end).
+
+### Schema (remote-target)
+
+Dexie bump to `v57` (additive, no upgrade hook) — new `sandboxConnections`
+table. `Character.computerUseTarget` + `ChatSession.computerUseTarget` are
+optional; existing rows round-trip unchanged.
