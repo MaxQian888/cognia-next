@@ -155,6 +155,34 @@ export async function deleteTwin(id: string): Promise<DeleteTwinResult> {
       await db.twins.delete(id)
     }
   )
+
+  // Resources that live OUTSIDE the twin Dexie DB can't be part of the
+  // transaction above, so clean them up after it commits. Both are best-effort
+  // — a failure here must not turn a successful row delete into an error.
+  //
+  //  • Scheduler cron tasks: otherwise `twin::<id>::ingest|distill` keep firing
+  //    and enqueueing jobs for a now-missing twin. `syncTwinCronToScheduler`
+  //    with `undefined` removes both task rows.
+  //  • Remote vector collection: otherwise every vector for the twin is
+  //    orphaned in the remote store with nothing referencing it.
+  try {
+    const { syncTwinCronToScheduler } = await import("@/lib/twin/cron/cron-bridge")
+    await syncTwinCronToScheduler(id, undefined)
+  } catch (err) {
+    console.warn(`deleteTwin: failed to remove scheduler cron tasks for ${id}`, err)
+  }
+  try {
+    const [{ tryBuildTwinDeps }, { vectorCollectionName }] = await Promise.all([
+      import("@/lib/twin/runtime/build-deps"),
+      import("@/lib/twin/ingest/persist"),
+    ])
+    const deps = await tryBuildTwinDeps()
+    const store = deps?.store as { deleteCollection?: (name: string) => Promise<void> } | undefined
+    await store?.deleteCollection?.(vectorCollectionName(id))
+  } catch (err) {
+    console.warn(`deleteTwin: failed to drop remote vector collection for ${id}`, err)
+  }
+
   return result
 }
 

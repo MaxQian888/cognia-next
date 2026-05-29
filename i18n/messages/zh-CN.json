@@ -2673,12 +2673,19 @@
       "description": "调整应用的视觉风格，所有改动会立即保存。",
       "tabs": {
         "theme": "主题",
+        "themePack": "主题包",
         "wallpaper": "壁纸",
         "custom": "自定义主题",
         "import": "导入",
         "typography": "字体",
         "a11y": "无障碍",
         "advanced": "高级"
+      },
+      "themePack": {
+        "title": "主题包",
+        "description": "插件贡献的一键套装——主题、字体、壁纸、密度、圆角与动效一起应用。",
+        "empty": "暂无可用主题包。启用一个贡献 themePacks 的插件后会显示在这里。",
+        "apply": "应用"
       },
       "reset": {
         "button": "重置外观",
@@ -2736,6 +2743,7 @@
         "deleteLabel": "删除壁纸",
         "noActive": "未选择壁纸。",
         "galleryTitle": "图库",
+        "pluginBadge": "插件",
         "addCustom": "自定义",
         "aria": {
           "delete": "删除 {name}"
@@ -6679,6 +6687,7 @@
       "description": "插件 manifest.configSchema 中声明的设置。保存后将在下一次激活时生效。",
       "noSchema": "此插件未声明 configSchema。下方为原始配置预览。",
       "loading": "正在加载插件配置…",
+      "loadingComponent": "正在加载插件的设置面板…",
       "save": "保存",
       "saving": "保存中…",
       "cancel": "取消",
@@ -8476,6 +8485,113 @@
       "fatal": "致命"
     }
   },
+  "sourceControl": {
+    "title": "源代码管理",
+    "desktopOnly": {
+      "title": "仅桌面端可用",
+      "description": "源代码管理需要访问本地文件系统，仅在桌面应用中可用。"
+    },
+    "emptyState": {
+      "noFolder": "未打开文件夹",
+      "openFolder": "打开文件夹",
+      "notARepo": "该文件夹不是 Git 仓库",
+      "noChanges": "没有更改"
+    },
+    "diff": {
+      "loading": "正在加载差异…",
+      "selectFile": "选择一个文件以查看其更改",
+      "binary": "二进制文件 — 不显示差异",
+      "hunkCount": "{count, plural, other {# 个差异块}}"
+    },
+    "groups": {
+      "staged": "已暂存的更改",
+      "changes": "更改",
+      "merge": "合并冲突"
+    },
+    "status": {
+      "modified": "已修改",
+      "added": "已添加",
+      "deleted": "已删除",
+      "renamed": "已重命名",
+      "untracked": "未跟踪",
+      "conflicted": "存在冲突",
+      "typeChanged": "类型已更改"
+    },
+    "commit": {
+      "placeholder": "提交信息（Ctrl+Enter 提交）",
+      "commit": "提交",
+      "amend": "提交（修订）",
+      "commitAndPush": "提交并推送",
+      "commitAndSync": "提交并同步",
+      "signoff": "添加签署",
+      "more": "更多提交操作"
+    },
+    "branches": {
+      "search": "搜索分支…",
+      "empty": "未找到分支",
+      "remote": "远程",
+      "switch": "切换分支",
+      "create": "创建分支",
+      "rename": "重命名分支",
+      "delete": "删除分支",
+      "newName": "新分支名称",
+      "renameTo": "将当前分支重命名为…",
+      "detached": "游离 HEAD"
+    },
+    "actions": {
+      "stage": "暂存更改",
+      "unstage": "取消暂存",
+      "discard": "放弃更改",
+      "openChanges": "打开更改",
+      "copyPath": "复制路径",
+      "viewHistory": "查看文件历史",
+      "stageAll": "暂存所有更改",
+      "unstageAll": "取消暂存所有更改",
+      "discardAll": "放弃所有更改",
+      "stageHunk": "暂存此块",
+      "unstageHunk": "取消暂存此块",
+      "discardHunk": "放弃此块",
+      "fetch": "获取",
+      "pull": "拉取",
+      "push": "推送",
+      "sync": "同步更改",
+      "more": "更多操作",
+      "refresh": "刷新"
+    },
+    "stash": {
+      "title": "贮藏",
+      "description": "保存并恢复工作区更改。",
+      "pushMessage": "贮藏信息（可选）",
+      "includeUntracked": "包含未跟踪的文件",
+      "keepIndex": "保留已暂存的更改",
+      "push": "贮藏",
+      "pop": "弹出",
+      "apply": "应用",
+      "drop": "删除",
+      "empty": "没有贮藏"
+    },
+    "conflicts": {
+      "acceptOurs": "采用当前更改",
+      "acceptTheirs": "采用传入更改",
+      "acceptBoth": "保留双方更改"
+    },
+    "timeline": {
+      "title": "时间线",
+      "repository": "仓库",
+      "thisFile": "当前文件",
+      "empty": "没有历史记录"
+    },
+    "errors": {
+      "generic": "Git 操作失败：{message}",
+      "commitFailed": "提交失败：{message}",
+      "pushFailed": "推送失败：{message}",
+      "pullFailed": "拉取失败：{message}",
+      "checkoutFailed": "切换分支失败：{message}"
+    },
+    "statusBar": {
+      "openSourceControl": "打开源代码管理"
+    }
+  },
   "observability": {
     "title": "可观测性",
     "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
@@ -10070,6 +10186,7 @@
       "agentTeams": "智能体团队",
       "scheduler": "调度器",
       "goals": "目标",
+      "sourceControl": "源代码管理",
       "observability": "可观测性",
       "performance": "性能",
       "logs": "日志",
@@ -12469,6 +12586,8 @@
       "voiceEmpty": "（空）",
       "never": "（从未）",
       "workerToggleLabel": "为本孪生自动启动后台任务工作器",
+      "rerankerToggleLabel": "对检索结果重排序",
+      "rerankerToggleHint": "扩大候选池并按关键词覆盖率重新打分(本地运行,无需 API Key)。",
       "embedding": "向量嵌入",
       "distillLlm": "蒸馏 LLM",
       "vectorStore": "向量库",

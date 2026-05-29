@@ -118,9 +118,16 @@ handle.close()
 
 插件组件收到 `{ onClose, modalId, args }`。调用 `onClose()` 把条目从栈里 pop 出去。
 
+在 `manifest.modalMounts[]` 里声明的 modal 会被注册（懒加载——组件在首次打开时才导入），可按 id 打开：
+
+```ts
+const handle = await ctx.modal.openById("wizard", { step: 1 })
+// → id 未知或组件加载失败时返回 null
+```
+
 ## ctx.chat — 围绕式中间件
 
-中间件包裹整个 build-options + send 调用。安全网：每个中间件 5s 超时（最大 60s）、错误隔离（抛错跳过该中间件、不影响主链路）、3 次连续失败熔断。
+中间件包裹**非流式整段回复**的一轮（`runAndCaptureAssistantReply`——连接器 / headless 回复路径），而非流式 UI 聊天（那里文本已在屏幕上、不存在"最终响应"可包裹）。**执行由默认关闭的开关门控**（`setChatMiddlewareExecutionEnabled(true)`）：注册始终发生，但开关开启前没有中间件运行，因此默认零开销。流式 UI 聊天请用更轻的 `onBuildOptions` hook 改选项。安全网：每个中间件 5s 超时（最大 60s）、错误隔离（抛错跳过该中间件、不影响主链路）、3 次连续失败熔断。
 
 ```ts
 const dispose = ctx.chat.use(
@@ -206,6 +213,29 @@ v2 复活两个之前 deprecated 的槽位：
 
 - **`chat.message.actions`** — 每条消息上方的 hover action bar，与 `chat.message.footer`（host copy/regenerate）区分。
 - **`settings.ai`** — `api-key-section` 顶部，统一 AI 设置卡片的标准 host。
+
+## 状态与参考插件
+
+经过 SDK 补全后，下列每个表面都已**完整接线到宿主**——不只是注册表，宿主渲染器 / 消费端都已存在：
+
+| 表面               | 宿主消费端                                                      | 参考插件                                  |
+| ------------------ | -------------------------------------------------------------- | ----------------------------------------- |
+| `themePacks`       | 外观 → **主题包** tab + 一键 `applyThemePack`                  | `cognia-appearance-demo`（声明式）        |
+| `wallpapers`       | 外观 → **壁纸** tab（插件项合并 + "Plugin" 徽章）              | `cognia-appearance-demo`（声明式）        |
+| `densityPresets`   | 通过 `applyDensityPresetVars` 按名解析（如来自主题包）         | `cognia-appearance-demo`（声明式）        |
+| `scheduledTasks`   | 启用时创建真实的 `ScheduledTask` Dexie 行                      | `cognia-scheduling-demo`（声明式）        |
+| `configComponent`  | 在插件设置面板渲染（失败回退到 schema 表单）                   | bridge 单测（`config-component-bridge`）  |
+| `modalMounts`      | 懒加载的声明式 modal 注册表 → `ctx.modal.openById`            | bridge 单测（`modal-mount-bridge`）       |
+| `chatMiddlewares`  | `runAndCaptureAssistantReply`（默认关闭开关）                  | bridge 单测（`chat-middleware-bridge`）   |
+
+> **Builtin 限制**：基于 import 的字段（带 `entry` / `export` 模块的——
+> `ocrProviders`、`workspaceBackends`、`messageRenderers`、`aiProviders`、
+> `modalMounts`、`chatMiddlewares`、`configComponent`）只有**磁盘 / 市场安装**
+> 的插件才能解析其模块（安装路径是真实可 fetch 的目录）。内置插件
+> （`builtin://…`）无法 fetch 单独的 entry 文件，必须改用 `ctx.*` API 命令式
+> 注册这些表面。声明式数据字段（`themePacks`、`wallpapers`、`densityPresets`、
+> `scheduledTasks`、`modes`）对内置插件同样有效——这也是上面的参考 demo 都是
+> 内置插件的原因。
 
 ## 迁移速查表
 

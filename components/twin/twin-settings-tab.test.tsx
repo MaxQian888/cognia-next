@@ -236,6 +236,23 @@ describe("TwinSettingsTab — native vector backend", () => {
     })
   })
 
+  // T2.6: the reranker toggle persists reranker.enabled on save
+  it("enables reranking and persists reranker.enabled on save (T2.6)", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const toggle = screen.getByLabelText(/rerank retrieved results/i)
+    await user.click(toggle)
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ reranker: expect.objectContaining({ enabled: true }) })
+      )
+    })
+  })
+
   // 3. "Test connection" calls verifyVectorBackendReadiness and shows the result
   it("calls verifyVectorBackendReadiness on test click and shows Operational badge", async () => {
     mockedIsTauri.mockReturnValue(true)

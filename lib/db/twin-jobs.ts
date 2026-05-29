@@ -16,6 +16,14 @@ function newId(): string {
   return "twj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/**
+ * Lease window for a claimed job. The worker refreshes the lease on every
+ * `updateJobProgress`, so this only needs to exceed the gap between progress
+ * updates, not the whole job duration. A `running` row whose lease has lapsed
+ * is assumed dead (tab closed / crashed mid-run) and is reclaimable.
+ */
+const LEASE_TTL_MS = 10 * 60 * 1000
+
 export type TwinJobDraft = Omit<
   TwinJob,
   "id" | "queuedAt" | "status" | "phase" | "progress" | "retryCount"
@@ -90,23 +98,49 @@ export async function claimNextQueuedJob(
 ): Promise<TwinJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.twinJobs, async () => {
-    const candidates = twinId
+    // Eligible = queued rows past their backoff, PLUS `running` rows whose
+    // lease has expired — those belong to a worker that crashed mid-run and
+    // never flipped the row terminal, so reclaim them rather than leave them
+    // stuck "running" forever.
+    const queued = twinId
       ? await db.twinJobs.where(["twinId", "status"]).equals([twinId, "queued"]).toArray()
       : await db.twinJobs.where("status").equals("queued").toArray()
-    if (candidates.length === 0) return undefined
-    const eligible = candidates
-      .filter((j) => (j.nextAttemptAt ?? 0) <= now)
-      .sort((a, b) => a.queuedAt - b.queuedAt)
+    const stuck = twinId
+      ? await db.twinJobs.where(["twinId", "status"]).equals([twinId, "running"]).toArray()
+      : await db.twinJobs.where("status").equals("running").toArray()
+
+    const eligible = [
+      ...queued.filter((j) => (j.nextAttemptAt ?? 0) <= now),
+      ...stuck.filter((j) => j.leaseExpiresAt !== undefined && j.leaseExpiresAt <= now),
+    ].sort((a, b) => a.queuedAt - b.queuedAt)
     if (eligible.length === 0) return undefined
+
     const oldest = eligible[0]
     const claimed: TwinJob = {
       ...oldest,
       status: "running",
       phase: "starting",
       startedAt: Date.now(),
+      leaseExpiresAt: now + LEASE_TTL_MS,
     }
     await db.twinJobs.put(claimed)
     return claimed
+  })
+}
+
+/**
+ * Release a claim the worker made but can't run right now because no
+ * concurrency seat is free. Flips `running → queued` WITHOUT touching
+ * `retryCount` or `nextAttemptAt` — seat contention is not a failure and must
+ * not consume the job's retry budget the way {@link requeueJob} does. Clears
+ * the lease.
+ */
+export async function releaseClaim(id: string): Promise<void> {
+  await getDb().twinJobs.update(id, {
+    status: "queued",
+    phase: "queued",
+    startedAt: undefined,
+    leaseExpiresAt: undefined,
   })
 }
 
@@ -114,7 +148,9 @@ export async function updateJobProgress(
   id: string,
   patch: { phase?: string; progress?: number }
 ): Promise<void> {
-  await getDb().twinJobs.update(id, patch)
+  // Refresh the lease on every progress tick so a healthy long-running job is
+  // never reclaimed as stuck; only a worker that stops reporting loses it.
+  await getDb().twinJobs.update(id, { ...patch, leaseExpiresAt: Date.now() + LEASE_TTL_MS })
 }
 
 export async function completeJob(

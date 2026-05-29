@@ -1,0 +1,55 @@
+{
+  "id": "cognia-appearance-demo",
+  "name": "Appearance Demo",
+  "version": "0.1.0",
+  "description": "Reference plugin exercising the appearance contribution surfaces: a theme pack (one-click bundle), a gradient wallpaper, and a named density preset.",
+  "type": "frontend",
+  "capabilities": ["theme-pack", "wallpapers"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
+  "wallpapers": [
+    {
+      "id": "demo-aurora",
+      "name": "Demo Aurora",
+      "source": {
+        "kind": "gradient",
+        "css": "linear-gradient(135deg, #1e3a8a 0%, #7c3aed 50%, #db2777 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "demo-airy",
+      "vars": {
+        "--density-spacing": "1.25rem",
+        "--density-input-height": "2.75rem",
+        "--density-row-padding": "0.75rem",
+        "--density-gap": "1rem",
+        "--density-line-height": "1.7"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "aurora-comfort",
+      "name": "Aurora Comfort",
+      "description": "Ocean accent + the Demo Aurora wallpaper + an airy density and soft corners.",
+      "applies": {
+        "themeId": "ocean",
+        "wallpaperId": "demo-aurora",
+        "density": "demo-airy",
+        "radius": 0.75,
+        "motionSpeed": 1
+      }
+    }
+  ]
+}

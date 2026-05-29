@@ -123,6 +123,27 @@ describe("assertDraftBodyClean", () => {
       })
     ).not.toThrow()
   })
+
+  it("catches PII nested inside an object/array field (T2.4)", () => {
+    // A leak hiding below the top level (not in one of the named prose fields)
+    // must still be caught now that the guard scans recursively.
+    let caught: unknown
+    try {
+      assertDraftBodyClean({
+        kind: "skill",
+        data: {
+          name: "Test skill",
+          description: "fine",
+          content: "fine",
+          metadata: { contacts: ["ping bob@example.com"] },
+        } as never,
+      })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(DraftPiiError)
+    expect((caught as DraftPiiError).violations.map((v) => v.field)).toContain("metadata")
+  })
 })
 
 describe("assertFieldsClean (Persona browser red-line)", () => {

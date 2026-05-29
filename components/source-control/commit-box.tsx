@@ -1,0 +1,128 @@
+"use client"
+
+/**
+ * Commit message box + split commit button. The dropdown offers amend, commit
+ * & push, commit & sync, and a sign-off toggle (VSCode parity).
+ */
+
+import { useCallback, useState } from "react"
+import { useTranslations } from "next-intl"
+import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Spinner } from "@/components/ui/spinner"
+import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { GIT_DEFAULTS, useGitStore } from "@/stores/git/git-store"
+
+interface CommitBoxProps {
+  rootDir: string
+  stagedCount: number
+  committing: boolean
+  actions: Pick<UseGitActionsResult, "commit" | "push" | "sync">
+}
+
+export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitBoxProps) {
+  const t = useTranslations("sourceControl")
+  const draft = useGitStore((s) => s.commitDraft[rootDir] ?? "")
+  const setCommitDraft = useGitStore((s) => s.setCommitDraft)
+  const amend = useGitStore((s) => s.commitAmend)
+  const setAmend = useGitStore((s) => s.setAmend)
+  const [signoff, setSignoff] = useState(false)
+
+  const canCommit = (draft.trim().length > 0 || amend) && (stagedCount > 0 || amend) && !committing
+
+  const doCommit = useCallback(
+    async (after?: "push" | "sync") => {
+      if (!canCommit) return
+      await actions.commit(draft, { amend, signoff })
+      setCommitDraft(rootDir, "")
+      setAmend(false)
+      if (after === "push") await actions.push(true)
+      else if (after === "sync") await actions.sync()
+    },
+    [canCommit, actions, draft, amend, signoff, setCommitDraft, rootDir, setAmend]
+  )
+
+  return (
+    <div className="flex flex-col gap-1.5 p-2" data-testid="commit-box">
+      <Textarea
+        value={draft}
+        onChange={(e) => setCommitDraft(rootDir, e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault()
+            void doCommit()
+          }
+        }}
+        rows={GIT_DEFAULTS.commitBoxRows}
+        placeholder={t("commit.placeholder")}
+        aria-label={t("commit.placeholder")}
+        className="resize-none text-sm"
+        data-testid="commit-message"
+      />
+      <div className="flex items-stretch gap-px">
+        <Button
+          className="flex-1 gap-1.5"
+          size="sm"
+          disabled={!canCommit}
+          onClick={() => void doCommit()}
+          data-testid="commit-button"
+        >
+          {committing ? <Spinner className="size-3.5" /> : <CheckIcon className="size-3.5" />}
+          {amend ? t("commit.amend") : t("commit.commit")}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              className="px-1.5"
+              aria-label={t("commit.more")}
+              data-testid="commit-more"
+            >
+              <ChevronDownIcon className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem
+              disabled={!canCommit}
+              onSelect={() => void doCommit("push")}
+              data-testid="commit-and-push"
+            >
+              {t("commit.commitAndPush")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!canCommit}
+              onSelect={() => void doCommit("sync")}
+              data-testid="commit-and-sync"
+            >
+              {t("commit.commitAndSync")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem
+              checked={amend}
+              onCheckedChange={setAmend}
+              data-testid="commit-amend-toggle"
+            >
+              {t("commit.amend")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={signoff}
+              onCheckedChange={(v) => setSignoff(Boolean(v))}
+              data-testid="commit-signoff-toggle"
+            >
+              {t("commit.signoff")}
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  )
+}

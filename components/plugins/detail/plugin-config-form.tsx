@@ -15,9 +15,15 @@
 // on next activation. Schema shapes the parser can't recognise still
 // degrade to a manifest preview (the existing fallback path).
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { PluginExtensionBoundary } from "@/components/plugins/plugin-extension-slot"
+import {
+  loadConfigComponent,
+  type ConfigComponent,
+} from "@/lib/plugin/bridge/config-component-bridge"
+import type { PluginManifest } from "@/types/plugin/plugin"
 import {
   Dialog,
   DialogContent,
@@ -403,7 +409,26 @@ export type PluginConfigFormVariant = "modal" | "inline"
  * setPluginConfig persistence, and the saving/error state machine — only
  * the surrounding chrome differs.
  */
-export function PluginConfigFormBody({
+export function PluginConfigFormBody(props: {
+  pluginId: string
+  plugin: PluginRow
+  onClose: () => void
+  variant?: PluginConfigFormVariant
+}) {
+  // A plugin may ship its own React settings UI via `manifest.configComponent`
+  // (ADR-0026 §3 §B). When declared, render it instead of the generic
+  // schema-driven form; the custom component owns its own save UI. A failed
+  // import or a render crash falls back to the schema form (see
+  // `CustomConfigBody`).
+  const custom = (props.plugin.manifest as { configComponent?: { entry: string; export: string } })
+    ?.configComponent
+  if (custom) {
+    return <CustomConfigBody {...props} />
+  }
+  return <SchemaConfigBody {...props} />
+}
+
+function SchemaConfigBody({
   pluginId,
   plugin,
   onClose,
@@ -488,6 +513,97 @@ export function PluginConfigFormBody({
           {saving ? t("saving") : t("save")}
         </Button>
       </Footer>
+    </>
+  )
+}
+
+type CustomLoadState =
+  | { status: "loading" }
+  | { status: "ready"; Component: ConfigComponent }
+  | { status: "fallback" }
+
+/**
+ * Renders a plugin's `manifest.configComponent` (ADR-0026 §3 §B).
+ *
+ * The component is resolved lazily through the plugin manager's proven
+ * 3-strategy importer (`importPluginEntry`) — the same resolver the
+ * module-bridge loop uses — so Tauri asset-protocol paths load correctly.
+ * The bridge caches the resolved component per pluginId.
+ *
+ * States: `loading` → header + spinner text; `ready` → header + the custom
+ * component wrapped in the shared `PluginExtensionBoundary` (a render crash
+ * records a `plugin.silent-failure` diagnostic and collapses to nothing,
+ * never taking down the panel); `fallback` → the generic `SchemaConfigBody`
+ * (load returned null: no component, or the import errored).
+ */
+function CustomConfigBody({
+  pluginId,
+  plugin,
+  onClose,
+  variant = "modal",
+}: {
+  pluginId: string
+  plugin: PluginRow
+  onClose: () => void
+  variant?: PluginConfigFormVariant
+}) {
+  const t = useTranslations("plugins.configForm")
+  const [state, setState] = useState<CustomLoadState>({ status: "loading" })
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { getPluginManager } = await import("@/lib/plugin/core/manager")
+        const manager = getPluginManager()
+        const Component = await loadConfigComponent(
+          plugin.manifest as unknown as PluginManifest,
+          plugin.path ?? "",
+          { importer: (entry) => manager.importPluginEntry(entry) }
+        )
+        if (cancelled) return
+        setState(Component ? { status: "ready", Component } : { status: "fallback" })
+      } catch {
+        if (!cancelled) setState({ status: "fallback" })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pluginId, plugin])
+
+  const handleSave = useCallback(
+    async (next: Record<string, unknown>) => {
+      await setPluginConfig(pluginId, next)
+      onClose()
+    },
+    [pluginId, onClose]
+  )
+
+  if (state.status === "fallback") {
+    return (
+      <SchemaConfigBody pluginId={pluginId} plugin={plugin} onClose={onClose} variant={variant} />
+    )
+  }
+
+  const Header = variant === "modal" ? ModalHeader : InlineHeader
+
+  if (state.status === "loading") {
+    return (
+      <>
+        <Header title={plugin.name} version={plugin.version} description={t("description")} />
+        <p className="text-sm text-muted-foreground p-4">{t("loadingComponent")}</p>
+      </>
+    )
+  }
+
+  const { Component } = state
+  return (
+    <>
+      <Header title={plugin.name} version={plugin.version} description={t("description")} />
+      <PluginExtensionBoundary pluginId={pluginId} extensionId={`${pluginId}:configComponent`}>
+        <Component config={plugin.config ?? {}} onSave={handleSave} pluginId={pluginId} />
+      </PluginExtensionBoundary>
     </>
   )
 }

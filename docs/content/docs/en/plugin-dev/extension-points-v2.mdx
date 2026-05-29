@@ -134,12 +134,26 @@ handle.close()
 The plugin component receives `{ onClose, modalId, args }`. Calling
 `onClose()` pops the entry from the stack.
 
+A modal declared in `manifest.modalMounts[]` is registered (lazily — the
+component is imported on first open) and can be opened by its id:
+
+```ts
+const handle = await ctx.modal.openById("wizard", { step: 1 })
+// → null if the id is unknown or its component fails to load
+```
+
 ## ctx.chat — around-style middleware
 
-A middleware wraps the entire build-options + send call. Safety net:
-per-middleware timeout (5s default, 60s max), error isolation (one throw
-skips that middleware), 3-strike circuit breaker disables on repeated
-failure.
+A middleware wraps the **non-streaming full-reply** turn
+(`runAndCaptureAssistantReply` — the connector / headless reply path), not
+the streaming UI chat (where text is already on screen before any final
+response exists). **Execution is gated behind a default-off flag**
+(`setChatMiddlewareExecutionEnabled(true)`); registration always happens but
+no middleware runs until the flag is enabled, so the feature is zero-overhead
+by default. For the streaming UI chat, use the lighter `onBuildOptions` hook
+to tweak options. Safety net: per-middleware timeout (5s default, 60s max),
+error isolation (one throw skips that middleware), 3-strike circuit breaker
+disables on repeated failure.
 
 ```ts
 const dispose = ctx.chat.use(
@@ -232,6 +246,32 @@ Two previously deprecated slots are revived in v2:
   separate from the `chat.message.footer` host actions row.
 - **`settings.ai`** — top of `api-key-section`, the canonical home for
   unified AI-settings plugin cards.
+
+## Status & reference plugins
+
+As of the SDK-completion pass, every surface below is **fully host-wired** —
+the host renderer / consumer exists, not just the registry:
+
+| Surface            | Host consumer                                                         | Reference plugin                        |
+| ------------------ | --------------------------------------------------------------------- | --------------------------------------- |
+| `themePacks`       | Appearance → **Theme packs** tab + one-click `applyThemePack`          | `cognia-appearance-demo` (declarative)  |
+| `wallpapers`       | Appearance → **Wallpaper** tab (plugin entries merged + "Plugin" badge) | `cognia-appearance-demo` (declarative)  |
+| `densityPresets`   | Resolved by name via `applyDensityPresetVars` (e.g. from a theme pack) | `cognia-appearance-demo` (declarative)  |
+| `scheduledTasks`   | Real `ScheduledTask` Dexie row created on enable                      | `cognia-scheduling-demo` (declarative)  |
+| `configComponent`  | Rendered in the plugin settings panel (falls back to the schema form) | bridge unit tests (`config-component-bridge`) |
+| `modalMounts`      | Lazy declared-modal registry → `ctx.modal.openById`                   | bridge unit tests (`modal-mount-bridge`) |
+| `chatMiddlewares`  | `runAndCaptureAssistantReply` (default-off flag)                      | bridge unit tests (`chat-middleware-bridge`) |
+
+> **Builtin limitation.** Import-based fields (those with an `entry` /
+> `export` module — `ocrProviders`, `workspaceBackends`, `messageRenderers`,
+> `aiProviders`, `modalMounts`, `chatMiddlewares`, `configComponent`) resolve
+> their module only for **disk / marketplace-installed** plugins, where the
+> install path is a real fetchable directory. Built-in plugins
+> (`builtin://…`) cannot fetch a separate entry file, so they must register
+> those surfaces imperatively via the `ctx.*` APIs instead. The
+> declarative-data fields (`themePacks`, `wallpapers`, `densityPresets`,
+> `scheduledTasks`, `modes`) work for builtins too — that is why the
+> reference demos above are builtins.
 
 ## Migration cheat-sheet
 

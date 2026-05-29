@@ -15,18 +15,20 @@
  */
 
 import type { TwinDraftPayload } from "@/types/twin"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
 
 /**
- * Fields whose contents are scanned. We intentionally limit the surface
- * to user-facing prose — internal ids / kind discriminators are exempt
- * because the schema controls their shape.
+ * The user-facing prose fields a draft *typically* carries. Kept for
+ * documentation / test reference; the guard below no longer limits itself to
+ * this list — it scans every field of `payload.data` recursively so PII can't
+ * hide in a nested value or a field added to the schema later. Scanning a
+ * schema-controlled id / discriminator is harmless: those never match PII.
  */
 const SCANNED_FIELDS = ["name", "description", "systemPrompt", "content", "voiceSummary"] as const
 
 export interface DraftPiiViolation {
-  /** Which payload field tripped the check. */
-  field: (typeof SCANNED_FIELDS)[number]
+  /** Which payload field (top-level key of `payload.data`) tripped the check. */
+  field: string
   /** Short message shown to the reviewer (single sentence). */
   message: string
 }
@@ -52,10 +54,11 @@ export class DraftPiiError extends Error {
 export function assertDraftBodyClean(payload: TwinDraftPayload): void {
   const data = payload.data as Record<string, unknown>
   const violations: DraftPiiViolation[] = []
-  for (const field of SCANNED_FIELDS) {
-    const value = data[field]
-    if (typeof value !== "string" || value.length === 0) continue
-    if (hasNoLeakingPii(value)) continue
+  for (const [field, value] of Object.entries(data)) {
+    if (value === undefined || value === null) continue
+    // Recurse into nested objects/arrays so PII can't hide below the top level.
+    // Non-string leaves are inherently safe (handled by hasNoLeakingPiiDeep).
+    if (hasNoLeakingPiiDeep(value)) continue
     violations.push({
       field,
       message: `${field} appears to contain unredacted personal information.`,

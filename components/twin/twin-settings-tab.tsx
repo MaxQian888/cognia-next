@@ -163,6 +163,23 @@ function RuntimeConfigCard() {
         </Label>
       </div>
 
+      <div className="flex items-center gap-3">
+        <Switch
+          id="twin-reranker-enabled"
+          checked={settings.reranker?.enabled ?? false}
+          onCheckedChange={(v) =>
+            updateField({
+              ...settings,
+              reranker: { enabled: v, model: settings.reranker?.model ?? "lexical" },
+            })
+          }
+        />
+        <Label htmlFor="twin-reranker-enabled" className="text-sm">
+          {t("rerankerToggleLabel")}
+        </Label>
+        <span className="text-muted-foreground text-xs">{t("rerankerToggleHint")}</span>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
         <FieldGroup
           legend={t("embedding")}

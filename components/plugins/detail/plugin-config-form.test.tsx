@@ -3,10 +3,31 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import type React from "react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 let mockPlugin: PluginRow | undefined
 const setPluginConfigMock = jest.fn(async (_id: string, _cfg: Record<string, unknown>) => undefined)
+
+// `CustomConfigBody` lazily imports these; mock them so the configComponent
+// branch is exercised without a real plugin bundle.
+let mockConfigComponentResult: React.ComponentType<{
+  config: Record<string, unknown>
+  onSave: (next: Record<string, unknown>) => Promise<void>
+  pluginId: string
+}> | null = null
+
+jest.mock("@/lib/plugin/bridge/config-component-bridge", () => ({
+  loadConfigComponent: jest.fn(async () => mockConfigComponentResult),
+}))
+
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({ importPluginEntry: async () => ({}) }),
+}))
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionBoundary: ({ children }: { children: React.ReactNode }) => children,
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -51,8 +72,18 @@ const schemaPlugin: PluginRow = {
   updatedAt: 1,
 }
 
+const configComponentPlugin: PluginRow = {
+  ...schemaPlugin,
+  manifest: {
+    id: "p_conf",
+    configComponent: { entry: "dist/config.js", export: "Config" },
+  },
+  config: { greeting: "hi" },
+}
+
 beforeEach(() => {
   mockPlugin = schemaPlugin
+  mockConfigComponentResult = null
   setPluginConfigMock.mockClear()
   usePluginsStore.setState({ configTarget: { pluginId: "p_conf" } })
 })
@@ -280,6 +311,43 @@ describe("PluginConfigForm", () => {
     expect(screen.getByText("clientId")).toBeInTheDocument()
     expect(screen.getByText("secret")).toBeInTheDocument()
     expect(screen.getByDisplayValue("abc")).toBeInTheDocument()
+  })
+
+  it("renders a plugin's configComponent when the manifest declares one", async () => {
+    mockPlugin = configComponentPlugin
+    mockConfigComponentResult = ({ config }) => (
+      <div data-testid="custom-config">custom:{String(config.greeting)}</div>
+    )
+    render(<PluginConfigForm />)
+    expect(await screen.findByTestId("custom-config")).toHaveTextContent("custom:hi")
+  })
+
+  it("custom configComponent onSave persists via setPluginConfig", async () => {
+    mockPlugin = configComponentPlugin
+    mockConfigComponentResult = ({ onSave }) => (
+      <button onClick={() => void onSave({ greeting: "bye" })}>save-custom</button>
+    )
+    render(<PluginConfigForm />)
+    fireEvent.click(await screen.findByText("save-custom"))
+    await Promise.resolve()
+    expect(setPluginConfigMock).toHaveBeenCalledWith("p_conf", { greeting: "bye" })
+  })
+
+  it("falls back to the schema form when configComponent fails to load", async () => {
+    mockPlugin = {
+      ...configComponentPlugin,
+      manifest: {
+        id: "p_conf",
+        configComponent: { entry: "dist/missing.js", export: "Config" },
+        configSchema: {
+          type: "object",
+          properties: { token: { type: "string", default: "" } },
+        },
+      },
+    }
+    mockConfigComponentResult = null // bridge resolves null → fallback
+    render(<PluginConfigForm />)
+    expect(await screen.findByText("token")).toBeInTheDocument()
   })
 
   it("save submits nested + array values to setPluginConfig", async () => {

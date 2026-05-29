@@ -196,6 +196,103 @@ describe("redactText — extended PII coverage", () => {
   })
 })
 
+describe("redactText — hardened secret/PII coverage (T0.1)", () => {
+  it("redacts spaced and dashed Luhn-valid bank cards", () => {
+    const original = "Card 4111 1111 1111 1111 on file"
+    const spaced = redactText(original)
+    expect(spaced.redacted).toContain("<BANK_CARD_001>")
+    expect(spaced.redacted).not.toContain("4111 1111 1111 1111")
+    expect(unredactText(spaced.redacted, spaced.map)).toBe(original)
+
+    const dashed = redactText("Card 4111-1111-1111-1111 on file")
+    expect(dashed.redacted).toContain("<BANK_CARD_001>")
+    expect(dashed.redacted).not.toContain("4111-1111-1111-1111")
+
+    // A spaced number that fails Luhn is left alone.
+    const bad = redactText("Ref 1234 5678 9012 3456 here")
+    expect(bad.redacted).toContain("1234 5678 9012 3456")
+  })
+
+  it("redacts PEM private-key blocks whole and round-trips", () => {
+    const pem = [
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "MIIEowIBAAKCAQEA2Z3basesixtyfourlines",
+      "abcdef0123456789AbCdEf==",
+      "-----END RSA PRIVATE KEY-----",
+    ].join("\n")
+    const original = `Here is my key:\n${pem}\nthanks`
+    const { redacted, map } = redactText(original)
+    expect(redacted).toContain("<PEM_KEY_001>")
+    expect(redacted).not.toContain("BEGIN RSA PRIVATE KEY")
+    expect(unredactText(redacted, map)).toBe(original)
+  })
+
+  it("redacts three-segment JWTs and round-trips", () => {
+    const jwt =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+    const original = `token=${jwt}`
+    const { redacted, map } = redactText(original)
+    expect(redacted).toContain("<JWT_001>")
+    expect(redacted).not.toContain("eyJhbGci")
+    // Single placeholder — the short token must not re-trip the hint matcher.
+    expect(redacted.match(/<(JWT|API_KEY)_\d{3}>/g)).toHaveLength(1)
+    expect(unredactText(redacted, map)).toBe(original)
+  })
+
+  it("redacts AWS secret access keys via the underscore-joined hint", () => {
+    const secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    const { redacted } = redactText(`aws_secret_access_key=${secret}`)
+    expect(redacted).toMatch(/<API_KEY_\d{3}>/)
+    expect(redacted).not.toContain(secret)
+  })
+
+  it("captures dotted/punctuation secrets whole (value stops at whitespace)", () => {
+    const dotted = "ab.cd.ef.gh.ij.kl.mn.op.qr.st"
+    const { redacted } = redactText(`token: ${dotted} end`)
+    expect(redacted).toMatch(/<API_KEY_\d{3}>/)
+    expect(redacted).not.toContain(dotted)
+    expect(redacted).toContain(" end")
+  })
+
+  it("redacts the password in basic-auth URLs, keeping scheme/user/host", () => {
+    const original = "clone https://deploy:s3cr3tP4ssword99@github.com/x/y.git"
+    const { redacted, map } = redactText(original)
+    expect(redacted).toContain("https://deploy:")
+    expect(redacted).toContain("@github.com/x/y.git")
+    expect(redacted).not.toContain("s3cr3tP4ssword99")
+    expect(redacted).toMatch(/<API_KEY_\d{3}>/)
+    expect(unredactText(redacted, map)).toBe(original)
+  })
+
+  it("redacts ≥2-group compressed IPv6 but never code-style `::`", () => {
+    const addr = redactText("peer 2001:db8::1 connected")
+    expect(addr.redacted).toContain("<IP_ADDR_001>")
+    expect(addr.redacted).not.toContain("2001:db8::1")
+
+    const code = redactText("call Self::add and std::vector<int> here")
+    expect(code.redacted).toContain("Self::add")
+    expect(code.redacted).toContain("std::vector")
+  })
+
+  it("hasNoLeakingPii flags every hardened kind and ignores clean code", () => {
+    expect(hasNoLeakingPii("Card 4111 1111 1111 1111")).toBe(false)
+    expect(hasNoLeakingPii("Card 4111-1111-1111-1111")).toBe(false)
+    expect(hasNoLeakingPii("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----")).toBe(
+      false
+    )
+    expect(
+      hasNoLeakingPii(
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+      )
+    ).toBe(false)
+    expect(hasNoLeakingPii("aws_secret=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")).toBe(false)
+    expect(hasNoLeakingPii("https://u:p4ssword12345678@host.com")).toBe(false)
+    expect(hasNoLeakingPii("peer 2001:db8::1")).toBe(false)
+    // Clean code that merely uses `::` is not a false positive.
+    expect(hasNoLeakingPii("std::vector<int> v; Self::add(1)")).toBe(true)
+  })
+})
+
 describe("hasNoLeakingPiiDeep", () => {
   it("passes clean primitives and structures", () => {
     expect(hasNoLeakingPiiDeep(null)).toBe(true)

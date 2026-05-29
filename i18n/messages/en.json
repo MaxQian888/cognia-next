@@ -2694,12 +2694,19 @@
       "description": "Tune the look and feel of the app. Changes are saved instantly.",
       "tabs": {
         "theme": "Theme",
+        "themePack": "Theme packs",
         "wallpaper": "Wallpaper",
         "custom": "Custom theme",
         "import": "Import",
         "typography": "Typography",
         "a11y": "Accessibility",
         "advanced": "Advanced"
+      },
+      "themePack": {
+        "title": "Theme packs",
+        "description": "One-click bundles contributed by plugins — theme, fonts, wallpaper, density, radius, and motion applied together.",
+        "empty": "No theme packs available. Enable a plugin that contributes themePacks to see them here.",
+        "apply": "Apply"
       },
       "reset": {
         "button": "Reset appearance",
@@ -2757,6 +2764,7 @@
         "deleteLabel": "Delete wallpaper",
         "noActive": "No wallpaper selected.",
         "galleryTitle": "Gallery",
+        "pluginBadge": "Plugin",
         "addCustom": "Custom",
         "aria": {
           "delete": "Delete {name}"
@@ -6679,6 +6687,7 @@
       "description": "Settings declared in the plugin's manifest.configSchema. Save to apply the new values on next activation.",
       "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
       "loading": "Loading plugin configuration…",
+      "loadingComponent": "Loading the plugin's settings panel…",
       "save": "Save",
       "saving": "Saving…",
       "cancel": "Cancel",
@@ -8476,6 +8485,113 @@
       "fatal": "Fatal"
     }
   },
+  "sourceControl": {
+    "title": "Source Control",
+    "desktopOnly": {
+      "title": "Desktop only",
+      "description": "Source control runs against the local filesystem and is available only in the desktop app."
+    },
+    "emptyState": {
+      "noFolder": "No folder open",
+      "openFolder": "Open Folder",
+      "notARepo": "This folder is not a Git repository",
+      "noChanges": "No changes"
+    },
+    "diff": {
+      "loading": "Loading diff…",
+      "selectFile": "Select a file to view its changes",
+      "binary": "Binary file — diff not shown",
+      "hunkCount": "{count, plural, one {# hunk} other {# hunks}}"
+    },
+    "groups": {
+      "staged": "Staged Changes",
+      "changes": "Changes",
+      "merge": "Merge Changes"
+    },
+    "status": {
+      "modified": "Modified",
+      "added": "Added",
+      "deleted": "Deleted",
+      "renamed": "Renamed",
+      "untracked": "Untracked",
+      "conflicted": "Conflicted",
+      "typeChanged": "Type changed"
+    },
+    "commit": {
+      "placeholder": "Message (Ctrl+Enter to commit)",
+      "commit": "Commit",
+      "amend": "Commit (Amend)",
+      "commitAndPush": "Commit & Push",
+      "commitAndSync": "Commit & Sync",
+      "signoff": "Sign Off",
+      "more": "More commit actions"
+    },
+    "branches": {
+      "search": "Search branches…",
+      "empty": "No branches found",
+      "remote": "remote",
+      "switch": "Switch Branch",
+      "create": "Create Branch",
+      "rename": "Rename Branch",
+      "delete": "Delete Branch",
+      "newName": "New branch name",
+      "renameTo": "Rename current branch to…",
+      "detached": "Detached HEAD"
+    },
+    "actions": {
+      "stage": "Stage Changes",
+      "unstage": "Unstage Changes",
+      "discard": "Discard Changes",
+      "openChanges": "Open Changes",
+      "copyPath": "Copy Path",
+      "viewHistory": "View File History",
+      "stageAll": "Stage All Changes",
+      "unstageAll": "Unstage All Changes",
+      "discardAll": "Discard All Changes",
+      "stageHunk": "Stage Hunk",
+      "unstageHunk": "Unstage Hunk",
+      "discardHunk": "Discard Hunk",
+      "fetch": "Fetch",
+      "pull": "Pull",
+      "push": "Push",
+      "sync": "Synchronize Changes",
+      "more": "More actions",
+      "refresh": "Refresh"
+    },
+    "stash": {
+      "title": "Stashes",
+      "description": "Save and restore working-tree changes.",
+      "pushMessage": "Stash message (optional)",
+      "includeUntracked": "Include untracked files",
+      "keepIndex": "Keep staged changes",
+      "push": "Stash",
+      "pop": "Pop",
+      "apply": "Apply",
+      "drop": "Drop",
+      "empty": "No stashes"
+    },
+    "conflicts": {
+      "acceptOurs": "Accept Current",
+      "acceptTheirs": "Accept Incoming",
+      "acceptBoth": "Accept Both"
+    },
+    "timeline": {
+      "title": "Timeline",
+      "repository": "Repository",
+      "thisFile": "This File",
+      "empty": "No history"
+    },
+    "errors": {
+      "generic": "Git operation failed: {message}",
+      "commitFailed": "Commit failed: {message}",
+      "pushFailed": "Push failed: {message}",
+      "pullFailed": "Pull failed: {message}",
+      "checkoutFailed": "Switch branch failed: {message}"
+    },
+    "statusBar": {
+      "openSourceControl": "Open Source Control"
+    }
+  },
   "observability": {
     "title": "Observability",
     "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
@@ -10070,6 +10186,7 @@
       "agentTeams": "Agent teams",
       "scheduler": "Scheduler",
       "goals": "Goals",
+      "sourceControl": "Source Control",
       "observability": "Observability",
       "performance": "Performance",
       "logs": "Logs",
@@ -12469,6 +12586,8 @@
       "voiceEmpty": "(empty)",
       "never": "(never)",
       "workerToggleLabel": "Auto-start the job worker for this twin",
+      "rerankerToggleLabel": "Rerank retrieved results",
+      "rerankerToggleHint": "Over-fetches a wider pool and re-scores by keyword coverage (local, no API key).",
       "embedding": "Embedding",
       "distillLlm": "Distill LLM",
       "vectorStore": "Vector store",

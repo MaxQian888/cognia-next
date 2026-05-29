@@ -8,6 +8,14 @@
 
 import { runAndCaptureAssistantReply, RunAndCaptureError } from "./run-and-capture"
 import type { ClaudeEvent } from "./types"
+import {
+  registerChatMiddleware,
+  __resetChatMiddlewareRegistryForTesting,
+} from "./chat-middleware/registry"
+import {
+  setChatMiddlewareExecutionEnabled,
+  __resetChatMiddlewareFlagForTesting,
+} from "./chat-middleware/feature-flag"
 
 // ── Mock the IPC layer the wrapper depends on ─────────────────────────────
 // `onClaudeMessage` returns the unlistener; we capture the handler so the
@@ -35,7 +43,17 @@ beforeEach(() => {
   interruptSessionMock.mockClear()
   unlistenMock.mockClear()
   onClaudeMessageMock.mockClear()
+  __resetChatMiddlewareRegistryForTesting()
+  __resetChatMiddlewareFlagForTesting()
 })
+
+// Spin the microtask queue until the IPC subscription lands (the middleware
+// chain adds an extra async hop before `captureAssistantReplyCore` subscribes).
+async function flushUntilSubscribed(): Promise<void> {
+  for (let i = 0; i < 100 && !captured; i++) {
+    await Promise.resolve()
+  }
+}
 
 // Helper: dispatch a synthetic event to the captured handler.
 const fire = (evt: ClaudeEvent) => {
@@ -219,6 +237,60 @@ describe("runAndCaptureAssistantReply", () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.code).toBe("send_failed")
     expect(err.name).toBe("RunAndCaptureError")
+  })
+
+  // ── Chat-middleware execution (ADR-0026 §4 §A, default-off flag) ───────
+
+  it("does not run registered middlewares when the execution flag is off (default)", async () => {
+    registerChatMiddleware({
+      pluginId: "p",
+      middlewareId: "upper",
+      fn: async (_req, next) => {
+        const r = await next()
+        return { ...r, text: r.text.toUpperCase() }
+      },
+    })
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("hello") // middleware skipped — flag off
+  })
+
+  it("runs a registered middleware when execution is enabled, transforming the reply text", async () => {
+    setChatMiddlewareExecutionEnabled(true)
+    registerChatMiddleware({
+      pluginId: "p",
+      middlewareId: "upper",
+      fn: async (_req, next) => {
+        const r = await next()
+        return { ...r, text: r.text.toUpperCase() }
+      },
+    })
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("HELLO")
+    // The full RunAndCaptureResult is preserved — only text is transformed.
+    expect(result.messageId).toBe("uuid-asst-1")
+  })
+
+  it("returns the middleware text (empty surfaces) when a middleware short-circuits next()", async () => {
+    setChatMiddlewareExecutionEnabled(true)
+    registerChatMiddleware({
+      pluginId: "p",
+      middlewareId: "block",
+      fn: async () => ({ text: "blocked" }),
+    })
+    // The middleware never calls next() → the real turn never runs, so no IPC
+    // events are needed and the promise resolves from the middleware alone.
+    const result = await runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    expect(result.text).toBe("blocked")
+    expect(result.messageId).toBe("")
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   // ── A2UI surface accumulator (G2 addition) ────────────────────────────

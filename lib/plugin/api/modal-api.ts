@@ -9,8 +9,8 @@
  * manager also clears every modal the plugin owns when the plugin is
  * disabled (via `clearModalsForPlugin`).
  *
- * Declarative pre-registration via `manifest.modalMounts[]` lands in a
- * follow-up — the imperative path here covers the common case.
+ * Declarative pre-registration via `manifest.modalMounts[]` is resolved by
+ * `modal-mount-bridge.ts`; open one by its declared id via `openById`.
  *
  * ADR-0026 §3 §A.
  */
@@ -18,6 +18,7 @@
 import { createPluginSystemLogger } from "../core/logger"
 import {
   clearModalsForPlugin,
+  openDeclaredModal,
   usePluginModalStore,
 } from "@/stores/plugin-runtime/plugin-modal-store"
 import type { PluginModalComponent, PluginModalHandle } from "@/types/plugin/plugin-modal"
@@ -30,6 +31,12 @@ export interface PluginModalAPI {
    * handle externally.
    */
   openModal(component: PluginModalComponent, args?: Record<string, unknown>): PluginModalHandle
+  /**
+   * Open a modal declared in `manifest.modalMounts[]` by its (unprefixed)
+   * id. The component is resolved lazily on first open. Resolves to a handle,
+   * or `null` if the id is unknown or its component failed to load.
+   */
+  openById(modalId: string, args?: Record<string, unknown>): Promise<PluginModalHandle | null>
   /** Close every modal this plugin opened. */
   closeAll(): void
 }
@@ -45,6 +52,21 @@ export function createModalAPI(pluginId: string): PluginModalAPI {
         close: () => {
           usePluginModalStore.getState().close(modalId)
           logger.info(`[modal] closed ${modalId}`)
+        },
+      }
+    },
+    async openById(modalId, args) {
+      const resolvedId = await openDeclaredModal(pluginId, modalId, args)
+      if (!resolvedId) {
+        logger.warn(`[modal] openById("${modalId}") — unknown id or component failed to load`)
+        return null
+      }
+      logger.info(`[modal] opened declared modal ${modalId} as ${resolvedId}`)
+      return {
+        modalId: resolvedId,
+        close: () => {
+          usePluginModalStore.getState().close(resolvedId)
+          logger.info(`[modal] closed ${resolvedId}`)
         },
       }
     },

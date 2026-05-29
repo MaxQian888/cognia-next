@@ -26,12 +26,13 @@ export interface FewShotSelectorInput {
   /** All style samples on the profile. */
   samples: StyleSample[]
   /**
-   * Optional pre-computed embeddings for each sample's `summary`. When
-   * present the selector skips the (cheap) cosine fallback below.
-   * Length MUST match `samples.length`. The runtime computes these once
-   * per profile mutation and caches them in memory.
+   * Optional per-sample embeddings of each sample's `summary`, index-aligned
+   * with `samples`. Individual entries may be `null`/`undefined` for samples
+   * not yet embedded (the runtime backfills lazily). Such samples fall back to
+   * token-overlap *individually* — a single un-embedded sample no longer forces
+   * the whole profile onto the lossy path.
    */
-  sampleEmbeddings?: number[][]
+  sampleEmbeddings?: Array<number[] | null | undefined>
   /**
    * Raw user-query text. Used ONLY by the no-embeddings fallback to rank
    * samples by lexical token-overlap against their `summary`. The runtime
@@ -70,31 +71,27 @@ export function selectFewShotSamples(input: FewShotSelectorInput): ScoredStyleSa
   const k = Math.max(1, input.topK ?? 3)
   if (input.samples.length === 0) return []
 
-  const scored: ScoredStyleSample[] = []
+  const queryText = input.queryText?.trim() ?? ""
+  const embeddings = input.sampleEmbeddings
 
-  if (input.sampleEmbeddings && input.sampleEmbeddings.length === input.samples.length) {
-    for (let i = 0; i < input.samples.length; i++) {
-      scored.push({
-        sample: input.samples[i],
-        score: cosineSimilarity(input.queryEmbedding, input.sampleEmbeddings[i]),
-      })
+  // Score per-sample: cosine when this sample has an embedding, token-overlap
+  // (or a length heuristic when there's no query text) otherwise. Doing this
+  // per-index — rather than all-or-nothing — means a single un-embedded sample
+  // (e.g. one whose embed call threw during backfill) can't force the entire
+  // profile onto the lossy fallback. Cosine ([-1,1]) and overlap ([0,1]) aren't
+  // on identical scales, but mixing only happens transiently until the lazy
+  // backfill fills the gaps, and it's strictly better than disabling cosine.
+  const scored: ScoredStyleSample[] = input.samples.map((sample, i) => {
+    const emb = embeddings?.[i]
+    if (emb && emb.length > 0) {
+      return { sample, score: cosineSimilarity(input.queryEmbedding, emb) }
     }
-  } else {
-    // Fallback (no per-sample embeddings yet): rank by lexical token-overlap
-    // between the raw query text and each sample's `summary`. Only when the
-    // caller supplies no `queryText` either do we drop to a length heuristic —
-    // a last-resort filler that surfaces *something* until the embedder
-    // backfill warms up.
-    const queryText = input.queryText?.trim() ?? ""
-    for (let i = 0; i < input.samples.length; i++) {
-      const sample = input.samples[i]
-      const score =
-        queryText.length === 0
-          ? 1 / (1 + Math.abs(sample.summary.length - 50))
-          : tokenOverlap(queryText, sample.summary)
-      scored.push({ sample, score })
-    }
-  }
+    const score =
+      queryText.length === 0
+        ? 1 / (1 + Math.abs(sample.summary.length - 50))
+        : tokenOverlap(queryText, sample.summary)
+    return { sample, score }
+  })
 
   scored.sort((a, b) => b.score - a.score)
   return scored.slice(0, k)

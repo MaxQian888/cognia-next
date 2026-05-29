@@ -25,7 +25,7 @@ import { type EmbeddingConfig, embedRedactedChunks } from "./embed"
 import { parseSource, type RawSource } from "./parse"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
-import { redactText } from "./redact"
+import { redactText, unredactText } from "./redact"
 
 export interface RunIngestInput {
   job: TwinJob
@@ -158,12 +158,18 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         continue
       }
 
-      // Slice originals back out of the parsed text so each row stores both
-      // the displayable original and the embedded redacted form.
+      // Each row stores both the embedded redacted form and the displayable
+      // original. Reconstruct the original by *un-redacting the redacted chunk*
+      // via the redaction map — NOT by slicing parsed.originalText with these
+      // offsets. The offsets index the redacted text (placeholders differ in
+      // length from the originals, so every offset after the first redaction in
+      // a chunk is shifted), and `originalText` can also differ from the
+      // `embeddableText` that was actually chunked. Un-redacting the chunk is
+      // exact by construction.
       const enriched = chunks.map((c) => ({
         ...c,
         contentRedacted: c.content,
-        content: parsed.originalText.slice(c.charStart, c.charEnd) || c.content,
+        content: unredactText(c.content, redaction.map),
       }))
 
       // Stage 5 — embed.

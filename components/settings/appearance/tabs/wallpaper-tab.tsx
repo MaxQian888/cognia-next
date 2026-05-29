@@ -7,7 +7,7 @@
 // Persists everything via the appearance setters added in P1 — no
 // component-level state survives unmount.
 
-import { useState } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,8 +34,17 @@ import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
 import { GradientBuilder } from "../components/gradient-builder"
+import {
+  listPluginWallpapers,
+  subscribePluginWallpapers,
+  type RegisteredPluginWallpaper,
+} from "@/lib/plugin/bridge/wallpaper-bridge"
 
 const POSITIONS: WallpaperPosition[] = ["cover", "contain", "tile", "center"]
+
+// Stable identity for the SSR / pre-hydration snapshot — a fresh array each
+// render would trip useSyncExternalStore's "snapshot should be cached" guard.
+const EMPTY_PLUGIN_WALLPAPERS: RegisteredPluginWallpaper[] = []
 
 interface ScopeCardSpec {
   scope: BackgroundScope
@@ -173,7 +182,23 @@ export function WallpaperTab() {
   const setActiveWallpaper = useSettingsStore((s) => s.setActiveWallpaper)
   const [busyError, setBusyError] = useState<string | null>(null)
 
-  const gallery = withBuiltinPresets(userWallpapers)
+  // Plugin-contributed wallpapers (ADR-0029) live in an in-memory registry —
+  // never in the user's settings row — so they merge into the gallery here
+  // rather than being persisted. They carry `builtin: true`, so the delete
+  // control is suppressed automatically (a plugin owns its own wallpapers).
+  const pluginWallpapers = useSyncExternalStore(
+    subscribePluginWallpapers,
+    listPluginWallpapers,
+    () => EMPTY_PLUGIN_WALLPAPERS
+  )
+  const gallery = useMemo(
+    () => [...withBuiltinPresets(userWallpapers), ...pluginWallpapers],
+    [userWallpapers, pluginWallpapers]
+  )
+  const pluginWallpaperIds = useMemo(
+    () => new Set(pluginWallpapers.map((w) => w.id)),
+    [pluginWallpapers]
+  )
   const activeWallpaper = gallery.find((w) => w.id === background.activeId) ?? null
   const verdict = computeOpacityVerdict(activeWallpaper?.kind ?? null, background.opacity)
 
@@ -375,15 +400,30 @@ export function WallpaperTab() {
           className="grid gap-3"
           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}
         >
-          {gallery.map((wp) => (
-            <WallpaperCard
-              key={wp.id}
-              wallpaper={wp}
-              active={background.activeId === wp.id}
-              onActivate={() => void setActiveWallpaper(wp.id)}
-              onDelete={!wp.builtin ? () => void handleDelete(wp) : undefined}
-            />
-          ))}
+          {gallery.map((wp) => {
+            const card = (
+              <WallpaperCard
+                wallpaper={wp}
+                active={background.activeId === wp.id}
+                onActivate={() => void setActiveWallpaper(wp.id)}
+                onDelete={!wp.builtin ? () => void handleDelete(wp) : undefined}
+              />
+            )
+            if (!pluginWallpaperIds.has(wp.id)) {
+              return <div key={wp.id}>{card}</div>
+            }
+            return (
+              <div key={wp.id} className="relative">
+                {card}
+                <Badge
+                  variant="secondary"
+                  className="pointer-events-none absolute right-1 top-1 text-[10px]"
+                >
+                  {t("pluginBadge")}
+                </Badge>
+              </div>
+            )
+          })}
         </div>
       </div>
 

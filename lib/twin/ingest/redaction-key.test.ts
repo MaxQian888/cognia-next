@@ -10,6 +10,7 @@ import {
   decryptRedactionMap,
   encryptRedactionMap,
   getRedactionKey,
+  RedactionKeyMismatchError,
 } from "./redaction-key"
 import { redactText } from "./redact"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -66,5 +67,48 @@ describe("encryptRedactionMap / decryptRedactionMap", () => {
     const blob = await encryptRedactionMap(map)
     await __resetRedactionKey()
     await expect(decryptRedactionMap(blob)).rejects.toThrow()
+  })
+})
+
+describe("getRedactionKey — key safety (T0.2)", () => {
+  it("throws (does not re-bootstrap) when the key is gone but a fingerprint remains", async () => {
+    await getRedactionKey() // records key + fingerprint
+    // Simulate the secret store evaporating while the Dexie fingerprint
+    // survives — the keyring-mock-restart scenario.
+    const db = getDb()
+    const row = (await db.settings.get("singleton")) as unknown as Record<string, unknown>
+    expect(row.twinRedactionKeyFingerprint).toBeDefined()
+    delete row.twinRedactionMasterKey
+    await db.settings.put(row as never)
+    await expect(getRedactionKey()).rejects.toBeInstanceOf(RedactionKeyMismatchError)
+  })
+
+  it("throws on a fingerprint mismatch (key rotated/replaced under a stale fingerprint)", async () => {
+    await getRedactionKey()
+    const db = getDb()
+    const row = (await db.settings.get("singleton")) as unknown as Record<string, unknown>
+    // Replace the key with a different valid 32-byte key, leaving the old fp.
+    row.twinRedactionMasterKey = Buffer.from(new Uint8Array(32).fill(7)).toString("base64")
+    await db.settings.put(row as never)
+    await expect(getRedactionKey()).rejects.toBeInstanceOf(RedactionKeyMismatchError)
+  })
+
+  it("adopts a fingerprint for a pre-hardening key (present, no fingerprint)", async () => {
+    await getRedactionKey()
+    const db = getDb()
+    const row = (await db.settings.get("singleton")) as unknown as Record<string, unknown>
+    delete row.twinRedactionKeyFingerprint // mimic a profile written before this landed
+    await db.settings.put(row as never)
+    await expect(getRedactionKey()).resolves.toBeDefined()
+    const after = (await db.settings.get("singleton")) as unknown as Record<string, unknown>
+    expect(after.twinRedactionKeyFingerprint).toBeDefined()
+  })
+
+  it("surfaces a typed RedactionKeyMismatchError on a GCM tag failure", async () => {
+    const { map } = redactText("contact carol@example.com")
+    const blob = await encryptRedactionMap(map)
+    await __resetRedactionKey() // clears key + fingerprint
+    await getRedactionKey() // bootstraps a NEW key/fingerprint
+    await expect(decryptRedactionMap(blob)).rejects.toBeInstanceOf(RedactionKeyMismatchError)
   })
 })

@@ -131,3 +131,27 @@ export async function rerank(
 export function identityScorer(_query: string, c: RerankCandidate): number {
   return c.score
 }
+
+function tokenSet(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/\W+/).filter(Boolean))
+}
+
+/**
+ * Built-in, key-free reranker. Re-scores each candidate by blending its
+ * original cosine score with the fraction of the query's terms that appear in
+ * the candidate content. Pure semantic search can rank a chunk high while
+ * missing the exact terms the user asked about (proper nouns, ids, file paths);
+ * the keyword-coverage term lifts those. Deterministic and local — no model /
+ * API key required, so it's the default once reranking is enabled.
+ */
+export function lexicalRerankScorer(query: string, c: RerankCandidate): number {
+  const queryTerms = tokenSet(query)
+  if (queryTerms.size === 0) return c.score
+  const contentTerms = tokenSet(c.content)
+  let covered = 0
+  for (const term of queryTerms) if (contentTerms.has(term)) covered += 1
+  const coverage = covered / queryTerms.size
+  // 70% original cosine signal, 30% keyword coverage. Keeps the semantic order
+  // dominant while letting strong keyword matches climb.
+  return 0.7 * c.score + 0.3 * coverage
+}

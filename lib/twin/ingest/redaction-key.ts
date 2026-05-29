@@ -33,6 +33,31 @@ const KEYRING_REF = { namespace: "twin-redaction", key: "master" } as const
  */
 const SETTINGS_FIELD = "twinRedactionMasterKey"
 
+/**
+ * Fingerprint of the master key, stored in the Dexie `settings` row in BOTH
+ * Tauri and web modes (deliberately NOT in the keyring). It lets us tell
+ * "no key yet — genuine first run" apart from "a key existed but the secret
+ * store stopped returning it" (keyring locked / unavailable / the keyring-mock
+ * that evaporates on restart). The latter must NOT silently re-bootstrap, or
+ * every existing `redactionMapEnc` blob is orphaned.
+ */
+const FINGERPRINT_FIELD = "twinRedactionKeyFingerprint"
+
+/**
+ * Thrown when the master key is missing-but-previously-existed, or present but
+ * does not match the recorded fingerprint, or when an AES-GCM tag check fails.
+ * Callers (workbench unredact, exports) can catch this to tell the user the
+ * redaction maps are unrecoverable rather than surfacing an opaque crypto error.
+ */
+export class RedactionKeyMismatchError extends Error {
+  readonly cause?: unknown
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = "RedactionKeyMismatchError"
+    this.cause = cause
+  }
+}
+
 function getSubtle(): SubtleCrypto {
   const subtle = globalThis.crypto?.subtle
   if (!subtle) {
@@ -98,6 +123,28 @@ async function readMasterKeyBytes(): Promise<Uint8Array | null> {
   }
 }
 
+/** Base64 SHA-256 of the raw key bytes — the fingerprint we persist + compare. */
+async function fingerprintOf(bytes: Uint8Array): Promise<string> {
+  const digest = await getSubtle().digest("SHA-256", toArrayBuffer(bytes))
+  return encodeBase64(new Uint8Array(digest))
+}
+
+async function readStoredFingerprint(): Promise<string | null> {
+  const row = (await getDb().settings.get("singleton")) as
+    | (AppSettings & { [FINGERPRINT_FIELD]?: string })
+    | undefined
+  const fp = row?.[FINGERPRINT_FIELD]
+  return typeof fp === "string" && fp.length > 0 ? fp : null
+}
+
+async function writeStoredFingerprint(fp: string): Promise<void> {
+  const db = getDb()
+  const existing = ((await db.settings.get("singleton")) ?? {
+    id: "singleton",
+  }) as AppSettings & { [FINGERPRINT_FIELD]?: string }
+  await db.settings.put({ ...existing, [FINGERPRINT_FIELD]: fp } as AppSettings)
+}
+
 async function writeMasterKeyBytes(bytes: Uint8Array): Promise<void> {
   const b64 = encodeBase64(bytes)
   if (isTauri()) {
@@ -112,23 +159,56 @@ async function writeMasterKeyBytes(bytes: Uint8Array): Promise<void> {
 }
 
 /**
- * Resolve the redaction master key. Bootstraps a fresh 32-byte random
- * key on first call. Idempotent — concurrent callers will agree on the
- * same key (the writer/reader race window is small enough that a second
- * generation only happens under extreme contention, and the loser's key
- * is overwritten before anyone uses it).
+ * Resolve the redaction master key.
+ *
+ * Bootstraps a fresh 32-byte random key ONLY on a genuine first run (no key
+ * and no recorded fingerprint). The recorded fingerprint is the safety latch:
+ *   • key missing + fingerprint present → the secret store lost the key
+ *     (keyring locked / unavailable / evaporated). Throw `RedactionKeyMismatchError`
+ *     instead of regenerating — regenerating would orphan every existing
+ *     `redactionMapEnc` blob with no loud signal.
+ *   • key present + fingerprint mismatch → key was rotated/replaced. Throw.
+ *   • key present + no fingerprint → pre-hardening profile; adopt the current
+ *     key's fingerprint so future mismatches are caught.
+ *
+ * If the secret-store read itself throws, that propagates (a read failure is
+ * never treated as "no key yet").
  */
 export async function getRedactionKey(): Promise<CryptoKey> {
   let bytes = await readMasterKeyBytes()
+  const storedFingerprint = await readStoredFingerprint()
+
   if (!bytes) {
+    if (storedFingerprint) {
+      throw new RedactionKeyMismatchError(
+        "Twin redaction master key is missing but a key fingerprint is recorded — " +
+          "the secret store is unavailable or the key was lost. Existing redaction " +
+          "maps cannot be decrypted until the key is restored."
+      )
+    }
+    // Genuine first run — bootstrap key + fingerprint together.
     bytes = randomBytes(32)
     await writeMasterKeyBytes(bytes)
+    await writeStoredFingerprint(await fingerprintOf(bytes))
+  } else {
+    if (bytes.length !== 32) {
+      // A truncated or oversized key would be an integrity issue — refuse
+      // rather than silently coerce. Caller has to clear + regenerate.
+      throw new Error(
+        `Twin redaction master key has unexpected length ${bytes.length} (expected 32)`
+      )
+    }
+    const fp = await fingerprintOf(bytes)
+    if (storedFingerprint && storedFingerprint !== fp) {
+      throw new RedactionKeyMismatchError(
+        "Twin redaction master key does not match the recorded fingerprint — the key " +
+          "was rotated or replaced. Existing redaction maps were encrypted with a " +
+          "different key and cannot be decrypted."
+      )
+    }
+    if (!storedFingerprint) await writeStoredFingerprint(fp)
   }
-  if (bytes.length !== 32) {
-    // A truncated or oversized key would be an integrity issue — refuse
-    // rather than silently coerce. Caller has to clear + regenerate.
-    throw new Error(`Twin redaction master key has unexpected length ${bytes.length} (expected 32)`)
-  }
+
   return getSubtle().importKey("raw", toArrayBuffer(bytes), { name: "AES-GCM" }, false, [
     "encrypt",
     "decrypt",
@@ -142,17 +222,17 @@ export async function getRedactionKey(): Promise<CryptoKey> {
  * after wiping the affected source rows or accepting the data loss.
  */
 export async function __resetRedactionKey(): Promise<void> {
-  if (isTauri()) {
-    await clearSecret(KEYRING_REF)
-    return
-  }
+  if (isTauri()) await clearSecret(KEYRING_REF)
+  // Always clear the Dexie-side fields (key in web mode, fingerprint in both)
+  // so the next `getRedactionKey` sees a genuine first run and re-bootstraps.
   const db = getDb()
   const existing = ((await db.settings.get("singleton")) ?? {
     id: "singleton",
-  }) as AppSettings & { [SETTINGS_FIELD]?: string }
-  if (existing[SETTINGS_FIELD]) {
+  }) as AppSettings & { [SETTINGS_FIELD]?: string; [FINGERPRINT_FIELD]?: string }
+  if (existing[SETTINGS_FIELD] || existing[FINGERPRINT_FIELD]) {
     const next = { ...existing }
     delete next[SETTINGS_FIELD]
+    delete next[FINGERPRINT_FIELD]
     await db.settings.put(next)
   }
 }
@@ -208,10 +288,21 @@ export async function decryptRedactionMap(
   const key = await getRedactionKey()
   const iv = decodeBase64(blob.iv)
   const ciphertext = decodeBase64(blob.ct)
-  const plaintext = await getSubtle().decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
-    key,
-    toArrayBuffer(ciphertext)
-  )
+  let plaintext: ArrayBuffer
+  try {
+    plaintext = await getSubtle().decrypt(
+      { name: "AES-GCM", iv: toArrayBuffer(iv) },
+      key,
+      toArrayBuffer(ciphertext)
+    )
+  } catch (err) {
+    // A GCM tag failure here means the key in hand differs from the one that
+    // wrote this blob — surface it as the typed, recoverable error.
+    throw new RedactionKeyMismatchError(
+      "Failed to decrypt the redaction map — the encryption key changed since this " +
+        "source was ingested, so the original values cannot be recovered.",
+      err
+    )
+  }
   return JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, RedactionRecord>
 }

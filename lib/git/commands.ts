@@ -1,0 +1,280 @@
+/**
+ * Typed wrappers around the Rust `git_*` Tauri commands. Mirrors the
+ * `lib/perf/backend/commands.ts` seam: business code imports these named
+ * functions, never `transport.call` directly. Every wrapper is gated by
+ * `isTauri()` so the panel degrades to an inert desktop-only state on web.
+ */
+
+import { isTauri, transport } from "@/lib/tauri"
+import { languageFromPath } from "./language-map"
+import {
+  EMPTY_REPO_STATE,
+  EMPTY_STATUS,
+  type AheadBehind,
+  type ConflictSide,
+  type GitBranch,
+  type GitCommit,
+  type GitConflict,
+  type GitDiff,
+  type GitFileChange,
+  type GitRemote,
+  type GitRepoState,
+  type GitStashEntry,
+  type GitStatus,
+} from "./types"
+
+// ----------------------------------------------------------------- reads
+
+export async function gitIsRepo(repoPath: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return transport.call<boolean>("git_is_repo", { repoPath })
+}
+
+export async function gitRepoState(repoPath: string): Promise<GitRepoState> {
+  if (!isTauri()) return EMPTY_REPO_STATE
+  return transport.call<GitRepoState>("git_repo_state", { repoPath })
+}
+
+export async function gitStatus(repoPath: string): Promise<GitStatus> {
+  if (!isTauri()) return EMPTY_STATUS
+  return transport.call<GitStatus>("git_status", { repoPath })
+}
+
+export async function gitDiffFile(
+  repoPath: string,
+  path: string,
+  staged: boolean
+): Promise<GitDiff> {
+  if (!isTauri()) {
+    return { path, oldContent: "", newContent: "", hunks: [], isBinary: false, language: null }
+  }
+  const diff = await transport.call<GitDiff>("git_diff_file", { repoPath, path, staged })
+  return { ...diff, language: languageFromPath(diff.path) }
+}
+
+export async function gitDiffCommit(repoPath: string, sha: string, path: string): Promise<GitDiff> {
+  if (!isTauri()) {
+    return { path, oldContent: "", newContent: "", hunks: [], isBinary: false, language: null }
+  }
+  const diff = await transport.call<GitDiff>("git_diff_commit", { repoPath, sha, path })
+  return { ...diff, language: languageFromPath(diff.path) }
+}
+
+export async function gitCommitFiles(repoPath: string, sha: string): Promise<GitFileChange[]> {
+  if (!isTauri()) return []
+  return transport.call<GitFileChange[]>("git_commit_files", { repoPath, sha })
+}
+
+export async function gitLog(
+  repoPath: string,
+  maxCount: number,
+  skip: number
+): Promise<GitCommit[]> {
+  if (!isTauri()) return []
+  return transport.call<GitCommit[]>("git_log", { repoPath, maxCount, skip })
+}
+
+export async function gitFileHistory(
+  repoPath: string,
+  path: string,
+  maxCount: number
+): Promise<GitCommit[]> {
+  if (!isTauri()) return []
+  return transport.call<GitCommit[]>("git_file_history", { repoPath, path, maxCount })
+}
+
+export async function gitBranches(repoPath: string): Promise<GitBranch[]> {
+  if (!isTauri()) return []
+  return transport.call<GitBranch[]>("git_branches", { repoPath })
+}
+
+export async function gitRemotes(repoPath: string): Promise<GitRemote[]> {
+  if (!isTauri()) return []
+  return transport.call<GitRemote[]>("git_remotes", { repoPath })
+}
+
+export async function gitStashList(repoPath: string): Promise<GitStashEntry[]> {
+  if (!isTauri()) return []
+  return transport.call<GitStashEntry[]>("git_stash_list", { repoPath })
+}
+
+export async function gitConflicts(repoPath: string): Promise<GitConflict[]> {
+  if (!isTauri()) return []
+  return transport.call<GitConflict[]>("git_conflicts", { repoPath })
+}
+
+// ----------------------------------------------- mutations / network
+
+export async function gitStage(
+  repoPath: string,
+  paths: string[],
+  hunkPatch?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_stage", { repoPath, paths, hunkPatch: hunkPatch ?? null })
+}
+
+export async function gitUnstage(
+  repoPath: string,
+  paths: string[],
+  hunkPatch?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_unstage", { repoPath, paths, hunkPatch: hunkPatch ?? null })
+}
+
+export async function gitDiscard(
+  repoPath: string,
+  paths: string[],
+  hunkPatch?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_discard", { repoPath, paths, hunkPatch: hunkPatch ?? null })
+}
+
+export async function gitDiscardAll(repoPath: string, includeUntracked: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_discard_all", { repoPath, includeUntracked })
+}
+
+export async function gitCommit(
+  repoPath: string,
+  message: string,
+  amend: boolean,
+  signoff: boolean
+): Promise<string> {
+  if (!isTauri()) return ""
+  return transport.call<string>("git_commit", { repoPath, message, amend, signoff })
+}
+
+export async function gitCheckoutBranch(repoPath: string, name: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_checkout_branch", { repoPath, name })
+}
+
+export async function gitCreateBranch(
+  repoPath: string,
+  name: string,
+  checkout: boolean,
+  from?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_create_branch", { repoPath, name, checkout, from: from ?? null })
+}
+
+export async function gitDeleteBranch(
+  repoPath: string,
+  name: string,
+  force: boolean
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_delete_branch", { repoPath, name, force })
+}
+
+export async function gitRenameBranch(
+  repoPath: string,
+  newName: string,
+  old?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_rename_branch", { repoPath, old: old ?? null, newName })
+}
+
+export async function gitFetch(repoPath: string, remote?: string, prune = false): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_fetch", { repoPath, remote: remote ?? null, prune })
+}
+
+export async function gitPull(
+  repoPath: string,
+  options: { remote?: string; branch?: string; rebase?: boolean } = {}
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_pull", {
+    repoPath,
+    remote: options.remote ?? null,
+    branch: options.branch ?? null,
+    rebase: options.rebase ?? false,
+  })
+}
+
+export async function gitPush(
+  repoPath: string,
+  options: {
+    remote?: string
+    branch?: string
+    setUpstream?: boolean
+    forceWithLease?: boolean
+  } = {}
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_push", {
+    repoPath,
+    remote: options.remote ?? null,
+    branch: options.branch ?? null,
+    setUpstream: options.setUpstream ?? false,
+    forceWithLease: options.forceWithLease ?? false,
+  })
+}
+
+export async function gitSync(repoPath: string): Promise<AheadBehind> {
+  if (!isTauri()) return { ahead: 0, behind: 0 }
+  return transport.call<AheadBehind>("git_sync", { repoPath })
+}
+
+export async function gitStashPush(
+  repoPath: string,
+  options: { message?: string; includeUntracked?: boolean; keepIndex?: boolean } = {}
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_stash_push", {
+    repoPath,
+    message: options.message ?? null,
+    includeUntracked: options.includeUntracked ?? false,
+    keepIndex: options.keepIndex ?? false,
+  })
+}
+
+export async function gitStashPop(repoPath: string, index: number): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_stash_pop", { repoPath, index })
+}
+
+export async function gitStashApply(repoPath: string, index: number): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_stash_apply", { repoPath, index })
+}
+
+export async function gitStashDrop(repoPath: string, index: number): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_stash_drop", { repoPath, index })
+}
+
+export async function gitResolveConflict(
+  repoPath: string,
+  path: string,
+  resolution: { mergedContent?: string; side?: ConflictSide }
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_resolve_conflict", {
+    repoPath,
+    path,
+    mergedContent: resolution.mergedContent ?? null,
+    side: resolution.side ?? null,
+  })
+}
+
+export async function gitMergeAbort(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_merge_abort", { repoPath })
+}
+
+export async function gitWatchStart(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_watch_start", { repoPath })
+}
+
+export async function gitWatchStop(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_watch_stop", { repoPath })
+}

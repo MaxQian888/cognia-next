@@ -100,7 +100,7 @@ interface BoundaryState {
   hasError: boolean
 }
 
-class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
+export class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
   constructor(props: BoundaryProps) {
     super(props)
     this.state = { hasError: false }

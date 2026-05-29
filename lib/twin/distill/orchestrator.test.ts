@@ -4,7 +4,7 @@
  * per agent, in pipeline order).
  */
 
-import { runOrchestrator } from "./orchestrator"
+import { runOrchestrator, SynthesizerError } from "./orchestrator"
 import type { LlmClient } from "./llm"
 import type { TwinChunk, TwinProfile } from "@/types/twin"
 
@@ -169,5 +169,54 @@ describe("runOrchestrator", () => {
     const result = await runOrchestrator({ llm, profile: emptyProfile(), chunks })
     expect(result.entities).toHaveLength(1)
     expect(result.entities[0].aliases.sort()).toEqual(["alice@x.com", "小爱"].sort())
+  })
+
+  it("keeps same-name entities with different roles distinct (T2.5)", async () => {
+    const chunks = [makeChunk("c1"), makeChunk("c2"), makeChunk("c3"), makeChunk("c4")]
+    const llm = queuedLlm([
+      `{ "entities": [
+          {"name":"Phoenix","aliases":[],"role":"person","firstSeenChunkId":"c1"},
+          {"name":"Phoenix","aliases":[],"role":"project","firstSeenChunkId":"c2"}
+        ], "perChunk": [] }`,
+      `{ "samples": [] }`,
+      `{ "playbooks": [] }`,
+      `{ "character": null, "skills": [] }`,
+      `{ "evaluations": [] }`,
+    ])
+    const result = await runOrchestrator({ llm, profile: emptyProfile(), chunks })
+    const phoenixes = result.entities.filter((e) => e.name === "Phoenix")
+    expect(phoenixes).toHaveLength(2)
+    expect(phoenixes.map((e) => e.role).sort()).toEqual(["person", "project"])
+  })
+
+  it("throws SynthesizerError when the synthesizer output is unparseable (T2.1)", async () => {
+    // 4 chunks → exactly one call per agent in pipeline order (knowledge,
+    // style, playbook, synthesizer); the synth call gets unparseable output.
+    const chunks = [makeChunk("c1"), makeChunk("c2"), makeChunk("c3"), makeChunk("c4")]
+    const llm = queuedLlm([
+      `{ "entities": [], "perChunk": [] }`, // knowledge
+      `{ "samples": [] }`, // style
+      `{ "playbooks": [] }`, // playbook
+      `the provider returned prose, not JSON`, // synthesizer → parse throws
+    ])
+    await expect(runOrchestrator({ llm, profile: emptyProfile(), chunks })).rejects.toThrow(
+      SynthesizerError
+    )
+  })
+
+  it("throws SynthesizerError (not hang) when the synthesizer times out (T2.1)", async () => {
+    const chunks = [makeChunk("c1"), makeChunk("c2"), makeChunk("c3"), makeChunk("c4")]
+    let call = 0
+    const fast = [`{ "entities": [], "perChunk": [] }`, `{ "samples": [] }`, `{ "playbooks": [] }`]
+    const llm: LlmClient = {
+      complete: jest.fn(async () => {
+        if (call < fast.length) return fast[call++]
+        // The 4th call is the synthesizer — hang forever so the deadline fires.
+        return new Promise<string>(() => {})
+      }),
+    }
+    await expect(
+      runOrchestrator({ llm, profile: emptyProfile(), chunks, agentTimeoutMs: 40 })
+    ).rejects.toThrow(SynthesizerError)
   })
 })

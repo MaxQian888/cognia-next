@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { ThemeTab } from "./tabs/theme-tab"
+import { ThemePackTab } from "./tabs/theme-pack-tab"
 import { TypographyTab } from "./tabs/typography-tab"
 import { WallpaperTab } from "./tabs/wallpaper-tab"
 import { CustomThemeTab } from "./tabs/custom-theme-tab"
@@ -36,6 +37,7 @@ const APPEARANCE_TAB_PARAM = "appearanceTab"
 
 export type AppearanceTabId =
   | "theme"
+  | "themePack"
   | "wallpaper"
   | "custom"
   | "import"
@@ -45,6 +47,7 @@ export type AppearanceTabId =
 
 const TAB_IDS: AppearanceTabId[] = [
   "theme",
+  "themePack",
   "wallpaper",
   "custom",
   "import",
@@ -104,6 +107,7 @@ export function AppearanceSection() {
           <div className="-mx-1 flex-1 overflow-x-auto px-1">
             <TabsList className="w-max">
               <TabsTrigger value="theme">{t("tabs.theme")}</TabsTrigger>
+              <TabsTrigger value="themePack">{t("tabs.themePack")}</TabsTrigger>
               <TabsTrigger value="wallpaper">{t("tabs.wallpaper")}</TabsTrigger>
               <TabsTrigger value="custom">{t("tabs.custom")}</TabsTrigger>
               <TabsTrigger value="import">{t("tabs.import")}</TabsTrigger>
@@ -118,6 +122,9 @@ export function AppearanceSection() {
         </div>
         <TabsContent value="theme" className="mt-4">
           <ThemeTab />
+        </TabsContent>
+        <TabsContent value="themePack" className="mt-4">
+          <ThemePackTab />
         </TabsContent>
         <TabsContent value="wallpaper" className="mt-4">
           <WallpaperTab />

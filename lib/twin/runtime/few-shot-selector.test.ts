@@ -107,15 +107,32 @@ describe("selectFewShotSamples", () => {
     expect(result[0].score).toBe(0)
   })
 
-  it("ignores sampleEmbeddings when its length doesn't match samples", () => {
-    const samples = [makeSample("a", "alpha"), makeSample("b", "beta")]
+  it("scores per-sample when sampleEmbeddings has null gaps (T2.2)", () => {
+    const samples = [makeSample("a", "alpha"), makeSample("b", "beta gamma delta")]
     const result = selectFewShotSamples({
       queryEmbedding: [1, 0, 0],
       samples,
-      sampleEmbeddings: [[1, 0, 0]], // length mismatch — falls back to heuristic
-      topK: 1,
+      sampleEmbeddings: [[1, 0, 0], null], // a → cosine 1.0; b → token-overlap fallback
+      queryText: "zzz no overlap",
+      topK: 2,
     })
-    // heuristic ranks by length; both are 5 chars — order is stable.
-    expect(result).toHaveLength(1)
+    expect(result).toHaveLength(2)
+    expect(result[0].sample.id).toBe("a")
+    expect(result[0].score).toBeCloseTo(1)
+  })
+
+  it("a single un-embedded sample does not disable cosine for the others (T2.2)", () => {
+    // Only the middle sample lacks an embedding. The old all-or-nothing gate
+    // would have forced ALL three onto token-overlap; per-sample scoring keeps
+    // cosine for the two that have embeddings.
+    const samples = [makeSample("x", "x"), makeSample("y", "y"), makeSample("z", "z")]
+    const result = selectFewShotSamples({
+      queryEmbedding: [1, 0, 0],
+      samples,
+      sampleEmbeddings: [[1, 0, 0], null, [0, 1, 0]],
+      topK: 3,
+    })
+    expect(result[0].sample.id).toBe("x")
+    expect(result[0].score).toBeCloseTo(1)
   })
 })

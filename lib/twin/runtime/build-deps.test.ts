@@ -49,6 +49,27 @@ describe("tryBuildTwinDeps", () => {
     )
   })
 
+  it("omits reranker by default (disabled) so RAG does not over-fetch (T2.6)", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({ storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } } })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.reranker).toBeUndefined()
+  })
+
+  it("attaches the lexical reranker scorer when enabled (T2.6)", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        reranker: { enabled: true, model: "lexical" },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.reranker?.model).toBe("lexical")
+    expect(deps?.reranker?.overFetch).toBe(3)
+    expect(typeof deps?.reranker?.scorer).toBe("function")
+  })
+
   it("builds pinecone deps", async () => {
     getTwinRuntimeSettings.mockResolvedValue(
       settings({

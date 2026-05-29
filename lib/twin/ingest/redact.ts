@@ -12,15 +12,23 @@
  *   • Emails        — RFC-5322 simplified
  *   • Phone numbers — Mainland China mobile (11 digits) + intl E.164 + US
  *   • CN national ID (18 digits, optional X check char)
- *   • CN bank cards (13–19 digits, Luhn-checked)
- *   • Names         — heuristic CJK-name segments inside email signatures /
- *                     chat speakers (best-effort; PII coverage is not a
- *                     proof-of-correctness)
- *   • IP addresses  — IPv4 (with private-range exclusions) + uncompressed IPv6
+ *   • Bank cards    — 13–19 digits, contiguous OR single space/dash separated
+ *                     (the human-written `4111 1111 1111 1111` form), Luhn-checked
+ *   • Names         — only the names passed in `nameHints` (chat speakers, email
+ *                     "From" headers). There is NO free-text name heuristic — a
+ *                     name that isn't seeded as a hint is NOT redacted. PII
+ *                     coverage is best-effort, not a proof-of-correctness.
+ *   • IP addresses  — IPv4 (with private-range exclusions) + IPv6 (uncompressed
+ *                     and `::`-compressed forms)
  *   • API keys      — `sk-…` / `ghp_…` / `gho_…` / `ghs_…` / `xox[abp]-…` /
- *                     OpenAI org keys + a high-entropy fallback for long
- *                     base64-ish tokens preceded by an obvious key hint
- *                     (`api_key`, `apikey`, `secret`, `token`, `bearer`).
+ *                     `AKIA…` / OpenAI org keys + a high-entropy fallback for long
+ *                     tokens preceded by an obvious key hint (`api_key`, `apikey`,
+ *                     `secret`, `token`, `bearer`, `password`, the AWS secret-key
+ *                     names, …). The hinted value stops at whitespace/quote so
+ *                     dotted secrets (JWT-after-hint) are captured whole.
+ *   • JWT           — three-segment `eyJ…`.`…`.`…` JSON Web Tokens
+ *   • PEM keys      — `-----BEGIN … PRIVATE KEY-----` … `-----END … PRIVATE KEY-----`
+ *   • URL creds     — the password in `scheme://user:password@host`
  *   • Passport      — ICAO machine-readable + CN passport prefixes (E/G/EH/EJ)
  *   • Driver lic.   — CN driver-license card numbers (12 digits, hint-driven)
  *
@@ -37,6 +45,8 @@ export type PiiKind =
   | "NAME"
   | "IP_ADDR"
   | "API_KEY"
+  | "JWT"
+  | "PEM_KEY"
   | "PASSPORT"
   | "DRIVER_LICENSE"
 
@@ -61,24 +71,50 @@ const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const PHONE_RE = /\b(?:\+\d{1,3}[\s-]?)?(?:1\d{10}|\d{3}[\s-]?\d{3,4}[\s-]?\d{4}|\d{10,11})\b/g
 // CN national ID: 17 digits + (digit | X | x).
 const CN_ID_RE = /\b\d{17}[\dXx]\b/g
-// Bank cards: 13–19 contiguous digits.
-const BANK_CARD_CANDIDATE_RE = /\b\d{13,19}\b/g
+// Bank cards: 13–19 digits, contiguous OR with a single space/dash between each
+// digit (the human-written `4111 1111 1111 1111` / `4111-1111-1111-1111` form).
+// The `\b…\b` anchors keep it from grabbing a slice of a longer digit run. The
+// match still has to clear Luhn (on the separator-stripped digits) before it's
+// treated as a card, so the looser shape doesn't inflate false positives.
+const BANK_CARD_CANDIDATE_RE = /\b\d(?:[ -]?\d){12,18}\b/g
+// JSON Web Tokens — header always starts `eyJ` (base64 of `{"`). Three
+// dot-separated base64url segments.
+const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g
+// PEM private-key blocks (RSA/EC/OPENSSH/generic). Non-greedy body so two
+// adjacent blocks don't merge into one match.
+const PEM_BLOCK_RE =
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g
+// Credentials embedded in a URL: `scheme://user:password@host`. We redact the
+// password (capture group 2); the scheme + user are kept so the URL still reads.
+const URL_CRED_RE = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+):([^\s:/@]+)@/gi
 // IPv4: four 0-255 octets. We exclude the obviously non-PII ranges
 // (loopback 127.0.0.0/8, link-local 169.254.0.0/16, private 10.* + 192.168.*
 // + 172.16-31.*) so example/log addresses don't trigger false positives.
 const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g
-// Uncompressed IPv6: 8 groups of 1-4 hex digits. The compressed `::` form is
-// uncommon enough in user-facing PII that we skip it here.
+// Uncompressed IPv6: 8 groups of 1-4 hex digits.
 const IPV6_RE = /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g
+// Compressed IPv6, restricted to the `≥2 leading groups :: …` form
+// (e.g. `2001:db8::1`, `2001:db8::8a2e:370:7334`). Requiring two real hex
+// groups before the `::` keeps this away from `namespace::member` in ingested
+// code (`std::vector`, `Self::add`) — the bare `hex::hex` shape (`fe80::1`,
+// `::1`) is structurally indistinguishable from such code, so we skip it; those
+// forms are link-local / loopback anyway (non-PII), mirroring the private-IPv4
+// exclusions above.
+const IPV6_COMPRESSED_RE = /\b(?:[0-9a-fA-F]{1,4}:){2,}:(?:[0-9a-fA-F]{1,4}:?)*[0-9a-fA-F]{1,4}\b/g
 // Known API key prefixes — covers OpenAI, Anthropic, GitHub, Slack and a
 // few others that ship recognisable prefixes.
 const API_KEY_PREFIX_RE =
   /\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g
-// High-entropy fallback: the regex matches `(api_key|apikey|secret|token|
-// bearer)\s*[:=]\s*"?<value>"?` where `<value>` is ≥20 chars and looks
-// base64/hex-ish. The captured group `m[1]` is the secret value.
+// High-entropy fallback: matches `<hint>\s*[:=]\s*"?<value>"?` where `<value>`
+// is ≥20 non-whitespace, non-quote chars. The captured group `m[1]` is the
+// secret. The value class is `[^\s"']` (not a base64 whitelist) so dotted /
+// punctuation-bearing secrets — JWTs, AWS secret access keys, URL-safe tokens —
+// are captured whole instead of being truncated at the first symbol. The hint
+// list includes the underscore-joined AWS secret-key names, which `\bsecret\b`
+// alone would miss (the `_` is a word char, so there's no boundary before
+// `secret` in `aws_secret_access_key`).
 const API_KEY_HINT_RE =
-  /\b(?:api[_-]?key|apikey|secret|token|bearer|password)\b\s*[:=]\s*["']?([A-Za-z0-9_\-+/=]{20,})["']?/gi
+  /\b(?:aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret|secret[_-]?access[_-]?key|api[_-]?key|apikey|secret|token|bearer|password)\b\s*[:=]\s*["']?([^\s"']{20,})["']?/gi
 // Passport: ICAO machine-readable (1 letter + 8 digits) and the CN-specific
 // prefixes E/G/EH/EJ etc. Hint-driven (case-insensitive look-back).
 const PASSPORT_RE = /\b(?:[A-Z]{1,2}\d{7,8}|[Ee]\d{8}|[Gg]\d{8}|[Ee][Hh]\d{7}|[Ee][Jj]\d{7})\b/g
@@ -98,8 +134,13 @@ function stateless(re: RegExp): RegExp {
 const EMAIL_DETECT = stateless(EMAIL_RE)
 const CN_ID_DETECT = stateless(CN_ID_RE)
 const API_KEY_DETECT = stateless(API_KEY_PREFIX_RE)
+const API_KEY_HINT_DETECT = stateless(API_KEY_HINT_RE)
 const IPV6_DETECT = stateless(IPV6_RE)
+const IPV6_COMPRESSED_DETECT = stateless(IPV6_COMPRESSED_RE)
 const PASSPORT_DETECT = stateless(PASSPORT_RE)
+const JWT_DETECT = stateless(JWT_RE)
+const PEM_DETECT = stateless(PEM_BLOCK_RE)
+const URL_CRED_DETECT = stateless(URL_CRED_RE)
 
 function luhn(digits: string): boolean {
   let sum = 0
@@ -138,6 +179,8 @@ function freshState(): RedactState {
       NAME: 0,
       IP_ADDR: 0,
       API_KEY: 0,
+      JWT: 0,
+      PEM_KEY: 0,
       PASSPORT: 0,
       DRIVER_LICENSE: 0,
     },
@@ -184,14 +227,27 @@ function tokenize(state: RedactState, kind: PiiKind, original: string): string {
 export function redactText(text: string, nameHints: Iterable<string> = []): RedactionResult {
   const state = freshState()
 
-  let out = text.replace(EMAIL_RE, (m) => tokenize(state, "EMAIL", m))
+  // PEM blocks first: the base64 body would otherwise feed the card / key
+  // passes a stream of false candidates. Redact the whole block as one token.
+  let out = text.replace(PEM_BLOCK_RE, (m) => tokenize(state, "PEM_KEY", m))
+  // URL-embedded credentials before EMAIL, so the `password@host` tail can't be
+  // mistaken for an email address. Only the password (group 2) is redacted.
+  out = out.replace(URL_CRED_RE, (full, prefix: string, password: string) =>
+    full.replace(`:${password}@`, `:${tokenize(state, "API_KEY", password)}@`)
+  )
+  out = out.replace(EMAIL_RE, (m) => tokenize(state, "EMAIL", m))
   // API keys come *before* anything else digit-heavy so a key like
   // `sk-proj-abc...123` doesn't get half-eaten by the bank-card regex.
   out = out.replace(API_KEY_PREFIX_RE, (m) => tokenize(state, "API_KEY", m))
+  // JWTs before the hinted-secret pass so a `token: eyJ…` is claimed as a JWT
+  // (and the short placeholder no longer trips the ≥20-char hint matcher).
+  out = out.replace(JWT_RE, (m) => tokenize(state, "JWT", m))
   out = out.replace(API_KEY_HINT_RE, (full, secret: string) =>
     full.replace(secret, tokenize(state, "API_KEY", secret))
   )
-  out = out.replace(BANK_CARD_CANDIDATE_RE, (m) => (luhn(m) ? tokenize(state, "BANK_CARD", m) : m))
+  out = out.replace(BANK_CARD_CANDIDATE_RE, (m) =>
+    luhn(m.replace(/[ -]/g, "")) ? tokenize(state, "BANK_CARD", m) : m
+  )
   out = out.replace(CN_ID_RE, (m) => tokenize(state, "CN_ID", m))
   // Passport before phone: phones don't have leading letters, but passport
   // numbers often share digit lengths. Run passport first to claim them.
@@ -208,6 +264,11 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   // for a phone number first.
   out = out.replace(IPV4_RE, (m) => (isLikelyPublicIPv4(m) ? tokenize(state, "IP_ADDR", m) : m))
   out = out.replace(IPV6_RE, (m) => tokenize(state, "IP_ADDR", m))
+  out = out.replace(IPV6_COMPRESSED_RE, (m) => {
+    // Skip anything already swapped for a placeholder this pass.
+    if (/^\s*<[A-Z_]+_\d{3}>\s*$/.test(m)) return m
+    return tokenize(state, "IP_ADDR", m)
+  })
 
   for (const hint of nameHints) {
     const trimmed = hint.trim()
@@ -228,7 +289,7 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
  */
 export function unredactText(text: string, map: Record<string, RedactionRecord>): string {
   return text.replace(
-    /<(EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|PASSPORT|DRIVER_LICENSE)_\d{3}>/g,
+    /<(EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|JWT|PEM_KEY|PASSPORT|DRIVER_LICENSE)_\d{3}>/g,
     (placeholder) => {
       const record = map[placeholder]
       return record ? record.original : placeholder
@@ -254,14 +315,21 @@ export function hasNoLeakingPii(text: string): boolean {
   if (EMAIL_DETECT.test(text)) return false
   if (CN_ID_DETECT.test(text)) return false
   if (API_KEY_DETECT.test(text)) return false
+  if (API_KEY_HINT_DETECT.test(text)) return false
+  if (JWT_DETECT.test(text)) return false
+  if (PEM_DETECT.test(text)) return false
+  if (URL_CRED_DETECT.test(text)) return false
   if (PASSPORT_DETECT.test(text)) return false
   if (IPV6_DETECT.test(text)) return false
+  if (IPV6_COMPRESSED_DETECT.test(text)) return false
   // IPv4 — restrict to public addresses so log/example lines don't leak.
   for (const match of text.matchAll(IPV4_RE)) {
     if (isLikelyPublicIPv4(match[0])) return false
   }
+  // Bank cards — Luhn-check the separator-stripped digits so the spaced /
+  // dashed human form is caught, not just contiguous runs.
   for (const match of text.matchAll(BANK_CARD_CANDIDATE_RE)) {
-    if (luhn(match[0])) return false
+    if (luhn(match[0].replace(/[ -]/g, ""))) return false
   }
   return true
 }

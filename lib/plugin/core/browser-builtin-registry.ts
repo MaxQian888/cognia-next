@@ -15,6 +15,8 @@ import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
 import agentTeamExamplesManifest from "@/plugins/agent-team-examples/plugin.json"
 import backendRefactorManifest from "@/plugins/cognia-backend-refactor/plugin.json"
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
+import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
+import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -28,6 +30,8 @@ import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
+import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
+import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -110,6 +114,18 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://zhihu-content-pipeline",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(zhihuContentPipelineModule),
+  },
+  {
+    manifest: asPluginManifest(appearanceDemoManifest),
+    path: "builtin://cognia-appearance-demo",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(appearanceDemoModule),
+  },
+  {
+    manifest: asPluginManifest(schedulingDemoManifest),
+    path: "builtin://cognia-scheduling-demo",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(schedulingDemoModule),
   },
 ]
 

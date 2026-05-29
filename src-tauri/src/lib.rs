@@ -14,6 +14,7 @@ mod cua_sandbox;
 mod external_agent;
 mod files;
 mod fs_atomic;
+mod git;
 mod github;
 mod hooks;
 mod keyring_secrets;
@@ -277,6 +278,9 @@ pub fn run() {
         // The store outlives the window; dropping it on app shutdown
         // cascades into per-session Drop kills.
         .manage(terminal::TerminalState::new())
+        // Source Control panel (ADR-0038) — the watcher map per active repo.
+        // Stateless commands aside, this is the subsystem's only managed state.
+        .manage(git::GitWatcherState::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("vscode-extensions"))
@@ -690,6 +694,40 @@ pub fn run() {
             github::workspace::github_workspace_commit_and_push,
             github::workspace::github_workspace_remove,
             github::workspace::github_workspace_stat,
+            // Source Control panel (ADR-0038).
+            git::commands::git_is_repo,
+            git::commands::git_repo_state,
+            git::commands::git_status,
+            git::commands::git_diff_file,
+            git::commands::git_diff_commit,
+            git::commands::git_commit_files,
+            git::commands::git_log,
+            git::commands::git_file_history,
+            git::commands::git_branches,
+            git::commands::git_remotes,
+            git::commands::git_stash_list,
+            git::commands::git_conflicts,
+            git::commands::git_stage,
+            git::commands::git_unstage,
+            git::commands::git_discard,
+            git::commands::git_discard_all,
+            git::commands::git_commit,
+            git::commands::git_checkout_branch,
+            git::commands::git_create_branch,
+            git::commands::git_delete_branch,
+            git::commands::git_rename_branch,
+            git::commands::git_fetch,
+            git::commands::git_pull,
+            git::commands::git_push,
+            git::commands::git_sync,
+            git::commands::git_stash_push,
+            git::commands::git_stash_pop,
+            git::commands::git_stash_apply,
+            git::commands::git_stash_drop,
+            git::commands::git_resolve_conflict,
+            git::commands::git_merge_abort,
+            git::commands::git_watch_start,
+            git::commands::git_watch_stop,
             ocr::ocr_extract_native,
             ocr::ocr_list_native_backends,
             ocr::ocr_model_status,

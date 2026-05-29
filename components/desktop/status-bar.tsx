@@ -34,6 +34,7 @@ import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 
 const log = loggers.ui
 
@@ -143,6 +144,8 @@ export function StatusBar() {
         )}
         <span>{isDesktop ? t("tauri") : t("web")}</span>
       </StatusItem>
+
+      <StatusBarBranch />
 
       <StatusItem
         onClick={openCommandPalette}

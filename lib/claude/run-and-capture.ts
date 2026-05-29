@@ -25,6 +25,11 @@
 import { sendPrompt, interruptSession, onClaudeMessage } from "./ipc"
 import type { ClaudeEvent, SendContent, SendOptions } from "./types"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"
+import { listActiveChatMiddlewares } from "@/lib/claude/chat-middleware/registry"
+import { isChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/feature-flag"
+import type { ChatMiddlewareRequest } from "@/types/plugin/plugin-chat-middleware"
+import type { PluginMessage } from "@/types/plugin/plugin"
 
 export interface RunAndCaptureResult {
   /** The accumulated assistant reply text (concatenated text blocks). */
@@ -197,10 +202,77 @@ export interface RunAndCaptureOptions {
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
- * Drive a Claude turn and resolve with the assistant's captured text
- * once the session ends. See module-level docs for behavioural notes.
+ * Drive a Claude turn and resolve with the assistant's captured text once
+ * the session ends.
+ *
+ * Around-style chat middlewares (ADR-0026 §4 §A) wrap the *whole* turn, so
+ * they belong on this non-streaming full-reply path — not the streaming UI
+ * chat hook, where text is already on screen before any "final response"
+ * exists. Execution is gated behind a DEFAULT-OFF flag
+ * (`isChatMiddlewareExecutionEnabled`); when off, or when no middleware is
+ * registered, the call goes straight to `captureAssistantReplyCore` with zero
+ * overhead and identical behaviour. When on, the chain wraps the capture and
+ * any text transformation is applied back onto the full result.
  */
 export async function runAndCaptureAssistantReply(
+  sessionId: string,
+  prompt: SendContent,
+  options?: SendOptions,
+  cap?: RunAndCaptureOptions
+): Promise<RunAndCaptureResult> {
+  if (!isChatMiddlewareExecutionEnabled()) {
+    return captureAssistantReplyCore(sessionId, prompt, options, cap)
+  }
+  const active = listActiveChatMiddlewares()
+  if (active.length === 0) {
+    return captureAssistantReplyCore(sessionId, prompt, options, cap)
+  }
+
+  const request: ChatMiddlewareRequest = {
+    messages:
+      typeof prompt === "string"
+        ? [{ id: "turn", role: "user", content: prompt } satisfies PluginMessage]
+        : [],
+    model: options?.model ?? "",
+    sessionId,
+    options: {
+      systemPrompt: options?.systemPrompt,
+      appendSystemPrompt: options?.appendSystemPrompt,
+      allowedTools: options?.allowedTools,
+    },
+    signal: cap?.signal ?? new AbortController().signal,
+  }
+
+  // Hold the captured result on an object so TS keeps its union type across
+  // the terminal closure (a bare `let` would be narrowed to its only visible
+  // synchronous assignment).
+  const holder: { value: RunAndCaptureResult | null } = { value: null }
+  const { response } = await runChatMiddlewareChain(
+    request,
+    async () => {
+      const result = await captureAssistantReplyCore(sessionId, prompt, options, cap)
+      holder.value = result
+      return { text: result.text }
+    },
+    { signal: cap?.signal }
+  )
+
+  if (!holder.value) {
+    // A middleware short-circuited without calling next() — return its text
+    // with empty surfaces (no real turn ran).
+    return { text: response.text, messageId: "", a2uiSurfaces: {}, a2uiSurfaceOrder: [] }
+  }
+  // Apply any text transformation the chain produced onto the captured result.
+  return response.text === holder.value.text
+    ? holder.value
+    : { ...holder.value, text: response.text }
+}
+
+/**
+ * The actual capture implementation. See module-level docs for behavioural
+ * notes. Wrapped by `runAndCaptureAssistantReply` for chat-middleware support.
+ */
+async function captureAssistantReplyCore(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions,

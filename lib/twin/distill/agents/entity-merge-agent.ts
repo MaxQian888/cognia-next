@@ -176,7 +176,13 @@ export async function runEntityMergeAgent(
     if (!VALID_ROLES.includes(entity.role)) merged.push(entity)
   }
   for (const role of VALID_ROLES) {
-    const bucket = buckets[role]
+    const fullBucket = buckets[role]
+    // Pinned entities are user-curated — never cluster, rename, or fold them.
+    // Pass them through verbatim and only run the LLM merge over the rest, so
+    // a pinned entity can't be silently renamed to a cluster canonical.
+    const pinned = fullBucket.filter((e) => e.pinned)
+    const bucket = fullBucket.filter((e) => !e.pinned)
+    merged = [...merged, ...pinned]
     if (bucket.length < minBucket) {
       merged = [...merged, ...bucket]
       continue

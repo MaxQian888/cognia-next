@@ -176,12 +176,26 @@ export async function applyTwinContext(
   }
 
   const settings = settingsFor(character)
-  const profile = await getTwinProfile(character.twinId)
   const collection = deps.vectorCollection ?? vectorCollectionName(character.twinId)
 
   let queryEmbedding: number[] | null = input.precomputedQueryEmbedding ?? null
   let degraded = false
   let degradedReason: string | undefined
+
+  // Load the profile defensively. getTwinProfile is documented as "never
+  // throws", but a Dexie failure (db locked / corrupt / quota exceeded) would
+  // otherwise propagate straight out of applyTwinContext and break its OWN
+  // never-throws contract — which today only survives because every caller
+  // re-wraps it. Degrade here instead so the guarantee is real.
+  let profile: Awaited<ReturnType<typeof getTwinProfile>>
+  try {
+    profile = await getTwinProfile(character.twinId)
+  } catch (err) {
+    profile = undefined
+    degraded = true
+    degradedReason =
+      err instanceof Error ? `profile-load-failed: ${err.message}` : "profile-load-failed: unknown"
+  }
 
   // Embed the user message — needed by both the RAG and style passes.
   if (!queryEmbedding && (settings.enableRag || settings.enableStyleFewShot)) {
@@ -219,21 +233,38 @@ export async function applyTwinContext(
       // disabled we pass the vector hits through unchanged (and preserve their
       // raw similarity scores). BM25 recall lifts verbatim ids / proper nouns /
       // file references that pure semantic search ranks low.
-      let orderedIds: string[]
+      let orderedIds: string[] = []
       const scoreById = new Map<string, number>()
-      if (settings.enableHybrid && character.twinId) {
-        const keywordHits = await keywordSearch(character.twinId, userMessage, fetchLimit)
-        const keywordWeight = Math.min(1, Math.max(0, settings.hybridKeywordWeight))
-        const fused = reciprocalRankFusion(
-          [vectorHits.map((h) => ({ id: h.id, score: h.score })), keywordHits],
-          [1 - keywordWeight, keywordWeight],
-          60
-        )
-        orderedIds = fused.slice(0, fetchLimit).map((f) => f.id)
-        for (const f of fused) scoreById.set(f.id, f.score)
-      } else {
+      const setVectorOnly = (): void => {
         orderedIds = vectorHits.map((h) => h.id)
+        scoreById.clear()
         for (const h of vectorHits) scoreById.set(h.id, h.score)
+      }
+      if (settings.enableHybrid && character.twinId) {
+        try {
+          const keywordHits = await keywordSearch(character.twinId, userMessage, fetchLimit)
+          const keywordWeight = Math.min(1, Math.max(0, settings.hybridKeywordWeight))
+          const fused = reciprocalRankFusion(
+            [vectorHits.map((h) => ({ id: h.id, score: h.score })), keywordHits],
+            [1 - keywordWeight, keywordWeight],
+            60
+          )
+          orderedIds = fused.slice(0, fetchLimit).map((f) => f.id)
+          for (const f of fused) scoreById.set(f.id, f.score)
+        } catch (err) {
+          // The BM25 lane failed but the vector search already succeeded —
+          // fall back to vector-only ordering rather than discarding the good
+          // vector hits (which is what letting this reach the outer catch would
+          // do, mislabelled as `retrieve-failed`). Flag the partial degradation.
+          degraded = true
+          degradedReason =
+            err instanceof Error
+              ? `hybrid-bm25-failed: ${err.message}`
+              : "hybrid-bm25-failed: unknown"
+          setVectorOnly()
+        }
+      } else {
+        setVectorOnly()
       }
 
       const dbChunks = await getTwinChunksByVectorDocIds(orderedIds)
@@ -286,14 +317,20 @@ export async function applyTwinContext(
       degradedReason =
         err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed: unknown"
     }
+  } else if (settings.enableRag && queryEmbedding && !deps.store.searchByEmbedding) {
+    // RAG was requested and we have a query embedding, but the configured store
+    // exposes no `searchByEmbedding` — surface it as a degradation instead of
+    // silently returning "no context, no warning".
+    degraded = true
+    degradedReason = "store-no-search"
   }
 
-  // Style few-shot — pure in-memory pass over the profile. When every
-  // StyleSample on the profile has an `embedding` (distill backfilled
-  // them during the last run), pass them to the selector for cosine
-  // ranking. Otherwise the selector falls back to a token-overlap
-  // heuristic on `summary` — and we kick off a background backfill so the
-  // cosine path lights up on a later turn.
+  // Style few-shot — pure in-memory pass over the profile. We pass a SPARSE
+  // per-sample embedding array (the sample's `embedding` or null): the selector
+  // scores each sample by cosine when it has an embedding and falls back to
+  // token-overlap only for the gaps. A single un-embedded sample therefore no
+  // longer drags the whole profile onto the lossy path. We still kick off a
+  // background backfill so the remaining gaps light up cosine on a later turn.
   if (settings.enableStyleFewShot && profile && profile.styleSamples.length > 0 && queryEmbedding) {
     maybeBackfillStyleEmbeddings(character.twinId, profile.styleSamples, deps.embedding)
   }
@@ -302,11 +339,9 @@ export async function applyTwinContext(
       ? selectFewShotSamples({
           queryEmbedding,
           samples: profile.styleSamples,
-          sampleEmbeddings: profile.styleSamples.every(
-            (s) => Array.isArray(s.embedding) && s.embedding.length > 0
-          )
-            ? profile.styleSamples.map((s) => s.embedding as number[])
-            : undefined,
+          sampleEmbeddings: profile.styleSamples.map((s) =>
+            Array.isArray(s.embedding) && s.embedding.length > 0 ? s.embedding : null
+          ),
           queryText: userMessage,
           topK: settings.styleSamplesK,
         }).map((s) => s.sample)

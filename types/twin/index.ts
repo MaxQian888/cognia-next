@@ -396,6 +396,14 @@ export interface TwinJob {
    */
   nextAttemptAt?: number
 
+  /**
+   * ms-since-epoch lease deadline, stamped when the worker claims the job and
+   * refreshed on every progress update. If a worker crashes mid-run the row is
+   * left `status="running"` forever; `claimNextQueuedJob` reclaims `running`
+   * rows whose `leaseExpiresAt` has passed. Absent on queued / terminal rows.
+   */
+  leaseExpiresAt?: number
+
   /** FK → twinDrafts.id[] — produced by `distill` runs. */
   outputDraftIds?: string[]
 
@@ -515,6 +523,21 @@ export interface TwinRuntimeLlmSettings {
   baseURL?: string
 }
 
+export interface TwinRuntimeRerankSettings {
+  /**
+   * When true, runtime RAG over-fetches a wider candidate pool and re-scores it
+   * with the configured reranker before keeping the top-K. When false, RAG
+   * fetches exactly `ragTopK` (no over-fetch, no rerank pass).
+   */
+  enabled: boolean
+  /**
+   * Reranker model id. `"lexical"` is the built-in, key-free re-scorer that
+   * blends cosine score with query-term coverage. Other ids are reserved for
+   * future model-backed rerankers.
+   */
+  model: "lexical" | (string & {})
+}
+
 export interface TwinRuntimeSettings {
   /** When false, the workbench does not auto-start its job-worker even if
    *  jobs are queued. */
@@ -522,6 +545,8 @@ export interface TwinRuntimeSettings {
   storage: TwinRuntimeStorageConfig
   embedding: TwinRuntimeEmbeddingSettings
   llm: TwinRuntimeLlmSettings
+  /** Optional RAG reranking stage. Off by default. */
+  reranker?: TwinRuntimeRerankSettings
 }
 
 export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
@@ -538,5 +563,9 @@ export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     apiKey: "",
+  },
+  reranker: {
+    enabled: false,
+    model: "lexical",
   },
 }

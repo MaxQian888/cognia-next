@@ -25,6 +25,8 @@ import {
   updatePlaybook,
   updateStyleSample,
   upsertEntities,
+  upsertPlaybooks,
+  upsertStyleSamples,
 } from "./twin-profile"
 import type { Playbook, ProfileEntity, StyleSample } from "@/types/twin"
 
@@ -198,6 +200,75 @@ describe("upsertEntities honors pinned", () => {
     await upsertEntities(TWIN_ID, [makeEntity("Bob", { relation: "new" })])
     const profile = await getTwinProfile(TWIN_ID)
     expect(profile?.entities.find((e) => e.name === "Bob")?.relation).toBe("new")
+  })
+
+  it("keeps same-name entities with different roles distinct (T2.5)", async () => {
+    await upsertEntities(TWIN_ID, [
+      makeEntity("Phoenix", { role: "person" }),
+      makeEntity("Phoenix", { role: "project" }),
+    ])
+    const profile = await getTwinProfile(TWIN_ID)
+    const phoenixes = profile?.entities.filter((e) => e.name === "Phoenix") ?? []
+    expect(phoenixes).toHaveLength(2)
+    expect(phoenixes.map((e) => e.role).sort()).toEqual(["person", "project"])
+  })
+})
+
+describe("upsertStyleSamples / upsertPlaybooks — re-distill safety (T1.2)", () => {
+  it("de-dupes style samples by content key across repeated distills", async () => {
+    await upsertStyleSamples(TWIN_ID, [
+      makeStyleSample("s1", { summary: "tone A", sourceChunkId: "c1" }),
+    ])
+    const again = await upsertStyleSamples(TWIN_ID, [
+      makeStyleSample("s2", { summary: "tone A", sourceChunkId: "c1" }),
+    ])
+    // Same sourceChunkId + summary → one row, refreshed (not duplicated).
+    expect(again.styleSamples).toHaveLength(1)
+  })
+
+  it("preserves a pinned style sample, dropping the incoming distill duplicate", async () => {
+    await upsertStyleSamples(TWIN_ID, [
+      makeStyleSample("s1", { summary: "X", sourceChunkId: "c1" }),
+    ])
+    await setStyleSamplePinned(TWIN_ID, "s1", true)
+    const after = await upsertStyleSamples(TWIN_ID, [
+      makeStyleSample("s2", { summary: "X", sourceChunkId: "c1" }),
+    ])
+    expect(after.styleSamples).toHaveLength(1)
+    expect(after.styleSamples[0].id).toBe("s1")
+    expect(after.styleSamples[0].pinned).toBe(true)
+  })
+
+  it("adds genuinely new style content and populates embeddings via embeddingFn", async () => {
+    const after = await upsertStyleSamples(
+      TWIN_ID,
+      [
+        makeStyleSample("s1", { summary: "A", sourceChunkId: "c1" }),
+        makeStyleSample("s2", { summary: "B", sourceChunkId: "c1" }),
+      ],
+      { embeddingFn: async () => [0.1, 0.2, 0.3] }
+    )
+    expect(after.styleSamples).toHaveLength(2)
+    expect(after.styleSamples.every((s) => s.embedding?.length === 3)).toBe(true)
+  })
+
+  it("de-dupes playbooks by title+trigger and preserves pinned", async () => {
+    await upsertPlaybooks(TWIN_ID, [
+      makePlaybook("p1", { title: "Handle refund", trigger: "refund asked" }),
+    ])
+    const dup = await upsertPlaybooks(TWIN_ID, [
+      makePlaybook("p2", { title: "Handle refund", trigger: "refund asked" }),
+    ])
+    expect(dup.playbooks).toHaveLength(1)
+
+    await setPlaybookPinned(TWIN_ID, dup.playbooks[0].id, true)
+    const pinnedId = dup.playbooks[0].id
+    const after = await upsertPlaybooks(TWIN_ID, [
+      makePlaybook("p3", { title: "Handle refund", trigger: "refund asked", confidence: 0.99 }),
+    ])
+    expect(after.playbooks).toHaveLength(1)
+    expect(after.playbooks[0].id).toBe(pinnedId)
+    expect(after.playbooks[0].pinned).toBe(true)
   })
 })
 

@@ -60,6 +60,14 @@ import {
   unregisterScheduledTasksForPlugin,
 } from "@/lib/plugin/bridge/scheduled-task-bridge"
 import {
+  registerModalMountsForPlugin,
+  unregisterModalMountsForPlugin,
+} from "@/lib/plugin/bridge/modal-mount-bridge"
+import {
+  registerChatMiddlewaresForPlugin,
+  unregisterChatMiddlewaresForPlugin,
+} from "@/lib/plugin/bridge/chat-middleware-bridge"
+import {
   registerDensityPresetsForPlugin,
   unregisterDensityPresetsByPlugin,
 } from "@/lib/appearance/density-preset-registry"
@@ -199,6 +207,38 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterDensityPresetsByPlugin(pluginId)
+    },
+  },
+  "chat-middleware": {
+    // Synthetic key. Declarative `manifest.chatMiddlewares[]` → the
+    // chat-middleware registry. Registration always happens; EXECUTION is
+    // gated behind a default-off flag at the send call-site
+    // (lib/claude/chat-middleware/feature-flag.ts), so wiring this never
+    // changes default chat behaviour.
+    key: "chat-middleware",
+    manifestField: "chatMiddlewares",
+    register: async (ctx) => {
+      await registerChatMiddlewaresForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterChatMiddlewaresForPlugin(pluginId)
+    },
+  },
+  "modal-mount": {
+    // Synthetic key. Declarative `manifest.modalMounts[]` → the modal store's
+    // lazy declared-modal registry. Field-driven gating; the component is not
+    // imported until the modal is actually opened.
+    key: "modal-mount",
+    manifestField: "modalMounts",
+    register: async (ctx) => {
+      await registerModalMountsForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterModalMountsForPlugin(pluginId)
     },
   },
   scheduler: {

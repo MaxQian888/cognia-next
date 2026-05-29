@@ -69,6 +69,8 @@ import {
   listJobsByTwinAndKind,
   listJobsByTwinAndStatus,
   listTwinJobsByTwin,
+  releaseClaim,
+  requeueJob,
   updateJobProgress,
 } from "./twin-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -731,5 +733,53 @@ describe("twinJobs CRUD + scheduler", () => {
     const job = await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
     await deleteTwinJob(job.id)
     expect(await getTwinJob(job.id)).toBeUndefined()
+  })
+
+  it("claimNextQueuedJob stamps a lease deadline (T1.4)", async () => {
+    await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
+    const claimed = await claimNextQueuedJob("twin_alice", 1_000_000)
+    expect(claimed?.leaseExpiresAt).toBeGreaterThan(1_000_000)
+  })
+
+  it("updateJobProgress refreshes the lease (T1.4)", async () => {
+    const job = await createTwinJob({ twinId: "twin_alice", kind: "distill", sourceIds: [] })
+    await claimNextQueuedJob("twin_alice", 1_000)
+    await updateJobProgress(job.id, { phase: "knowledge-agent", progress: 30 })
+    const refreshed = await getTwinJob(job.id)
+    // Refreshed to Date.now()+TTL — far beyond the tiny claim clock above.
+    expect(refreshed?.leaseExpiresAt).toBeGreaterThan(1_000_000)
+  })
+
+  it("reclaims a running job whose lease has expired (T1.4)", async () => {
+    const job = await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
+    const claimed = await claimNextQueuedJob("twin_alice", 1_000)
+    expect(claimed?.id).toBe(job.id)
+    const leaseAt = claimed!.leaseExpiresAt!
+    // No queued rows remain; claiming past the lease reclaims the stuck row.
+    const reclaimed = await claimNextQueuedJob("twin_alice", leaseAt + 1)
+    expect(reclaimed?.id).toBe(job.id)
+    expect(reclaimed?.status).toBe("running")
+  })
+
+  it("does NOT reclaim a running job with a live lease (T1.4)", async () => {
+    await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
+    const claimed = await claimNextQueuedJob("twin_alice", 1_000)
+    const within = claimed!.leaseExpiresAt! - 1
+    expect(await claimNextQueuedJob("twin_alice", within)).toBeUndefined()
+  })
+
+  it("releaseClaim requeues without burning retry budget, unlike requeueJob (T1.5)", async () => {
+    const job = await createTwinJob({ twinId: "twin_alice", kind: "ingest", sourceIds: [] })
+    await claimNextQueuedJob("twin_alice", 1_000)
+    await releaseClaim(job.id)
+    const released = await getTwinJob(job.id)
+    expect(released?.status).toBe("queued")
+    expect(released?.retryCount).toBe(0) // seat contention is not a failure
+    expect(released?.leaseExpiresAt).toBeUndefined()
+
+    // Contrast: requeueJob (a genuine transient failure) DOES advance the budget.
+    await claimNextQueuedJob("twin_alice", 2_000)
+    await requeueJob(job.id, 3_000)
+    expect((await getTwinJob(job.id))?.retryCount).toBe(1)
   })
 })

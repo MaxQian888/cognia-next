@@ -22,6 +22,7 @@ import {
   failJob,
   getTwinJob,
   pauseJob as pauseJobRow,
+  releaseClaim,
   requeueJob,
   resumeJob as resumeJobRow,
 } from "@/lib/db/twin-jobs"
@@ -298,14 +299,17 @@ export function startJobWorker(config: JobWorkerConfig, twinId?: string): JobWor
 
   const tickOnce = async () => {
     if (paused) return
-    // Peek without claiming to enforce per-kind concurrency. A small race
-    // is acceptable here: if a different tab claims this job we just see
-    // an empty queue on the next tick.
+    // Don't claim anything when neither kind has a free seat — avoids churn
+    // and avoids claiming a job we'd only have to release.
+    if (!seatsOpen("ingest") && !seatsOpen("distill")) return
     const job = await claimNextQueuedJob(twinId, (config.now ?? Date.now)())
     if (!job) return
     if (!seatsOpen(job.kind)) {
-      // No seat available — release the claim by flipping back to queued.
-      await requeueJob(job.id, (config.now ?? Date.now)())
+      // Claimed a job whose kind has no free seat — release it WITHOUT burning
+      // the retry budget. Seat contention is not a failure, so this must not go
+      // through `requeueJob` (which increments retryCount and could dead-letter
+      // a perfectly healthy job after a few bounces).
+      await releaseClaim(job.id)
       return
     }
     const tracker = job.kind === "ingest" ? inflightIngest : inflightDistill

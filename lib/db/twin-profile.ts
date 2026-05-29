@@ -67,28 +67,66 @@ export interface AppendStyleSamplesOptions {
   embeddingFn?: (summary: string) => Promise<number[]>
 }
 
+async function enrichSamplesWithEmbeddings(
+  samples: StyleSample[],
+  embeddingFn?: (summary: string) => Promise<number[]>
+): Promise<StyleSample[]> {
+  if (!embeddingFn) return samples
+  return Promise.all(
+    samples.map(async (s) => {
+      try {
+        return { ...s, embedding: await embeddingFn(s.summary) }
+      } catch {
+        return s
+      }
+    })
+  )
+}
+
+/** Stable content key for de-duping style samples across re-distill runs. */
+function styleSampleKey(s: StyleSample): string {
+  return `${s.sourceChunkId}::${s.summary.trim().toLowerCase()}`
+}
+
 export async function appendStyleSamples(
   twinId: string,
   samples: StyleSample[],
   options: AppendStyleSamplesOptions = {}
 ): Promise<TwinProfile> {
   const profile = await ensureTwinProfile(twinId)
-  let enriched = samples
-  if (options.embeddingFn) {
-    const fn = options.embeddingFn
-    enriched = await Promise.all(
-      samples.map(async (s) => {
-        try {
-          return { ...s, embedding: await fn(s.summary) }
-        } catch {
-          return s
-        }
-      })
-    )
-  }
+  const enriched = await enrichSamplesWithEmbeddings(samples, options.embeddingFn)
   const merged: TwinProfile = {
     ...profile,
     styleSamples: [...profile.styleSamples, ...enriched],
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+/**
+ * Re-distill–safe style-sample writer. Unlike {@link appendStyleSamples} this
+ * de-dupes by content key (`sourceChunkId` + normalized `summary`) so repeated
+ * distills don't multiply the array, and it preserves any existing **pinned**
+ * sample (the incoming distill sample with the same content is dropped so the
+ * user's pin / edit survives). Mirrors {@link upsertEntities}.
+ */
+export async function upsertStyleSamples(
+  twinId: string,
+  samples: StyleSample[],
+  options: AppendStyleSamplesOptions = {}
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const enriched = await enrichSamplesWithEmbeddings(samples, options.embeddingFn)
+  const byKey = new Map(profile.styleSamples.map((s) => [styleSampleKey(s), s]))
+  for (const sample of enriched) {
+    const key = styleSampleKey(sample)
+    if (byKey.get(key)?.pinned) continue
+    byKey.set(key, sample)
+  }
+  const merged: TwinProfile = {
+    ...profile,
+    styleSamples: Array.from(byKey.values()),
     updatedAt: Date.now(),
   }
   await getDb().twinProfile.put(merged)
@@ -117,6 +155,14 @@ export async function backfillStyleSampleEmbeddings(
   const next: StyleSample[] = []
   for (const sample of profile.styleSamples) {
     if (Array.isArray(sample.embedding) && sample.embedding.length > 0) {
+      next.push(sample)
+      skipped += 1
+      continue
+    }
+    // An empty/whitespace summary can't be embedded meaningfully and would
+    // fail on every backfill pass — skip it so it can't spin forever. The
+    // per-sample few-shot scorer just leaves it on the token-overlap path.
+    if (!sample.summary.trim()) {
       next.push(sample)
       skipped += 1
       continue
@@ -151,17 +197,49 @@ export async function appendPlaybooks(twinId: string, playbooks: Playbook[]): Pr
   return merged
 }
 
+/** Stable content key for de-duping playbooks across re-distill runs. */
+function playbookKey(p: Playbook): string {
+  return `${p.title.trim().toLowerCase()}::${p.trigger.trim().toLowerCase()}`
+}
+
+/**
+ * Re-distill–safe playbook writer. De-dupes by content key (normalized
+ * `title` + `trigger`) and preserves existing **pinned** playbooks, so repeated
+ * distills refresh content without multiplying rows or clobbering user pins.
+ * Mirrors {@link upsertEntities}.
+ */
+export async function upsertPlaybooks(twinId: string, playbooks: Playbook[]): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const byKey = new Map(profile.playbooks.map((p) => [playbookKey(p), p]))
+  for (const pb of playbooks) {
+    const key = playbookKey(pb)
+    if (byKey.get(key)?.pinned) continue
+    byKey.set(key, pb)
+  }
+  const merged: TwinProfile = {
+    ...profile,
+    playbooks: Array.from(byKey.values()),
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
 export async function upsertEntities(
   twinId: string,
   entities: ProfileEntity[]
 ): Promise<TwinProfile> {
   const profile = await ensureTwinProfile(twinId)
-  const byName = new Map(profile.entities.map((e) => [e.name.toLowerCase(), e]))
+  // Key by name AND role: a person and a project sharing a name are distinct
+  // entities and must not overwrite each other (the previous name-only key
+  // silently dropped one of them).
+  const keyOf = (e: ProfileEntity): string => `${e.name.toLowerCase()}::${e.role}`
+  const byName = new Map(profile.entities.map((e) => [keyOf(e), e]))
   for (const entity of entities) {
-    const key = entity.name.toLowerCase()
+    const key = keyOf(entity)
     const existing = byName.get(key)
     // A pinned existing entity is preserved across re-distill — distill output
-    // for the same name is dropped so user edits / manual additions survive.
+    // for the same name+role is dropped so user edits / manual additions survive.
     if (existing?.pinned) continue
     byName.set(key, entity)
   }

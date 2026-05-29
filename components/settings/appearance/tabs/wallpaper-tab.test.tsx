@@ -94,11 +94,16 @@ jest.mock("@/lib/appearance/wallpaper-storage", () => {
 })
 
 import { WallpaperTab } from "./wallpaper-tab"
+import {
+  applyPluginWallpapers,
+  __resetPluginWallpapersForTesting,
+} from "@/lib/plugin/bridge/wallpaper-bridge"
 
 beforeEach(() => {
   jest.clearAllMocks()
   storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS }
   storeState.wallpapers = []
+  __resetPluginWallpapersForTesting()
 })
 
 describe("WallpaperTab", () => {
@@ -225,6 +230,40 @@ describe("WallpaperTab", () => {
     expect(active.getAttribute("aria-checked")).toBe("true")
     const other = screen.getByRole("radio", { name: /scope\.chat\.label/i })
     expect(other.getAttribute("aria-checked")).toBe("false")
+  })
+
+  it("merges plugin-contributed wallpapers into the gallery with a Plugin badge", async () => {
+    applyPluginWallpapers({
+      pluginId: "demo",
+      pluginRoot: "/p/demo",
+      resolveAsset: () => "",
+      wallpapers: [
+        {
+          id: "aurora",
+          name: "Aurora",
+          source: { kind: "gradient", css: "linear-gradient(#000,#fff)" },
+        },
+      ],
+    })
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    expect(screen.getByLabelText("Aurora")).toBeInTheDocument()
+    expect(screen.getByText("pluginBadge")).toBeInTheDocument()
+  })
+
+  it("activating a plugin wallpaper calls setActiveWallpaper with its namespaced id", async () => {
+    applyPluginWallpapers({
+      pluginId: "demo",
+      pluginRoot: "/p/demo",
+      resolveAsset: () => "",
+      wallpapers: [{ id: "aurora", name: "Aurora", source: { kind: "color", value: "#102030" } }],
+    })
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    fireEvent.click(screen.getByLabelText("Aurora"))
+    expect(setActiveWallpaper).toHaveBeenCalledWith("plugin-demo-aurora")
   })
 
   it("uploads a file: saveImage → addWallpaper → setActiveWallpaper", async () => {

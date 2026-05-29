@@ -97,6 +97,7 @@ import {
   MODULE_BRIDGE_CAPABILITY_KEYS,
 } from "@/lib/plugin/contracts/module-bridge-map"
 import { createPluginAssetResolver } from "@/lib/plugin/core/plugin-asset-resolver"
+import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-component-bridge"
 // Skill detach still calls unregisterSkillsByPlugin directly after the
 // per-character cleanup hook; the map's bulk unregister fires for the
 // other three capabilities via the disable loop.
@@ -2633,6 +2634,18 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Import a module relative to a plugin's install root using the loader's
+   * proven 3-strategy resolver (Tauri asset-protocol → fetch+eval → script
+   * tag). Public so non-manager hosts — e.g. the `configComponent` renderer
+   * in the settings panel — can resolve a plugin's lazy entry the same way
+   * the module-bridge loop does, instead of a bare `import()` that mishandles
+   * Tauri asset paths.
+   */
+  importPluginEntry(entry: string): Promise<Record<string, unknown>> {
+    return this.loader.importEntry(entry)
+  }
+
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
@@ -2657,6 +2670,11 @@ export class PluginManager {
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       await MODULE_BRIDGE_CAPABILITIES[cap].unregister(pluginId)
     }
+    // Drop the cached `manifest.configComponent` module so a re-enable (or a
+    // hot-reload during dev) re-imports the component instead of serving a
+    // stale closure. The settings host falls back to the schema form until
+    // the plugin re-registers.
+    invalidateConfigComponentForPlugin(pluginId)
 
     // Unregister all tools
     if (plugin.tools) {

@@ -12,8 +12,8 @@ import { updateJobProgress } from "@/lib/db/twin-jobs"
 import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
 import { loggers } from "@/lib/logging"
 import {
-  appendPlaybooks,
-  appendStyleSamples,
+  upsertPlaybooks,
+  upsertStyleSamples,
   ensureTwinProfile,
   setVoiceSummary,
   upsertEntities,
@@ -89,7 +89,7 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
 
   // ───── Persist profile updates ─────
   await updateJobProgress(job.id, { phase: "persisting-profile", progress: 87 })
-  // Wrap `generateEmbedding` so `appendStyleSamples` can populate
+  // Wrap `generateEmbedding` so the style writer can populate
   // `StyleSample.embedding` inline. Failures are swallowed per-sample —
   // the runtime falls back to token-overlap when the field is absent.
   const embeddingFn = input.embedding
@@ -98,13 +98,27 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
         return result.embedding
       }
     : undefined
-  await appendStyleSamples(job.twinId, result.styleSamples, { embeddingFn })
-  await appendPlaybooks(job.twinId, result.playbooks)
+  // Upsert (not append) so a re-distill de-dupes by content and preserves any
+  // user-pinned style sample / playbook instead of multiplying the arrays.
+  await upsertStyleSamples(job.twinId, result.styleSamples, { embeddingFn })
+  await upsertPlaybooks(job.twinId, result.playbooks)
   if (result.entities.length > 0) {
     await upsertEntities(job.twinId, result.entities)
   }
   if (result.voiceSummary && result.voiceSummary !== profile.voiceSummary) {
-    await setVoiceSummary(job.twinId, result.voiceSummary)
+    // The voiceSummary is injected verbatim into the runtime system prompt, so
+    // it must clear the same PII gate as draft bodies. The synthesizer builds
+    // it from redacted chunks, but guard the write path anyway: if a leak slips
+    // through, re-redact it rather than persist raw PII into every future turn.
+    let voiceSummary = result.voiceSummary
+    if (!hasNoLeakingPii(voiceSummary)) {
+      loggers.scheduler.warn("twin distill: re-redacted voiceSummary after PII leak", {
+        jobId: job.id,
+        twinId: job.twinId,
+      })
+      voiceSummary = redactText(voiceSummary).redacted
+    }
+    await setVoiceSummary(job.twinId, voiceSummary)
   }
 
   // ───── Persist per-chunk entity tags ─────

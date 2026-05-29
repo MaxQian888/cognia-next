@@ -236,6 +236,21 @@ export interface TwinRuntimeDepsForBuild {
   }
   vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
   vectorCollection?: string
+  /**
+   * Optional RAG reranker. When present, applyTwinContext over-fetches a wider
+   * candidate pool and re-scores it with `scorer` before keeping top-K. Shape
+   * mirrors `apply-twin-context:ApplyTwinContextDeps.reranker` structurally
+   * (kept inline so build-options stays decoupled from the twin module).
+   */
+  reranker?: {
+    model?: string
+    overFetch?: number
+    timeoutMs?: number
+    scorer?: (
+      query: string,
+      candidate: { id: string; content: string; score: number; sourceTitle?: string }
+    ) => number | Promise<number>
+  }
 }
 
 /**

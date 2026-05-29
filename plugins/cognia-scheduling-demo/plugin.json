@@ -1,0 +1,29 @@
+{
+  "id": "cognia-scheduling-demo",
+  "name": "Scheduling Demo",
+  "version": "0.1.0",
+  "description": "Reference plugin exercising the scheduledTasks contribution: a benign daily task whose handler logs a heartbeat.",
+  "type": "frontend",
+  "capabilities": ["scheduler"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
+  "scheduledTasks": [
+    {
+      "name": "demo-heartbeat",
+      "description": "Logs a heartbeat once a day — demonstrates a plugin-contributed scheduled task.",
+      "handler": "demoHeartbeat",
+      "trigger": { "type": "interval", "seconds": 86400 },
+      "defaultEnabled": false,
+      "tags": ["demo"]
+    }
+  ]
+}

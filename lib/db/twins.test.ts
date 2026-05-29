@@ -25,8 +25,21 @@ import { createTwinDraft } from "./twin-drafts"
 import { createTwinJob } from "./twin-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import type { Character } from "@/lib/claude/types"
+import { syncTwinCronToScheduler } from "@/lib/twin/cron/cron-bridge"
+
+// `deleteTwin` reaches outside the twin Dexie DB to clean up scheduler cron
+// tasks + the remote vector collection (T1.3). Both are pulled via dynamic
+// import, so mock the modules here.
+jest.mock("@/lib/twin/cron/cron-bridge", () => ({
+  syncTwinCronToScheduler: jest.fn(async () => ({})),
+}))
+const mockDeleteCollection = jest.fn(async () => {})
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: jest.fn(async () => ({ store: { deleteCollection: mockDeleteCollection } })),
+}))
 
 beforeEach(async () => {
+  jest.clearAllMocks()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -209,6 +222,21 @@ describe("deleteTwin cascade", () => {
       profileDeleted: false,
       detachedCharacterIds: [],
     })
+  })
+
+  it("removes scheduler cron tasks and drops the remote vector collection (T1.3)", async () => {
+    const twin = await createTwin({ id: "twin-cleanup", name: "X" })
+    await deleteTwin(twin.id)
+    expect(syncTwinCronToScheduler).toHaveBeenCalledWith("twin-cleanup", undefined)
+    expect(mockDeleteCollection).toHaveBeenCalledWith("cognia_twin_twin-cleanup")
+  })
+
+  it("tolerates cleanup failures without failing the row delete (T1.3)", async () => {
+    ;(syncTwinCronToScheduler as jest.Mock).mockRejectedValueOnce(new Error("scheduler down"))
+    mockDeleteCollection.mockRejectedValueOnce(new Error("vector store down"))
+    const twin = await createTwin({ id: "twin-resilient", name: "Y" })
+    await expect(deleteTwin(twin.id)).resolves.toMatchObject({ profileDeleted: false })
+    expect(await getTwin("twin-resilient")).toBeUndefined()
   })
 })
 

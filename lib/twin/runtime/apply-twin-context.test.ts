@@ -20,6 +20,19 @@ jest.mock("@/lib/ai/embedding/embedding", () => ({
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
 }))
 
+// Wrap getTwinProfile / keywordSearch as jest.fns that call through to the real
+// implementation by default. Module exports are non-configurable getters under
+// the ts-jest transform, so spyOn can't redefine them — a mock factory is the
+// only way to override these per-test (T2.3 degradation tests).
+jest.mock("@/lib/db/twin-profile", () => {
+  const actual = jest.requireActual("@/lib/db/twin-profile")
+  return { ...actual, getTwinProfile: jest.fn(actual.getTwinProfile) }
+})
+jest.mock("./bm25-index", () => {
+  const actual = jest.requireActual("./bm25-index")
+  return { ...actual, keywordSearch: jest.fn(actual.keywordSearch) }
+})
+
 import { applyTwinContext, __flushStyleBackfills } from "./apply-twin-context"
 import type { ApplyTwinContextDeps } from "./apply-twin-context"
 import { getPluginEventHooks } from "@/lib/plugin"
@@ -27,7 +40,7 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
 import { ensureTwinProfile, appendStyleSamples, getTwinProfile } from "@/lib/db/twin-profile"
-import { __resetTwinBm25Cache } from "./bm25-index"
+import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@/lib/vector/store"
 
@@ -379,6 +392,77 @@ describe("applyTwinContext", () => {
     expect(result.degraded).toBe(true)
     expect(result.degradedReason).toBe("retrieve-failed: unknown")
     expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
+  })
+
+  it("degrades (does not throw) when getTwinProfile fails to load (T2.3)", async () => {
+    mockEmbedding()
+    ;(getTwinProfile as jest.Mock).mockRejectedValueOnce(new Error("db locked"))
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "hello",
+      deps: baseDeps,
+    })
+    // Never throws — degrades and still renders the base prompt.
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toContain("profile-load-failed")
+    expect(result.applied?.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
+  })
+
+  it("degrades with 'store-no-search' when the store can't search by embedding (T2.3)", async () => {
+    mockEmbedding()
+    const store = { ...makeFakeStore(), searchByEmbedding: undefined } as unknown as IVectorStore
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "anything",
+      deps: { ...baseDeps, store },
+    })
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toBe("store-no-search")
+    expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
+  })
+
+  it("falls back to vector-only (keeping hits) when the BM25 lane throws (T2.3)", async () => {
+    mockEmbedding()
+    const source = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/v.md",
+      title: "Vector doc",
+      bytes: 10,
+      fingerprint: "f-bm25-throw",
+      redacted: false,
+    })
+    const [chunk] = await bulkCreateTwinChunks([
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: "vector hit content",
+        contentRedacted: "vector hit content",
+        charStart: 0,
+        charEnd: 18,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: "vec_keep",
+        strategy: "paragraph",
+        tokenCount: 4,
+        metadata: {},
+      },
+    ])
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "vector hit content", score: 0.88 }],
+    })
+    ;(keywordSearch as jest.Mock).mockRejectedValueOnce(new Error("bm25 index corrupt"))
+    const result = await applyTwinContext({
+      character: makeCharacter({ twinSettings: { enableHybrid: true } as never }),
+      userMessage: "find the vector hit",
+      deps: { ...baseDeps, store },
+    })
+    // Vector hit is preserved (NOT discarded), and the degradation is labelled
+    // as the hybrid lane, not a blanket retrieve-failed.
+    expect(result.applied?.metadata.retrievedChunkIds).toEqual([chunk.id])
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toContain("hybrid-bm25-failed")
   })
 
   it("falls back to twinId for twinName when character.name is empty", async () => {

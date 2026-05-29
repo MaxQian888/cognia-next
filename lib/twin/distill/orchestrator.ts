@@ -7,11 +7,14 @@
  *   T4  Synthesizer     (one call w/ profile + 30 recent chunks)
  *   T5  Evaluator       (one call across synth output)
  *
- * Each agent is wrapped in `withTimeoutOrFallback` so a hung provider
- * call or a malformed response doesn't take down the whole run. The only
- * agent allowed to abort the run is the Synthesizer — without its output
- * there are no drafts to persist, and surfacing an empty distill as
- * "completed" would mislead the user.
+ * Every best-effort agent (T1/T2/T3/T5) is wrapped in `withTimeoutOrFallback`
+ * so a hung provider call or a malformed response degrades to an empty result
+ * instead of taking down the whole run. The Synthesizer (T4) is load-bearing —
+ * without its output there are no drafts to persist — so it runs under a hard
+ * `withTimeout` deadline and any timeout/failure is rethrown as a
+ * `SynthesizerError` that intentionally fails the job (surfacing an empty
+ * distill as "completed", or hanging forever on a stalled provider, would both
+ * mislead the user).
  *
  * Returns the structured result shape; the caller (`job-runner.ts`)
  * persists everything to Dexie + flips the parent TwinJob.
@@ -35,7 +38,23 @@ import { runEntityMergeAgent } from "./agents/entity-merge-agent"
 import { runSynthesizer, type SynthDraft } from "./agents/synthesizer"
 import { runEvaluator } from "./agents/evaluator"
 import type { LlmClient } from "./llm"
-import { DEFAULT_AGENT_TIMEOUT_MS, withTimeoutOrFallback } from "./with-timeout"
+import { DEFAULT_AGENT_TIMEOUT_MS, withTimeout, withTimeoutOrFallback } from "./with-timeout"
+
+/**
+ * Thrown when the load-bearing Synthesizer stage times out or fails to produce
+ * usable output. It propagates out of {@link runOrchestrator} so the job worker
+ * marks the distill job failed (with a clear message) instead of completing it
+ * with no drafts — and, critically, instead of hanging forever on a stalled
+ * provider call (the Synthesizer previously ran with no deadline at all).
+ */
+export class SynthesizerError extends Error {
+  readonly cause?: unknown
+  constructor(message: string, cause?: unknown) {
+    super(`Distill synthesizer failed: ${message}`)
+    this.name = "SynthesizerError"
+    this.cause = cause
+  }
+}
 
 const KNOWLEDGE_BATCH_SIZE = 100
 
@@ -179,10 +198,19 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     updatedAt: Date.now(),
   }
   const recent = chunks.slice(-30)
-  const synthResult = await runSynthesizer(llm, {
-    profile: transientProfile,
-    recentChunks: recent,
-  })
+  let synthResult: Awaited<ReturnType<typeof runSynthesizer>>
+  try {
+    // Hard deadline (no fallback): the Synthesizer is load-bearing, so on a
+    // timeout or parse failure we fail the job loudly rather than hang or
+    // complete empty.
+    synthResult = await withTimeout(
+      runSynthesizer(llm, { profile: transientProfile, recentChunks: recent }),
+      agentTimeoutMs,
+      "synthesizer"
+    )
+  } catch (err) {
+    throw new SynthesizerError(err instanceof Error ? err.message : String(err), err)
+  }
   await onProgress?.("synthesizer", 0.8)
 
   // ───── Stage 5: Evaluator (best-effort) ─────
@@ -225,7 +253,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 function dedupeEntitiesByName(entities: ProfileEntity[]): ProfileEntity[] {
   const map = new Map<string, ProfileEntity>()
   for (const entity of entities) {
-    const key = entity.name.toLowerCase()
+    // Key by name AND role so a person and a project that happen to share a
+    // name aren't collapsed into one entity with an arbitrary role.
+    const key = `${entity.name.toLowerCase()}::${entity.role}`
     const existing = map.get(key)
     if (!existing) {
       map.set(key, entity)

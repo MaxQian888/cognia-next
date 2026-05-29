@@ -1,5 +1,6 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@/lib/vector/store"
+import { lexicalRerankScorer } from "./reranker"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
@@ -96,10 +97,22 @@ export async function tryBuildTwinDeps(): Promise<TwinDepsForBuild | undefined> 
     if (!storeConfig) return undefined
 
     const store = createVectorStore(storeConfig)
+    // Optional reranker: when enabled, attach the built-in key-free lexical
+    // scorer so applyTwinContext over-fetches + re-scores. When disabled (the
+    // default) we leave `reranker` unset, so RAG fetches exactly topK with no
+    // over-fetch and no rerank pass.
+    const reranker = settings.reranker?.enabled
+      ? {
+          model: settings.reranker.model,
+          overFetch: 3,
+          scorer: lexicalRerankScorer,
+        }
+      : undefined
     return {
       store,
       embedding: settings.embedding,
       vectorBackend: settings.storage.vectorBackend,
+      ...(reranker ? { reranker } : {}),
     }
   } catch {
     return undefined

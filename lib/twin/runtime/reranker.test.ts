@@ -1,4 +1,10 @@
-import { identityScorer, rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
+import {
+  identityScorer,
+  lexicalRerankScorer,
+  rerank,
+  type RerankCandidate,
+  type RerankerOptions,
+} from "./reranker"
 
 const c = (id: string, score: number, content = id): RerankCandidate => ({
   id,
@@ -99,6 +105,30 @@ describe("rerank — custom scorer", () => {
     })
     expect(result.reranked).toBe(true)
     expect(result.candidates.map((x) => x.id)).toEqual(["b", "a"])
+  })
+})
+
+describe("lexicalRerankScorer (T2.6)", () => {
+  it("lifts a keyword-matching candidate above a slightly-higher-cosine one that misses the terms", async () => {
+    // "high" has a marginally better cosine score but none of the query words;
+    // "match" covers every query term verbatim. Scores:
+    //   high  = 0.7*0.80 + 0.3*0.00 = 0.560
+    //   match = 0.7*0.74 + 0.3*1.00 = 0.818  → wins
+    const candidates = [
+      c("high", 0.8, "an unrelated paragraph about gardening and the weather"),
+      c("match", 0.74, "reset vpn password"),
+    ]
+    const result = await rerank("reset vpn password", candidates, {
+      model: "lexical",
+      topK: 2,
+      scorer: lexicalRerankScorer,
+    })
+    expect(result.reranked).toBe(true)
+    expect(result.candidates[0].id).toBe("match")
+  })
+
+  it("returns the raw cosine score when the query has no usable terms", () => {
+    expect(lexicalRerankScorer("   ", c("a", 0.42, "anything"))).toBe(0.42)
   })
 })
 

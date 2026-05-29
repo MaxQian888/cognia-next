@@ -17,6 +17,7 @@ import {
   CalendarClockIcon,
   CompassIcon,
   GaugeIcon,
+  GitBranchIcon,
   InboxIcon,
   MailIcon,
   PencilRulerIcon,
@@ -61,11 +62,15 @@ const FEATURE_ENTRIES: FeatureEntry[] = [
 ]
 
 const AUXILIARY_ENTRIES: FeatureEntry[] = [
+  { route: "/source-control", i18nKey: "sourceControl", Icon: GitBranchIcon },
   { route: "/observability", i18nKey: "observability", Icon: GaugeIcon },
   { route: "/performance", i18nKey: "performance", Icon: ActivityIcon },
   { route: "/logs", i18nKey: "logs", Icon: ScrollTextIcon },
   { route: "/me", i18nKey: "me", Icon: UserRoundIcon },
 ]
+
+/** Desktop-only auxiliary routes — hidden on the mobile (Capacitor) shell. */
+const DESKTOP_ONLY_AUX = new Set(["/performance", "/source-control"])
 
 interface Props {
   onCreateTeam: () => void
@@ -96,7 +101,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
 
   const auxiliaryEntries =
     platform === "mobile"
-      ? AUXILIARY_ENTRIES.filter((e) => e.route !== "/performance")
+      ? AUXILIARY_ENTRIES.filter((e) => !DESKTOP_ONLY_AUX.has(e.route))
       : AUXILIARY_ENTRIES
 
   const onHomeRoute = pathname === "/"
