@@ -239,6 +239,51 @@ describe("A2UIProvider", () => {
     expect(mockSetDataValue).toHaveBeenCalledWith("test-surface", "/user/name", "Jane")
   })
 
+  it("should not emit actions when readOnly", () => {
+    const TestChild = () => {
+      const context = useA2UIContext()
+      return (
+        <button
+          data-testid="action-btn"
+          onClick={() => context.emitAction("click", "btn1", { value: 42 })}
+        >
+          Click
+        </button>
+      )
+    }
+
+    render(
+      <A2UIProvider surfaceId="test-surface" renderComponent={mockRenderComponent} readOnly>
+        <TestChild />
+      </A2UIProvider>
+    )
+
+    screen.getByTestId("action-btn").click()
+
+    expect(mockEmitAction).not.toHaveBeenCalled()
+  })
+
+  it("should not mutate data when readOnly", () => {
+    const TestChild = () => {
+      const context = useA2UIContext()
+      return (
+        <button data-testid="set-btn" onClick={() => context.setDataValue("/user/name", "Jane")}>
+          Set
+        </button>
+      )
+    }
+
+    render(
+      <A2UIProvider surfaceId="test-surface" renderComponent={mockRenderComponent} readOnly>
+        <TestChild />
+      </A2UIProvider>
+    )
+
+    screen.getByTestId("set-btn").click()
+
+    expect(mockSetDataValue).not.toHaveBeenCalled()
+  })
+
   it("should resolve string values", () => {
     const TestChild = () => {
       const context = useA2UIContext()

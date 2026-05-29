@@ -18,18 +18,14 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Custom domain — keep in sync with the app's `NEXT_PUBLIC_SHARE_URL` /
-# `DEFAULT_SHARE_URL` (lib/share/config.ts). Requires the matching zone active
-# on this account; comment out to deploy to the *.workers.dev subdomain only.
-routes = [{ pattern = "share.cognia.cn", custom_domain = true }]
-
-# The built viewer SPA. `single-page-application` routes any non-asset,
-# non-/v1 path (e.g. /v/<code>) to index.html so the client can read the code
-# + #fragment. The Worker still intercepts /v1/* before assets are consulted.
-[assets]
-directory = "../viewer/dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
+# Path-scoped route so the Worker owns only the JSON API under
+# `share.cognia.cn/v1/*`, while Cloudflare Pages serves the viewer (the app's
+# own `/share/view` static export) on the rest of the host. Worker routes take
+# precedence over a Pages project on the same hostname. Path patterns can't use
+# `custom_domain = true`; bind via `zone_name` instead. Keep the host in sync
+# with the app's `NEXT_PUBLIC_SHARE_URL` / `DEFAULT_SHARE_URL`
+# (lib/share/config.ts). Comment out to deploy to the *.workers.dev subdomain.
+routes = [{ pattern = "share.cognia.cn/v1/*", zone_name = "cognia.cn" }]
 
 [[r2_buckets]]
 binding = "SHARE_BUCKET"

@@ -31,6 +31,7 @@ export function A2UIProvider({
   catalogId = DEFAULT_CATALOG_ID,
   children,
   renderComponent,
+  readOnly = false,
 }: A2UIProviderProps) {
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
   const emitActionStore = useA2UIStore((state) => state.emitAction)
@@ -42,16 +43,18 @@ export function A2UIProvider({
 
   const emitAction = useCallback(
     (action: string, componentId: string, data?: Record<string, unknown>) => {
+      if (readOnly) return
       emitActionStore(surfaceId, action, componentId, data)
     },
-    [surfaceId, emitActionStore]
+    [surfaceId, emitActionStore, readOnly]
   )
 
   const setDataValue = useCallback(
     (path: string, value: unknown) => {
+      if (readOnly) return
       setDataValueStore(surfaceId, path, value)
     },
-    [surfaceId, setDataValueStore]
+    [surfaceId, setDataValueStore, readOnly]
   )
 
   const resolveString = useCallback(

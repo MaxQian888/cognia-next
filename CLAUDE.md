@@ -127,7 +127,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Agent Team                 | `lib/ai/agent/`, `lib/claude/agents/subagents/`, `lib/plugin/registries/`, `components/agent/workspace/`, `stores/agent/agent-team-store/`                     | v2 persist       | 0022, 0032       |
 | Integrated terminal        | `lib/terminal/`, `components/terminal/`, `stores/terminal/`, `src-tauri/src/terminal/`, `src-tauri/src/companion_api/ws_terminal.rs`                           | persist          | 0031, 0033       |
 | Rust performance dashboard | `src-tauri/src/perf/`, `lib/perf/backend/`, `hooks/perf/use-perf-stream.ts`, `components/performance/`, `app/performance/`                                     | —                | 0035             |
-| Public share links         | `lib/share/`, `lib/db/shared-links.ts`, `components/share/`, `share-server/worker/`, `share-server/viewer/`                                                    | v54              | 0037             |
+| Public share links         | `lib/share/`, `lib/db/shared-links.ts`, `components/share/`, `app/share/view/`, `share-server/worker/`, `share-server/pages/`                                  | v54              | 0037             |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 

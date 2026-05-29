@@ -26,6 +26,8 @@ export interface A2UIRendererProps {
 export interface A2UISurfaceContainerProps extends A2UISurfaceProps {
   showLoading?: boolean
   loadingText?: string
+  /** Render the surface read-only: user actions are inert (no store mutations). */
+  readOnly?: boolean
 }
 
 /**

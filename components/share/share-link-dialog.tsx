@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input"
 import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib/share/client"
 import type { SharePayload } from "@/lib/share/types"
 import type { CreatedShare } from "@/lib/share/client"
+import { PayloadView } from "@/components/share/payload-view"
 import { createLogger } from "@/lib/logging"
 
 const log = createLogger("share-link")
@@ -66,6 +67,7 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
   const [copied, setCopied] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revoked, setRevoked] = useState(false)
+  const [preview, setPreview] = useState<SharePayload | null>(null)
 
   const reset = () => {
     setCreated(null)
@@ -74,6 +76,21 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
     setCopied(false)
     setRevoked(false)
     setPassphrase("")
+    setPreview(null)
+  }
+
+  // Build the payload and render it locally — no server round-trip — so the
+  // owner can see exactly what recipients will get before publishing.
+  const onPreview = async () => {
+    setError(null)
+    try {
+      setPreview(await buildPayload())
+    } catch (err) {
+      log.error("share-preview-failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+      setError(t("errorGeneric"))
+    }
   }
 
   const handleOpenChange = (next: boolean) => {
@@ -179,6 +196,18 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
             </div>
             {revoked && <p className="text-center text-sm text-muted-foreground">{t("revoked")}</p>}
           </div>
+        ) : preview ? (
+          <div className="space-y-2 py-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">{t("view.previewTitle")}</p>
+              <Button variant="ghost" size="sm" onClick={() => setPreview(null)}>
+                {t("view.previewClose")}
+              </Button>
+            </div>
+            <div className="max-h-[50vh] overflow-auto rounded-md border border-border p-3">
+              <PayloadView payload={preview} />
+            </div>
+          </div>
         ) : (
           <div className="space-y-4 py-2">
             <div className="space-y-1">
@@ -256,9 +285,16 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
               <Button onClick={() => handleOpenChange(false)}>{t("done")}</Button>
             </>
           ) : notConfigured ? null : (
-            <Button onClick={() => void onCreate()} disabled={busy}>
-              {busy ? t("creating") : t("createButton")}
-            </Button>
+            <>
+              {!preview && (
+                <Button variant="outline" onClick={() => void onPreview()} disabled={busy}>
+                  {t("view.preview")}
+                </Button>
+              )}
+              <Button onClick={() => void onCreate()} disabled={busy}>
+                {busy ? t("creating") : t("createButton")}
+              </Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>

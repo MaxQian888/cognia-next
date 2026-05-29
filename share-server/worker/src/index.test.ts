@@ -157,4 +157,10 @@ describe("cors + size guards", () => {
     )
     expect(res.status).toBe(413)
   })
+
+  // The Worker is a pure /v1 API; the viewer lives on Cloudflare Pages.
+  it("404s a non-/v1 path instead of serving a viewer SPA", async () => {
+    const res = await run(req("/share/view?c=abc"))
+    expect(res.status).toBe(404)
+  })
 })

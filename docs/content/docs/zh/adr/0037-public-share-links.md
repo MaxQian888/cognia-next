@@ -6,9 +6,12 @@ description: 通过自部署的 Cloudflare worker（R2 + KV）把对话导出、
 # ADR 0037 — 公开分享链接（零知识）
 
 > **状态**：2026-05-26 接受。Phase 0–3 已交付：加密内核 + Dexie 镜像、Cloudflare
-> worker（`share-server/worker/`）、独立 viewer SPA（`share-server/viewer/`），
-> 以及四类产物的创建侧 UI。A2UI 分享呈现为「下载后导入 Cognia」卡片；浏览器内
-> 真渲染 A2UI 暂缓（见「后果」）。
+> worker（`share-server/worker/`）、独立 viewer SPA，以及四类产物的创建侧 UI。
+>
+> **Phase 4（2026-05-29）** 取代了独立 Vite viewer：应用自身的 `/share/view`
+> 路由成为所有类型的唯一查看端，A2UI 应用实现浏览器内真渲染（只读），worker
+> 退化为纯 `/v1` API。见
+> [Phase 4 增补](#phase-4--统一查看端--a2ui-真渲染2026-05-29)。
 
 ## 背景
 
@@ -85,3 +88,33 @@ viewer 页面的客户端**（`#fragment` 不会传给任何服务器）。读�
 - 不在范围：实时协作分享（Durable Objects）、可浏览注册表 / 市场、服务器端搜索。
 
 运营者部署指南见 `companion/share-links-setup`。
+
+## Phase 4 — 统一查看端 + A2UI 真渲染（2026-05-29）
+
+独立 Vite viewer（`share-server/viewer/`）**已移除**。它无法渲染 A2UI 应用，因为
+A2UI catalog 静态 import 了 61 个组件外加 `next/image`、recharts/three/d3/tone/
+framer-motion 与整个 Radix/HeroUI——所以 A2UI 分享当时只能下载。「后果」里暂缓的
+真渲染，正是用它当初预言的架构来落地的。
+
+**变化：**
+
+- **唯一查看端，落在应用内。** 应用自身的 `app/share/view/page.tsx`（`"use client"`）
+  是所有类型的唯一查看端。它随普通静态导出（`out/`）一起产出，因此既能在公网
+  **Cloudflare Pages** 上渲染，也能在 **Tauri 桌面壳**内渲染——owner 可在 app 内打开
+  自己的分享。按类型渲染在 `components/share/payload-view.tsx`（chat HTML/动画的沙箱
+  iframe 等级原样保留）；加载/解密编排在 `lib/share/load.ts`。
+- **A2UI 真渲染，只读。** `PayloadView` 把解密后的导出 JSON 通过 `createA2UISurface`
+  （与 `importApp` 同一路径）载入 A2UI store，再挂载真实的 `<A2UISurface readOnly>`。
+  `A2UIProvider`/`A2UISurface` 新增的 `readOnly` 让 `emitAction` / `setDataValue`
+  失效，公开查看端无法被驱动去修改或跳转。
+- **统一 URL。** 链接现在对**所有**类型铸造 `${base}/share/view?c=<code>#k=<key>`
+  （原为 `/v/<code>#k=`）。`code` 是公开查找 id（query 参数）；密钥仍只在
+  `#fragment`。查看端必须经正常导航或直接打开抵达——绝不能用 HTTP 重定向，否则
+  fragment 会丢失。
+- **worker 退为纯 API。** 不再托管静态资源；非 `/v1` 路径返回 404。`wrangler.toml`
+  去掉 `[assets]`，把 worker 路由限定在 `share.cognia.cn/v1/*`，host 其余部分交给
+  Cloudflare Pages 项目（托管 `out/`）。部署指南见 `share-server/pages/README.md`。
+
+**新后果：** 由于 `out/` 是整体导出，部署到 Pages 会把整个（无密钥的）应用壳公开
+在分享 host 上。可接受——导出中不含任何凭据——但只想暴露查看端的运营者可加一条
+Pages `_redirects` 规则，把非 `/share/view` 路径指向 `/share/view`。

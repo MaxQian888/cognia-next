@@ -10,13 +10,13 @@ of the app's pnpm workspace — install with `pnpm install --ignore-workspace`.
 
 ## API
 
-| Method   | Path                    | Auth   | Purpose                                                |
-| -------- | ----------------------- | ------ | ------------------------------------------------------ |
-| `POST`   | `/v1/share`             | Bearer | Store an envelope, return `{ code, expiresAt }`        |
-| `GET`    | `/v1/share/:code`       | public | Return `{ envelope }`; enforces TTL / max-views / burn |
-| `GET`    | `/v1/share/:code/stats` | Bearer | Owner view counts                                      |
-| `DELETE` | `/v1/share/:code`       | Bearer | Revoke                                                 |
-| `*`      | (anything else)         | public | The viewer SPA (static assets, SPA fallback)           |
+| Method   | Path                    | Auth   | Purpose                                                                     |
+| -------- | ----------------------- | ------ | --------------------------------------------------------------------------- |
+| `POST`   | `/v1/share`             | Bearer | Store an envelope, return `{ code, expiresAt }`                             |
+| `GET`    | `/v1/share/:code`       | public | Return `{ envelope }`; enforces TTL / max-views / burn                      |
+| `GET`    | `/v1/share/:code/stats` | Bearer | Owner view counts                                                           |
+| `DELETE` | `/v1/share/:code`       | Bearer | Revoke                                                                      |
+| `*`      | (anything else)         | public | `404` — the viewer is the app's own `/share/view` route on Cloudflare Pages |
 
 Writes/deletes require `Authorization: Bearer <SHARE_UPLOAD_SECRET>`. Reads are
 public but lifecycle-gated. Body cap: `MAX_BODY_BYTES` (default 10 MiB).
@@ -36,11 +36,14 @@ pnpm dev           # wrangler dev (local)
 wrangler r2 bucket create cognia-shares
 wrangler kv namespace create SHARE_KV        # paste the id into wrangler.toml
 wrangler secret put SHARE_UPLOAD_SECRET      # the bearer the app stores in its keyring
-# build the viewer first so ../viewer/dist exists:
-pnpm --dir ../viewer build
 wrangler deploy
 ```
 
+The Worker is a pure JSON API scoped to `share.cognia.cn/v1/*`. The **viewer**
+is the app's own `/share/view` route, deployed as a Cloudflare Pages static
+export on the same host (`pages/README.md`) — Pages serves everything except
+`/v1/*`, which this Worker route intercepts.
+
 Set the app's `NEXT_PUBLIC_SHARE_URL` (or Settings → share URL) and the same
-upload secret (Settings → share upload secret) to point at the deployed domain
+upload secret (Settings → share upload secret) to point at the deployed host
 (`routes` in `wrangler.toml`, default `share.cognia.cn`).

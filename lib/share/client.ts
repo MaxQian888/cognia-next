@@ -2,8 +2,9 @@
 //
 // Create flow: generate a random key → encrypt the payload (key never uploaded)
 // → POST the opaque envelope to the worker with the bearer secret → mint the
-// shareable URL `${base}/v/<code>#k=<key>` → mirror it into Dexie. Reads of the
-// link are public and handled by the viewer, not this module.
+// shareable URL `${base}/share/view?c=<code>#k=<key>` → mirror it into Dexie.
+// The viewer is the app's own `/share/view` route (ADR-0037 Phase 4); reads are
+// public and handled there, not by this module.
 
 import { generateShareKey, encodeShareKey } from "./keys"
 import { encryptSharePayload } from "./crypto"
@@ -89,7 +90,7 @@ export async function createShareLink(
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))
 
   const { code, expiresAt } = (await res.json()) as CreateShareResponse
-  const url = `${ep.baseUrl}/v/${code}#k=${encodeShareKey(key)}`
+  const url = `${ep.baseUrl}/share/view?c=${code}#k=${encodeShareKey(key)}`
 
   const row: Omit<SharedLinkRow, "id" | "revoked"> = {
     code,

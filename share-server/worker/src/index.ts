@@ -18,8 +18,6 @@ export interface Env {
   SHARE_KV: KVNamespace
   /** Bearer secret required for POST / DELETE / stats. */
   SHARE_UPLOAD_SECRET: string
-  /** Static assets (the built viewer SPA). Absent in unit tests. */
-  ASSETS?: Fetcher
   /** Max envelope body size in bytes (string env var). Default 10 MiB. */
   MAX_BODY_BYTES?: string
 }
@@ -255,8 +253,9 @@ export default {
       return json({ error: "method not allowed" }, 405)
     }
 
-    // Everything else → the viewer SPA (served from static assets in prod).
-    if (env.ASSETS) return env.ASSETS.fetch(request)
+    // Everything else is not ours. The viewer is now the app's own
+    // `/share/view` route served by Cloudflare Pages (ADR-0037 Phase 4); this
+    // Worker is a pure JSON API scoped to `/v1/*`.
     return json({ error: "not found" }, 404)
   },
 } satisfies ExportedHandler<Env>

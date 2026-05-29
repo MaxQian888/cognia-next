@@ -111,6 +111,17 @@ describe("ShareLinkDialog", () => {
     expect(await screen.findByText("Could not create the share link.")).toBeInTheDocument()
   })
 
+  it("previews the payload locally without creating a link", async () => {
+    open()
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    // chat-html renders into the sandboxed iframe titled "Shared conversation".
+    expect(await screen.findByTitle("Shared conversation")).toBeInTheDocument()
+    expect(mockCreate).not.toHaveBeenCalled()
+    // Closing the preview returns to the lifecycle form.
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }))
+    expect(screen.getByText("Expires")).toBeInTheDocument()
+  })
+
   it("switches to burn mode and passes burnAfterRead", async () => {
     mockCreate.mockResolvedValue({ code: "B", url: "https://share.test/v/B#k=K" })
     open()

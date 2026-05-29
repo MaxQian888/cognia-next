@@ -7,9 +7,12 @@ description: Turn chat exports, workflow images, A2UI apps, and backup packages 
 
 > **Status**: Accepted on 2026-05-26. Phases 0–3 shipped: crypto core +
 > Dexie mirror, the Cloudflare worker (`share-server/worker/`), the standalone
-> viewer SPA (`share-server/viewer/`), and the create-side UI for all four
-> artifacts. A2UI shares render as a "download + import into Cognia" card;
-> true in-browser A2UI rendering is deferred (see Consequences).
+> viewer SPA, and the create-side UI for all four artifacts.
+>
+> **Phase 4 (2026-05-29)** superseded the standalone Vite viewer: the app's own
+> `/share/view` route is now the single viewer for every kind, A2UI apps render
+> for real (read-only), and the worker became a pure `/v1` API. See the
+> [Phase 4 addendum](#phase-4--unified-viewer--a2ui-true-rendering-2026-05-29).
 
 ## Context
 
@@ -104,3 +107,42 @@ server-side search or preview.
   registry/marketplace, server-side search.
 
 See `companion/share-links-setup` for the operator deploy guide.
+
+## Phase 4 — unified viewer + A2UI true rendering (2026-05-29)
+
+The standalone Vite viewer (`share-server/viewer/`) is **removed**. It could not
+render A2UI apps because the A2UI catalog statically imports 61 components plus
+`next/image`, recharts/three/d3/tone/framer-motion and the full Radix/HeroUI
+surface — so A2UI shares were download-only. The deferred-rendering note in
+Consequences is now resolved by the architecture it predicted.
+
+**What changed:**
+
+- **Single viewer, in the app.** The app's own `app/share/view/page.tsx`
+  (`"use client"`) is the one viewer for every kind. It ships in the normal
+  static export (`out/`), so it renders both on the public **Cloudflare Pages**
+  deployment and inside the **Tauri desktop shell** — an owner can open their
+  own shares in-app. Render-by-kind lives in `components/share/payload-view.tsx`
+  (the sandboxed-iframe levels for chat HTML/animated are preserved verbatim);
+  load/decrypt orchestration is `lib/share/load.ts`.
+- **A2UI renders for real, read-only.** `PayloadView` loads the decrypted
+  export JSON into the A2UI store (via `createA2UISurface` — the same path
+  `importApp` uses) and mounts the real `<A2UISurface readOnly>`. A new
+  `readOnly` flag on `A2UIProvider`/`A2UISurface` makes `emitAction` /
+  `setDataValue` inert, so a public viewer cannot be driven to mutate or
+  navigate.
+- **Unified URL.** Links now mint `${base}/share/view?c=<code>#k=<key>` for
+  **every** kind (was `/v/<code>#k=`). The `code` is a public lookup id (query
+  param); the key still rides only in the `#fragment`. The viewer must be
+  reached by a normal navigation or direct open — never an HTTP redirect, which
+  would drop the fragment.
+- **Worker is a pure API.** It no longer serves static assets; non-`/v1` paths
+  return 404. `wrangler.toml` drops `[assets]` and scopes the Worker route to
+  `share.cognia.cn/v1/*` so a Cloudflare Pages project (serving `out/`) owns the
+  rest of the host. Deploy guide: `share-server/pages/README.md`.
+
+**New consequence:** because `out/` is a monolithic export, deploying it to
+Pages publishes the whole (secret-free) app shell at the share host. Acceptable
+— no credentials live in the export — but operators wanting only the viewer
+exposed can add a Pages `_redirects` rule pointing non-`/share/view` paths at
+`/share/view`.

@@ -45,4 +45,10 @@ export interface A2UIProviderProps {
   catalogId?: string
   children: React.ReactNode
   renderComponent: (component: A2UIComponent) => React.ReactNode
+  /**
+   * When true, user actions are inert: `emitAction` and `setDataValue` become
+   * no-ops so a surface can be rendered as a read-only preview (e.g. the public
+   * share viewer). Defaults to false — the editable/interactive behavior.
+   */
+  readOnly?: boolean
 }

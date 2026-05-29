@@ -31,7 +31,7 @@ links requires a bearer secret only you hold.
 | Chat export (Markdown / JSON / text) | Preformatted text |
 | Workflow image | A PNG |
 | Backup package | A download (re-import under Settings → Data) |
-| A2UI app | A download (re-import into Cognia to run it interactively) |
+| A2UI app | Rendered live in the browser (read-only) |
 
 ## Prerequisites
 
@@ -39,15 +39,16 @@ links requires a bearer secret only you hold.
 - Optional: a domain on Cloudflare DNS if you want a custom hostname
   (`share.example.com`); otherwise the worker is reachable on `*.workers.dev`.
 
-## Deploy the worker
+## Deploy the worker (the API)
 
-The worker + viewer live in `share-server/` in the repo. They are a standalone
-project (not part of the app's pnpm workspace).
+The worker lives in `share-server/worker/`. It is a standalone project (not part
+of the app's pnpm workspace) and is now a pure JSON API — the viewer is the
+app's own `/share/view` route, deployed separately to Cloudflare Pages (next
+section).
 
 ```bash
 # 1. Install deps (standalone — ignore the app workspace)
-cd share-server/viewer && pnpm install --ignore-workspace && pnpm build
-cd ../worker && pnpm install --ignore-workspace
+cd share-server/worker && pnpm install --ignore-workspace
 
 # 2. Create the storage the worker binds to
 wrangler r2 bucket create cognia-shares
@@ -59,15 +60,33 @@ wrangler kv namespace create SHARE_KV
 wrangler secret put SHARE_UPLOAD_SECRET
 #   → enter a long random string; keep a copy for the app config below
 
-# 4. Deploy (builds the viewer assets + worker)
+# 4. Deploy the API
 wrangler deploy
 ```
 
 <Callout type="info">
-  `wrangler.toml` has a `routes` line for `share.cognia.cn` — change it to your
-  own hostname (requires that zone active on your account), or comment it out to
-  use the `*.workers.dev` subdomain only.
+  `wrangler.toml` scopes the Worker to `share.cognia.cn/v1/*` so Cloudflare Pages
+  can serve the viewer on the same host — change the hostname to your own
+  (requires that zone active on your account), or comment the `routes` line out
+  to use the `*.workers.dev` subdomain only.
 </Callout>
+
+## Deploy the viewer (Cloudflare Pages)
+
+The viewer is the app's `/share/view` route, shipped in the normal static
+export. Build the app and deploy `out/` to Pages on the same host:
+
+```bash
+# from the repo root
+pnpm build
+wrangler pages deploy out --project-name cognia-share-viewer
+```
+
+Bind the Pages project to your share host (e.g. `share.cognia.cn`). The Worker
+route `…/v1/*` takes precedence, so `/v1/*` hits the API and `/share/view` (plus
+the rest of the static app) is served by Pages. See
+`share-server/pages/README.md` for details and the note that the full app shell
+becomes publicly reachable at that host.
 
 Run the test suite any time without an account — it uses miniflare:
 

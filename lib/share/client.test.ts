@@ -65,7 +65,7 @@ describe("createShareLink", () => {
     const created = await createShareLink({ payload: PAYLOAD, ttlSeconds: 3600 }, ENDPOINT)
 
     expect(created.code).toBe("AbC123")
-    expect(created.url).toMatch(/^https:\/\/share\.test\/v\/AbC123#k=/)
+    expect(created.url).toMatch(/^https:\/\/share\.test\/share\/view\?c=AbC123#k=/)
 
     // The posted envelope must be opaque — no kind/mime/title leaked.
     expect(posted).toBeDefined()

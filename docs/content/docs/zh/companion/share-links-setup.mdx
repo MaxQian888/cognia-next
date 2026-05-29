@@ -28,7 +28,7 @@ Cognia 可以把一个产物——对话记录、工作流图、A2UI 应用或�
 | 对话导出（Markdown / JSON / 文本） | 预格式化文本 |
 | 工作流图片 | 一张 PNG |
 | 备份包 | 下载（在 设置 → 数据 里重新导入） |
-| A2UI 应用 | 下载（导入回 Cognia 后可交互运行） |
+| A2UI 应用 | 在浏览器中实时渲染（只读） |
 
 ## 前置条件
 
@@ -36,15 +36,15 @@ Cognia 可以把一个产物——对话记录、工作流图、A2UI 应用或�
 - 可选：若想用自定义域名（`share.example.com`），需要域名托管在 Cloudflare DNS；
   否则 worker 可经 `*.workers.dev` 访问。
 
-## 部署 worker
+## 部署 worker（API）
 
-worker 与 viewer 位于仓库的 `share-server/`，是独立项目（不在应用的 pnpm
-workspace 内）。
+worker 位于仓库的 `share-server/worker/`，是独立项目（不在应用的 pnpm
+workspace 内）。它现在是纯 JSON API——viewer 改为应用自身的 `/share/view`
+路由，单独部署到 Cloudflare Pages（见下一节）。
 
 ```bash
 # 1. 安装依赖（独立项目——忽略应用 workspace）
-cd share-server/viewer && pnpm install --ignore-workspace && pnpm build
-cd ../worker && pnpm install --ignore-workspace
+cd share-server/worker && pnpm install --ignore-workspace
 
 # 2. 创建 worker 绑定的存储
 wrangler r2 bucket create cognia-shares
@@ -56,14 +56,31 @@ wrangler kv namespace create SHARE_KV
 wrangler secret put SHARE_UPLOAD_SECRET
 #   → 输入一段长随机串；下面应用配置里要用同一个值
 
-# 4. 部署（会构建 viewer 资源 + worker）
+# 4. 部署 API
 wrangler deploy
 ```
 
 <Callout type="info">
-  `wrangler.toml` 里有一行指向 `share.cognia.cn` 的 `routes`——改成你自己的
-  域名（需该 zone 已托管在你账号），或注释掉以仅使用 `*.workers.dev`。
+  `wrangler.toml` 把 worker 限定在 `share.cognia.cn/v1/*`，这样 Cloudflare Pages
+  可以在同一主机上托管 viewer——改成你自己的域名（需该 zone 已托管在你账号），
+  或注释掉 `routes` 行以仅使用 `*.workers.dev`。
 </Callout>
+
+## 部署 viewer（Cloudflare Pages）
+
+viewer 就是应用的 `/share/view` 路由，随普通静态导出一起产出。构建应用后把
+`out/` 部署到同一主机上的 Pages：
+
+```bash
+# 在仓库根目录
+pnpm build
+wrangler pages deploy out --project-name cognia-share-viewer
+```
+
+把 Pages 项目绑定到你的分享主机（如 `share.cognia.cn`）。worker 的
+`…/v1/*` 路由优先级更高，因此 `/v1/*` 命中 API，`/share/view`（以及其余静态
+应用）由 Pages 提供。详见 `share-server/pages/README.md`，其中也说明了整个
+应用壳会在该主机上公开可达。
 
 无需账号也可随时跑测试（用 miniflare）：
 

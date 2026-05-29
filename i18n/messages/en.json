@@ -16482,6 +16482,36 @@
       "saved": "Saved",
       "clear": "Clear",
       "cleared": "Cleared"
+    },
+    "view": {
+      "loading": "Decrypting…",
+      "footer": "Shared via cognia · end-to-end encrypted · the server never sees the contents",
+      "unavailableTitle": "This link is no longer available",
+      "unavailableBody": "It may have expired, been viewed the maximum number of times, or been revoked.",
+      "errorTitle": "Can’t open this share",
+      "error": {
+        "notLink": "This is not a valid share link.",
+        "network": "Could not reach the share server.",
+        "invalidKey": "This link is invalid or its key is wrong.",
+        "integrity": "This share failed its integrity check."
+      },
+      "passphraseTitle": "Passphrase required",
+      "passphraseBody": "This share is protected with an extra passphrase.",
+      "passphraseLabel": "Passphrase",
+      "passphrasePlaceholder": "Passphrase",
+      "passphraseSubmit": "Unlock",
+      "passphraseWrong": "That passphrase didn’t work — try again.",
+      "conversationTitle": "Shared conversation",
+      "workflowAlt": "Shared workflow",
+      "download": "Download",
+      "a2uiReadonly": "Read-only preview",
+      "backupTitle": "Shared backup",
+      "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
+      "appTitle": "Shared app",
+      "appInvalid": "This shared app could not be loaded.",
+      "preview": "Preview",
+      "previewTitle": "Preview",
+      "previewClose": "Close preview"
     }
   }
 }

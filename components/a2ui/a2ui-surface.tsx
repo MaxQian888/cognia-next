@@ -33,6 +33,7 @@ export function A2UISurface({
   onDataChange,
   showLoading = true,
   loadingText,
+  readOnly = false,
 }: A2UISurfaceContainerProps) {
   const t = useTranslations("a2ui")
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
@@ -127,6 +128,7 @@ export function A2UISurface({
           surfaceId={surfaceId}
           catalogId={surface.catalogId}
           renderComponent={renderComponent}
+          readOnly={readOnly}
         >
           <A2UIRenderer component={rootComponent} />
           {isStreaming && (

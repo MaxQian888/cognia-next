@@ -16482,6 +16482,36 @@
       "saved": "已保存",
       "clear": "清除",
       "cleared": "已清除"
+    },
+    "view": {
+      "loading": "正在解密…",
+      "footer": "通过 cognia 分享 · 端到端加密 · 服务器永远看不到内容",
+      "unavailableTitle": "该链接已不可用",
+      "unavailableBody": "它可能已过期、达到最大查看次数，或已被撤销。",
+      "errorTitle": "无法打开此分享",
+      "error": {
+        "notLink": "这不是一个有效的分享链接。",
+        "network": "无法连接到分享服务器。",
+        "invalidKey": "此链接无效，或密钥不正确。",
+        "integrity": "此分享未通过完整性校验。"
+      },
+      "passphraseTitle": "需要口令",
+      "passphraseBody": "此分享受额外口令保护。",
+      "passphraseLabel": "口令",
+      "passphrasePlaceholder": "口令",
+      "passphraseSubmit": "解锁",
+      "passphraseWrong": "口令不正确，请重试。",
+      "conversationTitle": "分享的对话",
+      "workflowAlt": "分享的工作流",
+      "download": "下载",
+      "a2uiReadonly": "只读预览",
+      "backupTitle": "分享的备份",
+      "backupBody": "这是一个 cognia 备份包。下载后从「设置 → 数据」导入。",
+      "appTitle": "分享的应用",
+      "appInvalid": "无法加载此分享的应用。",
+      "preview": "预览",
+      "previewTitle": "预览",
+      "previewClose": "关闭预览"
     }
   }
 }
