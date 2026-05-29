@@ -12,7 +12,11 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node", "jest"],
     "paths": {
-      "@/*": ["./node_modules/cognia-types/*"]
+      // Host modules (`@/types/*`, `@/lib/*`) are injected by cognia at
+      // runtime and externalized by esbuild at build time. For local
+      // type-checking + ts-jest, resolve them to the bundled shims under
+      // `src/__shims__/` (matches jest.config.cjs `moduleNameMapper`).
+      "@/*": ["./src/__shims__/*"]
     }
   },
   "include": ["src/**/*.ts"],

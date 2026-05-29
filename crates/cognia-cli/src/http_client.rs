@@ -115,8 +115,32 @@ pub fn get_json<R: for<'de> Deserialize<'de>>(
                 body.lines().take(20).collect::<Vec<_>>().join("\n")
             ))
         }
-        Err(other) => Err(anyhow!("GET {} failed: {}", url, other)),
+        // A non-Status error is a transport failure (connection refused,
+        // DNS, timeout). For our loopback bridge the overwhelmingly common
+        // cause is a *stale* endpoint file left behind by a cognia that has
+        // since exited — translate it into the same actionable guidance the
+        // missing-file path gives instead of a raw OS error string.
+        Err(other) => Err(unreachable_bridge_error(&endpoint.base_url, other)),
     }
+}
+
+/// Build the actionable error shown when the bridge URL is unreachable.
+/// Distinct from the missing-file case (`load_endpoint`): here the endpoint
+/// file exists but nothing is listening — almost always a stale file from a
+/// previous launch.
+fn unreachable_bridge_error(base_url: &str, err: ureq::Error) -> anyhow::Error {
+    let stale_hint = match endpoint_file_path() {
+        Ok(p) => format!(
+            "\nThe endpoint file {} may be stale (left over from a previous run).",
+            p.display()
+        ),
+        Err(_) => String::new(),
+    };
+    anyhow!(
+        "could not reach the cognia CLI bridge at {base_url} — is the desktop app running?{stale_hint}\n\
+         Start the cognia desktop app (or enable the CLI bridge in Settings → Plugins → Developer) and retry.\n\
+         (transport error: {err})"
+    )
 }
 
 /// POST JSON to `<base_url><path>` with the dev token header. Returns
@@ -147,7 +171,7 @@ pub fn post_json<R: for<'de> Deserialize<'de>>(
                 body.lines().take(20).collect::<Vec<_>>().join("\n")
             ))
         }
-        Err(other) => Err(anyhow!("POST {} failed: {}", url, other)),
+        Err(other) => Err(unreachable_bridge_error(&endpoint.base_url, other)),
     }
 }
 
@@ -244,6 +268,36 @@ mod tests {
         let _ = server_thread.join();
         let header = captured.lock().clone();
         assert_eq!(header.as_deref(), Some("the-token"));
+    }
+
+    /// A connection-refused (transport) failure must surface the actionable
+    /// "is the desktop app running? / endpoint file may be stale" guidance,
+    /// not a raw OS error. Binds a port, drops the listener, then POSTs to it
+    /// so the connection is refused deterministically.
+    #[test]
+    fn post_json_translates_unreachable_bridge_to_actionable_hint() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        drop(server); // free the port → connections now refused
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
+        let err = post_json::<serde_json::Value>(
+            &endpoint,
+            "/api/v1/dev/plugins/install",
+            &json!({"bundle_path": "x"}),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("is the desktop app running?"),
+            "expected actionable hint, got: {msg}"
+        );
+        assert!(
+            msg.contains("Start the cognia desktop app"),
+            "expected start hint, got: {msg}"
+        );
     }
 
     #[test]

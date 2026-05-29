@@ -26,6 +26,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { usePluginsStore } from "@/stores/plugins"
+import { PluginLicense } from "../_shared/plugin-license"
+import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import type { PluginManifest } from "@/types/plugin"
 
 interface OverviewManifestMeta {
   description?: string
@@ -105,9 +109,16 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
         <MetaRow label={t("metaSource")} value={plugin.source} />
         <MetaRow label={t("metaStatus")} value={plugin.status} />
         {author && <MetaRow label={t("metaAuthor")} value={author} />}
-        {manifest.license && <MetaRow label={t("metaLicense")} value={manifest.license} />}
         {manifest.homepage && <MetaRow label={t("metaHomepage")} value={manifest.homepage} />}
         {manifest.repository && <MetaRow label={t("metaRepository")} value={manifest.repository} />}
+        {plugin.sourceUrl && <MetaRow label={t("metaSourceUrl")} value={plugin.sourceUrl} />}
+        {(manifest.license || plugin.licenseText) && (
+          <PluginLicense
+            license={manifest.license}
+            licenseText={plugin.licenseText}
+            className="pt-1"
+          />
+        )}
       </Card>
 
       <Card className="p-3 space-y-1.5">
@@ -118,17 +129,16 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
         )}
       </Card>
 
-      {manifest.dependencies && Object.keys(manifest.dependencies).length > 0 && (
-        <Card className="p-3 space-y-1">
-          <div className="text-xs font-semibold">{t("dependencies")}</div>
-          <div className="space-y-0.5">
-            {Object.entries(manifest.dependencies).map(([dep, version]) => (
-              <div key={dep} className="text-xs flex items-center justify-between">
-                <code className="font-mono">{dep}</code>
-                <span className="text-muted-foreground">{version}</span>
-              </div>
-            ))}
-          </div>
+      <PluginDependencyPanel manifest={plugin.manifest as unknown as PluginManifest} />
+
+      {plugin.readme && (
+        <Card className="p-3">
+          <div className="text-xs font-semibold mb-2">{t("readme")}</div>
+          <ScrollArea className="max-h-[50vh]">
+            <div className="prose prose-sm dark:prose-invert max-w-none text-sm pr-2">
+              <MarkdownRenderer content={plugin.readme} enableMermaid={false} enableMath={false} />
+            </div>
+          </ScrollArea>
         </Card>
       )}
 

@@ -32,6 +32,13 @@ export interface FewShotSelectorInput {
    * per profile mutation and caches them in memory.
    */
   sampleEmbeddings?: number[][]
+  /**
+   * Raw user-query text. Used ONLY by the no-embeddings fallback to rank
+   * samples by lexical token-overlap against their `summary`. The runtime
+   * always passes this so the fallback is query-aware; when omitted, the
+   * selector degrades to a length heuristic.
+   */
+  queryText?: string
   /** Top-K to return. Defaults to 3 (matches `DEFAULT_TWIN_SETTINGS`). */
   topK?: number
 }
@@ -73,21 +80,18 @@ export function selectFewShotSamples(input: FewShotSelectorInput): ScoredStyleSa
       })
     }
   } else {
-    // Fallback: lexical token-overlap on `summary`. The query embedding is
-    // unused in this branch — we expose the same signature for caller
-    // ergonomics. Tests pass an empty embedding to drive this path.
-    const querySummary = "" // The selector does not have the raw query in
-    // this branch; callers that need the heuristic should also pass the
-    // query string in via `summary` on the first sample slot. To keep the
-    // current shape stable we treat absent embeddings as "rank by
-    // sample.summary length only" (newest tied last) — good enough as a
-    // last-resort filler until embeddings warm up.
+    // Fallback (no per-sample embeddings yet): rank by lexical token-overlap
+    // between the raw query text and each sample's `summary`. Only when the
+    // caller supplies no `queryText` either do we drop to a length heuristic —
+    // a last-resort filler that surfaces *something* until the embedder
+    // backfill warms up.
+    const queryText = input.queryText?.trim() ?? ""
     for (let i = 0; i < input.samples.length; i++) {
       const sample = input.samples[i]
       const score =
-        querySummary.length === 0
+        queryText.length === 0
           ? 1 / (1 + Math.abs(sample.summary.length - 50))
-          : tokenOverlap(querySummary, sample.summary)
+          : tokenOverlap(queryText, sample.summary)
       scored.push({ sample, score })
     }
   }

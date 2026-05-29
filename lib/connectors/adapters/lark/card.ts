@@ -12,6 +12,7 @@
  */
 
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
+import type { ConnectorCallbackBindingKind } from "@/types/connectors/interaction"
 import {
   buildActionId,
   recordCallbackBinding,
@@ -315,12 +316,28 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
         const action = stringValue(node.raw.action) || node.id
         const fullId = buildActionId(input.surfaceId, node.id, action)
+        // A button may carry an explicit binding-kind hint (e.g. a
+        // help/welcome card's quick-command button sets
+        // `bindingKind: "help_quick_command"` + `bindingPayload`). When
+        // present we record under that kind so the bus routes the click
+        // to the matching short-circuit; absent, the default
+        // `callback_query` kind keeps every existing button working.
+        const bindingKind =
+          typeof node.raw.bindingKind === "string"
+            ? (node.raw.bindingKind as ConnectorCallbackBindingKind)
+            : undefined
+        const bindingPayload =
+          node.raw.bindingPayload && typeof node.raw.bindingPayload === "object"
+            ? (node.raw.bindingPayload as Record<string, unknown>)
+            : undefined
         await recordCallbackBinding({
           adapterId: input.adapterId,
           actionId: fullId,
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          ...(bindingKind ? { kind: bindingKind } : {}),
+          ...(bindingPayload ? { payload: bindingPayload } : {}),
         })
         const variant = stringValue(node.raw.variant)
         const type =

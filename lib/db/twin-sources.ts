@@ -68,11 +68,21 @@ export async function findTwinSourceByFingerprint(
   twinId: string,
   fingerprint: string
 ): Promise<TwinSource | undefined> {
-  return getDb()
-    .twinSources.where("fingerprint")
-    .equals(fingerprint)
-    .filter((s) => s.twinId === twinId)
-    .first()
+  // Compound `[twinId+fingerprint]` index (Dexie v58) — a direct keyed lookup,
+  // no full `fingerprint` scan + JS `twinId` filter.
+  return getDb().twinSources.where("[twinId+fingerprint]").equals([twinId, fingerprint]).first()
+}
+
+/**
+ * Batch variant of {@link getTwinSource}. Returns the rows for the given ids
+ * (order not guaranteed; missing ids dropped) in a single `bulkGet` round-trip.
+ * Used by the runtime RAG path to resolve every hit's source title at once
+ * instead of one `getTwinSource` await per hit.
+ */
+export async function getTwinSourcesByIds(ids: string[]): Promise<TwinSource[]> {
+  if (ids.length === 0) return []
+  const rows = await getDb().twinSources.bulkGet(ids)
+  return rows.filter((r): r is TwinSource => r !== undefined)
 }
 
 export async function updateTwinSource(

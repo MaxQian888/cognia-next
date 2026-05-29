@@ -20,8 +20,12 @@ import type {
 } from "@/hooks/plugins/use-plugin-marketplace"
 import { loadPluginMarketplaceClient } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePluginPreInstall } from "@/hooks/plugins/use-plugin-pre-install"
+import { GitBranchIcon } from "lucide-react"
+import { useGithubMarketplaceSources } from "@/hooks/plugins/use-github-marketplace-sources"
 import { PluginMarketplaceCard } from "./plugin-marketplace-card"
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
+import { PluginMarketplaceSourcesDialog } from "./plugin-marketplace-sources-dialog"
+import { PluginInstallFromGithubDialog } from "../dialogs/plugin-install-from-github-dialog"
 import { PluginDiscovery } from "../plugin-discovery"
 import { PluginPreInstallDialog } from "../dialogs/plugin-pre-install-dialog"
 import { ScrollShadowRow } from "../scroll-shadow-row"
@@ -42,6 +46,9 @@ export function PluginMarketplace() {
   const [section, setSection] = useState<Section>("all")
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE)
   const [selectedEntry, setSelectedEntry] = useState<PluginMarketplaceEntry | null>(null)
+  const sources = useGithubMarketplaceSources()
+  const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false)
+  const [githubInstallRef, setGithubInstallRef] = useState<string | null>(null)
 
   // Reset the visible window whenever the section or query changes so we
   // don't stay zoomed into page 5 of "popular" after the user switches.
@@ -115,7 +122,8 @@ export function PluginMarketplace() {
       case "builtin":
         return builtinEntries
       default:
-        return allResults
+        // Merge GitHub marketplace-repo entries into the default browse view.
+        return [...allResults, ...sources.entries]
     }
   })()
 
@@ -157,6 +165,16 @@ export function PluginMarketplace() {
               <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
             </ToggleGroup>
           </ScrollShadowRow>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSourcesDialogOpen(true)}
+            aria-label={t("manageSources")}
+            data-testid="plugin-marketplace-manage-sources"
+          >
+            <GitBranchIcon className="size-3.5 lg:mr-1.5" />
+            <span className="hidden lg:inline">{t("manageSources")}</span>
+          </Button>
           <PluginComparisonTrigger />
         </div>
       </div>
@@ -219,10 +237,35 @@ export function PluginMarketplace() {
         onContinue={preInstall.resolveContinue}
         onCancel={preInstall.resolveCancel}
       />
+
+      <PluginMarketplaceSourcesDialog
+        open={sourcesDialogOpen}
+        onOpenChange={setSourcesDialogOpen}
+      />
+
+      {/* Installing a marketplace-repo (git) entry reuses the single-plugin
+          GitHub install dialog — same preview + pre-install chain. */}
+      <PluginInstallFromGithubDialog
+        open={githubInstallRef !== null}
+        initialRef={githubInstallRef ?? undefined}
+        onOpenChange={(open) => {
+          if (!open) setGithubInstallRef(null)
+        }}
+      />
     </div>
   )
 
   function onInstallById(id: string, version?: string) {
+    // GitHub marketplace-repo entries route through the GitHub install dialog
+    // (pre-filled) rather than the registry pre-install chain.
+    const gitEntry = sources.entries.find((e) => e.id === id)
+    if (gitEntry) {
+      const g = gitEntry.github
+      setGithubInstallRef(
+        `${g.owner}/${g.repo}${g.ref ? `@${g.ref}` : ""}${g.subdir ? `/${g.subdir}` : ""}`
+      )
+      return
+    }
     const entry = [...allResults, ...market.featured, ...market.popular, ...market.recent].find(
       (e) => e.id === id
     )

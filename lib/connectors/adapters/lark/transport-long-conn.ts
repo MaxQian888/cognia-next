@@ -18,6 +18,7 @@
 
 import { listen } from "@tauri-apps/api/event"
 import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
+import { loggers } from "@/lib/logging"
 import type { LarkEventEnvelope } from "./parse"
 
 export interface LarkLongConnOptions {
@@ -59,10 +60,22 @@ export async function* startLarkLongConn(
     let handleId: string
     try {
       handleId = await connectorsLarkWsOpen(opts.adapterId)
-    } catch {
+      loggers.network.info("[lark] ws handle opened", {
+        adapterId: opts.adapterId,
+        handleId,
+      })
+    } catch (err) {
       if (opts.signal.aborted) return
       attempts += 1
       const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      // Previously swallowed — surface the open failure so a non-connecting
+      // bot is diagnosable instead of silently retrying forever.
+      loggers.network.warn("[lark] ws open failed, backing off", {
+        adapterId: opts.adapterId,
+        attempts,
+        backoffMs: backoff,
+        error: err instanceof Error ? err.message : String(err),
+      })
       try {
         await delay(backoff, opts.signal)
       } catch {

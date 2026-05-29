@@ -158,7 +158,15 @@ qdrant-client = { version = "1.18", default-features = false, features = ["serde
 # Pinecone/Chroma/Weaviate. See ADR-0022.
 
 # TTS support — provider key vault, Edge-TTS WebSocket bridge, and HTTP proxy.
-keyring = "3"
+# keyring v3 has NO default features: without an explicit platform backend it
+# silently falls back to an in-process *mock* store (writes succeed but never
+# touch the OS keyring and evaporate on restart). That made every connector /
+# subscription / TTS secret non-persistent — e.g. the Lark App ID vanished
+# after restart, breaking the bot-identity probe and the long-connection
+# handshake (private-chat bot went dead). The real OS backend is wired per
+# target below (windows-native / apple-native / sync-secret-service); the base
+# entry stays default-free so Android/iOS fall back to mock intentionally.
+keyring = { version = "3", default-features = false }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 base64 = "0.22"
@@ -322,6 +330,9 @@ minidumper = "0.10"
 
 # Platform-native logging backends + UI automation back-ends.
 [target."cfg(target_os = \"windows\")".dependencies]
+# Real OS credential store (Windows Credential Manager) — see the keyring
+# note in [dependencies]. Without this feature keyring uses the mock store.
+keyring = { version = "3", features = ["windows-native"] }
 eventlog = "0.3"
 # UI Automation — leexgone/uiautomation-rs. Pins `windows = 0.62.2`; if that
 # duplicates with Tauri's `windows` dep, run `cargo tree -d` and either pin
@@ -347,6 +358,9 @@ windows = { version = "0.62.2", features = [
 ] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
+# Real OS credential store (macOS/iOS Keychain) — see the keyring note in
+# [dependencies]. Without this feature keyring uses the mock store.
+keyring = { version = "3", features = ["apple-native"] }
 oslog = "0.2"
 # Cross-platform input simulation for the macOS automation backend
 # (`automation/platform/ax/mod.rs`). Pinned to a major version that's known to
@@ -354,6 +368,12 @@ oslog = "0.2"
 enigo = "0.6"
 
 [target."cfg(target_os = \"linux\")".dependencies]
+# Real OS credential store (freedesktop Secret Service over D-Bus) — see the
+# keyring note in [dependencies]. `crypto-rust` encrypts the D-Bus session
+# transfer with RustCrypto so no system OpenSSL is needed at build time.
+# Chosen over `linux-native` (kernel keyutils) because keyutils is wiped on
+# reboot, which would lose stored bot credentials.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 libsystemd = "0.7"
 syslog = "7"
 # Cross-platform input simulation for the Linux automation backend

@@ -411,13 +411,27 @@ export interface TwinJob {
 /**
  * Per-character twin runtime preferences. All fields are optional with sane
  * defaults (`enableRag = true`, `ragTopK = 6`, `enableStyleFewShot = true`,
- * `styleSamplesK = 3`). Apply via `runtime/apply-twin-context.ts` (Phase 6).
+ * `styleSamplesK = 3`, `enableHybrid = false`, `hybridKeywordWeight = 0.5`).
+ * Apply via `runtime/apply-twin-context.ts` (Phase 6).
  */
 export interface TwinSettings {
   enableRag: boolean
   ragTopK: number
   enableStyleFewShot: boolean
   styleSamplesK: number
+  /**
+   * When true, RAG fuses BM25 keyword retrieval with the vector search via
+   * Reciprocal Rank Fusion. Off by default — opt-in per character. Improves
+   * recall for verbatim identifiers, proper nouns, and code/file references
+   * that pure semantic search ranks low.
+   */
+  enableHybrid: boolean
+  /**
+   * Relative weight of the BM25 keyword list in the RRF fusion (0–1); the
+   * vector list takes `1 - hybridKeywordWeight`. Ignored when `enableHybrid`
+   * is false.
+   */
+  hybridKeywordWeight: number
 }
 
 export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
@@ -425,6 +439,8 @@ export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
   ragTopK: 6,
   enableStyleFewShot: true,
   styleSamplesK: 3,
+  enableHybrid: false,
+  hybridKeywordWeight: 0.5,
 }
 
 /**

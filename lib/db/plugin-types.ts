@@ -45,12 +45,40 @@ export interface PluginRow {
   manifest: Record<string, unknown>
   /** Persisted plugin configuration (the user's settings). */
   config?: Record<string, unknown>
+  /**
+   * Raw README markdown captured at install time (GitHub installs read the
+   * repo's `README.md`). Rendered in the detail view. Non-indexed.
+   */
+  readme?: string
+  /** Raw LICENSE file text captured at install time. Non-indexed. */
+  licenseText?: string
+  /**
+   * Canonical source URL the plugin was installed from (e.g. a GitHub
+   * `…/tree/<ref>` URL). Surfaced as a link in the detail view. Non-indexed.
+   */
+  sourceUrl?: string
   /** Last manager-reported error message, if any. */
   error?: string
   /** Wall-clock ms of the most recent tool/command invocation. */
   lastUsedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * One row per added GitHub "marketplace repo" (Claude-Code-style plugin
+ * dispatch). The repo ships a `marketplace.json` catalog; its listed plugins
+ * surface in the browse grid. Added in Dexie v59.
+ */
+export interface PluginMarketplaceSourceRow {
+  /** Canonical `owner/repo` (+ optional `@ref`) reference; primary key. */
+  id: string
+  /** The raw reference the user entered (URL or shorthand). */
+  repoRef: string
+  /** Catalog `name` (from marketplace.json), or the repo for display. */
+  name: string
+  /** Wall-clock ms the source was added. */
+  addedAt: number
 }
 
 /**

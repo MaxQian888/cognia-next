@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,25 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn(),
 }))
 
+// Control the selected-adapter URL state (shared module with AdapterListRow).
+let selectedAdapterIdValue: string | null = null
+const mockSetSelectedAdapterId = jest.fn()
+jest.mock("../adapters/use-selected-adapter", () => ({
+  useSelectedAdapter: () => ({
+    selectedAdapterId: selectedAdapterIdValue,
+    setSelectedAdapterId: mockSetSelectedAdapterId,
+    activeTab: "config",
+    setActiveTab: jest.fn(),
+  }),
+}))
+
+// Stub the detail panel so the tab test stays focused on the list/selection.
+jest.mock("../adapters/adapter-detail-panel", () => ({
+  AdapterDetailPanel: ({ adapterId }: { adapterId: string }) => (
+    <div data-testid="mock-detail-panel" data-adapter-id={adapterId} />
+  ),
+}))
+
 import { useLiveQuery } from "dexie-react-hooks"
 const mockUseLiveQuery = useLiveQuery as jest.MockedFunction<typeof useLiveQuery>
 
@@ -116,6 +136,7 @@ function setupAdapterQueries(opts: {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  selectedAdapterIdValue = null
   setupAdapterQueries({ adapters: [baseAdapter] })
 })
 
@@ -297,6 +318,61 @@ describe("AdaptersTab", () => {
     setupAdapterQueries({ adapters: [baseAdapter] })
     render(<AdaptersTab />)
     expect(screen.queryByTestId(`adapter-pending-${baseAdapter.id}`)).not.toBeInTheDocument()
+  })
+
+  const disabledAdapter: AdapterInstanceRow = {
+    ...baseAdapter,
+    id: "cai_test_2",
+    type: "discord",
+    displayName: "Discord Bot",
+    enabled: false,
+  }
+
+  it("filters the sidebar list by the search query", () => {
+    setupAdapterQueries({ adapters: [baseAdapter, disabledAdapter] })
+    render(<AdaptersTab />)
+    expect(screen.getByText("Test Bot")).toBeInTheDocument()
+    expect(screen.getByText("Discord Bot")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("adapter-sidebar-search"), { target: { value: "discord" } })
+    expect(screen.queryByText("Test Bot")).not.toBeInTheDocument()
+    expect(screen.getByText("Discord Bot")).toBeInTheDocument()
+  })
+
+  it("filters the sidebar list by the Disabled status tab", async () => {
+    setupAdapterQueries({ adapters: [baseAdapter, disabledAdapter] })
+    render(<AdaptersTab />)
+    await userEvent.click(screen.getByRole("tab", { name: /^disabled$/i }))
+    expect(screen.queryByText("Test Bot")).not.toBeInTheDocument()
+    expect(screen.getByText("Discord Bot")).toBeInTheDocument()
+  })
+
+  it("renders the detail panel and mobile bar name when an adapter is selected", () => {
+    selectedAdapterIdValue = "cai_test_1"
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    expect(screen.getByTestId("mock-detail-panel")).toHaveAttribute("data-adapter-id", "cai_test_1")
+    // Selected adapter name appears in the list row + the mobile top bar.
+    expect(screen.getAllByText("Test Bot").length).toBeGreaterThan(0)
+  })
+
+  it("clicking a row selects the adapter (firing the drawer-close callback)", () => {
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    // Row click runs the onAfterSelect closure wired by AdaptersTab.
+    fireEvent.click(screen.getByTestId("adapter-card-cai_test_1"))
+    expect(mockSetSelectedAdapterId).toHaveBeenCalledWith("cai_test_1")
+  })
+
+  it("closes the active config dialog on dismiss", async () => {
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByText("Configure"))
+    await waitFor(() => expect(screen.getByText(/configure telegram bot/i)).toBeInTheDocument())
+    // Escape dismisses the Radix dialog → onOpenChange(false) → closeDialog.
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
+    await waitFor(() =>
+      expect(screen.queryByText(/configure telegram bot/i)).not.toBeInTheDocument()
+    )
   })
 
   it("excludes sent/failed/deadlettered jobs from the pending count", () => {

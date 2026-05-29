@@ -60,15 +60,31 @@ describe("readBundleArchive", () => {
     expect(result.resources).toEqual([])
   })
 
-  it("warns about resources outside scripts/references/assets but keeps them as `asset`", async () => {
+  it("warns about resources outside scripts/references/assets but classifies them per-extension", async () => {
     const bytes = await buildZip({
       "SKILL.md": SKILL_MD,
       "extras/extra.txt": "hello",
     })
     const result = await readBundleArchive(bytes)
     expect(result.resources).toHaveLength(1)
-    expect(result.resources[0].kind).toBe("asset")
-    expect(result.warnings.some((w) => w.includes("classified as 'asset'"))).toBe(true)
+    expect(result.resources[0].kind).toBe("reference")
+    expect(result.warnings.some((w) => w.includes("classified as 'reference'"))).toBe(true)
+  })
+
+  it("collects a Claude Code `resources/` dir, classifying each file by extension", async () => {
+    const bytes = await buildZip({
+      "code-review/SKILL.md": SKILL_MD,
+      "code-review/resources/guide.md": "# Guide\n",
+      "code-review/resources/helper.py": "print('hi')\n",
+      "code-review/resources/logo.png": new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    })
+    const result = await readBundleArchive(bytes)
+    expect(result.resources).toHaveLength(3)
+    const byPath = Object.fromEntries(result.resources.map((r) => [r.path, r]))
+    expect(byPath["resources/guide.md"].kind).toBe("reference")
+    expect(byPath["resources/helper.py"].kind).toBe("script")
+    expect(byPath["resources/logo.png"].kind).toBe("asset")
+    expect(byPath["resources/logo.png"].encoding).toBe("base64")
   })
 
   it("rejects a bundle that is missing SKILL.md", async () => {

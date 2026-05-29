@@ -40,6 +40,7 @@ import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { loggers } from "@/lib/logging"
 
 export interface LarkAdapterOptions {
   id: string
@@ -158,10 +159,42 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return // already started
     stopCalled = false
+
+    // Pre-flight credential check. A Lark adapter with no appId/appSecret can
+    // never connect — Rust `open()` aborts with "not configured in keyring",
+    // and the long-conn transport would otherwise retry that terminal failure
+    // forever, spamming warns. Skip such adapters cleanly (auto-exclude the
+    // empty ones) instead of starting a doomed reconnect loop.
+    let creds: { appId: string; appSecret: string }
+    try {
+      creds = await resolveCredentials()
+    } catch (err) {
+      healthState = "down"
+      loggers.network.error("[lark] adapter not started — credential lookup failed", err, {
+        id: opts.id,
+      })
+      return
+    }
+    if (!creds.appId || !creds.appSecret) {
+      healthState = "down"
+      loggers.network.warn("[lark] adapter skipped — appId/appSecret not configured", {
+        id: opts.id,
+      })
+      return
+    }
+
     abortController = new AbortController()
     const signal = abortController.signal
 
     healthState = "running"
+
+    // Inbound observability — the long-conn path was previously silent on
+    // success and swallowed failures, so a non-working bot left no trace.
+    // These [lark] info logs surface to stdout + the in-app log panel.
+    loggers.network.info("[lark] adapter start", {
+      id: opts.id,
+      transport: opts.transport,
+    })
 
     /**
      * Shared envelope dispatcher — handles both the long-connection and
@@ -170,6 +203,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
      * `ctx.emit` as a normalised message event.
      */
     const dispatchEnvelope = async (envelope: LarkEventEnvelope): Promise<void> => {
+      loggers.network.info("[lark] inbound envelope", {
+        id: opts.id,
+        eventType: envelope.header?.event_type,
+      })
       // Interactive card callbacks — route to the callback channel.
       if (envelope.header?.event_type === "im.interactive_message.action_triggered_v1") {
         const callback = parseLarkInteractiveCallback(opts.id, opts.selfBotOpenId, envelope)
@@ -196,15 +233,26 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         return
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
-      if (event) {
-        // v45 (im-refactored-crayon) — gate inbound `create` messages on
-        // the operator-configured at-strategy + chat allow/blocklist
-        // before the bus is invoked. Helper audits `inbound.policy_blocked`
-        // on deny and fails open on Dexie read errors.
-        if (!(await gateInboundEvent(opts.id, event))) return
-        lastActivityAt = Date.now()
-        await ctx.emit(event)
+      if (!event) {
+        loggers.network.warn("[lark] inbound envelope not parsed into an event", {
+          id: opts.id,
+          eventType: envelope.header?.event_type,
+        })
+        return
       }
+      // v45 (im-refactored-crayon) — gate inbound `create` messages on
+      // the operator-configured at-strategy + chat allow/blocklist
+      // before the bus is invoked. Helper audits `inbound.policy_blocked`
+      // on deny and fails open on Dexie read errors.
+      if (!(await gateInboundEvent(opts.id, event))) {
+        loggers.network.warn("[lark] inbound event blocked by gate (at-strategy / allowlist)", {
+          id: opts.id,
+        })
+        return
+      }
+      lastActivityAt = Date.now()
+      loggers.network.info("[lark] inbound event passed gate → emit to bus", { id: opts.id })
+      await ctx.emit(event)
     }
 
     if (opts.transport === "long-connection") {
@@ -220,10 +268,16 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            loggers.network.warn("[lark] long-conn generator ended (no data, health=down)", {
+              id: opts.id,
+            })
           }
-        } catch {
+        } catch (err) {
           if (!stopCalled) {
             healthState = "degraded"
+            loggers.network.error("[lark] long-conn generator threw (health=degraded)", err, {
+              id: opts.id,
+            })
           }
         }
       })()

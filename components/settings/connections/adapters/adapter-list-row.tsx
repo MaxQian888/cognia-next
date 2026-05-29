@@ -14,7 +14,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CircleIcon, InboxIcon, MoreVerticalIcon } from "lucide-react"
+import { InboxIcon, MoreVerticalIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -45,19 +45,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 import { getPlatformMeta } from "./platform-meta"
 import { useSelectedAdapter } from "./use-selected-adapter"
-import {
-  decideBadge,
-  STATE_ICON,
-  STATE_TINT,
-  type BadgeState,
-} from "@/components/inbox/adapter-health-decision"
-
-const HEALTH_LABEL_KEY: Record<BadgeState, string> = {
-  "breaker-open": "rowHealth.breakerOpen",
-  "rate-limited": "rowHealth.rateLimited",
-  degraded: "rowHealth.degraded",
-  down: "rowHealth.down",
-}
+import { deriveAdapterStatus } from "./adapter-status"
 
 export interface AdapterListRowProps {
   row: AdapterInstanceRow
@@ -65,9 +53,16 @@ export interface AdapterListRowProps {
   pendingCount: number
   /** Open the per-platform configuration dialog for this row. */
   onConfigure: (row: AdapterInstanceRow) => void
+  /** Fired after the row selects itself — used to close the mobile drawer. */
+  onAfterSelect?: () => void
 }
 
-export function AdapterListRow({ row, pendingCount, onConfigure }: AdapterListRowProps) {
+export function AdapterListRow({
+  row,
+  pendingCount,
+  onConfigure,
+  onAfterSelect,
+}: AdapterListRowProps) {
   const t = useTranslations("settings.connections.adapters")
   const { selectedAdapterId, setSelectedAdapterId, setActiveTab } = useSelectedAdapter()
   const [removeOpen, setRemoveOpen] = useState(false)
@@ -78,7 +73,13 @@ export function AdapterListRow({ row, pendingCount, onConfigure }: AdapterListRo
   const platformLabel = t(`platforms.${labelKey}`)
 
   const health = useAdapterHealth(row.id)
-  const decision = decideBadge(health)
+  const status = deriveAdapterStatus(row.enabled, health)
+  const StatusIcon = status.Icon
+
+  const onSelect = () => {
+    setSelectedAdapterId(row.id)
+    onAfterSelect?.()
+  }
 
   const onToggleEnabled = () => {
     void updateAdapterInstance(row.id, { enabled: !row.enabled })
@@ -113,55 +114,60 @@ export function AdapterListRow({ row, pendingCount, onConfigure }: AdapterListRo
     }
   }
 
-  const HealthIcon = decision ? STATE_ICON[decision.state] : null
-
   return (
     <li
       role="button"
       aria-pressed={selected}
       data-testid={`adapter-card-${row.id}`}
-      onClick={() => setSelectedAdapterId(row.id)}
+      onClick={onSelect}
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded border bg-card/40 px-2.5 py-2 text-sm transition-colors",
-        selected ? "border-primary bg-primary/5" : "hover:border-muted-foreground/40"
+        "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
+        selected
+          ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
+          : "hover:bg-muted/50"
       )}
     >
-      <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-md",
+          selected ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground"
+        )}
+      >
         <Icon className="size-4" aria-hidden />
-        <CircleIcon
-          aria-hidden
-          className={cn(
-            "absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full fill-current stroke-background stroke-[3px]",
-            row.enabled ? "text-emerald-500" : "text-muted-foreground"
-          )}
-        />
       </span>
 
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{row.displayName}</div>
-        <div className="truncate text-[11px] text-muted-foreground">
+        <div
+          className={cn(
+            "truncate text-[11px]",
+            selected ? "text-primary-foreground/70" : "text-muted-foreground"
+          )}
+        >
           {platformLabel} · {row.transportMode}
         </div>
       </div>
 
-      {decision && HealthIcon && (
-        <span
-          data-testid={`adapter-row-health-${row.id}`}
-          aria-label={t("rowHealth.aria", { state: t(HEALTH_LABEL_KEY[decision.state]) })}
-          className={cn(
-            "flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
-            STATE_TINT[decision.state]
-          )}
-        >
-          <HealthIcon className="size-3" aria-hidden />
-          {t(HEALTH_LABEL_KEY[decision.state])}
-        </span>
-      )}
+      <span
+        data-testid={`adapter-row-status-${row.id}`}
+        data-status={status.status}
+        aria-label={t("rowHealth.aria", { state: t(status.labelKey) })}
+        className={cn(
+          "flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
+          status.tint
+        )}
+      >
+        <StatusIcon className="size-3" aria-hidden />
+        <span className="hidden sm:inline">{t(status.labelKey)}</span>
+      </span>
 
       {pendingCount > 0 && (
         <Badge
           variant="secondary"
-          className="shrink-0 gap-1 text-xs"
+          className={cn(
+            "shrink-0 gap-1 text-xs",
+            selected && "bg-primary-foreground/20 text-primary-foreground"
+          )}
           aria-label={t("pendingBadgeAria", { count: pendingCount })}
           data-testid={`adapter-pending-${row.id}`}
         >
@@ -176,7 +182,11 @@ export function AdapterListRow({ row, pendingCount, onConfigure }: AdapterListRo
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 shrink-0"
+              className={cn(
+                "size-7 shrink-0",
+                selected &&
+                  "text-primary-foreground hover:bg-primary-foreground/20 hover:text-primary-foreground"
+              )}
               aria-label={t("actions.menuAria", { name: row.displayName })}
             >
               <MoreVerticalIcon className="size-4" />

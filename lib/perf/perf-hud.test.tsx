@@ -4,6 +4,11 @@ import { PERF_NAMESPACE } from "./perf-marker"
 import { PerfHud, __test__ } from "./perf-hud"
 
 jest.mock("@/lib/capacitor/_shared", () => ({
+  // Keep the real module's other exports (makeDefaultLoader, withPlugin, …)
+  // intact — companion-storage.ts calls makeDefaultLoader at module init via
+  // the transitive lib/utils → lib/tauri import chain, so dropping it here
+  // makes the whole suite fail to load. Only detectNativePlatform is stubbed.
+  ...jest.requireActual("@/lib/capacitor/_shared"),
   detectNativePlatform: jest.fn(() => "web"),
 }))
 

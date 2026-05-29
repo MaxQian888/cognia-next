@@ -1544,6 +1544,10 @@
       "teams": "团队",
       "skills": "技能",
       "plugins": "插件",
+      "mcpTools": "MCP 工具",
+      "connectors": "连接器",
+      "ocrProviders": "OCR 服务",
+      "workflowTemplates": "工作流模板",
       "twinDrafts": "孪生草稿",
       "twinIngest": "Twin 摄入"
     },
@@ -2673,6 +2677,7 @@
         "custom": "自定义主题",
         "import": "导入",
         "typography": "字体",
+        "a11y": "无障碍",
         "advanced": "高级"
       },
       "reset": {
@@ -4914,6 +4919,21 @@
           "audit": "审计",
           "outbound": "出站"
         },
+        "sidebar": {
+          "searchPlaceholder": "搜索连接器…",
+          "filterAll": "全部",
+          "filterEnabled": "已启用",
+          "filterDisabled": "未启用",
+          "stats": "{total} 个连接器 · {enabled} 个已启用"
+        },
+        "status": {
+          "connected": "已连接",
+          "disabled": "未启用"
+        },
+        "mobile": {
+          "openConnectors": "连接器",
+          "title": "即时通讯连接器"
+        },
         "health": {
           "title": "适配器健康",
           "lastOk": "最近成功",
@@ -5503,6 +5523,16 @@
         "timezonePlaceholder": "例如 Asia/Singapore",
         "timezoneInvalid": "不是有效的 IANA 时区标识符。"
       },
+      "helpAndWelcome": {
+        "title": "帮助与欢迎卡片",
+        "enableCardLabel": "发送欢迎卡片",
+        "enableCardHelp": "机器人入群或用户首次发消息时，用一张卡片引导用户。每个会话仅发送一次。",
+        "triggersLabel": "帮助触发词",
+        "triggersHelp": "每行一个。消息内容与其中任意一项完全匹配时，发送帮助卡片而不调用助手。留空则使用默认值（{defaults}）。",
+        "welcomeTextLabel": "欢迎语",
+        "welcomeTextHelp": "可选，显示在欢迎卡片顶部。留空则使用内置文案。",
+        "welcomeTextPlaceholder": "例如：你好！我是你的助手，下面是我能帮你做的事。"
+      },
       "adapterForm": {
         "cancel": "取消",
         "save": "保存",
@@ -5984,7 +6014,9 @@
       "enable": "启用",
       "disable": "停用",
       "open": "打开",
-      "openInEditor": "在编辑器中打开"
+      "openInEditor": "在编辑器中打开",
+      "selectAria": "选择 {name}",
+      "actionsAria": "{name} 的操作"
     },
     "detail": {
       "tabOverview": "概览",

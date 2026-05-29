@@ -342,6 +342,15 @@ const config: Config = {
     "/out/",
     "/src-tauri/",
     "/sidecar/",
+    // `share-server/` (worker + viewer) is a standalone Vitest workspace with
+    // its own package.json/node_modules — same arrangement as `sidecar/`. Its
+    // specs `import` from `vitest` and `cloudflare:test`, which Jest's CJS
+    // loader can't resolve. Run them via the share-server workspace's own
+    // `vitest` / `wrangler` scripts, not the root Jest suite.
+    "/share-server/",
+    // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
+    // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
+    "/tmp/",
     "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
     // scripts/*.test.mjs use Node's built-in `node --test` runner (ESM with
     // `import.meta.url` / `__dirname = dirname(fileURLToPath(...))`) which

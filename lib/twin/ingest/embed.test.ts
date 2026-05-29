@@ -5,7 +5,7 @@ jest.mock("@/lib/ai/embedding/embedding", () => ({
   generateEmbeddings: (...args: unknown[]) => mockGenerateEmbeddings(...args),
 }))
 
-import { embedRedactedChunks, type EmbeddingConfig } from "./embed"
+import { embedRedactedChunks, __resetTwinEmbeddingCache, type EmbeddingConfig } from "./embed"
 
 const baseConfig: EmbeddingConfig = {
   provider: "openai",
@@ -15,6 +15,9 @@ const baseConfig: EmbeddingConfig = {
 
 beforeEach(() => {
   mockGenerateEmbeddings.mockReset()
+  // The module-local embedding cache is a singleton across cases — reset it so
+  // texts reused between `it` blocks don't leak cache hits and skew call counts.
+  __resetTwinEmbeddingCache()
 })
 
 describe("embedRedactedChunks", () => {
@@ -117,5 +120,76 @@ describe("embedRedactedChunks", () => {
       [0, 1, 0],
       [0, 0, 1],
     ])
+  })
+
+  it("embeds duplicate texts only once but returns one vector per input", async () => {
+    // Three inputs, two of which are identical — upstream should see 2 distinct.
+    mockGenerateEmbeddings.mockResolvedValueOnce({
+      embeddings: [
+        [1, 1],
+        [2, 2],
+      ],
+      usage: { tokens: 9 },
+    })
+    const result = await embedRedactedChunks(["dup", "unique", "dup"], baseConfig)
+    expect(mockGenerateEmbeddings).toHaveBeenCalledTimes(1)
+    expect(mockGenerateEmbeddings.mock.calls[0][0] as string[]).toEqual(["dup", "unique"])
+    // Both "dup" slots resolve to the same vector; order preserved.
+    expect(result.embeddings).toEqual([
+      [1, 1],
+      [2, 2],
+      [1, 1],
+    ])
+    expect(result.tokensUsed).toBe(9)
+  })
+
+  it("serves cached vectors on a second call without re-embedding (idempotent re-import)", async () => {
+    mockGenerateEmbeddings.mockResolvedValueOnce({
+      embeddings: [
+        [1, 0],
+        [0, 1],
+      ],
+      usage: { tokens: 4 },
+    })
+    const first = await embedRedactedChunks(["alpha", "beta"], baseConfig)
+    expect(mockGenerateEmbeddings).toHaveBeenCalledTimes(1)
+
+    // Same texts again — fully cached, no upstream call, no token spend.
+    const second = await embedRedactedChunks(["alpha", "beta"], baseConfig)
+    expect(mockGenerateEmbeddings).toHaveBeenCalledTimes(1)
+    expect(second.embeddings).toEqual(first.embeddings)
+    expect(second.tokensUsed).toBe(0)
+  })
+
+  it("only embeds the cache-miss text on a partially-cached call", async () => {
+    mockGenerateEmbeddings.mockResolvedValueOnce({ embeddings: [[1, 0]], usage: { tokens: 2 } })
+    await embedRedactedChunks(["warm"], baseConfig)
+
+    mockGenerateEmbeddings.mockResolvedValueOnce({ embeddings: [[0, 1]], usage: { tokens: 3 } })
+    const result = await embedRedactedChunks(["warm", "cold"], baseConfig)
+    // Second call embeds only "cold"; "warm" comes from cache.
+    expect(mockGenerateEmbeddings.mock.calls[1][0] as string[]).toEqual(["cold"])
+    expect(result.embeddings).toEqual([
+      [1, 0],
+      [0, 1],
+    ])
+    expect(result.tokensUsed).toBe(3)
+  })
+
+  it("keys the cache by provider+model so a different model re-embeds the same text", async () => {
+    mockGenerateEmbeddings.mockResolvedValueOnce({ embeddings: [[1, 0, 0]], usage: { tokens: 1 } })
+    await embedRedactedChunks(["shared"], baseConfig)
+
+    mockGenerateEmbeddings.mockResolvedValueOnce({
+      embeddings: [[9, 9, 9, 9]],
+      usage: { tokens: 1 },
+    })
+    const other = await embedRedactedChunks(["shared"], {
+      ...baseConfig,
+      model: "text-embedding-3-large",
+    })
+    // Different model → cache miss → upstream called again (correct dimension).
+    expect(mockGenerateEmbeddings).toHaveBeenCalledTimes(2)
+    expect(other.embeddings).toEqual([[9, 9, 9, 9]])
   })
 })

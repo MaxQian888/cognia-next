@@ -100,8 +100,24 @@ describe("<TwinBindingSection />", () => {
     // Runtime knob labels.
     expect(screen.getByText("enableRag")).toBeInTheDocument()
     expect(screen.getByText("ragTopK")).toBeInTheDocument()
+    expect(screen.getByText("enableHybrid")).toBeInTheDocument()
+    expect(screen.getByText("hybridKeywordWeight")).toBeInTheDocument()
     expect(screen.getByText("enableStyleFewShot")).toBeInTheDocument()
     expect(screen.getByText("styleSamplesK")).toBeInTheDocument()
+  })
+
+  it("toggling enableHybrid calls onChange with updated settings", () => {
+    const onChange = jest.fn()
+    render(
+      <TwinBindingSection
+        value={{ twinId: "twin_x", twinSettings: DEFAULT_TWIN_SETTINGS }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(screen.getByLabelText("enableHybrid"))
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(last.twinSettings.enableHybrid).toBe(true)
+    expect(last.twinId).toBe("twin_x")
   })
 
   it("toggling enableRag calls onChange with updated settings", () => {

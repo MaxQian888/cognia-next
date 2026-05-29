@@ -187,7 +187,6 @@ mod tests {
     // rustc's unused-import lint doesn't see through tiny_http's reader type.
     #[allow(unused_imports)]
     use std::io::Read as _;
-    use tempfile::NamedTempFile;
 
     use std::io::Write;
 

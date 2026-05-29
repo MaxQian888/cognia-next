@@ -89,6 +89,18 @@ const PASSPORT_RE = /\b(?:[A-Z]{1,2}\d{7,8}|[Ee]\d{8}|[Gg]\d{8}|[Ee][Hh]\d{7}|[E
 const DRIVER_LICENSE_HINT_RE =
   /(?:\b(?:driver[_\s-]?license|driver[_\s-]?lic|dl[\s#]?|driving[\s_-]?license)\b|驾驶证|驾照)[^\d]{0,20}(\d{12})/gi
 
+// Non-global clones of the detectors used by the no-leak gate. Derived from
+// the canonical `/g` patterns above so the two never drift, but with the `g`
+// flag stripped: `.test()` on these is stateless (no shared `lastIndex`).
+function stateless(re: RegExp): RegExp {
+  return new RegExp(re.source, re.flags.replace("g", ""))
+}
+const EMAIL_DETECT = stateless(EMAIL_RE)
+const CN_ID_DETECT = stateless(CN_ID_RE)
+const API_KEY_DETECT = stateless(API_KEY_PREFIX_RE)
+const IPV6_DETECT = stateless(IPV6_RE)
+const PASSPORT_DETECT = stateless(PASSPORT_RE)
+
 function luhn(digits: string): boolean {
   let sum = 0
   let alt = false
@@ -233,41 +245,25 @@ export function unredactText(text: string, map: Record<string, RedactionRecord>)
  * the draft through a second redaction pass + audit log entry.
  */
 export function hasNoLeakingPii(text: string): boolean {
-  // Reset every regex's lastIndex (these are global regexes; .test mutates
-  // state) so this function stays idempotent across calls.
-  for (const re of [EMAIL_RE, CN_ID_RE, API_KEY_PREFIX_RE, IPV4_RE, IPV6_RE, PASSPORT_RE]) {
-    re.lastIndex = 0
-  }
-
-  if (EMAIL_RE.test(text)) return reset(false)
-  if (CN_ID_RE.test(text)) return reset(false)
-  if (API_KEY_PREFIX_RE.test(text)) return reset(false)
-  if (PASSPORT_RE.test(text)) return reset(false)
-  if (IPV6_RE.test(text)) return reset(false)
+  // Presence checks run on NON-global detector clones: `.test()` on a
+  // non-global regex is stateless (no `lastIndex` to track or reset), so the
+  // gate is idempotent and safe under concurrent / interleaved calls. The
+  // IPv4 / bank-card passes need every match (to apply a predicate), so they
+  // use `matchAll`, which clones the regex internally and never mutates the
+  // shared global's `lastIndex`.
+  if (EMAIL_DETECT.test(text)) return false
+  if (CN_ID_DETECT.test(text)) return false
+  if (API_KEY_DETECT.test(text)) return false
+  if (PASSPORT_DETECT.test(text)) return false
+  if (IPV6_DETECT.test(text)) return false
   // IPv4 — restrict to public addresses so log/example lines don't leak.
-  let ipLeak = false
-  text.replace(IPV4_RE, (m) => {
-    if (isLikelyPublicIPv4(m)) ipLeak = true
-    return m
-  })
-  if (ipLeak) return false
-
-  let bankLeak = false
-  text.replace(BANK_CARD_CANDIDATE_RE, (m) => {
-    if (luhn(m)) bankLeak = true
-    return m
-  })
-  return !bankLeak
-}
-
-function reset(value: boolean): boolean {
-  EMAIL_RE.lastIndex = 0
-  CN_ID_RE.lastIndex = 0
-  API_KEY_PREFIX_RE.lastIndex = 0
-  IPV4_RE.lastIndex = 0
-  IPV6_RE.lastIndex = 0
-  PASSPORT_RE.lastIndex = 0
-  return value
+  for (const match of text.matchAll(IPV4_RE)) {
+    if (isLikelyPublicIPv4(match[0])) return false
+  }
+  for (const match of text.matchAll(BANK_CARD_CANDIDATE_RE)) {
+    if (luhn(match[0])) return false
+  }
+  return true
 }
 
 /**

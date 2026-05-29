@@ -174,6 +174,17 @@ export interface ConnectorCallbackEvent {
  *   - `"wf_fanout_cancel"`  — A2UI Cancel companion to `wf_fanout_approve`.
  *                            Drops both binding rows + enqueues "⊘
  *                            已取消".
+ *   - `"help_quick_command"` — A button on a cross-provider help / welcome
+ *                            card that, when clicked, runs a configured IM
+ *                            quick command. Payload carries the resolved
+ *                            `{action:{type,value}}`; on click the bus
+ *                            synthesises a `create` inbound event (with
+ *                            `selfMentioned: true` so an explicit click is
+ *                            never dropped by the at-gate) and re-enters
+ *                            `dispatchInboundFull`, exactly as if the user
+ *                            had typed the command or clicked the native
+ *                            bot menu. Platform-agnostic — emitted by
+ *                            `lib/connectors/help/build-help-surface.ts`.
  */
 export type ConnectorCallbackBindingKind =
   | "callback_query"
@@ -186,6 +197,7 @@ export type ConnectorCallbackBindingKind =
   | "numeric_action"
   | "wf_fanout_approve"
   | "wf_fanout_cancel"
+  | "help_quick_command"
 
 /**
  * Persisted association between an outbound A2UI surface and the

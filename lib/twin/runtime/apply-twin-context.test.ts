@@ -20,23 +20,28 @@ jest.mock("@/lib/ai/embedding/embedding", () => ({
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
 }))
 
-import { applyTwinContext } from "./apply-twin-context"
+import { applyTwinContext, __flushStyleBackfills } from "./apply-twin-context"
 import type { ApplyTwinContextDeps } from "./apply-twin-context"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
-import { ensureTwinProfile, appendStyleSamples } from "@/lib/db/twin-profile"
+import { ensureTwinProfile, appendStyleSamples, getTwinProfile } from "@/lib/db/twin-profile"
+import { __resetTwinBm25Cache } from "./bm25-index"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@/lib/vector/store"
 
 beforeEach(async () => {
+  // Settle any fire-and-forget style backfill from the previous case against
+  // the old DB before we tear it down, so it can't write into the next test.
+  await __flushStyleBackfills()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   const db = getDb()
   await Promise.all([db.twinSources.clear(), db.twinChunks.clear(), db.twinProfile.clear()])
+  __resetTwinBm25Cache()
 })
 
 function makeCharacter(overrides: Partial<Character> = {}): Character {
@@ -174,6 +179,70 @@ describe("applyTwinContext", () => {
     expect(result.degraded).toBe(false)
   })
 
+  it("surfaces a BM25-only match via hybrid fusion that pure vector search missed", async () => {
+    mockEmbedding()
+    const source = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/finance.md",
+      title: "Finance runbook",
+      bytes: 100,
+      fingerprint: "f-hybrid",
+      redacted: false,
+    })
+    await bulkCreateTwinChunks([
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: "team onboarding overview and welcome",
+        contentRedacted: "team onboarding overview and welcome",
+        charStart: 0,
+        charEnd: 36,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: "vec_sem",
+        strategy: "paragraph",
+        tokenCount: 6,
+        metadata: {},
+      },
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: "annual payroll reconciliation procedure",
+        contentRedacted: "annual payroll reconciliation procedure",
+        charStart: 0,
+        charEnd: 39,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: "vec_kw",
+        strategy: "paragraph",
+        tokenCount: 5,
+        metadata: {},
+      },
+    ])
+    // Vector search returns ONLY the semantic chunk — it misses the keyword one.
+    const store = makeFakeStore({
+      onSearch: () => [
+        { id: "vec_sem", content: "team onboarding overview and welcome", score: 0.9 },
+      ],
+    })
+    const character = makeCharacter({
+      twinSettings: { enableRag: true, enableHybrid: true, hybridKeywordWeight: 0.5 },
+    })
+    const result = await applyTwinContext({
+      character,
+      userMessage: "what is the payroll reconciliation procedure?",
+      deps: { ...baseDeps, store },
+    })
+    const ids = result.applied?.metadata.retrievedChunkIds ?? []
+    const contents = result.retrievedChunks.map((rc) => rc.chunk.content)
+    // BM25 lane pulls in the keyword chunk that the vector lane never returned.
+    expect(contents).toContain("annual payroll reconciliation procedure")
+    expect(ids.length).toBeGreaterThanOrEqual(2)
+    expect(result.degraded).toBe(false)
+  })
+
   it("degrades cleanly when embedding fails", async () => {
     mockEmbeddingFailure(new Error("openai is down"))
     const result = await applyTwinContext({
@@ -221,6 +290,37 @@ describe("applyTwinContext", () => {
     })
     expect(result.applied?.systemPrompt).toContain("## Style examples")
     expect(result.applied?.metadata.styleSampleIds).toEqual(["ss_1"])
+  })
+
+  it("lazily backfills missing style-sample embeddings in the background", async () => {
+    mockEmbedding([0.5, 0.5, 0.5])
+    await ensureTwinProfile("twin_alice")
+    await appendStyleSamples("twin_alice", [
+      {
+        id: "ss_nofill",
+        contextLabel: "rejection",
+        original: "Sorry, not now.",
+        summary: "polite rejection",
+        sourceChunkId: "c1",
+        tone: ["concise"],
+        addedAt: 1,
+        addedBy: "distill",
+      },
+    ])
+    // Pre-condition: the sample has no embedding yet.
+    const before = await getTwinProfile("twin_alice")
+    expect(before?.styleSamples[0].embedding).toBeUndefined()
+
+    await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "draft a polite no",
+      deps: baseDeps,
+    })
+    // The backfill is fire-and-forget — wait for it to settle.
+    await __flushStyleBackfills()
+
+    const after = await getTwinProfile("twin_alice")
+    expect(after?.styleSamples[0].embedding).toEqual([0.5, 0.5, 0.5])
   })
 
   it("respects character.twinSettings.enableRag = false", async () => {

@@ -71,7 +71,9 @@ describe("CanvasDocumentRail", () => {
       })
     })
     renderWithProviders(<CanvasDocumentRail />)
-    expect(screen.getByRole("button", { name: /Delete document/i })).toBeInTheDocument()
+    // The document title must be interpolated into the aria-label; a missing
+    // {name} arg would render the literal placeholder and throw at runtime.
+    expect(screen.getByRole("button", { name: "Delete document Bye" })).toBeInTheDocument()
   })
 
   it("activates the document when the row's select button is clicked", async () => {

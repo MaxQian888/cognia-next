@@ -12,6 +12,7 @@ import {
   deleteTwinSource,
   findTwinSourceByFingerprint,
   getTwinSource,
+  getTwinSourcesByIds,
   listTwinSourcesByTwin,
   listTwinSourcesByTwinAndKind,
   listTwinSourcesByTwinAndStatus,
@@ -142,11 +143,23 @@ describe("twinSources CRUD", () => {
     expect(list.map((r) => r.id)).toEqual([newer.id, older.id])
   })
 
-  it("findTwinSourceByFingerprint isolates by twinId", async () => {
+  it("findTwinSourceByFingerprint isolates by twinId (compound index)", async () => {
     await createTwinSource(baseDraft)
     await createTwinSource({ ...baseDraft, twinId: "twin_bob", fingerprint: "sha256:aaa" })
     const aliceHit = await findTwinSourceByFingerprint("twin_alice", "sha256:aaa")
     expect(aliceHit?.twinId).toBe("twin_alice")
+    const bobHit = await findTwinSourceByFingerprint("twin_bob", "sha256:aaa")
+    expect(bobHit?.twinId).toBe("twin_bob")
+    // A fingerprint that exists only under another twin must not leak across.
+    expect(await findTwinSourceByFingerprint("twin_carol", "sha256:aaa")).toBeUndefined()
+  })
+
+  it("getTwinSourcesByIds batch-fetches in one round-trip, dropping missing ids", async () => {
+    const a = await createTwinSource({ ...baseDraft, fingerprint: "fp-a" })
+    const b = await createTwinSource({ ...baseDraft, fingerprint: "fp-b" })
+    const rows = await getTwinSourcesByIds([a.id, "tws_missing", b.id])
+    expect(rows.map((r) => r.id).sort()).toEqual([a.id, b.id].sort())
+    expect(await getTwinSourcesByIds([])).toEqual([])
   })
 
   it("updateTwinSource patches fields and returns the new row", async () => {

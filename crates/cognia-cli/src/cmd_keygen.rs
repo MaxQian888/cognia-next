@@ -45,9 +45,8 @@ pub fn run(out_dir: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
     let pub_b64 = kp.public_base64();
     let fp = kp.fingerprint_hex();
     println!(
-        "{}{} Ed25519 keypair generated",
-        style::success_prefix(),
-        style::ok("✓")
+        "{}Ed25519 keypair generated",
+        style::success_prefix()
     );
     println!("  private key: {}", style::dim(priv_path.display().to_string()));
     println!("  public key:  {}", style::dim(pub_path.display().to_string()));

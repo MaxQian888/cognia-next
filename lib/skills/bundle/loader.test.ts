@@ -107,7 +107,7 @@ describe("loadBundle", () => {
       "extras/stray.txt": "stray",
     })
     const result = await loadBundle({ kind: "zip-blob", bytes })
-    expect(result.warnings.some((w) => w.includes("classified as 'asset'"))).toBe(true)
+    expect(result.warnings.some((w) => w.includes("classified as 'reference'"))).toBe(true)
   })
 
   it("falls back to rootDirName for fallbackName when not provided", async () => {

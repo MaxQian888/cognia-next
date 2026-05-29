@@ -121,3 +121,4 @@ dist
 # IDE-local data (Tallycode VSCode extension cache)
 .vscode/.tallycode/
 .wrangler/
+tmp/

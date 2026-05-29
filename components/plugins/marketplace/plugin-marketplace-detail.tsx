@@ -21,6 +21,9 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { InstallButton } from "../_shared/install-button"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
+import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import type { PluginManifest } from "@/types/plugin"
 import {
   DANGEROUS_PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
@@ -107,26 +110,21 @@ export function PluginMarketplaceDetail({
                 <PermissionList title={t("optional")} permissions={entry.optionalPermissions} />
               )}
 
-              {entry.dependencies && Object.keys(entry.dependencies).length > 0 && (
-                <Card className="p-3 space-y-2">
-                  <h3 className="text-xs font-semibold">{t("dependencies")}</h3>
-                  <div className="space-y-0.5">
-                    {Object.entries(entry.dependencies).map(([dep, version]) => (
-                      <div key={dep} className="text-xs flex items-center justify-between">
-                        <code className="font-mono">{dep}</code>
-                        <span className="text-muted-foreground">{version}</span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
+              <PluginDependencyPanel
+                manifest={{ dependencies: entry.dependencies } as PluginManifest}
+              />
 
               {entry.readme && (
-                <Card className="p-0">
+                <Card className="p-3">
+                  <div className="text-xs font-semibold mb-2">{t("readme")}</div>
                   <ScrollArea className="max-h-[40vh]">
-                    <pre className="p-3 text-xs leading-relaxed whitespace-pre-wrap font-sans">
-                      {entry.readme}
-                    </pre>
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-sm pr-2">
+                      <MarkdownRenderer
+                        content={entry.readme}
+                        enableMermaid={false}
+                        enableMath={false}
+                      />
+                    </div>
                   </ScrollArea>
                 </Card>
               )}

@@ -21,6 +21,7 @@ import { listWikiArticlesByScope, listAllWikiArticles } from "@/lib/db/wiki-arti
 import { listWikiSectionsByArticle } from "@/lib/db/wiki-sections"
 import { listTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
+import { BM25Index } from "@/lib/ai/rag/hybrid-search"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
 
 export type RagSearchScope = WikiScope | "all" | "twin"
@@ -111,40 +112,39 @@ async function ragSearchWiki(
 }
 
 /**
- * BM25-ish retrieval over the user's twin chunks for a single twinId.
+ * BM25 retrieval over the user's twin chunks for a single twinId.
  *
- * Scores each chunk against the query tokens; ties broken by source title
- * tokens (matching "send me code from notes.md" promotes notes-derived
- * chunks). The redacted form is what we score against (the redacted text
- * is what the twin's runtime would see), but the *original* content is
- * what we return — external agents see the user's real text, which is the
- * point of the surface.
+ * Reuses the shared RAG toolkit's `BM25Index` (IDF + length normalisation +
+ * CJK-aware tokenisation) — the same primitive the twin RUNTIME hybrid path
+ * uses — instead of a hand-rolled token-overlap count, so the two retrieval
+ * surfaces rank consistently. Each chunk is indexed by the REDACTED text (what
+ * the runtime would see) plus its source title, so a query token that hits the
+ * title (e.g. "notes.md") still promotes that source's chunks. The *original*
+ * content is what we return — external agents see the user's real text, which
+ * is the point of the surface.
  */
 async function ragSearchTwin(twinId: string, query: string, k: number): Promise<RagSearchOutput> {
-  const tokens = tokenize(query)
-  if (tokens.length === 0) return { chunks: [], considered: 0 }
+  if (tokenize(query).length === 0) return { chunks: [], considered: 0 }
 
   const [chunks, sources] = await Promise.all([
     listTwinChunksByTwin(twinId),
     listTwinSourcesByTwin(twinId),
   ])
+  if (chunks.length === 0) return { chunks: [], considered: 0 }
   const sourceById = new Map(sources.map((s) => [s.id, s]))
 
-  const hits: RagSearchHit[] = []
+  const index = new BM25Index()
   for (const chunk of chunks) {
-    const haystack = tokenize(chunk.contentRedacted || chunk.content)
-    if (haystack.length === 0) continue
-    const set = new Set(haystack)
-    let score = 0
-    for (const t of tokens) if (set.has(t)) score += 1
-    if (score === 0) continue
-    // Title boost — tokens that hit the source title (e.g. "notes.md")
-    // promote chunks from that source.
+    const title = sourceById.get(chunk.sourceId)?.title ?? ""
+    index.addDocument(chunk.id, `${chunk.contentRedacted || chunk.content}\n${title}`)
+  }
+
+  const chunkById = new Map(chunks.map((c) => [c.id, c]))
+  const hits: RagSearchHit[] = []
+  for (const ranked of index.search(query, k)) {
+    const chunk = chunkById.get(ranked.id)
+    if (!chunk) continue
     const source = sourceById.get(chunk.sourceId)
-    if (source) {
-      const titleTokens = new Set(tokenize(source.title))
-      for (const t of tokens) if (titleTokens.has(t)) score += 0.5
-    }
     hits.push({
       twinId,
       twinSourceId: chunk.sourceId,
@@ -152,11 +152,10 @@ async function ragSearchTwin(twinId: string, query: string, k: number): Promise<
       lineStart: 0,
       lineEnd: 0,
       content: chunk.content,
-      score,
+      score: ranked.score,
     })
   }
-  hits.sort((a, b) => b.score - a.score)
-  return { chunks: hits.slice(0, k), considered: chunks.length }
+  return { chunks: hits, considered: chunks.length }
 }
 
 function scoreSection(

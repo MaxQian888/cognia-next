@@ -15,6 +15,12 @@ export type AuditKind =
   | "inbound.deferred_quiet_hours"
   | "inbound.deferred_muted"
   | "inbound.deferred_manual_mode"
+  // Cross-provider help / welcome card subsystem (lib/connectors/help). The
+  // bus served an on-demand help card in response to a help-trigger message
+  // (`inbound.help_served`) or pushed a proactive welcome card on bot-join /
+  // first-inbound (`inbound.welcome_sent`). Both short-circuit the AI turn.
+  | "inbound.help_served"
+  | "inbound.welcome_sent"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
   // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the

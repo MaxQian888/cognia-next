@@ -104,6 +104,9 @@ export function TwinBindingSection({ value, onChange, excludeCharacterId }: Prop
       enableStyleFewShot:
         value.twinSettings?.enableStyleFewShot ?? DEFAULT_TWIN_SETTINGS.enableStyleFewShot,
       styleSamplesK: value.twinSettings?.styleSamplesK ?? DEFAULT_TWIN_SETTINGS.styleSamplesK,
+      enableHybrid: value.twinSettings?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
+      hybridKeywordWeight:
+        value.twinSettings?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
     }),
     [value.twinSettings]
   )
@@ -318,6 +321,41 @@ function RuntimeKnobs({
           onValueChange={(v) => onChange({ ragTopK: v[0] ?? settings.ragTopK })}
           disabled={!settings.enableRag}
           aria-label={t("ragTopK")}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="twin-enable-hybrid" className="cursor-pointer text-sm">
+            {t("enableHybrid")}
+          </Label>
+          <p className="text-muted-foreground text-[11px]">{t("enableHybridHint")}</p>
+        </div>
+        <Switch
+          id="twin-enable-hybrid"
+          checked={settings.enableHybrid}
+          onCheckedChange={(v) => onChange({ enableHybrid: v })}
+          disabled={!settings.enableRag}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("hybridKeywordWeight")}</Label>
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {settings.hybridKeywordWeight.toFixed(1)}
+          </span>
+        </div>
+        <Slider
+          min={0}
+          max={1}
+          step={0.1}
+          value={[settings.hybridKeywordWeight]}
+          onValueChange={(v) =>
+            onChange({ hybridKeywordWeight: v[0] ?? settings.hybridKeywordWeight })
+          }
+          disabled={!settings.enableRag || !settings.enableHybrid}
+          aria-label={t("hybridKeywordWeight")}
         />
       </div>
 

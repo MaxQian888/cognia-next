@@ -76,6 +76,10 @@ export async function updateAdapterInstance(
       | "lastWhoamiAt"
       | "lastWhoamiResult"
       | "userTokenStoredAt"
+      // Cross-provider help / welcome card settings.
+      | "welcomeCardEnabled"
+      | "helpTriggers"
+      | "welcomeText"
     >
   >
 ): Promise<void> {

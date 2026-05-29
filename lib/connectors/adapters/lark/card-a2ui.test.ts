@@ -52,6 +52,31 @@ describe("buildLarkA2UICard", () => {
     // Bindings round-trip.
     const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:b1:yes")
     expect(binding?.componentId).toBe("b1")
+    // Plain buttons default to the callback_query kind.
+    expect(binding?.kind).toBe("callback_query")
+  })
+
+  it("honours a Button's bindingKind + bindingPayload hint (help quick command)", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Card", title: "Help", children: ["qc"] },
+        qc: {
+          id: "qc",
+          component: "Button",
+          text: "今日日程",
+          action: "qc:agenda",
+          bindingKind: "help_quick_command",
+          bindingPayload: { action: { type: "slash", value: "/lark agenda" } },
+        },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    await buildLarkA2UICard(baseInput(surface))
+    const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:qc:qc:agenda")
+    expect(binding?.kind).toBe("help_quick_command")
+    expect(binding?.payload).toEqual({ action: { type: "slash", value: "/lark agenda" } })
+    expect(binding?.conversationKey).toBe("lark:adp_lk:oc_chat")
   })
 
   it("renders Select with options + DatePicker as native elements", async () => {

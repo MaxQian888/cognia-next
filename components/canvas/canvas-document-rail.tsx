@@ -368,7 +368,9 @@ export function CanvasDocumentRail() {
                                         variant="ghost"
                                         size="icon"
                                         type="button"
-                                        aria-label={t("deleteAria")}
+                                        aria-label={t("deleteAria", {
+                                          name: doc.title || t("untitledDefault"),
+                                        })}
                                         onClick={(ev) => {
                                           ev.stopPropagation()
                                           if (activeId === doc.id) setActive(null)

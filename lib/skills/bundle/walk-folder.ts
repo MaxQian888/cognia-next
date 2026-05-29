@@ -9,9 +9,9 @@
 // module stays import-safe in jsdom.
 
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
-import type { SkillResourceKind } from "@/lib/claude/types"
 import type { BundleArchiveReadResult } from "./walk-zip"
 import { MAX_RESOURCES_PER_SKILL, MAX_RESOURCE_BYTES_WEB, validateResourcePath } from "./limits"
+import { inferResourceKind, isCanonicalBundleDir } from "./classify"
 
 export interface BundleFsEntry {
   name: string
@@ -74,12 +74,6 @@ const TEXT_EXTENSIONS = new Set([
   ".lock",
   ".log",
 ])
-
-const KIND_BY_DIR: Record<string, SkillResourceKind> = {
-  scripts: "script",
-  references: "reference",
-  assets: "asset",
-}
 
 function joinPath(a: string, b: string): string {
   if (!a) return b
@@ -147,26 +141,35 @@ interface RecurseAcc {
   warnings: string[]
 }
 
+/**
+ * Walk the whole bundle tree, collecting every file. Kind is inferred per
+ * entry via the shared classifier (canonical subdirs win, else by
+ * extension) so `resources/` and other ad-hoc folders are collected rather
+ * than dropped. SKILL.md and the Codex sidecar are skipped — the caller
+ * reads those directly.
+ */
 async function recurse(
   absBase: string,
   relBase: string,
-  kind: SkillResourceKind,
   fs: BundleFs,
   acc: RecurseAcc
 ): Promise<void> {
   const entries = await fs.readDir(absBase)
   for (const entry of entries) {
-    if (acc.resources.length >= MAX_RESOURCES_PER_SKILL) {
-      acc.warnings.push(
-        `Bundle has more than ${MAX_RESOURCES_PER_SKILL} resources; later entries (${entry.name}…) ignored.`
-      )
-      return
-    }
     const absChild = joinPath(absBase, entry.name)
     const relChild = relBase ? `${relBase}/${entry.name}` : entry.name
     if (entry.isDirectory) {
-      await recurse(absChild, relChild, kind, fs, acc)
+      await recurse(absChild, relChild, fs, acc)
       continue
+    }
+    // Skip the manifest + Codex sidecar — read separately by the caller.
+    if (relChild === "SKILL.md") continue
+    if (relChild === "agents/openai.yaml" || relChild === "agents/openai.yml") continue
+    if (acc.resources.length >= MAX_RESOURCES_PER_SKILL) {
+      acc.warnings.push(
+        `Bundle has more than ${MAX_RESOURCES_PER_SKILL} resources; later entries (${relChild}…) ignored.`
+      )
+      return
     }
     const pathError = validateResourcePath(relChild)
     if (pathError) {
@@ -179,6 +182,12 @@ async function recurse(
       )
     }
     const { encoding, content } = encodeResource(relChild, bytes)
+    const kind = inferResourceKind(relChild)
+    if (!isCanonicalBundleDir(relChild.split("/")[0])) {
+      acc.warnings.push(
+        `Resource ${relChild} lives outside scripts/ references/ assets/; classified as '${kind}'.`
+      )
+    }
     acc.resources.push({
       kind,
       name: basename(relChild),
@@ -219,52 +228,11 @@ export async function readBundleFolder(
 
   const acc: RecurseAcc = { resources: [], warnings: [] }
 
-  for (const [subdir, kind] of Object.entries(KIND_BY_DIR)) {
-    const absSub = joinPath(rootDir, subdir)
-    if (!(await fs.exists(absSub))) continue
-    await recurse(absSub, subdir, kind, fs, acc)
-  }
-
-  // Scan the root for stragglers — files not under scripts/references/assets
-  // and not the manifest files. Classify as `asset` with a warning.
-  const rootEntries = await fs.readDir(rootDir)
-  for (const entry of rootEntries) {
-    if (entry.isDirectory && (KIND_BY_DIR[entry.name] || entry.name === "agents")) {
-      continue
-    }
-    if (entry.name === "SKILL.md") continue
-    if (acc.resources.length >= MAX_RESOURCES_PER_SKILL) break
-    if (entry.isDirectory) {
-      acc.warnings.push(
-        `Folder ${entry.name}/ lives outside scripts/ references/ assets/ agents/; contents not collected.`
-      )
-      continue
-    }
-    const absChild = joinPath(rootDir, entry.name)
-    const relChild = entry.name
-    const pathError = validateResourcePath(relChild)
-    if (pathError) {
-      throw new Error(`Bundle resource rejected: ${pathError}`)
-    }
-    const bytes = await fs.readFile(absChild)
-    if (bytes.byteLength > MAX_RESOURCE_BYTES_WEB) {
-      throw new Error(
-        `Bundle resource ${relChild} exceeds the ${MAX_RESOURCE_BYTES_WEB} byte per-file cap.`
-      )
-    }
-    const { encoding, content } = encodeResource(relChild, bytes)
-    acc.resources.push({
-      kind: "asset",
-      name: basename(relChild),
-      path: relChild,
-      content,
-      encoding,
-      size: bytes.byteLength,
-    })
-    acc.warnings.push(
-      `Resource ${relChild} lives outside scripts/ references/ assets/; classified as 'asset'.`
-    )
-  }
+  // Walk the entire tree from the root. The recurse skips SKILL.md and the
+  // Codex sidecar and classifies every other file via the shared
+  // classifier, so canonical subdirs, Claude Code's `resources/` dir, and
+  // ad-hoc folders are all collected consistently.
+  await recurse(rootDir, "", fs, acc)
 
   return {
     skillMd,

@@ -41,6 +41,9 @@ export function TwinHeaderBadge({ twinId, twinSettings }: Props) {
     enableStyleFewShot:
       twinSettings?.enableStyleFewShot ?? DEFAULT_TWIN_SETTINGS.enableStyleFewShot,
     styleSamplesK: twinSettings?.styleSamplesK ?? DEFAULT_TWIN_SETTINGS.styleSamplesK,
+    enableHybrid: twinSettings?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
+    hybridKeywordWeight:
+      twinSettings?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
   }
 
   return (

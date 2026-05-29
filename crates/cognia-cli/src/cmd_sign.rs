@@ -37,6 +37,15 @@ pub fn run(bundle: PathBuf, key: PathBuf, out: Option<PathBuf>, ui: &mut Runtime
         );
     }
     let signature = sign_bundle(&kp.signing_key, &bytes);
+    // Create the destination's parent dir if `--out` points somewhere that
+    // doesn't exist yet — consistent with `build`/`keygen`, which both
+    // `create_dir_all` rather than erroring with a raw OS path error.
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("mkdir {}", parent.display()))?;
+        }
+    }
     std::fs::write(&dest, &signature).with_context(|| format!("write {}", dest.display()))?;
     println!(
         "{}{} {} → {}",
@@ -111,6 +120,21 @@ mod tests {
         let actual = std::fs::read_to_string(tmp.path().join("p.zip.sig")).unwrap();
         assert_ne!(actual, "stale");
         crate::signing::verify_bundle(&kp.public_base64(), b"bundle", actual.trim()).unwrap();
+    }
+
+    #[test]
+    fn sign_creates_missing_parent_dir_for_out() {
+        let tmp = tempdir().unwrap();
+        let bundle = tmp.path().join("p.zip");
+        std::fs::write(&bundle, b"x").unwrap();
+        let kp = Keypair::generate();
+        let key_path = tmp.path().join("priv.b64");
+        std::fs::write(&key_path, kp.private_base64()).unwrap();
+        // --out points into a directory tree that does not exist yet.
+        let out_path = tmp.path().join("nested").join("dir").join("custom.sig");
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
+        run(bundle, key_path, Some(out_path.clone()), &mut ui).unwrap();
+        assert!(out_path.exists(), "sign should create the parent dir for --out");
     }
 
     #[test]

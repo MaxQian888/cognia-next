@@ -32,6 +32,7 @@ import type {
   PluginReviewRow,
   PluginAnalyticsRow,
   PluginScheduledJobRow,
+  PluginMarketplaceSourceRow,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
 import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
@@ -1554,6 +1555,23 @@ export class CogniaDB extends Dexie {
     this.version(57).stores({
       sandboxConnections: "&id, name, createdAt, updatedAt",
     })
+
+    // v58 — add the `[twinId+fingerprint]` compound index to `twinSources` so
+    // import-time dedup (`findTwinSourceByFingerprint`) is a direct compound
+    // lookup instead of a full `fingerprint` index scan + JS `twinId` filter.
+    // Additive index only — Dexie builds it on upgrade; no data migration.
+    this.version(58).stores({
+      twinSources:
+        "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status], [twinId+fingerprint]",
+    })
+
+    // v59 — GitHub "marketplace repo" sources (Claude-Code-style plugin
+    // dispatch). One row per added catalog repo. Additive only; no upgrade
+    // hook. Indexes: `&id` (owner/repo[@ref] primary), `addedAt` (newest-first
+    // list in the manage-sources dialog).
+    this.version(59).stores({
+      pluginMarketplaceSources: "&id, repoRef, addedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1566,6 +1584,8 @@ export class CogniaDB extends Dexie {
   inboxTelemetryEvents!: Table<InboxTelemetryEventRow, string>
   // v57 — Computer-Use sandbox connections. See `lib/db/sandbox-connections.ts`.
   sandboxConnections!: Table<SandboxConnectionRow, string>
+  // v59 — GitHub marketplace-repo sources. See `lib/db/plugin-marketplace-sources.ts`.
+  pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */

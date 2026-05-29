@@ -183,6 +183,17 @@ describe("redactText — extended PII coverage", () => {
     expect(hasNoLeakingPii("clean text")).toBe(true)
     expect(hasNoLeakingPii("clean text")).toBe(true)
   })
+
+  it("hasNoLeakingPii is order-independent when interleaving clean and dirty text", () => {
+    // Stateless guard: a dirty call must never poison the verdict of a later
+    // clean call (and vice-versa), regardless of interleaving order.
+    expect(hasNoLeakingPii("see alice@example.com")).toBe(false)
+    expect(hasNoLeakingPii("perfectly clean prose")).toBe(true)
+    expect(hasNoLeakingPii("ID 11010519900101111X")).toBe(false)
+    expect(hasNoLeakingPii("more clean prose")).toBe(true)
+    expect(hasNoLeakingPii("Card: 4111111111111111")).toBe(false)
+    expect(hasNoLeakingPii("nothing to see here")).toBe(true)
+  })
 })
 
 describe("hasNoLeakingPiiDeep", () => {

@@ -12,7 +12,7 @@
  * surface as "no executor registered" run failures.
  */
 
-import type { StepExecutionContext } from "@/types/workflow/visual"
+import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import {
@@ -1227,9 +1227,28 @@ registerNodeExecutor({
     const team = store.getTeam(teamId)
     if (!team) throw nonRetryable(`team ${teamId} not found`)
 
+    // When the outer run was kicked off from an IM channel (via
+    // `startWorkflowFromIM`, which mirrors the origin onto
+    // `trigger.binding`), carry that origin into the synthesized team run so
+    // the `workflow-progress-runner` fans the team's progress + final result
+    // back to the originating conversation. Only set `source: "im"` when both
+    // identifiers are present; UI / API runs leave it undefined so their
+    // behavior is unchanged.
+    const triggerBinding = ctx.trigger.binding
+    const triggeredFrom: WorkflowTriggeredFrom | undefined =
+      triggerBinding?.adapterId && triggerBinding?.conversationKey
+        ? {
+            source: "im",
+            adapterId: triggerBinding.adapterId,
+            conversationKey: triggerBinding.conversationKey,
+            ...(triggerBinding.sessionId ? { sessionId: triggerBinding.sessionId } : {}),
+          }
+        : undefined
+
     const partial = buildAgentTeamRuntimeDeps()
     const deps = {
       ...partial,
+      ...(triggeredFrom ? { triggeredFrom } : {}),
       storeReader: {
         getTeam: (id: string) => useAgentTeamStore.getState().getTeam(id),
         getTeammates: (id: string) => useAgentTeamStore.getState().getTeammates(id),

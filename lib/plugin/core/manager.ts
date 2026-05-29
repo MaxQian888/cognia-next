@@ -44,6 +44,7 @@ import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/mess
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
+import { updatePlugin } from "@/lib/db/plugins"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
@@ -1023,7 +1024,6 @@ export class PluginManager {
       name?: string
     }
   ): Promise<Plugin> {
-    const store = usePluginStore.getState()
     const type = options?.type || "local"
 
     const txn: InstallTransactionState = {
@@ -1050,81 +1050,182 @@ export class PluginManager {
         installType: type,
         pluginDir: this.config.pluginDirectory,
       })
-      txn.pluginId = result.manifest.id
-      txn.pluginPath = result.path
-      txn.manifest = result.manifest
-      txn.stepsCompleted.backendInstall = true
-
-      // Validate manifest
-      const validation = validatePluginManifest(result.manifest, {
-        governanceMode: this.pluginPointGovernanceMode,
+      return await this.registerBackendInstall(result, type, txn)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
+        loggers.manager.error(
+          `[plugin:${txn.pluginId || "(unknown)"}] install rollback itself failed`,
+          rollbackErr
+        )
       })
-      if (!validation.valid) {
-        throw new Error(`Invalid plugin manifest: ${validation.errors.join(", ")}`)
-      }
+      throw new Error(`Failed to install plugin: ${reason}`)
+    }
+  }
 
-      const compatibility = this.applyCompatibilityPolicy(result.manifest, `install:${type}`)
-      if (compatibility.blocked) {
-        const messages = compatibility.diagnostics
-          .filter((item) => item.severity === "error")
-          .map((item) => `${item.code}: ${item.message}`)
-        throw new Error(`Incompatible plugin manifest: ${messages.join("; ")}`)
-      }
+  /**
+   * Register a plugin that a Tauri backend command has already unpacked to
+   * disk (`plugin_install`, `plugin_install_from_github`, …). Runs manifest
+   * validation, compatibility + signature checks, store discovery/install,
+   * verification recording, and permission registration — the shared tail
+   * every backend install path needs so the in-memory store stays the
+   * single UI-facing authority. Throws on any failure; the caller owns the
+   * surrounding try/catch + `performInstallRollback`.
+   */
+  private async registerBackendInstall(
+    result: {
+      manifest: PluginManifest
+      path: string
+      source?: PluginSource
+      installRootKind?: PluginInstallRootKind
+    },
+    type: "local" | "git" | "marketplace",
+    txn: InstallTransactionState
+  ): Promise<Plugin> {
+    const store = usePluginStore.getState()
+    txn.pluginId = result.manifest.id
+    txn.pluginPath = result.path
+    txn.manifest = result.manifest
+    txn.stepsCompleted.backendInstall = true
 
-      const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
-        validation.diagnostics || []
+    // Validate manifest
+    const validation = validatePluginManifest(result.manifest, {
+      governanceMode: this.pluginPointGovernanceMode,
+    })
+    if (!validation.valid) {
+      throw new Error(`Invalid plugin manifest: ${validation.errors.join(", ")}`)
+    }
+
+    const compatibility = this.applyCompatibilityPolicy(result.manifest, `install:${type}`)
+    if (compatibility.blocked) {
+      const messages = compatibility.diagnostics
+        .filter((item) => item.severity === "error")
+        .map((item) => `${item.code}: ${item.message}`)
+      throw new Error(`Incompatible plugin manifest: ${messages.join("; ")}`)
+    }
+
+    const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
+      validation.diagnostics || []
+    )
+
+    // Verify signature
+    if (!(await this.verifyPluginSignature(result.path, result.manifest.id))) {
+      throw new Error(`Signature verification failed for plugin ${result.manifest.id}`)
+    }
+
+    const projection = this.buildDiscoveryProjection(
+      result.manifest,
+      result.path,
+      result.source || (type as PluginSource),
+      [...capabilityContractDiagnostics, ...compatibility.diagnostics],
+      this.collectObservedSources(store.plugins[result.manifest.id]),
+      result.installRootKind
+    )
+
+    // Register with store
+    store.discoverPlugin(result.manifest, projection.source, result.path, {
+      installRootKind: projection.installRootKind,
+      compatibilityDiagnostics: projection.compatibilityDiagnostics,
+      descriptor: projection.descriptor,
+    })
+    txn.stepsCompleted.storeDiscovery = true
+
+    await store.installPlugin(result.manifest.id)
+    txn.stepsCompleted.storeInstall = true
+
+    this.recordPluginVerification(result.manifest.id, {
+      status: "installed",
+      action: "install",
+      stage: "installation",
+      successful: true,
+      resolvedVersion: result.manifest.version,
+    })
+
+    try {
+      this.registerPluginPermissions(result.manifest.id, result.manifest.permissions || [])
+      txn.stepsCompleted.permissionRegistration = true
+    } catch (error) {
+      // Permission registration is normally infallible (in-memory map +
+      // Dexie write); surface it explicitly so a misconfigured permission
+      // table doesn't silently leave the plugin half-armed.
+      throw new Error(
+        `Permission registration failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+
+    if (result.manifest.type === "wasm") {
+      await this.preloadWasmComponent(result.manifest, result.path)
+    }
+
+    return store.plugins[result.manifest.id]
+  }
+
+  /**
+   * Install a build-free plugin straight from a public GitHub repo. The
+   * Rust `plugin_install_from_github` command downloads the repo tarball,
+   * validates the manifest + entry artifacts, and unpacks it; we then run
+   * the shared `registerBackendInstall` tail and persist the README /
+   * LICENSE / source metadata onto the Dexie row for the detail UI.
+   *
+   * Tauri-only — the caller (GitHub install dialog) gates on
+   * `canUseTauriInvoke()`.
+   */
+  async installPluginFromGithub(repo: string, gitRef?: string, subdir?: string): Promise<Plugin> {
+    const txn: InstallTransactionState = {
+      pluginId: null,
+      pluginPath: null,
+      manifest: null,
+      stepsCompleted: {
+        backendInstall: false,
+        storeDiscovery: false,
+        storeInstall: false,
+        permissionRegistration: false,
+      },
+    }
+
+    try {
+      const result = await invoke<{
+        manifest: PluginManifest
+        path: string
+        source?: PluginSource
+        installRootKind?: PluginInstallRootKind
+        readme?: string | null
+        licenseText?: string | null
+        repo: string
+        gitRef: string
+      }>("plugin_install_from_github", { repo, gitRef, subdir })
+
+      const plugin = await this.registerBackendInstall(
+        {
+          manifest: result.manifest,
+          path: result.path,
+          source: result.source ?? ("git" as PluginSource),
+          installRootKind: result.installRootKind,
+        },
+        "git",
+        txn
       )
 
-      // Verify signature
-      if (!(await this.verifyPluginSignature(result.path, result.manifest.id))) {
-        throw new Error(`Signature verification failed for plugin ${result.manifest.id}`)
-      }
-
-      const projection = this.buildDiscoveryProjection(
-        result.manifest,
-        result.path,
-        result.source || (type as PluginSource),
-        [...capabilityContractDiagnostics, ...compatibility.diagnostics],
-        this.collectObservedSources(store.plugins[result.manifest.id]),
-        result.installRootKind
-      )
-
-      // Register with store
-      store.discoverPlugin(result.manifest, projection.source, result.path, {
-        installRootKind: projection.installRootKind,
-        compatibilityDiagnostics: projection.compatibilityDiagnostics,
-        descriptor: projection.descriptor,
-      })
-      txn.stepsCompleted.storeDiscovery = true
-
-      await store.installPlugin(result.manifest.id)
-      txn.stepsCompleted.storeInstall = true
-
-      this.recordPluginVerification(result.manifest.id, {
-        status: "installed",
-        action: "install",
-        stage: "installation",
-        successful: true,
-        resolvedVersion: result.manifest.version,
-      })
-
+      // Persist README / LICENSE text + the resolved source URL so the
+      // detail views can render them offline. Non-fatal: the install itself
+      // already succeeded, so a metadata-write hiccup must not fail it.
       try {
-        this.registerPluginPermissions(result.manifest.id, result.manifest.permissions || [])
-        txn.stepsCompleted.permissionRegistration = true
+        const sourceUrl = `https://github.com/${result.repo}${
+          result.gitRef ? `/tree/${result.gitRef}` : ""
+        }`
+        await updatePlugin(result.manifest.id, {
+          readme: result.readme ?? undefined,
+          licenseText: result.licenseText ?? undefined,
+          sourceUrl,
+        })
       } catch (error) {
-        // Permission registration is normally infallible (in-memory map +
-        // Dexie write); surface it explicitly so a misconfigured permission
-        // table doesn't silently leave the plugin half-armed.
-        throw new Error(
-          `Permission registration failed: ${error instanceof Error ? error.message : String(error)}`
+        loggers.manager.warn(
+          `[plugin:${result.manifest.id}] failed to persist GitHub source metadata`,
+          { error: error instanceof Error ? error.message : String(error) }
         )
       }
 
-      if (result.manifest.type === "wasm") {
-        await this.preloadWasmComponent(result.manifest, result.path)
-      }
-
-      return store.plugins[result.manifest.id]
+      return plugin
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       await this.performInstallRollback(txn, reason).catch((rollbackErr) => {

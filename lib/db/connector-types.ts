@@ -131,6 +131,27 @@ export interface AdapterInstanceRow {
   chatAllowlist?: string[]
   chatBlocklist?: string[]
   /**
+   * Cross-provider help / welcome card settings (shared across every IM
+   * adapter, same row-level placement rationale as `quietHours`/`muted`:
+   * a cross-cutting concern the bus reads without parsing platform-specific
+   * `settings`). All three are non-indexed JSON columns — IndexedDB stores
+   * extra keys transparently, so no schema-version bump is required; the
+   * reader defaults a missing value (`welcomeCardEnabled ?? true`).
+   *
+   *   - `welcomeCardEnabled` — send a welcome card when the bot joins a chat
+   *     (`systemKind === "member_added"`) or on the first inbound in a
+   *     conversation. Defaults to `true`.
+   *   - `helpTriggers` — message texts that trigger an on-demand help card
+   *     instead of an AI turn. Matched case-insensitively against the
+   *     trimmed `plainText`. Defaults to `["/help", "帮助"]` when undefined
+   *     or empty.
+   *   - `welcomeText` — optional operator-authored intro line injected into
+   *     the welcome card; falls back to a built-in bilingual default.
+   */
+  welcomeCardEnabled?: boolean
+  helpTriggers?: string[]
+  welcomeText?: string
+  /**
    * Cached bot identity probe written by
    * `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
    * adapter detail Config tab renders this so the operator can confirm
@@ -207,7 +228,7 @@ export interface PlatformIdentityRow extends PlatformIdentity {
  * pre-v38 rows keep the original `${adapterId}:${platformMessageId}` id
  * — the row is queryable either way via the compound index.
  */
-export type InboundLedgerNamespace = "inbound" | "callback"
+export type InboundLedgerNamespace = "inbound" | "callback" | "welcome"
 
 export interface InboundLedgerRow {
   /** `${adapterId}:${namespace}:${platformMessageId}` (or legacy form). */

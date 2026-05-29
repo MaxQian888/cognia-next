@@ -150,6 +150,29 @@ you choose, then runs an assistant turn when the menu is clicked.
 
 ---
 
+## 9. Help & Welcome Cards
+
+cognia-next can greet users with an interactive card and answer `/help` with a
+capability card. This is a **cross-provider** feature (every IM adapter shares it);
+the card lists your configured quick commands as clickable buttons and explains the
+bot's @-mention strategy. Clicking a quick-command button runs the same action as
+the native bot menu.
+
+- **On-demand help** — a message that exactly matches a help trigger (`/help` or
+  `帮助` by default) serves a help card instead of running the assistant. Configure
+  the trigger words under **Settings → Connections → Lark → Help & Welcome**.
+- **Welcome on join / first message** — sent once per conversation. To receive the
+  bot-join signal, subscribe these events in the Lark console and grant the scope:
+  - `im.chat.member.bot.added_v1` — bot added to a group
+  - `im:chat.access_event.bot_p2p_chat:read` — first 1:1 chat opened (scope)
+- Sending interactive cards requires the **`cardkit:card:write`** scope.
+
+Toggle the welcome card, edit trigger words, and set a custom welcome message under
+**Settings → Connections → Lark → Help & Welcome** (the section appears on every
+adapter's detail panel). The welcome card is on by default.
+
+---
+
 ## Troubleshooting
 
 | Symptom                               | Likely cause                                                                 |
@@ -160,3 +183,5 @@ you choose, then runs an assistant turn when the menu is clicked.
 | Decrypt error                         | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions |
 | Bot not responding in groups          | Ensure the bot is installed to the group and has `im:message` scope          |
 | Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |
+| No welcome card on join               | Subscribe `im.chat.member.bot.added_v1`; ensure Welcome card is enabled under Help & Welcome |
+| Interactive cards render as plain text | Grant the `cardkit:card:write` scope and re-release the app version            |

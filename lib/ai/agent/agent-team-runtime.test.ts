@@ -226,6 +226,47 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
   })
 
+  it("threads an IM triggeredFrom onto the team run row for progress fan-out", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      triggeredFrom: {
+        source: "im" as const,
+        adapterId: "lark:a1",
+        conversationKey: "lark:a1:oc_team",
+        sessionId: "sess_1",
+      },
+    }
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    const row = await getDb().workflowRuns.get(result.runId)
+    expect(row?.triggeredBy).toEqual({
+      source: "im",
+      adapterId: "lark:a1",
+      conversationKey: "lark:a1:oc_team",
+      sessionId: "sess_1",
+    })
+    // The origin is also mirrored onto the trigger binding for binding-aware nodes.
+    expect(row?.triggerBinding).toMatchObject({
+      adapterId: "lark:a1",
+      conversationKey: "lark:a1:oc_team",
+    })
+  })
+
+  it("omits triggeredBy for non-IM (UI/API) runs", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps)
+    const row = await getDb().workflowRuns.get(result.runId)
+    expect(row?.triggeredBy).toBeUndefined()
+  })
+
   it("dependency chain executes in order", async () => {
     ;(executeAgent as jest.Mock).mockResolvedValue({
       text: "ok",

@@ -12,13 +12,13 @@
 
 import JSZip from "jszip"
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
-import type { SkillResourceKind } from "@/lib/claude/types"
 import {
   MAX_RESOURCES_PER_SKILL,
   MAX_RESOURCE_BYTES_WEB,
   MAX_ZIP_TOTAL_BYTES,
   validateResourcePath,
 } from "./limits"
+import { inferResourceKind, isCanonicalBundleDir } from "./classify"
 
 /** Text MIME extensions we inline as utf-8 rather than base64. */
 const TEXT_EXTENSIONS = new Set([
@@ -65,13 +65,6 @@ const TEXT_EXTENSIONS = new Set([
   ".lock",
   ".log",
 ])
-
-/** Resource kinds keyed by the bundle's canonical subdir names. */
-const KIND_BY_DIR: Record<string, SkillResourceKind> = {
-  scripts: "script",
-  references: "reference",
-  assets: "asset",
-}
 
 export interface BundleArchiveReadResult {
   /** UTF-8 body of SKILL.md. */
@@ -251,13 +244,14 @@ export async function readBundleArchive(
       )
     }
 
-    // Kind is inferred from the first path segment; unknown roots get
-    // bucketed into `asset` so the file isn't dropped.
-    const topDir = rel.split("/")[0]
-    const kind: SkillResourceKind = KIND_BY_DIR[topDir] ?? "asset"
-    if (!KIND_BY_DIR[topDir]) {
+    // Kind is inferred from the canonical subdir name when present, else
+    // per-file by extension (handles Claude Code's `resources/` dir, ad-hoc
+    // folders, and root stragglers). Files outside the canonical dirs still
+    // get a soft warning so the import dialog can flag the non-standard layout.
+    const kind = inferResourceKind(rel)
+    if (!isCanonicalBundleDir(rel.split("/")[0])) {
       warnings.push(
-        `Resource ${rel} lives outside scripts/ references/ assets/; classified as 'asset'.`
+        `Resource ${rel} lives outside scripts/ references/ assets/; classified as '${kind}'.`
       )
     }
 

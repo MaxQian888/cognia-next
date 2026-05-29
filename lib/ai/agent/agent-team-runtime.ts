@@ -22,6 +22,7 @@ import {
   refreshAllInstanceCapabilityWarnings,
 } from "@/lib/ai/agent/team/capability-audit"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import { createTeammatePool } from "./team/teammate-pool"
@@ -57,6 +58,16 @@ export interface RunTeamLifecycleDeps {
   }) => Promise<LeadPlanResult>
   /** Wired by buildAgentTeamRuntimeDeps in production. */
   notifierDeps?: TeamNotifierDeps
+  /**
+   * Origin of this team run when it was triggered from an IM channel
+   * (e.g. an `action.team.run` node inside a workflow that
+   * `startWorkflowFromIM` kicked off). Threaded onto the synthesized team
+   * `runWorkflow` as `triggeredBy` so the existing
+   * `workflow-progress-runner` fans the team's progress + final result back
+   * to the originating conversation. Omitted for UI / API runs, which keeps
+   * their behavior unchanged (no IM fan-out).
+   */
+  triggeredFrom?: WorkflowTriggeredFrom
 }
 
 export interface RunTeamLifecycleResult {
@@ -391,10 +402,28 @@ export async function runTeamLifecycle(
           kind: "trigger.team",
           payload: { teamId },
           originAt: Date.now(),
+          // Carry the IM origin onto the trigger binding too, so any
+          // downstream node that inspects `ctx.trigger.binding` sees the
+          // originating conversation (parity with `startWorkflowFromIM`).
+          ...(deps.triggeredFrom?.adapterId && deps.triggeredFrom?.conversationKey
+            ? {
+                binding: {
+                  adapterId: deps.triggeredFrom.adapterId,
+                  conversationKey: deps.triggeredFrom.conversationKey,
+                  ...(deps.triggeredFrom.sessionId
+                    ? { sessionId: deps.triggeredFrom.sessionId }
+                    : {}),
+                },
+              }
+            : {}),
         },
         runId,
         signal: ac.signal,
         concurrency,
+        // IM-origin fan-out: the progress-runner only mirrors runs whose
+        // `triggeredBy.source === "im"`. Threading this is the single line
+        // that lights up team → IM result delivery; UI/API runs omit it.
+        ...(deps.triggeredFrom ? { triggeredBy: deps.triggeredFrom } : {}),
       })
       finalStatus =
         result.status === "succeeded"

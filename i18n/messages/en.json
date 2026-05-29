@@ -1544,6 +1544,10 @@
       "teams": "Teams",
       "skills": "Skills",
       "plugins": "Plugins",
+      "mcpTools": "MCP tools",
+      "connectors": "Connectors",
+      "ocrProviders": "OCR providers",
+      "workflowTemplates": "Workflow templates",
       "twinDrafts": "Twin drafts",
       "twinIngest": "Twin ingest"
     },
@@ -2694,6 +2698,7 @@
         "custom": "Custom theme",
         "import": "Import",
         "typography": "Typography",
+        "a11y": "Accessibility",
         "advanced": "Advanced"
       },
       "reset": {
@@ -4914,6 +4919,21 @@
           "audit": "Audit",
           "outbound": "Outbound"
         },
+        "sidebar": {
+          "searchPlaceholder": "Search connectors…",
+          "filterAll": "All",
+          "filterEnabled": "Enabled",
+          "filterDisabled": "Disabled",
+          "stats": "{total} connectors · {enabled} enabled"
+        },
+        "status": {
+          "connected": "Connected",
+          "disabled": "Not enabled"
+        },
+        "mobile": {
+          "openConnectors": "Connectors",
+          "title": "IM Connectors"
+        },
         "health": {
           "title": "Adapter health",
           "lastOk": "Last OK",
@@ -5503,6 +5523,16 @@
         "timezonePlaceholder": "e.g. Asia/Singapore",
         "timezoneInvalid": "Not a valid IANA timezone identifier."
       },
+      "helpAndWelcome": {
+        "title": "Help & Welcome card",
+        "enableCardLabel": "Send a welcome card",
+        "enableCardHelp": "Greet users with a card when the bot joins a chat or on their first message. Sent once per conversation.",
+        "triggersLabel": "Help trigger words",
+        "triggersHelp": "One per line. A message that exactly matches any of these serves a help card instead of running the assistant. Leave empty to use the defaults ({defaults}).",
+        "welcomeTextLabel": "Welcome message",
+        "welcomeTextHelp": "Optional intro shown at the top of the welcome card. Falls back to a built-in line.",
+        "welcomeTextPlaceholder": "e.g. Hi! I'm your assistant — here's what I can do."
+      },
       "adapterForm": {
         "cancel": "Cancel",
         "save": "Save",
@@ -5984,7 +6014,9 @@
       "enable": "Enable",
       "disable": "Disable",
       "open": "Open",
-      "openInEditor": "Open in editor"
+      "openInEditor": "Open in editor",
+      "selectAria": "Select {name}",
+      "actionsAria": "Actions for {name}"
     },
     "detail": {
       "tabOverview": "Overview",

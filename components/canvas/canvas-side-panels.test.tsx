@@ -184,4 +184,21 @@ describe("CanvasSidePanels", () => {
     renderWithProviders(<CanvasSidePanels />)
     expect(screen.getByTestId("canvas-tab-motion-history")).toBeInTheDocument()
   })
+
+  it("does not emit a duplicate-key warning for the AnimatePresence tab panels", async () => {
+    // AnimatePresence requires its DIRECT children (the TabsContent panels) to
+    // carry unique keys; keying only the inner motion.div produced a
+    // "two children with the same key, ``" console error in the desktop shell.
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    seedDocument("doc-1")
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasSidePanels />)
+    await user.click(screen.getByRole("tab", { name: /History/i }))
+    await user.click(screen.getByRole("tab", { name: /Run/i }))
+    const sawDuplicateKey = errorSpy.mock.calls.some((call) =>
+      call.some((arg) => typeof arg === "string" && arg.includes("same key"))
+    )
+    expect(sawDuplicateKey).toBe(false)
+    errorSpy.mockRestore()
+  })
 })

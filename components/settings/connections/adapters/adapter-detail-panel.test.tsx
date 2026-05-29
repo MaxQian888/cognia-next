@@ -60,6 +60,11 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
 }))
 
+// The header derives a unified status badge from the live health hook.
+jest.mock("@/hooks/connectors/use-adapter-health", () => ({
+  useAdapterHealth: () => ({ current: { state: "running" }, breaker: null, rateBucket: null }),
+}))
+
 // ---------------------------------------------------------------------------
 // dexie-react-hooks — control useLiveQuery per test
 // ---------------------------------------------------------------------------

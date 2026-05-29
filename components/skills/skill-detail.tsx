@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -248,9 +248,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function ContentSection({ skill }: { skill: Skill }) {
-  return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
-      <Streamdown>{`## ${skill.name}\n\n${skill.content}`}</Streamdown>
-    </div>
-  )
+  // Reuse the chat MarkdownRenderer so the skill body gets Shiki syntax
+  // highlighting, the same-line code toolbar (language + copy/download/wrap),
+  // GFM tables, and math — instead of streamdown's plain fallback.
+  return <MarkdownRenderer content={`## ${skill.name}\n\n${skill.content}`} />
 }

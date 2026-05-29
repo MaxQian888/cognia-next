@@ -19,9 +19,10 @@ import { useTranslations } from "next-intl"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
-import { SettingsCard } from "@/components/settings/common/settings-section"
+import { cn } from "@/lib/utils"
+import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { getPlatformMeta } from "./platform-meta"
+import { deriveAdapterStatus } from "./adapter-status"
 import { ConfigDetail } from "./tabs/config-detail"
 import { HealthDetail } from "./tabs/health-detail"
 import { ConversationsDetail } from "./tabs/conversations-detail"
@@ -39,6 +40,7 @@ export interface AdapterDetailPanelProps {
 export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   const t = useTranslations("settings.connections.adapters")
   const { activeTab, setActiveTab } = useSelectedAdapter()
+  const health = useAdapterHealth(adapterId)
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
     () =>
       typeof window === "undefined"
@@ -49,75 +51,97 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
 
   if (!row) {
     return (
-      <Card>
-        <CardContent className="py-6 text-center text-xs text-muted-foreground">
-          {t("detail.adapterMissing")}
-        </CardContent>
-      </Card>
+      <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+        {t("detail.adapterMissing")}
+      </div>
     )
   }
 
-  const { Icon } = getPlatformMeta(row.type)
+  const { labelKey, Icon } = getPlatformMeta(row.type)
+  const platformLabel = t(`platforms.${labelKey}`)
+  const status = deriveAdapterStatus(row.enabled, health)
+  const StatusIcon = status.Icon
 
   return (
-    <div className="space-y-4" data-testid="adapter-detail-panel">
-      <SettingsCard
-        icon={<Icon className="size-4" />}
-        title={row.displayName}
-        badge={row.type}
-        badgeVariant="outline"
-        headerAction={
+    <div data-testid="adapter-detail-panel">
+      {/* Header */}
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="shrink-0 text-xs">
-              {row.defaultMode}
+            <h3 className="truncate text-base font-semibold">{row.displayName}</h3>
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              {row.type}
             </Badge>
-            <Switch
-              id={`detail-enabled-${row.id}`}
-              checked={row.enabled}
-              onCheckedChange={() => void updateAdapterInstance(row.id, { enabled: !row.enabled })}
-              aria-label={
-                row.enabled
-                  ? t("disableAria", { name: row.displayName })
-                  : t("enableAria", { name: row.displayName })
-              }
-              data-testid="adapter-detail-toggle"
-            />
-            <label
-              htmlFor={`detail-enabled-${row.id}`}
-              className="text-xs text-muted-foreground cursor-pointer"
-            >
-              {row.enabled ? t("enabled") : t("disabled")}
-            </label>
           </div>
-        }
-      >
-        <></>
-      </SettingsCard>
+          <p className="truncate text-xs text-muted-foreground">
+            {platformLabel} · {row.transportMode}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            data-testid="adapter-detail-status"
+            data-status={status.status}
+            className={cn(
+              "flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
+              status.tint
+            )}
+          >
+            <StatusIcon className="size-3" aria-hidden />
+            {t(status.labelKey)}
+          </span>
+          <Badge variant="secondary" className="shrink-0 text-xs">
+            {row.defaultMode}
+          </Badge>
+          <Switch
+            id={`detail-enabled-${row.id}`}
+            checked={row.enabled}
+            onCheckedChange={() => void updateAdapterInstance(row.id, { enabled: !row.enabled })}
+            aria-label={
+              row.enabled
+                ? t("disableAria", { name: row.displayName })
+                : t("enableAria", { name: row.displayName })
+            }
+            data-testid="adapter-detail-toggle"
+          />
+          <label
+            htmlFor={`detail-enabled-${row.id}`}
+            className="cursor-pointer text-xs text-muted-foreground"
+          >
+            {row.enabled ? t("enabled") : t("disabled")}
+          </label>
+        </div>
+      </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
-        <TabsList>
-          <TabsTrigger value="config">{t("detailTabs.config")}</TabsTrigger>
-          <TabsTrigger value="health">{t("detailTabs.health")}</TabsTrigger>
-          <TabsTrigger value="conversations">{t("detailTabs.conversations")}</TabsTrigger>
-          <TabsTrigger value="audit">{t("detailTabs.audit")}</TabsTrigger>
-          <TabsTrigger value="outbound">{t("detailTabs.outbound")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="config" className="mt-4">
-          <ConfigDetail row={row} />
-        </TabsContent>
-        <TabsContent value="health" className="mt-4">
-          <HealthDetail adapterId={adapterId} />
-        </TabsContent>
-        <TabsContent value="conversations" className="mt-4">
-          <ConversationsDetail adapterId={adapterId} />
-        </TabsContent>
-        <TabsContent value="audit" className="mt-4">
-          <AuditTab adapterId={adapterId} />
-        </TabsContent>
-        <TabsContent value="outbound" className="mt-4">
-          <OutboundTab adapterId={adapterId} />
-        </TabsContent>
-      </Tabs>
+      {/* Inner tabs */}
+      <div className="p-4">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
+          <TabsList>
+            <TabsTrigger value="config">{t("detailTabs.config")}</TabsTrigger>
+            <TabsTrigger value="health">{t("detailTabs.health")}</TabsTrigger>
+            <TabsTrigger value="conversations">{t("detailTabs.conversations")}</TabsTrigger>
+            <TabsTrigger value="audit">{t("detailTabs.audit")}</TabsTrigger>
+            <TabsTrigger value="outbound">{t("detailTabs.outbound")}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="config" className="mt-4">
+            <ConfigDetail row={row} />
+          </TabsContent>
+          <TabsContent value="health" className="mt-4">
+            <HealthDetail adapterId={adapterId} />
+          </TabsContent>
+          <TabsContent value="conversations" className="mt-4">
+            <ConversationsDetail adapterId={adapterId} />
+          </TabsContent>
+          <TabsContent value="audit" className="mt-4">
+            <AuditTab adapterId={adapterId} />
+          </TabsContent>
+          <TabsContent value="outbound" className="mt-4">
+            <OutboundTab adapterId={adapterId} />
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   )
 }

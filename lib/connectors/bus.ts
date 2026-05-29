@@ -36,6 +36,8 @@ import { routeInbound, type RouteDecision } from "./mode-router"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
+import { parseConversationKey } from "@/types/connectors/event"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -220,6 +222,29 @@ export class ConnectorBus {
       })
     }
 
+    // ── Step 9.5: help / welcome short-circuit (cross-provider) ──────────────
+    // A help-trigger message serves a help card and skips the AI turn +
+    // workflow fan-out entirely. Otherwise, the first inbound on a fresh
+    // conversation gets a one-time welcome card (deduped per conversation)
+    // BEFORE the normal reply, so onboarding lands ahead of the answer.
+    // Both are best-effort: a help/welcome failure must never break the
+    // inbound pipeline.
+    if (decision !== "drop" && !evalResult.blocked) {
+      try {
+        if (await maybeHandleHelpCommand(event, adapterRow)) return
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          reason: "help_dispatch_failed",
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+      await maybeSendWelcome(event, adapterRow).catch(() => undefined)
+    }
+
     // ── Step 10: route handler ────────────────────────────────────────────────
     if (this.routeHandler && decision !== "drop") {
       await this.routeHandler(event, decision, resolved)
@@ -393,6 +418,19 @@ export class ConnectorBus {
           ?.event_type,
       },
     })
+
+    // Bot joined a chat → push a one-time welcome card (cross-provider).
+    // Deduped per conversation by `maybeSendWelcome`; gated on the
+    // adapter's `welcomeCardEnabled`. Best-effort — a missing adapter row
+    // or enqueue failure must not break system-event bookkeeping.
+    if (kind === "inbound.member_added") {
+      try {
+        const adapterRow = await getAdapterInstance(event.adapterId)
+        if (adapterRow) await maybeSendWelcome(event, adapterRow)
+      } catch {
+        // swallow — welcome is best-effort
+      }
+    }
   }
 
   /**
@@ -675,6 +713,76 @@ export class ConnectorBus {
           reason: err instanceof Error ? err.name : "unknown",
           message: err instanceof Error ? err.message : String(err),
           fields: { triggerId: event.triggerId, skillId },
+        })
+      }
+      return
+    }
+
+    // ── Step 4a-help: help_quick_command short-circuit (cross-provider) ──
+    //
+    // A help/welcome card's quick-command button. Re-enter the inbound
+    // pipeline with a synthesised `create` event carrying the resolved
+    // command text, exactly as if the user had typed it or clicked the
+    // native bot menu. `selfMentioned: true` so an explicit click is never
+    // dropped by a mention-only trigger rule.
+    if (resolvedBinding?.kind === "help_quick_command") {
+      const action = (resolvedBinding.payload as { action?: { value?: unknown } } | undefined)
+        ?.action
+      const text = typeof action?.value === "string" ? action.value : ""
+      const convKey = resolvedConversationKey
+      if (!text || !convKey) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.unbound",
+          at: Date.now(),
+          conversationKey: convKey ?? undefined,
+          reason: "help_quick_command:missing_action_or_conversation",
+          message: `triggerId=${event.triggerId}`,
+        })
+        return
+      }
+      let parsed
+      try {
+        parsed = parseConversationKey(convKey)
+      } catch {
+        return
+      }
+      const synthetic: NormalizedInboundEvent = {
+        platform: event.platform,
+        adapterId: event.adapterId,
+        selfId: event.selfId,
+        messageId: `help-cmd:${event.triggerId}`,
+        conversationRef: {
+          platform: event.platform,
+          adapterId: event.adapterId,
+          channelId: parsed.remoteChatId,
+          ...(parsed.threadId ? { threadTs: parsed.threadId } : {}),
+        },
+        conversationKey: convKey,
+        sender: event.user,
+        channel: {
+          id: convKey,
+          kind: parsed.threadId ? "thread" : "group",
+          platformChannelId: parsed.remoteChatId,
+        },
+        segments: [{ type: "text", text }],
+        plainText: text,
+        mentions: { selfMentioned: true, users: [] },
+        timestamp: event.timestamp || Date.now(),
+        raw: event.raw,
+        kind: "create",
+      }
+      try {
+        await this.dispatchInboundFull(synthetic)
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
+          at: Date.now(),
+          conversationKey: convKey,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: "help_quick_command" },
         })
       }
       return

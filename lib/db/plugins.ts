@@ -52,7 +52,18 @@ export type PluginDraft = Pick<
   "id" | "name" | "version" | "type" | "source" | "path" | "manifest"
 > &
   Partial<
-    Pick<PluginRow, "status" | "enabled" | "capabilities" | "config" | "error" | "lastUsedAt">
+    Pick<
+      PluginRow,
+      | "status"
+      | "enabled"
+      | "capabilities"
+      | "config"
+      | "error"
+      | "lastUsedAt"
+      | "readme"
+      | "licenseText"
+      | "sourceUrl"
+    >
   >
 
 export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
@@ -70,6 +81,9 @@ export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
     path: draft.path,
     manifest: draft.manifest,
     config: draft.config ?? existing?.config,
+    readme: draft.readme ?? existing?.readme,
+    licenseText: draft.licenseText ?? existing?.licenseText,
+    sourceUrl: draft.sourceUrl ?? existing?.sourceUrl,
     error: draft.error ?? existing?.error,
     lastUsedAt: draft.lastUsedAt ?? existing?.lastUsedAt,
     createdAt: existing?.createdAt ?? now,

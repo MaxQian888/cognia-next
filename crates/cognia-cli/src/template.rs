@@ -239,6 +239,25 @@ mod tests {
     }
 
     #[test]
+    fn ts_tsconfig_paths_resolve_at_alias_to_shims() {
+        // Regression: ts-jest type-checks `@/*` imports against tsconfig
+        // `paths`. If `@/*` points at a nonexistent package the scaffold's
+        // own `pnpm test` fails on a fresh `plugin new --kind ts` (TS2307),
+        // contradicting the README + next-steps promise that tests are
+        // green out of the box. The shims under src/__shims__ are the
+        // resolution target the jest moduleNameMapper already uses.
+        let cfg = ts::TSCONFIG_JSON;
+        assert!(
+            cfg.contains("./src/__shims__/*"),
+            "tsconfig @/* should resolve to the bundled shims, got: {cfg}"
+        );
+        assert!(
+            !cfg.contains("cognia-types"),
+            "tsconfig must not point @/* at the nonexistent cognia-types package"
+        );
+    }
+
+    #[test]
     fn humanize_handles_underscores_and_hyphens() {
         assert_eq!(humanize("my-cool-plugin"), "My Cool Plugin");
         assert_eq!(humanize("my_cool_plugin"), "My Cool Plugin");

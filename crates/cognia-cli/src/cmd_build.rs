@@ -151,6 +151,10 @@ fn build_wasm(
         .to_string();
 
     if !skip_build {
+        // Preflight the toolchain BEFORE shelling out to cargo so a missing
+        // cargo-component / wasm32-wasip2 target surfaces actionable install
+        // guidance instead of cargo's bare `no such command: component`.
+        preflight_wasm_toolchain()?;
         // Spinner sits at the bottom while cargo's own output streams
         // above it. `finish_with_message` clears the spinner before the
         // success line lands, so the final state is a clean "✓ ...".
@@ -215,6 +219,59 @@ fn run_cargo_component_build(crate_root: &Path) -> Result<()> {
         .arg("build")
         .arg("--release");
     run_streaming(cmd, "cargo component build")
+}
+
+/// Probe the host for the WASM build toolchain and bail with an actionable
+/// message if it's incomplete. Checks (a) `cargo component` is runnable and
+/// (b) the `wasm32-wasip2` rustup target is installed (only when `rustup`
+/// itself is present — non-rustup installs are left to cargo-component).
+fn preflight_wasm_toolchain() -> Result<()> {
+    let cargo_component_ok = Command::new("cargo")
+        .args(["component", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    // `rustup target list --installed` is the only portable way to confirm
+    // the target. If rustup is absent we can't (and shouldn't) assert on it.
+    let installed_targets = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    if let Some(problem) = wasm_toolchain_problem(cargo_component_ok, installed_targets.as_deref()) {
+        bail!("{problem}");
+    }
+    Ok(())
+}
+
+/// Pure decision core for `preflight_wasm_toolchain` — kept separate so the
+/// guidance text can be unit-tested without depending on what's installed
+/// on the test machine.
+fn wasm_toolchain_problem(
+    cargo_component_ok: bool,
+    installed_targets: Option<&str>,
+) -> Option<String> {
+    if !cargo_component_ok {
+        return Some(
+            "cargo-component is required to build WASM plugins but was not found.\n\
+             Install it with:\n    cargo install --locked cargo-component\n\
+             then re-run `cognia plugin build`."
+                .to_string(),
+        );
+    }
+    if let Some(list) = installed_targets {
+        let has_target = list.lines().any(|line| line.trim() == "wasm32-wasip2");
+        if !has_target {
+            return Some(
+                "the wasm32-wasip2 compilation target is not installed.\n\
+                 Add it with:\n    rustup target add wasm32-wasip2\n\
+                 then re-run `cognia plugin build`."
+                    .to_string(),
+            );
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -282,6 +339,35 @@ mod tests {
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
         run(root.to_path_buf(), Some(out.clone()), true, &mut ui).unwrap();
         assert!(out.exists());
+    }
+
+    #[test]
+    fn wasm_preflight_flags_missing_cargo_component() {
+        let problem = wasm_toolchain_problem(false, Some("wasm32-wasip2\n"));
+        let msg = problem.expect("missing cargo-component should be flagged");
+        assert!(msg.contains("cargo-component"), "got: {msg}");
+        assert!(msg.contains("cargo install"), "got: {msg}");
+    }
+
+    #[test]
+    fn wasm_preflight_flags_missing_target() {
+        let problem = wasm_toolchain_problem(true, Some("wasm32-unknown-unknown\nx86_64-pc-windows-msvc\n"));
+        let msg = problem.expect("missing target should be flagged");
+        assert!(msg.contains("wasm32-wasip2"), "got: {msg}");
+        assert!(msg.contains("rustup target add"), "got: {msg}");
+    }
+
+    #[test]
+    fn wasm_preflight_passes_when_toolchain_complete() {
+        assert!(wasm_toolchain_problem(true, Some("wasm32-wasip2\nx86_64-pc-windows-msvc\n")).is_none());
+    }
+
+    #[test]
+    fn wasm_preflight_skips_target_check_without_rustup() {
+        // rustup absent → `installed_targets` is None → we can't assert on
+        // the target, only on cargo-component being present.
+        assert!(wasm_toolchain_problem(true, None).is_none());
+        assert!(wasm_toolchain_problem(false, None).is_some());
     }
 
     #[test]

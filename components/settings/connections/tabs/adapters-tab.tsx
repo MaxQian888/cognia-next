@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { BotIcon, PlusIcon } from "lucide-react"
+import { BotIcon, MenuIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
@@ -22,7 +22,8 @@ import { MatrixConfigDialog } from "../forms/matrix-config"
 import { QQOfficialConfigDialog } from "../forms/qq-official-config"
 import { WechatOaConfigDialog } from "../forms/wechat-oa-config"
 import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
-import { AdapterListRow } from "../adapters/adapter-list-row"
+import { AdapterSidebar, type AdapterStatusFilter } from "../adapters/adapter-sidebar"
+import { getPlatformMeta } from "../adapters/platform-meta"
 import { AddConnectorGrid } from "../adapters/add-connector-grid"
 import { useSelectedAdapter } from "../adapters/use-selected-adapter"
 
@@ -69,6 +70,9 @@ export function AdaptersTab() {
   const t = useTranslations("settings.connections.adapters")
   const [editing, setEditing] = useState<EditingDialog | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const [statusFilter, setStatusFilter] = useState<AdapterStatusFilter>("all")
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const { selectedAdapterId } = useSelectedAdapter()
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
@@ -103,6 +107,23 @@ export function AdaptersTab() {
     return counts
   }, [adapters])
 
+  // Sidebar list filtered by the status tab + search box. Search matches the
+  // display name or the platform kind (case-insensitive).
+  const visibleAdapters = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return (adapters ?? []).filter((row) => {
+      if (statusFilter === "enabled" && !row.enabled) return false
+      if (statusFilter === "disabled" && row.enabled) return false
+      if (!q) return true
+      return row.displayName.toLowerCase().includes(q) || row.type.toLowerCase().includes(q)
+    })
+  }, [adapters, statusFilter, search])
+
+  const selectedRow = useMemo(
+    () => (adapters ?? []).find((row) => row.id === selectedAdapterId),
+    [adapters, selectedAdapterId]
+  )
+
   const onConfigure = (row: AdapterInstanceRow) => {
     if (isConfigurableKind(row.type)) {
       setEditing({ kind: row.type, row })
@@ -134,6 +155,23 @@ export function AdaptersTab() {
 
   const isEmpty = !adapters || adapters.length === 0
 
+  // Shared sidebar — rendered in the desktop column and the mobile drawer.
+  const sidebar = (
+    <AdapterSidebar
+      adapters={visibleAdapters}
+      pendingByAdapter={pendingByAdapter}
+      onConfigure={onConfigure}
+      searchQuery={search}
+      onSearchChange={setSearch}
+      statusFilter={statusFilter}
+      onStatusFilterChange={setStatusFilter}
+      addButton={addButton}
+      onAfterSelect={() => setMobileSheetOpen(false)}
+    />
+  )
+
+  const SelectedIcon = selectedRow ? getPlatformMeta(selectedRow.type).Icon : null
+
   return (
     <div className="space-y-4">
       {isEmpty ? (
@@ -148,41 +186,56 @@ export function AdaptersTab() {
           </CardContent>
         </Card>
       ) : (
-        // Adapter list (left) + detail panel (right) — sidebar (260px) on
-        // md+ screens, stacked single column below md. Selecting a row sets
-        // the `?adapter=<id>` URL param; the detail panel reads it.
+        // Master-detail: a bordered sidebar (search + status filter + list +
+        // stats) on md+ screens, collapsing to a Sheet drawer on mobile. The
+        // detail panel reads the `?adapter=<id>` URL param set by row clicks.
         <div
-          className="flex flex-col gap-4 md:grid md:grid-cols-[260px_1fr]"
+          className="grid grid-cols-1 gap-4 md:grid-cols-[300px_1fr]"
           data-testid="adapters-shell"
         >
-          <Card data-testid="adapters-sidebar">
-            <CardContent className="space-y-3 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-sm">{t("listTitle")}</Label>
-                {addButton}
-              </div>
-              <ul className="space-y-1.5">
-                {adapters.map((row) => (
-                  <AdapterListRow
-                    key={row.id}
-                    row={row}
-                    pendingCount={pendingByAdapter.get(row.id) ?? 0}
-                    onConfigure={onConfigure}
-                  />
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          {/* Desktop sidebar */}
+          <div
+            className="hidden rounded-lg border md:flex md:flex-col"
+            data-testid="adapters-sidebar"
+          >
+            {sidebar}
+          </div>
 
-          <div className="min-w-0" data-testid="adapters-detail">
+          {/* Mobile top bar + drawer */}
+          <div className="flex items-center gap-2 md:hidden">
+            <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
+                  <MenuIcon className="size-4" />
+                  {t("mobile.openConnectors")}
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[320px] p-0">
+                <SheetHeader className="px-3 pt-3">
+                  <SheetTitle className="text-sm">{t("mobile.title")}</SheetTitle>
+                </SheetHeader>
+                {sidebar}
+              </SheetContent>
+            </Sheet>
+            {selectedRow && (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                {SelectedIcon && <SelectedIcon className="size-4 shrink-0 text-muted-foreground" />}
+                <p className="truncate text-sm font-medium">{selectedRow.displayName}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Detail */}
+          <div className="rounded-lg border" data-testid="adapters-detail">
             {selectedAdapterId ? (
               <AdapterDetailPanel adapterId={selectedAdapterId} />
             ) : (
-              <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                  {t("detail.noSelection")}
-                </CardContent>
-              </Card>
+              <div className="flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+                <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                  <BotIcon className="size-6" />
+                </span>
+                <p className="max-w-sm text-sm text-muted-foreground">{t("detail.noSelection")}</p>
+              </div>
             )}
           </div>
         </div>

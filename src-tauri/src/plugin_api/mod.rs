@@ -31,6 +31,7 @@ pub mod context_menu;
 pub mod devtools;
 pub mod error;
 pub mod fs_watcher;
+pub mod github;
 pub mod lifecycle;
 pub mod marketplace;
 pub mod node_permission;

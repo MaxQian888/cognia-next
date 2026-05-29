@@ -160,7 +160,11 @@ export function CanvasSidePanels() {
         </TabsList>
 
         <AnimatePresence mode="wait" initial={false}>
-          <TabsContent value="suggestions" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <TabsContent
+            key="suggestions"
+            value="suggestions"
+            className="m-0 flex-1 min-h-0 overflow-hidden"
+          >
             <motion.div
               key="suggestions"
               data-testid="canvas-tab-motion-suggestions"
@@ -169,7 +173,7 @@ export function CanvasSidePanels() {
               <SuggestionsHost documentId={activeId} />
             </motion.div>
           </TabsContent>
-          <TabsContent value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <TabsContent key="history" value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
             <motion.div
               key="history"
               data-testid="canvas-tab-motion-history"
@@ -178,7 +182,11 @@ export function CanvasSidePanels() {
               <HistoryHost documentId={activeId} />
             </motion.div>
           </TabsContent>
-          <TabsContent value="comments" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <TabsContent
+            key="comments"
+            value="comments"
+            className="m-0 flex-1 min-h-0 overflow-hidden"
+          >
             <motion.div
               key="comments"
               data-testid="canvas-tab-motion-comments"
@@ -187,7 +195,11 @@ export function CanvasSidePanels() {
               <CommentsHost documentId={activeId} />
             </motion.div>
           </TabsContent>
-          <TabsContent value="collaboration" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <TabsContent
+            key="collaboration"
+            value="collaboration"
+            className="m-0 flex-1 min-h-0 overflow-hidden"
+          >
             <motion.div
               key="collaboration"
               data-testid="canvas-tab-motion-collaboration"
@@ -196,7 +208,11 @@ export function CanvasSidePanels() {
               <CollaborationHost documentId={activeId} />
             </motion.div>
           </TabsContent>
-          <TabsContent value="execution" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <TabsContent
+            key="execution"
+            value="execution"
+            className="m-0 flex-1 min-h-0 overflow-hidden"
+          >
             <motion.div
               key="execution"
               data-testid="canvas-tab-motion-execution"

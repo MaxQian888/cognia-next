@@ -203,16 +203,23 @@ describe("AdapterListRow", () => {
     expect(mockSetSelected).not.toHaveBeenCalledWith(null)
   })
 
-  it("hides the health badge when the adapter is nominal", () => {
+  it("shows a connected status badge when enabled and nominal", () => {
     renderRow()
-    expect(screen.queryByTestId("adapter-row-health-tg-1")).not.toBeInTheDocument()
+    const badge = screen.getByTestId("adapter-row-status-tg-1")
+    expect(badge).toHaveAttribute("data-status", "connected")
   })
 
-  it("shows a tinted health badge when degraded", () => {
+  it("shows a disabled status badge when the adapter is not enabled", () => {
+    renderRow({ enabled: false })
+    const badge = screen.getByTestId("adapter-row-status-tg-1")
+    expect(badge).toHaveAttribute("data-status", "disabled")
+  })
+
+  it("shows a warning status badge with the degraded label when degraded", () => {
     mockHealth.current = { state: "degraded" }
     renderRow()
-    const badge = screen.getByTestId("adapter-row-health-tg-1")
-    expect(badge).toBeInTheDocument()
+    const badge = screen.getByTestId("adapter-row-status-tg-1")
+    expect(badge).toHaveAttribute("data-status", "warning")
     expect(badge.textContent).toMatch(/Degraded/)
   })
 
@@ -231,5 +238,29 @@ describe("AdapterListRow", () => {
     selectedAdapterId = "tg-1"
     renderRow()
     expect(screen.getByTestId("adapter-card-tg-1")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("fires onAfterSelect after selecting when provided", () => {
+    const onAfterSelect = jest.fn()
+    render(
+      <AdapterListRow
+        row={baseRow}
+        pendingCount={0}
+        onConfigure={jest.fn()}
+        onAfterSelect={onAfterSelect}
+      />
+    )
+    fireEvent.click(screen.getByTestId("adapter-card-tg-1"))
+    expect(mockSetSelected).toHaveBeenCalledWith("tg-1")
+    expect(onAfterSelect).toHaveBeenCalled()
+  })
+
+  it("swallows keyring delete failures and still deletes the row", async () => {
+    mockKeyringDelete.mockRejectedValueOnce(new Error("already gone"))
+    selectedAdapterId = "tg-1"
+    renderRow()
+    fireEvent.click(screen.getByText("Remove"))
+    fireEvent.click(screen.getAllByText("Remove").at(-1)!)
+    await waitFor(() => expect(mockDeleteAdapterInstance).toHaveBeenCalledWith("tg-1"))
   })
 })

@@ -22,6 +22,7 @@ import {
   FilePlus2Icon,
   ShieldCheckIcon,
   FolderOpenIcon,
+  GitBranchIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,6 +36,7 @@ import {
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
+import { PluginInstallFromGithubDialog } from "./dialogs/plugin-install-from-github-dialog"
 import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-install-from-url-dialog"
 import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
@@ -56,6 +58,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
   const setImportStaging = usePluginsStore((s) => s.setImportStaging)
   const [busy, setBusy] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
+  const [githubDialogOpen, setGithubDialogOpen] = useState(false)
   const [signedUrlDialogOpen, setSignedUrlDialogOpen] = useState(false)
   const wasmLocal = useInstallWasmFromLocal()
   const loadUnpacked = useLoadUnpackedFlow()
@@ -137,6 +140,12 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             {wasmAvailable && (
               <>
                 <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t("groupGit")}</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setGithubDialogOpen(true)}>
+                  <GitBranchIcon className="size-3.5 mr-2" />
+                  {t("fromGithub")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel>{t("groupLocal")}</DropdownMenuLabel>
                 <DropdownMenuItem
                   onClick={() => void loadUnpacked.trigger()}
@@ -197,6 +206,9 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
       )}
 
       <PluginInstallFromUrlDialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen} />
+      {wasmAvailable && (
+        <PluginInstallFromGithubDialog open={githubDialogOpen} onOpenChange={setGithubDialogOpen} />
+      )}
       {wasmAvailable && (
         <PluginSignedInstallFromUrlDialog
           open={signedUrlDialogOpen}

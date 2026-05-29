@@ -53,6 +53,10 @@ jest.mock("@/lib/capacitor/local-notifications", () => ({
 }))
 
 jest.mock("@/lib/capacitor/_shared", () => ({
+  // Preserve the real exports (makeDefaultLoader, withPlugin, …) — they're
+  // pulled in at module-init time through companion-storage.ts via the
+  // lib/utils → lib/tauri chain. Only detectNativePlatform is stubbed.
+  ...jest.requireActual("@/lib/capacitor/_shared"),
   detectNativePlatform: jest.fn().mockReturnValue("mobile"),
 }))
 

@@ -11,16 +11,14 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => [],
 }))
 
-jest.mock(
-  "streamdown",
-  () => ({
-    __esModule: true,
-    Streamdown: ({ children }: { children: React.ReactNode }) => (
-      <div data-testid="streamdown">{children}</div>
-    ),
-  }),
-  { virtual: true }
-)
+// MarkdownRenderer pulls in react-markdown + the full renderer suite +
+// next/dynamic; stub it so this test isolates the SkillDetail header/tabs.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  __esModule: true,
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="markdown-renderer">{content}</div>
+  ),
+}))
 
 jest.mock("@/hooks/skills", () => ({
   useSkillValidation: jest.fn(),

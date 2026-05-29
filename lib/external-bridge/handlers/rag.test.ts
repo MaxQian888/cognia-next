@@ -193,6 +193,63 @@ describe("ragSearch — twin scope", () => {
     // considered counts ALL twin chunks for the twin (not just hits)
     expect(out.considered).toBe(2)
   })
+
+  it("ranks CJK twin chunks via the BM25 multilingual tokenizer", async () => {
+    const db = getDb()
+    await db.twinSources.put({
+      id: "tsrc_cjk",
+      twinId: "twin_cjk",
+      kind: "document",
+      format: "markdown",
+      source: "manual",
+      title: "运维手册",
+      bytes: 0,
+      fingerprint: "fp-cjk",
+      chunkCount: 2,
+      status: "parsed",
+      importedAt: 1,
+      redacted: true,
+    })
+    await db.twinChunks.bulkPut([
+      {
+        id: "tchk_cjk_1",
+        twinId: "twin_cjk",
+        sourceId: "tsrc_cjk",
+        content: "数据库故障应急处理流程与回滚步骤",
+        contentRedacted: "数据库故障应急处理流程与回滚步骤",
+        charStart: 0,
+        charEnd: 16,
+        vectorBackend: "qdrant",
+        vectorCollection: "c",
+        vectorDocId: "vec_cjk_1",
+        strategy: "paragraph",
+        tokenCount: 8,
+        metadata: {},
+        createdAt: 1,
+      },
+      {
+        id: "tchk_cjk_2",
+        twinId: "twin_cjk",
+        sourceId: "tsrc_cjk",
+        content: "团队团建活动的午餐菜单安排",
+        contentRedacted: "团队团建活动的午餐菜单安排",
+        charStart: 0,
+        charEnd: 13,
+        vectorBackend: "qdrant",
+        vectorCollection: "c",
+        vectorDocId: "vec_cjk_2",
+        strategy: "paragraph",
+        tokenCount: 7,
+        metadata: {},
+        createdAt: 2,
+      },
+    ])
+
+    const out = await ragSearch({ query: "数据库故障回滚", scope: "twin", twinId: "twin_cjk" })
+    expect(out.considered).toBe(2)
+    expect(out.chunks[0].content).toContain("数据库故障")
+    expect(out.chunks[0].score).toBeGreaterThan(0)
+  })
 })
 
 describe("internal helpers", () => {

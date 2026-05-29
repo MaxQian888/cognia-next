@@ -137,6 +137,81 @@ describe("PluginManager", () => {
     clearPluginExtensions("rollback-plugin")
   })
 
+  describe("installPluginFromGithub", () => {
+    it("invokes plugin_install_from_github, registers via the shared tail, and returns the installed plugin", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) {
+            store.plugins[pluginId] = { ...p, status: "installed", installedAt: new Date() }
+          }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const manifest = createManifest("gh-plugin")
+      mockInvoke.mockResolvedValueOnce({
+        manifest,
+        path: "/plugins/gh-plugin",
+        source: "git",
+        installRootKind: "installed",
+        readme: "# Demo",
+        licenseText: "MIT",
+        repo: "acme/gh",
+        gitRef: "main",
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub")
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_install_from_github", {
+        repo: "acme/gh",
+        gitRef: "main",
+        subdir: "sub",
+      })
+      expect(store.discoverPlugin).toHaveBeenCalledWith(
+        manifest,
+        "git",
+        "/plugins/gh-plugin",
+        expect.objectContaining({
+          descriptor: expect.objectContaining({ source: "git" }),
+        })
+      )
+      expect(store.installPlugin).toHaveBeenCalledWith("gh-plugin")
+      expect(plugin?.manifest.id).toBe("gh-plugin")
+      expect(plugin?.status).toBe("installed")
+    })
+
+    it("wraps a backend failure in a 'Failed to install plugin' error", async () => {
+      const store = {
+        plugins: {},
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockRejectedValueOnce(new Error("tarball 404"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.installPluginFromGithub("acme/missing")).rejects.toThrow(
+        /Failed to install plugin/i
+      )
+    })
+  })
+
   describe("installPlugin", () => {
     it("should call plugin_install with installType=git and write to store", async () => {
       const store: {

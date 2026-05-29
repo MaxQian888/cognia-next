@@ -13,16 +13,18 @@
 
 import { generateEmbedding } from "@/lib/ai/embedding/embedding"
 import { getTwinChunksByVectorDocIds } from "@/lib/db/twin-chunks"
-import { getTwinProfile } from "@/lib/db/twin-profile"
-import { getTwinSource } from "@/lib/db/twin-sources"
+import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-profile"
+import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore } from "@/lib/vector/store"
 import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
+import { reciprocalRankFusion } from "@/lib/ai/rag/hybrid-search"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
+import { keywordSearch } from "./bm25-index"
 import { rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
 
 export interface TwinRuntimeEmbeddingConfig {
@@ -115,17 +117,48 @@ function settingsFor(character: Character): TwinSettings {
     enableStyleFewShot:
       character.twinSettings?.enableStyleFewShot ?? DEFAULT_TWIN_SETTINGS.enableStyleFewShot,
     styleSamplesK: character.twinSettings?.styleSamplesK ?? DEFAULT_TWIN_SETTINGS.styleSamplesK,
+    enableHybrid: character.twinSettings?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
+    hybridKeywordWeight:
+      character.twinSettings?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
   }
 }
 
-async function loadSourceTitle(
-  sourceId: string,
-  cache: Map<string, TwinSource>
-): Promise<string | undefined> {
-  if (cache.has(sourceId)) return cache.get(sourceId)?.title
-  const row = await getTwinSource(sourceId)
-  if (row) cache.set(sourceId, row)
-  return row?.title
+// In-flight style-embedding backfills, keyed by twinId. Prevents a burst of
+// chat turns from each kicking off a redundant backfill for the same twin.
+const styleBackfillInFlight = new Map<string, Promise<unknown>>()
+
+/**
+ * Fire-and-forget lazy backfill of `StyleSample.embedding`. The cosine
+ * few-shot path only activates once EVERY sample has an embedding; distill
+ * embeds new samples inline, but legacy profiles, per-sample embed failures,
+ * and manually-added samples leave gaps. When we spot a gap (and the query
+ * embedding succeeded, so the provider is reachable), we kick off a backfill
+ * in the background: THIS turn still uses the query-aware token-overlap
+ * fallback, and subsequent turns pick up the persisted embeddings. Never
+ * blocks the send and never throws.
+ */
+function maybeBackfillStyleEmbeddings(
+  twinId: string,
+  samples: StyleSample[],
+  embedding: TwinRuntimeEmbeddingConfig
+): void {
+  const hasGap = samples.some((s) => !(Array.isArray(s.embedding) && s.embedding.length > 0))
+  if (!hasGap || styleBackfillInFlight.has(twinId)) return
+  const task = backfillStyleSampleEmbeddings(twinId, (summary) =>
+    generateEmbedding(summary, embedding).then((r) => r.embedding)
+  )
+    .catch(() => {
+      // Swallow — a transient embed/DB failure just means we retry next turn.
+    })
+    .finally(() => {
+      styleBackfillInFlight.delete(twinId)
+    })
+  styleBackfillInFlight.set(twinId, task)
+}
+
+/** Test hook — await any in-flight style-embedding backfills. */
+export async function __flushStyleBackfills(): Promise<void> {
+  await Promise.all([...styleBackfillInFlight.values()])
 }
 
 /**
@@ -177,19 +210,51 @@ export async function applyTwinContext(
         ? Math.max(settings.ragTopK * overFetch, settings.ragTopK)
         : settings.ragTopK
 
-      const hits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
+      const vectorHits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
         limit: fetchLimit,
       })
-      const docIds = hits.map((h) => h.id)
-      const dbChunks = await getTwinChunksByVectorDocIds(docIds)
+
+      // Hybrid retrieval: fuse the vector ranking with a BM25 keyword ranking
+      // over the same corpus via Reciprocal Rank Fusion. Off by default — when
+      // disabled we pass the vector hits through unchanged (and preserve their
+      // raw similarity scores). BM25 recall lifts verbatim ids / proper nouns /
+      // file references that pure semantic search ranks low.
+      let orderedIds: string[]
+      const scoreById = new Map<string, number>()
+      if (settings.enableHybrid && character.twinId) {
+        const keywordHits = await keywordSearch(character.twinId, userMessage, fetchLimit)
+        const keywordWeight = Math.min(1, Math.max(0, settings.hybridKeywordWeight))
+        const fused = reciprocalRankFusion(
+          [vectorHits.map((h) => ({ id: h.id, score: h.score })), keywordHits],
+          [1 - keywordWeight, keywordWeight],
+          60
+        )
+        orderedIds = fused.slice(0, fetchLimit).map((f) => f.id)
+        for (const f of fused) scoreById.set(f.id, f.score)
+      } else {
+        orderedIds = vectorHits.map((h) => h.id)
+        for (const h of vectorHits) scoreById.set(h.id, h.score)
+      }
+
+      const dbChunks = await getTwinChunksByVectorDocIds(orderedIds)
       const chunkById = new Map<string, TwinChunk>(dbChunks.map((c) => [c.vectorDocId, c]))
-      const sourceTitleCache = new Map<string, TwinSource>()
+      // Batch-load every distinct source once (single bulkGet) so the per-hit
+      // title lookup below is synchronous — no N+1 serial Dexie awaits.
+      const sourceIds = Array.from(
+        new Set(dbChunks.map((c) => c.sourceId).filter((id): id is string => Boolean(id)))
+      )
+      const sourceById = new Map<string, TwinSource>(
+        (await getTwinSourcesByIds(sourceIds)).map((s) => [s.id, s])
+      )
       const enriched: typeof retrievedChunks = []
-      for (const hit of hits) {
-        const chunk = chunkById.get(hit.id)
+      for (const id of orderedIds) {
+        const chunk = chunkById.get(id)
         if (!chunk) continue
-        const sourceTitle = await loadSourceTitle(chunk.sourceId, sourceTitleCache)
-        enriched.push({ chunk, score: hit.score, sourceTitle })
+        enriched.push({
+          chunk,
+          score: scoreById.get(id) ?? 0,
+          sourceTitle: sourceById.get(chunk.sourceId)?.title,
+        })
       }
 
       // Optional rerank pass — never throws (falls back to identity on
@@ -227,7 +292,11 @@ export async function applyTwinContext(
   // StyleSample on the profile has an `embedding` (distill backfilled
   // them during the last run), pass them to the selector for cosine
   // ranking. Otherwise the selector falls back to a token-overlap
-  // heuristic on `summary`.
+  // heuristic on `summary` — and we kick off a background backfill so the
+  // cosine path lights up on a later turn.
+  if (settings.enableStyleFewShot && profile && profile.styleSamples.length > 0 && queryEmbedding) {
+    maybeBackfillStyleEmbeddings(character.twinId, profile.styleSamples, deps.embedding)
+  }
   const styleSamples =
     settings.enableStyleFewShot && profile && queryEmbedding
       ? selectFewShotSamples({
@@ -238,6 +307,7 @@ export async function applyTwinContext(
           )
             ? profile.styleSamples.map((s) => s.embedding as number[])
             : undefined,
+          queryText: userMessage,
           topK: settings.styleSamplesK,
         }).map((s) => s.sample)
       : []

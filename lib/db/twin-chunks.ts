@@ -8,6 +8,7 @@
  * hits to full chunks via `getTwinChunkByVectorDocId`.
  */
 
+import Dexie from "dexie"
 import type { TwinChunk } from "@/types/twin"
 import { getDb } from "./schema"
 
@@ -101,6 +102,27 @@ export async function listTwinChunksByTwin(
 
 export async function countTwinChunksByTwin(twinId: string): Promise<number> {
   return getDb().twinChunks.where("twinId").equals(twinId).count()
+}
+
+/**
+ * Cheap content-version signal for a twin's chunk corpus — `count` plus the
+ * newest `createdAt`. Re-parses stamp a fresh `createdAt`, so this pair changes
+ * whenever chunks are added, removed, or replaced (even when the count is
+ * unchanged). Used by the runtime BM25 index cache to decide when to rebuild
+ * without loading the whole table. Both reads ride existing indexes
+ * (`twinId` count + the `[twinId+createdAt]` compound for the newest row).
+ */
+export async function getTwinChunksVersion(
+  twinId: string
+): Promise<{ count: number; latestCreatedAt: number }> {
+  const db = getDb()
+  const count = await db.twinChunks.where("twinId").equals(twinId).count()
+  if (count === 0) return { count: 0, latestCreatedAt: 0 }
+  const newest = await db.twinChunks
+    .where("[twinId+createdAt]")
+    .between([twinId, Dexie.minKey], [twinId, Dexie.maxKey])
+    .last()
+  return { count, latestCreatedAt: newest?.createdAt ?? 0 }
 }
 
 export async function updateTwinChunk(

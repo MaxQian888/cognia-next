@@ -163,6 +163,28 @@ describe("createLarkAdapter", () => {
     expect(adapter.health().state).toBe("down")
   })
 
+  it("start() skips adapters with empty appId/appSecret (no doomed reconnect loop)", async () => {
+    const adapter = createLarkAdapter({
+      id: "lark-empty",
+      displayName: "Unconfigured Bot",
+      appId: async () => "",
+      appSecret: async () => "",
+      verificationToken: async () => "",
+      selfBotOpenId: "ou_bot",
+      transport: "long-connection",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+    // Give any (incorrectly-started) async transport loop a tick to fire.
+    await new Promise((r) => setTimeout(r, 20))
+    // Skipped cleanly: health is 'down' and the Rust WS open command never ran.
+    expect(adapter.health().state).toBe("down")
+    const openCalls = mockInvoke.mock.calls.filter(
+      ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
+    )
+    expect(openCalls).toHaveLength(0)
+  })
+
   it("start() is idempotent (second call is no-op)", async () => {
     const adapter = makeAdapter()
     const { ctx } = makeCtx()

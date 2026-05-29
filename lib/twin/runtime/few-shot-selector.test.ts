@@ -41,6 +41,22 @@ describe("selectFewShotSamples", () => {
     expect(result[0].score).toBeCloseTo(1)
   })
 
+  it("ranks by query token-overlap when embeddings are absent but queryText is given", () => {
+    const samples = [
+      makeSample("offtopic", "quarterly revenue projections and budget"),
+      makeSample("ontopic", "how to reset your password and login"),
+    ]
+    const result = selectFewShotSamples({
+      queryEmbedding: [],
+      samples,
+      queryText: "I forgot my password, how do I login again?",
+      topK: 1,
+    })
+    // The query overlaps the "ontopic" summary far more than "offtopic".
+    expect(result[0].sample.id).toBe("ontopic")
+    expect(result[0].score).toBeGreaterThan(0)
+  })
+
   it("falls back to length heuristic when embeddings are absent", () => {
     const samples = [
       makeSample("short", "x"),

@@ -122,7 +122,7 @@ describe("readBundleFolder", () => {
     expect(result.warnings.some((w) => w.includes("more than"))).toBe(true)
   })
 
-  it("warns about files in root that aren't SKILL.md and classifies them as 'asset'", async () => {
+  it("collects root files that aren't SKILL.md, classifying them per-extension", async () => {
     const fs = FakeFs.fromObject({
       "SKILL.md": SKILL_MD,
       "README.md": "# Read me\n",
@@ -130,17 +130,35 @@ describe("readBundleFolder", () => {
     const result = await readBundleFolder("/bundle", fs)
     expect(result.resources).toHaveLength(1)
     expect(result.resources[0].path).toBe("README.md")
-    expect(result.resources[0].kind).toBe("asset")
-    expect(result.warnings.some((w) => w.includes("classified as 'asset'"))).toBe(true)
+    expect(result.resources[0].kind).toBe("reference")
+    expect(result.warnings.some((w) => w.includes("classified as 'reference'"))).toBe(true)
   })
 
-  it("warns about unknown top-level subdirs without collecting their contents", async () => {
+  it("recurses into unknown top-level subdirs and collects their contents", async () => {
     const fs = FakeFs.fromObject({
       "SKILL.md": SKILL_MD,
       "extras/stuff.txt": "hi",
     })
     const result = await readBundleFolder("/bundle", fs)
-    expect(result.resources).toEqual([])
-    expect(result.warnings.some((w) => w.includes("extras/"))).toBe(true)
+    expect(result.resources).toHaveLength(1)
+    expect(result.resources[0].path).toBe("extras/stuff.txt")
+    expect(result.resources[0].kind).toBe("reference")
+    expect(result.warnings.some((w) => w.includes("extras/stuff.txt"))).toBe(true)
+  })
+
+  it("collects a Claude Code `resources/` dir, classifying each file by extension", async () => {
+    const fs = FakeFs.fromObject({
+      "SKILL.md": SKILL_MD,
+      "resources/guide.md": "# Guide\n",
+      "resources/helper.py": "print('hi')\n",
+      "resources/logo.png": new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    })
+    const result = await readBundleFolder("/bundle", fs)
+    expect(result.resources).toHaveLength(3)
+    const byPath = Object.fromEntries(result.resources.map((r) => [r.path, r]))
+    expect(byPath["resources/guide.md"].kind).toBe("reference")
+    expect(byPath["resources/helper.py"].kind).toBe("script")
+    expect(byPath["resources/logo.png"].kind).toBe("asset")
+    expect(byPath["resources/logo.png"].encoding).toBe("base64")
   })
 })

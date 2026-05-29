@@ -273,10 +273,12 @@ pub async fn open(app: tauri::AppHandle, adapter_id: String) -> Result<String, S
     let app_id = super::keyring::get(&adapter_id, "appId")?.unwrap_or_default();
     let app_secret = super::keyring::get(&adapter_id, "appSecret")?.unwrap_or_default();
     if app_id.is_empty() || app_secret.is_empty() {
+        log::warn!("[lark-ws] open aborted: appId/appSecret not in keyring for adapter {adapter_id}");
         return Err("Lark appId/appSecret not configured in keyring".into());
     }
 
     let handle_id = Uuid::new_v4().to_string();
+    log::info!("[lark-ws] open requested adapter={adapter_id} handle={handle_id}");
     let cancel = Arc::new(Notify::new());
     handles()
         .lock()
@@ -332,6 +334,7 @@ async fn connect_and_run(
     cancel: &Notify,
 ) -> Result<(), String> {
     let (url, cfg) = fetch_endpoint(app_id, app_secret).await?;
+    log::info!("[lark-ws] {handle_id} endpoint resolved, dialing");
 
     // Dial (proxy-aware) — mirrors `ws_client::open_ws`.
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -365,6 +368,7 @@ async fn connect_and_run(
     let (ws_stream, _) = client_async_tls(request, raw)
         .await
         .map_err(|e| format!("WS handshake failed: {e}"))?;
+    log::info!("[lark-ws] {handle_id} connected (ws handshake ok), entering read loop");
     let (mut sink, mut stream) = ws_stream.split();
 
     // Single outbound pump (pings + acks). Mirrors `ws_client`'s mpsc pattern.
@@ -471,6 +475,7 @@ async fn handle_frame(
         let payload = maybe_inflate(&frame.payload_encoding, payload);
         if msg_type == T_EVENT || msg_type == T_CARD {
             if let Ok(json) = String::from_utf8(payload) {
+                log::info!("[lark-ws] {handle_id} event frame received (type={msg_type}) → emitting");
                 let _ = app.emit(&format!("connectors://lark-ws/{handle_id}/event"), json);
             }
         }
