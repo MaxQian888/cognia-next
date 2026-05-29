@@ -576,6 +576,7 @@ mod tests {
                 has_input_sim: false,
                 has_screenshot: false,
                 has_events: false,
+                has_a11y_tree: false,
             }
         }
         fn get_focus(&self) -> Result<ElementInfo> {

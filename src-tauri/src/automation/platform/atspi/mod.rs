@@ -47,6 +47,7 @@ impl AutomationBackend for AtspiBackend {
             has_input_sim: !wayland_only,
             has_screenshot: !wayland_only,
             has_events: false,
+            has_a11y_tree: false, // minimum-viable enigo backend: input only, no AT-SPI tree.
         }
     }
 

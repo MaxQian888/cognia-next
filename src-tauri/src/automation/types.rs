@@ -27,6 +27,27 @@ pub struct Capabilities {
     pub has_input_sim: bool,
     pub has_screenshot: bool,
     pub has_events: bool,
+    /// The back-end exposes a cross-platform accessibility tree
+    /// (`read_tree` / `find`) independent of Windows UIA. True for the remote
+    /// cua sandbox backend (`get_accessibility_tree`); false for the
+    /// input-only local enigo back-ends. `#[serde(default)]` keeps older
+    /// persisted/round-tripped payloads deserializing.
+    #[serde(default)]
+    pub has_a11y_tree: bool,
+}
+
+/// Which execution backend a call targets. `Local` = the synchronous COM
+/// worker (existing UIA / enigo back-ends); `Remote` = the async
+/// `CuaRemoteClient` keyed by a sandbox connection id. Default = `Local`, so
+/// every existing call site that doesn't set a target keeps hitting the host.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CallTarget {
+    #[default]
+    Local,
+    Remote {
+        connection_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -544,10 +565,27 @@ mod tests {
             has_input_sim: true,
             has_screenshot: true,
             has_events: true,
+            has_a11y_tree: true,
         };
         let json = serde_json::to_string(&caps).unwrap();
         assert!(json.contains("\"hasUia\":true"));
+        assert!(json.contains("\"hasA11yTree\":true"));
         assert!(json.contains("\"platform\":\"windows\""));
+    }
+
+    #[test]
+    fn call_target_defaults_to_local() {
+        assert_eq!(CallTarget::default(), CallTarget::Local);
+    }
+
+    #[test]
+    fn call_target_remote_serializes_camel() {
+        let json = serde_json::to_string(&CallTarget::Remote {
+            connection_id: "c1".into(),
+        })
+        .unwrap();
+        assert!(json.contains("\"kind\":\"remote\""));
+        assert!(json.contains("\"connectionId\":\"c1\""));
     }
 
     #[test]
