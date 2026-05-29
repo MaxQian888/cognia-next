@@ -606,6 +606,14 @@ export interface ChatSession {
    * appSettings.sandboxDefaultEnabled. Undefined falls through.
    */
   sandboxEnabled?: boolean
+  /**
+   * ADR-0020 remote-target — per-session override of the computer-use GUI
+   * execution target. `"local"` forces the host even if the character defaults
+   * to a sandbox; `{ connectionId }` targets a specific cua sandbox;
+   * `undefined` inherits the character. Precedence: session → character →
+   * local (`lib/automation/sandbox-target.ts`).
+   */
+  computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
   systemPrompt?: string
   /**
    * Identity of the system-prompt preset this session was last configured
@@ -1665,6 +1673,8 @@ export interface Character {
     ragTopK?: number
     enableStyleFewShot?: boolean
     styleSamplesK?: number
+    enableHybrid?: boolean
+    hybridKeywordWeight?: number
   }
   platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
   /**
@@ -1734,6 +1744,15 @@ export interface Character {
      */
     screenOffMode?: boolean
   }
+  /**
+   * ADR-0020 remote-target — where this character's computer-use GUI actions
+   * run. `"local"` (or `undefined`) = the local host backend; `{ connectionId }`
+   * targets a cua desktop sandbox (see `lib/db/sandbox-connections.ts`). The
+   * connection id is the convergence anchor (a future ADR-0028 `cua-desktop`
+   * tier reuses the same binding). Resolved with session precedence by
+   * `resolveSendOptions` (`lib/automation/sandbox-target.ts`).
+   */
+  computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
   /**
    * Set ONLY when this row is a user-cloned copy of a plugin-overlay character
    * (ADR-0030). Never set on app-seeded built-ins or pure user-created rows.

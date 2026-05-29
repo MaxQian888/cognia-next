@@ -37,6 +37,7 @@ import {
 } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import { getActiveComputerUseTarget } from "@/lib/claude/computer-use-target-state"
 import type { CallContext } from "@/lib/automation/client"
 
 // ADR-0020 W1 audit-fix — build the CallContext for a chat-path
@@ -65,6 +66,13 @@ function buildChatCallContext(): CallContext {
     // errors with `vdd_unavailable` when the driver isn't installed.
     if (settings?.screenOffMode === true) {
       ctx.screenOffMode = true
+    }
+    // ADR-0020 remote-target — when this session resolved to a cua sandbox,
+    // stamp the connection id so the Rust `cua_route` layer dispatches the
+    // action to the container instead of the host.
+    const target = getActiveComputerUseTarget(sessionId)
+    if (target.kind === "remote") {
+      ctx.sandboxConnectionId = target.connectionId
     }
   }
   return ctx

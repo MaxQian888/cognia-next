@@ -74,6 +74,17 @@ export interface CallContext {
    * `automation::commands::CallContext.screen_off_mode`.
    */
   screenOffMode?: boolean
+  /**
+   * ADR-0020 remote-target — when set, the action runs against the cua
+   * desktop sandbox with this connection id instead of the local host.
+   * Empty / absent = local. Deserialized into
+   * `automation::commands::CallContext.sandbox_connection_id`; the Rust
+   * `cua_route` layer dispatches to the `CuaRemoteClient` keyed by this id.
+   * Populated by the computer-use plugin's `execute()` callback from the
+   * per-session resolved `computerUseTarget` (see
+   * `lib/claude/computer-use-target-state.ts`).
+   */
+  sandboxConnectionId?: string
 }
 
 /**

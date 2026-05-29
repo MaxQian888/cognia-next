@@ -919,6 +919,25 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       computerUseGateTier,
     })
     Object.assign(opts, applied.opts)
+    // ADR-0020 remote-target — resolve the GUI execution target (session →
+    // character → local) and stash it per-session so the computer-use plugin's
+    // execute() callback can stamp `CallContext.sandboxConnectionId`. Cleared
+    // when Computer Use is disabled so a stale remote target can't linger.
+    const [
+      { resolveComputerUseTarget },
+      { setActiveComputerUseTarget, clearActiveComputerUseTarget },
+    ] = await Promise.all([
+      import("@/lib/automation/sandbox-target"),
+      import("@/lib/claude/computer-use-target-state"),
+    ])
+    if (character?.enableComputerUse) {
+      setActiveComputerUseTarget(
+        session?.id,
+        resolveComputerUseTarget(session?.computerUseTarget, character?.computerUseTarget)
+      )
+    } else {
+      clearActiveComputerUseTarget(session?.id)
+    }
   } catch {
     // Non-fatal — the registry import shouldn't ever fail in production,
     // but a hot-reload during dev can briefly leave it unresolved. Better
