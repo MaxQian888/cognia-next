@@ -88,6 +88,10 @@ const PluginsSection = dynamic(
   () => import("./sections/plugins-section").then((m) => m.PluginsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const PluginConfigSection = dynamic(
+  () => import("./sections/plugin-config-section").then((m) => m.PluginConfigSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const SkillsSection = dynamic(
   () => import("./sections/skills-section").then((m) => m.SkillsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -350,6 +354,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <A2UISection />
     case "plugins":
       return <PluginsSection onClose={onClose} />
+    case "plugin-config":
+      return <PluginConfigSection />
     case "connections":
       return <ConnectionsSection />
     case "data":

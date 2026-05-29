@@ -706,7 +706,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sha1",
+ "sha1 0.10.6",
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite 0.29.0",
@@ -1649,6 +1649,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "sha1 0.11.0",
  "sha2 0.11.0",
  "sqlite-vec",
  "subtle",
@@ -2843,7 +2844,7 @@ dependencies = [
  "rkyv 0.8.16",
  "rustls",
  "sec1",
- "sha1",
+ "sha1 0.10.6",
  "sha2 0.10.9",
  "thiserror 1.0.69",
  "tokio",
@@ -9017,6 +9018,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11021,7 +11033,7 @@ dependencies = [
  "rand 0.8.6",
  "rustls",
  "rustls-pki-types",
- "sha1",
+ "sha1 0.10.6",
  "thiserror 1.0.69",
  "utf-8",
 ]
@@ -11038,7 +11050,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
- "sha1",
+ "sha1 0.10.6",
  "thiserror 2.0.18",
 ]
 
@@ -12179,7 +12191,7 @@ dependencies = [
  "log",
  "rtcp",
  "rtp",
- "sha1",
+ "sha1 0.10.6",
  "subtle",
  "thiserror 1.0.69",
  "tokio",

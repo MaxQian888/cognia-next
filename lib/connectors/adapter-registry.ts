@@ -23,6 +23,12 @@ import { createOneBotAdapter } from "./adapters/onebot"
 import { createWeComAdapter } from "./adapters/wecom"
 import type { WeComAdapterSettings } from "./adapters/wecom/welcome"
 import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
+import { createMatrixAdapter } from "./adapters/matrix"
+import { matrixWhoami } from "./adapters/matrix/auth"
+import { createQQOfficialAdapter } from "./adapters/qq-official"
+import { getQQAccessToken } from "./adapters/qq-official/auth"
+import { createWechatOaAdapter } from "./adapters/wechat-oa"
+import { getWechatOaAccessToken } from "./adapters/wechat-oa/auth"
 import { getTenantAccessToken } from "./adapters/lark/auth"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 
@@ -49,6 +55,12 @@ export async function buildAdapterFromRow(
       return buildWeComAdapter(row)
     case "wechat-personal":
       return buildWechatPersonalAdapter(row)
+    case "matrix":
+      return buildMatrixAdapter(row)
+    case "qq-official":
+      return buildQQOfficialAdapter(row)
+    case "wechat-oa":
+      return buildWechatOaAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -328,6 +340,77 @@ export async function buildWechatPersonalAdapter(
     displayName: row.displayName,
     token: () => connectorsKeyringGet(row.id, "botToken").then((v) => v ?? ""),
     baseUrl: async () => settings.baseUrl ?? "",
+  })
+}
+
+/**
+ * Instantiate a Matrix PlatformAdapter from a persisted AdapterInstanceRow.
+ *
+ * Reads the access token from the keyring and the non-secret homeserver URL
+ * from `settings.homeserver`, then calls `whoami` to resolve the bot's own
+ * user id (selfId). If the probe fails the adapter still starts — self-mention
+ * detection then relies on explicit `m.mentions` only.
+ */
+export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const settings = (row.settings ?? {}) as { homeserver?: string }
+  const homeserver = settings.homeserver ?? ""
+
+  const accessTokenRaw = await connectorsKeyringGet(row.id, "accessToken")
+  const accessToken = accessTokenRaw ?? ""
+
+  let selfId = ""
+  try {
+    const resolved = await matrixWhoami(homeserver, accessToken)
+    if (resolved) selfId = resolved
+  } catch {
+    console.warn(`[adapter-registry] whoami failed for Matrix adapter ${row.id}`)
+  }
+
+  return createMatrixAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    homeserver,
+    accessToken: () => connectorsKeyringGet(row.id, "accessToken").then((t) => t ?? ""),
+    selfId,
+  })
+}
+
+/**
+ * Instantiate a QQ Official Bot PlatformAdapter from a persisted row.
+ *
+ * Reads `appId` + `clientSecret` from the keyring; the access token is
+ * resolved (and cached) on demand by `getQQAccessToken`. No identity probe is
+ * needed — the bot's id arrives on the gateway READY event.
+ */
+export async function buildQQOfficialAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  return createQQOfficialAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    accessToken: async () => {
+      const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
+      const secret = (await connectorsKeyringGet(row.id, "clientSecret")) ?? ""
+      return getQQAccessToken(appId, secret)
+    },
+  })
+}
+
+/**
+ * Instantiate a WeChat Official Account PlatformAdapter from a persisted row.
+ *
+ * Reads `appId` + `appSecret` from the keyring for the access token; the
+ * webhook `token` + `encodingAesKey` are also stored in the keyring (read by
+ * the Rust webhook handler under the same adapter id). No identity probe is
+ * needed — the official account id arrives on the first inbound message.
+ */
+export async function buildWechatOaAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  return createWechatOaAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    accessToken: async () => {
+      const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
+      const appSecret = (await connectorsKeyringGet(row.id, "appSecret")) ?? ""
+      return getWechatOaAccessToken(appId, appSecret)
+    },
   })
 }
 

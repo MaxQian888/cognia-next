@@ -306,6 +306,56 @@ describe("Plugin Validation", () => {
       expect(result.valid).toBe(true)
     })
 
+    describe("capability ↔ field cross-check", () => {
+      it("warns when a declared capability has no contribution field", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["scheduler"]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(result.valid).toBe(true)
+        expect(result.diagnostics.some((d) => d.code === "manifest.capability.field_missing")).toBe(
+          true
+        )
+      })
+
+      it("warns when a contribution field is populated without its capability tag", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["tools"]
+        ;(manifest as Record<string, unknown>).tools = [
+          { name: "t", description: "d", parametersSchema: {} },
+        ]
+        ;(manifest as Record<string, unknown>).fonts = [
+          { family: "X", files: [{ weight: 400, src: "a.woff2" }] },
+        ]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics.some((d) => d.code === "manifest.capability.field_undeclared")
+        ).toBe(true)
+      })
+
+      it("does not warn field_missing when the gating field is populated", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["fonts"]
+        ;(manifest as Record<string, unknown>).fonts = [
+          { family: "X", files: [{ weight: 400, src: "a.woff2" }] },
+        ]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics.some(
+            (d) => d.code === "manifest.capability.field_missing" && d.message.includes("fonts")
+          )
+        ).toBe(false)
+      })
+
+      it("accepts the newly-contracted capabilities without an invalid-capability error", () => {
+        for (const cap of ["theme-pack", "fonts", "wallpapers", "tray"]) {
+          const manifest = createValidManifest()
+          manifest.capabilities = [cap] as PluginManifest["capabilities"]
+          const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+          expect(result.errors.some((e) => e.includes("Invalid capability"))).toBe(false)
+        }
+      })
+    })
+
     it("should require main for frontend plugins", () => {
       const manifest = createValidManifest()
       manifest.type = "frontend"

@@ -27,13 +27,15 @@ export type OAuthHandler = (code: string, state: string) => Promise<void>
 export const oauthRegistry = new Map<PlatformKind, OAuthHandler>()
 
 // ---------------------------------------------------------------------------
-// Slack — Phase 1 stub
-// Routes cognia://connector/oauth/slack?code=... to a known handler.
-// Full token exchange is implemented in Phase 2 (D1).
+// Slack — fully wired (ADR-0009 D1, completed in the IM connector uplift).
+// Routes cognia://connector/oauth/slack?code=...&state=slack:<adapterId>:<nonce>
+// through `handleSlackOAuth`, which swaps the code for a bot token via
+// oauth.v2.access and persists it in the keyring under `botToken`.
 // ---------------------------------------------------------------------------
 
-oauthRegistry.set("slack", async (_code: string, _state: string): Promise<void> => {
-  throw new Error("Slack OAuth exchange not yet implemented (Phase 2)")
+oauthRegistry.set("slack", async (code: string, state: string): Promise<void> => {
+  const { handleSlackOAuth } = await import("./adapters/slack/oauth-handler")
+  await handleSlackOAuth(code, { state })
 })
 
 // ---------------------------------------------------------------------------

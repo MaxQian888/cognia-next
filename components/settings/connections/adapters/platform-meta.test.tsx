@@ -1,36 +1,39 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { render } from "@testing-library/react"
 import { getPlatformMeta } from "./platform-meta"
-import {
-  BirdIcon,
-  BotIcon,
-  HashIcon,
-  MessageCircleIcon,
-  MessagesSquareIcon,
-  SendIcon,
-} from "lucide-react"
+import { getPlatformIcon } from "@/components/connectors/platform-icons"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
 describe("getPlatformMeta", () => {
-  it.each<[PlatformKind, string, unknown]>([
-    ["telegram", "telegram", SendIcon],
-    ["discord", "discord", MessagesSquareIcon],
-    ["slack", "slack", HashIcon],
-    ["lark", "lark", BirdIcon],
-    ["onebot", "onebot", BotIcon],
-  ])("maps %s to its label key + icon", (kind, labelKey, Icon) => {
+  it.each<[PlatformKind, string]>([
+    ["telegram", "telegram"],
+    ["discord", "discord"],
+    ["slack", "slack"],
+    ["lark", "lark"],
+    ["onebot", "onebot"],
+    ["wecom", "wecom"],
+    ["wechat-personal", "wechat-personal"],
+    ["wechat-oa", "wechat-oa"],
+    ["qq-official", "qq-official"],
+    ["matrix", "matrix"],
+  ])("maps %s to its label key + shared brand icon", (kind, labelKey) => {
     const meta = getPlatformMeta(kind)
     expect(meta.labelKey).toBe(labelKey)
-    expect(meta.Icon).toBe(Icon)
+    // Icon comes from the shared vendored brand set.
+    expect(meta.Icon).toBe(getPlatformIcon(kind))
   })
 
-  it("falls back to a generic glyph for kinds without a dialog", () => {
-    const meta = getPlatformMeta("matrix")
-    expect(meta.labelKey).toBe("unknown")
-    expect(meta.Icon).toBe(MessageCircleIcon)
+  it("falls back to the 'unknown' label for kinds without a dialog", () => {
+    expect(getPlatformMeta("github").labelKey).toBe("unknown")
+    expect(getPlatformMeta("kook").labelKey).toBe("unknown")
   })
 
-  it("falls back for an unknown plugin-contributed kind", () => {
-    const meta = getPlatformMeta("github")
-    expect(meta.labelKey).toBe("unknown")
-    expect(meta.Icon).toBe(MessageCircleIcon)
+  it("always returns a renderable icon, even for fallback kinds", () => {
+    const { Icon } = getPlatformMeta("github")
+    const { container } = render(<Icon className="size-4" />)
+    expect(container.querySelector("svg")).not.toBeNull()
   })
 })

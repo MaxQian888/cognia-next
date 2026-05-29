@@ -13,6 +13,7 @@ import {
   pruneOlderThan,
   queryBySession,
   queryByTrace,
+  queryByWindow,
   queryRecent,
 } from "./agent-traces"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -143,6 +144,30 @@ describe("queryByTrace", () => {
 
   it("returns [] for empty traceId", async () => {
     expect(await queryByTrace("")).toEqual([])
+  })
+})
+
+describe("queryByWindow", () => {
+  beforeEach(async () => {
+    await bulkInsertSpans([
+      span({ id: "a", startTime: 100 }),
+      span({ id: "b", startTime: 500 }),
+      span({ id: "c", startTime: 900 }),
+    ])
+  })
+
+  it("returns spans in [since, until] oldest-first", async () => {
+    const rows = await queryByWindow({ since: 200, until: 900 })
+    expect(rows.map((r) => r.id)).toEqual(["b", "c"])
+  })
+
+  it("treats until as open-ended when omitted", async () => {
+    const rows = await queryByWindow({ since: 0 })
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c"])
+  })
+
+  it("returns [] when the window excludes everything", async () => {
+    expect(await queryByWindow({ since: 5000 })).toEqual([])
   })
 })
 

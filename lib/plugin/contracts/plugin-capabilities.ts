@@ -687,6 +687,74 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/features/plugin-development.md#capabilities",
     requiredTests: ["lib/plugin/bridge/workflow-integration.test.ts"],
   },
+  {
+    // Theme packs (ADR-0029). Applyable bundles registered via the themes
+    // bridge into the theme-pack registry. Wired at plugin enable; no
+    // dedicated SDK helper yet — hence `partial`.
+    id: "theme-pack",
+    support: "partial",
+    manifestFields: ["themePacks"],
+    runtimeBinding:
+      "Theme packs registered via the themes bridge (registerPluginThemePacks) into the theme-pack registry",
+    hostBindings: ["lib/plugin/bridge/themes-bridge.ts", "lib/theme/theme-pack-registry.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/theme/theme-pack-registry.test.ts"],
+  },
+  {
+    // Plugin-bundled font families (ADR-0029). Applied via the font bridge
+    // (@font-face injection) into the cross-source font registry on enable.
+    id: "fonts",
+    support: "partial",
+    manifestFields: ["fonts"],
+    runtimeBinding:
+      "Font families applied via the font bridge (applyPluginFonts) into the font registry",
+    hostBindings: ["lib/plugin/bridge/font-bridge.ts", "lib/appearance/font-registry.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/bridge/font-bridge.test.ts"],
+  },
+  {
+    // Plugin-bundled wallpapers (ADR-0029). Registered via the wallpaper
+    // bridge so the picker surfaces them alongside built-in/user wallpapers.
+    id: "wallpapers",
+    support: "partial",
+    manifestFields: ["wallpapers"],
+    runtimeBinding: "Wallpapers registered via the wallpaper bridge (applyPluginWallpapers)",
+    hostBindings: ["lib/plugin/bridge/wallpaper-bridge.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/bridge/wallpaper-bridge.test.ts"],
+  },
+  {
+    // System tray items. Registered imperatively at activation via
+    // `ctx.tray.register` (no manifest field); desktop-only. Experimental
+    // pending a declarative manifest surface + SDK helper.
+    id: "tray",
+    support: "experimental",
+    manifestFields: [],
+    runtimeBinding: "System tray items registered imperatively via ctx.tray.register",
+    hostBindings: ["lib/plugin/api/tray-api.ts", "lib/tray/registry.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/tray/registry.test.ts"],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

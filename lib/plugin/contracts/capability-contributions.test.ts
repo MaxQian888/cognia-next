@@ -53,6 +53,42 @@ describe("getContributionsForCapability", () => {
     expect(getContributionsForCapability(manifest, "workflow-trigger")).toEqual([{ id: "trig-a" }])
   })
 
+  it("counts the overlay capabilities (character-pack/subagent/team-template/shared-memory/workflow-template)", () => {
+    const manifest = {
+      characterPacks: [{ id: "pack-a", name: "Pack A" }],
+      subagents: [{ id: "sub-a" }, { id: "sub-b" }],
+      agentTeamTemplates: [{ id: "team-a", name: "Team A" }],
+      sharedMemoryAdapters: [{ id: "mem-a" }],
+      workflowTemplates: [{ id: "wf-a" }],
+    }
+    expect(getContributionsForCapability(manifest, "character-pack")).toEqual([
+      { id: "pack-a", label: "Pack A" },
+    ])
+    expect(getContributionsForCapability(manifest, "subagent")).toEqual([
+      { id: "sub-a" },
+      { id: "sub-b" },
+    ])
+    expect(getContributionsForCapability(manifest, "agent-team-template")).toEqual([
+      { id: "team-a", label: "Team A" },
+    ])
+    expect(getContributionsForCapability(manifest, "shared-memory-adapter")).toEqual([
+      { id: "mem-a" },
+    ])
+    expect(getContributionsForCapability(manifest, "workflow-template")).toEqual([{ id: "wf-a" }])
+  })
+
+  it("keys fonts by family and scheduled tasks by name (no id field)", () => {
+    expect(
+      getContributionsForCapability({ fonts: [{ family: "Inter" }, { family: "Mono" }] }, "fonts")
+    ).toEqual([{ id: "Inter" }, { id: "Mono" }])
+    expect(
+      getContributionsForCapability(
+        { scheduledTasks: [{ name: "daily" }, { name: "hourly" }] },
+        "scheduler"
+      )
+    ).toEqual([{ id: "daily" }, { id: "hourly" }])
+  })
+
   it("returns [] for capabilities with no manifest contribution surface", () => {
     expect(getContributionsForCapability({}, "tools")).toEqual([])
     expect(getContributionsForCapability({}, "hooks")).toEqual([])

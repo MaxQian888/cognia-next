@@ -7,12 +7,6 @@ import { BotIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
@@ -24,13 +18,17 @@ import { SlackConfigDialog } from "../forms/slack-config"
 import { OneBotConfigDialog } from "../forms/onebot-config"
 import { WeComConfigDialog } from "../forms/wecom-config"
 import { WeChatPersonalConfigDialog } from "../forms/wechat-personal-config"
+import { MatrixConfigDialog } from "../forms/matrix-config"
+import { QQOfficialConfigDialog } from "../forms/qq-official-config"
+import { WechatOaConfigDialog } from "../forms/wechat-oa-config"
 import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
 import { AdapterListRow } from "../adapters/adapter-list-row"
+import { AddConnectorGrid } from "../adapters/add-connector-grid"
 import { useSelectedAdapter } from "../adapters/use-selected-adapter"
 
-// Platform kinds whose configuration dialog is wired into this tab.
-// All five platforms ship with a dialog under `../forms/`; the dispatcher
-// below picks the right one by `row.type`.
+// Platform kinds whose configuration dialog is wired into this tab. Each ships
+// with a dialog under `../forms/`; the dispatcher below picks the right one by
+// `row.type`. This list also drives the AddConnectorGrid picker.
 type ConfigurableKind =
   | "telegram"
   | "lark"
@@ -39,6 +37,9 @@ type ConfigurableKind =
   | "onebot"
   | "wecom"
   | "wechat-personal"
+  | "matrix"
+  | "qq-official"
+  | "wechat-oa"
 
 const CONFIGURABLE_KINDS: ConfigurableKind[] = [
   "telegram",
@@ -48,18 +49,9 @@ const CONFIGURABLE_KINDS: ConfigurableKind[] = [
   "onebot",
   "wecom",
   "wechat-personal",
-]
-
-// Display order of the "Add adapter" menu. Labels resolve from
-// `platforms.<kind>` so they stay i18n-wired and shared with the row.
-const ADAPTER_MENU: ConfigurableKind[] = [
-  "telegram",
-  "lark",
-  "discord",
-  "slack",
-  "onebot",
-  "wecom",
-  "wechat-personal",
+  "matrix",
+  "qq-official",
+  "wechat-oa",
 ]
 
 function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
@@ -76,6 +68,7 @@ type EditingDialog = {
 export function AdaptersTab() {
   const t = useTranslations("settings.connections.adapters")
   const [editing, setEditing] = useState<EditingDialog | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
   const { selectedAdapterId } = useSelectedAdapter()
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
@@ -101,36 +94,42 @@ export function AdaptersTab() {
     return counts
   }, [outboundJobs])
 
+  // Configured-instance count per platform kind, for the picker badges.
+  const configuredCounts = useMemo(() => {
+    const counts = new Map<PlatformKind, number>()
+    for (const row of adapters ?? []) {
+      counts.set(row.type, (counts.get(row.type) ?? 0) + 1)
+    }
+    return counts
+  }, [adapters])
+
   const onConfigure = (row: AdapterInstanceRow) => {
     if (isConfigurableKind(row.type)) {
       setEditing({ kind: row.type, row })
     }
   }
 
-  const onAddAdapter = (kind: ConfigurableKind) => {
-    setEditing({ kind, row: null })
+  const onPickPlatform = (kind: PlatformKind) => {
+    if (isConfigurableKind(kind)) {
+      setAddOpen(false)
+      setEditing({ kind, row: null })
+    }
   }
 
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null)
   }
 
-  const addMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline">
-          <PlusIcon className="mr-2 h-3.5 w-3.5" />
-          {t("addAdapter")}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {ADAPTER_MENU.map((kind) => (
-          <DropdownMenuItem key={kind} onClick={() => onAddAdapter(kind)}>
-            {t(`platforms.${kind}`)}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+  const addButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => setAddOpen(true)}
+      data-testid="add-adapter-button"
+    >
+      <PlusIcon className="mr-2 h-3.5 w-3.5" />
+      {t("addAdapter")}
+    </Button>
   )
 
   const isEmpty = !adapters || adapters.length === 0
@@ -144,7 +143,7 @@ export function AdaptersTab() {
               icon={<BotIcon className="size-6" />}
               title={t("noAdaptersTitle")}
               description={t("noAdaptersHint")}
-              action={addMenu}
+              action={addButton}
             />
           </CardContent>
         </Card>
@@ -160,7 +159,7 @@ export function AdaptersTab() {
             <CardContent className="space-y-3 p-4">
               <div className="flex items-center justify-between gap-2">
                 <Label className="text-sm">{t("listTitle")}</Label>
-                {addMenu}
+                {addButton}
               </div>
               <ul className="space-y-1.5">
                 {adapters.map((row) => (
@@ -189,9 +188,18 @@ export function AdaptersTab() {
         </div>
       )}
 
+      {/* Platform picker — brand-card grid → opens the matching dialog. */}
+      <AddConnectorGrid
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        kinds={CONFIGURABLE_KINDS}
+        configuredCounts={configuredCounts}
+        onPick={onPickPlatform}
+      />
+
       {/* Per-platform configuration dialogs. Only the dialog matching the
        * active `editing.kind` is open at any time so cross-platform state
-       * cannot leak between forms. Mounting all five lets the dispatcher
+       * cannot leak between forms. Mounting them all lets the dispatcher
        * stay a pure switch on `editing.kind`. */}
       <TelegramConfigDialog
         open={editing?.kind === "telegram"}
@@ -227,6 +235,21 @@ export function AdaptersTab() {
         open={editing?.kind === "wechat-personal"}
         onOpenChange={closeDialog}
         row={editing?.kind === "wechat-personal" ? editing.row : null}
+      />
+      <MatrixConfigDialog
+        open={editing?.kind === "matrix"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "matrix" ? editing.row : null}
+      />
+      <QQOfficialConfigDialog
+        open={editing?.kind === "qq-official"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "qq-official" ? editing.row : null}
+      />
+      <WechatOaConfigDialog
+        open={editing?.kind === "wechat-oa"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "wechat-oa" ? editing.row : null}
       />
     </div>
   )

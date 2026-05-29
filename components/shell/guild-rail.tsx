@@ -16,6 +16,7 @@ import {
   BotIcon,
   CalendarClockIcon,
   CompassIcon,
+  GaugeIcon,
   InboxIcon,
   MailIcon,
   PencilRulerIcon,
@@ -60,6 +61,7 @@ const FEATURE_ENTRIES: FeatureEntry[] = [
 ]
 
 const AUXILIARY_ENTRIES: FeatureEntry[] = [
+  { route: "/observability", i18nKey: "observability", Icon: GaugeIcon },
   { route: "/performance", i18nKey: "performance", Icon: ActivityIcon },
   { route: "/logs", i18nKey: "logs", Icon: ScrollTextIcon },
   { route: "/me", i18nKey: "me", Icon: UserRoundIcon },

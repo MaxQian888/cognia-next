@@ -1,6 +1,16 @@
 import { render } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
-import { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./density-applier"
+import {
+  DensityApplier,
+  resolveDensityAttrs,
+  densitySurfaceProps,
+  applyDensityPresetVars,
+  clearDensityPresetVars,
+} from "./density-applier"
+import {
+  registerDensityPresetsForPlugin,
+  __resetDensityPresetRegistryForTesting,
+} from "./density-preset-registry"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import type { DensitySettings } from "@/types/appearance"
 
@@ -70,6 +80,37 @@ describe("DensityApplier", () => {
     setSettings(undefined)
     render(<DensityApplier />)
     expect(document.documentElement.getAttribute("data-density")).toBe("comfortable")
+  })
+})
+
+describe("applyDensityPresetVars / clearDensityPresetVars", () => {
+  afterEach(() => {
+    __resetDensityPresetRegistryForTesting()
+    clearDensityPresetVars()
+  })
+
+  it("injects a registered preset's vars onto <html> and returns true", () => {
+    registerDensityPresetsForPlugin("p1", [
+      { name: "cozy", vars: { "--density-spacing": "0.5rem", "--density-gap": "0.75rem" } },
+    ])
+    expect(applyDensityPresetVars("cozy")).toBe(true)
+    const root = document.documentElement
+    expect(root.style.getPropertyValue("--density-spacing")).toBe("0.5rem")
+    expect(root.style.getPropertyValue("--density-gap")).toBe("0.75rem")
+  })
+
+  it("returns false and injects nothing for an unknown preset", () => {
+    expect(applyDensityPresetVars("nope")).toBe(false)
+    expect(document.documentElement.style.getPropertyValue("--density-spacing")).toBe("")
+  })
+
+  it("clearDensityPresetVars removes previously injected overrides", () => {
+    registerDensityPresetsForPlugin("p1", [
+      { name: "cozy", vars: { "--density-spacing": "0.5rem" } },
+    ])
+    applyDensityPresetVars("cozy")
+    clearDensityPresetVars()
+    expect(document.documentElement.style.getPropertyValue("--density-spacing")).toBe("")
   })
 })
 

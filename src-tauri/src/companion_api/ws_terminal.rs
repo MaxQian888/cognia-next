@@ -278,9 +278,11 @@ async fn handle_terminal_socket(
         // Remote sessions fan out through the mpsc sink above; the desktop
         // Tauri Channel slot stays detached (the WS handler owns reconnect
         // via its own registry consumer-swap).
+        let path = build_remote_cli_path_injection();
         let new_session = match session::spawn_session_with_sink(
             req,
             &script_dir,
+            &path,
             sink,
             session::detached_desk_channel(),
         ) {
@@ -545,6 +547,30 @@ fn handle_control_frame(text: &str, session: &PtySession) -> Result<ControlActio
 fn resolve_script_dir() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest.join("resources").join("terminal")
+}
+
+/// PATH directories woven into a remote (WS) terminal child so `cognia` is
+/// runnable server-side. Mirrors `terminal::commands::build_cli_path_injection`
+/// but without an `AppHandle` (this handler runs inside the axum server):
+/// app-managed (downloaded) dirs + a dev/bundled workspace `target` dir,
+/// then `~/.cargo/bin` resolved from `HOME` / `USERPROFILE`.
+fn build_remote_cli_path_injection() -> session::PathInjection {
+    let mut prepend = crate::cli_bridge::detect::managed_dirs_snapshot();
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(root) = manifest.parent() {
+        for profile in ["release", "debug"] {
+            let dir = root.join("target").join(profile);
+            if dir.join(session::cognia_bin_filename()).exists() {
+                prepend.push(dir);
+                break;
+            }
+        }
+    }
+    let mut append = Vec::new();
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        append.push(PathBuf::from(home).join(".cargo").join("bin"));
+    }
+    session::PathInjection { prepend, append }
 }
 
 async fn send_error_and_close(socket: &mut WebSocket, message: &str) {

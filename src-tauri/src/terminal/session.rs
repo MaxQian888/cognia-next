@@ -15,6 +15,7 @@
 //! every session drops → every child dies. No leaks across reload.
 
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -195,6 +196,66 @@ pub struct PtySession {
 /// without `'static + Copy` constraints leaking into the public API.
 pub type EventSink = Arc<dyn Fn(u64, TerminalEvent) + Send + Sync + 'static>;
 
+/// File name of the bundled / downloaded `cognia` plugin-author CLI on this
+/// OS. Used both to probe a candidate directory and (indirectly) to weave
+/// the CLI's directory into a terminal child's PATH.
+pub fn cognia_bin_filename() -> &'static str {
+    if cfg!(windows) {
+        "cognia.exe"
+    } else {
+        "cognia"
+    }
+}
+
+/// Directories to weave into a spawned child's PATH so the integrated
+/// terminal can run tools the app ships or downloaded (today: `cognia`).
+///
+/// `prepend` wins over the inherited PATH (an app-managed / downloaded copy
+/// the user explicitly installed); `append` is a low-priority fallback
+/// (`~/.cargo/bin` for a `cargo install`ed CLI). Both are de-duplicated
+/// against the inherited PATH so we never bloat it with repeats.
+#[derive(Debug, Default, Clone)]
+pub struct PathInjection {
+    pub prepend: Vec<PathBuf>,
+    pub append: Vec<PathBuf>,
+}
+
+impl PathInjection {
+    pub fn is_empty(&self) -> bool {
+        self.prepend.is_empty() && self.append.is_empty()
+    }
+}
+
+/// Build the child's PATH value by prepending `inj.prepend`, then the
+/// inherited `existing` PATH, then appending `inj.append` — skipping any
+/// directory already present so the result stays minimal. Returns `None`
+/// when there's nothing to inject, or when the join fails (a directory
+/// containing the platform separator) — in both cases the caller leaves the
+/// inherited PATH untouched, which is always safe.
+pub(super) fn compute_path(existing: Option<&OsStr>, inj: &PathInjection) -> Option<OsString> {
+    if inj.is_empty() {
+        return None;
+    }
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let push_unique = |dirs: &mut Vec<PathBuf>, dir: PathBuf| {
+        if !dir.as_os_str().is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    };
+    for dir in &inj.prepend {
+        push_unique(&mut dirs, dir.clone());
+    }
+    if let Some(existing) = existing {
+        for dir in std::env::split_paths(existing) {
+            push_unique(&mut dirs, dir);
+        }
+    }
+    for dir in &inj.append {
+        push_unique(&mut dirs, dir.clone());
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 /// Channel-backed convenience wrapper — mirrors the original public
 /// signature so the existing Tauri command (`terminal_spawn`) keeps
 /// compiling unchanged. The Channel wire format doesn't carry seq, so
@@ -202,6 +263,7 @@ pub type EventSink = Arc<dyn Fn(u64, TerminalEvent) + Send + Sync + 'static>;
 pub fn spawn_session(
     req: SpawnRequest,
     script_dir: &Path,
+    path: &PathInjection,
     event_channel: Channel<SeqEvent>,
 ) -> Result<PtySession, String> {
     // Desktop path: the sink sends through a *swappable* Channel slot so a
@@ -224,7 +286,7 @@ pub fn spawn_session(
             }
         }
     });
-    spawn_session_with_sink(req, script_dir, sink, slot)
+    spawn_session_with_sink(req, script_dir, path, sink, slot)
 }
 
 /// Construct a PtySession by spawning the requested shell under a fresh
@@ -234,6 +296,7 @@ pub fn spawn_session(
 pub fn spawn_session_with_sink(
     req: SpawnRequest,
     script_dir: &Path,
+    path: &PathInjection,
     sink: EventSink,
     channel_slot: DeskChannel,
 ) -> Result<PtySession, String> {
@@ -271,6 +334,15 @@ pub fn spawn_session_with_sink(
     }
     for (k, v) in &setup.env_overrides {
         cmd.env(k, v);
+    }
+    // Weave app-shipped / downloaded tool directories into PATH so `cognia`
+    // is runnable from the terminal. Read the builder's *base* PATH (which
+    // portable-pty has already merged from the parent env + Windows
+    // registry) rather than `std::env`, then override. Copy it out first to
+    // release the immutable borrow before the mutable `cmd.env` call.
+    let base_path = cmd.get_env("PATH").map(|p| p.to_os_string());
+    if let Some(new_path) = compute_path(base_path.as_deref(), path) {
+        cmd.env("PATH", new_path);
     }
 
     let child = pair
@@ -499,6 +571,68 @@ mod tests {
     }
 
     #[test]
+    fn compute_path_returns_none_when_nothing_to_inject() {
+        assert!(compute_path(Some(OsStr::new("/usr/bin")), &PathInjection::default()).is_none());
+        assert!(compute_path(None, &PathInjection::default()).is_none());
+    }
+
+    #[test]
+    fn compute_path_prepends_then_existing_then_appends() {
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/managed/cli")],
+            append: vec![PathBuf::from("/home/u/.cargo/bin")],
+        };
+        let existing = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join existing");
+        let out = compute_path(Some(&existing), &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/managed/cli"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/home/u/.cargo/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn compute_path_dedupes_against_existing() {
+        // A prepend / append dir already present in PATH must not be repeated.
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/usr/bin")],
+            append: vec![PathBuf::from("/bin")],
+        };
+        let existing = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join existing");
+        let out = compute_path(Some(&existing), &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(dirs, vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+    }
+
+    #[test]
+    fn compute_path_with_no_existing_uses_injected_only() {
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/managed/cli")],
+            append: vec![],
+        };
+        let out = compute_path(None, &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(dirs, vec![PathBuf::from("/managed/cli")]);
+    }
+
+    #[test]
+    fn cognia_bin_filename_has_exe_suffix_on_windows() {
+        let name = cognia_bin_filename();
+        if cfg!(windows) {
+            assert_eq!(name, "cognia.exe");
+        } else {
+            assert_eq!(name, "cognia");
+        }
+    }
+
+    #[test]
     fn spawn_request_defaults_serialize_as_expected() {
         let json = r#"{
             "shell": "/bin/sh",
@@ -528,7 +662,7 @@ mod tests {
             enable_shell_integration: false,
             origin: SessionOrigin::Local,
         };
-        let result = spawn_session(req, &empty_script_dir(), channel);
+        let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
         assert!(result.is_err());
     }
 
@@ -560,7 +694,7 @@ mod tests {
             enable_shell_integration: false,
             origin: SessionOrigin::Local,
         };
-        let session = match spawn_session(req, &empty_script_dir(), channel) {
+        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("skip — spawn failed in this env: {e}");
@@ -618,7 +752,7 @@ mod tests {
             enable_shell_integration: false,
             origin: SessionOrigin::Local,
         };
-        let session = match spawn_session(req, &empty_script_dir(), channel) {
+        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -652,7 +786,7 @@ mod tests {
             enable_shell_integration: false,
             origin: SessionOrigin::Remote,
         };
-        let session = match spawn_session(req, &empty_script_dir(), channel) {
+        let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -683,7 +817,7 @@ mod tests {
             enable_shell_integration: false,
             origin: SessionOrigin::Local,
         };
-        spawn_session(req, &empty_script_dir(), channel).ok()
+        spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()
     }
 
     fn wait_for_exit(session: &PtySession) {

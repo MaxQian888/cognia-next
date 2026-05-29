@@ -26,6 +26,11 @@ import {
   clearPluginExtensions,
 } from "@/lib/plugin/api/extension-api"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import {
+  listPluginWallpapers,
+  __resetPluginWallpapersForTesting,
+} from "@/lib/plugin/bridge/wallpaper-bridge"
+import { listThemePacks, __resetThemePackRegistryForTesting } from "@/lib/theme/theme-pack-registry"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -1899,6 +1904,81 @@ describe("PluginManager", () => {
           "cmd-plugin.cmd-plugin.run#alias:cmd-alias"
       )
       expect(conflictRegistered).toBe(false)
+    })
+  })
+
+  describe("module-bridge capability wiring", () => {
+    const createWallpaperPlugin = (status: Plugin["status"] = "loaded"): Plugin => ({
+      manifest: {
+        ...createManifest("mb-plugin"),
+        capabilities: ["wallpapers", "theme-pack"],
+        wallpapers: [
+          {
+            id: "aurora",
+            name: "Aurora",
+            source: { kind: "gradient", css: "linear-gradient(#0ff,#f0f)" },
+          },
+        ],
+        themePacks: [{ id: "pack1", name: "Pack One", applies: {} }],
+      },
+      status,
+      source: "local",
+      path: "/plugins/mb-plugin",
+      config: {},
+    })
+
+    afterEach(() => {
+      __resetPluginWallpapersForTesting()
+      __resetThemePackRegistryForTesting()
+    })
+
+    it("registers module-bridge contributions on enable", async () => {
+      const store = {
+        plugins: { "mb-plugin": createWallpaperPlugin("loaded") } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("mb-plugin", {})
+      ;(manager as unknown as { loader: { isLoaded: (id: string) => boolean } }).loader.isLoaded =
+        jest.fn(() => true)
+
+      await manager.enablePlugin("mb-plugin")
+
+      // Module-bridge loop wired the wallpaper contribution…
+      expect(listPluginWallpapers().some((w) => w.pluginId === "mb-plugin")).toBe(true)
+      // …and the bespoke theme-pack wiring registered the pack.
+      expect(listThemePacks().some((p) => p.pluginId === "mb-plugin")).toBe(true)
+    })
+
+    it("tears down module-bridge + theme-pack contributions on disable", async () => {
+      // Real enable→disable round-trip so the lazily-created themes bridge
+      // exists at disable time (mirrors production lifecycle).
+      const store = {
+        plugins: { "mb-plugin": createWallpaperPlugin("loaded") } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "disabled" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("mb-plugin", {})
+      ;(manager as unknown as { loader: { isLoaded: (id: string) => boolean } }).loader.isLoaded =
+        jest.fn(() => true)
+
+      await manager.enablePlugin("mb-plugin")
+      expect(listPluginWallpapers().some((w) => w.pluginId === "mb-plugin")).toBe(true)
+      expect(listThemePacks().some((p) => p.pluginId === "mb-plugin")).toBe(true)
+
+      await manager.disablePlugin("mb-plugin")
+
+      expect(listPluginWallpapers().some((w) => w.pluginId === "mb-plugin")).toBe(false)
+      expect(listThemePacks().some((p) => p.pluginId === "mb-plugin")).toBe(false)
     })
   })
 

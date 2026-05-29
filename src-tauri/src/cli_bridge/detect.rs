@@ -72,6 +72,17 @@ pub fn invalidate(name: &str) {
     cache().lock().retain(|(n, _), _| n != name);
 }
 
+/// Snapshot of the registered app-managed directories (locations of
+/// CLIs the app downloaded itself), most-recently-registered first.
+///
+/// The integrated terminal weaves these into the spawned child's PATH so a
+/// `cognia` that was downloaded through the install dialog is runnable from
+/// the terminal without the user touching their system PATH. Returns a
+/// clone so callers don't hold the lock.
+pub fn managed_dirs_snapshot() -> Vec<PathBuf> {
+    managed_dirs().lock().clone()
+}
+
 /// Candidate executable file names for `name` on this OS. On Windows we
 /// try both the bare name (PATH resolution handles `.exe`) and the
 /// explicit `.exe` so a managed-dir lookup hits.

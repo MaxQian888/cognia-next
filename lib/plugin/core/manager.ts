@@ -45,7 +45,6 @@ import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
-import { purgeMessagePartRenderersForPlugin } from "@/lib/plugin/api/message-part-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
   evaluatePluginCompatibility,
@@ -88,6 +87,15 @@ import {
   OVERLAY_REGISTRY_CAPABILITIES,
   OVERLAY_REGISTRY_CAPABILITY_KEYS,
 } from "@/lib/plugin/contracts/capability-bridge-map"
+// Async sibling of the overlay map: 7 contribution fields wired through
+// dynamic-import bridges (ai/ocr/workspace/message-renderer/connectors/
+// fonts/wallpapers). Driven by one `await` loop on each side, mirroring the
+// overlay dispatch.
+import {
+  MODULE_BRIDGE_CAPABILITIES,
+  MODULE_BRIDGE_CAPABILITY_KEYS,
+} from "@/lib/plugin/contracts/module-bridge-map"
+import { createPluginAssetResolver } from "@/lib/plugin/core/plugin-asset-resolver"
 // Skill detach still calls unregisterSkillsByPlugin directly after the
 // per-character cleanup hook; the map's bulk unregister fires for the
 // other three capabilities via the disable loop.
@@ -2350,6 +2358,17 @@ export class PluginManager {
       }
     }
 
+    // Theme packs — register the applyable bundles into the theme-pack
+    // registry. The bridge method exists but was never called from enable
+    // (ADR-0029 wiring gap); packs become discoverable via `listThemePacks()`.
+    if (plugin.manifest.themePacks?.length) {
+      this.ensureThemesBridge().registerPluginThemePacks(
+        pluginId,
+        plugin.manifest.name,
+        plugin.manifest
+      )
+    }
+
     // M1·T5 — Plugin-first Computer Use capability contributions.
     //
     // PR-D consolidated the 4 overlay-registry capabilities
@@ -2370,6 +2389,33 @@ export class PluginManager {
         } catch (err) {
           loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err)
         }
+      }
+    }
+
+    // Async module-bridge capabilities (ai/ocr/workspace/message-renderer/
+    // connectors/fonts/wallpapers). Each bridge dynamic-imports a lazy
+    // factory module or reads the plugin's loaded exports, so this is an
+    // awaited loop. Field-gated; per-descriptor try/catch keeps one bad
+    // bridge from blocking the rest (each bridge also isolates per-entry
+    // failures internally). This is the wiring these bridges always lacked.
+    const moduleBridgeCtx = {
+      pluginId,
+      manifest: plugin.manifest,
+      installRoot: plugin.path ?? "",
+      importer: (entry: string) => this.loader.importEntry(entry),
+      resolveAsset: await createPluginAssetResolver(),
+      moduleExports: this.loader.getModuleExports(pluginId) ?? {},
+    }
+    for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
+      const descriptor = MODULE_BRIDGE_CAPABILITIES[cap]
+      const entries = plugin.manifest[descriptor.manifestField] as
+        | ReadonlyArray<unknown>
+        | undefined
+      if (!entries?.length) continue
+      try {
+        await descriptor.register(moduleBridgeCtx)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} bridge:`, err)
       }
     }
 
@@ -2495,13 +2541,21 @@ export class PluginManager {
     this.a2uiBridge?.unregisterPluginComponents(pluginId)
     this.a2uiBridge?.unregisterPluginTemplates(pluginId)
     this.themesBridge?.unregisterPluginThemes(pluginId)
+    this.themesBridge?.unregisterPluginThemePacks(pluginId)
     // GC any `CustomTheme` rows the plugin created via `ctx.theme.registerCustomTheme`.
     // The manifest-themes path above handles in-memory plugin themes; this
     // line handles the persistent Dexie-backed rows. Both are required to
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
     clearPluginExtensions(pluginId)
-    purgeMessagePartRenderersForPlugin(pluginId)
+    // Async module-bridge capabilities — drop every contribution. Includes
+    // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
+    // call previously handled (the bridge unregister calls the same
+    // `clearMessagePartRenderersForPlugin`, so this is behaviour-identical),
+    // plus the 6 bridges whose disable cleanup was never wired before.
+    for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
+      await MODULE_BRIDGE_CAPABILITIES[cap].unregister(pluginId)
+    }
 
     // Unregister all tools
     if (plugin.tools) {

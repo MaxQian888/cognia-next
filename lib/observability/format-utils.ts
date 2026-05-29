@@ -33,3 +33,26 @@ export function formatTokens(tokens: number | null | undefined): string {
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`
   return `${(tokens / 1_000_000).toFixed(2)}M`
 }
+
+/** USD with adaptive precision: sub-cent amounts keep 4 dp, the rest 2 dp. */
+export function formatUsd(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—"
+  if (value === 0) return "$0.00"
+  if (Math.abs(value) < 0.01) return `$${value.toFixed(4)}`
+  return `$${value.toFixed(2)}`
+}
+
+/** Fraction (0..1) → percent string. `digits` controls decimal places. */
+export function formatPercent(fraction: number | null | undefined, digits = 0): string {
+  if (fraction === null || fraction === undefined || !Number.isFinite(fraction)) return "—"
+  return `${(fraction * 100).toFixed(digits)}%`
+}
+
+/** Duration in ms → compact human string (µs / ms / s). */
+export function formatMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—"
+  if (ms < 1) return `${Math.round(ms * 1000)}µs`
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`
+  return `${(ms / 60_000).toFixed(1)}m`
+}

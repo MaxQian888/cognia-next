@@ -2,46 +2,41 @@
 
 /**
  * Platform → { label key, icon } lookup for the Adapters list + detail
- * header. There are no brand SVGs in the repo, so each platform maps to a
- * distinct lucide glyph. `labelKey` is the suffix under the
+ * header. Icons come from the shared vendored brand set
+ * (`@/components/connectors/platform-icons`) so the Settings list and the
+ * Inbox badge render the same glyph. `labelKey` is the suffix under the
  * `settings.connections.adapters.platforms.*` i18n namespace — callers
  * resolve it with `t(\`platforms.${meta.labelKey}\`)`. Kinds without a
- * configuration dialog (and any future plugin-contributed kind) fall back
- * to a generic chat glyph so the list never renders a blank icon.
+ * configuration dialog fall back to `"unknown"` for the label while still
+ * getting a sensible glyph from `getPlatformIcon`.
  */
 
-import type { LucideIcon } from "lucide-react"
-import {
-  BirdIcon,
-  BotIcon,
-  BuildingIcon,
-  HashIcon,
-  MessageCircleIcon,
-  MessagesSquareIcon,
-  SendIcon,
-  SmartphoneIcon,
-} from "lucide-react"
-
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import { getPlatformIcon, type PlatformIconComponent } from "@/components/connectors/platform-icons"
 
 export interface PlatformMeta {
   /** i18n key suffix under `settings.connections.adapters.platforms`. */
   labelKey: string
-  Icon: LucideIcon
+  Icon: PlatformIconComponent
 }
 
-const META: Partial<Record<PlatformKind, PlatformMeta>> = {
-  telegram: { labelKey: "telegram", Icon: SendIcon },
-  discord: { labelKey: "discord", Icon: MessagesSquareIcon },
-  slack: { labelKey: "slack", Icon: HashIcon },
-  lark: { labelKey: "lark", Icon: BirdIcon },
-  onebot: { labelKey: "onebot", Icon: BotIcon },
-  wecom: { labelKey: "wecom", Icon: BuildingIcon },
-  "wechat-personal": { labelKey: "wechat-personal", Icon: SmartphoneIcon },
+/** Platforms that have a configuration dialog and a translated label. */
+const LABEL_KEY: Partial<Record<PlatformKind, string>> = {
+  telegram: "telegram",
+  discord: "discord",
+  slack: "slack",
+  lark: "lark",
+  onebot: "onebot",
+  wecom: "wecom",
+  "wechat-personal": "wechat-personal",
+  "wechat-oa": "wechat-oa",
+  "qq-official": "qq-official",
+  matrix: "matrix",
 }
-
-const FALLBACK: PlatformMeta = { labelKey: "unknown", Icon: MessageCircleIcon }
 
 export function getPlatformMeta(kind: PlatformKind): PlatformMeta {
-  return META[kind] ?? FALLBACK
+  return {
+    labelKey: LABEL_KEY[kind] ?? "unknown",
+    Icon: getPlatformIcon(kind),
+  }
 }

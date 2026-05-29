@@ -45,6 +45,24 @@ export async function queryRecent(limit = 500): Promise<AgentTraceSpan[]> {
   return rows.slice(0, safeLimit)
 }
 
+/** Read spans whose `startTime` falls in `[since, until]`, oldest-first. Used
+ * by the observability dashboard's windowed reads. `until` defaults to "now
+ * and later" (no upper bound). Same full-table-scan + client-filter rationale
+ * as `aggregateStatsAll` — Dexie has no cheap global `startTime` index and the
+ * cardinality is low thousands of rows. */
+export async function queryByWindow(opts: {
+  since: number
+  until?: number
+}): Promise<AgentTraceSpan[]> {
+  const { since, until } = opts
+  const rows = await getDb().agentTraces.toArray()
+  const filtered = rows.filter(
+    (r) => r.startTime >= since && (until === undefined || r.startTime <= until)
+  )
+  filtered.sort((a, b) => a.startTime - b.startTime)
+  return filtered
+}
+
 /** Read all spans for one trace, ordered chronologically (oldest-first) so
  * the trace view can render a proper timeline. */
 export async function queryByTrace(traceId: string): Promise<AgentTraceSpan[]> {

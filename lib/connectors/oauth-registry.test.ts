@@ -15,12 +15,12 @@ describe("oauthRegistry", () => {
     expect(oauthRegistry.has("slack")).toBe(true)
   })
 
-  it("slack handler throws Phase-2 stub error", async () => {
+  it("slack handler is wired to the real OAuth exchange (no stub error)", async () => {
     const handler = oauthRegistry.get("slack")
     expect(handler).toBeDefined()
-    await expect(handler!("fake-code", "fake-state")).rejects.toThrow(
-      "Slack OAuth exchange not yet implemented"
-    )
+    // Real handler delegates to `handleSlackOAuth`; a malformed state surfaces
+    // the parser's "state malformed" error, proving the Phase-1 stub is gone.
+    await expect(handler!("fake-code", "garbage")).rejects.toThrow(/state malformed/i)
   })
 
   it("has the lark key registered", () => {

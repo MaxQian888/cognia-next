@@ -2215,6 +2215,14 @@
     "groupData": "数据",
     "groupObservability": "可观测性",
     "groupSystem": "系统",
+    "pluginConfig": {
+      "title": "插件配置",
+      "description": "在此配置每个已启用插件的设置。这些表单与各插件详情页内的完全一致；更改会在插件下次激活时生效。",
+      "emptyTitle": "暂无可配置的插件",
+      "emptyHint": "声明了配置 schema 或配置组件的已启用插件会显示在这里。",
+      "manageAll": "管理全部插件",
+      "versionLabel": "v{version}"
+    },
     "tabs": {
       "general": "常规",
       "appearance": "外观",
@@ -2247,6 +2255,7 @@
       "scheduledTasks": "定时任务",
       "a2ui": "A2UI",
       "plugins": "插件",
+      "pluginConfig": "插件配置",
       "remoteControl": "远程控制",
       "externalBridge": "外部桥接 (MCP)",
       "automation": "UI 自动化",
@@ -2290,6 +2299,7 @@
       "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
       "a2ui": "Agent-to-UI 小应用、运行时默认值、MCP 桥接与调试器。",
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
+      "pluginConfig": "在一处集中配置每个已启用插件的设置——与各插件详情页内的表单完全一致。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
       "automation": "桌面 UI 自动化 —— 截屏、查找元素、点击、键入、发送热键。默认关闭；三级权限策略与全局 Kill Switch 控制。",
@@ -4858,7 +4868,10 @@
           "onebot": "QQ（OneBot / NapCat）",
           "wecom": "企业微信 / WeCom",
           "wechat-personal": "微信（个人版）/ 个人微信",
-          "unknown": "适配器"
+          "unknown": "适配器",
+          "matrix": "Matrix",
+          "wechat-oa": "微信公众号",
+          "qq-official": "QQ 官方机器人"
         },
         "actions": {
           "menuAria": "{name} 的操作",
@@ -4931,6 +4944,26 @@
             "at_direct_only": "群聊（仅允许私聊）",
             "other": "其他"
           }
+        },
+        "platformDescriptions": {
+          "telegram": "通过长轮询或 Webhook 的机器人",
+          "discord": "通过网关或 Socket 模式的机器人",
+          "slack": "通过 Socket Mode 或 Events API 的应用",
+          "lark": "通过长连接的飞书 / Lark 机器人",
+          "onebot": "通过 NapCat / Lagrange 的 QQ（OneBot）",
+          "wecom": "企业微信智能机器人长连接",
+          "wechat-personal": "通过 iLink 的个人微信（仅回复）",
+          "matrix": "通过 /sync 的 Matrix homeserver",
+          "wechat-oa": "通过 Webhook 的微信公众号",
+          "qq-official": "通过网关的 QQ 官方机器人",
+          "unknown": "平台连接器"
+        },
+        "addConnector": {
+          "title": "添加连接器",
+          "description": "选择要配置的消息平台。",
+          "searchPlaceholder": "搜索平台…",
+          "noResults": "没有匹配的平台。",
+          "configuredCount": "已配置 {count} 个"
         }
       },
       "conversations": {
@@ -5479,7 +5512,10 @@
           "lark": "打开 Lark 聊天 → 设置 → 群信息 → 复制 chat_id（oc_…）。",
           "onebot": "QQ 私聊 uin 或群 uin。",
           "wecom": "单聊：填接收人的 userid。群聊：填此前入站回调中的 chatid。",
-          "wechat-personal": "仅回复——个人微信无法主动发起会话，测试发送会被拒绝。"
+          "wechat-personal": "仅回复——个人微信无法主动发起会话，测试发送会被拒绝。",
+          "matrix": "房间 ID（例如 !abcd:matrix.org）。请先把机器人邀请进房间。",
+          "wechat-oa": "粉丝的 OpenID（来自一条入站消息）。",
+          "qq-official": "频道 ID 或群 openid。"
         },
         "bodyLabel": "内容",
         "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
@@ -5487,6 +5523,100 @@
         "desktopOnly": "发送测试需要桌面运行时，以保证适配器已注册到 bus。",
         "sentSuccess": "已发送。platform_message_id = {messageId}",
         "sentError": "发送失败（{code}）：{message}"
+      },
+      "matrix": {
+        "titleNew": "添加 Matrix 连接器",
+        "titleEdit": "编辑 Matrix 连接器",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "Matrix 机器人",
+        "displayNameRequired": "显示名称不能为空",
+        "homeserverLabel": "Homeserver 地址",
+        "homeserverHelp": "你的 Matrix homeserver，例如 https://matrix.org",
+        "homeserverPlaceholder": "https://matrix.org",
+        "homeserverRequired": "Homeserver 地址不能为空",
+        "accessTokenLabel": "访问令牌",
+        "accessTokenHelp": "粘贴机器人访问令牌，或在下方用密码登录以获取。",
+        "accessTokenPlaceholder": "syt_…",
+        "accessTokenRequired": "访问令牌不能为空",
+        "credentialUnchangedPlaceholder": "留空则保留当前令牌",
+        "sectionIdentity": "身份",
+        "sectionIdentityDesc": "机器人账号的 homeserver 与访问令牌。",
+        "sectionAdvanced": "高级",
+        "sectionAdvancedDesc": "免打扰时段与静音。",
+        "passwordLogin": {
+          "title": "使用密码登录",
+          "help": "用用户名和密码换取访问令牌；密码不会被保存。",
+          "userLabel": "用户名",
+          "userPlaceholder": "@bot:matrix.org 或 bot",
+          "passwordLabel": "密码",
+          "passwordPlaceholder": "密码",
+          "loginButton": "登录",
+          "desktopOnly": "仅桌面端",
+          "credentialsRequired": "请输入用户名和密码",
+          "success": "已登录为 {userId}"
+        },
+        "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
+        "adapterCreated": "已添加 Matrix 连接器",
+        "adapterUpdated": "已更新 Matrix 连接器",
+        "create": "添加连接器",
+        "save": "保存"
+      },
+      "qqOfficial": {
+        "titleNew": "添加 QQ 官方机器人",
+        "titleEdit": "编辑 QQ 官方机器人",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "QQ 机器人",
+        "displayNameRequired": "显示名称不能为空",
+        "appIdLabel": "App ID",
+        "appIdHelp": "来自 QQ 开放平台 → 机器人 → 开发设置。",
+        "appIdPlaceholder": "102xxxxxx",
+        "clientSecretLabel": "Client Secret",
+        "clientSecretHelp": "用于换取访问令牌的 AppSecret。",
+        "clientSecretPlaceholder": "client secret",
+        "credentialUnchangedPlaceholder": "留空则保留当前值",
+        "credentialsRequired": "App ID 和 Client Secret 不能为空",
+        "sectionIdentity": "身份",
+        "sectionIdentityDesc": "QQ 开放平台的应用凭据。",
+        "sectionAdvanced": "高级",
+        "sectionAdvancedDesc": "免打扰时段与静音。",
+        "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
+        "adapterCreated": "已添加 QQ 官方机器人",
+        "adapterUpdated": "已更新 QQ 官方机器人",
+        "create": "添加连接器",
+        "save": "保存"
+      },
+      "wechatOa": {
+        "titleNew": "添加微信公众号",
+        "titleEdit": "编辑微信公众号",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "微信公众号",
+        "displayNameRequired": "显示名称不能为空",
+        "appIdLabel": "App ID",
+        "appIdHelp": "公众号 → 设置 → 基本配置 → AppID。",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "AppSecret —— 用于访问令牌与客服回复接口。",
+        "tokenLabel": "Token",
+        "tokenHelp": "在服务器配置中设置的 Token（用于签名校验）。",
+        "encodingAesKeyLabel": "EncodingAESKey",
+        "encodingAesKeyHelp": "服务器配置（安全模式）中的 43 位密钥 —— 用于解密回调。",
+        "encodingAesKeyInvalid": "EncodingAESKey 必须为 43 个字符。",
+        "credentialUnchangedPlaceholder": "留空则保留当前值",
+        "credentialsRequired": "App ID、App Secret、Token 和 EncodingAESKey 不能为空",
+        "sectionIdentity": "身份",
+        "sectionIdentityDesc": "公众号凭据与安全模式密钥。",
+        "sectionDelivery": "投递",
+        "sectionDeliveryDesc": "微信推送消息的回调地址。",
+        "webhookUrlLabel": "Webhook 地址",
+        "webhookUrlHelp": "在此路径前加上你的公网基础地址，填入 服务器配置 → URL。",
+        "webhookUrlAfterSave": "（保存后生成）",
+        "windowNote": "回复使用客服消息接口，仅允许在用户最后一条消息后的 48 小时内发送。",
+        "sectionAdvanced": "高级",
+        "sectionAdvancedDesc": "免打扰时段与静音。",
+        "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
+        "adapterCreated": "已添加微信公众号",
+        "adapterUpdated": "已更新微信公众号",
+        "create": "添加连接器",
+        "save": "保存"
       }
     },
     "developer": {
@@ -6264,9 +6394,35 @@
       "openSchedulerButton": "打开调度器"
     },
     "devtools": {
-      "title": "插件开发工具",
-      "hint": "查看实时消息总线、Hook 历史、沙箱状态，并触发热重载。",
-      "gateHint": "插件开发工具仅在开发版本中可用。"
+      "dropzone": {
+        "title": "将插件目录拖到这里",
+        "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。"
+      },
+      "validator": {
+        "title": "清单校验器",
+        "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
+        "pickButton": "选择 plugin.json 或目录",
+        "validating": "校验中…",
+        "valid": "清单校验通过。",
+        "invalid": "清单存在 {count, plural, other {# 个错误}}。",
+        "errorsHeading": "错误",
+        "warningsHeading": "警告",
+        "permissionsHeading": "声明的权限",
+        "noPermissions": "未声明任何权限。",
+        "tauriRequiredError": "清单校验器需要在桌面应用中使用。",
+        "readError": "无法读取清单：{message}"
+      },
+      "hotReload": {
+        "title": "热重载活动",
+        "empty": "本次会话尚无重载记录。运行 `cognia plugin dev` 查看实时更新。",
+        "clear": "清空",
+        "kindInstall": "已安装",
+        "kindUninstall": "已卸载",
+        "kindHotReload": "已热重载",
+        "statusSuccess": "成功",
+        "statusFailed": "失败",
+        "statusInProgress": "进行中"
+      }
     },
     "signature": {
       "verified": "已验证",
@@ -6549,37 +6705,6 @@
       "tauriRequiredError": "本地插件加载需要在桌面应用中使用。",
       "installSuccess": "{name} 已从本地安装。"
     },
-    "devtools": {
-      "dropzone": {
-        "title": "将插件目录拖到这里",
-        "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。"
-      },
-      "validator": {
-        "title": "清单校验器",
-        "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
-        "pickButton": "选择 plugin.json 或目录",
-        "validating": "校验中…",
-        "valid": "清单校验通过。",
-        "invalid": "清单存在 {count, plural, other {# 个错误}}。",
-        "errorsHeading": "错误",
-        "warningsHeading": "警告",
-        "permissionsHeading": "声明的权限",
-        "noPermissions": "未声明任何权限。",
-        "tauriRequiredError": "清单校验器需要在桌面应用中使用。",
-        "readError": "无法读取清单：{message}"
-      },
-      "hotReload": {
-        "title": "热重载活动",
-        "empty": "本次会话尚无重载记录。运行 `cognia plugin dev` 查看实时更新。",
-        "clear": "清空",
-        "kindInstall": "已安装",
-        "kindUninstall": "已卸载",
-        "kindHotReload": "已热重载",
-        "statusSuccess": "成功",
-        "statusFailed": "失败",
-        "statusInProgress": "进行中"
-      }
-    },
     "cliStatus": {
       "title": "cognia CLI",
       "description": "插件作者 CLI 用于脚手架、构建、签名和热重载插件。",
@@ -6594,6 +6719,28 @@
       "chipReady": "cognia CLI 就绪",
       "chipBridgeDown": "cognia CLI 已安装（桥接离线）",
       "chipMissing": "未安装 cognia CLI"
+    },
+    "cliLauncher": {
+      "title": "运行 cognia 命令",
+      "description": "在终端标签里对插件项目运行 cognia CLI。",
+      "pickProject": "选择项目…",
+      "pickProjectTitle": "选择插件项目目录",
+      "noProject": "尚未选择项目。",
+      "invalidProject": "该目录下未找到有效的 plugin.json。",
+      "needsCli": "请先在上方安装 cognia CLI 以启用这些命令。",
+      "pickBundleTitle": "选择要安装的插件包",
+      "bundleFilter": "插件包",
+      "bridgeWarning": "cognia CLI 桥接未运行——此命令可能无法送达应用。",
+      "bridgeHint": "桥接离线：在连接前 install / dev 热重载无法送达运行中的应用。",
+      "launchFailed": "无法启动命令：{message}",
+      "launchDenied": "终端启动被拒绝。",
+      "cmd": {
+        "build": "构建",
+        "dev": "开发",
+        "lint": "检查",
+        "new": "新建",
+        "install": "安装…"
+      }
     },
     "cliInstall": {
       "title": "安装 cognia CLI",
@@ -6948,7 +7095,8 @@
         "profiler": "性能分析",
         "hotReload": "热重载",
         "inspect": "运行时检查",
-        "triggers": "触发记录"
+        "triggers": "触发记录",
+        "cli": "CLI"
       },
       "logs": {
         "empty": "未捕获到日志。"
@@ -8234,6 +8382,94 @@
       "warn": "警告",
       "error": "错误",
       "fatal": "致命"
+    }
+  },
+  "observability": {
+    "title": "可观测性",
+    "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
+    "noData": "该时间窗口内暂无数据",
+    "panels": {
+      "totalCost": "总成本",
+      "totalSpans": "Span 总数",
+      "errorRate": "错误率",
+      "cacheHitRate": "缓存命中率",
+      "p95Latency": "延迟 (p95)",
+      "costOverTime": "成本走势",
+      "requestRate": "请求速率",
+      "errorRateOverTime": "错误率",
+      "latencyPercentiles": "延迟分位",
+      "tokenThroughput": "Token 吞吐",
+      "byModel": "按模型分布",
+      "bySurface": "按来源分布",
+      "recentTraces": "最近 Trace"
+    },
+    "series": {
+      "cost": "成本",
+      "perSec": "请求/秒",
+      "errorRate": "错误率",
+      "p50": "p50",
+      "p95": "p95",
+      "p99": "p99",
+      "input": "输入",
+      "output": "输出",
+      "cacheRead": "缓存读取",
+      "cacheCreation": "缓存写入"
+    },
+    "toolbar": {
+      "edit": "编辑布局",
+      "lock": "锁定布局",
+      "resetLayout": "重置布局"
+    },
+    "range": {
+      "quickRanges": "快捷范围",
+      "absolute": "绝对范围",
+      "custom": "自定义范围",
+      "from": "起始",
+      "to": "结束",
+      "apply": "应用",
+      "presets": {
+        "5m": "近 5 分钟",
+        "15m": "近 15 分钟",
+        "1h": "近 1 小时",
+        "6h": "近 6 小时",
+        "24h": "近 24 小时",
+        "7d": "近 7 天",
+        "30d": "近 30 天"
+      }
+    },
+    "refresh": {
+      "label": "自动刷新",
+      "off": "关闭"
+    },
+    "filters": {
+      "search": "搜索…",
+      "empty": "无可选项",
+      "clear": "清除",
+      "dims": {
+        "model": "模型",
+        "surface": "来源",
+        "operation": "操作",
+        "tool": "工具",
+        "session": "会话"
+      }
+    },
+    "traces": {
+      "root": "Trace",
+      "started": "开始时间",
+      "duration": "耗时",
+      "spans": "Span 数",
+      "cost": "成本",
+      "surface": "来源",
+      "empty": "该时间窗口内暂无 Trace"
+    },
+    "waterfall": {
+      "title": "Trace 详情",
+      "totalDuration": "耗时 {value}",
+      "spanCount": "{count} 个 span",
+      "empty": "该 Trace 暂无 span",
+      "toggleEvents": "展开/收起 span 详情",
+      "tokens": "{count} tokens",
+      "cost": "成本 {value}"
     }
   },
   "performance": {
@@ -9742,6 +9978,7 @@
       "agentTeams": "智能体团队",
       "scheduler": "调度器",
       "goals": "目标",
+      "observability": "可观测性",
       "performance": "性能",
       "logs": "日志",
       "me": "我的",
@@ -10241,7 +10478,9 @@
     "appDeleted": "应用已删除",
     "appDuplicated": "应用已复制",
     "appExported": "应用已导出",
-    "workspace": "工作区",
+    "workspace": {
+      "headerLoading": "加载中"
+    },
     "componentTree": "组件",
     "propertyInspector": "属性",
     "dataModel": "数据模型",
@@ -10291,10 +10530,7 @@
       "fallback": "此小部件正在使用其后备渲染方式。"
     },
     "selectPlaceholder": "请选择...",
-    "comparisonEmpty": "暂无对比数据。",
-    "workspace": {
-      "headerLoading": "加载中"
-    }
+    "comparisonEmpty": "暂无对比数据。"
   },
   "toolSettings": {
     "title": "内置工具",
@@ -14495,13 +14731,18 @@
         "intro": "由智能体团队运行时在内部触发，此触发器无需配置。"
       },
       "teamTaskDispatch": {
-        "teamId": { "label": "团队" },
+        "teamId": {
+          "label": "团队"
+        },
         "taskId": {
           "label": "任务 id",
           "hint": "派发任务的稳定标识。",
           "placeholder": "task_..."
         },
-        "title": { "label": "标题", "placeholder": "总结最新报告" },
+        "title": {
+          "label": "标题",
+          "placeholder": "总结最新报告"
+        },
         "description": {
           "label": "描述",
           "placeholder": "分配给成员的详细说明。"
@@ -15616,7 +15857,9 @@
       "chatLoading": "正在加载对话…"
     },
     "settings": {
-      "runPolicy": { "title": "运行策略" },
+      "runPolicy": {
+        "title": "运行策略"
+      },
       "errorPolicy": {
         "label": "出错时",
         "stop": "停止运行",
@@ -15627,8 +15870,14 @@
         "label": "运行超时",
         "hint": "单次运行的墙钟时间上限。"
       },
-      "concurrency": { "label": "并发运行数", "hint": "针对本工作流。" },
-      "maxConcurrency": { "label": "运行内最大节点数", "hint": "单次运行内并行的节点数。" },
+      "concurrency": {
+        "label": "并发运行数",
+        "hint": "针对本工作流。"
+      },
+      "maxConcurrency": {
+        "label": "运行内最大节点数",
+        "hint": "单次运行内并行的节点数。"
+      },
       "retry": {
         "title": "默认重试",
         "attempts": "次数",
@@ -15668,7 +15917,11 @@
         "title": "插件与能力",
         "hint": "由已安装插件贡献的工作流节点、触发器与模板。",
         "empty": "尚未安装插件贡献的工作流能力。",
-        "sections": { "nodes": "节点", "triggers": "触发器", "templates": "模板" },
+        "sections": {
+          "nodes": "节点",
+          "triggers": "触发器",
+          "templates": "模板"
+        },
         "contributedBy": "由 {plugin} 提供",
         "useTemplate": "使用",
         "missingDep": "缺少：{id}"

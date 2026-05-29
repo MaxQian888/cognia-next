@@ -16,4 +16,10 @@ describe("lib/plugin/sdk barrel", () => {
     const result = (sym as (input: unknown) => unknown)(probe)
     expect(result).toBe(probe)
   })
+
+  // These two narrow + lightly validate (not pure identity), so just assert
+  // the barrel re-exports them (they were authored but previously unexported).
+  it.each(["defineCharacterPack", "defineWorkflowTemplate"])("re-exports %s", (name) => {
+    expect(typeof (sdk as Record<string, unknown>)[name]).toBe("function")
+  })
 })

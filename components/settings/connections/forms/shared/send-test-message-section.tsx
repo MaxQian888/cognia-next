@@ -49,6 +49,9 @@ const PLATFORM_PLACEHOLDER: Partial<Record<PlatformKind, string>> = {
   onebot: "987654321",
   wecom: "userid (single) / chatid (group)",
   "wechat-personal": "reply-only — cannot test proactively",
+  matrix: "!roomid:matrix.org",
+  "wechat-oa": "follower OpenID",
+  "qq-official": "channel id / group openid",
 }
 
 function placeholderFor(platform: PlatformKind): string {
@@ -77,6 +80,9 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
         adapterId,
         chatId: chatId.trim(),
         channelId: chatId.trim(),
+        // Matrix reads `roomId`; passing every key is safe since the bus
+        // never inspects the ref beyond `platform` + `adapterId`.
+        roomId: chatId.trim(),
       }
       const sendResult = await getBus().sendOutbound(adapterId, {
         conversationRef,

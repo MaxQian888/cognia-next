@@ -21,13 +21,14 @@
 
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Path, RawQuery, State},
+    http::{HeaderMap, Method, StatusCode},
     response::Response,
     routing::{any, get},
     Extension, Router,
 };
 use bytes::Bytes;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::state::ConnectorsState;
@@ -103,9 +104,37 @@ async fn webhook_handler(
     State(state): State<ConnectorsState>,
     Extension(EmitterExt(emitter)): Extension<EmitterExt>,
     Path((_url_adapter_type, adapter_id)): Path<(String, String)>,
+    method: Method,
+    RawQuery(raw_query): RawQuery,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Resolve the registered adapter type up front so WeChat OA — which needs a
+    // bespoke GET echostr handshake + an encrypted reply protocol the
+    // fire-and-forget `verify_webhook` flow can't express — can branch off.
+    let adapter_type = {
+        let inner = state.inner.lock();
+        inner
+            .registered_adapters
+            .get(&adapter_id)
+            .map(|reg| reg.adapter_type.clone())
+    };
+    let adapter_type = match adapter_type {
+        Some(t) => t,
+        None => return error_response(StatusCode::NOT_FOUND, "adapter not registered"),
+    };
+
+    if adapter_type == "wechat-oa" {
+        return wechat_oa_handler(
+            &adapter_id,
+            &method,
+            raw_query.as_deref().unwrap_or(""),
+            &body,
+            emitter.as_ref(),
+        )
+        .await;
+    }
+
     match verify_webhook(&state, &adapter_id, &headers, &body).await {
         Ok(payload) => {
             emitter.emit_webhook(&adapter_id, &payload);
@@ -113,6 +142,118 @@ async fn webhook_handler(
         }
         Err((status, msg)) => error_response(status, msg),
     }
+}
+
+/// Parse a `&`-separated, percent-encoded query string into a map.
+fn parse_query(raw: &str) -> HashMap<String, String> {
+    serde_urlencoded::from_str::<Vec<(String, String)>>(raw)
+        .map(|pairs| pairs.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Pull the inner text of a CDATA-wrapped XML field, e.g.
+/// `<Encrypt><![CDATA[abc]]></Encrypt>` → `abc`. Falls back to a bare
+/// `<Encrypt>abc</Encrypt>` when CDATA is absent.
+fn extract_xml_field(xml: &str, field: &str) -> Option<String> {
+    let open = format!("<{field}>");
+    let close = format!("</{field}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    let inner = xml[start..end].trim();
+    let inner = inner
+        .strip_prefix("<![CDATA[")
+        .and_then(|s| s.strip_suffix("]]>"))
+        .unwrap_or(inner);
+    Some(inner.trim().to_string())
+}
+
+/// WeChat Official Account webhook handler.
+///
+/// GET  → URL verification: verify `signature` over (token, timestamp, nonce)
+///        and echo `echostr` back verbatim.
+/// POST → message callback: verify `msg_signature`, decrypt the `<Encrypt>`
+///        field (safe mode), emit the inner XML as `{"xml": ...}`, and reply
+///        `success` so WeChat does not retry (the bot replies asynchronously
+///        via the 客服 message API).
+async fn wechat_oa_handler(
+    adapter_id: &str,
+    method: &Method,
+    raw_query: &str,
+    body: &[u8],
+    emitter: &dyn EventEmitter,
+) -> Response {
+    let params = parse_query(raw_query);
+    let timestamp = params.get("timestamp").map(String::as_str).unwrap_or("");
+    let nonce = params.get("nonce").map(String::as_str).unwrap_or("");
+
+    let token = match super::keyring::get(adapter_id, "token") {
+        Ok(Some(t)) => t,
+        Ok(None) => return error_response(StatusCode::UNAUTHORIZED, "token not configured"),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"),
+    };
+
+    if method == Method::GET {
+        let signature = params.get("signature").map(String::as_str).unwrap_or("");
+        let echostr = params.get("echostr").cloned().unwrap_or_default();
+        return match super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature)
+        {
+            Ok(()) => text_response(echostr),
+            Err(_) => error_response(StatusCode::UNAUTHORIZED, "signature verification failed"),
+        };
+    }
+
+    // POST — message callback.
+    let xml = match std::str::from_utf8(body) {
+        Ok(s) => s,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "body is not UTF-8"),
+    };
+
+    if let Some(encrypt) = extract_xml_field(xml, "Encrypt") {
+        let msg_signature = params.get("msg_signature").map(String::as_str).unwrap_or("");
+        if super::sigverify::wechat::verify_msg_signature(
+            &token,
+            timestamp,
+            nonce,
+            &encrypt,
+            msg_signature,
+        )
+        .is_err()
+        {
+            return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
+        }
+        let aes_key = match super::keyring::get(adapter_id, "encodingAesKey") {
+            Ok(Some(k)) => k,
+            Ok(None) => {
+                return error_response(StatusCode::UNAUTHORIZED, "encoding aes key not configured")
+            }
+            Err(_) => {
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed")
+            }
+        };
+        match super::sigverify::wechat::decrypt(&aes_key, &encrypt) {
+            Ok((msg_xml, _appid)) => {
+                emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": msg_xml }));
+                text_response("success".to_string())
+            }
+            Err(_) => error_response(StatusCode::UNAUTHORIZED, "decryption failed"),
+        }
+    } else {
+        // Plaintext mode — verify the plain signature, emit the raw XML.
+        let signature = params.get("signature").map(String::as_str).unwrap_or("");
+        if super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature).is_err() {
+            return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
+        }
+        emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": xml }));
+        text_response("success".to_string())
+    }
+}
+
+fn text_response(body: String) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/plain; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap()
 }
 
 /// Pure verification function — no `AppHandle`, no event emission. Returns

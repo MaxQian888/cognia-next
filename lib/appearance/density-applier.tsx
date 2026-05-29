@@ -4,6 +4,49 @@ import { useEffect } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_DENSITY, type DensityLevel, type DensitySettings } from "@/types/appearance"
 import { setDataAttr } from "./css-var"
+import { getDensityPreset } from "./density-preset-registry"
+
+/** The `--density-*` custom properties a plugin density preset may override. */
+const DENSITY_PRESET_VARS = [
+  "--density-spacing",
+  "--density-input-height",
+  "--density-row-padding",
+  "--density-gap",
+  "--density-line-height",
+] as const
+
+/**
+ * Apply a plugin-contributed density preset by name, injecting its
+ * `--density-*` overrides as inline custom properties on `<html>`. Looks the
+ * preset up in the registry (`density-preset-registry.ts`); a missing name is
+ * a no-op that returns `false` so callers can fall back to a canonical level.
+ * This is the apply mechanism a theme pack's `applies.density` reference (or a
+ * direct caller) uses to make a registered preset take visual effect.
+ */
+export function applyDensityPresetVars(name: string): boolean {
+  if (typeof document === "undefined") return false
+  const preset = getDensityPreset(name)
+  if (!preset) return false
+  const root = document.documentElement
+  for (const varName of DENSITY_PRESET_VARS) {
+    const value = preset.vars[varName]
+    if (typeof value === "string" && value.length > 0) {
+      root.style.setProperty(varName, value)
+    } else {
+      root.style.removeProperty(varName)
+    }
+  }
+  return true
+}
+
+/** Remove any density-preset overrides previously injected on `<html>`. */
+export function clearDensityPresetVars(): void {
+  if (typeof document === "undefined") return
+  const root = document.documentElement
+  for (const varName of DENSITY_PRESET_VARS) {
+    root.style.removeProperty(varName)
+  }
+}
 
 /**
  * Resolve the data-attribute map this applier writes onto `<html>`.

@@ -148,32 +148,49 @@ describe("AdaptersTab", () => {
     expect(screen.getByText("Configure")).toBeInTheDocument()
   })
 
-  it("shows Add adapter dropdown trigger", () => {
+  it("shows the Add adapter button", () => {
     render(<AdaptersTab />)
-    expect(screen.getByRole("button", { name: /add adapter/i })).toBeInTheDocument()
+    expect(screen.getByTestId("add-adapter-button")).toBeInTheDocument()
   })
 
-  it("opens the dropdown and shows the Telegram entry", async () => {
+  it("opens the picker grid and shows the Telegram + Matrix cards", async () => {
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Telegram" })).toBeInTheDocument()
+      expect(screen.getByTestId("add-connector-card-telegram")).toBeInTheDocument()
+    })
+    // Matrix is now a first-class configurable platform in the picker.
+    expect(screen.getByTestId("add-connector-card-matrix")).toBeInTheDocument()
+  })
+
+  it("filters the picker grid by search query", async () => {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-search"))
+    fireEvent.change(screen.getByTestId("add-connector-search"), { target: { value: "matrix" } })
+    await waitFor(() => {
+      expect(screen.getByTestId("add-connector-card-matrix")).toBeInTheDocument()
+      expect(screen.queryByTestId("add-connector-card-telegram")).not.toBeInTheDocument()
     })
   })
 
-  it("does not show Coming soon — all five platforms are active", async () => {
+  it("opens Telegram dialog when its picker card is clicked", async () => {
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => expect(screen.queryAllByText(/lark \/ feishu/i).length).toBeGreaterThan(0))
-    expect(screen.queryAllByText(/coming soon/i)).toHaveLength(0)
-  })
-
-  it("opens Telegram dialog when Add → Telegram is clicked", async () => {
-    render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    fireEvent.click(screen.getByRole("button", { name: "Telegram" }))
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-card-telegram"))
+    fireEvent.click(screen.getByTestId("add-connector-card-telegram"))
     await waitFor(() => {
       expect(screen.getByText(/add telegram bot/i)).toBeInTheDocument()
+    })
+  })
+
+  it("opens the Matrix dialog when its picker card is clicked", async () => {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-card-matrix"))
+    fireEvent.click(screen.getByTestId("add-connector-card-matrix"))
+    await waitFor(() => {
+      expect(screen.getByText(/add matrix connector/i)).toBeInTheDocument()
     })
   })
 
@@ -185,18 +202,11 @@ describe("AdaptersTab", () => {
     })
   })
 
-  it("shows Lark as an active menu entry", async () => {
+  it("opens Lark dialog when its picker card is clicked", async () => {
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => screen.getByRole("button", { name: /lark \/ feishu/i }))
-    const button = screen.getByRole("button", { name: /lark \/ feishu/i })
-    expect(button).not.toBeDisabled()
-  })
-
-  it("opens Lark dialog when Add → Lark / Feishu is clicked", async () => {
-    render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    fireEvent.click(screen.getByRole("button", { name: /lark \/ feishu/i }))
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-card-lark"))
+    fireEvent.click(screen.getByTestId("add-connector-card-lark"))
     await waitFor(() => {
       expect(screen.getByText(/add lark bot/i)).toBeInTheDocument()
     })
@@ -222,15 +232,15 @@ describe("AdaptersTab", () => {
     })
   })
 
-  it.each<[string, RegExp, RegExp]>([
-    ["Discord", /^discord$/i, /add discord bot/i],
-    ["Slack", /^slack$/i, /add slack bot/i],
-    ["QQ (OneBot / NapCat)", /qq \(onebot \/ napcat\)/i, /add onebot/i],
-  ])("opens the %s dialog when Add → %s is clicked", async (_label, menuText, dialogText) => {
+  it.each<[string, RegExp]>([
+    ["discord", /add discord bot/i],
+    ["slack", /add slack bot/i],
+    ["onebot", /add onebot/i],
+  ])("opens the %s dialog when its picker card is clicked", async (kind, dialogText) => {
     render(<AdaptersTab />)
-    fireEvent.click(screen.getByRole("button", { name: /add adapter/i }))
-    await waitFor(() => expect(screen.getByRole("button", { name: menuText })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: menuText }))
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId(`add-connector-card-${kind}`))
+    fireEvent.click(screen.getByTestId(`add-connector-card-${kind}`))
     await waitFor(() => {
       expect(screen.getByText(dialogText)).toBeInTheDocument()
     })

@@ -45,9 +45,12 @@ const VALID_PERMISSIONS: &[&str] = &[
     "secrets:write",
 ];
 
-/// Canonical plugin capabilities (mirrors the type union in
-/// types/plugin/plugin.ts plus the contracts list in
-/// lib/plugin/contracts/plugin-capabilities.ts).
+/// Canonical plugin capabilities. MUST stay in lockstep with
+/// `CANONICAL_PLUGIN_CAPABILITIES` (derived from `PLUGIN_CAPABILITY_CONTRACTS`
+/// in lib/plugin/contracts/plugin-capabilities.ts) — the set the app's
+/// validator enforces. A drift here means `cognia plugin lint` passes a
+/// manifest the app then rejects at load. The set is asserted equal by
+/// `lib/plugin/contracts/rust-capability-parity.test.ts`.
 const VALID_CAPABILITIES: &[&str] = &[
     "tools",
     "native-anthropic-tool",
@@ -73,10 +76,50 @@ const VALID_CAPABILITIES: &[&str] = &[
     "workflow",
     "workflow-trigger",
     "tray",
+    "lsp-server",
+    "character-pack",
+    "subagent",
+    "agent-team-template",
+    "shared-memory-adapter",
+    "workflow-template",
+    "theme-pack",
+    "fonts",
+    "wallpapers",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
     &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
+
+/// Capability → contribution array field(s). Mirrors the array-typed
+/// `manifestFields` in PLUGIN_CAPABILITY_CONTRACTS. Capabilities omitted are
+/// api-only (registered imperatively at activation) or have entry-point string
+/// fields (`python`) validated elsewhere. Drives the capability↔field
+/// cross-check (parity with validation.ts).
+const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
+    ("tools", &["tools"]),
+    ("components", &["a2uiComponents"]),
+    ("modes", &["modes"]),
+    ("skills", &["skills"]),
+    ("themes", &["themes"]),
+    ("commands", &["commands"]),
+    ("a2ui", &["a2uiComponents", "a2uiTemplates"]),
+    ("scheduler", &["scheduledTasks"]),
+    ("external-agent-preset", &["externalAgentPresets"]),
+    ("mcp-server-preset", &["mcpServerPresets"]),
+    ("native-anthropic-tool", &["nativeAnthropicTools"]),
+    ("lsp-server", &["lspServers"]),
+    ("character-pack", &["characterPacks"]),
+    ("subagent", &["subagents"]),
+    ("agent-team-template", &["agentTeamTemplates"]),
+    ("shared-memory-adapter", &["sharedMemoryAdapters"]),
+    ("workflow-template", &["workflowTemplates"]),
+    ("connectors", &["connectors"]),
+    ("workflow", &["workflows"]),
+    ("workflow-trigger", &["workflows"]),
+    ("theme-pack", &["themePacks"]),
+    ("fonts", &["fonts"]),
+    ("wallpapers", &["wallpapers"]),
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diagnostic types
@@ -349,6 +392,68 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
             }
         }
         _ => {}
+    }
+
+    // ── capability ↔ field cross-check (parity with validation.ts) ──────
+    let declared: Vec<&str> = obj
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let is_populated_array = |field: &str| -> bool {
+        obj.get(field)
+            .and_then(Value::as_array)
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
+    };
+    // declared-but-empty: capability tag present, no gating field populated.
+    for (cap, fields) in CAPABILITY_FIELDS {
+        if declared.contains(cap) && !fields.iter().any(|f| is_populated_array(f)) {
+            out.push(Diagnostic {
+                severity: Severity::Warning,
+                field: "capabilities".into(),
+                code: "manifest.capability.field_missing".into(),
+                message: format!(
+                    "Capability \"{cap}\" is declared but its contribution field(s) {} are empty.",
+                    fields
+                        .iter()
+                        .map(|f| format!("\"{f}\""))
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                ),
+                hint: Some("Add the contribution entries, or drop the capability tag.".into()),
+            });
+        }
+    }
+    // populated-but-undeclared: field has entries, none of its caps declared.
+    let mut seen_fields: Vec<&str> = Vec::new();
+    for (_, fields) in CAPABILITY_FIELDS {
+        for field in fields.iter() {
+            if seen_fields.contains(field) {
+                continue;
+            }
+            seen_fields.push(field);
+            if !is_populated_array(field) {
+                continue;
+            }
+            let caps: Vec<&str> = CAPABILITY_FIELDS
+                .iter()
+                .filter(|(_, fs)| fs.contains(field))
+                .map(|(c, _)| *c)
+                .collect();
+            if !caps.iter().any(|c| declared.contains(c)) {
+                out.push(Diagnostic {
+                    severity: Severity::Warning,
+                    field: "capabilities".into(),
+                    code: "manifest.capability.field_undeclared".into(),
+                    message: format!(
+                        "Field \"{field}\" has entries but none of its capabilities ({}) is declared.",
+                        caps.join(", ")
+                    ),
+                    hint: Some(format!("Add one of: {} to \"capabilities\".", caps.join(", "))),
+                });
+            }
+        }
     }
 
     // ── type-specific entry points ──────────────────────────────────────
@@ -823,6 +928,16 @@ mod tests {
         );
     }
 
+    fn assert_has_warning_code(manifest: Value, code: &str) {
+        let diags = validate_manifest(&manifest);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.severity == Severity::Warning && d.code == code),
+            "expected warning code {code}, got: {diags:?}"
+        );
+    }
+
     fn minimal_frontend() -> Value {
         json!({
             "id": "hello-plugin",
@@ -856,6 +971,47 @@ mod tests {
     #[test]
     fn minimal_wasm_is_valid() {
         assert_clean(minimal_wasm());
+    }
+
+    #[test]
+    fn newly_contracted_capabilities_are_valid() {
+        for cap in [
+            "theme-pack",
+            "fonts",
+            "wallpapers",
+            "subagent",
+            "agent-team-template",
+            "shared-memory-adapter",
+            "workflow-template",
+            "lsp-server",
+            "character-pack",
+        ] {
+            let mut m = minimal_frontend();
+            m["capabilities"] = json!([cap]);
+            let diags = validate_manifest(&m);
+            assert!(
+                !diags
+                    .iter()
+                    .any(|d| d.code == "manifest.capabilities.invalid"),
+                "capability {cap} should be valid, got: {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn declared_capability_without_field_warns() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["scheduler"]);
+        assert_has_warning_code(m, "manifest.capability.field_missing");
+    }
+
+    #[test]
+    fn populated_field_without_capability_warns() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["tools"]);
+        m["tools"] = json!([{ "name": "t", "description": "d", "parametersSchema": {} }]);
+        m["fonts"] = json!([{ "family": "X", "files": [{ "weight": 400, "src": "a.woff2" }] }]);
+        assert_has_warning_code(m, "manifest.capability.field_undeclared");
     }
 
     #[test]

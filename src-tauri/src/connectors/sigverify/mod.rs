@@ -2,6 +2,7 @@ pub mod discord;
 pub mod lark;
 pub mod slack;
 pub mod telegram;
+pub mod wechat;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SigError {

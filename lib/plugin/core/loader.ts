@@ -678,6 +678,18 @@ export class PluginLoader {
   }
 
   /**
+   * Import a secondary plugin entry module (e.g. an `ocrProviders[].entry`
+   * file) by absolute path, reusing the same cross-runtime strategy as the
+   * main-module loader (Tauri asset protocol → fetch+eval → script tag).
+   * Used by the module-bridge capabilities (`module-bridge-map.ts`) as the
+   * default `importer` so lazy-factory entries resolve identically to the
+   * plugin's main bundle. Tests inject their own importer and never hit this.
+   */
+  async importEntry(absolutePath: string): Promise<Record<string, unknown>> {
+    return (await this.importModule(absolutePath)) as Record<string, unknown>
+  }
+
+  /**
    * Get loaded plugin definition
    */
   getDefinition(pluginId: string): PluginDefinition | undefined {

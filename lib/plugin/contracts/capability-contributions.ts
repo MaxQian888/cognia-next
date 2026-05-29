@@ -45,7 +45,12 @@ interface ContributionManifestShape {
   lspServers?: Array<{ id?: string; name?: string; language?: string }>
   a2uiComponents?: Array<{ id?: string; name?: string }>
   a2uiTemplates?: Array<{ id?: string; name?: string }>
-  scheduledTasks?: Array<{ id?: string; name?: string }>
+  scheduledTasks?: Array<{ name?: string }>
+  characterPacks?: Array<{ id?: string; name?: string }>
+  subagents?: Array<{ id?: string; name?: string }>
+  agentTeamTemplates?: Array<{ id?: string; name?: string }>
+  sharedMemoryAdapters?: Array<{ id?: string; name?: string }>
+  workflowTemplates?: Array<{ id?: string; name?: string }>
   workflows?: {
     nodeExecutors?: Array<{ id?: string; name?: string }>
     triggers?: Array<{ id?: string; name?: string }>
@@ -92,7 +97,8 @@ export function getContributionsForCapability(
     case "theme-pack":
       return compact(asArray(m.themePacks).map((s) => entry(s.id, s.name)))
     case "fonts":
-      return compact(asArray(m.fonts).map((s) => entry(s.id, s.family ?? s.name)))
+      // Font contributions are keyed by `family` (no `id` field).
+      return compact(asArray(m.fonts).map((s) => entry(s.family ?? s.name, s.family ?? s.name)))
     case "wallpapers":
       return compact(asArray(m.wallpapers).map((s) => entry(s.id, s.name)))
     case "mcp-server-preset":
@@ -113,11 +119,22 @@ export function getContributionsForCapability(
     case "components":
       return compact(asArray(m.a2uiComponents).map((s) => entry(s.id, s.name)))
     case "scheduler":
-      return compact(asArray(m.scheduledTasks).map((s) => entry(s.id, s.name)))
+      // Scheduled tasks are keyed by `name` (no `id` field).
+      return compact(asArray(m.scheduledTasks).map((s) => entry(s.name, s.name)))
     case "workflow":
       return compact(asArray(m.workflows?.nodeExecutors).map((s) => entry(s.id, s.name)))
     case "workflow-trigger":
       return compact(asArray(m.workflows?.triggers).map((s) => entry(s.id, s.name)))
+    case "character-pack":
+      return compact(asArray(m.characterPacks).map((s) => entry(s.id, s.name)))
+    case "subagent":
+      return compact(asArray(m.subagents).map((s) => entry(s.id, s.name)))
+    case "agent-team-template":
+      return compact(asArray(m.agentTeamTemplates).map((s) => entry(s.id, s.name)))
+    case "shared-memory-adapter":
+      return compact(asArray(m.sharedMemoryAdapters).map((s) => entry(s.id, s.name)))
+    case "workflow-template":
+      return compact(asArray(m.workflowTemplates).map((s) => entry(s.id, s.name)))
     default:
       return []
   }

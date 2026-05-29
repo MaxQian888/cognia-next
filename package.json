@@ -172,6 +172,7 @@
     "react-chartjs-2": "^5.3.1",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.6",
+    "react-grid-layout": "^2.2.3",
     "react-hook-form": "^7.76.1",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.11.2",

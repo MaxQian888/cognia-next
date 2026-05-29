@@ -2215,6 +2215,14 @@
     "groupData": "Data",
     "groupObservability": "Observability",
     "groupSystem": "System",
+    "pluginConfig": {
+      "title": "Plugin configuration",
+      "description": "Configure each enabled plugin's settings here. These are the same forms surfaced inside each plugin's detail pane; changes are picked up on the plugin's next activation.",
+      "emptyTitle": "No configurable plugins",
+      "emptyHint": "Enabled plugins that declare a configuration schema or component appear here.",
+      "manageAll": "Manage all plugins",
+      "versionLabel": "v{version}"
+    },
     "tabs": {
       "general": "General",
       "appearance": "Appearance",
@@ -2247,6 +2255,7 @@
       "scheduledTasks": "Scheduled Tasks",
       "a2ui": "A2UI",
       "plugins": "Plugins",
+      "pluginConfig": "Plugin configuration",
       "remoteControl": "Remote Control",
       "externalBridge": "External Bridge (MCP)",
       "automation": "UI Automation",
@@ -2290,6 +2299,7 @@
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
       "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
       "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
+      "pluginConfig": "Configure each enabled plugin's settings in one place — the same forms surfaced inside each plugin's detail pane.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
       "automation": "Desktop UI automation — screenshot, find element, click, type, send keys. Disabled by default; gated by a three-tier permission policy with a global kill switch.",
@@ -4858,7 +4868,10 @@
           "onebot": "QQ (OneBot / NapCat)",
           "wecom": "WeCom / 企业微信",
           "wechat-personal": "WeChat (Personal) / 个人微信",
-          "unknown": "Adapter"
+          "unknown": "Adapter",
+          "matrix": "Matrix",
+          "wechat-oa": "WeChat Official Account / 公众号",
+          "qq-official": "QQ (Official Bot)"
         },
         "actions": {
           "menuAria": "Actions for {name}",
@@ -4931,6 +4944,26 @@
             "at_direct_only": "Group chat (direct only)",
             "other": "Other"
           }
+        },
+        "platformDescriptions": {
+          "telegram": "Bot via long-poll or webhook",
+          "discord": "Bot via gateway or socket mode",
+          "slack": "App via Socket Mode or Events API",
+          "lark": "Feishu / Lark bot via long connection",
+          "onebot": "QQ via NapCat / Lagrange (OneBot)",
+          "wecom": "WeCom smart-bot long connection",
+          "wechat-personal": "Personal WeChat via iLink (reply-only)",
+          "matrix": "Matrix homeserver via /sync",
+          "wechat-oa": "WeChat Official Account via webhook",
+          "qq-official": "QQ official bot via gateway",
+          "unknown": "Platform connector"
+        },
+        "addConnector": {
+          "title": "Add a connector",
+          "description": "Pick a messaging platform to configure.",
+          "searchPlaceholder": "Search platforms…",
+          "noResults": "No platforms match your search.",
+          "configuredCount": "{count} configured"
         }
       },
       "conversations": {
@@ -5479,7 +5512,10 @@
           "lark": "Open Lark chat → Settings → Group Info → Copy chat_id (oc_…).",
           "onebot": "QQ user uin (private chat) or group uin.",
           "wecom": "Single chat: the recipient's userid. Group: the chatid from a prior inbound callback.",
-          "wechat-personal": "Reply-only — personal WeChat cannot be messaged proactively, so the test send will be rejected."
+          "wechat-personal": "Reply-only — personal WeChat cannot be messaged proactively, so the test send will be rejected.",
+          "matrix": "The room id (e.g. !abcd:matrix.org). Invite the bot to the room first.",
+          "wechat-oa": "The follower's OpenID (from an inbound message).",
+          "qq-official": "The channel id or group openid."
         },
         "bodyLabel": "Body",
         "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
@@ -5487,6 +5523,100 @@
         "desktopOnly": "Sending requires the desktop runtime so the adapter is registered with the bus.",
         "sentSuccess": "Sent. platform_message_id = {messageId}",
         "sentError": "Send failed ({code}): {message}"
+      },
+      "matrix": {
+        "titleNew": "Add Matrix connector",
+        "titleEdit": "Edit Matrix connector",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "Matrix bot",
+        "displayNameRequired": "Display name is required",
+        "homeserverLabel": "Homeserver URL",
+        "homeserverHelp": "Your Matrix homeserver, e.g. https://matrix.org",
+        "homeserverPlaceholder": "https://matrix.org",
+        "homeserverRequired": "Homeserver URL is required",
+        "accessTokenLabel": "Access token",
+        "accessTokenHelp": "Paste a bot access token, or sign in with a password below to fetch one.",
+        "accessTokenPlaceholder": "syt_…",
+        "accessTokenRequired": "An access token is required",
+        "credentialUnchangedPlaceholder": "Leave blank to keep the current token",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Homeserver and access token for the bot account.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and mute.",
+        "passwordLogin": {
+          "title": "Sign in with password",
+          "help": "Exchange a username and password for an access token. The password is never stored.",
+          "userLabel": "Username",
+          "userPlaceholder": "@bot:matrix.org or bot",
+          "passwordLabel": "Password",
+          "passwordPlaceholder": "Password",
+          "loginButton": "Sign in",
+          "desktopOnly": "Desktop only",
+          "credentialsRequired": "Enter a username and password",
+          "success": "Signed in as {userId}"
+        },
+        "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
+        "adapterCreated": "Matrix connector added",
+        "adapterUpdated": "Matrix connector updated",
+        "create": "Add connector",
+        "save": "Save"
+      },
+      "qqOfficial": {
+        "titleNew": "Add QQ Official Bot",
+        "titleEdit": "Edit QQ Official Bot",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "QQ bot",
+        "displayNameRequired": "Display name is required",
+        "appIdLabel": "App ID",
+        "appIdHelp": "From the QQ open platform → Bot → Development settings.",
+        "appIdPlaceholder": "102xxxxxx",
+        "clientSecretLabel": "Client Secret",
+        "clientSecretHelp": "The AppSecret used to mint access tokens.",
+        "clientSecretPlaceholder": "client secret",
+        "credentialUnchangedPlaceholder": "Leave blank to keep the current value",
+        "credentialsRequired": "App ID and Client Secret are required",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "App credentials for the QQ open platform.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and mute.",
+        "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
+        "adapterCreated": "QQ Official Bot added",
+        "adapterUpdated": "QQ Official Bot updated",
+        "create": "Add connector",
+        "save": "Save"
+      },
+      "wechatOa": {
+        "titleNew": "Add WeChat Official Account",
+        "titleEdit": "Edit WeChat Official Account",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "WeChat OA",
+        "displayNameRequired": "Display name is required",
+        "appIdLabel": "App ID",
+        "appIdHelp": "Official Account → Settings → Basic config → AppID.",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "AppSecret — used for the access token + 客服 reply API.",
+        "tokenLabel": "Token",
+        "tokenHelp": "The Token you set under Server Config (used for signature checks).",
+        "encodingAesKeyLabel": "EncodingAESKey",
+        "encodingAesKeyHelp": "43-character key from Server Config (safe mode) — used to decrypt callbacks.",
+        "encodingAesKeyInvalid": "EncodingAESKey must be exactly 43 characters.",
+        "credentialUnchangedPlaceholder": "Leave blank to keep the current value",
+        "credentialsRequired": "App ID, App Secret, Token and EncodingAESKey are required",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Official Account credentials and safe-mode keys.",
+        "sectionDelivery": "Delivery",
+        "sectionDeliveryDesc": "The callback URL WeChat posts messages to.",
+        "webhookUrlLabel": "Webhook URL",
+        "webhookUrlHelp": "Prefix this path with your public base URL and paste it into Server Config → URL.",
+        "webhookUrlAfterSave": "(generated after save)",
+        "windowNote": "Replies use the 客服 message API and are only allowed within 48h of the user's last message.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and mute.",
+        "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
+        "adapterCreated": "WeChat Official Account added",
+        "adapterUpdated": "WeChat Official Account updated",
+        "create": "Add connector",
+        "save": "Save"
       }
     },
     "developer": {
@@ -6264,9 +6394,35 @@
       "openSchedulerButton": "Open scheduler"
     },
     "devtools": {
-      "title": "Plugin devtools",
-      "hint": "Inspect the live message bus, hook history, sandbox state, and trigger hot reload.",
-      "gateHint": "Plugin devtools are only available in development builds."
+      "dropzone": {
+        "title": "Drop a plugin folder here",
+        "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace."
+      },
+      "validator": {
+        "title": "Manifest validator",
+        "description": "Validate a plugin.json against the host schema without installing.",
+        "pickButton": "Pick plugin.json or folder",
+        "validating": "Validating…",
+        "valid": "Manifest is valid.",
+        "invalid": "Manifest has {count, plural, one {# error} other {# errors}}.",
+        "errorsHeading": "Errors",
+        "warningsHeading": "Warnings",
+        "permissionsHeading": "Declared permissions",
+        "noPermissions": "No permissions declared.",
+        "tauriRequiredError": "The manifest validator requires the Cognia desktop app.",
+        "readError": "Couldn't read the manifest: {message}"
+      },
+      "hotReload": {
+        "title": "Hot-reload activity",
+        "empty": "No reloads yet this session. Run `cognia plugin dev` to see live updates.",
+        "clear": "Clear",
+        "kindInstall": "Installed",
+        "kindUninstall": "Uninstalled",
+        "kindHotReload": "Hot-reloaded",
+        "statusSuccess": "Success",
+        "statusFailed": "Failed",
+        "statusInProgress": "In progress"
+      }
     },
     "signature": {
       "verified": "Verified",
@@ -6549,37 +6705,6 @@
       "tauriRequiredError": "Loading local plugins requires the Cognia desktop app.",
       "installSuccess": "{name} installed from disk."
     },
-    "devtools": {
-      "dropzone": {
-        "title": "Drop a plugin folder here",
-        "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace."
-      },
-      "validator": {
-        "title": "Manifest validator",
-        "description": "Validate a plugin.json against the host schema without installing.",
-        "pickButton": "Pick plugin.json or folder",
-        "validating": "Validating…",
-        "valid": "Manifest is valid.",
-        "invalid": "Manifest has {count, plural, one {# error} other {# errors}}.",
-        "errorsHeading": "Errors",
-        "warningsHeading": "Warnings",
-        "permissionsHeading": "Declared permissions",
-        "noPermissions": "No permissions declared.",
-        "tauriRequiredError": "The manifest validator requires the Cognia desktop app.",
-        "readError": "Couldn't read the manifest: {message}"
-      },
-      "hotReload": {
-        "title": "Hot-reload activity",
-        "empty": "No reloads yet this session. Run `cognia plugin dev` to see live updates.",
-        "clear": "Clear",
-        "kindInstall": "Installed",
-        "kindUninstall": "Uninstalled",
-        "kindHotReload": "Hot-reloaded",
-        "statusSuccess": "Success",
-        "statusFailed": "Failed",
-        "statusInProgress": "In progress"
-      }
-    },
     "cliStatus": {
       "title": "cognia CLI",
       "description": "The plugin-author CLI scaffolds, builds, signs, and hot-reloads plugins.",
@@ -6594,6 +6719,28 @@
       "chipReady": "cognia CLI ready",
       "chipBridgeDown": "cognia CLI installed (bridge offline)",
       "chipMissing": "cognia CLI not installed"
+    },
+    "cliLauncher": {
+      "title": "Run cognia commands",
+      "description": "Run the cognia CLI against a plugin project in a terminal tab.",
+      "pickProject": "Choose project…",
+      "pickProjectTitle": "Select a plugin project directory",
+      "noProject": "No project selected.",
+      "invalidProject": "No valid plugin.json found in that folder.",
+      "needsCli": "Install the cognia CLI above to enable these commands.",
+      "pickBundleTitle": "Select a plugin bundle to install",
+      "bundleFilter": "Plugin bundle",
+      "bridgeWarning": "The cognia CLI bridge isn't running — this command may not reach the app.",
+      "bridgeHint": "Bridge offline: install / dev-reload won't reach the running app until it's connected.",
+      "launchFailed": "Couldn't start the command: {message}",
+      "launchDenied": "Terminal launch was denied.",
+      "cmd": {
+        "build": "Build",
+        "dev": "Dev",
+        "lint": "Lint",
+        "new": "New",
+        "install": "Install…"
+      }
     },
     "cliInstall": {
       "title": "Install the cognia CLI",
@@ -6948,7 +7095,8 @@
         "profiler": "Profiler",
         "hotReload": "Hot reload",
         "inspect": "Inspect",
-        "triggers": "Triggers"
+        "triggers": "Triggers",
+        "cli": "CLI"
       },
       "logs": {
         "empty": "No logs captured."
@@ -8234,6 +8382,94 @@
       "warn": "Warning",
       "error": "Error",
       "fatal": "Fatal"
+    }
+  },
+  "observability": {
+    "title": "Observability",
+    "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
+    "noData": "No data in this window",
+    "panels": {
+      "totalCost": "Total cost",
+      "totalSpans": "Total spans",
+      "errorRate": "Error rate",
+      "cacheHitRate": "Cache hit rate",
+      "p95Latency": "Latency (p95)",
+      "costOverTime": "Cost over time",
+      "requestRate": "Request rate",
+      "errorRateOverTime": "Error rate",
+      "latencyPercentiles": "Latency percentiles",
+      "tokenThroughput": "Token throughput",
+      "byModel": "Spans by model",
+      "bySurface": "Spans by surface",
+      "recentTraces": "Recent traces"
+    },
+    "series": {
+      "cost": "Cost",
+      "perSec": "Requests/s",
+      "errorRate": "Error rate",
+      "p50": "p50",
+      "p95": "p95",
+      "p99": "p99",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read",
+      "cacheCreation": "Cache write"
+    },
+    "toolbar": {
+      "edit": "Edit layout",
+      "lock": "Lock layout",
+      "resetLayout": "Reset layout"
+    },
+    "range": {
+      "quickRanges": "Quick ranges",
+      "absolute": "Absolute range",
+      "custom": "Custom range",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply",
+      "presets": {
+        "5m": "Last 5m",
+        "15m": "Last 15m",
+        "1h": "Last 1h",
+        "6h": "Last 6h",
+        "24h": "Last 24h",
+        "7d": "Last 7d",
+        "30d": "Last 30d"
+      }
+    },
+    "refresh": {
+      "label": "Auto-refresh",
+      "off": "Off"
+    },
+    "filters": {
+      "search": "Search…",
+      "empty": "No options",
+      "clear": "Clear",
+      "dims": {
+        "model": "Model",
+        "surface": "Surface",
+        "operation": "Operation",
+        "tool": "Tool",
+        "session": "Session"
+      }
+    },
+    "traces": {
+      "root": "Trace",
+      "started": "Started",
+      "duration": "Duration",
+      "spans": "Spans",
+      "cost": "Cost",
+      "surface": "Surface",
+      "empty": "No traces in this window"
+    },
+    "waterfall": {
+      "title": "Trace detail",
+      "totalDuration": "Duration {value}",
+      "spanCount": "{count} spans",
+      "empty": "No spans for this trace",
+      "toggleEvents": "Toggle span details",
+      "tokens": "{count} tokens",
+      "cost": "Cost {value}"
     }
   },
   "performance": {
@@ -9742,6 +9978,7 @@
       "agentTeams": "Agent teams",
       "scheduler": "Scheduler",
       "goals": "Goals",
+      "observability": "Observability",
       "performance": "Performance",
       "logs": "Logs",
       "me": "Me",
@@ -10241,7 +10478,9 @@
     "appDeleted": "App deleted",
     "appDuplicated": "App duplicated",
     "appExported": "App exported",
-    "workspace": "Workspace",
+    "workspace": {
+      "headerLoading": "Loading"
+    },
     "componentTree": "Components",
     "propertyInspector": "Properties",
     "dataModel": "Data Model",
@@ -10291,10 +10530,7 @@
       "fallback": "This widget is using its fallback presentation."
     },
     "selectPlaceholder": "Select...",
-    "comparisonEmpty": "No comparison data available.",
-    "workspace": {
-      "headerLoading": "Loading"
-    }
+    "comparisonEmpty": "No comparison data available."
   },
   "toolSettings": {
     "title": "Built-in tools",
@@ -14495,13 +14731,18 @@
         "intro": "Fired internally by the agent-team runtime. This trigger has no configuration."
       },
       "teamTaskDispatch": {
-        "teamId": { "label": "Team" },
+        "teamId": {
+          "label": "Team"
+        },
         "taskId": {
           "label": "Task id",
           "hint": "Stable identifier for the dispatched task.",
           "placeholder": "task_..."
         },
-        "title": { "label": "Title", "placeholder": "Summarize the latest report" },
+        "title": {
+          "label": "Title",
+          "placeholder": "Summarize the latest report"
+        },
         "description": {
           "label": "Description",
           "placeholder": "Detailed instructions for the assigned teammate."
@@ -15616,7 +15857,9 @@
       "chatLoading": "Loading chat…"
     },
     "settings": {
-      "runPolicy": { "title": "Run policy" },
+      "runPolicy": {
+        "title": "Run policy"
+      },
       "errorPolicy": {
         "label": "On error",
         "stop": "Stop the run",
@@ -15627,8 +15870,14 @@
         "label": "Run timeout",
         "hint": "Hard ceiling on a single run's wall-clock time."
       },
-      "concurrency": { "label": "Concurrent runs", "hint": "Of this workflow." },
-      "maxConcurrency": { "label": "Max in-run nodes", "hint": "Parallel nodes per run." },
+      "concurrency": {
+        "label": "Concurrent runs",
+        "hint": "Of this workflow."
+      },
+      "maxConcurrency": {
+        "label": "Max in-run nodes",
+        "hint": "Parallel nodes per run."
+      },
       "retry": {
         "title": "Retry defaults",
         "attempts": "Attempts",
@@ -15668,7 +15917,11 @@
         "title": "Plugins & capabilities",
         "hint": "Workflow nodes, triggers, and templates contributed by installed plugins.",
         "empty": "No plugin-contributed workflow capabilities installed.",
-        "sections": { "nodes": "Nodes", "triggers": "Triggers", "templates": "Templates" },
+        "sections": {
+          "nodes": "Nodes",
+          "triggers": "Triggers",
+          "templates": "Templates"
+        },
         "contributedBy": "Provided by {plugin}",
         "useTemplate": "Use",
         "missingDep": "Missing: {id}"

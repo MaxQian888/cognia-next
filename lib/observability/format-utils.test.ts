@@ -1,4 +1,12 @@
-import { formatTimestamp, formatBytesCompact, formatRate, formatTokens } from "./format-utils"
+import {
+  formatTimestamp,
+  formatBytesCompact,
+  formatRate,
+  formatTokens,
+  formatUsd,
+  formatPercent,
+  formatMs,
+} from "./format-utils"
 
 describe("formatTimestamp", () => {
   it("renders Date instances", () => {
@@ -56,5 +64,39 @@ describe("formatTokens", () => {
   it("renders K and M ranges", () => {
     expect(formatTokens(1500)).toBe("1.5K")
     expect(formatTokens(2_500_000)).toBe("2.50M")
+  })
+})
+
+describe("formatUsd", () => {
+  it("returns em-dash for bad input", () => {
+    expect(formatUsd(null)).toBe("—")
+    expect(formatUsd(NaN)).toBe("—")
+  })
+  it("formats zero, sub-cent and normal amounts", () => {
+    expect(formatUsd(0)).toBe("$0.00")
+    expect(formatUsd(0.0012)).toBe("$0.0012")
+    expect(formatUsd(3.5)).toBe("$3.50")
+  })
+})
+
+describe("formatPercent", () => {
+  it("returns em-dash for bad input", () => {
+    expect(formatPercent(undefined)).toBe("—")
+  })
+  it("formats fractions with configurable digits", () => {
+    expect(formatPercent(0.5)).toBe("50%")
+    expect(formatPercent(0.1234, 1)).toBe("12.3%")
+  })
+})
+
+describe("formatMs", () => {
+  it("returns em-dash for bad input", () => {
+    expect(formatMs(null)).toBe("—")
+  })
+  it("formats µs / ms / s / m ranges", () => {
+    expect(formatMs(0.5)).toBe("500µs")
+    expect(formatMs(250)).toBe("250ms")
+    expect(formatMs(1500)).toBe("1.50s")
+    expect(formatMs(120_000)).toBe("2.0m")
   })
 })

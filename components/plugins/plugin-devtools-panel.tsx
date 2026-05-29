@@ -71,6 +71,8 @@ import {
   isConsoleTapInstalled,
   uninstallConsoleTap,
 } from "@/lib/plugin/devtools/console-tap"
+import { CogniaCliStatusCard } from "./devtools/cognia-cli-status-card"
+import { CogniaCliLauncher } from "./devtools/cognia-cli-launcher"
 
 const DEVELOPER_MODE_KEY = "cognia.plugins.developerMode"
 
@@ -128,6 +130,7 @@ export function PluginDevtoolsPanel() {
           <TabsTrigger value="hotReload">{t("tabs.hotReload")}</TabsTrigger>
           <TabsTrigger value="inspect">{t("tabs.inspect")}</TabsTrigger>
           <TabsTrigger value="triggers">{t("tabs.triggers")}</TabsTrigger>
+          <TabsTrigger value="cli">{t("tabs.cli")}</TabsTrigger>
         </TabsList>
       </ScrollShadowRow>
 
@@ -151,6 +154,12 @@ export function PluginDevtoolsPanel() {
       </TabsContent>
       <TabsContent value="triggers" className="mt-0">
         <TriggersPane />
+      </TabsContent>
+      <TabsContent value="cli" className="mt-0">
+        <div className="space-y-3">
+          <CogniaCliStatusCard />
+          <CogniaCliLauncher />
+        </div>
       </TabsContent>
     </Tabs>
   )

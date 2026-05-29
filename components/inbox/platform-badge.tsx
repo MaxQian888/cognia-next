@@ -7,43 +7,33 @@
  * Per-platform colour comes from `config.colorClass`, applied via className.
  */
 
-import {
-  SendIcon,
-  MessageCircleIcon,
-  HashIcon,
-  BirdIcon,
-  BotIcon,
-  MailIcon,
-  GridIcon,
-  GitBranchIcon,
-} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import { PlatformIcon } from "@/components/connectors/platform-icons"
 
 interface PlatformConfig {
   label: string
-  icon: React.ComponentType<{ className?: string }>
   colorClass: string
 }
 
 const PLATFORM_CONFIG: Record<PlatformKind, PlatformConfig> = {
-  telegram: { label: "TG", icon: SendIcon, colorClass: "text-sky-500" },
-  discord: { label: "DC", icon: HashIcon, colorClass: "text-indigo-500" },
-  slack: { label: "SL", icon: HashIcon, colorClass: "text-purple-500" },
-  lark: { label: "LK", icon: BirdIcon, colorClass: "text-teal-500" },
-  onebot: { label: "OB", icon: BotIcon, colorClass: "text-orange-500" },
-  dingtalk: { label: "DT", icon: MessageCircleIcon, colorClass: "text-blue-600" },
-  wecom: { label: "WC", icon: MessageCircleIcon, colorClass: "text-green-600" },
-  "wechat-oa": { label: "WO", icon: MessageCircleIcon, colorClass: "text-green-500" },
-  "wechat-personal": { label: "WX", icon: MessageCircleIcon, colorClass: "text-green-500" },
-  "qq-official": { label: "QQ", icon: MessageCircleIcon, colorClass: "text-blue-500" },
-  email: { label: "EM", icon: MailIcon, colorClass: "text-amber-600" },
-  matrix: { label: "MX", icon: GridIcon, colorClass: "text-neutral-500" },
-  kook: { label: "KK", icon: GitBranchIcon, colorClass: "text-violet-500" },
-  line: { label: "LN", icon: MessageCircleIcon, colorClass: "text-green-400" },
-  mattermost: { label: "MM", icon: HashIcon, colorClass: "text-blue-700" },
-  github: { label: "GH", icon: GitBranchIcon, colorClass: "text-slate-700" },
+  telegram: { label: "TG", colorClass: "text-sky-500" },
+  discord: { label: "DC", colorClass: "text-indigo-500" },
+  slack: { label: "SL", colorClass: "text-purple-500" },
+  lark: { label: "LK", colorClass: "text-teal-500" },
+  onebot: { label: "OB", colorClass: "text-orange-500" },
+  dingtalk: { label: "DT", colorClass: "text-blue-600" },
+  wecom: { label: "WC", colorClass: "text-green-600" },
+  "wechat-oa": { label: "WO", colorClass: "text-green-500" },
+  "wechat-personal": { label: "WX", colorClass: "text-green-500" },
+  "qq-official": { label: "QQ", colorClass: "text-blue-500" },
+  email: { label: "EM", colorClass: "text-amber-600" },
+  matrix: { label: "MX", colorClass: "text-neutral-500" },
+  kook: { label: "KK", colorClass: "text-violet-500" },
+  line: { label: "LN", colorClass: "text-green-400" },
+  mattermost: { label: "MM", colorClass: "text-blue-700" },
+  github: { label: "GH", colorClass: "text-slate-700" },
 }
 
 interface PlatformBadgeProps {
@@ -56,11 +46,8 @@ interface PlatformBadgeProps {
 export function PlatformBadge({ platform, className, iconOnly = false }: PlatformBadgeProps) {
   const config = PLATFORM_CONFIG[platform] ?? {
     label: platform.slice(0, 2).toUpperCase(),
-    icon: MessageCircleIcon,
     colorClass: "text-muted-foreground",
   }
-
-  const Icon = config.icon
 
   return (
     <Badge
@@ -76,7 +63,7 @@ export function PlatformBadge({ platform, className, iconOnly = false }: Platfor
       title={platform}
       data-testid={`platform-badge-${platform}`}
     >
-      <Icon />
+      <PlatformIcon kind={platform} />
       {!iconOnly && <span className="text-xs leading-none">{config.label}</span>}
     </Badge>
   )

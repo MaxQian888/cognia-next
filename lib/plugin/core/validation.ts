@@ -13,6 +13,7 @@ import type {
 import { loggers } from "./logger"
 import {
   CANONICAL_PLUGIN_CAPABILITIES,
+  PLUGIN_CAPABILITY_CONTRACTS,
   validatePluginCapabilities,
 } from "@/lib/plugin/contracts/plugin-capabilities"
 import {
@@ -81,7 +82,13 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "secrets:write",
 ]
 
-const VALID_PLUGIN_TYPES: PluginType[] = ["frontend", "python", "hybrid", "wasm"]
+const VALID_PLUGIN_TYPES: PluginType[] = [
+  "frontend",
+  "python",
+  "hybrid",
+  "wasm",
+  "vscode-extension",
+]
 
 const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
@@ -361,6 +368,55 @@ export function validatePluginManifest(
         pushError("capabilities", code, diagnostic.message, diagnostic.hint)
       } else {
         pushWarning("capabilities", code, diagnostic.message, diagnostic.hint)
+      }
+    }
+
+    // Cross-check declared capabilities against their contribution fields,
+    // driven by `PLUGIN_CAPABILITY_CONTRACTS[].manifestFields` (the same single
+    // source the contracts expose). Two non-fatal smells:
+    //   - a capability declared with none of its gating fields populated, and
+    //   - a contribution field populated without its gating capability tag.
+    // Capabilities with no manifest field (api-only: tray/media/canvas/…) are
+    // skipped. A field shared by several capabilities (e.g. `workflows`) is
+    // satisfied if ANY of its capabilities is declared.
+    const declaredSet = new Set(declaredCapabilities)
+    const hasField = (field: string): boolean => {
+      const value = (m as unknown as Record<string, unknown>)[field]
+      return Array.isArray(value) && value.length > 0
+    }
+    const fieldToCapabilities = new Map<string, string[]>()
+    for (const contract of PLUGIN_CAPABILITY_CONTRACTS) {
+      if (contract.manifestFields.length === 0) continue
+      // Skip `python`: its fields are entry points (pythonMain string /
+      // pythonDependencies), validated by the type-specific block, not
+      // array contributions.
+      if (contract.id === "python") continue
+      // declared-but-empty: capability tag present, no gating field populated.
+      if (declaredSet.has(contract.id) && !contract.manifestFields.some(hasField)) {
+        pushWarning(
+          "capabilities",
+          "manifest.capability.field_missing",
+          `Capability "${contract.id}" is declared but its contribution field(s) ${contract.manifestFields
+            .map((f) => `"${f}"`)
+            .join(" / ")} are empty.`,
+          "Add the contribution entries, or drop the capability tag."
+        )
+      }
+      for (const field of contract.manifestFields) {
+        const list = fieldToCapabilities.get(field) ?? []
+        list.push(contract.id)
+        fieldToCapabilities.set(field, list)
+      }
+    }
+    // populated-but-undeclared: field has entries, none of its caps declared.
+    for (const [field, caps] of fieldToCapabilities) {
+      if (hasField(field) && !caps.some((c) => declaredSet.has(c))) {
+        pushWarning(
+          "capabilities",
+          "manifest.capability.field_undeclared",
+          `Field "${field}" has entries but none of its capabilities (${caps.join(", ")}) is declared.`,
+          `Add one of: ${caps.join(", ")} to "capabilities".`
+        )
       }
     }
   }
