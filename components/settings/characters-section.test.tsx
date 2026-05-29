@@ -90,6 +90,7 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     avatarEmoji: "🐙",
     systemPrompt: "You are a tutor.",
     model: "",
+    computerUseTarget: "local",
     permissionMode: undefined,
     allowedTools: [],
     disallowedTools: [],

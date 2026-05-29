@@ -3905,6 +3905,11 @@
           "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
           "styleSamplesK": "Samples per send"
         },
+        "computerUseTarget": {
+          "label": "Execution target",
+          "local": "Local (this machine)",
+          "description": "Where this character's computer-use actions run. Pick a configured cua sandbox to run them in an isolated Docker desktop instead of this machine. Manage sandboxes under Settings → Automation → Sandboxes."
+        },
         "computerUseSubSettings": {
           "requireConsent": {
             "label": "Always ask before each call",

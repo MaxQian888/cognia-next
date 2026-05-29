@@ -59,6 +59,7 @@ import {
   LOCAL_PACK_PLUGIN_ID,
 } from "@/lib/plugin/character-pack/local-pack-store"
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
+import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { isTauri } from "@/lib/tauri"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
@@ -596,6 +597,7 @@ export function CharactersSection() {
             twinSettings: undefined,
             enableComputerUse: false,
             computerUseSettings: undefined,
+            computerUseTarget: "local",
             sandboxEnabled: false,
             sandboxTier: "inherit",
             accountIdOverride: "inherit",
@@ -711,6 +713,10 @@ function CharacterRow({
           twinSettings: character.twinSettings,
           enableComputerUse: Boolean(character.enableComputerUse),
           computerUseSettings: character.computerUseSettings,
+          computerUseTarget:
+            character.computerUseTarget && typeof character.computerUseTarget === "object"
+              ? character.computerUseTarget.connectionId
+              : "local",
           sandboxEnabled: Boolean(character.sandboxEnabled),
           sandboxTier: character.sandboxTier ?? "inherit",
           accountIdOverride: character.accountIdOverride ?? "inherit",
@@ -1317,6 +1323,8 @@ export type EditorState = {
   twinSettings?: Character["twinSettings"]
   enableComputerUse: boolean
   computerUseSettings?: Character["computerUseSettings"]
+  /** ADR-0020 remote-target — `"local"` or a sandbox connection id. */
+  computerUseTarget: "local" | string
   /** ADR-0028 Phase 10 — per-character sandbox enablement override. */
   sandboxEnabled: boolean
   /** ADR-0028 Phase 10 — `"inherit"` writes back as `undefined`. */
@@ -1363,6 +1371,7 @@ type EditorOutput = {
   twinSettings?: Character["twinSettings"]
   enableComputerUse?: boolean
   computerUseSettings?: Character["computerUseSettings"]
+  computerUseTarget?: Character["computerUseTarget"]
   sandboxEnabled?: boolean
   sandboxTier?: "os" | "microvm"
   accountIdOverride?: string
@@ -1506,6 +1515,10 @@ export function CharacterEditor({
         twinSettings: s.twinSettings,
         enableComputerUse: s.enableComputerUse || undefined,
         computerUseSettings: s.computerUseSettings,
+        computerUseTarget:
+          s.enableComputerUse && s.computerUseTarget && s.computerUseTarget !== "local"
+            ? { connectionId: s.computerUseTarget }
+            : undefined,
         sandboxEnabled: s.sandboxEnabled || undefined,
         sandboxTier: s.sandboxTier === "inherit" ? undefined : s.sandboxTier,
         accountIdOverride: s.accountIdOverride === "inherit" ? undefined : s.accountIdOverride,
@@ -1791,10 +1804,16 @@ export function CharacterEditor({
           />
         </div>
         {s.enableComputerUse && (
-          <ComputerUseSubSettings
-            value={s.computerUseSettings}
-            onChange={(next) => setS({ ...s, computerUseSettings: next })}
-          />
+          <>
+            <ComputerUseSubSettings
+              value={s.computerUseSettings}
+              onChange={(next) => setS({ ...s, computerUseSettings: next })}
+            />
+            <ComputerUseTargetPicker
+              value={s.computerUseTarget}
+              onChange={(target) => setS({ ...s, computerUseTarget: target })}
+            />
+          </>
         )}
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-0.5">
@@ -2154,6 +2173,39 @@ function ComputerUseSubSettings({ value, onChange }: ComputerUseSubSettingsProps
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ADR-0020 remote-target — per-character Computer Use execution target.
+// "local" runs GUI actions on this host; selecting a configured cua sandbox
+// routes them into that isolated Docker desktop instead. Connections are
+// managed in Settings → Automation → Sandboxes.
+interface ComputerUseTargetPickerProps {
+  value: "local" | string
+  onChange: (next: "local" | string) => void
+}
+
+function ComputerUseTargetPicker({ value, onChange }: ComputerUseTargetPickerProps) {
+  const t = useTranslations("settings.characters.editor.computerUseTarget")
+  const { connections } = useSandboxConnections()
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{t("label")}</Label>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger aria-label={t("label")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="local">{t("local")}</SelectItem>
+          {connections.map((conn) => (
+            <SelectItem key={conn.id} value={conn.id}>
+              {conn.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[10px] text-muted-foreground">{t("description")}</p>
     </div>
   )
 }

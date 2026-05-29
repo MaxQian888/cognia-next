@@ -3905,6 +3905,11 @@
           "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
           "styleSamplesK": "每次发送的样本数"
         },
+        "computerUseTarget": {
+          "label": "执行目标",
+          "local": "本机（这台设备）",
+          "description": "本角色的 computer-use 动作在哪里执行。选择一个已配置的 cua 沙箱即可让动作在隔离的 Docker 桌面里运行，而不是本机。沙箱在「设置 → 自动化 → 沙箱」中管理。"
+        },
         "computerUseSubSettings": {
           "requireConsent": {
             "label": "每次调用前都征求同意",
