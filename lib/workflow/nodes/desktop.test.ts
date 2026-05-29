@@ -107,6 +107,22 @@ describe("action.desktop.screenshot", () => {
       region: { x: 5, y: 6, width: 7, height: 8 },
     })
   })
+
+  it("threads a per-node sandbox target into ctx.sandboxConnectionId", async () => {
+    mocks.screenshot.mockResolvedValueOnce({
+      bytes: "AA==",
+      width: 1,
+      height: 1,
+      capturedAt: 0,
+      format: "png",
+    })
+    const exec = getExecutor("action.desktop.screenshot", 1)!
+    await exec.execute(makeCtx({ target: { connectionId: "conn-1" } }))
+    expect(mocks.screenshot).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ surface: "workflow", sandboxConnectionId: "conn-1" })
+    )
+  })
 })
 
 describe("action.desktop.findElement", () => {

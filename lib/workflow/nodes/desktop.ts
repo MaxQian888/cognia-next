@@ -82,10 +82,15 @@ function parseLocator(params: Record<string, unknown>): Locator {
 }
 
 function callCtx(params: Record<string, unknown>) {
+  // ADR-0020 remote-target — a per-node `target: { connectionId }` routes this
+  // node's desktop action to a cua sandbox; absent / empty = local host.
+  const target = obj(params, "target")
+  const sandboxConnectionId = target ? str(target, "connectionId") : undefined
   return {
     surface: "workflow" as const,
     processName: str(params, "processName"),
     windowTitle: str(params, "windowTitle"),
+    sandboxConnectionId: sandboxConnectionId || undefined,
   }
 }
 
