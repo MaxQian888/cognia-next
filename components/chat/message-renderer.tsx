@@ -226,12 +226,7 @@ function MessageRendererInner({
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
-    // Diagnostic: per-message boundary id so the PerfHud lists one row per
-    // message — `clear` the HUD, stream a turn, and watch which `chat:msg:*`
-    // rows reappear to see whether only the streaming row re-renders (memo
-    // holding) or every row does (memo busted). Revert to a stable
-    // `id="chat:message"` once the repeated-render question is settled.
-    <PerfBoundary id={`chat:msg:${message.id.slice(-6)}`}>
+    <PerfBoundary id="chat:message">
       <Message from={message.role}>
         {speaker &&
           message.role === "assistant" &&

@@ -7,9 +7,18 @@
 # Durable Objects are available on the Workers Free plan when SQLite-backed
 # (`new_sqlite_classes`), which is why the migration below uses it even though
 # the relay keeps no SQL rows — per-connection state lives on WebSocket
-# attachments. Per-IP connection limiting (the axum server's `ip_limits.rs`,
-# 50/IP) is intentionally NOT reimplemented here: configure a Cloudflare Rate
-# Limiting rule on the `/v1/signaling` route instead.
+# attachments.
+#
+# Per-IP connection limiting works in two layers:
+#   1. In-DO, per-room: the RoomDurableObject caps how many sockets one
+#      `cf-connecting-ip` may hold in a single room (SIGNALING_MAX_CONN_PER_IP_PER_ROOM).
+#   2. Global, per-IP: a DO only sees its own room, so cross-room flooding is
+#      the edge's job. Add a Cloudflare Rate Limiting rule (Security → WAF →
+#      Rate limiting rules) on this Worker, e.g.:
+#        - When incoming requests match:  URI Path equals "/v1/signaling"
+#        - Rate:  60 requests per 1 minute, counting by  IP
+#        - Action:  Block (or Managed Challenge)
+#      This mirrors the axum server's `ip_limits.rs` (50/IP process-wide).
 name = "cognia-signaling"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-11-01"
@@ -19,9 +28,38 @@ compatibility_date = "2024-11-01"
 # the `DEFAULT_SIGNALING_URL` fallback in lib/signaling/types.ts). On `wrangler
 # deploy` this provisions the hostname + route automatically — it REQUIRES the
 # matching zone (here `cognia.cn`) to be active on this Cloudflare account.
-# Change it to your own domain, or comment the line out to deploy to the
+# Change it to your own domain, or leave it commented to deploy to the
 # `*.workers.dev` subdomain only.
+#
+# MUST stay a TOP-LEVEL key (above the [vars] table) — a `routes` placed under
+# [vars] is parsed as an env var `vars.routes`, not a deploy trigger.
+#
+# NOTE: `*.workers.dev` is SNI-blocked from mainland China (GFW resets the TLS
+# handshake), so a custom domain on your own zone is required for CN clients.
 routes = [{ pattern = "signaling.cognia.cn", custom_domain = true }]
+
+# Room admission + abuse controls. Read by RoomDurableObject (room.rs) and the
+# router (lib.rs); shared verbatim with the axum server's env vars via
+# cognia-signaling-core::policy. Override per-deployment as needed.
+[vars]
+# Max peers admitted to one room. Default 4 leaves slack for reconnect overlap
+# (an old socket may still count until its close event fires).
+SIGNALING_MAX_PEERS_PER_ROOM = "4"
+# Max desktop peers per room (the home server). A second desktop is rejected
+# with `role_taken`.
+SIGNALING_MAX_DESKTOPS = "1"
+# Max concurrent sockets one IP may hold in a single room. Kept at the room cap
+# by default (home desktop + mobile often share one public IP); the global
+# per-IP defense is the edge Rate Limiting rule documented above.
+SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
+# Comma-separated WebSocket Origin allowlist. Empty = allow all (native clients
+# send no Origin and are always allowed). Set to your web + mobile origins to
+# refuse cross-origin browser connections, e.g.
+# "https://app.cognia.cn,capacitor://localhost,https://localhost".
+SIGNALING_ALLOWED_ORIGINS = ""
+# 1-in-N Analytics Engine sampling for hot events (relay + per-frame
+# rejections) so a flood can't amplify AE writes. State changes are unsampled.
+AE_SAMPLE_N = "10"
 
 [build]
 command = "worker-build --release"
@@ -41,5 +79,10 @@ enabled = true
 # data point per event (see `RoomDurableObject::record`); writes are
 # best-effort, so removing this binding degrades cleanly to the `console_log!`
 # breadcrumbs. Query via the AE SQL API.
-[[analytics_engine_datasets]]
-binding = "METRICS"
+#
+# FREE-PLAN: Analytics Engine requires the Workers Paid plan, so the binding is
+# commented out. The DO's `record()` no-ops when the binding is absent — the
+# relay is unaffected; use `wrangler tail` for the `console_log!` breadcrumbs.
+# Uncomment after upgrading to Workers Paid.
+# [[analytics_engine_datasets]]
+# binding = "METRICS"

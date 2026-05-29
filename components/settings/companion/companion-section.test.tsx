@@ -342,6 +342,54 @@ describe("CompanionSection", () => {
       expect(names).toContain("companion_server_start")
     })
   })
+
+  it("saving a named tunnel clears the token field and shows the configured badge", async () => {
+    const user = userEvent.setup()
+    let saved = false
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_tunnel_current") return null
+      if (name === "companion_tunnel_get_config") {
+        return saved
+          ? { mode: "named", hostname: "https://c.example.com", hasToken: true }
+          : { mode: "named", hostname: "", hasToken: false }
+      }
+      if (name === "companion_tunnel_save_named_config") {
+        saved = true
+        return undefined as unknown as never
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    // Named-mode form lives in the (default-open) Server & network group.
+    const hostname = await screen.findByLabelText(/Public hostname/i)
+    const token = screen.getByLabelText(/Connector token/i)
+    await user.type(hostname, "https://c.example.com")
+    await user.type(token, "eyJsecret")
+    await user.click(screen.getByRole("button", { name: /^Save$/i }))
+
+    // Token is a write-only secret — the field must clear on success so the
+    // populated password box doesn't imply it still holds the saved value.
+    await waitFor(() => expect((token as HTMLInputElement).value).toBe(""))
+    // The configured badge is the source-of-truth signal, not just a toast.
+    expect(await screen.findByTestId("tunnel-token-configured")).toBeInTheDocument()
+  })
+
+  it("collapses Advanced & diagnostics by default and expands on click", async () => {
+    const user = userEvent.setup()
+    render(<CompanionSection />)
+    // A default-open group renders immediately…
+    await screen.findByText(/Mobile companion server/i)
+    // …while the collapsed Advanced group keeps its cards unmounted.
+    expect(screen.queryByText(/Connection diagnostics/i)).toBeNull()
+    expect(screen.queryByText(/Sync status/i)).toBeNull()
+
+    await user.click(screen.getByTestId("companion-group-trigger-advanced"))
+
+    expect(await screen.findByText(/Connection diagnostics/i)).toBeInTheDocument()
+    expect(screen.getByText(/Sync status/i)).toBeInTheDocument()
+  })
 })
 
 // ─── Web-mode degradation ─────────────────────────────────────────────────────

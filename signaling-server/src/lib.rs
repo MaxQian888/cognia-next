@@ -16,4 +16,10 @@ pub mod ws;
 // integration tests in `tests/` keep resolving unchanged.
 pub use cognia_signaling_core::{limits, proto};
 
-pub use server::{router, serve, serve_for_test, serve_for_test_with, AppState};
+pub use server::{
+    router, serve, serve_for_test, serve_for_test_full, serve_for_test_with, AppState,
+};
+
+// Re-export the shared admission policy so `crate::policy::*` resolves in the
+// integration tests alongside `crate::proto` / `crate::limits`.
+pub use cognia_signaling_core::policy;

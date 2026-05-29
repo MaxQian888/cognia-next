@@ -1,26 +1,26 @@
 ---
-title: Extending Platform Connectors with Plugins
-description: How to write a cognia-next plugin that contributes a new messaging-platform adapter.
+title: 用插件扩展平台连接器
+description: 如何编写一个 cognia-next 插件，使其贡献一个新的消息平台适配器。
 ---
 
-# Extending Platform Connectors with Plugins
+# 用插件扩展平台连接器
 
-cognia-next ships seven built-in platform adapters (Telegram, Discord, Slack, Lark, OneBot, WeCom,
-personal WeChat). The **Plugin Connector Bridge** (`lib/plugin/bridge/connectors-bridge.ts`) lets
-any installed plugin contribute additional adapters — like Mastodon, Bluesky, Matrix, or any
-internal messaging system — without touching the cognia-next source.
+cognia-next 内置了七个平台适配器（Telegram、Discord、Slack、Lark、OneBot、WeCom、
+个人微信）。**插件连接器桥**（`lib/plugin/bridge/connectors-bridge.ts`）让
+任何已安装的插件都能贡献额外的适配器 —— 例如 Mastodon、Bluesky、Matrix，或任何
+内部消息系统 —— 而无需改动 cognia-next 的源码。
 
-## How it works
+## 工作原理
 
-1. The plugin declares `"connectors"` in `capabilities` and a `connectors[]` array in its manifest.
-2. On plugin enable, `registerPluginAdapters()` calls the factory function from the plugin's
-   exported module and hands the resulting `PlatformAdapter` to the `ConnectorBus`.
-3. The adapter then participates in the full pipeline: inbound dedup → policy evaluation →
-   mode routing → outbound FIFO queue → circuit breaker → audit log.
+1. 插件在 `capabilities` 中声明 `"connectors"`，并在清单中提供一个 `connectors[]` 数组。
+2. 插件启用时，`registerPluginAdapters()` 会调用插件导出模块中的工厂函数，
+   并将生成的 `PlatformAdapter` 交给 `ConnectorBus`。
+3. 该适配器随后便参与到完整的流水线中：入站去重 → 策略评估 →
+   模式路由 → 出站 FIFO 队列 → 熔断器 → 审计日志。
 
-## Walkthrough — hypothetical Mastodon adapter
+## 演练 —— 假想的 Mastodon 适配器
 
-### 1. Declare the capability in `manifest.json`
+### 1. 在 `manifest.json` 中声明能力
 
 ```json
 {
@@ -52,7 +52,7 @@ internal messaging system — without touching the cognia-next source.
 }
 ```
 
-### 2. Export the factory function
+### 2. 导出工厂函数
 
 ```ts
 // dist/index.ts (plugin main entry)
@@ -99,12 +99,12 @@ export function createMastodonAdapter(ctx: PluginAdapterContext): PlatformAdapte
 }
 ```
 
-### 3. Register / unregister via the bridge
+### 3. 通过桥进行注册 / 注销
 
-The bridge is called automatically by the plugin lifecycle when the user enables or disables
-the plugin. You do not need to call it manually — the `PluginManager` handles this.
+当用户启用或禁用插件时，插件生命周期会自动调用该桥。你无需手动调用 ——
+`PluginManager` 会处理这一切。
 
-For debugging you can call the bridge directly:
+调试时你可以直接调用该桥：
 
 ```ts
 import {
@@ -121,9 +121,9 @@ await registerPluginAdapters(manifest.id, manifest, exports)
 unregisterPluginAdapters(manifest.id)
 ```
 
-## Accessing credentials
+## 访问凭据
 
-Use the Tauri keyring shims to store and retrieve secrets:
+使用 Tauri keyring 垫片来存储和读取密钥：
 
 ```ts
 import { connectorsKeyringGet, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
@@ -135,31 +135,30 @@ await connectorsKeyringSet(adapterId, "accessToken", token)
 const token = await connectorsKeyringGet(adapterId, "accessToken")
 ```
 
-Credentials are stored encrypted in the OS keyring (macOS Keychain, Windows Credential Manager,
-libsecret on Linux). They are never logged or included in backups.
+凭据以加密形式存储在操作系统的 keyring 中（macOS Keychain、Windows Credential Manager、
+Linux 上的 libsecret）。它们绝不会被记入日志或包含在备份中。
 
-## Transport patterns
+## 传输模式
 
-| Pattern      | When to use                                                              |
+| 模式         | 适用场景                                                                 |
 | ------------ | ------------------------------------------------------------------------ |
-| `longpoll`   | REST-based platforms with a "get updates" endpoint (Telegram, Mastodon). |
-| `webhook`    | Platform pushes to a public URL via axum.                                |
-| `reverse-ws` | Device connects to cognia-next (OneBot / NapCat pattern).                |
-| `gateway`    | Maintain a long-lived WS to the platform (Discord).                      |
+| `longpoll`   | 带有“拉取更新”端点的基于 REST 的平台（Telegram、Mastodon）。              |
+| `webhook`    | 平台通过 axum 推送到一个公网 URL。                                       |
+| `reverse-ws` | 设备连接到 cognia-next（OneBot / NapCat 模式）。                         |
+| `gateway`    | 维持一条到平台的长连接 WS（Discord）。                                   |
 
-For `webhook` and `reverse-ws` you need to register an axum route in the Rust connector module.
-See `src-tauri/src/connectors/` for examples.
+对于 `webhook` 和 `reverse-ws`，你需要在 Rust 连接器模块中注册一个 axum 路由。
+示例参见 `src-tauri/src/connectors/`。
 
-## Coverage requirement
+## 覆盖率要求
 
-Plugin-contributed adapters are subject to the same ≥90% test coverage rule as built-in code
-(see `CLAUDE.md`). Ship tests alongside your plugin using the same `foo.test.ts` co-location
-convention.
+插件贡献的适配器与内置代码遵循同样的 ≥90% 测试覆盖率规则
+（参见 `CLAUDE.md`）。请使用同样的 `foo.test.ts` 同目录约定，将测试与你的插件一起发布。
 
-## Reference
+## 参考
 
-- `types/plugin/plugin.ts` — `PluginConnectorDef`, `PluginCapability`
-- `lib/plugin/bridge/connectors-bridge.ts` — `registerPluginAdapters`, `unregisterPluginAdapters`
-- `types/connectors/adapter.ts` — `PlatformAdapter` interface
-- `lib/connectors/bus.ts` — `ConnectorBus` (singleton)
-- ADR-0009 (`docs/content/docs/adr/0009-platform-connectors.md`) — full architecture decision
+- `types/plugin/plugin.ts` —— `PluginConnectorDef`、`PluginCapability`
+- `lib/plugin/bridge/connectors-bridge.ts` —— `registerPluginAdapters`、`unregisterPluginAdapters`
+- `types/connectors/adapter.ts` —— `PlatformAdapter` 接口
+- `lib/connectors/bus.ts` —— `ConnectorBus`（单例）
+- ADR-0009（`docs/content/docs/adr/0009-platform-connectors.md`）—— 完整的架构决策

@@ -14,8 +14,8 @@ const BASE = process.env.SIGNALING_URL ?? "ws://127.0.0.1:8787"
 const RID = `it-${Date.now()}`
 const TIMEOUT_MS = 5000
 
-function connect(role) {
-  const ws = new WebSocket(`${BASE}/v1/signaling?rid=${RID}`)
+function connect(role, rid = RID) {
+  const ws = new WebSocket(`${BASE}/v1/signaling?rid=${rid}`)
   ws._inbox = []
   ws._waiters = []
   ws.addEventListener("message", (ev) => {
@@ -58,8 +58,52 @@ function open(ws) {
   })
 }
 
+// Like open() but resolves {ok} instead of throwing — used where an upgrade
+// rejection (e.g. the per-IP cap returning 429) is an acceptable outcome.
+function tryOpen(ws, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, reason: "timeout" }), ms)
+    ws.addEventListener("open", () => {
+      clearTimeout(timer)
+      resolve({ ok: true })
+    })
+    ws.addEventListener("error", () => {
+      clearTimeout(timer)
+      resolve({ ok: false, reason: "upgrade-rejected" })
+    })
+  })
+}
+
 function send(ws, frame) {
   ws.send(JSON.stringify(frame))
+}
+
+// Resolve if NO frame arrives within `ms`; reject if one does. Used to prove
+// an unsubscribed observer receives nothing.
+function expectNoFrame(ws, ms) {
+  return new Promise((resolve, reject) => {
+    if (ws._inbox.length) {
+      reject(new Error(`${ws._role}: unexpected buffered frame ${JSON.stringify(ws._inbox[0])}`))
+      return
+    }
+    // The pushed function and the one removed on timeout must be the SAME
+    // reference, or a stale waiter lingers and eats the next real frame.
+    const waiter = (frame) =>
+      reject(new Error(`${ws._role}: unexpected frame ${JSON.stringify(frame)}`))
+    setTimeout(() => {
+      const i = ws._waiters.indexOf(waiter)
+      if (i >= 0) ws._waiters.splice(i, 1)
+      resolve()
+    }, ms)
+    ws._waiters.push(waiter)
+  })
+}
+
+// Subscribe and await the `subscribed` ack.
+async function subscribe(ws, rid, role, nonce) {
+  send(ws, { kind: "subscribe", rendezvousId: rid, role, clientNonce: nonce })
+  const frame = await nextFrame(ws)
+  return frame
 }
 
 function assert(cond, msg) {
@@ -111,8 +155,76 @@ async function main() {
   const pong = await nextFrame(mobile)
   assert(pong.kind === "pong", "ping is answered with pong")
 
+  // Subscribed-only fan-out (the security fix): an observer that connects but
+  // never subscribes must NOT receive relayed envelopes, and must not trip a
+  // peerJoined to the subscribed peers.
+  const observer = connect("observer")
+  await open(observer)
+  await expectNoFrame(desktop, 300) // no peerJoined for an unsubscribed socket
+  send(mobile, { kind: "relay", rendezvousId: RID, payload: "BBBB" })
+  const relayed2 = await nextFrame(desktop)
+  assert(
+    relayed2.kind === "relay" && relayed2.payload === "BBBB",
+    "relay still reaches the desktop"
+  )
+  await expectNoFrame(observer, 300) // observer eavesdrops nothing
+  observer.close()
+
+  // Binary frames are explicitly rejected (parity with the axum server).
+  mobile.send(new Uint8Array([1, 2, 3]))
+  const bin = await nextFrame(mobile)
+  assert(
+    bin.kind === "error" && bin.code === "binary_not_supported",
+    "binary frame is rejected with binary_not_supported"
+  )
+
   desktop.close()
   mobile.close()
+
+  // Role cardinality: a second desktop into a fresh room is role_taken.
+  const ridA = `${RID}-roles`
+  const d1 = connect("desktop", ridA)
+  await open(d1)
+  const s1 = await subscribe(d1, ridA, "desktop", "n-d1")
+  assert(s1.kind === "subscribed", "first desktop subscribes")
+  const d2 = connect("desktop2", ridA)
+  await open(d2)
+  const s2 = await subscribe(d2, ridA, "desktop", "n-d2")
+  assert(s2.kind === "error" && s2.code === "role_taken", "second desktop is role_taken")
+  d1.close()
+  d2.close()
+
+  // Room cap: with the default cap of 4, the 5th subscriber is room_full.
+  const ridB = `${RID}-cap`
+  const cap = []
+  const capDesktop = connect("desktop", ridB)
+  await open(capDesktop)
+  await subscribe(capDesktop, ridB, "desktop", "c-d")
+  cap.push(capDesktop)
+  for (let i = 0; i < 3; i++) {
+    const m = connect(`mobile${i}`, ridB)
+    await open(m)
+    const s = await subscribe(m, ridB, "mobile", `c-m${i}`)
+    assert(s.kind === "subscribed", `mobile ${i} fills a room slot`)
+    cap.push(m)
+  }
+  // The 5th is rejected one of two ways depending on environment: against a
+  // real Cloudflare edge (cf-connecting-ip present) the per-IP cap (default 4,
+  // = room cap) refuses the UPGRADE first since all 5 share one IP; locally
+  // (no cf-connecting-ip) per-IP is a no-op so the 5th subscribes and gets a
+  // `room_full` error frame. Accept either — both prove the room is bounded.
+  const overflow = connect("overflow", ridB)
+  const opened = await tryOpen(overflow, TIMEOUT_MS)
+  if (!opened.ok) {
+    console.log("  5th connection refused at upgrade (per-IP cap) ✓")
+  } else {
+    const ofRes = await subscribe(overflow, ridB, "mobile", "c-of")
+    assert(ofRes.kind === "error" && ofRes.code === "room_full", "5th subscriber is room_full")
+    console.log("  5th subscribe refused (room_full) ✓")
+  }
+  overflow.close()
+  for (const ws of cap) ws.close()
+
   console.log("✓ signaling worker integration smoke passed")
 }
 

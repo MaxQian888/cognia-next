@@ -1,107 +1,107 @@
 ---
-title: "Slack Bot Setup"
-description: "Create a Slack app, gather bot/app tokens and signing secret, and connect it to cognia-next."
+title: "Slack 机器人配置"
+description: "创建 Slack 应用，收集 bot/app 令牌与签名密钥，并将其连接到 cognia-next。"
 ---
 
-# Slack Bot Setup Guide
+# Slack 机器人配置指南
 
-This guide walks you through creating a Slack app, obtaining the required tokens and secrets, and configuring cognia-next to connect to your workspace.
-
----
-
-## 1. Create a Slack App
-
-1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
-2. Click **Create New App** and choose **From scratch**.
-3. Enter an **App Name** (e.g. "Cognia Bot") and select the **workspace** you want to install it in.
-4. Click **Create App**.
+本指南将引导你创建 Slack 应用、获取所需的令牌与密钥，并配置 cognia-next 以连接到你的工作区。
 
 ---
 
-## 2. Add OAuth Scopes
+## 1. 创建 Slack 应用
 
-1. In your app settings, select **OAuth & Permissions** from the left sidebar.
-2. Scroll down to **Bot Token Scopes** and add the following:
+1. 打开 [https://api.slack.com/apps](https://api.slack.com/apps) 并使用你的 Slack 账号登录。
+2. 点击 **Create New App**，然后选择 **From scratch**。
+3. 输入一个 **App Name**（例如 "Cognia Bot"），并选择你想要安装它的 **workspace**。
+4. 点击 **Create App**。
 
-   | Scope               | Purpose                                   |
+---
+
+## 2. 添加 OAuth 权限范围
+
+1. 在应用设置中，从左侧边栏选择 **OAuth & Permissions**。
+2. 向下滚动至 **Bot Token Scopes**，添加以下权限范围：
+
+   | 权限范围            | 用途                                       |
    | ------------------- | ----------------------------------------- |
-   | `chat:write`        | Send messages to channels and DMs         |
-   | `channels:history`  | Read messages in public channels          |
-   | `im:history`        | Read messages in direct messages (DMs)    |
-   | `app_mentions:read` | Receive events when the bot is @mentioned |
-   | `users:read`        | Look up user information                  |
-   | `users:read.email`  | (Optional) Access user email addresses    |
+   | `chat:write`        | 向频道和私信发送消息                       |
+   | `channels:history`  | 读取公开频道中的消息                       |
+   | `im:history`        | 读取私信（DM）中的消息                      |
+   | `app_mentions:read` | 在机器人被 @mention 时接收事件             |
+   | `users:read`        | 查询用户信息                               |
+   | `users:read.email`  | （可选）访问用户的电子邮件地址             |
 
-3. Click **Save Changes**.
-
----
-
-## 3. Enable Socket Mode
-
-cognia-next uses **Socket Mode** by default, which means it connects via a persistent WebSocket and does not require a public URL.
-
-1. In your app settings, select **Socket Mode** from the left sidebar.
-2. Toggle **Enable Socket Mode** to on.
-3. You will be prompted to **Generate an App-Level Token**:
-   - Enter a token name (e.g. "cognia-socket-token").
-   - Add the scope `connections:write`.
-   - Click **Generate**.
-4. Copy the token — it starts with `xapp-`. **Store it securely.**
+3. 点击 **Save Changes**。
 
 ---
 
-## 4. Install the App to Your Workspace
+## 3. 启用 Socket Mode
 
-1. In your app settings, select **OAuth & Permissions** from the left sidebar.
-2. Click **Install to Workspace** (or **Reinstall** if already installed).
-3. Review the permissions and click **Allow**.
-4. Copy the **Bot User OAuth Token** — it starts with `xoxb-`. **Store it securely.**
+cognia-next 默认使用 **Socket Mode**，即通过一个持久的 WebSocket 连接，无需公网 URL。
 
----
-
-## 5. Copy the Signing Secret
-
-1. In your app settings, select **Basic Information** from the left sidebar.
-2. Scroll down to **App Credentials**.
-3. Copy the **Signing Secret**. This is used to verify that webhook payloads originate from Slack.
+1. 在应用设置中，从左侧边栏选择 **Socket Mode**。
+2. 将 **Enable Socket Mode** 切换为开启。
+3. 系统会提示你 **Generate an App-Level Token**：
+   - 输入一个令牌名称（例如 "cognia-socket-token"）。
+   - 添加权限范围 `connections:write`。
+   - 点击 **Generate**。
+4. 复制该令牌 —— 它以 `xapp-` 开头。**请妥善保管。**
 
 ---
 
-## 6. Configure cognia-next
+## 4. 将应用安装到你的工作区
 
-1. Open cognia-next and navigate to **Settings → Connections**.
-2. Click **Add Adapter** and choose **Slack**.
-3. In the **Slack Configuration** dialog:
-   - Enter a **Display Name** for this bot (e.g. "My Workspace Bot").
-   - Paste the **Bot Token** (`xoxb-...`) you copied in step 4.
-   - Click **Test** to verify the token connects to Slack successfully. The dialog will display your bot's username and workspace name.
-   - Paste the **Signing Secret** you copied in step 5.
-   - Select **Socket Mode** as the transport (default).
-   - Paste the **App Token** (`xapp-...`) you copied in step 3.
-4. Click **Create**.
-
-cognia-next will connect to Slack via Socket Mode. No public URL is required.
+1. 在应用设置中，从左侧边栏选择 **OAuth & Permissions**。
+2. 点击 **Install to Workspace**（若已安装则点击 **Reinstall**）。
+3. 检查权限并点击 **Allow**。
+4. 复制 **Bot User OAuth Token** —— 它以 `xoxb-` 开头。**请妥善保管。**
 
 ---
 
-## 7. Verify the Connection
+## 5. 复制签名密钥（Signing Secret）
 
-1. Send a **direct message** to your bot in Slack, or `@mention` it in a channel where it has been invited.
-2. The message should appear in cognia-next within a second or two.
-3. Check the **Connections** overview — the adapter should show status **Running**.
-
-If the adapter shows **Down** or **Degraded**:
-
-- Verify the bot token is correct (`xoxb-...`).
-- Verify the app token is correct (`xapp-...`) and has the `connections:write` scope.
-- Confirm Socket Mode is enabled in the Slack Developer Portal.
-- Check the **Audit Log** tab in Settings → Connections for error details.
+1. 在应用设置中，从左侧边栏选择 **Basic Information**。
+2. 向下滚动至 **App Credentials**。
+3. 复制 **Signing Secret**。它用于验证 webhook 负载确实来自 Slack。
 
 ---
 
-## Notes
+## 6. 配置 cognia-next
 
-- **Rate limits**: Slack enforces a burst limit of approximately 1 message per second per channel. cognia-next's outbound runner respects retryable errors (HTTP 429).
-- **Events API webhook**: For production deployments behind a public URL, you can switch the transport to **Events API webhook** in the configuration dialog. This requires a publicly reachable HTTPS URL and is outside the scope of Phase 1.
-- **Typing indicator**: Slack's `assistant.threads.setStatus` is restricted to Slack Assistant apps. Standard bot adapters do not support typing indicators in Phase 1.
-- **File uploads**: Phase 1 sends files as hyperlinks via `chat.postMessage`. Native file upload via `files.upload` is planned for Phase 2.
+1. 打开 cognia-next 并导航到 **设置 → 平台连接**。
+2. 点击 **添加连接器** 并选择 **Slack**。
+3. 在 **Slack Configuration** 对话框中：
+   - 为该机器人输入一个 **显示名称**（例如 "My Workspace Bot"）。
+   - 粘贴你在第 4 步复制的 **Bot Token**（`xoxb-...`）。
+   - 点击 **Test** 验证该令牌能否成功连接到 Slack。对话框会显示你的机器人用户名和工作区名称。
+   - 粘贴你在第 5 步复制的 **签名密钥（Signing Secret）**。
+   - 选择 **Socket Mode** 作为传输方式（默认）。
+   - 粘贴你在第 3 步复制的 **App Token**（`xapp-...`）。
+4. 点击 **Create**。
+
+cognia-next 将通过 Socket Mode 连接到 Slack，无需公网 URL。
+
+---
+
+## 7. 验证连接
+
+1. 在 Slack 中向你的机器人发送一条 **私信**，或在已邀请它的频道中对它 `@mention`。
+2. 该消息应在一两秒内出现在 cognia-next 中。
+3. 检查 **平台连接** 概览 —— 该适配器的状态应显示为 **运行中**。
+
+如果适配器显示 **已停止** 或 **降级**：
+
+- 验证 bot 令牌是否正确（`xoxb-...`）。
+- 验证 app 令牌是否正确（`xapp-...`）且具备 `connections:write` 权限范围。
+- 确认已在 Slack Developer Portal 中启用 Socket Mode。
+- 在 设置 → 平台连接 的 **Audit Log** 标签页中查看错误详情。
+
+---
+
+## 注意事项
+
+- **速率限制**：Slack 对每个频道强制实施约每秒 1 条消息的突发限制。cognia-next 的出站执行器会遵循可重试的错误（HTTP 429）。
+- **Events API Webhook**：对于部署在公网 URL 之后的生产环境，你可以在配置对话框中将传输方式切换为 **Events API Webhook**。这需要一个公网可访问的 HTTPS URL，且不在第 1 阶段（Phase 1）的范围内。
+- **正在输入指示器**：Slack 的 `assistant.threads.setStatus` 仅限于 Slack Assistant 应用使用。标准机器人适配器在第 1 阶段不支持正在输入指示器。
+- **文件上传**：第 1 阶段通过 `chat.postMessage` 以超链接形式发送文件。通过 `files.upload` 进行的原生文件上传计划在第 2 阶段（Phase 2）实现。

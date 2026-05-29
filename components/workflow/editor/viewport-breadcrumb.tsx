@@ -12,10 +12,9 @@
  * pointermove.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useShallow } from "zustand/react/shallow"
 import { useOnViewportChange, type ReactFlowInstance, type Viewport } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
@@ -78,36 +77,30 @@ function findActiveGroup(
   return best
 }
 
-export function ViewportBreadcrumb({
+export const ViewportBreadcrumb = memo(function ViewportBreadcrumb({
   store,
   reactFlowInstance,
   className,
 }: ViewportBreadcrumbProps) {
   const t = useTranslations("workflows.editor.breadcrumb")
-  const {
-    workflowName,
-    nodes,
-    viewport: storeViewport,
-  } = store(
-    useShallow((s: EditorState) => ({
-      workflowName: s.baseWorkflow.name,
-      nodes: s.nodes,
-      viewport: s.viewport,
-    }))
-  )
+  // Subscribe ONLY to the (rarely-changing) workflow name. The graph is read
+  // through `store.getState().nodes` inside the throttled group scan, so a
+  // node-drag frame (which replaces the `nodes` array) does NOT re-render the
+  // breadcrumb — only `useOnViewportChange` (pan/zoom) drives recomputation.
+  const workflowName = store((s: EditorState) => s.baseWorkflow.name)
 
   // Per-frame live viewport state is owned LOCALLY by the breadcrumb so that
   // pan/zoom doesn't re-render the canvas parent every animation frame. The
   // seed comes from the editor store; `useOnViewportChange` then pushes
   // updates while the user is interacting. The active-group compute below is
   // rAF-throttled so the O(n) group scan only runs once per frame.
-  const [liveViewport, setLiveViewport] = useState<Viewport>(storeViewport)
+  const [liveViewport, setLiveViewport] = useState<Viewport>(() => store.getState().viewport)
   useOnViewportChange({ onChange: setLiveViewport })
 
   const [activeGroup, setActiveGroup] = useState<GroupHit | null>(null)
   const compute = useMemo(
-    () => (vp: Viewport) => setActiveGroup(findActiveGroup(nodes, vp)),
-    [nodes]
+    () => (vp: Viewport) => setActiveGroup(findActiveGroup(store.getState().nodes, vp)),
+    [store]
   )
   const throttled = useRafThrottle(compute)
 
@@ -157,4 +150,4 @@ export function ViewportBreadcrumb({
       ) : null}
     </nav>
   )
-}
+})

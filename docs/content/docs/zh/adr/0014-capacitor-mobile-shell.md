@@ -1,44 +1,41 @@
 ---
-title: ADR-0014 — Capacitor mobile shell
-description: Mobile client v1 wraps the existing Tauri-shared Next.js static export in a Capacitor 7 shell. Same JS bundle on three platforms, three-way Transport selection, OS keystore for the device JWT.
+title: ADR-0014 — Capacitor 移动端外壳
+description: 移动端客户端 v1 把既有的、与 Tauri 共享的 Next.js 静态导出包裹进一个 Capacitor 7 外壳。同一份 JS 包跑在三个平台上，三路 Transport 选择，设备 JWT 存于操作系统密钥库。
 ---
 
-# Capacitor mobile shell
+# Capacitor 移动端外壳
 
-| Status   | Accepted                                                                  |
+| 状态     | 已接受                                                                     |
 | -------- | ------------------------------------------------------------------------- |
-| Date     | 2026-05-08                                                                |
-| Affects  | mobile/, lib/tauri/, app/(mobile-onboard), app/, src-tauri/companion_api/ |
-| Issues   | #41 (M3.1) · #42 (M3.2) · #43 (M3.3) · #44 (M3.4)                         |
-| Tracking | #56                                                                       |
+| 日期     | 2026-05-08                                                                |
+| 影响     | mobile/, lib/tauri/, app/(mobile-onboard), app/, src-tauri/companion_api/ |
+| Issue    | #41 (M3.1) · #42 (M3.2) · #43 (M3.3) · #44 (M3.4)                         |
+| 跟踪     | #56                                                                       |
 
-## Context
+## 背景
 
-cognia-next runs on the desktop as a Tauri 2 app (Rust shell + WebView).
-The Mobile Client v1 plan (issue #56) adds a phone client that talks to
-the desktop over LAN. Three native-shell options were on the table:
+cognia-next 在桌面端以 Tauri 2 应用形式运行（Rust 外壳 + WebView）。
+移动端客户端 v1 计划（issue #56）新增一个手机客户端，通过 LAN 与桌面端
+通信。当时摆在桌面上的有三个原生外壳方案：
 
-1. **Tauri 2 Mobile** — would let us reuse the same Rust crates. Rejected:
-   sidecar support is missing on mobile (Tauri issues #11454 / #9774) and
-   our Claude Agent SDK sidecar is the keystone of the desktop runtime.
-2. **React Native** — would let us share Zustand stores and lib/ helpers.
-   Rejected: rewriting all 57 shadcn/ui components in RN primitives is
-   weeks of work for no functional gain. The desktop UI is already the
-   thing the mobile user wants.
-3. **Capacitor 7** — wraps the existing Next.js static export in a native
-   WebView. Selected.
+1. **Tauri 2 Mobile** —— 能让我们复用同一套 Rust crate。否决：移动端缺少
+   sidecar 支持（Tauri issues #11454 / #9774），而我们的 Claude Agent SDK
+   sidecar 是桌面端运行时的基石。
+2. **React Native** —— 能让我们共享 Zustand store 与 lib/ 辅助函数。否决：
+   把全部 57 个 shadcn/ui 组件用 RN 原语重写需要数周，却没有任何功能收益。
+   桌面端 UI 本来就是移动端用户想要的东西。
+3. **Capacitor 7** —— 把既有的 Next.js 静态导出包进原生 WebView。选用。
 
-Pairing the choice with an HTTP-based companion server (M2) means: the
-phone calls into the desktop the same way an external script would,
-through `/api/v1/*`. The server-client architecture documented in #56
-makes the mobile client and the future headless `cognia-server` symmetric
-clients of the same API.
+把该选择与一个基于 HTTP 的 companion 服务器（M2）配对意味着：手机调用
+桌面端的方式与外部脚本一样，都走 `/api/v1/*`。#56 中记录的服务器-客户端
+架构使移动端客户端与未来无头的 `cognia-server` 成为同一套 API 的对称
+客户端。
 
-## Decision
+## 决策
 
-### Workspace layout
+### 工作区布局
 
-A new pnpm workspace `mobile/` joins the existing `docs/`:
+一个新的 pnpm 工作区 `mobile/` 加入既有的 `docs/`：
 
 ```
 pnpm-workspace.yaml
@@ -46,27 +43,27 @@ pnpm-workspace.yaml
 └── mobile      # Capacitor shell (no Next server — feeds off ../out)
 ```
 
-Capacitor's `webDir: "../out"` points at the same directory Tauri loads
-from (`src-tauri/tauri.conf.json` `frontendDist: "../out"`). One
-`pnpm build` produces one static export, two native shells consume it.
+Capacitor 的 `webDir: "../out"` 指向 Tauri 加载的同一个目录
+（`src-tauri/tauri.conf.json` 的 `frontendDist: "../out"`）。一次
+`pnpm build` 产出一份静态导出，两个原生外壳消费它。
 
-### Pinned versions
+### 锁定的版本
 
-| Package                                                            | Range     | Why                                                                                          |
+| 包                                                                 | 范围      | 原因                                                                                          |
 | ------------------------------------------------------------------ | --------- | -------------------------------------------------------------------------------------------- |
-| `@capacitor/core`, `@capacitor/cli`                                | `^7.0.0`  | Capacitor 7 is the floor for Node 20.                                                        |
-| `@capacitor/android`                                               | `^7.6.3`  | Pinned to align with `^7` core.                                                              |
-| `@capacitor/{app,keyboard,network,preferences,push-notifications}` | `^7.0.x`  | Official plugins.                                                                            |
-| `capacitor-secure-storage-plugin`                                  | `^0.13.0` | Active community plugin; bridges Keychain / Keystore.                                        |
-| `@capacitor-mlkit/barcode-scanning`                                | `^7.5.0`  | The currently maintained QR scanner. The older `@capacitor/barcode-scanner` is unmaintained. |
+| `@capacitor/core`, `@capacitor/cli`                                | `^7.0.0`  | Capacitor 7 是 Node 20 的下限。                                                              |
+| `@capacitor/android`                                               | `^7.6.3`  | 锁定以与 `^7` core 对齐。                                                                    |
+| `@capacitor/{app,keyboard,network,preferences,push-notifications}` | `^7.0.x`  | 官方插件。                                                                                   |
+| `capacitor-secure-storage-plugin`                                  | `^0.13.0` | 活跃的社区插件；桥接 Keychain / Keystore。                                                   |
+| `@capacitor-mlkit/barcode-scanning`                                | `^7.5.0`  | 当前在维护的 QR 扫描器。较老的 `@capacitor/barcode-scanner` 已无人维护。                     |
 
-`bundledWebRuntime` is **not set** — the field was removed in Capacitor
-5+. Issue #41's original wording predates that change.
+`bundledWebRuntime` **未设置**——该字段在 Capacitor 5+ 中被移除。issue
+#41 的原始措辞早于此变更。
 
-### Transport selection
+### 传输层选择
 
-Three concrete `Transport` implementations, picked once at module load
-in `lib/tauri/transport-instance.ts`:
+三个具体的 `Transport` 实现，在 `lib/tauri/transport-instance.ts` 模块
+加载时一次性选定：
 
 ```
 window.__TAURI_INTERNALS__ exists                  → TauriTransport
@@ -74,137 +71,126 @@ window.Capacitor?.isNativePlatform() === true      → CompanionTransport
 otherwise                                          → WebStubTransport
 ```
 
-`CompanionTransport` (M2.7, `lib/tauri/transport-companion.ts`) talks to
-the desktop over `POST /api/v1/_rpc/<command>` and `GET /ws/v1/events`.
-On the phone its base URL points to the desktop's LAN IP. On the web
-build it would aim at a future `cognia-server` deployment — the same
-code path serves both.
+`CompanionTransport`（M2.7，`lib/tauri/transport-companion.ts`）通过
+`POST /api/v1/_rpc/<command>` 与 `GET /ws/v1/events` 与桌面端通信。在
+手机上，它的 base URL 指向桌面端的 LAN IP。在 web 构建中，它将瞄准
+未来的 `cognia-server` 部署——同一条代码路径服务两者。
 
-### Storage of the device JWT
+### 设备 JWT 的存储
 
-`lib/tauri/companion-storage.ts` adds a backend-agnostic
-`CompanionConfigStorage` interface with two implementations:
+`lib/tauri/companion-storage.ts` 加入一个与后端无关的
+`CompanionConfigStorage` 接口，含两个实现：
 
-- **`LocalStorageCompanionStorage`** — wraps `window.localStorage`. Used
-  in the web build and in jsdom unit tests.
-- **`SecureStorageCompanionStorage`** — dynamically imports
-  `capacitor-secure-storage-plugin` (so the web bundle never resolves
-  it). Stores the JSON-serialized `CompanionConfig` under
-  `cognia.companion.config.v1` in iOS Keychain / Android Keystore.
+- **`LocalStorageCompanionStorage`** —— 封装 `window.localStorage`。用于
+  web 构建以及 jsdom 单元测试。
+- **`SecureStorageCompanionStorage`** —— 动态导入
+  `capacitor-secure-storage-plugin`（这样 web 包永远不会解析它）。把
+  JSON 序列化的 `CompanionConfig` 存在 iOS Keychain / Android Keystore 中
+  的 `cognia.companion.config.v1` 键下。
 
-Selection happens via `pickCompanionStorage()`, mirroring the transport
-pick. A module-level cache fronts both backends so the hot path
-(`transport.call()` reading the JWT) stays synchronous; the cache is
-primed by `hydrateCompanionConfig()` at app boot or by any successful
-`saveCompanionConfig()`.
+选择通过 `pickCompanionStorage()` 进行，镜像传输层的选择。一个模块级
+缓存挡在两个后端之前，使热路径（`transport.call()` 读取 JWT）保持同步；
+缓存在应用启动时由 `hydrateCompanionConfig()` 预热，或由任何一次成功的
+`saveCompanionConfig()` 预热。
 
-### Mobile onboarding stub
+### 移动端引导（stub）
 
 `app/(mobile-onboard)/pair/page.tsx` + `components/mobile/
-pair-onboarding-client.tsx` ship the M3.4 stub:
+pair-onboarding-client.tsx` 交付 M3.4 stub：
 
-1. Manual textboxes for `baseUrl` + `pair JWT` (real QR scan ships in
-   M4.5 / #49).
-2. `POST {baseUrl}/api/v1/auth/pair` with the pair JWT, device label,
-   platform, and an optional public key.
-3. Persist the returned `CompanionConfig` into the secure storage path.
-4. Smoke RPC: `transport.call("claude_sidecar_status")` — the read-only
-   command is already registered server-side in
-   `src-tauri/src/companion_api/rpc.rs`. (Issue #44's example used
-   `list_characters`, but characters live in Dexie and are not exposed
-   on the Rust side; `claude_sidecar_status` is the equivalent
-   read-only smoke that exists today.)
-5. Smoke WS: `transport.subscribe("claude://session-event", …)` — opens
-   the WebSocket, replays from the seq cursor.
+1. 用于 `baseUrl` + `pair JWT` 的手动文本框（真正的 QR 扫描在 M4.5 / #49
+   发布）。
+2. 带 pair JWT、设备标签、平台与一个可选公钥，`POST {baseUrl}/api/v1/auth/pair`。
+3. 把返回的 `CompanionConfig` 持久化到安全存储路径。
+4. 冒烟 RPC：`transport.call("claude_sidecar_status")` —— 该只读命令已在
+   服务端的 `src-tauri/src/companion_api/rpc.rs` 中注册。（issue #44 的示例
+   用的是 `list_characters`，但 character 存在 Dexie 中、并未在 Rust 侧
+   暴露；`claude_sidecar_status` 是当下存在的等价只读冒烟。）
+5. 冒烟 WS：`transport.subscribe("claude://session-event", …)` —— 打开
+   WebSocket，从 seq 游标回放。
 
-The page sits behind a route group `(mobile-onboard)`, so the URL is
-`/pair`. Static export is preserved (`dynamicParams = false`, no
-`generateStaticParams` needed since the route is concrete).
+该页面位于路由组 `(mobile-onboard)` 之下，因此 URL 为 `/pair`。静态导出
+得以保留（`dynamicParams = false`，由于路由是具体的，无需
+`generateStaticParams`）。
 
-### Platform manifests
+### 平台清单
 
-iOS (`mobile/ios/App/App/Info.plist`, M3.2 — HITL on a Mac):
+iOS（`mobile/ios/App/App/Info.plist`，M3.2 —— 需在 Mac 上人工介入）：
 
-- `NSCameraUsageDescription` — QR pairing
-- `NSLocalNetworkUsageDescription` — discover desktop on LAN
-- `NSAppTransportSecurity / NSAllowsLocalNetworking = true` — needed
-  while M2.8's TLS work is deferred to M2.9. Once the self-signed cert
-  lands the policy tightens to a trust anchor.
+- `NSCameraUsageDescription` —— QR 配对
+- `NSLocalNetworkUsageDescription` —— 在 LAN 上发现桌面端
+- `NSAppTransportSecurity / NSAllowsLocalNetworking = true` —— 在 M2.8 的
+  TLS 工作被推迟到 M2.9 期间所需。一旦自签名证书落地，策略就收紧为
+  trust anchor。
 - iOS Deployment Target = 16.0
 
-Android (`mobile/android/`, M3.3 — built and verified on Windows with
-JDK 21 + Android SDK 35):
+Android（`mobile/android/`，M3.3 —— 在 Windows 上以 JDK 21 + Android
+SDK 35 构建并验证）：
 
-- `INTERNET`, `CAMERA`, `POST_NOTIFICATIONS` declared in
-  `app/src/main/AndroidManifest.xml`.
-- Debug-only `usesCleartextTraffic="true"` lives in
-  `app/src/debug/AndroidManifest.xml` so release builds inherit
-  the secure default.
-- `compileSdk` / `targetSdk` = 35 (Capacitor 7 default), `minSdk` = 24.
-- `gradlew assembleDebug` succeeded; the resulting
-  `app-debug.apk` (≈22 MB) is the smoke evidence.
+- `INTERNET`、`CAMERA`、`POST_NOTIFICATIONS` 声明于
+  `app/src/main/AndroidManifest.xml`。
+- 仅调试用的 `usesCleartextTraffic="true"` 放在
+  `app/src/debug/AndroidManifest.xml`，这样发布构建继承安全默认值。
+- `compileSdk` / `targetSdk` = 35（Capacitor 7 默认），`minSdk` = 24。
+- `gradlew assembleDebug` 成功；产出的 `app-debug.apk`（≈22 MB）即冒烟
+  证据。
 
-## Consequences
+## 后果
 
-### Good
+### 好处
 
-- One Next.js codebase, three shells. No UI rewrite, no parallel
-  component libraries.
-- `out/` regeneration cost is paid once, consumed twice.
-- Adding a future fourth client (Electron, Wails, …) needs only a new
-  `Transport` implementation and a wrapper that loads `out/`.
-- The phone is a _client_, not a peer. Twin embeddings, sidecar token
-  budgets, MCP servers, OAuth bearers — all stay desktop-side. The
-  phone never touches `~/.claude/.credentials.json`.
+- 一套 Next.js 代码库，三个外壳。无 UI 重写，无并行的组件库。
+- `out/` 的再生成成本付一次，消费两次。
+- 将来新增第四个客户端（Electron、Wails……）只需一个新的 `Transport`
+  实现，外加一个加载 `out/` 的封装。
+- 手机是_客户端_，不是对等节点。Twin embedding、sidecar token 预算、MCP
+  服务器、OAuth bearer —— 全都留在桌面侧。手机永不触碰
+  `~/.claude/.credentials.json`。
 
-### Acceptable cost
+### 可接受的成本
 
-- WebView constraints: no `<canvas>` heavy rendering paths, no native
-  filesystem access. cognia-next happens to not need either on mobile
-  (no sidebar 3D scene yet).
-- Pairing flow needs a UX (QR or sideband). M4.5 ships the QR scan;
-  the M3.4 stub uses textboxes.
-- Capacitor's WebView is shared with the system, not a Chromium fork.
-  Older Android devices (API < 24) get poor JS perf — `minSdk = 24`
-  is the line we hold.
+- WebView 约束：没有 `<canvas>` 重渲染路径，没有原生文件系统访问。
+  cognia-next 恰好在移动端两者都不需要（暂无侧栏 3D 场景）。
+- 配对流程需要一套 UX（QR 或旁路）。M4.5 发布 QR 扫描；M3.4 stub 用
+  文本框。
+- Capacitor 的 WebView 与系统共享，而非 Chromium 分叉。较老的 Android
+  设备（API < 24）的 JS 性能很差——`minSdk = 24` 是我们守住的底线。
 
-### Open
+### 待定
 
-- **TLS for LAN** — M2.8 deferred self-signed cert + cloudflared to
-  M2.9. Until M2.9 lands the M3.4 smoke runs over plain HTTP, gated by
-  the `NSAllowsLocalNetworking` / `usesCleartextTraffic` debug-only
-  exceptions above. M2.9 will tighten both manifests.
-- **mDNS broadcast** — also deferred to M2.9. The M3.4 stub uses
-  manual `baseUrl` entry; M4.4 will pull it from the QR payload.
-- **iOS smoke build** — #42 is HITL on a Mac. Plan-level decision
-  recorded; physical verification + Xcode log excerpt land when an
-  owner runs the build.
+- **LAN 的 TLS** —— M2.8 把自签名证书 + cloudflared 推迟到 M2.9。在
+  M2.9 落地前，M3.4 冒烟跑在纯 HTTP 之上，由上面的
+  `NSAllowsLocalNetworking` / `usesCleartextTraffic` 仅调试例外把守。
+  M2.9 将收紧两份清单。
+- **mDNS 广播** —— 同样推迟到 M2.9。M3.4 stub 用手动 `baseUrl` 输入；
+  M4.4 将从 QR 载荷中取它。
+- **iOS 冒烟构建** —— #42 需在 Mac 上人工介入。计划级决策已记录；待某位
+  负责人运行构建后补上物理验证 + Xcode 日志摘录。
 
-## Verification
+## 验证
 
-End-to-end (manual, requires running M2 desktop server + a phone or
-emulator on the same LAN):
+端到端（手动，需要运行中的 M2 桌面服务器 + 同一 LAN 上的一部手机或
+模拟器）：
 
-1. Desktop: `pnpm tauri dev`, Settings → Companion → enable LAN bind +
-   start server, generate a 5-minute pair JWT.
-2. Build the static export: `pnpm build`.
-3. Sync into the platform: `pnpm mobile:sync` (chains
-   `pnpm build && pnpm -F mobile sync`).
-4. Open the platform: `pnpm mobile:open:android` (or `:ios` on a Mac).
-5. From the on-device app, navigate to `/pair`, enter the desktop's
-   LAN IP + pair JWT, tap **Pair**.
-6. Tap **Smoke RPC** — expect a `claude_sidecar_status` payload.
-7. Tap **Smoke WS** — expect an "OK" or a captured frame within 5s.
-8. Confirm the JWT is in OS keystore: on Android, `adb shell run-as
-com.cognia.mobile cat shared_prefs/SecureStorage.xml` shows an
-   encrypted value; on iOS, `security find-generic-password -a default
--s "com.cognia.mobile.companion" -w` returns the JWT.
+1. 桌面：`pnpm tauri dev`，设置 → Companion → 启用 LAN 绑定 + 启动
+   服务器，生成一个 5 分钟的 pair JWT。
+2. 构建静态导出：`pnpm build`。
+3. 同步进平台：`pnpm mobile:sync`（链式执行
+   `pnpm build && pnpm -F mobile sync`）。
+4. 打开平台：`pnpm mobile:open:android`（或在 Mac 上用 `:ios`）。
+5. 在设备应用中，导航到 `/pair`，输入桌面端的 LAN IP + pair JWT，点
+   **Pair**。
+6. 点 **Smoke RPC** —— 预期得到一个 `claude_sidecar_status` 载荷。
+7. 点 **Smoke WS** —— 预期在 5s 内得到 "OK" 或一帧捕获帧。
+8. 确认 JWT 在操作系统密钥库中：Android 上 `adb shell run-as
+com.cognia.mobile cat shared_prefs/SecureStorage.xml` 显示一个加密值；
+   iOS 上 `security find-generic-password -a default
+-s "com.cognia.mobile.companion" -w` 返回该 JWT。
 
-Automated:
+自动化：
 
 - `pnpm test --testPathPatterns="(companion-storage|transport-companion|pair-onboarding)"`
-  — 58 tests cover the storage backends, the transport refactor, and
-  the onboarding component (happy + error paths).
-- `pnpm typecheck` — clean.
-- `gradlew assembleDebug` (in `mobile/android/`) — `BUILD SUCCESSFUL`,
-  produces `app/build/outputs/apk/debug/app-debug.apk`.
+  —— 58 个测试覆盖存储后端、传输层重构与引导组件（正常 + 错误路径）。
+- `pnpm typecheck` —— 干净。
+- `gradlew assembleDebug`（在 `mobile/android/` 中）—— `BUILD SUCCESSFUL`，
+  产出 `app/build/outputs/apk/debug/app-debug.apk`。

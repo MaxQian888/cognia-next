@@ -95,7 +95,12 @@ export function ChatPane({
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
-  const messages = useChatStore((s) => s.messages)
+  // Subscribe to a boolean, not the whole `messages` array: the empty/chat
+  // layout swap and the focus/retry gates only care whether any message
+  // exists. Streaming tokens mutate `messages` but not this boolean, so the
+  // chrome (header, composer, footer) no longer re-renders per token — only
+  // the inner `ChatMessages` subtree does.
+  const hasMessages = useChatStore((s) => s.messages.length > 0)
   const status = useChatStore((s) => s.status)
   const errorMessage = useChatStore((s) => s.errorMessage)
   const messagesLoading = useChatStore((s) => s.messagesLoading)
@@ -194,7 +199,7 @@ export function ChatPane({
       {errorMessage && (
         <InlineError
           message={errorMessage}
-          onRetry={messages.length > 0 ? handleRetry : undefined}
+          onRetry={hasMessages ? handleRetry : undefined}
           onOpenSettings={() => onOpenSettings("api-key")}
           onDismiss={() => useChatStore.getState().setError(null)}
         />
@@ -209,11 +214,7 @@ export function ChatPane({
   return (
     <>
       {showHeader && (
-        <ChatHeader
-          session={activeSession}
-          messages={messages}
-          onOpenSettings={() => onOpenSettings("api-key")}
-        />
+        <ChatHeader session={activeSession} onOpenSettings={() => onOpenSettings("api-key")} />
       )}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
@@ -231,10 +232,10 @@ export function ChatPane({
           // Skip on mobile viewports: programmatic focus opens the virtual
           // keyboard, which is disruptive when switching sessions from the nav
           // sheet (the left drawer on mobile).
-          if (messages.length > 0 && !isMobile) internalComposerRef.current?.focus()
+          if (hasMessages && !isMobile) internalComposerRef.current?.focus()
         }}
       >
-        {messages.length === 0 ? (
+        {!hasMessages ? (
           <motion.div
             key="empty"
             className="flex min-h-0 flex-1 flex-col"
@@ -284,9 +285,7 @@ export function ChatPane({
             animate={{ opacity: 1 }}
             transition={mobileTransition("normal")}
           >
-            <MessageList
-              messages={messages}
-              status={status}
+            <ChatMessages
               onCopy={handleCopySuccess}
               onRegenerate={handleRegenerate}
               onEditResend={handleEditResend}
@@ -297,5 +296,33 @@ export function ChatPane({
         )}
       </AnimatePresence>
     </>
+  )
+}
+
+/**
+ * The only subtree that subscribes to the full `messages` array, so it is the
+ * only part of the chat pane that re-renders as streaming tokens arrive. The
+ * callbacks are forwarded verbatim (no new closures) to preserve `MessageList`
+ * / `MessageRenderer` memo identity.
+ */
+function ChatMessages({
+  onCopy,
+  onRegenerate,
+  onEditResend,
+}: {
+  onCopy: () => void
+  onRegenerate: () => void
+  onEditResend: (messageId: string, newText: string) => void
+}) {
+  const messages = useChatStore((s) => s.messages)
+  const status = useChatStore((s) => s.status)
+  return (
+    <MessageList
+      messages={messages}
+      status={status}
+      onCopy={onCopy}
+      onRegenerate={onRegenerate}
+      onEditResend={onEditResend}
+    />
   )
 }

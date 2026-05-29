@@ -32,7 +32,21 @@ import {
   type ServerFrame,
 } from "./types"
 
-export type SignalingState = "idle" | "connecting" | "subscribed" | "reconnecting" | "closed"
+export type SignalingState =
+  | "idle"
+  | "connecting"
+  | "subscribed"
+  | "reconnecting"
+  | "rejected"
+  | "closed"
+
+/**
+ * Server error codes that are terminal for this connection: the room rejected
+ * the subscription (full, or a desktop already owns it). The server keeps the
+ * socket open, so the client must stop itself — reconnecting would just be
+ * rejected again in a tight loop.
+ */
+const TERMINAL_ERROR_CODES = new Set(["room_full", "role_taken"])
 
 export interface SignalingEventMap {
   state: SignalingState
@@ -90,6 +104,7 @@ export class SignalingClient {
   private pingTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private destroyed = false
+  private rejected = false
 
   private readonly listeners: {
     [K in keyof SignalingEventMap]: Set<SignalingListener<K>>
@@ -131,6 +146,9 @@ export class SignalingClient {
   connect(): void {
     if (this.destroyed) return
     if (this.state === "connecting" || this.state === "subscribed") return
+    // An explicit connect() after a terminal rejection is an intentional
+    // retry — clear the flag so the socket can reopen.
+    this.rejected = false
     this.openSocket()
   }
 
@@ -243,8 +261,29 @@ export class SignalingClient {
         break
       case "error":
         this.emit("error", { code: frame.code, message: frame.message })
+        if (TERMINAL_ERROR_CODES.has(frame.code)) this.reject()
         break
     }
+  }
+
+  /**
+   * Enter the terminal `rejected` state: stop pinging, close the socket, and
+   * suppress auto-reconnect. Unlike {@link close} this leaves `destroyed`
+   * false, so a later explicit {@link connect} can retry.
+   */
+  private reject(): void {
+    this.rejected = true
+    this.cancelReconnect()
+    this.cancelPing()
+    if (this.ws) {
+      try {
+        this.ws.close()
+      } catch {
+        // ignored
+      }
+      this.ws = null
+    }
+    this.setState("rejected")
   }
 
   private async handleRelay(fromRole: PeerRole, payloadB64: string): Promise<void> {
@@ -272,7 +311,7 @@ export class SignalingClient {
   // ── reconnect & keepalive ──────────────────────────────────────────────
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer || this.destroyed) return
+    if (this.reconnectTimer || this.destroyed || this.rejected) return
     const idx = Math.min(this.reconnectAttempt, SIGNALING_BACKOFF_MS.length - 1)
     const base = SIGNALING_BACKOFF_MS[idx]
     const jitter = Math.floor(Math.random() * base)

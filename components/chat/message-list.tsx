@@ -31,6 +31,14 @@ import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logging"
 import { PerfBoundary } from "@/lib/perf"
 
+// Lists at or below this length render in normal document flow (no
+// virtualization): the per-row ResizeObserver churn and the scroll-time
+// remounting of heavy rows (markdown / Tool cards / mermaid) cost more than
+// windowing saves when there are only a handful of messages. ~40 covers the
+// overwhelming majority of sessions while keeping flow-render cost bounded;
+// longer histories still take the virtualized path.
+export const VIRTUALIZE_THRESHOLD = 40
+
 interface Props {
   messages: UIMessage[]
   status: "idle" | "streaming" | "awaiting_approval" | "error"
@@ -91,6 +99,11 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
 
   const showThinking = shouldShowThinking(messages, status)
   const totalCount = messages.length + (showThinking ? 1 : 0)
+  // Short lists skip virtualization entirely (see VIRTUALIZE_THRESHOLD). The
+  // virtualizer hook + measure effects below stay unconditional (Rules of
+  // Hooks); the flow branch simply never attaches its measureElement ref, so
+  // no ResizeObservers spin up there.
+  const virtualize = totalCount > VIRTUALIZE_THRESHOLD
 
   // The currently-streaming row, if any: the last message must be the
   // assistant message we're appending tokens to and the status must be
@@ -161,6 +174,34 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [])
 
+  // Shared row body for both the virtualized and the document-flow branch so
+  // the MessageRenderer props (and the mobile LongPress wrapper) stay
+  // identical regardless of which path renders the row.
+  const renderRow = (m: UIMessage, isStreaming: boolean) =>
+    isMobile ? (
+      <LongPress onLongPress={() => setActionMessage(m)}>
+        <MessageRenderer
+          message={m}
+          characterById={characterById}
+          isStreaming={isStreaming}
+          isLastAssistant={m.id === lastAssistantId}
+          onCopy={onCopy}
+          onRegenerate={onRegenerate}
+          onEditResend={onEditResend}
+        />
+      </LongPress>
+    ) : (
+      <MessageRenderer
+        message={m}
+        characterById={characterById}
+        isStreaming={isStreaming}
+        isLastAssistant={m.id === lastAssistantId}
+        onCopy={onCopy}
+        onRegenerate={onRegenerate}
+        onEditResend={onEditResend}
+      />
+    )
+
   return (
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -208,15 +249,44 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
           role="log"
           onScroll={handleScroll}
         >
-          <div style={{ height: totalSize, position: "relative" }}>
-            {virtualItems.map((virtualItem) => {
-              const isThinkingRow = virtualItem.index === messages.length
-              if (isThinkingRow) {
+          {virtualize ? (
+            <div style={{ height: totalSize, position: "relative" }}>
+              {virtualItems.map((virtualItem) => {
+                const isThinkingRow = virtualItem.index === messages.length
+                if (isThinkingRow) {
+                  return (
+                    <div
+                      key="thinking"
+                      data-index={virtualItem.index}
+                      ref={rowVirtualizer.measureElement}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualItem.start}px)`,
+                        padding: "0 1rem",
+                      }}
+                    >
+                      <Shimmer as="p" className="px-1 py-2 text-sm">
+                        {t("thinking")}
+                      </Shimmer>
+                    </div>
+                  )
+                }
+
+                const m = messages[virtualItem.index]!
+                const isStreaming =
+                  virtualItem.index === lastIndex &&
+                  m.role === "assistant" &&
+                  (status === "streaming" || status === "awaiting_approval")
+                const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
+
                 return (
                   <div
-                    key="thinking"
+                    key={m.id}
                     data-index={virtualItem.index}
-                    ref={rowVirtualizer.measureElement}
+                    ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                     style={{
                       position: "absolute",
                       top: 0,
@@ -226,61 +296,36 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
                       padding: "0 1rem",
                     }}
                   >
-                    <Shimmer as="p" className="px-1 py-2 text-sm">
-                      {t("thinking")}
-                    </Shimmer>
+                    {renderRow(m, isStreaming)}
                   </div>
                 )
-              }
-
-              const m = messages[virtualItem.index]!
-              const isStreaming =
-                virtualItem.index === lastIndex &&
-                m.role === "assistant" &&
-                (status === "streaming" || status === "awaiting_approval")
-              const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
-
-              return (
-                <div
-                  key={m.id}
-                  data-index={virtualItem.index}
-                  ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualItem.start}px)`,
-                    padding: "0 1rem",
-                  }}
-                >
-                  {isMobile ? (
-                    <LongPress onLongPress={() => setActionMessage(m)}>
-                      <MessageRenderer
-                        message={m}
-                        characterById={characterById}
-                        isStreaming={isStreaming}
-                        isLastAssistant={m.id === lastAssistantId}
-                        onCopy={onCopy}
-                        onRegenerate={onRegenerate}
-                        onEditResend={onEditResend}
-                      />
-                    </LongPress>
-                  ) : (
-                    <MessageRenderer
-                      message={m}
-                      characterById={characterById}
-                      isStreaming={isStreaming}
-                      isLastAssistant={m.id === lastAssistantId}
-                      onCopy={onCopy}
-                      onRegenerate={onRegenerate}
-                      onEditResend={onEditResend}
-                    />
-                  )}
+              })}
+            </div>
+          ) : (
+            // Document-flow path for short lists: intrinsic heights, no
+            // absolute positioning, no measureElement ref (zero ResizeObservers),
+            // no remount-on-scroll.
+            <div>
+              {messages.map((m, index) => {
+                const isStreaming =
+                  index === lastIndex &&
+                  m.role === "assistant" &&
+                  (status === "streaming" || status === "awaiting_approval")
+                return (
+                  <div key={m.id} style={{ padding: "0 1rem" }}>
+                    {renderRow(m, isStreaming)}
+                  </div>
+                )
+              })}
+              {showThinking && (
+                <div key="thinking" style={{ padding: "0 1rem" }}>
+                  <Shimmer as="p" className="px-1 py-2 text-sm">
+                    {t("thinking")}
+                  </Shimmer>
                 </div>
-              )
-            })}
-          </div>
+              )}
+            </div>
+          )}
 
           {!isAtBottom && (
             <Button

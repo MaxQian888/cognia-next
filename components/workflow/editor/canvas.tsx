@@ -12,24 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  Background,
-  BackgroundVariant,
-  ReactFlow,
-  ReactFlowProvider,
-  applyEdgeChanges,
-  applyNodeChanges,
-  addEdge,
-  useReactFlow,
-  type Connection,
-  type EdgeChange,
-  type NodeChange,
-  type NodeTypes,
-  type OnConnectEnd,
-  type OnConnectStart,
-  type ReactFlowInstance,
-  type Viewport,
-} from "@xyflow/react"
+import { ReactFlowProvider, type ReactFlowInstance, type Viewport } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
@@ -48,27 +31,13 @@ import {
   parseClipboard,
   serializeClipboard,
 } from "@/lib/workflow/editor/clipboard"
-import {
-  computeAlignmentGuides,
-  type GuidesResult,
-  type RectLike,
-} from "@/lib/workflow/editor/alignment-guides"
-import { AlignmentOverlay } from "./alignment-overlay"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
-import { useDragSnapshot } from "@/hooks/workflow/use-drag-snapshot"
-import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
-import { PerfMiniMap } from "./minimap-perf"
 import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
-import { ViewportBreadcrumb } from "./viewport-breadcrumb"
 import { SpotlightSearch } from "./spotlight-search"
-import { LassoOverlay } from "./lasso-overlay"
-import { SmartEdge } from "./edges/smart-edge"
-import { ConnectionLineGhostFactory, ConnectionPointerListener } from "./connection-overlay"
-import type { EdgeTypes } from "@xyflow/react"
-import { validateConnection } from "@/lib/workflow/editor/connection-validator"
+import { ConnectionLineGhostFactory } from "./connection-overlay"
+import { FlowCanvas } from "./flow-canvas"
 import type { TriggerEvent } from "@/types/workflow/visual"
-import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { EditorToolbar } from "./toolbar"
 import { CanvasToolbar, type CanvasBackgroundVariant } from "./canvas-toolbar"
 import { SelectionToolbar } from "./selection-toolbar"
@@ -80,27 +49,9 @@ import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
-import { PerfBoundary } from "@/lib/perf"
 import * as ResizablePrimitive from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-
-const nodeTypes: NodeTypes = {
-  workflowNode: WorkflowNodeComponent as unknown as NodeTypes[string],
-}
-
-const edgeTypes: EdgeTypes = {
-  default: SmartEdge as unknown as EdgeTypes[string],
-  smart: SmartEdge as unknown as EdgeTypes[string],
-}
-
-// Lifted to module scope so React Flow doesn't see a fresh array identity on
-// every render and re-initialize internal state. (A2)
-const SNAP_GRID: [number, number] = [16, 16]
-const DELETE_KEY_CODE: string[] = ["Backspace", "Delete"]
-const MULTI_SELECTION_KEY_CODE: string[] = ["Shift", "Meta", "Control"]
-const FIT_VIEW_PROPS = false
-const PRO_OPTIONS = { hideAttribution: true } as const
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -112,41 +63,33 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const t = useTranslations("workflows.canvasToast")
   const tValidation = useTranslations("workflows.validation")
 
-  // (A3) Structural slice — covers the graph + envelope identity + the
-  // actions that mutate them. Subscribes to nodes/edges array identity
-  // (re-render is unavoidable when these change because React Flow needs
-  // the new lists) but NOT to `runStatusByStepId` / `validationByStepId`
-  // / `lastRunByStepId` — those churn during active runs and are now read
-  // per-node via `useNodeDecoration` (A4).
+  // (A8) Chrome slice — everything the editor *frame* needs that does NOT
+  // change on every drag frame. Crucially this NO LONGER subscribes to
+  // `nodes` / `edges`: those churn ~60×/s during a drag and used to re-render
+  // this whole component (and its toolbars/sidebars/dialogs) with them. The
+  // per-frame graph now lives entirely inside `<FlowCanvas>`. `viewport` is
+  // kept because the store only updates it at `onMoveEnd` (once per pan), and
+  // the toolbar's bookmark UI needs the live value; `nodeCount` (a primitive)
+  // drives the empty-state and changes only on add/remove.
   const {
-    nodes,
-    edges,
-    viewport,
     dirty,
+    viewport,
     workflowName,
     workflowId,
-    setNodes,
-    setEdges,
-    setViewport,
+    nodeCount,
     setSelectedNodes,
-    setSelectedEdges,
     setName,
     markSaved,
     toWorkflow,
     revalidateAll,
   } = useStore(
     useShallow((s: EditorState) => ({
-      nodes: s.nodes,
-      edges: s.edges,
-      viewport: s.viewport,
       dirty: s.dirty,
+      viewport: s.viewport,
       workflowName: s.baseWorkflow.name,
       workflowId: s.baseWorkflow.id,
-      setNodes: s.setNodes,
-      setEdges: s.setEdges,
-      setViewport: s.setViewport,
+      nodeCount: s.nodes.length,
       setSelectedNodes: s.setSelectedNodes,
-      setSelectedEdges: s.setSelectedEdges,
       setName: s.setName,
       markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
@@ -154,17 +97,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     }))
   )
 
-  // (A3) Interaction slice — small primitives consumed by the canvas
-  // chrome (minimap degrade flag, snap toggle, dragging flag setter).
-  // Split out so toggling these doesn't churn the structural slice.
-  const isDraggingAny = useStore((s) => s.isDraggingAny)
+  // Snap toggle is owned by the canvas toolbar (chrome); the live `snapToGrid`
+  // value is also subscribed inside `<FlowCanvas>` for React Flow.
   const snapToGrid = useStore((s) => s.snapToGrid)
   const setSnapToGrid = useStore((s) => s.setSnapToGrid)
-  const setIsDraggingAny = useStore((s) => s.setIsDraggingAny)
   const setLastRunByStepId = useStore((s) => s.setLastRunByStepId)
 
   const perfTier = useEffectivePerfTier(useStore)
-  const rf = useReactFlow()
 
   // Custom connection-line component is created once per store instance —
   // its closure captures `useStore` so it can read connectionState while
@@ -197,9 +136,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const [minimapVisible, setMinimapVisible] = useState(true)
   const [backgroundVariant, setBackgroundVariant] = useState<CanvasBackgroundVariant>("dots")
   const toggleInteractive = useCallback(() => setInteractive((v) => !v), [])
-  // Alignment guides — populated by `onNodeDrag` while a node is moving,
-  // cleared on drag stop so the overlay doesn't linger.
-  const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
   // Canvas context menu state — driven by React Flow's pane/node/edge
   // context-menu callbacks below.
   const [ctxMenu, setCtxMenu] = useState<{
@@ -244,202 +180,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     useStore.getState().clearRequestedContextMenu()
   }, [requestedContextMenu, useStore])
 
-  const onNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      setNodes(applyNodeChanges(changes, nodes) as typeof nodes)
-      const selected = changes
-        .filter((c): c is Extract<NodeChange, { type: "select" }> => c.type === "select")
-        .filter((c) => c.selected)
-        .map((c) => c.id)
-      if (selected.length > 0) setSelectedNodes(selected)
-    },
-    [nodes, setNodes, setSelectedNodes]
-  )
-
-  const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => {
-      setEdges(applyEdgeChanges(changes, edges) as typeof edges)
-      const selected = changes
-        .filter((c): c is Extract<EdgeChange, { type: "select" }> => c.type === "select")
-        .filter((c) => c.selected)
-        .map((c) => c.id)
-      if (selected.length > 0) setSelectedEdges(selected)
-    },
-    [edges, setEdges, setSelectedEdges]
-  )
-
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      const result = validateConnection(connection, nodes, edges)
-      if (!result.valid) {
-        toast.error(result.reason)
-        return
-      }
-      setEdges(
-        addEdge(
-          {
-            ...connection,
-            id: "e_" + Math.random().toString(36).slice(2, 10),
-            type: "default",
-          },
-          edges
-        ) as typeof edges
-      )
-    },
-    [nodes, edges, setEdges]
-  )
-
-  const isValidConnection = useCallback(
-    (connection: Connection | { source: string | null; target: string | null }) =>
-      validateConnection(connection, nodes, edges).valid,
-    [nodes, edges]
-  )
-
-  // Stabilized connect handlers — React Flow re-attaches its prop listeners
-  // when the callback identity changes, so we wrap these in `useCallback`
-  // rather than passing inline arrows on every parent render. (A2)
-  const handleConnectStart = useCallback<OnConnectStart>(
-    (_e, params) => {
-      if (!params.nodeId) return
-      useStore.getState().beginConnection({
-        sourceId: params.nodeId,
-        sourceHandle: params.handleId ?? null,
-      })
-    },
-    [useStore]
-  )
-  const handleConnectEnd = useCallback<OnConnectEnd>(
-    () => useStore.getState().endConnection(),
-    [useStore]
-  )
-
-  // (A7) Track whether the user is actively panning/zooming the viewport.
-  // The PerfMiniMap consumes this so the minimap drops its pointer listeners
-  // and flat-colours its nodes while the viewport moves — same degrade path
-  // that already runs during node-drag. Without this, MiniMap's internal
-  // viewport subscription forces a per-frame repaint of every node colour.
-  const [isMovingViewport, setIsMovingViewport] = useState(false)
-  const handleMoveStart = useCallback(() => setIsMovingViewport(true), [])
-  const onMoveEnd = useCallback(
-    (_e: unknown, v: Viewport) => {
-      setIsMovingViewport(false)
-      setViewport(v)
-    },
-    [setViewport]
-  )
-
-  // Compute alignment guides while dragging. The peer rect map is captured
-  // ONCE on drag start (O(n)) and looked up via ref each frame — the per-
-  // pointer-move cost drops to O(p) for `computeAlignmentGuides` over peers,
-  // no longer paying an extra O(n) for snapshot construction every tick.
-  // rAF coalesces multiple pointermove events fired in the same frame.
-  const drag = useDragSnapshot()
-  const dragRectRef = useRef<{ width: number; height: number } | null>(null)
-
-  const dragComputeAndSet = useCallback(
-    (dragged: RectLike) => {
-      // (A6) Reuse the cached AlignmentIndex built lazily by the snapshot
-      // hook. Per-tick cost drops from O(n) (Array.from + scan) to
-      // O(log n + k) per anchor via sorted-axis binary search.
-      const index = drag.getAlignmentIndex()
-      if (!index) return
-      setAlignmentGuides(computeAlignmentGuides(dragged, index))
-    },
-    // drag.getAlignmentIndex is a stable callback over a ref; React Compiler
-    // can't statically prove ref-read safety here, so we disable the
-    // auto-memo check.
-    [drag]
-  )
-
-  const dragThrottled = useRafThrottle(dragComputeAndSet)
-
-  const handleNodeDragStart = useCallback(
-    (
-      _e: unknown,
-      draggedNode: {
-        id: string
-        position: { x: number; y: number }
-        width?: number | null
-        height?: number | null
-      }
-    ) => {
-      // Pause + snapshot before any position `setNodes` fires, so the whole
-      // drag coalesces into a single undo entry (see store.beginDragHistory).
-      useStore.getState().beginDragHistory()
-      setIsDraggingAny(true)
-      if (!perfTier.flags.alignmentGuides) {
-        dragRectRef.current = null
-        return
-      }
-      drag.capture(nodes, draggedNode.id)
-      // Snapshot the dragged node's own measured size up front so the per-
-      // frame handler doesn't fall back to defaults if `useReactFlow` hasn't
-      // measured yet.
-      const live = rf.getNode(draggedNode.id)
-      const w =
-        (live?.measured?.width as number | undefined) ??
-        (live?.width as number | undefined) ??
-        draggedNode.width ??
-        240
-      const h =
-        (live?.measured?.height as number | undefined) ??
-        (live?.height as number | undefined) ??
-        draggedNode.height ??
-        80
-      dragRectRef.current = { width: w, height: h }
-    },
-    [drag, nodes, perfTier.flags.alignmentGuides, rf, setIsDraggingAny, useStore]
-  )
-
-  const handleNodeDrag = useCallback(
-    (_e: unknown, draggedNode: { id: string; position: { x: number; y: number } }) => {
-      if (!perfTier.flags.alignmentGuides) return
-      const cached = dragRectRef.current
-      const live = rf.getNode(draggedNode.id)
-      const w =
-        (live?.measured?.width as number | undefined) ??
-        (live?.width as number | undefined) ??
-        cached?.width ??
-        240
-      const h =
-        (live?.measured?.height as number | undefined) ??
-        (live?.height as number | undefined) ??
-        cached?.height ??
-        80
-      dragThrottled.call({
-        id: draggedNode.id,
-        x: draggedNode.position.x,
-        y: draggedNode.position.y,
-        width: w,
-        height: h,
-      })
-    },
-    [dragThrottled, perfTier.flags.alignmentGuides, rf]
-  )
-
-  const handleNodeDragStop = useCallback(() => {
-    // Resume recording + push the single coalesced undo entry for the drag.
-    useStore.getState().commitDragHistory()
-    dragThrottled.cancel()
-    drag.release()
-    dragRectRef.current = null
-    setAlignmentGuides(null)
-    setIsDraggingAny(false)
-  }, [drag, dragThrottled, setIsDraggingAny, useStore])
-
-  // Multi-selection drags route through React Flow's selection-drag events
-  // (the canvas has `selectionOnDrag`), not the node-drag events — so they
-  // need the same begin/commit coalescing. The store guards make overlapping
-  // node/selection events idempotent.
-  const handleSelectionDragStart = useCallback(() => {
-    useStore.getState().beginDragHistory()
-    setIsDraggingAny(true)
-  }, [setIsDraggingAny, useStore])
-
-  const handleSelectionDragStop = useCallback(() => {
-    useStore.getState().commitDragHistory()
-    setIsDraggingAny(false)
-  }, [setIsDraggingAny, useStore])
+  // React Flow change/connect/drag/move handlers now live inside
+  // `<FlowCanvas>` (the only per-frame subscriber). See flow-canvas.tsx.
 
   // ── Context menu callbacks ──────────────────────────────────────────────
   const handlePaneContextMenu = useCallback(
@@ -641,14 +383,15 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   }, [requestedRunFromStepId, useStore, handleRun])
 
   const handleAutoLayout = useCallback(async () => {
-    const positions = await autoLayout(nodes, edges)
+    const s = useStore.getState()
+    const positions = await autoLayout(s.nodes, s.edges)
     if (Object.keys(positions).length === 0) {
       toast.error(t("layoutUnavailable"))
       return
     }
-    setNodes(applyAutoLayoutPositions(nodes, positions))
+    s.setNodes(applyAutoLayoutPositions(s.nodes, positions))
     requestAnimationFrame(() => reactFlowInstance?.fitView({ duration: 250, padding: 0.2 }))
-  }, [nodes, edges, setNodes, reactFlowInstance, t])
+  }, [useStore, reactFlowInstance, t])
 
   // ── JSON export / import ──────────────────────────────────────────────────
   const handleExportJson = useCallback(() => {
@@ -664,7 +407,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     try {
       await exportWorkflowImage({
         flowEl: el,
-        nodes,
+        nodes: useStore.getState().nodes,
         fileName: workflowName.replace(/[^a-z0-9-_]+/gi, "_") || "workflow",
         backgroundColor: null,
       })
@@ -672,14 +415,18 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("imageExportFailed"))
     }
-  }, [nodes, workflowName, t])
+  }, [useStore, workflowName, t])
 
   const buildImageSharePayload = useCallback(async () => {
     const el = canvasWrapperRef.current
     if (!el) throw new Error("Canvas not ready")
-    const blob = await renderWorkflowImageBlob({ flowEl: el, nodes, backgroundColor: null })
+    const blob = await renderWorkflowImageBlob({
+      flowEl: el,
+      nodes: useStore.getState().nodes,
+      backgroundColor: null,
+    })
     return workflowImagePayload(blob, workflowName || "workflow")
-  }, [nodes, workflowName])
+  }, [useStore, workflowName])
 
   const handleImportJson = useCallback(
     (jsonText: string) => {
@@ -891,7 +638,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     [reactFlowInstance, useStore, setSelectedNodes]
   )
 
-  const showEmpty = nodes.length === 0
+  const showEmpty = nodeCount === 0
 
   const minimapNodeColor = useCallback((n: { data?: { kind?: WorkflowNodeKind } }) => {
     const kind = n.data?.kind
@@ -967,127 +714,60 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           </div>
         </ResizablePrimitive.Separator>
         <ResizablePrimitive.Panel defaultSize="56%" minSize="30%">
-          <div
-            ref={canvasWrapperRef}
-            className="relative h-full w-full overflow-hidden bg-muted/30"
-            data-testid="workflow-canvas"
+          <FlowCanvas
+            store={useStore}
+            perfTier={perfTier}
+            reactFlowInstance={reactFlowInstance}
+            setReactFlowInstance={setReactFlowInstance}
+            canvasWrapperRef={canvasWrapperRef}
+            interactive={interactive}
+            minimapVisible={minimapVisible}
+            backgroundVariant={backgroundVariant}
+            minimapNodeColor={minimapNodeColor}
+            connectionLineGhost={connectionLineGhost}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
-          >
-            <ViewportBreadcrumb store={useStore} reactFlowInstance={reactFlowInstance} />
-            <LassoOverlay
-              containerRef={canvasWrapperRef}
-              reactFlowInstance={reactFlowInstance}
-              store={useStore}
-              enabled={true}
-            />
-            <ConnectionPointerListener store={useStore} />
-            <PerfBoundary id="workflow:canvas">
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                viewport={viewport}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                isValidConnection={isValidConnection}
-                onMoveStart={handleMoveStart}
-                onMoveEnd={onMoveEnd}
-                onNodeDragStart={handleNodeDragStart}
-                onNodeDrag={handleNodeDrag}
-                onNodeDragStop={handleNodeDragStop}
-                onSelectionDragStart={handleSelectionDragStart}
-                onSelectionDragStop={handleSelectionDragStop}
-                onPaneContextMenu={handlePaneContextMenu}
-                onNodeContextMenu={handleNodeContextMenu}
-                onEdgeContextMenu={handleEdgeContextMenu}
-                onInit={setReactFlowInstance}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                connectionLineComponent={connectionLineGhost}
-                onConnectStart={handleConnectStart}
-                onConnectEnd={handleConnectEnd}
-                fitView={FIT_VIEW_PROPS}
-                minZoom={0.2}
-                maxZoom={2}
-                snapToGrid={snapToGrid}
-                snapGrid={SNAP_GRID}
-                deleteKeyCode={DELETE_KEY_CODE}
-                multiSelectionKeyCode={MULTI_SELECTION_KEY_CODE}
-                panOnScroll
-                selectionOnDrag
-                proOptions={PRO_OPTIONS}
-                // Interactivity lock driven by the canvas toolbar — when locked,
-                // nodes can't be dragged / connected / selected but pan + zoom
-                // still work (mirrors React Flow's native Controls lock).
-                nodesDraggable={interactive}
-                nodesConnectable={interactive}
-                elementsSelectable={interactive}
-                // (A1) Tier-aware viewport culling: enable when graphs grow
-                // past `perfTier.flags.cullingThreshold` OR when the user/
-                // system chose a non-`high` tier. Below the threshold on
-                // `high`, the per-render measure+filter cost outweighs the
-                // savings; the threshold itself is tier-driven so balanced/
-                // reduced can opt into culling unconditionally.
-                onlyRenderVisibleElements={
-                  nodes.length >= perfTier.flags.cullingThreshold || perfTier.effective !== "high"
-                }
-              >
-                {backgroundVariant !== "none" ? (
-                  <Background
-                    variant={
-                      backgroundVariant === "lines"
-                        ? BackgroundVariant.Lines
-                        : BackgroundVariant.Dots
-                    }
-                    gap={16}
-                    size={1}
-                  />
-                ) : null}
-                {perfTier.flags.showMinimap && minimapVisible ? (
-                  <PerfMiniMap
-                    degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
-                    nodeColor={minimapNodeColor}
-                    className="!rounded-md !border !bg-background"
-                  />
-                ) : null}
-                <AlignmentOverlay guides={alignmentGuides} />
-              </ReactFlow>
-            </PerfBoundary>
-            <SelectionToolbar
-              store={useStore}
-              reactFlowInstance={reactFlowInstance}
-              motionEnabled={perfTier.flags.edgeAnimations}
-            />
-            <CanvasToolbar
-              onAddNode={handleOpenPalette}
-              onOpenSearch={handleOpenSpotlight}
-              onAddSticky={handleAddSticky}
-              onAddGroup={handleAddGroup}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              onAutoLayout={handleAutoLayout}
-              interactive={interactive}
-              onToggleInteractive={toggleInteractive}
-              snapToGrid={snapToGrid}
-              onToggleSnap={setSnapToGrid}
-              minimapVisible={minimapVisible}
-              minimapAvailable={perfTier.flags.showMinimap}
-              onToggleMinimap={setMinimapVisible}
-              backgroundVariant={backgroundVariant}
-              onBackgroundChange={setBackgroundVariant}
-              motionEnabled={perfTier.flags.edgeAnimations}
-              performanceTier={perfTier.userChoice}
-              effectivePerformanceTier={perfTier.effective}
-              onPerformanceTierChange={perfTier.setUserChoice}
-              workflowId={workflowId}
-              currentViewport={viewport}
-              onRestoreViewport={handleRestoreViewport}
-            />
-            {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
-          </div>
+            onPaneContextMenu={handlePaneContextMenu}
+            onNodeContextMenu={handleNodeContextMenu}
+            onEdgeContextMenu={handleEdgeContextMenu}
+            overlays={
+              <>
+                <SelectionToolbar
+                  store={useStore}
+                  reactFlowInstance={reactFlowInstance}
+                  motionEnabled={perfTier.flags.edgeAnimations}
+                />
+                <CanvasToolbar
+                  onAddNode={handleOpenPalette}
+                  onOpenSearch={handleOpenSpotlight}
+                  onAddSticky={handleAddSticky}
+                  onAddGroup={handleAddGroup}
+                  onUndo={handleUndo}
+                  onRedo={handleRedo}
+                  canUndo={canUndo}
+                  canRedo={canRedo}
+                  onAutoLayout={handleAutoLayout}
+                  interactive={interactive}
+                  onToggleInteractive={toggleInteractive}
+                  snapToGrid={snapToGrid}
+                  onToggleSnap={setSnapToGrid}
+                  minimapVisible={minimapVisible}
+                  minimapAvailable={perfTier.flags.showMinimap}
+                  onToggleMinimap={setMinimapVisible}
+                  backgroundVariant={backgroundVariant}
+                  onBackgroundChange={setBackgroundVariant}
+                  motionEnabled={perfTier.flags.edgeAnimations}
+                  performanceTier={perfTier.userChoice}
+                  effectivePerformanceTier={perfTier.effective}
+                  onPerformanceTierChange={perfTier.setUserChoice}
+                  workflowId={workflowId}
+                  currentViewport={viewport}
+                  onRestoreViewport={handleRestoreViewport}
+                />
+                {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
+              </>
+            }
+          />
         </ResizablePrimitive.Panel>
         <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
           <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">

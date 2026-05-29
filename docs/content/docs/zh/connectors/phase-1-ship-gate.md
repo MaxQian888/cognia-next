@@ -1,169 +1,169 @@
 ---
-title: "Phase 1 Ship Gate"
-description: "Manual verification checklist for the Platform Connectors Phase 1 release. All items must be checked before merging feat/platform-connectors-phase1 to master."
+title: "Phase 1 发布门禁"
+description: "平台连接器 Phase 1 发布的人工验证清单。在将 feat/platform-connectors-phase1 合并到 master 之前，所有条目都必须勾选完成。"
 ---
 
-# Platform Connectors — Phase 1 Ship Gate
+# 平台连接器 —— Phase 1 发布门禁
 
-**Branch:** `feat/platform-connectors-phase1`  
-**ADR:** [0009 — Platform Connectors](/docs/adr/0009-platform-connectors)  
-**Date:** 2026-05-05
-
----
-
-## Automated gates (CI must pass)
-
-Before proceeding to manual checks, confirm all automated gates are green:
-
-- [ ] `pnpm typecheck` — zero TS errors
-- [ ] `pnpm lint` — zero ESLint errors (warnings acceptable)
-- [ ] `pnpm test` — all Jest suites pass (987 suites, 12 772+ tests)
-- [ ] `pnpm build` — Next.js static export completes without errors (exit 0)
-- [ ] `pnpm tauri build --debug` — Rust compiles, `.msi` and `.exe` bundles produced
+**分支：** `feat/platform-connectors-phase1`  
+**ADR：** [0009 —— 平台连接器](/docs/adr/0009-platform-connectors)  
+**日期：** 2026-05-05
 
 ---
 
-## §1 — Telegram adapter smoke test
+## 自动化门禁（CI 必须通过）
 
-> Prerequisites: create a bot via @BotFather, set `TELEGRAM_BOT_TOKEN`.  
-> Start the desktop app in dev mode: `pnpm tauri dev`.
+在进行人工检查之前，请确认所有自动化门禁均为绿色：
 
-- [ ] Open Settings → Connections → Adapters tab.
-- [ ] Click **+ Add Adapter** → select **Telegram**.
-- [ ] Enter bot token; save. Verify row appears in the list with status `idle`.
-- [ ] Click **Enable**. Status transitions to `polling`.
-- [ ] Send "hello" from a Telegram client to the bot.
-- [ ] Verify the message appears in the Inbox (navigate to `/inbox` or `?section=connections` → Inbox tab).
-- [ ] In **manual** mode, type a reply in the Composer and hit Send.
-- [ ] Verify the reply appears in the Telegram chat.
-- [ ] Disable the adapter. Status transitions back to `idle`. No further polling.
+- [ ] `pnpm typecheck` —— 零 TS 错误
+- [ ] `pnpm lint` —— 零 ESLint 错误（警告可接受）
+- [ ] `pnpm test` —— 所有 Jest 套件通过（987 个套件，12 772+ 个测试）
+- [ ] `pnpm build` —— Next.js 静态导出无错误完成（退出码 0）
+- [ ] `pnpm tauri build --debug` —— Rust 编译通过，生成 `.msi` 和 `.exe` 安装包
 
 ---
 
-## §2 — Discord adapter smoke test
+## §1 —— Telegram 适配器冒烟测试
 
-> Prerequisites: Discord bot token with `bot` + `applications.commands` scopes,
-> at least `Guilds` and `Message Content` intents enabled in the Developer Portal.
+> 前置条件：通过 @BotFather 创建一个机器人，设置 `TELEGRAM_BOT_TOKEN`。  
+> 以 dev 模式启动桌面应用：`pnpm tauri dev`。
 
-- [ ] Add a Discord adapter in Settings → Connections → Adapters.
-- [ ] Enter bot token; save and enable. Status transitions to `connected` (Gateway WS).
-- [ ] Send a message in a channel the bot can see.
-- [ ] Message appears in the Inbox within 5 s.
-- [ ] Reply in manual mode; reply appears in Discord within 10 s.
-
----
-
-## §3 — Slack adapter smoke test
-
-> Prerequisites: Slack app with `app_mentions:read`, `chat:write`, `channels:history` scopes.  
-> Slash-command / event URL must be publicly routable (use `ngrok` or the
-> Tauri HTTP proxy wired in Tasks 94/95).
-
-- [ ] Add a Slack adapter. Enter Bot User OAuth Token and Signing Secret.
-- [ ] Trigger an event from Slack (mention the bot in a channel).
-- [ ] Event appears in the Inbox.
-- [ ] Reply in manual mode; reply appears in Slack within 10 s.
+- [ ] 打开 设置 → 平台连接 → 适配器 选项卡。
+- [ ] 点击 **+ 添加连接器** → 选择 **Telegram**。
+- [ ] 输入机器人 token；保存。确认列表中出现一行，状态为 `idle`。
+- [ ] 点击 **启用**。状态转为 `polling`。
+- [ ] 从 Telegram 客户端向机器人发送 “hello”。
+- [ ] 确认消息出现在收件箱中（访问 `/inbox` 或 `?section=connections` → 收件箱选项卡）。
+- [ ] 在 **手动** 模式下，在编辑器中输入回复并点击发送。
+- [ ] 确认回复出现在 Telegram 聊天中。
+- [ ] 禁用该适配器。状态转回 `idle`。不再轮询。
 
 ---
 
-## §4 — Lark / Feishu adapter smoke test
+## §2 —— Discord 适配器冒烟测试
 
-> Prerequisites: Lark Custom Bot with Encrypt Key and Verification Token.
+> 前置条件：具备 `bot` + `applications.commands` 权限范围的 Discord 机器人 token，
+> 并在开发者门户中至少启用 `Guilds` 和 `Message Content` intent。
 
-- [ ] Add a Lark adapter. Enter App ID, App Secret, Encrypt Key, and Verification Token.
-- [ ] Send a message from Lark to the bot.
-- [ ] Message appears in the Inbox.
-- [ ] Reply in manual mode; reply appears in Lark within 10 s.
-
----
-
-## §5 — OneBot v11 (NapCat / LLOneBot) smoke test
-
-> Prerequisites: NapCat or LLOneBot running locally with reverse-WS transport configured.
-
-- [ ] Add a OneBot adapter. Enter the access token (if configured) and confirm the
-      reverse-WS URL (`ws://127.0.0.1:<port>/api/onebot`) matches the NapCat config.
-- [ ] NapCat connects. Adapter status transitions to `connected`.
-- [ ] Send a QQ message to the bot.
-- [ ] Message appears in the Inbox.
-- [ ] Reply in manual mode; reply appears in QQ within 10 s.
+- [ ] 在 设置 → 平台连接 → 适配器 中添加一个 Discord 适配器。
+- [ ] 输入机器人 token；保存并启用。状态转为 `connected`（Gateway WS）。
+- [ ] 在机器人可见的频道中发送一条消息。
+- [ ] 消息在 5 秒内出现在收件箱中。
+- [ ] 在手动模式下回复；回复在 10 秒内出现在 Discord 中。
 
 ---
 
-## §6 — Outbound queue and circuit breaker
+## §3 —— Slack 适配器冒烟测试
 
-- [ ] Enable any adapter and set it to **manual** mode.
-- [ ] Disconnect from the internet / revoke the bot token to force delivery failures.
-- [ ] Send a message via the Composer. The Outbound tab in Settings should show the
-      job in `pending` → `retrying` state with increasing `attempts`.
-- [ ] After 5 failed attempts the row transitions to `deadlettered`.
-- [ ] Restore connectivity / fix the token. Jobs do NOT auto-retry from dead-letter
-      (Phase 1 behaviour — manual re-queue from the Outbound tab).
+> 前置条件：具备 `app_mentions:read`、`chat:write`、`channels:history` 权限范围的 Slack 应用。  
+> 斜杠命令 / 事件 URL 必须是公网可路由的（使用 `ngrok` 或
+> 在任务 94/95 中接好的 Tauri HTTP 代理）。
 
----
-
-## §7 — Quiet hours
-
-- [ ] Open Settings → Connections → Adapters → edit an adapter.
-- [ ] Set quiet hours from `00:00` to `23:59` (today's date) and save.
-- [ ] Trigger a reply; the Outbound tab shows the job deferred (status `pending`,
-      `nextAttemptAt` set to the quiet-window end time).
-- [ ] Remove quiet hours; job processes immediately.
+- [ ] 添加一个 Slack 适配器。输入 Bot User OAuth Token 和 Signing Secret。
+- [ ] 从 Slack 触发一个事件（在频道中提及机器人）。
+- [ ] 事件出现在收件箱中。
+- [ ] 在手动模式下回复；回复在 10 秒内出现在 Slack 中。
 
 ---
 
-## §8 — Draft mode
+## §4 —— Lark / 飞书适配器冒烟测试
 
-> Phase 1 note: the AI pipeline in auto mode is stubbed (records a placeholder job).  
-> Draft mode only produces a draft row — verify that flow end-to-end.
+> 前置条件：具备 Encrypt Key 和 Verification Token 的 Lark 自定义机器人。
 
-- [ ] Set an adapter conversation to **draft** mode via the ConversationHeader switcher.
-- [ ] Send an inbound message.
-- [ ] Open the Inbox → conversation detail. Verify the DraftBanner appears with the
-      placeholder draft text.
-- [ ] Click **Approve**. Verify the draft transitions to an outbound job in the Outbound tab.
-- [ ] Click **Reject**. Verify the draft is removed.
+- [ ] 添加一个 Lark 适配器。输入 App ID、App Secret、Encrypt Key 和 Verification Token。
+- [ ] 从 Lark 向机器人发送一条消息。
+- [ ] 消息出现在收件箱中。
+- [ ] 在手动模式下回复；回复在 10 秒内出现在 Lark 中。
 
 ---
 
-## §9 — Web-mode degradation
+## §5 —— OneBot v11（NapCat / LLOneBot）冒烟测试
 
-- [ ] Open cognia-next in a browser (not Tauri): `pnpm dev` → `http://localhost:3000`.
-- [ ] Navigate to Settings → Connections. Verify the web-mode banner is visible with
-      role `status` and aria-label `"Web mode banner"`.
-- [ ] Open `/inbox` → navigate to any platform-bound conversation.
-- [ ] Verify the ConversationHeader mode switcher is wrapped in a disabled span
-      (`pointer-events-none`, `aria-disabled="true"`).
-- [ ] Open any chat session that has a `platformBinding`. Verify the Composer Send
-      button is disabled.
+> 前置条件：本地运行 NapCat 或 LLOneBot，并配置好反向 WS 传输。
 
----
-
-## §10 — Plugin connector extension API
-
-- [ ] Build or obtain a plugin that declares `manifest.connectors[]` with a valid
-      `PluginConnectorDef` (see [Extending with Plugins](/docs/connectors/extending-with-plugins)).
-- [ ] Install the plugin via Settings → Plugins.
-- [ ] Verify the plugin adapter appears in the Adapters list.
-- [ ] Disable the plugin. Verify the adapter is removed from the list.
+- [ ] 添加一个 OneBot 适配器。输入访问 token（如已配置），并确认
+      反向 WS URL（`ws://127.0.0.1:<port>/api/onebot`）与 NapCat 配置一致。
+- [ ] NapCat 连接成功。适配器状态转为 `connected`。
+- [ ] 向机器人发送一条 QQ 消息。
+- [ ] 消息出现在收件箱中。
+- [ ] 在手动模式下回复；回复在 10 秒内出现在 QQ 中。
 
 ---
 
-## §11 — Audit log
+## §6 —— 出站队列与熔断器
 
-- [ ] Perform several inbound/outbound flows across different adapters.
-- [ ] Open Settings → Connections → Audit tab.
-- [ ] Verify each event has a timestamp, `adapterId`, `kind` (`inbound.received`,
-      `outbound.enqueued`, `outbound.delivered`, `outbound.failed`), and message.
-- [ ] Verify the table is capped at 5 000 rows (add a script to insert 5 001 rows and
-      confirm the oldest is pruned on the next write).
+- [ ] 启用任意适配器并将其设为 **手动** 模式。
+- [ ] 断开互联网连接 / 吊销机器人 token，以强制造成投递失败。
+- [ ] 通过编辑器发送一条消息。设置中的“出站”选项卡应显示该
+      任务处于 `pending` → `retrying` 状态，且 `attempts` 不断增加。
+- [ ] 在 5 次失败尝试后，该行转为 `deadlettered`。
+- [ ] 恢复连接 / 修复 token。任务不会从死信中自动重试
+      （Phase 1 行为 —— 需从“出站”选项卡手动重新入队）。
 
 ---
 
-## §12 — Scheduled outbound via scheduler
+## §7 —— 免打扰时段
 
-- [ ] Open the Scheduler UI. Create a task with type `connection:outbound:send`
-      and payload:
+- [ ] 打开 设置 → 平台连接 → 适配器 → 编辑某个适配器。
+- [ ] 将免打扰时段设为 `00:00` 至 `23:59`（今天的日期）并保存。
+- [ ] 触发一次回复；“出站”选项卡显示该任务被延后（状态 `pending`，
+      `nextAttemptAt` 设为免打扰窗口结束时间）。
+- [ ] 移除免打扰时段；任务立即处理。
+
+---
+
+## §8 —— 草稿模式
+
+> Phase 1 说明：auto 模式下的 AI 流水线是桩实现（记录一个占位任务）。  
+> 草稿模式只产生一行草稿 —— 请端到端验证该流程。
+
+- [ ] 通过 ConversationHeader 的切换器将某个适配器会话设为 **draft** 模式。
+- [ ] 发送一条入站消息。
+- [ ] 打开 收件箱 → 会话详情。确认 DraftBanner 出现，并带有
+      占位草稿文本。
+- [ ] 点击 **批准**。确认草稿在“出站”选项卡中转为一个出站任务。
+- [ ] 点击 **拒绝**。确认草稿被移除。
+
+---
+
+## §9 —— Web 模式降级
+
+- [ ] 在浏览器（非 Tauri）中打开 cognia-next：`pnpm dev` → `http://localhost:3000`。
+- [ ] 导航到 设置 → 平台连接。确认 web 模式横幅可见，其
+      role 为 `status`，aria-label 为 `"Web mode banner"`。
+- [ ] 打开 `/inbox` → 导航到任意绑定了平台的会话。
+- [ ] 确认 ConversationHeader 的模式切换器被包裹在一个禁用的 span 中
+      （`pointer-events-none`、`aria-disabled="true"`）。
+- [ ] 打开任意带有 `platformBinding` 的聊天会话。确认编辑器的发送
+      按钮被禁用。
+
+---
+
+## §10 —— 插件连接器扩展 API
+
+- [ ] 构建或获取一个插件，其声明了带有有效 `PluginConnectorDef` 的
+      `manifest.connectors[]`（参见 [用插件扩展](/docs/connectors/extending-with-plugins)）。
+- [ ] 通过 设置 → 插件 安装该插件。
+- [ ] 确认插件适配器出现在适配器列表中。
+- [ ] 禁用该插件。确认适配器从列表中被移除。
+
+---
+
+## §11 —— 审计日志
+
+- [ ] 在不同适配器上执行若干入站/出站流程。
+- [ ] 打开 设置 → 平台连接 → 审计 选项卡。
+- [ ] 确认每个事件都有时间戳、`adapterId`、`kind`（`inbound.received`、
+      `outbound.enqueued`、`outbound.delivered`、`outbound.failed`）以及消息。
+- [ ] 确认该表上限为 5 000 行（添加一个脚本插入 5 001 行，
+      并确认下一次写入时最旧的一行被剪除）。
+
+---
+
+## §12 —— 通过调度器进行定时出站
+
+- [ ] 打开调度器 UI。创建一个类型为 `connection:outbound:send`
+      的任务，载荷为：
   ```json
   {
     "adapterId": "<your_adapter_id>",
@@ -171,30 +171,30 @@ Before proceeding to manual checks, confirm all automated gates are green:
     "segments": [{ "type": "text", "text": "Scheduled greeting" }]
   }
   ```
-- [ ] Trigger the task (Run Now).
-- [ ] Verify the message is delivered to the platform within 30 s.
-- [ ] Verify an `outbound.enqueued` audit entry is written.
+- [ ] 触发该任务（立即运行）。
+- [ ] 确认消息在 30 秒内投递到平台。
+- [ ] 确认写入了一条 `outbound.enqueued` 审计条目。
 
 ---
 
-## Deferred (Phase 1+ only)
+## 已推迟（仅限 Phase 1+）
 
-The following items are explicitly deferred and must **not** block this release:
+以下条目已被明确推迟，**不得**阻塞本次发布：
 
-| Deferred item                                                       | Tracking                                        |
+| 推迟的条目                                                          | 跟踪                                            |
 | ------------------------------------------------------------------- | ----------------------------------------------- |
-| Auto mode real AI round-trip (`sendPrompt` → reply → `sendMessage`) | Task 40+                                        |
-| Attachment caching (`connectorAttachments` fetch pipeline)          | Phase 2                                         |
-| Slack / Lark OAuth hosted redirect URL                              | Phase 2                                         |
-| Full Playwright E2E (`pnpx playwright test`)                        | Requires `pnpm add -D @playwright/test express` |
-| `connection:scheduled:digest` real AI call                          | Task 40+                                        |
+| auto 模式真实 AI 往返（`sendPrompt` → 回复 → `sendMessage`）        | 任务 40+                                        |
+| 附件缓存（`connectorAttachments` 拉取流水线）                       | Phase 2                                         |
+| Slack / Lark OAuth 托管重定向 URL                                   | Phase 2                                         |
+| 完整 Playwright E2E（`pnpx playwright test`）                       | 需要 `pnpm add -D @playwright/test express`     |
+| `connection:scheduled:digest` 真实 AI 调用                          | 任务 40+                                        |
 
 ---
 
-## Sign-off
+## 签核
 
-| Role        | Name | Date | Status |
+| 角色        | 姓名 | 日期 | 状态   |
 | ----------- | ---- | ---- | ------ |
-| Implementer |      |      |        |
-| Reviewer    |      |      |        |
+| 实现者      |      |      |        |
+| 评审者      |      |      |        |
 | QA          |      |      |        |

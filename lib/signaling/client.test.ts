@@ -113,6 +113,51 @@ describe("SignalingClient", () => {
     expect(events).toEqual(["connecting", "subscribed"])
   })
 
+  it("enters rejected and stops reconnecting on a terminal room_full error", async () => {
+    const client = makeClient()
+    const states: string[] = []
+    const errors: { code: string; message: string }[] = []
+    client.on("state", (s) => states.push(s))
+    client.on("error", (e) => errors.push(e))
+    client.connect()
+    const ws = instances[0]
+    ws.open()
+
+    ws.push({ kind: "error", code: "room_full", message: "rendezvous room is full" })
+
+    expect(errors).toEqual([{ code: "room_full", message: "rendezvous room is full" }])
+    expect(client.getState()).toBe("rejected")
+    expect(ws.readyState).toBe(FakeWebSocket.CLOSED)
+
+    // No auto-reconnect: even after timers fire, no new socket is created.
+    await flushAsync()
+    expect(instances).toHaveLength(1)
+    expect(states).toEqual(["connecting", "rejected"])
+  })
+
+  it("treats role_taken as terminal too", () => {
+    const client = makeClient()
+    client.connect()
+    instances[0].open()
+    instances[0].push({
+      kind: "error",
+      code: "role_taken",
+      message: "a desktop peer already owns this room",
+    })
+    expect(client.getState()).toBe("rejected")
+  })
+
+  it("does not reject on a non-terminal error and keeps the socket open", () => {
+    const client = makeClient()
+    client.connect()
+    const ws = instances[0]
+    ws.open()
+    ws.push({ kind: "subscribed", rendezvousId: "room-1", peers: [] })
+    ws.push({ kind: "error", code: "rate_limited", message: "too many frames" })
+    expect(client.getState()).toBe("subscribed")
+    expect(ws.readyState).toBe(FakeWebSocket.OPEN)
+  })
+
   it("appends the rendezvous id as a rid query param on connect", () => {
     const client = makeClient()
     client.connect()

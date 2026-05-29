@@ -24,6 +24,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use cognia_signaling_core::policy::{is_origin_allowed, SubscribeDecision};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -64,6 +65,21 @@ pub async fn ws_upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, &'static str)> {
+    // Origin allowlist (opt-in). Empty allowlist or a missing Origin (native
+    // clients never send one) passes; only a present-but-unlisted browser
+    // Origin is refused. Checked before the per-IP gate so a cross-origin
+    // probe doesn't consume a connection slot.
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+    if !is_origin_allowed(origin, &state.allowed_origins) {
+        warn!(
+            target: "signaling",
+            origin = origin.unwrap_or("<none>"),
+            "rejecting WS upgrade — origin not on allowlist"
+        );
+        state.metrics.frame_rejected(RejectReason::OriginRejected);
+        return Err((StatusCode::FORBIDDEN, "origin not allowed"));
+    }
+
     let client_ip = extract_client_ip(peer_addr, &headers);
     let acquired = match state.ip_limits.try_acquire(client_ip) {
         AcquireOutcome::Accepted(guard) => guard,
@@ -264,7 +280,36 @@ async fn handle_frame(
                 joined_at_ms,
                 tx: tx.clone(),
             };
-            let (existing, others) = state.registry.join(&rendezvous_id, handle);
+            let (existing, others) =
+                match state.registry.try_join(&rendezvous_id, handle, &state.room_limits) {
+                    Ok(joined) => joined,
+                    Err(SubscribeDecision::Reject { code, message }) => {
+                        state.metrics.frame_rejected(match code {
+                            "role_taken" => RejectReason::RoleTaken,
+                            _ => RejectReason::RoomFull,
+                        });
+                        warn!(
+                            target: "signaling",
+                            peer_id,
+                            rendezvous_id = %rendezvous_id,
+                            role = role.as_str(),
+                            code,
+                            "subscribe rejected"
+                        );
+                        // Graceful: keep the socket open so the client can
+                        // surface the reason and stop retrying.
+                        let _ = tx
+                            .send(ServerFrame::Error {
+                                code: code.to_string(),
+                                message: message.to_string(),
+                            })
+                            .await;
+                        return;
+                    }
+                    // `evaluate_subscribe` only ever returns Accept / Reject;
+                    // Accept is unwrapped as the Ok arm above.
+                    Err(SubscribeDecision::Accept) => unreachable!(),
+                };
             subscribed_rooms.push((rendezvous_id.clone(), role));
 
             // Tell the joiner who is already in the room.
@@ -372,10 +417,16 @@ mod tests {
     use std::sync::Arc;
 
     fn state() -> AppState {
+        state_with(cognia_signaling_core::policy::RoomLimits::default())
+    }
+
+    fn state_with(room_limits: cognia_signaling_core::policy::RoomLimits) -> AppState {
         AppState {
             registry: Arc::new(RoomRegistry::new()),
             metrics: Arc::new(Metrics::new()),
             ip_limits: IpLimits::new(50),
+            room_limits,
+            allowed_origins: Arc::new(Vec::new()),
         }
     }
 
@@ -425,6 +476,46 @@ mod tests {
         }
         assert_eq!(state.registry.stats().peers, 1);
         assert_eq!(rooms, vec![("r".to_string(), PeerRole::Desktop)]);
+    }
+
+    #[tokio::test]
+    async fn second_desktop_subscribe_is_rejected_role_taken() {
+        let state = state();
+        // Seed a desktop already owning the room.
+        let _owner = seed_peer(&state, "r", PeerRole::Desktop);
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Desktop), &tx, &mut rooms).await;
+
+        match rx.try_recv().expect("error frame") {
+            ServerFrame::Error { code, .. } => assert_eq!(code, "role_taken"),
+            other => panic!("expected Error role_taken, got {other:?}"),
+        }
+        // Rejected peer is not added and does not track the room.
+        assert_eq!(state.registry.stats().peers, 1);
+        assert!(rooms.is_empty());
+    }
+
+    #[tokio::test]
+    async fn subscribe_past_peer_cap_is_rejected_room_full() {
+        let state = state_with(cognia_signaling_core::policy::RoomLimits {
+            max_peers: 1,
+            max_desktops: 1,
+        });
+        let _owner = seed_peer(&state, "r", PeerRole::Desktop);
+        let (tx, mut rx) = mpsc::channel(PEER_OUTBOUND_BUFFER);
+        let peer_id = state.registry.next_peer_id();
+        let mut rooms = Vec::new();
+
+        handle_frame(&state, peer_id, subscribe("r", PeerRole::Mobile), &tx, &mut rooms).await;
+
+        match rx.try_recv().expect("error frame") {
+            ServerFrame::Error { code, .. } => assert_eq!(code, "room_full"),
+            other => panic!("expected Error room_full, got {other:?}"),
+        }
+        assert_eq!(state.registry.stats().peers, 1);
     }
 
     #[tokio::test]

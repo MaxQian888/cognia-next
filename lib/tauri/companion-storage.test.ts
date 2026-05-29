@@ -122,6 +122,44 @@ describe("SecureStorageCompanionStorage", () => {
     await expect(storage.clear()).resolves.toBeUndefined()
   })
 
+  it("default loader resolves the plugin from window.Capacitor.Plugins (device path)", async () => {
+    // Regression for the on-device save bug: the previous default loader did a
+    // bare `import("capacitor-secure-storage-plugin")` that never resolves in
+    // the static-export WebView, so save() threw and the pairing key was lost.
+    // `registerNativePlugins()` registers the proxy onto window.Capacitor.Plugins
+    // at boot — the loader must read that first.
+    const store = new Map<string, string>()
+    ;(
+      window as unknown as {
+        Capacitor: { isNativePlatform: () => boolean; Plugins: Record<string, unknown> }
+      }
+    ).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        SecureStoragePlugin: {
+          async set(opts: { key: string; value: string }) {
+            store.set(opts.key, opts.value)
+            return { value: true }
+          },
+          async get(opts: { key: string }) {
+            if (!store.has(opts.key)) throw new Error(`absent: ${opts.key}`)
+            return { value: store.get(opts.key)! }
+          },
+          async remove(opts: { key: string }) {
+            store.delete(opts.key)
+            return { value: true }
+          },
+        },
+      },
+    }
+
+    // No injected loader — exercises `defaultSecureStoragePluginLoader`.
+    const storage = new SecureStorageCompanionStorage()
+    await storage.save(MOCK)
+    expect(store.get("cognia.companion.config.v1")).toBe(JSON.stringify(MOCK))
+    expect(await storage.load()).toEqual(MOCK)
+  })
+
   it("returns null when the plugin returns an empty value", async () => {
     const plugin = {
       async set() {

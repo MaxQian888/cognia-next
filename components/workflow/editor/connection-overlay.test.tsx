@@ -106,6 +106,25 @@ describe("ConnectionPointerListener", () => {
     // the lint.
     void trigger
   })
+
+  it("recomputes valid candidates when a new connection starts from a different source", () => {
+    const { store, trigger, ai } = buildStore()
+    // First connection: drag from the trigger — the AI node is a valid target.
+    store.getState().beginConnection({ sourceId: trigger, sourceHandle: null })
+    const { rerender } = render(<ConnectionPointerListener store={store} />)
+    act(() => dispatchPointerMove(100, 140))
+    expect(store.getState().connectionState?.candidate?.nodeId).toBe(ai)
+
+    // End it and start a NEW connection from the AI node. The candidate set is
+    // memoized per connection (keyed on sourceId), so this must recompute:
+    // the trigger is not a valid target, so dragging onto it yields no
+    // candidate even though the previous connection had one.
+    act(() => store.getState().endConnection())
+    act(() => store.getState().beginConnection({ sourceId: ai, sourceHandle: null }))
+    rerender(<ConnectionPointerListener store={store} />)
+    act(() => dispatchPointerMove(0, 40))
+    expect(store.getState().connectionState?.candidate).toBeNull()
+  })
 })
 
 describe("ConnectionLineGhostFactory", () => {

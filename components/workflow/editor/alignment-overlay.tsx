@@ -10,6 +10,7 @@
  * so guides pan / zoom with the canvas instead of floating in screen space.
  */
 
+import { memo } from "react"
 import { ViewportPortal } from "@xyflow/react"
 import type {
   GuidesResult,
@@ -55,7 +56,7 @@ export interface AlignmentOverlayProps {
   guides: GuidesResult | null
 }
 
-export function AlignmentOverlay({ guides }: AlignmentOverlayProps) {
+export const AlignmentOverlay = memo(function AlignmentOverlay({ guides }: AlignmentOverlayProps) {
   if (!guides) return null
   if (guides.vertical.length === 0 && guides.horizontal.length === 0) return null
   return (
@@ -86,4 +87,4 @@ export function AlignmentOverlay({ guides }: AlignmentOverlayProps) {
       </svg>
     </ViewportPortal>
   )
-}
+})

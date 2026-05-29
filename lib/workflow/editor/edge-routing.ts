@@ -30,7 +30,12 @@ export interface RouteInputs {
   targetX: number
   targetY: number
   targetPosition: HandlePosition
-  nodes: ReadonlyArray<RouteRect>
+  /**
+   * Lazy blocker source. Only invoked in the bezier-fallback branch (the L-
+   * shaped branches never inspect other nodes), so callers pay the O(n) rect
+   * snapshot only when a curve might actually need to bend around something.
+   */
+  getNodes: () => ReadonlyArray<RouteRect>
   excludeNodeIds: ReadonlyArray<string>
   /** Default 8. */
   cornerRadius?: number
@@ -112,7 +117,7 @@ export function computeSmartRoute(input: RouteInputs): RouteResult {
   // node's rect, offset the control points (and the midpoint we report for
   // the label) above or below the blocker.
   const excludeSet = new Set(input.excludeNodeIds)
-  const blocker = input.nodes.find((n) => !excludeSet.has(n.id) && pointInRect(mid, n))
+  const blocker = input.getNodes().find((n) => !excludeSet.has(n.id) && pointInRect(mid, n))
   if (blocker) {
     const blockerCenterY = blocker.y + blocker.height / 2
     const dir = mid.y < blockerCenterY ? -1 : 1

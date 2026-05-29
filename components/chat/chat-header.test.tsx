@@ -20,6 +20,12 @@ jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
   SingleExportTrigger: () => null,
 }))
 
+// The live cost badge subscribes to the chat store + a Dexie liveQuery; the
+// header's logic tests don't need it. Stubbed to keep the store/Dexie out.
+jest.mock("@/components/chat/session-cost-badge-live", () => ({
+  SessionCostBadgeLive: () => null,
+}))
+
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
@@ -82,7 +88,7 @@ describe("ChatHeader", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
-        <ChatHeader session={mkSession({ title: "My Chat" })} messages={[]} />
+        <ChatHeader session={mkSession({ title: "My Chat" })} />
       </Wrapper>
     )
     expect(screen.getByText("My Chat")).toBeInTheDocument()
@@ -93,7 +99,7 @@ describe("ChatHeader", () => {
     const adapter = makeAdapter({ useCharacter: () => c })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={mkSession({ characterId: "c-zed", title: "T" })} messages={[]} />
+        <ChatHeader session={mkSession({ characterId: "c-zed", title: "T" })} />
       </DataAdapterProvider>
     )
     expect(screen.getByText("T")).toBeInTheDocument()
@@ -106,7 +112,7 @@ describe("ChatHeader", () => {
     const session = mkSession({ id: "ses_42", title: "S" })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={session} messages={[]} />
+        <ChatHeader session={session} />
       </DataAdapterProvider>
     )
 
@@ -139,7 +145,7 @@ describe("ChatHeader", () => {
     })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={mkSession({ characterId: "c1" })} messages={[]} />
+        <ChatHeader session={mkSession({ characterId: "c1" })} />
       </DataAdapterProvider>
     )
     // The badge label has the form "Skills 1/1" via i18n; just confirm a 1 is shown.
@@ -157,7 +163,7 @@ describe("ChatHeader", () => {
 
     const { rerender } = render(
       <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={session} messages={[]} />
+        <ChatHeader session={session} />
       </DataAdapterProvider>
     )
 
@@ -173,7 +179,7 @@ describe("ChatHeader", () => {
     await act(async () => {
       rerender(
         <DataAdapterProvider adapter={adapter}>
-          <ChatHeader session={session} messages={[]} />
+          <ChatHeader session={session} />
         </DataAdapterProvider>
       )
     })
@@ -200,7 +206,7 @@ describe("ChatHeader", () => {
     const adapter = makeAdapter({ usePresets: () => presets })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={mkSession()} messages={[]} />
+        <ChatHeader session={mkSession()} />
       </DataAdapterProvider>
     )
     fireEvent.click(screen.getByRole("button", { name: /session settings/i }))

@@ -43,8 +43,6 @@ import { groupPresets } from "@/lib/presets/group-presets"
 import { ChatHeaderPresetPill } from "@/components/chat/chat-header-preset-pill"
 import { usePlatform } from "@/hooks/use-platform"
 import type { AppSettings, ChatSession, SystemPromptPreset } from "@/lib/claude/types"
-import type { UsageInfo } from "@/lib/claude/adapter"
-import type { UIMessage } from "ai"
 import {
   FolderOpenIcon,
   GitBranchIcon,
@@ -66,7 +64,7 @@ import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
-import { SessionCostBadge } from "@/components/chat/session-cost-badge"
+import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { ContextGauge } from "@/components/chat/context-gauge"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
@@ -95,7 +93,6 @@ const PERMISSION_MODES: NonNullable<AppSettings["permissionMode"]>[] = [
 
 interface Props {
   session: ChatSession
-  messages: UIMessage[]
   onOpenSettings?: () => void
 }
 
@@ -122,7 +119,7 @@ interface FormState {
   briefMode: boolean
 }
 
-export function ChatHeader({ session, messages, onOpenSettings }: Props) {
+export function ChatHeader({ session, onOpenSettings }: Props) {
   const t = useTranslations("chat.header")
   const updateSession = useUpdateSession()
   const recordPresetUsage = useRecordPresetUsage()
@@ -205,8 +202,6 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
       cancelled = true
     }
   }, [open])
-
-  const usage = useMemo(() => aggregateUsage(messages), [messages])
 
   const handlePickDir = async () => {
     if (!isTauri()) return
@@ -458,13 +453,10 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
         )}
       </div>
 
-      {usage && (
-        <SessionCostBadge
-          sessionId={session.id}
-          inMemoryUsage={usage}
-          tokensLabel={(input, output) => t("tokensLabel", { input, output })}
-        />
-      )}
+      <SessionCostBadgeLive
+        sessionId={session.id}
+        tokensLabel={(input, output) => t("tokensLabel", { input, output })}
+      />
 
       <ContextGauge modelId={session.model} />
 
@@ -835,27 +827,4 @@ function SkillsBadge({ skills, disabled, onToggle }: SkillsBadgeProps) {
       </PopoverContent>
     </Popover>
   )
-}
-
-function aggregateUsage(messages: UIMessage[]): UsageInfo | null {
-  const totals: UsageInfo = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadInputTokens: 0,
-    cacheCreationInputTokens: 0,
-    totalCostUsd: 0,
-  }
-  let any = false
-  for (const m of messages) {
-    const meta = (m as { metadata?: { usage?: UsageInfo } }).metadata
-    const u = meta?.usage
-    if (!u) continue
-    any = true
-    totals.inputTokens! += u.inputTokens ?? 0
-    totals.outputTokens! += u.outputTokens ?? 0
-    totals.cacheReadInputTokens! += u.cacheReadInputTokens ?? 0
-    totals.cacheCreationInputTokens! += u.cacheCreationInputTokens ?? 0
-    totals.totalCostUsd! += u.totalCostUsd ?? 0
-  }
-  return any ? totals : null
 }

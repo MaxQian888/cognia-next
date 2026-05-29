@@ -22,6 +22,8 @@
  * keeps callers from branching on platform.
  */
 
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+
 export interface CompanionConfig {
   /** e.g. "https://192.168.1.42:7890" */
   baseUrl: string
@@ -106,19 +108,20 @@ interface SecureStoragePluginShape {
 
 type SecureStoragePluginLoader = () => Promise<SecureStoragePluginShape>
 
-const defaultSecureStoragePluginLoader: SecureStoragePluginLoader = async () => {
-  // The plugin package is declared by the `mobile/` workspace, not by the
-  // root, so the root tsconfig cannot resolve its types. The runtime
-  // resolution is expected only inside Capacitor — on web / jsdom the
-  // import() rejects and the surrounding try/catch returns null. Using a
-  // string literal lets the bundler skip static analysis without exposing
-  // the dynamic symbol to type-checking.
-  const moduleId = "capacitor-secure-storage-plugin"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    SecureStoragePlugin: SecureStoragePluginShape
-  }
-  return mod.SecureStoragePlugin
-}
+// Resolve the SecureStorage plugin the SAME way every other native wrapper
+// does — via `lib/capacitor/_shared.ts:makeDefaultLoader`, which reads the
+// proxy `registerNativePlugins()` populates onto `window.Capacitor.Plugins`
+// at mobile boot FIRST and only then falls back to a `webpackIgnore`'d dynamic
+// import. The bare `import("capacitor-secure-storage-plugin")` never resolves
+// inside the static-export WebView (the npm package isn't bundled and there's
+// no node_modules), so the previous import-only loader made `save()` THROW on
+// device → the pairing key could never persist. The package-name literal is
+// kept so the loader still works if the global proxy is somehow absent.
+const defaultSecureStoragePluginLoader: SecureStoragePluginLoader =
+  makeDefaultLoader<SecureStoragePluginShape>(
+    "capacitor-secure-storage-plugin",
+    "SecureStoragePlugin"
+  )
 
 export class SecureStorageCompanionStorage implements CompanionConfigStorage {
   private readonly loader: SecureStoragePluginLoader

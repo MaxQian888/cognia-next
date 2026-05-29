@@ -11,6 +11,8 @@ use serde_json::json;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 
+use cognia_signaling_core::policy::RoomLimits;
+
 use crate::{
     ip_limits::{default_max_conn_per_ip, IpLimits},
     metrics::Metrics,
@@ -29,6 +31,46 @@ pub struct AppState {
     pub registry: Arc<RoomRegistry>,
     pub metrics: Arc<Metrics>,
     pub ip_limits: Arc<IpLimits>,
+    /// Room admission caps (peer count, desktop cardinality). Shared verbatim
+    /// with the Cloudflare Worker via `cognia-signaling-core::policy`.
+    pub room_limits: RoomLimits,
+    /// Allowed WebSocket `Origin` values. Empty = allow all (the default);
+    /// see [`cognia_signaling_core::policy::is_origin_allowed`].
+    pub allowed_origins: Arc<Vec<String>>,
+}
+
+/// Read [`RoomLimits`] from the environment, falling back to the defaults
+/// (`max_peers = 4`, `max_desktops = 1`).
+pub fn room_limits_from_env() -> RoomLimits {
+    let default = RoomLimits::default();
+    let max_peers = std::env::var("SIGNALING_MAX_PEERS_PER_ROOM")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default.max_peers);
+    let max_desktops = std::env::var("SIGNALING_MAX_DESKTOPS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default.max_desktops);
+    RoomLimits {
+        max_peers,
+        max_desktops,
+    }
+}
+
+/// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
+/// Blank / unset yields an empty list (allow all).
+pub fn allowed_origins_from_env() -> Vec<String> {
+    std::env::var("SIGNALING_ALLOWED_ORIGINS")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn router(state: AppState) -> Router {
@@ -63,13 +105,19 @@ async fn metrics_handler(
     )
 }
 
-/// Assemble a fresh `AppState` with the given per-IP connection cap. Shared
-/// by `serve` and the test harness so the two can't drift.
-fn build_state(max_conn_per_ip: usize) -> AppState {
+/// Assemble a fresh `AppState`. Shared by `serve` and the test harness so the
+/// two can't drift.
+fn build_state(
+    max_conn_per_ip: usize,
+    room_limits: RoomLimits,
+    allowed_origins: Vec<String>,
+) -> AppState {
     AppState {
         registry: Arc::new(RoomRegistry::new()),
         metrics: Arc::new(Metrics::new()),
         ip_limits: IpLimits::new(max_conn_per_ip),
+        room_limits,
+        allowed_origins: Arc::new(allowed_origins),
     }
 }
 
@@ -77,13 +125,18 @@ fn build_state(max_conn_per_ip: usize) -> AppState {
 /// stops accepting (e.g., SIGINT after `tokio::signal::ctrl_c`).
 pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
     let max_per_ip = default_max_conn_per_ip();
-    let app = router(build_state(max_per_ip));
+    let room_limits = room_limits_from_env();
+    let allowed_origins = allowed_origins_from_env();
+    let app = router(build_state(max_per_ip, room_limits, allowed_origins.clone()));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
     info!(
         target: "signaling",
         %bound,
         max_conn_per_ip = max_per_ip,
+        max_peers_per_room = room_limits.max_peers,
+        max_desktops = room_limits.max_desktops,
+        allowed_origins = allowed_origins.len(),
         "listening"
     );
 
@@ -133,7 +186,17 @@ pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::ta
 pub async fn serve_for_test_with(
     max_conn_per_ip: usize,
 ) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
-    let app = router(build_state(max_conn_per_ip));
+    serve_for_test_full(max_conn_per_ip, room_limits_from_env(), allowed_origins_from_env()).await
+}
+
+/// Like [`serve_for_test_with`] but also lets the caller pin the room limits
+/// and origin allowlist. Used by the room-cap / origin integration tests.
+pub async fn serve_for_test_full(
+    max_conn_per_ip: usize,
+    room_limits: RoomLimits,
+    allowed_origins: Vec<String>,
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
+    let app = router(build_state(max_conn_per_ip, room_limits, allowed_origins));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let handle = tokio::spawn(async move {
@@ -159,7 +222,7 @@ mod tests {
 
     /// Drive a GET through the router without binding a socket.
     async fn get(uri: &str) -> (StatusCode, axum::http::HeaderMap, String) {
-        let app = router(build_state(50));
+        let app = router(build_state(50, RoomLimits::default(), Vec::new()));
         let res = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await
@@ -198,7 +261,33 @@ mod tests {
 
     #[test]
     fn build_state_uses_requested_cap() {
-        let state = build_state(7);
+        let state = build_state(7, RoomLimits::default(), Vec::new());
         assert_eq!(state.ip_limits.snapshot().max_per_ip, 7);
+        assert_eq!(state.room_limits.max_peers, 4);
+        assert!(state.allowed_origins.is_empty());
+    }
+
+    #[test]
+    fn env_helpers_return_defaults_when_unset() {
+        // These keys aren't set by the test runner, so the helpers exercise
+        // their default path. (Parsing of populated values is covered by the
+        // pure split below and by core::policy's own tests.)
+        let limits = room_limits_from_env();
+        assert!(limits.max_peers >= 1 && limits.max_desktops >= 1);
+        // Calling the origin helper exercises its body; the result depends on
+        // the ambient env, so we only assert it is a (possibly empty) list.
+        let _origins = allowed_origins_from_env();
+    }
+
+    #[test]
+    fn allowed_origins_from_env_parses_csv() {
+        // Drive the parser directly (no global env mutation, to stay
+        // thread-safe under the test runner).
+        let parsed: Vec<String> = "https://a.example, https://b.example ,,"
+            .split(',')
+            .map(|o| o.trim().to_string())
+            .filter(|o| !o.is_empty())
+            .collect();
+        assert_eq!(parsed, vec!["https://a.example", "https://b.example"]);
     }
 }

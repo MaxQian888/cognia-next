@@ -1,40 +1,38 @@
 ---
-title: "0010 — Claude Subscription OAuth + Usage Tracking"
-description: "cognia-next gains first-class support for Claude Pro/Max OAuth login, sidecar bearer-token injection, and live 5-hour / 7-day rate-limit visibility built on the unified-* response headers."
+title: "0010 — Claude 订阅 OAuth + 用量追踪"
+description: "cognia-next 获得对 Claude Pro/Max OAuth 登录、sidecar bearer-token 注入，以及基于 unified-* 响应头实时展示 5 小时 / 7 天速率限制的一级支持。"
 ---
 
-# ADR 0010 — Claude Subscription OAuth + Usage Tracking
+# ADR 0010 — Claude 订阅 OAuth + 用量追踪
 
-**Status:** Accepted
-**Date:** 2026-05-06
-**Branch:** `feat/claude-subscription-oauth`
-
----
-
-## Context
-
-Until this ADR, cognia-next's Anthropic integration was strictly **API-key based**:
-the renderer wrote `apiKey` to IndexedDB, the Rust shell forwarded it as
-`ANTHROPIC_API_KEY` when spawning the sidecar, and that was the entire auth
-story. Pro/Max subscribers — Anthropic's most valuable individual users —
-could not (a) sign in with their subscription token and (b) see how close they
-were to the 5-hour rolling window or 7-day weekly cap that
-[Anthropic activated on 2025-07-28](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/).
-
-Two CCSwitch-style ecosystems already solved variants of this problem:
-[Leu-s/CCSwitch](https://github.com/Leu-s/CCSwitch) parses the unified
-rate-limit headers, [zach-source/ccswitch](https://github.com/zach-source/ccswitch)
-manages the OS-keyring credential lifecycle, and the
-[Claude Code CLI](https://code.claude.com/docs/en/authentication) defines the
-canonical `claude login` OAuth flow against `claude.ai`. We borrow the
-mechanisms but stay strictly **single-account** in this phase — multi-account
-auto-rotation is deferred to ADR 0011.
+**状态：** 已接受
+**日期：** 2026-05-06
+**分支：** `feat/claude-subscription-oauth`
 
 ---
 
-## Decision
+## 背景
 
-### Architecture overview
+在本 ADR 之前，cognia-next 与 Anthropic 的集成完全是**基于 API key** 的：
+renderer 把 `apiKey` 写入 IndexedDB，Rust shell 在启动 sidecar 时将其作为
+`ANTHROPIC_API_KEY` 转发，这就是全部的鉴权方案。Pro/Max 订阅用户——Anthropic
+最具价值的个人用户——既无法 (a) 用其订阅 token 登录，也无法 (b) 看到自己距离
+[Anthropic 于 2025-07-28 启用](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/)
+的 5 小时滚动窗口或 7 天周上限还有多近。
+
+已有两个 CCSwitch 风格的生态各自解决了该问题的变体：
+[Leu-s/CCSwitch](https://github.com/Leu-s/CCSwitch) 解析统一速率限制响应头，
+[zach-source/ccswitch](https://github.com/zach-source/ccswitch)
+管理操作系统钥匙串的凭据生命周期，而
+[Claude Code CLI](https://code.claude.com/docs/en/authentication) 定义了针对
+`claude.ai` 的标准 `claude login` OAuth 流程。我们借用这些机制，但本阶段严格保持
+**单账户**——多账户自动轮换推迟到 ADR 0011。
+
+---
+
+## 决策
+
+### 架构总览
 
 ```
 ┌──────── Frontend (React) ─────────────────────────────────────────┐
@@ -82,33 +80,32 @@ auto-rotation is deferred to ADR 0011.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### OAuth flow
+### OAuth 流程
 
-The Pro/Max flow and the Console (API-billing) flow share the **same public
-client_id** `9d1c250a-e61b-44d9-88ed-5944d1962f5e`
-([anthropics/claude-code#39445](https://github.com/anthropics/claude-code/issues/39445);
-the misconception that they differ — and the workaround in
-[ben-vargas/claude-code-sdk_oauth](https://gist.github.com/ben-vargas/c7c7cbfebbb47278f45feca9cef309d1) —
-is documented in the same thread).
+Pro/Max 流程与 Console（API 计费）流程共用**同一个公开 client_id**
+`9d1c250a-e61b-44d9-88ed-5944d1962f5e`
+（[anthropics/claude-code#39445](https://github.com/anthropics/claude-code/issues/39445)；
+认为二者不同的误解——以及
+[ben-vargas/claude-code-sdk_oauth](https://gist.github.com/ben-vargas/c7c7cbfebbb47278f45feca9cef309d1)
+中的绕过办法——都记录在同一个 thread 中）。
 
-| Param                       | Subscription (Pro / Max)                                                                                                                                      | Console (API-billing)                               |
+| 参数                        | 订阅（Pro / Max）                                                                                                                                            | Console（API 计费）                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Authorize URL               | `https://claude.ai/oauth/authorize`                                                                                                                           | `https://console.anthropic.com/oauth/authorize`     |
 | Redirect URI                | `https://platform.claude.com/oauth/code/callback`                                                                                                             | `https://console.anthropic.com/oauth/code/callback` |
 | Scopes                      | `user:profile user:inference user:sessions:claude_code`                                                                                                       | `org:create_api_key user:profile user:inference`    |
-| Token endpoint (both flows) | `POST https://platform.claude.com/v1/oauth/token` (form-encoded — JSON returns 400 invalid_grant per [coqu](https://flopsstuff.github.io/coqu/claude-oauth/)) |                                                     |
-| PKCE                        | S256 + `state`                                                                                                                                                | same                                                |
-| `code=true`                 | forces the manual-code variant                                                                                                                                | same                                                |
+| Token endpoint（两种流程）  | `POST https://platform.claude.com/v1/oauth/token`（form-encoded——JSON 会按 [coqu](https://flopsstuff.github.io/coqu/claude-oauth/) 返回 400 invalid_grant） |                                                     |
+| PKCE                        | S256 + `state`                                                                                                                                                | 同上                                                |
+| `code=true`                 | 强制走手动输入 code 的变体                                                                                                                                    | 同上                                                |
 
-The login dialog is paste-the-code (no localhost loopback), which sidesteps
-port allocation, firewall prompts, and Tauri deep-link registration. The
-`code_verifier` lives in the dialog's component state — no global storage,
-no persistence on cancel.
+登录对话框采用粘贴 code 的方式（无 localhost 回环），从而绕开端口分配、防火墙弹窗
+以及 Tauri deep-link 注册。`code_verifier` 存活于对话框组件的 state 中——无全局
+存储，取消时不留持久化。
 
-### Sidecar header set (OAuth bearer mode)
+### Sidecar 请求头集合（OAuth bearer 模式）
 
-When `CLAUDE_CODE_OAUTH_TOKEN` is set, the sidecar's
-`@anthropic-ai/claude-agent-sdk` automatically sends:
+当设置了 `CLAUDE_CODE_OAUTH_TOKEN` 时，sidecar 的
+`@anthropic-ai/claude-agent-sdk` 会自动发送：
 
 ```
 authorization: Bearer <oat01-...>
@@ -118,35 +115,34 @@ x-app: cli
 user-agent: claude-cli/...
 ```
 
-Without `oauth-2025-04-20`, Anthropic returns "OAuth authentication is currently
+缺少 `oauth-2025-04-20` 时，Anthropic 会返回 "OAuth authentication is currently
 not supported"
-([#37205](https://github.com/anthropics/claude-code/issues/37205)). Without
-`claude-code-20250219` + `x-app: cli`, the Sonnet/Opus 4 series 429s OAuth
-callers
-([NousResearch/hermes-agent#17169](https://github.com/NousResearch/hermes-agent/issues/17169)).
-The official agent SDK encodes all of these for us — we don't write them
-ourselves.
+（[#37205](https://github.com/anthropics/claude-code/issues/37205)）。缺少
+`claude-code-20250219` + `x-app: cli` 时，Sonnet/Opus 4 系列会对 OAuth 调用方
+返回 429
+（[NousResearch/hermes-agent#17169](https://github.com/NousResearch/hermes-agent/issues/17169)）。
+官方 agent SDK 已为我们编码了所有这些头——我们不必自己编写。
 
-### Usage tracking — passive vs. active
+### 用量追踪——被动 vs. 主动
 
-A near-empty `POST /v1/messages` (`max_tokens: 1`, one-character user message)
-**is billed** — the
-[Anthropic pricing docs](https://platform.claude.com/docs/en/about-claude/pricing)
-have no minimum-charge carve-out. So we pivot from the typical CCSwitch
-"probe every 60 seconds" pattern to a **passive-first** design:
+一次近乎空载的 `POST /v1/messages`（`max_tokens: 1`、单字符的用户消息）
+**也会计费**——
+[Anthropic 定价文档](https://platform.claude.com/docs/en/about-claude/pricing)
+并无最低收费豁免。因此我们从典型的 CCSwitch「每 60 秒探测一次」模式转向
+**被动优先**的设计：
 
-1. **Passive collection** (default ON, zero extra quota cost):
-   `sidecar/fetch-interceptor.mjs` monkey-patches `globalThis.fetch` _before_
-   the agent SDK is imported. Every response on `api.anthropic.com` triggers
-   a `usage_headers` stdout event, which the renderer's `usage-collector`
-   parses and persists. The user gets a fresh sample on every chat send.
-2. **Active probe** (default OFF, opt-in): the user enables it explicitly in
-   Settings → Subscription → Settings, with a UI line that calls out
-   "~10 input + 1 output tokens per probe". The probe goes through the same
-   parser + collector pipeline so both data sources share storage and UI.
+1. **被动采集**（默认开启，零额外配额成本）：
+   `sidecar/fetch-interceptor.mjs` 在 agent SDK 被 import _之前_ 对
+   `globalThis.fetch` 打猴子补丁。`api.anthropic.com` 上的每个响应都会触发一个
+   `usage_headers` stdout 事件，renderer 的 `usage-collector` 解析并持久化它。
+   用户每次发送聊天都会获得一份新样本。
+2. **主动探测**（默认关闭，需显式开启）：用户在
+   设置 → 订阅 → 设置 中显式启用，UI 文案明确指出
+   "每次探测约消耗 10 输入 + 1 输出 token"。探测走与被动采集相同的
+   parser + collector 流水线，因此两个数据源共享存储与 UI。
 
-The full unified-\* header set we parse — verbatim from
-[anthropics/claude-code#12829](https://github.com/anthropics/claude-code/issues/12829):
+我们解析的完整 unified-\* 响应头集合——逐字摘自
+[anthropics/claude-code#12829](https://github.com/anthropics/claude-code/issues/12829)：
 
 ```
 anthropic-ratelimit-unified-status                allowed | allowed_warning | rate_limited
@@ -161,77 +157,73 @@ anthropic-ratelimit-unified-fallback-percentage   0.0–1.0
 anthropic-ratelimit-unified-overage-disabled-reason text
 ```
 
-These headers are not in Anthropic's public docs (only the legacy
-`anthropic-ratelimit-{requests,tokens,…}-*` family is). We treat them as
-evidence-based but unsupported — failures degrade silently to "status:
-unknown" rather than crashing the collector.
+这些响应头不在 Anthropic 的公开文档中（仅旧的
+`anthropic-ratelimit-{requests,tokens,…}-*` 系列有）。我们将其视为有据可依但
+不受官方支持——失败时静默降级为 "status: unknown"，而非让采集器崩溃。
 
-### Schema (v20)
+### Schema（v20）
 
-One Dexie table added in `lib/db/schema.ts` version 20:
+在 `lib/db/schema.ts` 第 20 版中新增一张 Dexie 表：
 
-| Table               | Key       | Indexed                                               |
+| 表                  | Key       | 索引                                                  |
 | ------------------- | --------- | ----------------------------------------------------- |
-| `subscriptionUsage` | `localId` | `fetchedAt`, `status`, `source`, `[source+fetchedAt]` |
+| `subscriptionUsage` | `localId` | `fetchedAt`、`status`、`source`、`[source+fetchedAt]` |
 
-Capped at 1 000 rows newest-first by `lib/anthropic-subscription/usage-collector.ts`.
-A 60-second debounce per source (`passive` / `probe`) collapses streaming bursts.
+由 `lib/anthropic-subscription/usage-collector.ts` 按最新优先封顶 1 000 行。
+每个数据源（`passive` / `probe`）有 60 秒去抖，折叠流式爆发。
 
-### Settings (AppSettings.subscriptionSettings)
+### 设置（AppSettings.subscriptionSettings）
 
-| Field               | Default | Notes                                                              |
-| ------------------- | ------- | ------------------------------------------------------------------ |
-| `probeEnabled`      | `false` | Active-probe master switch.                                        |
-| `visibleIntervalMs` | 5 min   | Foreground cadence. Floor 60 s.                                    |
-| `idleIntervalMs`    | 30 min  | Background cadence. Floor 60 s.                                    |
-| `warnThresholdPct`  | 90      | Overview tab flips to "approaching limit" past this % utilization. |
+| 字段                | 默认值  | 说明                                                       |
+| ------------------- | ------- | ---------------------------------------------------------- |
+| `probeEnabled`      | `false` | 主动探测总开关。                                           |
+| `visibleIntervalMs` | 5 分钟  | 前台节奏。下限 60 秒。                                     |
+| `idleIntervalMs`    | 30 分钟 | 后台节奏。下限 60 秒。                                     |
+| `warnThresholdPct`  | 90      | 利用率超过该百分比时，概览页切换为「接近上限」。           |
 
-### Credentials in the OS keyring
+### 操作系统钥匙串中的凭据
 
-| Field    | Value                                                                                                                                  |
+| 字段     | 值                                                                                                                                     |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Service  | `com.cognia.claude-subscription/v1`                                                                                                    |
 | Account  | `default`                                                                                                                              |
-| Backend  | macOS Keychain / Windows Credential Manager / Linux Secret Service via the `keyring` Rust crate (already a project dependency for TTS) |
-| Web mode | Tauri-only — falls back to a static "desktop required" banner                                                                          |
+| 后端     | macOS Keychain / Windows Credential Manager / Linux Secret Service，经由 `keyring` Rust crate（已是项目的 TTS 依赖）                   |
+| Web 模式 | 仅 Tauri——降级为静态的「需桌面端」横幅                                                                                                |
 
-The service name is **deliberately separate** from the Claude Code CLI's own
-`Claude Code-credentials` entry. cognia-next never writes
-`~/.claude/.credentials.json` — that file is owned by `claude login`, and
-double-writing would race with the CLI's refresh cycle.
+该 service 名称**刻意独立**于 Claude Code CLI 自身的
+`Claude Code-credentials` 条目。cognia-next 从不写入
+`~/.claude/.credentials.json`——该文件归 `claude login` 所有，双重写入会与 CLI
+的刷新周期竞争。
 
 ---
 
-## Tradeoffs
+## 取舍
 
-| Tradeoff                                                          | Why we accept it                                                                                                                              |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reusing the Claude Code public client_id                          | No public 3rd-party OAuth program for Anthropic. Multiple open-source community projects converge on the same UUID.                           |
-| Passive collection requires at least one chat send to populate UI | Real-world quota cost is zero. Active probe is the escape hatch for users who want a baseline.                                                |
-| 1 000-row cap on the usage table                                  | 1 sample per minute × 7 days = 10 080 samples; the cap drops the oldest. Plenty for the 7-day chart.                                          |
-| OS keychain only (no encrypted Dexie fallback)                    | Keychain is the security baseline `claude login` itself uses. We refuse to weaken that for a web-mode fallback users can't safely run anyway. |
+| 取舍                                                             | 我们为何接受                                                                                                                                  |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 复用 Claude Code 的公开 client_id                                | Anthropic 没有公开的第三方 OAuth 计划。多个开源社区项目都汇聚到了同一个 UUID。                                                                |
+| 被动采集需至少一次聊天发送才能填充 UI                            | 现实中的配额成本为零。主动探测是给想要基线的用户的逃生口。                                                                                    |
+| 用量表 1 000 行上限                                              | 每分钟 1 样本 × 7 天 = 10 080 样本；上限会丢弃最旧的。对 7 天图表绰绰有余。                                                                   |
+| 仅用操作系统钥匙串（无加密的 Dexie 回退）                        | 钥匙串正是 `claude login` 本身所用的安全基线。我们拒绝为一个用户本就无法安全运行的 web 模式回退而削弱它。                                     |
 
-## What's intentionally out of scope
+## 刻意排除在范围之外的内容
 
-- Multi-account vault + auto-rotation across accounts (ADR 0011).
-- Writing the OAuth credential into `~/.claude/.credentials.json` so the
-  external Claude Code CLI shares it. CCSwitch already covers env-var-based
-  sharing; OAuth-credential injection is an additional attack surface.
-- Real Anthropic-side billing (Console API). Independent path from
-  subscription OAuth.
+- 多账户保险库 + 跨账户自动轮换（ADR 0011）。
+- 把 OAuth 凭据写入 `~/.claude/.credentials.json` 以便外部 Claude Code CLI 共享。
+  CCSwitch 已覆盖基于环境变量的共享；注入 OAuth 凭据是额外的攻击面。
+- 真正的 Anthropic 侧计费（Console API）。与订阅 OAuth 是相互独立的路径。
 
-## Verification (end-to-end)
+## 验证（端到端）
 
-1. Settings → Subscription → Account → "Sign in" → choose **Subscription** →
-   browser opens claude.ai authorize page → paste code → dialog closes →
-   Account tab shows email + plan + expiry → keychain entry appears.
-2. Send a chat message. DevTools Network shows
-   `Authorization: Bearer ...`, `anthropic-beta: ...,oauth-2025-04-20`,
-   `x-app: cli`. **No** `x-api-key`.
-3. Settings → Subscription → Overview now shows two progress bars (5h, 7d)
-   with the "(authoritative)" badge on the representative-claim window.
-4. Force a refresh: Account → "Refresh now" → keychain access_token rotates;
-   refresh_token rotates if the server sends a new one.
-5. Sign out → keychain entry disappears → Overview returns to the empty state.
-6. Web mode (`pnpm dev`): Subscription section renders the "desktop required"
-   banner; login CTA is disabled.
+1. 设置 → 订阅 → 账户 → "登录" → 选择 **订阅** →
+   浏览器打开 claude.ai 授权页 → 粘贴 code → 对话框关闭 →
+   账户页显示邮箱 + 套餐 + 到期时间 → 钥匙串条目出现。
+2. 发送一条聊天消息。DevTools Network 显示
+   `Authorization: Bearer ...`、`anthropic-beta: ...,oauth-2025-04-20`、
+   `x-app: cli`。**没有** `x-api-key`。
+3. 设置 → 订阅 → 概览 此时显示两条进度条（5h、7d），
+   并在代表性窗口上带有 "(authoritative)" 徽章。
+4. 强制刷新：账户 → "立即刷新" → 钥匙串 access_token 轮换；
+   若服务器下发了新的 refresh_token，则其也轮换。
+5. 登出 → 钥匙串条目消失 → 概览回到空状态。
+6. Web 模式（`pnpm dev`）：订阅区块渲染「需桌面端」横幅；登录按钮禁用。

@@ -14,11 +14,10 @@
  * `<ViewportPortal>` so the line follows pan/zoom naturally.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { ViewportPortal, type ReactFlowInstance } from "@xyflow/react"
 import { useTranslations } from "next-intl"
-import { useShallow } from "zustand/react/shallow"
-import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
+import type { EditorStore } from "@/lib/workflow/editor/store"
 import { nodeIdsInPolygon, type Point } from "@/lib/workflow/editor/lasso"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 
@@ -31,19 +30,16 @@ export interface LassoOverlayProps {
   enabled: boolean
 }
 
-export function LassoOverlay({
+export const LassoOverlay = memo(function LassoOverlay({
   containerRef,
   reactFlowInstance,
   store,
   enabled,
 }: LassoOverlayProps) {
   const t = useTranslations("workflows.editor.lasso")
-  const { nodes, setSelectedNodes } = store(
-    useShallow((s: EditorState) => ({
-      nodes: s.nodes,
-      setSelectedNodes: s.setSelectedNodes,
-    }))
-  )
+  // The graph + selection action are read via `getState()` at pointer-up
+  // instead of subscribed, so the overlay does NOT re-render on every node
+  // drag frame (it has nothing to show until an Alt+drag lasso starts).
 
   const [polygon, setPolygon] = useState<Point[]>([])
   const [statusPos, setStatusPos] = useState<{ x: number; y: number } | null>(null)
@@ -97,7 +93,7 @@ export function LassoOverlay({
       const finalPoly = polygonRef.current
       if (finalPoly.length >= 3) {
         const ids = nodeIdsInPolygon(
-          nodes.map((n) => ({
+          store.getState().nodes.map((n) => ({
             id: n.id,
             position: n.position,
             width: n.width ?? undefined,
@@ -105,7 +101,7 @@ export function LassoOverlay({
           })),
           finalPoly
         )
-        setSelectedNodes(ids)
+        store.getState().setSelectedNodes(ids)
       }
       setPolygon([])
       setStatusPos(null)
@@ -120,13 +116,12 @@ export function LassoOverlay({
       window.removeEventListener("pointermove", onPointerMove, true)
       window.removeEventListener("pointerup", onPointerUp, true)
     }
-  }, [containerRef, enabled, nodes, pushThrottled, reactFlowInstance, setSelectedNodes])
+  }, [containerRef, enabled, pushThrottled, reactFlowInstance, store])
 
   // Keep an always-current polygon ref so the pointerup handler doesn't
   // close over stale state inside the effect's identity.
   const polygonRef = useRef<Point[]>([])
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability -- polygonRef.current is the canonical "latest polygon" reference for the pointerup handler; assignment is the point of the effect.
     polygonRef.current = polygon
   }, [polygon])
 
@@ -169,4 +164,4 @@ export function LassoOverlay({
       ) : null}
     </>
   )
-}
+})

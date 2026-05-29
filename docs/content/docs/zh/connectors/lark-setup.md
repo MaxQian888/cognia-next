@@ -1,130 +1,129 @@
 ---
-title: "Lark / Feishu Setup"
-description: "Create a Lark (Feishu) bot app and connect it to cognia-next via the connector adapter."
+title: "飞书 / Lark 配置"
+description: "创建飞书（Lark）机器人应用，并通过连接器适配器将其接入 cognia-next。"
 ---
 
-# Lark / Feishu Setup Guide
+# 飞书 / Lark 配置指南
 
-This guide walks you through creating a Lark (Feishu) bot app and connecting it to cognia-next.
+本指南将引导你创建一个飞书（Lark）机器人应用，并将其接入 cognia-next。
 
-## Prerequisites
+## 前置条件
 
-- A Lark / Feishu account with permission to create custom apps.
-- Access to the [Lark Developer Console](https://open.feishu.cn/app).
-
----
-
-## 1. Create a Lark Custom App
-
-1. Open the [Lark Developer Console](https://open.feishu.cn/app).
-2. Click **Create custom app**.
-3. Enter an app name (e.g. "cognia-bot") and description, then click **Create**.
-4. Note the **App ID** (`cli_...`) and **App Secret** on the **App Credentials** page
-   (Menu: App settings → App credentials).
+- 一个拥有创建自建应用权限的飞书 / Lark 账号。
+- 能够访问 [飞书开放平台开发者后台](https://open.feishu.cn/app)。
 
 ---
 
-## 2. Configure Event Subscriptions
+## 1. 创建飞书自建应用
 
-Lark sends messages to your bot via an event subscription. cognia-next supports two transport modes.
-
-### Option A — Long Connection (Recommended)
-
-Long connection establishes a persistent WebSocket from cognia-next to Lark's servers.
-No public webhook URL is required.
-
-1. Go to **Event subscriptions** in your app's menu.
-2. Under **Subscription method**, select **Use long connection to receive events**.
-3. Subscribe to the following event:
-   - `im.message.receive_v1` — Bot receives a message
-
-Click **Save**.
-
-### Option B — Webhook
-
-A public HTTPS endpoint on the same machine is required.
-
-1. Go to **Event subscriptions** in your app's menu.
-2. Under **Subscription method**, select **Configure request URL**.
-3. Enter your webhook URL (e.g. `https://your-host.example.com/connectors/lark/<adapterId>`).
-4. Lark will send a verification request; cognia-next's Rust HTTP proxy handles the handshake.
-5. Subscribe to the following event:
-   - `im.message.receive_v1` — Bot receives a message
-
-Click **Save**.
+1. 打开 [飞书开放平台开发者后台](https://open.feishu.cn/app)。
+2. 点击 **创建企业自建应用**。
+3. 填写应用名称（例如 "cognia-bot"）和描述，然后点击 **创建**。
+4. 在 **凭证与基础信息** 页面记录 **App ID**（`cli_...`）和 **App Secret**
+   （菜单：应用设置 → 凭证与基础信息）。
 
 ---
 
-## 3. Obtain the Verification Token and Encrypt Key
+## 2. 配置事件订阅
 
-Still on the **Event subscriptions** page:
+飞书通过事件订阅向你的机器人推送消息。cognia-next 支持两种传输方式。
 
-- **Verification Token**: Copy the token shown under "Verification Token". This is required.
-- **Encrypt Key** (optional): If you want payload encryption, toggle **Enable Encrypt Key** and
-  copy the generated key. Store it securely — it is required to decrypt incoming events.
+### 方案 A —— 长连接（推荐）
 
-> **Note**: If Encrypt Key is enabled, cognia-next will automatically decrypt events using
-> AES-256-CBC with the key you provide.
+长连接会从 cognia-next 到飞书服务器建立一条持久化的 WebSocket。
+无需公网 webhook URL。
 
----
+1. 在应用菜单中进入 **事件与回调** 订阅页面。
+2. 在 **订阅方式** 下，选择 **使用长连接接收事件**。
+3. 订阅以下事件：
+   - `im.message.receive_v1` —— 机器人接收消息
 
-## 4. Grant Required Scopes
+点击 **保存**。
 
-Your app needs the following permissions. Go to **Permission management** and add:
+### 方案 B —— Webhook
 
-| Scope                    | Purpose                                |
-| ------------------------ | -------------------------------------- |
-| `im:message`             | Read messages sent to the bot          |
-| `im:message:send_as_bot` | Send messages as the bot               |
-| `im:chat`                | Access chat information                |
-| `im:resource`            | Access media resources (images, files) |
+需要同一台机器上有一个公网 HTTPS 端点。
 
-Click **Apply permissions** and wait for approval (self-service for custom apps in the same org).
+1. 在应用菜单中进入 **事件与回调** 订阅页面。
+2. 在 **订阅方式** 下，选择 **配置请求地址**。
+3. 填写你的 webhook URL（例如 `https://your-host.example.com/connectors/lark/<adapterId>`）。
+4. 飞书会发送一个验证请求；cognia-next 的 Rust HTTP 代理会处理握手。
+5. 订阅以下事件：
+   - `im.message.receive_v1` —— 机器人接收消息
 
----
-
-## 5. Install the Bot to Your Workspace
-
-1. Go to **Bot** in the menu. Enable the bot feature.
-2. Go to **Version management & release** → Click **Create version**.
-3. Fill in version details and click **Apply for online release** (or "Release internally" for
-   org-only bots).
-4. After approval, add the bot to the chats or groups where you want it to operate.
+点击 **保存**。
 
 ---
 
-## 6. Configure in cognia-next
+## 3. 获取 Verification Token 与 Encrypt Key
 
-1. Open **Settings → Connections → Add adapter → Lark**.
-2. Fill in the fields:
+仍在 **事件与回调** 订阅页面：
 
-| Field                  | Value                                           |
-| ---------------------- | ----------------------------------------------- |
-| **App ID**             | `cli_...` from App credentials                  |
-| **App Secret**         | App Secret from App credentials                 |
-| **Verification Token** | Token from Event subscriptions                  |
-| **Encrypt Key**        | (Optional) Encrypt Key from Event subscriptions |
-| **Transport**          | "Long connection" (recommended) or "Webhook"    |
+- **Verification Token**：复制 "Verification Token" 下显示的令牌。此项为必填。
+- **Encrypt Key**（可选）：如果你想要对载荷加密，开启 **启用 Encrypt Key** 并
+  复制生成的密钥。请妥善保存——解密入站事件时需要用到它。
 
-3. Click **Test** to verify App ID + App Secret.
-4. Click **Create** to save. The adapter will start automatically.
+> **注意**：如果启用了 Encrypt Key，cognia-next 将使用你提供的密钥通过
+> AES-256-CBC 自动解密事件。
 
 ---
 
-## 7. Resolving the Bot's Own open_id
+## 4. 授予所需权限
 
-The adapter uses `selfBotOpenId` to detect when the bot is mentioned. cognia-next resolves this
-at startup via the Lark API. If the bot's open_id cannot be resolved, mention detection falls back
-to checking the `app_id` in event headers.
+你的应用需要以下权限。进入 **权限管理** 并添加：
 
-You can also find your bot's open_id by calling:
+| 权限                     | 用途                       |
+| ------------------------ | -------------------------- |
+| `im:message`             | 读取发送给机器人的消息     |
+| `im:message:send_as_bot` | 以机器人身份发送消息       |
+| `im:chat`                | 访问群聊信息               |
+| `im:resource`            | 访问媒体资源（图片、文件） |
+
+点击 **申请权限** 并等待审批（同组织内的自建应用可自助开通）。
+
+---
+
+## 5. 将机器人安装到你的工作区
+
+1. 在菜单中进入 **机器人**。启用机器人功能。
+2. 进入 **版本管理与发布** → 点击 **创建版本**。
+3. 填写版本详情并点击 **申请线上发布**（仅供组织内使用的机器人可选 "内部发布"）。
+4. 审批通过后，将机器人添加到你希望它运行的聊天或群组中。
+
+---
+
+## 6. 在 cognia-next 中配置
+
+1. 打开 **平台连接 → 适配器 → 添加连接器 → 飞书**。
+2. 填写各字段：
+
+| 字段                   | 取值                                       |
+| ---------------------- | ------------------------------------------ |
+| **App ID**             | 来自凭证与基础信息的 `cli_...`             |
+| **App Secret**         | 来自凭证与基础信息的 App Secret            |
+| **Verification Token** | 来自事件订阅的令牌                         |
+| **Encrypt Key**        | （可选）来自事件订阅的 Encrypt Key         |
+| **传输方式**           | "长连接"（推荐）或 "Webhook"               |
+
+3. 点击 **测试** 以校验 App ID + App Secret。
+4. 点击 **创建** 保存。适配器将自动启动。
+
+---
+
+## 7. 解析机器人自身的 open_id
+
+适配器使用 `selfBotOpenId` 来检测机器人何时被提及。cognia-next 会在启动时
+通过飞书 API 解析它。如果无法解析机器人的 open_id，提及检测会回退为检查
+事件头中的 `app_id`。
+
+你也可以通过以下调用查询机器人的 open_id：
 
 ```
 GET https://open.feishu.cn/open-apis/bot/v3/info
 Authorization: Bearer <tenant_access_token>
 ```
 
-The response includes `bot.open_id`.
+响应中包含 `bot.open_id`。
 
 ---
 
@@ -147,13 +146,13 @@ cognia-next 把每个菜单项的 `event_key` 映射到你指定的动作，点�
 
 ---
 
-## Troubleshooting
+## 故障排查
 
-| Symptom                               | Likely cause                                                                 |
-| ------------------------------------- | ---------------------------------------------------------------------------- |
-| "Connection failed" on Test           | Incorrect App ID or App Secret                                               |
-| Events not received (long connection) | Check that `im.message.receive_v1` is subscribed                             |
-| Events not received (webhook)         | Verify the webhook URL is reachable and returns 200                          |
-| Decrypt error                         | Encrypt Key mismatch — ensure the key matches the one in Event subscriptions |
-| Bot not responding in groups          | Ensure the bot is installed to the group and has `im:message` scope          |
-| Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |
+| 现象                            | 可能原因                                                            |
+| ------------------------------- | ------------------------------------------------------------------- |
+| 测试时提示 "Connection failed"  | App ID 或 App Secret 不正确                                         |
+| 收不到事件（长连接）            | 检查是否已订阅 `im.message.receive_v1`                              |
+| 收不到事件（webhook）           | 确认 webhook URL 可达且返回 200                                     |
+| 解密错误                        | Encrypt Key 不匹配——确保密钥与事件订阅中的一致                     |
+| 机器人在群里不响应              | 确保机器人已安装到群组并拥有 `im:message` 权限                      |
+| 点击机器人菜单无反应            | 订阅 `application.bot.menu_v6` 并在快捷指令下映射对应的 `event_key` |

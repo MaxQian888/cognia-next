@@ -1,167 +1,149 @@
 ---
-title: ADR-0005 — Remote Control Subsystem
-description: Complete the half-finished webhook + event-trigger story with a local 127.0.0.1 axum HTTP listener, HMAC-signed outbound deliveries, and a dedicated Settings section.
+title: ADR-0005 — 远程控制子系统
+description: 用本地 127.0.0.1 axum HTTP 监听器、HMAC 签名的出站投递以及专门的设置区，补完半成品的 webhook + 事件触发能力。
 ---
 
-# Remote Control Subsystem
+# 远程控制子系统
 
-| Status   | Accepted                                                                                                               |
-| -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Date     | 2026-05-03                                                                                                             |
-| Replaces | The half-finished webhook channel + free-text event-trigger UI in `components/scheduler/task-form.tsx` (pre-this-ADR). |
+| 状态 | 已接受                                                                                                                  |
+| ---- | --------------------------------------------------------------------------------------------------------------------- |
+| 日期 | 2026-05-03                                                                                                            |
+| 取代 | `components/scheduler/task-form.tsx` 中半成品的 webhook 通道 + 自由文本事件触发 UI（本 ADR 之前）。                     |
 
-## Context
+## 背景
 
-cognia-next has shipped two adjacent half-features since the scheduler landed:
+自 scheduler 落地以来，cognia-next 已交付两个相邻的半成品特性：
 
-1. **Outbound webhook delivery** — `lib/scheduler/notification-integration.ts:176`
-   already POSTs to a configured URL with retry/timeout/jitter, and
-   `NotificationChannel = "desktop" | "toast" | "webhook" | "none"` plus
-   `TaskNotificationConfig.webhookUrl?` were typed end-to-end. But the task form
-   only rendered `["desktop", "toast"]` channel buttons — there was no way to
-   actually set a webhook URL through the UI. There was also no signing or custom
-   header story, so receivers had no way to verify that a delivery actually came
-   from this cognia install.
-2. **Event-triggered tasks** — `lib/scheduler/event-integration.ts` exposes
-   `emitSchedulerEvent(eventType, data, eventSource)` and
-   `lib/scheduler/task-scheduler.ts:1260` already filters listening tasks by
-   **both** `eventType` and `eventSource`. The form, though, was a single
-   free-text input and didn't surface `eventSource` at all. There was no way for
-   anything outside the renderer to fire an event.
+1. **出站 webhook 投递** —— `lib/scheduler/notification-integration.ts:176`
+   已经会带重试/超时/抖动地向配置的 URL 发 POST，且
+   `NotificationChannel = "desktop" | "toast" | "webhook" | "none"` 加上
+   `TaskNotificationConfig.webhookUrl?` 已端到端类型化。但任务表单只渲染了
+   `["desktop", "toast"]` 通道按钮——根本没有办法通过 UI 实际设置 webhook URL。
+   也没有签名或自定义 header 的能力，因此接收方无从验证某次投递是否真的来自这个
+   cognia 安装。
+2. **事件触发任务** —— `lib/scheduler/event-integration.ts` 暴露了
+   `emitSchedulerEvent(eventType, data, eventSource)`，且
+   `lib/scheduler/task-scheduler.ts:1260` 已经**同时**按 `eventType` 与
+   `eventSource` 过滤监听中的任务。但表单只是一个自由文本输入框，完全没有暴露
+   `eventSource`。渲染进程之外的任何东西都无法触发一个事件。
 
-That left a "remote control" story with no inbound surface (external systems
-can't trigger a task or fire an event) and only a partial outbound surface
-(no auth, no URL field, no custom headers). The user-facing motivation in
-2026-05-03 was that automation suites and personal scripts wanted to drive
-their own cognia install — kick off a scheduled chat from a CI job, fire a
-`backup:needed` event when an external sync ends, etc. — without writing a
-plugin or learning the MCP toolchain.
+这就留下了一个没有入站表面（外部系统无法触发任务或触发事件）、出站表面也只完成
+一部分（无认证、无 URL 字段、无自定义 header）的「远程控制」能力。2026-05-03 时
+面向用户的动机是：自动化套件和个人脚本想要驱动它们自己的 cognia 安装——从 CI
+作业启动一个定时对话、在外部同步结束时触发 `backup:needed` 事件等等——而无需
+编写插件或学习 MCP 工具链。
 
-## Decisions
+## 决策
 
-### 1. Inbound transport: local 127.0.0.1 axum HTTP server
+### 1. 入站传输：本地 127.0.0.1 axum HTTP 服务器
 
-A new Rust module `src-tauri/src/remote_control/` spawns an axum 0.7 HTTP
-server bound to `127.0.0.1:<port>` (default `47821`). Three endpoints:
+新增的 Rust 模块 `src-tauri/src/remote_control/` 启动一个绑定到
+`127.0.0.1:<port>`（默认 `47821`）的 axum 0.7 HTTP 服务器。三个端点：
 
-- `GET  /api/v1/health` — `{ ok: true, version }`. Auth required to avoid
-  leaking version info to unauthenticated probers.
-- `POST /api/v1/tasks/:id/run` — emits the `remote-control://run-task` Tauri
-  event; the `RemoteControlReceiver` provider in the renderer dispatches that
-  to `useSchedulerStore.getState().runTaskNow(taskId)`. Returns `202`.
-- `POST /api/v1/events` — emits `remote-control://emit-event`; the receiver
-  forwards to `emitSchedulerEvent`. Returns `202`.
+- `GET  /api/v1/health` —— `{ ok: true, version }`。需要认证，以避免向未认证的
+  探测者泄露版本信息。
+- `POST /api/v1/tasks/:id/run` —— 触发 `remote-control://run-task` Tauri 事件；
+  渲染进程中的 `RemoteControlReceiver` provider 将其分派给
+  `useSchedulerStore.getState().runTaskNow(taskId)`。返回 `202`。
+- `POST /api/v1/events` —— 触发 `remote-control://emit-event`；接收方转发给
+  `emitSchedulerEvent`。返回 `202`。
 
-We chose 127.0.0.1 over `0.0.0.0` because LAN exposure is out of scope for
-this iteration — a future ADR can add a Cloudflare Tunnel sidecar without
-changing the axum app at all.
+我们选择 127.0.0.1 而非 `0.0.0.0`，因为本次迭代不涉及 LAN 暴露——未来的 ADR 可以
+增加一个 Cloudflare Tunnel sidecar，而完全不改动 axum 应用。
 
-The middleware stack (outer→inner): body-size limit (8 KiB) →
-bearer-auth (constant-time compare via `subtle::ConstantTimeEq`) →
-IPv4 CIDR allowlist → fixed-window rate limit (default 60 req/min). Wrong
-token → 401, off-allowlist → 403, oversized body → 413, over rate limit → 429. Graceful shutdown rides on a `tokio::sync::watch` channel.
+中间件栈（由外到内）：体积上限（8 KiB）→
+bearer 认证（经 `subtle::ConstantTimeEq` 做常量时间比较）→
+IPv4 CIDR allowlist → 固定窗口限流（默认 60 req/min）。令牌错误 → 401，
+不在 allowlist → 403，体积超限 → 413，超过限流 → 429。优雅关闭依托
+`tokio::sync::watch` 通道。
 
-The listener is **opt-in**. The Inbound tab's enable Switch is disabled
-until the user explicitly clicks "Generate token", and the auto-start path
-in `lib.rs:setup` only runs the listener when both `inbound.enabled` is
-persisted true AND the OS keyring still has a token. A missing token cleanly
-returns `TokenMissing` so the renderer prompts the user to regenerate.
+监听器是**选择加入**的。Inbound 标签页的启用 Switch 在用户显式点击「Generate
+token」之前一直禁用，而 `lib.rs:setup` 中的自动启动路径仅当 `inbound.enabled`
+持久化为真**且**操作系统钥匙串中仍有令牌时才运行监听器。缺失令牌会干净地返回
+`TokenMissing`，于是渲染进程提示用户重新生成。
 
-### 2. Outbound HMAC signing + custom headers
+### 2. 出站 HMAC 签名 + 自定义 header
 
-`sendWebhookNotification` is extended with an optional `opts` argument
-`{ signingSecret?, headers? }`. When `signingSecret` is set, the body is
-HMAC-SHA256-signed and an `X-Cognia-Signature: sha256=<hex>` header rides on
-every retry of the same delivery. The signing helper lives in
-`lib/scheduler/webhook-signature.ts` (Web Crypto, ~30 lines) so both the
-production send path and tests use the same vector.
+`sendWebhookNotification` 增加了一个可选 `opts` 参数
+`{ signingSecret?, headers? }`。当设置了 `signingSecret` 时，对体做 HMAC-SHA256
+签名，并在同一次投递的每次重试上带上 `X-Cognia-Signature: sha256=<hex>` header。
+签名辅助函数位于 `lib/scheduler/webhook-signature.ts`（Web Crypto，约 30 行），
+以便生产发送路径和测试使用同一向量。
 
-`opts.headers` is merged BEFORE the canonical `Content-Type: application/json`
-— a caller-supplied `Content-Type` is dropped on purpose so receivers always
-see JSON. Both opts are computed once via `getWebhookOutboundConfig()` in
-`lib/scheduler/webhook-outbound-config.ts`, which reads the Zustand
-`useRemoteControlStore` for headers and (on desktop only) the OS keyring for
-the signing secret. The secret never enters Zustand or Dexie.
+`opts.headers` 在规范的 `Content-Type: application/json` **之前**合并——调用方提供的
+`Content-Type` 会被故意丢弃，从而让接收方始终看到 JSON。两个 opts 都通过
+`lib/scheduler/webhook-outbound-config.ts` 中的 `getWebhookOutboundConfig()` 一次性
+计算，它从 Zustand 的 `useRemoteControlStore` 读取 header，并（仅在桌面上）从操作
+系统钥匙串读取签名密钥。该密钥永不进入 Zustand 或 Dexie。
 
-### 3. Secrets live in the OS keyring (`com.cognia.remote-control`)
+### 3. 密钥存放于操作系统钥匙串（`com.cognia.remote-control`）
 
-Both the inbound bearer token and the outbound signing secret are stored
-through the same `keyring = "3"` crate that the TTS subsystem already uses
-(`src-tauri/src/tts/keyring.rs`). Service `"com.cognia.remote-control"`,
-accounts `"inbound-token"` and `"outbound-signing-secret"`. The renderer
-fetches them on demand via `remoteControlGetToken` /
-`remoteControlGetSigningSecret` Tauri commands; neither value is part of any
-persisted Zustand state.
+入站 bearer 令牌和出站签名密钥都通过 TTS 子系统已在使用的同一个 `keyring = "3"`
+crate 存放（`src-tauri/src/tts/keyring.rs`）。服务 `"com.cognia.remote-control"`，
+账户 `"inbound-token"` 与 `"outbound-signing-secret"`。渲染进程按需通过
+`remoteControlGetToken` / `remoteControlGetSigningSecret` Tauri 命令获取它们；
+两个值都不属于任何持久化的 Zustand 状态。
 
-### 4. New `remote-control` Settings section
+### 4. 新增 `remote-control` 设置区
 
-`components/settings/remote-control/remote-control-section.tsx` mirrors
-`data/data-section.tsx` 1:1 — `useSyncExternalStore` + `?remoteControlTab=`
-URL hydration, four tabs (`Overview` / `Inbound` / `Outbound` / `Events`).
-The Inbound tab is gated behind `isTauri()`; the other three render in both
-runtimes. The section sits in the `system` settings group between
-`Scheduled Tasks` and `Desktop`.
+`components/settings/remote-control/remote-control-section.tsx` 1:1 镜像
+`data/data-section.tsx` —— `useSyncExternalStore` + `?remoteControlTab=`
+URL 水合，四个标签页（`Overview` / `Inbound` / `Outbound` / `Events`）。
+Inbound 标签页被 `isTauri()` 闸住；另外三个在两种运行时中都渲染。该区位于
+`system` 设置分组中，介于 `Scheduled Tasks` 与 `Desktop` 之间。
 
-### 5. In-place extension of `domain-list-input` for the IP allowlist
+### 5. 就地扩展 `domain-list-input` 以支持 IP allowlist
 
-Rather than fork the search-side `domain-list-input.tsx`, we add two
-optional props — `validate?: (raw: string) => string | null` and
-`errorRender?: (key: string) => ReactNode`. Existing callers (the search
-allow/block lists) keep their original behaviour because the default
-validator returns `null`. The remote-control allowlist passes
-`validateCidrOrIp` (defined in `types/remote-control/index.ts`) and an
-`errorRender` that translates the returned i18n key.
+我们没有从搜索侧的 `domain-list-input.tsx` 分叉，而是增加两个可选 prop——
+`validate?: (raw: string) => string | null` 与
+`errorRender?: (key: string) => ReactNode`。既有调用方（搜索的允许/屏蔽列表）
+保留其原始行为，因为默认校验器返回 `null`。远程控制的 allowlist 传入
+`validateCidrOrIp`（定义于 `types/remote-control/index.ts`）和一个翻译所返回 i18n
+键的 `errorRender`。
 
-### 6. Add `"remote"` to `TaskExecutionTriggerSource`
+### 6. 为 `TaskExecutionTriggerSource` 增加 `"remote"`
 
-The runtime `runTaskNow` path tags executions with their initiating source.
-Remote-triggered runs deserve their own variant so the execution history
-can show a "remote" badge instead of mis-classifying as "run-now".
+运行时 `runTaskNow` 路径会用其发起来源标记执行。远程触发的运行理应有自己的变体，
+这样执行历史可以显示「remote」徽章，而不是误分类为「run-now」。
 
-## Threat model
+## 威胁模型
 
-The single bearer token + 127.0.0.1 binding is sufficient against:
+单一 bearer 令牌 + 127.0.0.1 绑定足以抵御：
 
-- a co-resident user-mode process on the same host that **doesn't** have read
-  access to the OS keyring (defence: bearer auth)
-- an off-loopback network attacker (defence: 127.0.0.1 binding +
-  IPv4 CIDR allowlist defaulting to `127.0.0.1/32`)
-- replay of a stolen body to a webhook receiver (defence: HMAC signature on
-  outbound deliveries, `subtle::ConstantTimeEq` on inbound auth)
+- 同主机上**不**具备读取操作系统钥匙串权限的同驻用户态进程（防御：bearer 认证）
+- 非环回的网络攻击者（防御：127.0.0.1 绑定 + 默认为 `127.0.0.1/32` 的
+  IPv4 CIDR allowlist）
+- 把窃取到的体重放到 webhook 接收方（防御：出站投递的 HMAC 签名、入站认证上的
+  `subtle::ConstantTimeEq`）
 
-It is **not** sufficient against:
+它**不足以**抵御：
 
-- a co-resident attacker who can read the OS keyring (no defence — the same
-  threat applies to any cognia API key)
-- a malicious browser extension running in the cognia webview (Tauri's
-  default CSP applies)
-- man-in-the-middle on outbound webhook deliveries (defence: receivers should
-  pin TLS + verify the signature)
+- 能读取操作系统钥匙串的同驻攻击者（无防御——同样的威胁适用于任何 cognia API key）
+- 运行在 cognia webview 中的恶意浏览器扩展（适用 Tauri 的默认 CSP）
+- 出站 webhook 投递上的中间人（防御：接收方应当 pin TLS + 验证签名）
 
-## Reuse map
+## 复用映射
 
-| Concern                 | Reused source                                              | Why we didn't fork                                                             |
-| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Webhook retry/timeout   | `lib/scheduler/notification-integration.ts:176`            | Existing 3-retry exponential-backoff loop is correct; we extend opts in place. |
-| Webhook test infra      | `lib/scheduler/notification-integration.ts:231`            | `testNotificationChannel("webhook", url)` already supports an explicit URL.    |
-| Tabbed settings shell   | `components/settings/data/data-section.tsx`                | `useSyncExternalStore` + `?…Tab=` URL hydration is the canonical pattern.      |
-| Settings primitives     | `components/settings/common/settings-section.tsx`          | `SettingsCard`/`Toggle`/`Row` cover every layout need.                         |
-| List input              | `components/settings/search/_shared/domain-list-input.tsx` | Adding a `validate?` prop avoids a parallel widget.                            |
-| Tauri command bindings  | `lib/tauri/canvas.ts`                                      | One `invoke` call site per command + `isTauri()` guard.                        |
-| OS keyring              | `src-tauri/src/tts/keyring.rs`                             | Same `keyring = "3"` crate, same `NoEntry → None` mapping.                     |
-| Long-lived service      | `src-tauri/src/scheduler/service.rs`                       | Tauri-managed state owning a `tokio::sync::Mutex<Option<JoinHandle>>`.         |
-| Frontend Tauri listener | `components/providers/a2ui-dispatch-provider.tsx`          | Top-level provider that owns Tauri listeners for the entire app lifetime.      |
-| Pref persistence        | `lib/tauri/store.ts` + Zustand `persist` middleware        | Same hybrid (localStorage on web, tauri-plugin-store on desktop).              |
+| 关注点                  | 复用来源                                                  | 为何没有分叉                                                                  |
+| ----------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Webhook 重试/超时       | `lib/scheduler/notification-integration.ts:176`            | 既有的 3 次重试指数退避循环是正确的；我们就地扩展 opts。                       |
+| Webhook 测试设施        | `lib/scheduler/notification-integration.ts:231`            | `testNotificationChannel("webhook", url)` 已支持显式 URL。                    |
+| 标签式设置外壳          | `components/settings/data/data-section.tsx`                | `useSyncExternalStore` + `?…Tab=` URL 水合是规范模式。                        |
+| 设置原语                | `components/settings/common/settings-section.tsx`          | `SettingsCard`/`Toggle`/`Row` 覆盖一切布局需求。                              |
+| 列表输入                | `components/settings/search/_shared/domain-list-input.tsx` | 增加一个 `validate?` prop 即可避免再造一个平行控件。                          |
+| Tauri 命令绑定          | `lib/tauri/canvas.ts`                                      | 每个命令一个 `invoke` 调用点 + `isTauri()` 护栏。                            |
+| 操作系统钥匙串          | `src-tauri/src/tts/keyring.rs`                             | 同一个 `keyring = "3"` crate，同样的 `NoEntry → None` 映射。                 |
+| 长生命周期服务          | `src-tauri/src/scheduler/service.rs`                       | 由 Tauri 管理、持有 `tokio::sync::Mutex<Option<JoinHandle>>` 的状态。        |
+| 前端 Tauri 监听器       | `components/providers/a2ui-dispatch-provider.tsx`          | 顶层 provider，在整个应用生命周期内持有 Tauri 监听器。                        |
+| 偏好持久化              | `lib/tauri/store.ts` + Zustand `persist` 中间件            | 同样的混合方案（web 上用 localStorage，桌面上用 tauri-plugin-store）。       |
 
-## Future work
+## 未来工作
 
-- **Cloudflare Tunnel sidecar** — let users expose their inbound listener to
-  the public internet without port forwarding. The axum app stays put; only a
-  new sidecar process is added.
-- **MCP toolset** — wrap the same routes in an MCP server so external Claude
-  Desktop / Cursor sessions can drive the listener through their own protocol.
-- **Per-task signing secret override** — currently a single global secret
-  signs every outbound webhook.
-- **Multiple bearer tokens with scopes** — single token today; per-token
-  rate limiting is in place but every token has the same authority.
-- **WebSocket / SSE push** — only request/response is supported today.
+- **Cloudflare Tunnel sidecar** —— 让用户无需端口转发即可把入站监听器暴露到公网。
+  axum 应用原地不动；只新增一个 sidecar 进程。
+- **MCP 工具集** —— 把同样的路由包进一个 MCP 服务器，让外部 Claude Desktop /
+  Cursor 会话能够通过它们自己的协议驱动监听器。
+- **按任务覆盖签名密钥** —— 目前是单个全局密钥对每次出站 webhook 签名。
+- **带 scope 的多个 bearer 令牌** —— 今天只有单个令牌；按令牌限流已就位，但每个
+  令牌拥有相同的权限。
+- **WebSocket / SSE 推送** —— 今天只支持请求/响应。

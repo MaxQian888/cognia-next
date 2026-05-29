@@ -1,54 +1,53 @@
 ---
-title: ADR 0017 — Workflow Plugin Extension Points
-description: Canonical contracts that let plugins contribute node executors and trigger sources to the visual workflow runtime.
+title: ADR 0017 — 工作流插件扩展点
+description: 让插件能向可视化工作流运行时贡献节点执行器和触发源的正典契约。
 ---
 
-## Status
+## 状态
 
-Accepted — 2026-05-09
+已接受 —— 2026-05-09
 
-## Context
+## 背景
 
-The visual workflow subsystem (ADR 0011) ships 32 built-in node executors
-and 5 trigger kinds. Plugins were only able to participate via a single
-escape hatch — the `action.plugin.invoke` node, which dispatches into a
-plugin's `workflow.task` extension point. That works for a one-shot
-"call my plugin" pattern but fails the moment a plugin wants to
-contribute a domain-specific node (e.g., a "Fetch from JIRA" action with
-its own params schema and label) or a custom trigger source (e.g., a
-GitHub webhook listener that emits trigger events on push).
+可视化工作流子系统（ADR 0011）出厂带 32 个内置节点执行器
+和 5 种触发器类型。插件此前只能通过单一逃生口参与 ——
+即 `action.plugin.invoke` 节点，它会分发进某个插件的
+`workflow.task` 扩展点。这对一次性的
+「调用我的插件」模式有效，但一旦插件想
+贡献一个领域专属节点（例如带有自己参数 schema 和标签的
+「从 JIRA 拉取」action）或一个自定义触发源（例如在 push 时
+发出触发事件的 GitHub webhook 监听器），它就行不通了。
 
-The gap surfaced when we audited the editor's left-rail node palette:
-`groupedCatalog()` was hard-coded to the built-in registry, plugins had
-no way to surface their own node kind, and the executor registry had
-neither an `unregister` nor a `subscribe` API — meaning even if we
-wired a back-channel, the editor couldn't react to plugin enable /
-disable lifecycle events.
+这个缺口在我们审计编辑器左栏节点面板时浮现出来：
+`groupedCatalog()` 被硬编码到内置注册表，插件
+无法呈现自己的节点类型，而且执行器注册表既没有
+`unregister` 也没有 `subscribe` API —— 意味着即使我们
+接好了一条回传通道，编辑器也无法对插件启用 /
+禁用生命周期事件作出反应。
 
-## Decision
+## 决策
 
-Introduce two new canonical extension points alongside the existing
-`workflow.task`:
+在现有 `workflow.task` 之外引入两个新的正典扩展点：
 
 ```ts
 export const CANONICAL_RUNTIME_POINTS = [
-  "workflow.node", // plugin-contributed node executor
-  "workflow.trigger", // plugin-contributed long-running trigger source
-  "workflow.task", // existing — pre-formalized action.plugin.invoke target
+  "workflow.node", // 插件贡献的节点执行器
+  "workflow.trigger", // 插件贡献的长跑触发源
+  "workflow.task", // 既有 —— 预先形式化的 action.plugin.invoke 目标
 ] as const
 ```
 
-These join the existing `ui-slot` / `hook` / `activation` taxonomies as
-a fourth `runtime` kind. Permission gate: `extension:workflow`. ADR
-audit (`auditPluginPointContracts`) traverses all three.
+它们与既有的 `ui-slot` / `hook` / `activation` 分类法并列，
+作为第四种 `runtime` 类型。权限门：`extension:workflow`。ADR
+审计（`auditPluginPointContracts`）会遍历全部三者。
 
-### Type contracts
+### 类型契约
 
-`types/plugin/plugin-workflow.ts` declares the runtime shapes:
+`types/plugin/plugin-workflow.ts` 声明运行时形状：
 
 ```ts
 interface PluginNodeDef {
-  kind: string // unprefixed; runtime adds <pluginId>.
+  kind: string // 无前缀；运行时补上 <pluginId>.
   typeVersion: number
   category: WorkflowNodeCategory | "plugin"
   label: string
@@ -73,14 +72,14 @@ interface PluginTriggerDef {
 }
 ```
 
-`PluginManifest` gains an optional `workflows` block that mirrors the
-runtime shapes minus the `execute` / `start` functions. The bridge that
-wires manifest entries to the actual functions reads them off the
-plugin's `main` entry on activate.
+`PluginManifest` 新增一个可选的 `workflows` 块，镜像
+运行时形状但去掉 `execute` / `start` 函数。把清单条目
+接到实际函数上的桥接器，会在 activate 时从插件的
+`main` 入口读取它们。
 
-### Plugin-facing API
+### 面向插件的 API
 
-`PluginContext.workflow` is the single entry point plugins use:
+`PluginContext.workflow` 是插件使用的唯一入口：
 
 ```ts
 interface PluginWorkflowAPI {
@@ -90,74 +89,76 @@ interface PluginWorkflowAPI {
 }
 ```
 
-Each `register*` returns an unsubscribe function. The runtime also
-tracks every registration on a per-pluginId map so a force-disable from
-the manager calls `teardownPluginWorkflowRegistrations(pluginId)` to
-clean up everything in one shot.
+每个 `register*` 返回一个取消订阅函数。运行时还会
+在一张按 pluginId 索引的 map 上跟踪每一次注册，于是
+管理器的强制禁用会调用
+`teardownPluginWorkflowRegistrations(pluginId)` 一次性
+清理掉所有东西。
 
-### Kind prefixing
+### 类型前缀
 
-Plugin authors supply unprefixed kinds (e.g., `"action.fetchPage"`).
-The runtime prefixes with `<pluginId>.` automatically — so the kind
-ends up as `action.<pluginId>.fetchPage` in the registry / catalog /
-saved workflows. Trigger kinds preserve the leading `trigger.` segment
-(`trigger.<pluginId>.<rest>`) so namespace-based pattern matching in the
-orchestrator still works.
+插件作者提供无前缀的 kind（例如 `"action.fetchPage"`）。
+运行时自动补上 `<pluginId>.` 前缀 —— 于是该 kind
+在注册表 / 目录 / 已保存工作流中最终变为
+`action.<pluginId>.fetchPage`。触发器 kind 保留开头的
+`trigger.` 段（`trigger.<pluginId>.<rest>`），使编排器中
+基于命名空间的模式匹配仍然有效。
 
-### Registry subscribe
+### 注册表订阅
 
-`lib/workflow/nodes/registry.ts` (and the parallel
-`lib/workflow/triggers/registry.ts`) gain `subscribeNodeRegistry(fn)` /
-`subscribePluginTriggerRegistry(fn)` returning an unsubscribe function.
-Notifications dispatch on a `queueMicrotask` so React effects mounted
-after eager built-in registration still observe the population.
+`lib/workflow/nodes/registry.ts`（以及对应的
+`lib/workflow/triggers/registry.ts`）新增
+`subscribeNodeRegistry(fn)` /
+`subscribePluginTriggerRegistry(fn)`，返回一个取消订阅函数。
+通知在 `queueMicrotask` 上分发，使在内置项预先注册之后
+挂载的 React effect 仍能观察到这一填充。
 
-### Catalog hot-merge
+### 目录热合并
 
-`lib/workflow/nodes/catalog.ts` adds a parallel `pluginCatalog` map +
-`addPluginCatalogEntry` / `removePluginCatalogEntry` /
-`subscribePluginCatalog` / `getPluginCatalogSnapshot`. `groupedCatalog()`
-emits a virtual `category: "plugin"` group at the bottom; the editor's
-NodeSearchSidebar uses `useSyncExternalStore` to react to plugin
-add / remove without manual re-renders. `searchCatalog()` includes plugin
-entries in scoring.
+`lib/workflow/nodes/catalog.ts` 新增一张并行的 `pluginCatalog`
+map + `addPluginCatalogEntry` / `removePluginCatalogEntry` /
+`subscribePluginCatalog` / `getPluginCatalogSnapshot`。`groupedCatalog()`
+在底部发出一个虚拟的 `category: "plugin"` 分组；编辑器的
+NodeSearchSidebar 用 `useSyncExternalStore` 对插件
+增 / 删作出反应，无需手动重渲染。`searchCatalog()` 会把插件
+条目纳入打分。
 
-## Consequences
+## 后果
 
-### Positive
+### 正面
 
-- Plugins finally have a first-class extension surface in the visual
-  workflow editor — not just a passive `workflow.task` callback.
-- Hot reload works end-to-end: enable a plugin while the editor is
-  open, the new nodes appear in the sidebar without a refresh.
-- Existing `action.plugin.invoke` paths stay valid — the new
-  `workflow.task` runtime point is a strict formalization, not a
-  breaking redefinition.
-- Cleanly bounded: the new types live in
-  `types/plugin/plugin-workflow.ts`, the bridge in `PluginContext`,
-  and the catalog merge in `lib/workflow/nodes/`. No cross-cutting
-  changes to the orchestrator or to `WorkflowNodeKind`.
+- 插件终于在可视化工作流编辑器里拥有了一级扩展表面 ——
+  而不只是一个被动的 `workflow.task` 回调。
+- 热重载端到端可用：在编辑器打开时启用一个插件，
+  新节点无需刷新即出现在侧边栏。
+- 既有的 `action.plugin.invoke` 路径保持有效 —— 新的
+  `workflow.task` 运行时点是严格的形式化，而非
+  破坏性的重定义。
+- 边界干净：新类型位于
+  `types/plugin/plugin-workflow.ts`，桥接在 `PluginContext` 中，
+  目录合并在 `lib/workflow/nodes/` 中。对编排器或
+  `WorkflowNodeKind` 没有横切改动。
 
-### Negative
+### 负面
 
-- `WorkflowNodeKind` is a closed union of built-ins; plugin kinds
-  extend it at runtime via `as never` casts at registration time.
-  Long-term we may want to widen the type to `string` and rely on the
-  catalog for known-shape validation. For Phase 1 we accept the cast.
-- The trigger emit path (`emitTriggerEvent`) is a Phase 1 stub; actual
-  delivery into the orchestrator's trigger queue lands in Phase 2 when
-  `trigger-bridge.ts` gets a `dispatchPluginTrigger` entry point.
+- `WorkflowNodeKind` 是内置项的封闭联合类型；插件 kind
+  在注册时通过 `as never` 强转在运行时扩展它。
+  长期看我们可能想把该类型放宽为 `string`，并依赖
+  目录做已知形状校验。在 Phase 1 我们接受这次强转。
+- 触发器 emit 路径（`emitTriggerEvent`）在 Phase 1 是一个桩；实际
+  投递进编排器的触发队列要等到 Phase 2，届时
+  `trigger-bridge.ts` 会获得一个 `dispatchPluginTrigger` 入口点。
 
-### Neutral
+### 中性
 
-- Permission gate `extension:workflow` is new but reuses the existing
-  permission machinery. Existing plugin manifests don't need to declare
-  it unless they actually use `PluginContext.workflow.*`.
+- 权限门 `extension:workflow` 是新的，但复用既有的
+  权限机制。既有插件清单无需声明
+  它，除非它们确实使用了 `PluginContext.workflow.*`。
 
-## Migration
+## 迁移
 
-No migration required for existing plugins or workflows. Plugins
-opting into the new surface declare:
+既有插件或工作流无需迁移。选择
+接入新表面的插件声明：
 
 ```jsonc
 {
@@ -170,19 +171,18 @@ opting into the new surface declare:
 }
 ```
 
-and call `context.workflow.registerNode` / `registerTrigger` from
-`activate`. The host calls the returned unsubscribe automatically on
-deactivate.
+并从 `activate` 调用 `context.workflow.registerNode` /
+`registerTrigger`。宿主会在 deactivate 时自动调用返回的取消订阅函数。
 
-## References
+## 参考
 
-- `lib/plugin/contracts/plugin-points.ts` — `CANONICAL_RUNTIME_POINTS`
-- `types/plugin/plugin-workflow.ts` — definition types
-- `lib/workflow/nodes/registry.ts` — subscribe / unregister
-- `lib/workflow/triggers/registry.ts` — trigger lifecycle
-- `lib/workflow/nodes/catalog.ts` — plugin catalog hot-merge
-- `lib/plugin/core/context.ts` — `createWorkflowAPI`
-- `components/workflow/editor/node-search-sidebar.tsx` —
-  `useSyncExternalStore` integration
-- ADR 0011 — visual workflow subsystem (foundation)
-- ADR 0006 / 0016 — plugin system architecture
+- `lib/plugin/contracts/plugin-points.ts` —— `CANONICAL_RUNTIME_POINTS`
+- `types/plugin/plugin-workflow.ts` —— 定义类型
+- `lib/workflow/nodes/registry.ts` —— 订阅 / 注销
+- `lib/workflow/triggers/registry.ts` —— 触发器生命周期
+- `lib/workflow/nodes/catalog.ts` —— 插件目录热合并
+- `lib/plugin/core/context.ts` —— `createWorkflowAPI`
+- `components/workflow/editor/node-search-sidebar.tsx` ——
+  `useSyncExternalStore` 集成
+- ADR 0011 —— 可视化工作流子系统（基础）
+- ADR 0006 / 0016 —— 插件系统架构

@@ -1,36 +1,34 @@
 ---
-title: ADR-0001 — Backup schema v3
-description: Cognia's full backup format ported to cognia-next, with encryption, integrity, history, and per-domain transfers.
+title: ADR-0001 — 备份格式 v3
+description: 将 Cognia 的完整备份格式移植到 cognia-next，提供加密、完整性校验、历史记录与按域分项导出。
 ---
 
-# Backup schema v3
+# 备份格式 v3
 
-| Status     | Accepted                                                                 |
-| ---------- | ------------------------------------------------------------------------ |
-| Date       | 2026-04-30                                                               |
-| Supersedes | The original v1 `ExportEnvelope` shipped in `lib/data/export-schema.ts`. |
+| 状态     | 已接受                                                                   |
+| -------- | ------------------------------------------------------------------------ |
+| 日期     | 2026-04-30                                                               |
+| 取代     | `lib/data/export-schema.ts` 中最初发布的 v1 `ExportEnvelope`。           |
 
-## Context
+## 背景
 
-cognia-next started with a minimal v1 export envelope: a flat JSON file with
-the user's settings, characters, skills, presets, and (optionally) sessions.
-That worked for moving data between two installs in the same week, but it
-didn't help users who wanted:
+cognia-next 最初只有一个极简的 v1 导出信封：一个扁平的 JSON 文件，包含
+用户的 settings、characters、skills、presets，以及（可选的）sessions。
+它能在同一周内的两个安装之间搬运数据，但对以下需求毫无帮助：
 
-- An on-disk file they could put in a backup tool without leaking their API key.
-- Verifiable integrity — "did the file get truncated mid-write?".
-- Encryption with either a device-stored key (one-click) or a passphrase
-  (portable across devices).
-- Reminders + scheduled writes on Tauri so they couldn't forget.
-- Per-domain transfers (just my skills, just my MCP servers).
-- Imports from other assistants (ChatGPT, Claude.ai, Gemini Takeout).
+- 一个可放进备份工具、又不会泄露 API key 的磁盘文件。
+- 可验证的完整性——「文件是不是写到一半被截断了？」。
+- 用设备存储的密钥（一键）或口令（跨设备可移植）加密。
+- 在 Tauri 上的提醒 + 定时写入，让用户不会忘记。
+- 按域分项导出（只导我的 skills、只导我的 MCP servers）。
+- 从其他助手导入（ChatGPT、Claude.ai、Gemini Takeout）。
 
-Cognia (the original product) has solved all of this in a `BackupPackageV3`
-schema. cognia-next adopts the same shape, stripped to our domain.
+Cognia（原产品）已在一个 `BackupPackageV3` 格式里解决了所有这些问题。
+cognia-next 沿用同样的形态，裁剪到我们自己的领域。
 
-## Decision
+## 决策
 
-### File formats
+### 文件格式
 
 ```
 BackupPackageV3                        # plaintext
@@ -67,93 +65,89 @@ DomainExportFile                       # single-table slice
 └── payload (BackupPayloadV3 subset)
 ```
 
-The migration boundary lives in `lib/data/migrate.ts`. It accepts a v1 file
-and lifts the flat fields into a synthetic v3 manifest+payload, so existing
-user files keep working forever.
+迁移边界位于 `lib/data/migrate.ts`。它接受 v1 文件，把扁平字段提升进一个
+合成的 v3 manifest+payload，因此既有的用户文件可以永远继续工作。
 
-### Encryption modes
+### 加密模式
 
-The export dialog offers three modes:
+导出对话框提供三种模式：
 
-1. **Plaintext** (default) — easiest to inspect.
-2. **Auto-key** — encrypted with a device-stored key (Tauri:
-   `@tauri-apps/plugin-store`, web: `localStorage`). One-click, unreadable on
-   other devices unless the user also exports the key.
-3. **Custom passphrase** — PBKDF2-SHA256 with 600 000 iterations + AES-GCM.
+1. **明文**（默认）——最便于查看。
+2. **自动密钥**——用设备存储的密钥加密（Tauri：
+   `@tauri-apps/plugin-store`，web：`localStorage`）。一键完成，在其他
+   设备上不可读，除非用户也导出了该密钥。
+3. **自定义口令**——PBKDF2-SHA256，600 000 次迭代 + AES-GCM。
 
-The importer detects the encrypted shape, tries the auto-key silently first,
-and falls back to a passphrase prompt only if that fails.
+导入器会检测加密形态，先静默尝试自动密钥，只有在失败时才回退到口令提示。
 
-### Backup history + reminders + auto-schedule
+### 备份历史 + 提醒 + 自动定时
 
-A new Dexie table `backupHistory` (v10) records every successful or failed
-export. The history is capped at 50 newest rows. The settings singleton gains:
+新增的 Dexie 表 `backupHistory`（v10）记录每一次成功或失败的导出。历史
+最多保留最新的 50 行。settings 单例新增：
 
-- `backupReminderDays` (default 7) — soft reminder cadence.
-- `backupReminderDismissedAt` — debounces the reminder banner.
-- `backupAutoSchedule` — `{ enabled, intervalDays, dirPath, retainCount }`
-  for the Tauri-only scheduled-write loop.
+- `backupReminderDays`（默认 7）——软提醒频率。
+- `backupReminderDismissedAt`——为提醒横幅做去抖。
+- `backupAutoSchedule`——`{ enabled, intervalDays, dirPath, retainCount }`，
+  用于仅 Tauri 的定时写入循环。
 
-The scheduler runs in `BackupSchedulerProvider`, mounted at the app root. It
-checks every 30 minutes (and once on mount) whether
-`shouldRunScheduledBackup` returns true; if so, it writes an auto-key
-encrypted file to `dirPath` and prunes older auto-backups beyond `retainCount`.
+调度器运行在挂载于应用根部的 `BackupSchedulerProvider` 中。它每 30 分钟
+（以及挂载时一次）检查 `shouldRunScheduledBackup` 是否返回 true；若是，
+则向 `dirPath` 写入一个自动密钥加密的文件，并清理超出 `retainCount` 的
+旧自动备份。
 
-### External-format imports
+### 外部格式导入
 
-`lib/data/importers/{chatgpt,claude,gemini}-import.ts` each parse a single
-third-party export shape into our `ChatSession` + `StoredMessage` rows.
-`lib/data/import-registry.ts` dispatches based on a cheap structural sniff.
+`lib/data/importers/{chatgpt,claude,gemini}-import.ts` 各自把一种第三方
+导出形态解析成我们的 `ChatSession` + `StoredMessage` 行。
+`lib/data/import-registry.ts` 基于一次廉价的结构嗅探进行分派。
 
-The dialog is unified — one "Import from another assistant" surface picks
-up whichever format the user drops in.
+对话框是统一的——单一的「从其他助手导入」入口会接收用户拖入的任意格式。
 
-## Consequences
+## 后果
 
-- **v1 user files keep working** thanks to `migrateEnvelope`. The user
-  doesn't need to know we changed schema versions.
-- **The plaintext format is canonical-key-sorted** (`canonicalStringify`)
-  before SHA-256 so the manifest's integrity check is stable across JS
-  engines and table-iteration orders.
-- **Encryption is opt-in.** Plaintext stays the default because most users
-  back up to a folder they already trust (Drive, Dropbox).
-- **The schedule is Tauri-only.** Browsers have no way to write to a folder
-  silently; web users get the reminder banner instead.
-- **`jszip` is lazy-loaded** inside `lib/export/batch/batch-export.ts`. It
-  doesn't ship in the main bundle until the user opens the bulk-export dialog.
+- **v1 用户文件继续工作**，得益于 `migrateEnvelope`。用户无需知道我们
+  改过了格式版本。
+- **明文格式在 SHA-256 之前按规范键排序**（`canonicalStringify`），因此
+  manifest 的完整性校验在不同 JS 引擎和表迭代顺序下都保持稳定。
+- **加密是可选项。** 明文仍是默认，因为多数用户备份到的是他们已经信任
+  的文件夹（Drive、Dropbox）。
+- **定时只在 Tauri 上可用。** 浏览器无法静默写入文件夹；web 用户得到的
+  是提醒横幅。
+- **`jszip` 是懒加载的**，位于 `lib/export/batch/batch-export.ts` 内。在
+  用户打开批量导出对话框之前，它不会进入主包。
 
-## File map
+## 文件地图
 
-| Path                                                    | Purpose                                                                                 |
+| 路径                                                    | 用途                                                                                    |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `lib/data/types.ts`                                     | Type contracts, error classes, `EXPORT_SCHEMA_VERSION`                                  |
-| `lib/data/crypto.ts`                                    | `sha256Hex`, `encryptBackupPackage`, `decryptBackupPackage`                             |
-| `lib/data/backup-key.ts`                                | Device-stored auto-key + rotation                                                       |
-| `lib/data/migrate.ts`                                   | v1 → v3 boundary; integrity check                                                       |
-| `lib/data/build-package.ts`                             | Reads Dexie tables → `BackupPackageV3`                                                  |
-| `lib/data/apply-package.ts`                             | Writes `BackupPackageV3` back, respecting built-ins                                     |
-| `lib/data/scheduler.ts`                                 | Pure helpers: `shouldRunScheduledBackup`, `shouldShowReminder`, `pruneScheduledBackups` |
-| `lib/data/import-registry.ts`                           | External-format dispatcher                                                              |
-| `lib/data/importers/{chatgpt,claude,gemini}-import.ts`  | Per-platform parsers                                                                    |
-| `lib/data/domain/index.ts`                              | Per-domain export/import + registry                                                     |
-| `lib/db/backup-history.ts`                              | Dexie CRUD for the history table                                                        |
-| `lib/export/text/rich-markdown.ts`                      | Markdown / JSON / plain-text formatters                                                 |
-| `lib/export/html/{beautiful,animated,syntax-themes}.ts` | HTML exports                                                                            |
-| `lib/export/batch/batch-export.ts`                      | Multi-session ZIP                                                                       |
-| `lib/export/single/index.ts`                            | Single-session dispatcher                                                               |
-| `hooks/data/*`                                          | React-side wiring for each flow                                                         |
-| `components/data/*`                                     | Dialogs + shared bits (passphrase input, encryption options, history table)             |
-| `components/settings/data/*`                            | Tab shell + the four tabs                                                               |
-| `components/providers/backup-scheduler-provider.tsx`    | The scheduler runner                                                                    |
+| `lib/data/types.ts`                                     | 类型契约、错误类、`EXPORT_SCHEMA_VERSION`                                                |
+| `lib/data/crypto.ts`                                    | `sha256Hex`、`encryptBackupPackage`、`decryptBackupPackage`                              |
+| `lib/data/backup-key.ts`                                | 设备存储的自动密钥 + 轮换                                                                |
+| `lib/data/migrate.ts`                                   | v1 → v3 边界；完整性校验                                                                 |
+| `lib/data/build-package.ts`                             | 读取 Dexie 表 → `BackupPackageV3`                                                        |
+| `lib/data/apply-package.ts`                             | 写回 `BackupPackageV3`，尊重内置项                                                       |
+| `lib/data/scheduler.ts`                                 | 纯辅助函数：`shouldRunScheduledBackup`、`shouldShowReminder`、`pruneScheduledBackups`    |
+| `lib/data/import-registry.ts`                           | 外部格式分派器                                                                           |
+| `lib/data/importers/{chatgpt,claude,gemini}-import.ts`  | 各平台解析器                                                                             |
+| `lib/data/domain/index.ts`                              | 按域导出/导入 + 注册表                                                                   |
+| `lib/db/backup-history.ts`                              | 历史表的 Dexie CRUD                                                                      |
+| `lib/export/text/rich-markdown.ts`                      | Markdown / JSON / 纯文本格式化器                                                         |
+| `lib/export/html/{beautiful,animated,syntax-themes}.ts` | HTML 导出                                                                                |
+| `lib/export/batch/batch-export.ts`                      | 多会话 ZIP                                                                               |
+| `lib/export/single/index.ts`                            | 单会话分派器                                                                             |
+| `hooks/data/*`                                          | 各流程的 React 侧接线                                                                    |
+| `components/data/*`                                     | 对话框 + 共享部件（口令输入、加密选项、历史表）                                          |
+| `components/settings/data/*`                            | Tab 外壳 + 四个 tab                                                                      |
+| `components/providers/backup-scheduler-provider.tsx`    | 调度器运行器                                                                             |
 
-## Verification
+## 验证
 
-- All ≥90% test coverage thresholds enforced via `pnpm test:coverage`.
-- 136 tests across `lib/data/**`, `lib/export/**`, `hooks/data/**` exercise
-  the round-trip: build → encrypt → migrate → decrypt → apply.
-- Manual smoke tests:
-  1. Export each encryption mode; re-import the resulting file.
-  2. Drop a ChatGPT / Claude / Gemini export; confirm conversations land.
-  3. Per-domain row export → reset → re-import; confirm full restore.
-  4. Enable scheduled backups in Tauri; advance the clock; confirm a
-     `cognia-backup-*.enc.cbk` lands in the chosen folder.
+- 所有 ≥90% 测试覆盖率阈值通过 `pnpm test:coverage` 强制。
+- `lib/data/**`、`lib/export/**`、`hooks/data/**` 共 136 个测试覆盖整个
+  往返：build → encrypt → migrate → decrypt → apply。
+- 手工冒烟测试：
+  1. 以每种加密模式导出；再导入产出的文件。
+  2. 拖入一个 ChatGPT / Claude / Gemini 导出；确认对话落地。
+  3. 按域行导出 → 重置 → 再导入；确认完整恢复。
+  4. 在 Tauri 中启用定时备份；推进时钟；确认一个
+     `cognia-backup-*.enc.cbk` 落入所选文件夹。

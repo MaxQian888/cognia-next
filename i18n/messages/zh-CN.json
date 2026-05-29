@@ -12836,6 +12836,12 @@
       }
     },
     "companion": {
+      "groups": {
+        "network": "服务与网络",
+        "pairing": "设备配对",
+        "push": "推送通知",
+        "advanced": "高级与诊断"
+      },
       "tunnel": {
         "title": "Cloudflared 隧道",
         "description": "出门在外时让手机能连上桌面。需先安装 cloudflared CLI。",
@@ -12857,7 +12863,8 @@
         "clearButton": "清除",
         "clearAria": "清除命名隧道配置",
         "cleared": "配置已清除。",
-        "namedConfigured": "命名隧道已配置。打开开关即可启动 cloudflared。"
+        "namedConfigured": "命名隧道已配置。打开开关即可启动 cloudflared。",
+        "tokenConfigured": "Token 已配置"
       },
       "mdns": {
         "title": "LAN 自动发现 (mDNS)",

@@ -23,6 +23,7 @@
  */
 
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 
 /** Sentinel prefix used in `RTCIceServer.credential` to indicate the
  *  real credential lives in the OS keyring under a separate key id. */
@@ -89,27 +90,23 @@ interface SecureStoragePluginShape {
   remove(opts: { key: string }): Promise<unknown>
 }
 
-/** Lazy import so the plugin is only loaded inside Capacitor.
+/** Resolve the SecureStorage plugin via the canonical loader
+ *  (`lib/capacitor/_shared.ts:makeDefaultLoader`): it reads the proxy that
+ *  `registerNativePlugins()` puts on `window.Capacitor.Plugins` at mobile boot
+ *  FIRST, only falling back to a `webpackIgnore`'d dynamic import. The bare
+ *  `import("capacitor-secure-storage-plugin")` never resolves inside the
+ *  static-export WebView (package not bundled, no node_modules), so an
+ *  import-only loader silently disabled TURN-credential persistence on device.
  *
- * Package name MUST stay in lockstep with `mobile/package.json` —
- * mismatches fail silently here (the try/catch swallows MODULE_NOT_FOUND)
- * so the bug surfaces only as "TURN credentials never persist on mobile".
- * `turn-credentials.test.ts:CapacitorSecureStore package name` pins both
- * sides of the lockstep.
- *
- * The plugin is declared by the `mobile/` workspace, not by the root, so
- * the root tsconfig cannot resolve its types. The runtime resolution is
- * expected only inside Capacitor; on web / jsdom the import() rejects
- * and the surrounding try/catch returns null. A dynamic module-id string
- * lets the bundler skip static analysis (mirrors the same pattern in
- * `lib/tauri/companion-storage.ts:109-121`). */
+ *  The package-name literal MUST stay in lockstep with `mobile/package.json`;
+ *  `turn-credentials.test.ts:CapacitorSecureStore package name` pins it. Errors
+ *  collapse to `null` so the caller can fall back to the in-memory store. */
 async function loadSecureStorage(): Promise<SecureStoragePluginShape | null> {
   try {
-    const moduleId = "capacitor-secure-storage-plugin"
-    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-      SecureStoragePlugin?: SecureStoragePluginShape
-    }
-    return mod.SecureStoragePlugin ?? null
+    return await makeDefaultLoader<SecureStoragePluginShape>(
+      "capacitor-secure-storage-plugin",
+      "SecureStoragePlugin"
+    )()
   } catch {
     return null
   }

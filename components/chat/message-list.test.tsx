@@ -102,7 +102,7 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
-import { MessageList } from "./message-list"
+import { MessageList, VIRTUALIZE_THRESHOLD } from "./message-list"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
@@ -136,6 +136,10 @@ const userMsg = (id: string, text: string): UIMessage => ({
   role: "user",
   parts: [{ type: "text", text }],
 })
+
+// More than VIRTUALIZE_THRESHOLD messages forces the virtualized render path.
+const manyMsgs = (n: number): UIMessage[] =>
+  Array.from({ length: n }, (_, i) => userMsg(`vm-${i}`, `Msg ${i}`))
 
 beforeEach(() => {
   useChatStore.getState().clear()
@@ -247,10 +251,10 @@ describe("MessageList", () => {
     )
   })
 
-  it("renders items based on virtualizer output", () => {
+  it("renders a short list in document flow (no virtualized [data-index] rows)", () => {
     const Wrapper = withAdapter(makeAdapter())
-    const msgs = Array.from({ length: 10 }, (_, i) => userMsg(`vm-${i}`, `Msg ${i}`))
-    render(
+    const msgs = manyMsgs(10) // 10 <= threshold → flow path
+    const { container } = render(
       <Wrapper>
         <MessageList messages={msgs} status="idle" />
       </Wrapper>
@@ -258,6 +262,22 @@ describe("MessageList", () => {
     for (let i = 0; i < 10; i++) {
       expect(document.querySelector(`[data-test="msg-vm-${i}"]`)).toBeTruthy()
     }
+    // Flow path attaches no measureElement ref → no [data-index] wrappers.
+    expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+  })
+
+  it("renders a long list via the virtualizer ([data-index] rows present)", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const count = VIRTUALIZE_THRESHOLD + 1
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(count)} status="idle" />
+      </Wrapper>
+    )
+    // The mock virtualizer emits one [data-index] row per message.
+    expect(container.querySelectorAll("[data-index]")).toHaveLength(count)
+    expect(document.querySelector(`[data-test="msg-vm-0"]`)).toBeTruthy()
+    expect(document.querySelector(`[data-test="msg-vm-${count - 1}"]`)).toBeTruthy()
   })
 
   it("wraps messages in LongPress on mobile and renders MessageActionSheet", () => {
@@ -280,7 +300,28 @@ describe("MessageList", () => {
       parts: [{ type: "text", text }],
     })
 
-    it("the actively-streaming row receives no measureElement ref", () => {
+    it("the actively-streaming row is the last [data-index] row (virtualized path)", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      // Force the virtualized path: fillers + a final streaming assistant row.
+      const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
+      const { container } = render(
+        <Wrapper>
+          <MessageList
+            messages={[...fillers, assistantStreaming("a1", "partial…")]}
+            status="streaming"
+          />
+        </Wrapper>
+      )
+      const rows = container.querySelectorAll("[data-index]")
+      // fillers + streaming row (no thinking shimmer: the streaming row has text).
+      expect(rows).toHaveLength(fillers.length + 1)
+      // The streaming row (last index) skips the measureElement ref; we verify
+      // it is rendered and carries the streaming text — the ref-skip is
+      // exercised by the snapshot rendering correctly.
+      expect(rows[rows.length - 1].textContent).toContain("partial")
+    })
+
+    it("renders the streaming row in document flow for short lists", () => {
       const Wrapper = withAdapter(makeAdapter())
       const { container } = render(
         <Wrapper>
@@ -290,18 +331,9 @@ describe("MessageList", () => {
           />
         </Wrapper>
       )
-      // The mock useVirtualizer renders both rows; we just confirm the DOM
-      // structure produces exactly the two message containers and the
-      // streaming row is the second one.
-      const rows = container.querySelectorAll("[data-index]")
-      expect(rows).toHaveLength(2)
-      // The user row (index 0) is non-streaming, so its container is a div
-      // that React attaches the virtualizer's measureElement ref to. The
-      // assistant streaming row (index 1) skips the ref. We can't read ref
-      // assignments from React, but we can verify the streaming row is
-      // marked by its data-index and contains the streaming text — the
-      // ref-skip is exercised by the snapshot rendering working.
-      expect(rows[1].textContent).toContain("partial")
+      // Flow path → no [data-index]; the streaming text still renders.
+      expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+      expect(document.querySelector(`[data-test="msg-a1"]`)?.textContent).toContain("partial")
     })
 
     it("estimateSize returns a growing projection for the streaming row", () => {

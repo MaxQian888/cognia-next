@@ -17,6 +17,8 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+use cognia_signaling_core::policy::{evaluate_subscribe, RoomLimits, SubscribeDecision};
+
 use crate::proto::{PeerRole, ServerFrame};
 
 /// Outbound channel buffer (frames). Sized generously — peers that fall
@@ -70,6 +72,38 @@ impl RoomRegistry {
         let others: Vec<_> = entry.iter().map(|h| h.tx.clone()).collect();
         entry.push(handle);
         (existing, others)
+    }
+
+    /// Like [`join`] but gated by the room admission policy
+    /// ([`evaluate_subscribe`]). The peer-count / role check and the insert
+    /// happen under the same lock so two concurrent `Subscribe`s can't both
+    /// slip past a cap. On `Reject` nothing is mutated and the decision is
+    /// returned for the caller to turn into a `ServerFrame::Error`.
+    pub fn try_join(
+        &self,
+        rendezvous_id: &str,
+        handle: PeerHandle,
+        limits: &RoomLimits,
+    ) -> Result<(Vec<PeerHandle>, Vec<mpsc::Sender<ServerFrame>>), SubscribeDecision> {
+        let mut rooms = self.rooms.lock();
+        let entry = rooms.entry(rendezvous_id.to_string()).or_default();
+
+        let existing_roles: Vec<PeerRole> = entry.iter().map(|h| h.role).collect();
+        if let SubscribeDecision::Reject { code, message } =
+            evaluate_subscribe(&existing_roles, handle.role, limits)
+        {
+            // Drop a room we just lazily created but won't populate, so a
+            // rejected first subscribe doesn't leak an empty entry.
+            if entry.is_empty() {
+                rooms.remove(rendezvous_id);
+            }
+            return Err(SubscribeDecision::Reject { code, message });
+        }
+
+        let existing = entry.clone();
+        let others: Vec<_> = entry.iter().map(|h| h.tx.clone()).collect();
+        entry.push(handle);
+        Ok((existing, others))
     }
 
     /// Remove a peer from a room. Returns the other peers' senders so the
@@ -225,6 +259,54 @@ mod tests {
         assert_eq!(announcements.len(), 1);
         assert!(announcements[0].2.is_empty(), "no other peers were left to notify");
         assert_eq!(reg.stats().rooms, 0);
+    }
+
+    #[test]
+    fn try_join_rejects_second_desktop() {
+        let reg = RoomRegistry::new();
+        let limits = RoomLimits::default();
+        let (h1, _rx1) = handle(&reg, PeerRole::Desktop);
+        let (h2, _rx2) = handle(&reg, PeerRole::Desktop);
+
+        assert!(reg.try_join("r", h1, &limits).is_ok());
+        let rejected = reg.try_join("r", h2, &limits);
+        match rejected {
+            Err(SubscribeDecision::Reject { code, .. }) => assert_eq!(code, "role_taken"),
+            _ => panic!("expected role_taken rejection"),
+        }
+        // The rejected peer was not added.
+        assert_eq!(reg.stats().peers, 1);
+    }
+
+    #[test]
+    fn try_join_rejects_when_room_full() {
+        let reg = RoomRegistry::new();
+        let limits = RoomLimits {
+            max_peers: 2,
+            max_desktops: 1,
+        };
+        let (h1, _rx1) = handle(&reg, PeerRole::Desktop);
+        let (h2, _rx2) = handle(&reg, PeerRole::Mobile);
+        let (h3, _rx3) = handle(&reg, PeerRole::Mobile);
+        assert!(reg.try_join("r", h1, &limits).is_ok());
+        assert!(reg.try_join("r", h2, &limits).is_ok());
+        match reg.try_join("r", h3, &limits) {
+            Err(SubscribeDecision::Reject { code, .. }) => assert_eq!(code, "room_full"),
+            _ => panic!("expected room_full rejection"),
+        }
+        assert_eq!(reg.stats().peers, 2);
+    }
+
+    #[test]
+    fn try_join_rejecting_first_subscribe_leaves_no_empty_room() {
+        let reg = RoomRegistry::new();
+        let limits = RoomLimits {
+            max_peers: 0,
+            max_desktops: 1,
+        };
+        let (h1, _rx1) = handle(&reg, PeerRole::Desktop);
+        assert!(reg.try_join("r", h1, &limits).is_err());
+        assert_eq!(reg.stats().rooms, 0, "rejected lazy room must be dropped");
     }
 
     #[test]

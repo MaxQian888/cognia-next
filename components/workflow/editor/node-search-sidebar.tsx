@@ -10,7 +10,7 @@
  * is the same pattern the official React Flow Drag-and-Drop example uses.
  */
 
-import { useMemo, useState, useSyncExternalStore } from "react"
+import { memo, useMemo, useState, useSyncExternalStore } from "react"
 import * as LucideIcons from "lucide-react"
 import { ChevronRightIcon, SearchIcon, type LucideIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -39,7 +39,7 @@ function getServerSnapshot(): readonly NodeCatalogEntry[] {
   return SERVER_SNAPSHOT
 }
 
-export function NodeSearchSidebar({
+export const NodeSearchSidebar = memo(function NodeSearchSidebar({
   className,
   onAddNodeAtCenter,
   embedded = false,
@@ -131,7 +131,7 @@ export function NodeSearchSidebar({
       )}
     </aside>
   )
-}
+})
 
 function NodeCategoryGroup({
   title,

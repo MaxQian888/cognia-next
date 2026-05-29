@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ChevronDownIcon,
   CircleIcon,
   CopyIcon,
   CheckIcon,
@@ -37,6 +38,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { isTauri, transport } from "@/lib/tauri"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
@@ -179,18 +183,69 @@ async function clearNamedConfig(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export function CompanionSection() {
+  const t = useTranslations("mobile.companion.groups")
   return (
-    <div className="space-y-4 p-4" data-testid="companion-section">
-      <ServerStatusCard />
-      <TunnelCard />
-      <MdnsCard />
-      <WebRtcCard />
-      <PairDeviceCard />
-      <PairedDevicesCard />
-      <SyncStatusCard />
-      <ReachabilityDiagnosticsCard />
-      <PushCredentialsCard />
+    <div className="space-y-3 p-4" data-testid="companion-section">
+      <CompanionGroup id="network" title={t("network")} defaultOpen>
+        <ServerStatusCard />
+        <TunnelCard />
+        <MdnsCard />
+        <WebRtcCard />
+      </CompanionGroup>
+      <CompanionGroup id="pairing" title={t("pairing")} defaultOpen>
+        <PairDeviceCard />
+        <PairedDevicesCard />
+      </CompanionGroup>
+      <CompanionGroup id="push" title={t("push")} defaultOpen>
+        <PushCredentialsCard />
+      </CompanionGroup>
+      {/* Diagnostics + per-table sync state are power-user surfaces; collapse
+          them by default so the common pairing / push path isn't buried. */}
+      <CompanionGroup id="advanced" title={t("advanced")} defaultOpen={false}>
+        <SyncStatusCard />
+        <ReachabilityDiagnosticsCard />
+      </CompanionGroup>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Collapsible group wrapper — labeled section header + chevron. Inlined here
+// (not its own file) so it rides the existing companion-section.test.tsx
+// coverage; its only behavior is open/close, exercised by the section tests.
+// ---------------------------------------------------------------------------
+
+function CompanionGroup({
+  id,
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  id: string
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="rounded-lg border bg-muted/30"
+      data-testid={`companion-group-${id}`}
+    >
+      <CollapsibleTrigger
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-semibold"
+        data-testid={`companion-group-trigger-${id}`}
+      >
+        <span>{title}</span>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-4 px-2 pb-3">{children}</CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -288,9 +343,12 @@ function TunnelCard() {
     try {
       await saveNamedConfig(tokenInput.trim(), hostnameInput.trim())
       const next = await getTunnelConfig()
-
-      console.log("[TunnelCard] saveNamedConfig -> getTunnelConfig:", next)
       setConfig(next)
+      // The token is a write-only secret — never read back into the field.
+      // Clear it on success so a populated password box doesn't imply the
+      // field still "holds" the saved value; the "Token configured" badge
+      // (driven by `hasToken`) is the source of truth instead.
+      setTokenInput("")
       toast.success(t("saved"))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -406,6 +464,16 @@ function TunnelCard() {
                 className="h-8 text-xs"
               />
             </div>
+            {namedReady && (
+              <Badge
+                variant="outline"
+                className="w-fit gap-1 text-[10px] uppercase text-emerald-600 dark:text-emerald-400"
+                data-testid="tunnel-token-configured"
+              >
+                <CheckIcon className="size-3" aria-hidden="true" />
+                {t("tokenConfigured")}
+              </Badge>
+            )}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
@@ -1131,8 +1199,8 @@ function PushCredentialsCard() {
               </Badge>
             ) : null}
           </div>
-          <textarea
-            className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
+          <Textarea
+            className="h-32 resize-y font-mono text-[10px]"
             placeholder={t("fcmPlaceholder")}
             value={fcmJson}
             onChange={(e) => setFcmJson(e.target.value)}
@@ -1193,8 +1261,8 @@ function PushCredentialsCard() {
               />
             </div>
           </div>
-          <textarea
-            className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
+          <Textarea
+            className="h-32 resize-y font-mono text-[10px]"
             placeholder={t("apnsKeyPlaceholder")}
             value={apns.privateKeyPem}
             onChange={(e) => setApns({ ...apns, privateKeyPem: e.target.value })}
@@ -1202,16 +1270,18 @@ function PushCredentialsCard() {
             aria-label={t("apnsKeyAria")}
           />
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-1.5">
+              <Checkbox
+                id="apns-production"
                 checked={apns.production}
-                onChange={(e) => setApns({ ...apns, production: e.target.checked })}
+                onCheckedChange={(v) => setApns({ ...apns, production: v === true })}
                 disabled={!desktop || busy}
                 aria-label={t("productionAria")}
               />
-              {t("productionEnv")}
-            </label>
+              <Label htmlFor="apns-production" className="text-xs font-normal">
+                {t("productionEnv")}
+              </Label>
+            </div>
             <Button size="sm" onClick={onSubmitApns} disabled={!desktop || busy}>
               {t("saveApns")}
             </Button>

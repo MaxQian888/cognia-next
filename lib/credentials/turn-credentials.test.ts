@@ -263,4 +263,52 @@ describe("CapacitorSecureStore package name", () => {
     expect(mobilePkg.dependencies?.["capacitor-secure-storage-plugin"]).toBeDefined()
     expect(mobilePkg.dependencies?.["@capacitor-community/secure-storage-plugin"]).toBeUndefined()
   })
+
+  it("persists through window.Capacitor.Plugins.SecureStoragePlugin on device", async () => {
+    // Regression for the on-device persistence bug: the loader must read the
+    // proxy `registerNativePlugins()` registers at boot, not rely on a bare
+    // dynamic import that never resolves in the static-export WebView.
+    const realCap = (window as { Capacitor?: unknown }).Capacitor
+    const secureStore = new Map<string, string>()
+    try {
+      // Force the runtime to pick CapacitorSecureStore: clear the injected
+      // backend, present as a native Capacitor platform, expose the proxy.
+      __setTurnCredentialBackend(null)
+      ;(
+        window as unknown as {
+          Capacitor: { isNativePlatform: () => boolean; Plugins: Record<string, unknown> }
+        }
+      ).Capacitor = {
+        isNativePlatform: () => true,
+        Plugins: {
+          SecureStoragePlugin: {
+            async set(opts: { key: string; value: string }) {
+              secureStore.set(opts.key, opts.value)
+              return { value: true }
+            },
+            async get(opts: { key: string }) {
+              if (!secureStore.has(opts.key)) throw new Error(`absent: ${opts.key}`)
+              return { value: secureStore.get(opts.key)! }
+            },
+            async remove(opts: { key: string }) {
+              secureStore.delete(opts.key)
+              return { value: true }
+            },
+          },
+        },
+      }
+
+      await saveTurnCredential("k-dev", { username: "alice", credential: "s3cret" })
+      // Stored under the namespaced key in the secure store…
+      expect(secureStore.get("webrtc-turn.k-dev")).toBe(
+        JSON.stringify({ username: "alice", credential: "s3cret" })
+      )
+      // …and reads back through the same plugin proxy.
+      expect(await loadTurnCredential("k-dev")).toEqual({ username: "alice", credential: "s3cret" })
+    } finally {
+      if (realCap === undefined) delete (window as { Capacitor?: unknown }).Capacitor
+      else (window as { Capacitor?: unknown }).Capacitor = realCap
+      __setTurnCredentialBackend(null)
+    }
+  })
 })

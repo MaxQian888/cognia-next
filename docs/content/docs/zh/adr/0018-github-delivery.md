@@ -5,15 +5,15 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub Delivery
 
-**Status:** Accepted
-**Date:** 2026-05-12
-**Branch:** `feat/github-delivery`
+**状态：** 已接受
+**日期：** 2026-05-12
+**分支：** `feat/github-delivery`
 
 > **编号说明.** 该 ADR 在初次落地时使用过 `0012-github-delivery.md` 的临时编号,
 > 与既有的 `0012-transport-abstraction.md` 冲突。当前编号 **0018** 是规范化后的最终编号,
 > 内容与原文一致(仅标题行升级)。后续引用请使用 ADR-0018。
 
-## Context
+## 背景
 
 cognia-next 已经具备四个稳定子系统 —— 可视化工作流编辑器(38 种节点,schema v22)、插件运行时
 (13 个扩展点)、调度器(8 类执行器)以及 ConnectorBus(5 个平台适配器),但没有一种官方手段
@@ -27,7 +27,7 @@ Inbox 里露面。
 **不在本 ADR 内:**CI/CD 编排(lint / test / build / deploy 继续留在 GitHub Actions);
 通用的 GitLab / Gitea 适配器;cognia 自托管的 token-exchange 服务。
 
-## Decision
+## 决策
 
 GitHub Delivery 由 **薄核心层**(`lib/github/`)+ **插件外壳**(`plugins/github-delivery/`)
 组成。插件向工作流注入 13 个 `action.github.*` 节点执行器、一个 webhook 触发器、一个轮询任务、
@@ -167,7 +167,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 - `workflow_register_trigger` IPC 在 `kind == "trigger.github.webhook"` 时隐式选择
   `Github`;若入参显式带 `signatureMode` 字段则继续优先采用,留出前向兼容空间。
 
-## Consequences
+## 后果
 
 **正面**
 
@@ -237,7 +237,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 - Usage Tab 里的 30 日图表(M4 仅占位)。
 - 实时 GitHub API 配额历史(每隔一段时间快照 `GET /rate_limit`)。
 
-## References
+## 参考
 
 - [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
 - [GitHub Apps 概览](https://docs.github.com/en/apps/overview)

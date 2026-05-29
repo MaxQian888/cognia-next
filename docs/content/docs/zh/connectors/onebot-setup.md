@@ -1,50 +1,50 @@
 ---
-title: "OneBot (QQ) Setup"
-description: "Integrate QQ via the OneBot protocol using NapCat, Lagrange, or LLOneBot over reverse-WebSocket."
+title: "OneBot (QQ) 配置"
+description: "通过 OneBot 协议，使用 NapCat、Lagrange 或 LLOneBot 以 reverse-WebSocket 方式接入 QQ。"
 ---
 
-# OneBot (QQ) Setup Guide
+# OneBot (QQ) 配置指南
 
-cognia-next integrates with QQ via the **OneBot** protocol using a **reverse-WebSocket** connection.
-NapCat, Lagrange, or LLOneBot runs alongside the QQ client and connects to cognia-next.
+cognia-next 通过 **OneBot** 协议，使用 **reverse-WebSocket** 连接接入 QQ。
+NapCat、Lagrange 或 LLOneBot 与 QQ 客户端一同运行，并连接到 cognia-next。
 
-Supported clients:
+支持的客户端：
 
-- [NapCat](https://github.com/NapNeko/NapCatQQ) — QQ for Windows/Linux, fastest update cadence
-- [Lagrange](https://github.com/LagrangeDev/Lagrange.Core) — cross-platform NTQQ
-- [LLOneBot](https://github.com/LLOneBot/LLOneBot) — LiteLoader plugin for QQNT
-
----
-
-## Prerequisites
-
-- cognia-next running in **desktop mode** (`pnpm tauri dev` or installed app)
-- QQ account logged in via NapCat / Lagrange / LLOneBot
-- Port `8080` (or whichever connectors port you configured) reachable from the QQ client machine (usually the same machine)
+- [NapCat](https://github.com/NapNeko/NapCatQQ) —— 适用于 Windows/Linux 的 QQ，更新频率最快
+- [Lagrange](https://github.com/LagrangeDev/Lagrange.Core) —— 跨平台 NTQQ
+- [LLOneBot](https://github.com/LLOneBot/LLOneBot) —— 适用于 QQNT 的 LiteLoader 插件
 
 ---
 
-## Step 1 — Add the adapter in cognia-next
+## 前置条件
 
-1. Open **Settings → Connections**.
-2. Click **Add adapter** → **OneBot (QQ)**.
-3. Fill in:
-   - **Bot UIN** — the QQ number of the bot account (e.g. `123456789`).
-   - **Bearer Token** — leave blank unless you configure `accessToken` in NapCat (see Step 3).
-   - **Expected Client** — choose NapCat, Lagrange, or LLOneBot (cosmetic).
-4. Click **Create**. The dialog will show the **reverse-WS endpoint URL**, e.g.:
+- cognia-next 以 **桌面模式** 运行（`pnpm tauri dev` 或已安装的应用）
+- 通过 NapCat / Lagrange / LLOneBot 登录的 QQ 账号
+- QQ 客户端所在机器（通常是同一台机器）可访问 `8080` 端口（或你配置的任意连接器端口）
+
+---
+
+## 第 1 步 —— 在 cognia-next 中添加适配器
+
+1. 打开 **平台连接**。
+2. 点击 **添加连接器** → **OneBot (QQ)**。
+3. 填写：
+   - **Bot UIN（QQ 号）** —— 机器人账号的 QQ 号（例如 `123456789`）。
+   - **Bearer Token（可选）** —— 除非你在 NapCat 中配置了 `accessToken`（见第 3 步），否则留空。
+   - **预期客户端** —— 选择 NapCat、Lagrange 或 LLOneBot（仅作显示用途）。
+4. 点击 **创建**。对话框会显示 **reverse-WS 端点 URL**，例如：
 
    ```
    ws://127.0.0.1:8080/ws/onebot/<adapterId>
    ```
 
-   Copy this URL — you will paste it into NapCat config next.
+   复制此 URL —— 接下来你会把它粘贴到 NapCat 配置中。
 
 ---
 
-## Step 2 — Configure NapCat reverse-WS
+## 第 2 步 —— 配置 NapCat reverse-WS
 
-Edit your NapCat `napcat.json` (or use the NapCat WebUI) and add the reverse-WS URL:
+编辑你的 NapCat `napcat.json`（或使用 NapCat WebUI），添加 reverse-WS URL：
 
 ```json
 {
@@ -58,11 +58,11 @@ Edit your NapCat `napcat.json` (or use the NapCat WebUI) and add the reverse-WS 
 }
 ```
 
-Replace `<adapterId>` with the value shown in the cognia-next dialog.
+将 `<adapterId>` 替换为 cognia-next 对话框中显示的值。
 
 ### Lagrange
 
-In `appsettings.json`:
+在 `appsettings.json` 中：
 
 ```json
 {
@@ -80,7 +80,7 @@ In `appsettings.json`:
 
 ### LLOneBot
 
-In the LLOneBot plugin settings, add a **Reverse WebSocket** entry with URL:
+在 LLOneBot 插件设置中，添加一条 **Reverse WebSocket** 条目，URL 为：
 
 ```
 ws://127.0.0.1:8080/ws/onebot/<adapterId>
@@ -88,11 +88,11 @@ ws://127.0.0.1:8080/ws/onebot/<adapterId>
 
 ---
 
-## Step 3 — Optional: configure bearer token
+## 第 3 步 —— 可选：配置 bearer token
 
-If you want to protect the endpoint (recommended on shared machines):
+如果你想保护该端点（在共享机器上推荐这样做）：
 
-1. In NapCat `napcat.json`, set:
+1. 在 NapCat `napcat.json` 中设置：
 
    ```json
    {
@@ -100,28 +100,28 @@ If you want to protect the endpoint (recommended on shared machines):
    }
    ```
 
-2. In cognia-next adapter dialog, paste `my-secret-token` into the **Bearer Token** field.
+2. 在 cognia-next 适配器对话框中，将 `my-secret-token` 粘贴到 **Bearer Token（可选）** 字段。
 
-cognia-next will reject connections that send a wrong or missing token.
-
----
-
-## Step 4 — Restart and verify
-
-1. Restart NapCat (or reload the LLOneBot plugin / restart Lagrange).
-2. NapCat will initiate the WebSocket connection to cognia-next within a few seconds.
-3. In the cognia-next adapter dialog, click **Verify connection** — it waits up to 10 s for the handshake.
-4. Once connected, the adapter status in **Settings → Connections** shows **running** (green).
+cognia-next 会拒绝发送了错误或缺失令牌的连接。
 
 ---
 
-## Step 5 — Test the bot
+## 第 4 步 —— 重启并验证
 
-- **Private message**: send a QQ private message to the bot's UIN.
-- **Group @mention**: in a group chat, `@<bot-UIN> hello` — the bot responds if the group trigger policy matches.
+1. 重启 NapCat（或重新加载 LLOneBot 插件 / 重启 Lagrange）。
+2. NapCat 会在几秒内向 cognia-next 发起 WebSocket 连接。
+3. 在 cognia-next 适配器对话框中，点击 **验证连接** —— 它会最多等待 10 秒以完成握手。
+4. 连接成功后，**平台连接** 中的适配器状态会显示 **running**（绿色）。
 
 ---
 
-## Troubleshooting
+## 第 5 步 —— 测试机器人
 
-See [QQ via OneBot FAQ](./qq-via-onebot-faq.md) for common issues.
+- **私聊消息**：向机器人的 UIN 发送一条 QQ 私聊消息。
+- **群内 @提及**：在群聊中发送 `@<bot-UIN> hello` —— 如果群触发策略匹配，机器人会响应。
+
+---
+
+## 故障排查
+
+常见问题请参阅 [QQ via OneBot FAQ](./qq-via-onebot-faq.md)。

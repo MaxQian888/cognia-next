@@ -1,5 +1,5 @@
 {
-  "title": "Architecture Decisions",
+  "title": "架构决策记录",
   "pages": [
     "0001-backup-schema-v3",
     "0002-scheduler-full-agent-resolution",

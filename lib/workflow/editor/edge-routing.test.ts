@@ -1,6 +1,7 @@
 import { computeSmartRoute, type RouteRect } from "./edge-routing"
 
 const noBlockers: RouteRect[] = []
+const getNone = () => noBlockers
 
 describe("computeSmartRoute — L-shaped step path", () => {
   it("emits a 6-command path with rounded corners when both deltas exceed the threshold", () => {
@@ -11,7 +12,7 @@ describe("computeSmartRoute — L-shaped step path", () => {
       targetX: 400,
       targetY: 200,
       targetPosition: "left",
-      nodes: noBlockers,
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     // The L path always starts with "M …", contains two "Q" rounded corners
@@ -30,7 +31,7 @@ describe("computeSmartRoute — L-shaped step path", () => {
       targetX: 40, // dx < threshold
       targetY: 80,
       targetPosition: "left",
-      nodes: noBlockers,
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     expect(result.path).toContain(" C ")
@@ -45,7 +46,7 @@ describe("computeSmartRoute — L-shaped step path", () => {
       targetX: 200,
       targetY: 400,
       targetPosition: "top",
-      nodes: noBlockers,
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     // Vertical L has 2 Q corners and emits an L commands going first down
@@ -62,7 +63,7 @@ describe("computeSmartRoute — L-shaped step path", () => {
       targetX: 20, // dx < threshold
       targetY: 200,
       targetPosition: "top",
-      nodes: noBlockers,
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     expect(result.path).toContain(" C ")
@@ -79,7 +80,7 @@ describe("computeSmartRoute — bezier fallback", () => {
       targetX: 50,
       targetY: 50,
       targetPosition: "bottom",
-      nodes: noBlockers,
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     expect((result.path.match(/ C /g) ?? []).length).toBe(1)
@@ -95,7 +96,7 @@ describe("computeSmartRoute — bezier fallback", () => {
       targetX: 200,
       targetY: 30,
       targetPosition: "bottom",
-      nodes: [],
+      getNodes: getNone,
       excludeNodeIds: [],
     })
     const blocked = computeSmartRoute({
@@ -105,7 +106,7 @@ describe("computeSmartRoute — bezier fallback", () => {
       targetX: 200,
       targetY: 30,
       targetPosition: "bottom",
-      nodes: [blocker],
+      getNodes: () => [blocker],
       excludeNodeIds: [],
     })
     // With the blocker centred at y=20, midpoint at y=30 sits inside the
@@ -123,7 +124,7 @@ describe("computeSmartRoute — bezier fallback", () => {
       targetX: 200,
       targetY: 30,
       targetPosition: "bottom",
-      nodes: [blocker],
+      getNodes: () => [blocker],
       excludeNodeIds: ["endpoint"],
     })
     expect(route.midpoint.y).toBe(30)

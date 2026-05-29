@@ -53,6 +53,11 @@ import {
 import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
+import { useRafThrottle, type RafThrottleHandle } from "@/hooks/workflow/use-raf-throttle"
+import {
+  useDebouncedCallback,
+  type DebouncedCallbackHandle,
+} from "@/hooks/workflow/use-debounced-callback"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
@@ -208,8 +213,22 @@ export function useClaudeChat() {
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
+  /**
+   * Per-session authoritative "latest messages" while a coalesced commit /
+   * debounced persist is in flight. The streaming hot path reads `current`
+   * from here (falling back to the store) so deferring the React commit can't
+   * feed a stale base into the next event's `applySdkEvent`. Written
+   * synchronously every event; cleared at every turn boundary (turnComplete,
+   * session_ended, a new send/edit/regenerate) and on a session switch below.
+   */
+  const messagesMirrorRef = useRef<Map<string, UIMessage[]>>(new Map())
   useEffect(() => {
     const unsub = useChatStore.subscribe((s) => {
+      if (activeRef.current !== s.activeSessionId) {
+        // Session switched — the prior session's streaming mirror is no longer
+        // the active base; drop the whole map so the next read hits the store.
+        messagesMirrorRef.current.clear()
+      }
       activeRef.current = s.activeSessionId
     })
     activeRef.current = useChatStore.getState().activeSessionId
@@ -259,6 +278,48 @@ export function useClaudeChat() {
    */
   const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
+  /**
+   * Coalesce the React-visible store commit to ≤1 per animation frame during
+   * streaming. SDK events can arrive dozens of times per second; without this
+   * each one triggers a synchronous re-render of the message-list subtree.
+   * Latest snapshot wins.
+   */
+  const commit = useRafThrottle((msgs: UIMessage[]) => {
+    useChatStore.getState().replaceMessages(msgs)
+  })
+
+  /**
+   * Debounce the Dexie write during streaming so we don't run a transaction
+   * per token. Flushed (and the final state awaited) on turnComplete. 0ms in
+   * tests degrades to synchronous so existing persist-ordering assertions hold.
+   */
+  const PERSIST_DEBOUNCE_MS = process.env.NODE_ENV === "test" ? 0 : 250
+  const persistDebounced = useDebouncedCallback((sid: string, msgs: UIMessage[]) => {
+    void persistMessages(sid, msgs).catch((err) =>
+      console.error("debounced persistMessages failed", err)
+    )
+  }, PERSIST_DEBOUNCE_MS)
+
+  // The handle objects are recreated each render (only their `call`/`flush`/
+  // `cancel` members are stable), so we read them through refs — both from the
+  // long-lived event handler and from the send/stop/edit/regenerate callbacks —
+  // to keep their dependency arrays free of an unstable object.
+  const commitRef = useRef<RafThrottleHandle<[UIMessage[]]>>(commit)
+  const persistRef = useRef<DebouncedCallbackHandle<[string, UIMessage[]]>>(persistDebounced)
+  useEffect(() => {
+    commitRef.current = commit
+    persistRef.current = persistDebounced
+  })
+
+  // Best-effort flush of any pending streaming write on unmount so the last
+  // partial isn't lost when the hook tears down mid-turn.
+  useEffect(() => {
+    const persist = persistRef
+    return () => {
+      persist.current.flush()
+    }
+  }, [])
+
   // Subscribe to sidecar events once.
   useEffect(() => {
     if (!isTauri()) return
@@ -277,7 +338,13 @@ export function useClaudeChat() {
       const tail = (queues.get(key) ?? Promise.resolve())
         // A prior failure must not break the chain for later events.
         .catch(() => {})
-        .then(() => handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef))
+        .then(() =>
+          handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
+            messagesMirrorRef,
+            commitRef,
+            persistRef,
+          })
+        )
         .catch((err) => {
           console.error("handleEvent failed", err)
         })
@@ -429,6 +496,12 @@ export function useClaudeChat() {
           ? effectiveContent
           : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
               ?.text ?? "")
+
+      // New turn: drop any coalesced/debounced streaming work and the mirror
+      // from a prior turn so this turn's events read the fresh optimistic base.
+      commitRef.current.cancel()
+      persistRef.current.cancel()
+      messagesMirrorRef.current.delete(sessionId)
 
       // Optimistic user-message append. Skipped during regenerate so the
       // existing user anchor stays the single source of truth for that turn.
@@ -612,6 +685,11 @@ export function useClaudeChat() {
     if (!sessionId) return
     try {
       await interruptSession(sessionId)
+      // Commit + persist whatever partial we have, then drop the mirror; the
+      // sidecar's follow-up session_ended is also flush-safe (idempotent).
+      commitRef.current.flush()
+      persistRef.current.flush()
+      messagesMirrorRef.current.delete(sessionId)
       store.getState().setStatus("idle")
     } catch (err) {
       console.error("interrupt failed", err)
@@ -673,6 +751,11 @@ export function useClaudeChat() {
     async (messageId: string, newContent: SendContent) => {
       const sessionId = useChatStore.getState().activeSessionId
       if (!sessionId) return
+      // Truncating the history invalidates any in-flight streaming mirror for
+      // this session; drop it (and pending work) so the rebuilt base wins.
+      commitRef.current.cancel()
+      persistRef.current.cancel()
+      messagesMirrorRef.current.delete(sessionId)
       if (detectPlatform() === "mobile") {
         await mirrorTruncateToDesktop(sessionId, messageId)
       }
@@ -694,6 +777,11 @@ export function useClaudeChat() {
   const regenerate = useCallback(async () => {
     const sessionId = useChatStore.getState().activeSessionId
     if (!sessionId) return
+
+    // Rebuilding the branch base invalidates any streaming mirror; drop it.
+    commitRef.current.cancel()
+    persistRef.current.cancel()
+    messagesMirrorRef.current.delete(sessionId)
 
     const messages = useChatStore.getState().messages
     let lastUserIdx = -1
@@ -842,13 +930,27 @@ function isTeamSubSession(sessionId: string): boolean {
   return sessionId.includes("::char::")
 }
 
+/**
+ * Coalescing handles + authoritative mirror threaded in from the hook. Only the
+ * active session uses these; background sessions persist immediately as before.
+ */
+interface StreamCoalescing {
+  messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
+  commitRef: React.MutableRefObject<RafThrottleHandle<[UIMessage[]]>>
+  persistRef: React.MutableRefObject<DebouncedCallbackHandle<[string, UIMessage[]]>>
+}
+
 async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
   allowListRef: React.MutableRefObject<string[]>,
   pendingBranchTagRef: React.MutableRefObject<Map<string, { groupId: string; index: number }>>,
-  sendRef: React.MutableRefObject<SendFn | null>
+  sendRef: React.MutableRefObject<SendFn | null>,
+  coalescing: StreamCoalescing
 ) {
+  const { messagesMirrorRef, commitRef, persistRef } = coalescing
+  const commit = commitRef.current
+  const persistDebounced = persistRef.current
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -891,6 +993,11 @@ async function handleEvent(
           // the error toast so the UI stays in `streaming`.
           const retried = await attemptRoutingFallback(evt.sessionId, evt.error)
           if (!retried) {
+            // Permanent failure — commit + persist the final partial and drop
+            // the mirror. (A retry re-issues `send`, which clears it itself.)
+            commit.flush()
+            persistDebounced.flush()
+            messagesMirrorRef.current.delete(evt.sessionId)
             useChatStore.getState().setError(evt.error)
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
@@ -906,6 +1013,11 @@ async function handleEvent(
             useChatStore.getState().clearLastSend(evt.sessionId)
           }
         } else {
+          // Clean end without a content-bearing result event (e.g. tool-only
+          // turn): flush pending streaming work and drop the mirror.
+          commit.flush()
+          persistDebounced.flush()
+          messagesMirrorRef.current.delete(evt.sessionId)
           useChatStore.getState().setStatus("idle")
           useChatStore.getState().clearLastSend(evt.sessionId)
         }
@@ -982,7 +1094,11 @@ async function handleEvent(
       const isActive = sessionId === activeRef.current
 
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.
-      const current = isActive ? useChatStore.getState().messages : await listMessages(sessionId)
+      // Mirror-first for the active session: the store commit may be a frame
+      // behind (coalesced), so the mirror holds the true latest base.
+      const current = isActive
+        ? (messagesMirrorRef.current.get(sessionId) ?? useChatStore.getState().messages)
+        : await listMessages(sessionId)
 
       const {
         messages: appliedMessages,
@@ -1059,13 +1175,26 @@ async function handleEvent(
 
       if (nextMessages !== current) {
         if (isActive) {
-          // Update the store first so the token render is instant — it no
-          // longer waits on a Dexie write that grows with session length.
-          // Safe because same-session events are serialized (eventQueuesRef):
-          // the next event won't start until this persist resolves, so there's
-          // no lost-update from reordering store-update ahead of persistence.
-          useChatStore.getState().replaceMessages(nextMessages)
-          await persistMessages(sessionId, nextMessages)
+          // Mirror is the authoritative base for the next event (the store
+          // commit below may be coalesced a frame behind). Always write it
+          // synchronously before scheduling any deferred work.
+          messagesMirrorRef.current.set(sessionId, nextMessages)
+          if (turnComplete) {
+            // Seal the turn: drop any coalesced/debounced work from earlier
+            // tokens and commit + durably persist the final state now. Use an
+            // explicit synchronous commit (not commit.flush()) because the
+            // twin-sources merge above may have rewritten `nextMessages` after
+            // the last commit.call — flush would re-commit the pre-merge args.
+            commit.cancel()
+            persistDebounced.cancel()
+            useChatStore.getState().replaceMessages(nextMessages)
+            await persistMessages(sessionId, nextMessages)
+          } else {
+            // Mid-stream: coalesce the React commit to ≤1/frame and debounce
+            // the Dexie write. The mirror keeps the read path correct.
+            commit.call(nextMessages)
+            persistDebounced.call(sessionId, nextMessages)
+          }
         } else {
           await persistMessages(sessionId, nextMessages)
           if (
@@ -1129,6 +1258,15 @@ async function handleEvent(
       }
 
       if (turnComplete && isActive) {
+        // Streaming sealed. Flush any still-pending coalesced commit / debounced
+        // write (covers the no-delta seal where the commit block above was
+        // skipped because nextMessages === current), then drop the mirror so the
+        // next turn's first event reads a fresh base from the store. Idempotent
+        // when the delta branch already committed + canceled above.
+        commit.flush()
+        persistDebounced.flush()
+        messagesMirrorRef.current.delete(sessionId)
+
         // Don't immediately flip to idle if approvals are still pending; the
         // store helper handles the precedence.
         const { pendingApprovals } = useChatStore.getState()

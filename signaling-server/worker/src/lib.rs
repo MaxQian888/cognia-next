@@ -14,6 +14,7 @@
 //! Worker exactly as it was to the axum server — it is forwarded verbatim and
 //! verified end-to-end by the two peers.
 
+use cognia_signaling_core::policy::is_origin_allowed;
 use worker::*;
 
 mod room;
@@ -24,10 +25,32 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
 
     match req.path().as_str() {
-        "/healthz" => Response::from_json(&serde_json::json!({ "status": "ok" })),
+        // Shape aligned with the axum server's `/healthz` (`ok` + `version`).
+        // Global rooms/peers counts are NOT available here — they live in the
+        // per-rid Durable Objects with no cross-DO view; query Analytics Engine
+        // (the `METRICS` dataset) for fleet-wide totals.
+        "/healthz" => Response::from_json(&serde_json::json!({
+            "ok": true,
+            "version": env!("CARGO_PKG_VERSION"),
+            "backend": "worker",
+        })),
         "/v1/signaling" => route_signaling(req, env).await,
         _ => Response::error("not found", 404),
     }
+}
+
+/// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
+/// Unset / blank yields an empty list (allow all).
+fn allowed_origins(env: &Env) -> Vec<String> {
+    env.var("SIGNALING_ALLOWED_ORIGINS")
+        .map(|v| {
+            v.to_string()
+                .split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Resolve the room Durable Object from `?rid=` and forward the WebSocket
@@ -37,6 +60,15 @@ async fn route_signaling(req: Request, env: Env) -> Result<Response> {
     let upgrade = req.headers().get("Upgrade")?.unwrap_or_default();
     if !upgrade.eq_ignore_ascii_case("websocket") {
         return Response::error("expected websocket upgrade", 426);
+    }
+
+    // Origin allowlist (opt-in). Empty allowlist or a missing Origin (native
+    // clients never send one) passes; only a present-but-unlisted browser
+    // Origin is refused. Mirrors the axum server's `ws_upgrade` check via the
+    // shared `is_origin_allowed`.
+    let origin = req.headers().get("Origin")?;
+    if !is_origin_allowed(origin.as_deref(), &allowed_origins(&env)) {
+        return Response::error("origin not allowed", 403);
     }
 
     let rid = req

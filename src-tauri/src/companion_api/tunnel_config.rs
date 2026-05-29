@@ -167,26 +167,18 @@ pub fn summarize(data_dir: Option<&Path>) -> TunnelConfigSummary {
 pub fn save_named(data_dir: Option<&Path>, token: &str, hostname: &str) -> Result<(), String> {
     save_token(token)?;
 
-    // Verify the token is readable — Windows Credential Manager occasionally
-    // has a sync delay between write and read in the same process.
-    // Retry with exponential backoff; if the write succeeded the token is
-    // persisted, so a transient read failure should not block the user.
-    let mut has_token = load_token().unwrap_or(None).is_some();
-    if !has_token {
-        for attempt in 1..=5 {
-            let delay_ms = 200 * (1u64 << (attempt - 1)); // 200, 400, 800, 1600, 3200 ms
-            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            has_token = load_token().unwrap_or(None).is_some();
-            if has_token {
-                break;
-            }
-        }
-    }
-    if !has_token {
+    // Best-effort, NON-blocking read-back. Windows Credential Manager can have
+    // a transient sync delay between write and read in the same process, so a
+    // miss here does not mean the write failed — `summarize` already reports
+    // `has_token = true` optimistically when the named config file exists, so
+    // the UI never disables the toggle on a delayed read. We log the miss for
+    // diagnostics but must not `sleep` on the command thread (that froze the
+    // Save button for up to ~6 s on Windows).
+    if load_token().unwrap_or(None).is_none() {
         log::warn!(
-            "Tunnel token write succeeded but read-back verification failed \
+            "Tunnel token write succeeded but immediate read-back returned empty \
              (likely Windows Credential Manager sync delay). \
-             The token is persisted and will be readable on next process start."
+             The token is persisted and will be readable shortly / on next process start."
         );
     }
 

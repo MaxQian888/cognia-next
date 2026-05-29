@@ -96,7 +96,6 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
   const storeBits = store?.(storeSelector)
 
   const route = useMemo(() => {
-    const allNodes = rf.getNodes() as Array<Parameters<typeof toRouteRect>[0]>
     return computeSmartRoute({
       sourceX,
       sourceY,
@@ -104,7 +103,10 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
       targetX,
       targetY,
       targetPosition: (targetPosition ?? "left") as HandlePosition,
-      nodes: allNodes.map(toRouteRect),
+      // Lazy: the L-shaped branches (the common left→right case) never call
+      // this, so a dragged edge re-routing every frame pays zero allocation
+      // unless it actually falls back to a bezier that might hit a blocker.
+      getNodes: () => (rf.getNodes() as Array<Parameters<typeof toRouteRect>[0]>).map(toRouteRect),
       excludeNodeIds: [source, target],
     })
   }, [rf, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, target])

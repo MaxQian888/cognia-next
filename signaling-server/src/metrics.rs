@@ -28,6 +28,9 @@ pub struct Metrics {
     pub frames_rejected_rate: AtomicU64,
     pub frames_rejected_not_subscribed: AtomicU64,
     pub frames_rejected_too_large: AtomicU64,
+    pub frames_rejected_room_full: AtomicU64,
+    pub frames_rejected_role_taken: AtomicU64,
+    pub frames_rejected_origin: AtomicU64,
     /// `Instant` is sufficient because we only ever subtract from a single
     /// process — no clock-skew concerns vs. a wall clock here.
     pub started_at: Instant,
@@ -44,6 +47,9 @@ impl Metrics {
             frames_rejected_rate: AtomicU64::new(0),
             frames_rejected_not_subscribed: AtomicU64::new(0),
             frames_rejected_too_large: AtomicU64::new(0),
+            frames_rejected_room_full: AtomicU64::new(0),
+            frames_rejected_role_taken: AtomicU64::new(0),
+            frames_rejected_origin: AtomicU64::new(0),
             started_at: Instant::now(),
         }
     }
@@ -67,6 +73,9 @@ impl Metrics {
             RejectReason::Rate => &self.frames_rejected_rate,
             RejectReason::NotSubscribed => &self.frames_rejected_not_subscribed,
             RejectReason::TooLarge => &self.frames_rejected_too_large,
+            RejectReason::RoomFull => &self.frames_rejected_room_full,
+            RejectReason::RoleTaken => &self.frames_rejected_role_taken,
+            RejectReason::OriginRejected => &self.frames_rejected_origin,
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -87,6 +96,9 @@ impl Metrics {
         let rej_rate = self.frames_rejected_rate.load(Ordering::Relaxed);
         let rej_not_sub = self.frames_rejected_not_subscribed.load(Ordering::Relaxed);
         let rej_too_large = self.frames_rejected_too_large.load(Ordering::Relaxed);
+        let rej_room_full = self.frames_rejected_room_full.load(Ordering::Relaxed);
+        let rej_role_taken = self.frames_rejected_role_taken.load(Ordering::Relaxed);
+        let rej_origin = self.frames_rejected_origin.load(Ordering::Relaxed);
         let mut out = String::with_capacity(1024);
         out.push_str("# HELP signaling_frames_in_total Inbound client frames accepted for processing.\n");
         out.push_str("# TYPE signaling_frames_in_total counter\n");
@@ -125,6 +137,18 @@ impl Metrics {
             "signaling_frames_rejected_total{{reason=\"too_large\"}} {}\n",
             rej_too_large
         ));
+        out.push_str(&format!(
+            "signaling_frames_rejected_total{{reason=\"room_full\"}} {}\n",
+            rej_room_full
+        ));
+        out.push_str(&format!(
+            "signaling_frames_rejected_total{{reason=\"role_taken\"}} {}\n",
+            rej_role_taken
+        ));
+        out.push_str(&format!(
+            "signaling_frames_rejected_total{{reason=\"origin\"}} {}\n",
+            rej_origin
+        ));
         out.push_str("# HELP signaling_rooms_active Currently-tracked rendezvous rooms.\n");
         out.push_str("# TYPE signaling_rooms_active gauge\n");
         out.push_str(&format!("signaling_rooms_active {}\n", registry.rooms));
@@ -158,6 +182,12 @@ pub enum RejectReason {
     Rate,
     NotSubscribed,
     TooLarge,
+    /// `Subscribe` past the room peer cap.
+    RoomFull,
+    /// Second `Desktop` `Subscribe` into a room that already has one.
+    RoleTaken,
+    /// WS upgrade carrying an `Origin` not on the configured allowlist.
+    OriginRejected,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +228,9 @@ mod tests {
         m.frame_rejected(RejectReason::Rate);
         m.frame_rejected(RejectReason::NotSubscribed);
         m.frame_rejected(RejectReason::TooLarge);
+        m.frame_rejected(RejectReason::RoomFull);
+        m.frame_rejected(RejectReason::RoleTaken);
+        m.frame_rejected(RejectReason::OriginRejected);
         let s = m.render_prometheus(stats(2, 5));
         assert!(s.contains("signaling_frames_in_total 2\n"));
         assert!(s.contains("signaling_frames_relayed_total 3\n"));
@@ -207,6 +240,9 @@ mod tests {
         assert!(s.contains("signaling_frames_rejected_total{reason=\"rate\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"not_subscribed\"} 1\n"));
         assert!(s.contains("signaling_frames_rejected_total{reason=\"too_large\"} 1\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"room_full\"} 1\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"role_taken\"} 1\n"));
+        assert!(s.contains("signaling_frames_rejected_total{reason=\"origin\"} 1\n"));
         assert!(s.contains("signaling_rooms_active 2\n"));
         assert!(s.contains("signaling_peers_active 5\n"));
     }

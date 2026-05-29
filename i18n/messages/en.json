@@ -12836,6 +12836,12 @@
       }
     },
     "companion": {
+      "groups": {
+        "network": "Server & network",
+        "pairing": "Device pairing",
+        "push": "Push notifications",
+        "advanced": "Advanced & diagnostics"
+      },
       "tunnel": {
         "title": "Cloudflared tunnel",
         "description": "Reach this desktop from anywhere. Requires the cloudflared CLI to be installed.",
@@ -12857,7 +12863,8 @@
         "clearButton": "Clear",
         "clearAria": "Clear named tunnel configuration",
         "cleared": "Configuration cleared.",
-        "namedConfigured": "Named tunnel configured. Toggle to start cloudflared."
+        "namedConfigured": "Named tunnel configured. Toggle to start cloudflared.",
+        "tokenConfigured": "Token configured"
       },
       "mdns": {
         "title": "LAN auto-discovery (mDNS)",

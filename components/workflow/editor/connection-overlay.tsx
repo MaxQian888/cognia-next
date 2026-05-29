@@ -18,7 +18,7 @@
  * pointer doesn't spawn O(n × handles) work per pixel.
  */
 
-import { memo, useEffect } from "react"
+import { memo, useEffect, useMemo } from "react"
 import { useReactFlow, type ConnectionLineComponentProps } from "@xyflow/react"
 import { useShallow } from "zustand/react/shallow"
 import type { ConnectionCandidate, EditorState, EditorStore } from "@/lib/workflow/editor/store"
@@ -79,64 +79,79 @@ export interface ConnectionPointerListenerProps {
  * Tracks pointermove while `connectionState !== null` and writes the
  * nearest compatible candidate handle to the store.
  */
-export function ConnectionPointerListener({ store }: ConnectionPointerListenerProps) {
+export const ConnectionPointerListener = memo(function ConnectionPointerListener({
+  store,
+}: ConnectionPointerListenerProps) {
   const rf = useReactFlow()
-  const { connectionState, nodes, edges, updateConnectionPointer } = store(
+  // Subscribe ONLY to the connection's stable identity (source id + handle),
+  // NOT to `connectionState` (which this component itself rewrites every frame
+  // via `updateConnectionPointer`) and NOT to `nodes`/`edges` (which churn on
+  // every node-drag frame). Reading those reactively forced a re-render of this
+  // listener on every drag tick; the graph is instead read on demand through
+  // `store.getState()`.
+  const { sourceId, sourceHandle, updateConnectionPointer } = store(
     useShallow((s: EditorState) => ({
-      connectionState: s.connectionState,
-      nodes: s.nodes,
-      edges: s.edges,
+      sourceId: s.connectionState?.sourceId ?? null,
+      sourceHandle: s.connectionState?.sourceHandle ?? null,
       updateConnectionPointer: s.updateConnectionPointer,
     }))
   )
 
-  const throttled = useRafThrottle<[{ x: number; y: number }, ConnectionCandidate | null]>(
-    (pointer, candidate) => {
-      updateConnectionPointer(pointer, candidate)
+  // The set of valid target handles cannot change while a single connection is
+  // being drawn (nodes don't move, edges don't change), so compute it ONCE per
+  // connection instead of re-running `collectTargetHandles` + an O(n)
+  // `validateConnection` pass on every pointer move.
+  const validCandidates = useMemo<HandlePosition[]>(() => {
+    if (!sourceId) return []
+    const s = store.getState()
+    return collectTargetHandles(s.nodes, sourceId).filter(
+      (c) =>
+        validateConnection(
+          { source: sourceId, target: c.nodeId, sourceHandle, targetHandle: c.handleId },
+          s.nodes,
+          s.edges
+        ).valid
+    )
+  }, [store, sourceId, sourceHandle])
+
+  // Only the cheap nearest-candidate scan runs per frame — and it runs INSIDE
+  // the rAF coalescer, so a fast pointer that fires many `pointermove` events
+  // per frame does the work at most once. (Previously the expensive scan ran
+  // on every raw event and only the store write was throttled.)
+  const throttled = useRafThrottle<[{ x: number; y: number }]>((flow) => {
+    const zoom = rf.getViewport().zoom || 1
+    const snapDistanceFlow = SNAP_DISTANCE_SCREEN / zoom
+    let best: { candidate: HandlePosition; distance: number } | null = null
+    for (const c of validCandidates) {
+      const distance = Math.hypot(c.position.x - flow.x, c.position.y - flow.y)
+      if (distance < snapDistanceFlow && (best === null || distance < best.distance)) {
+        best = { candidate: c, distance }
+      }
     }
-  )
+    const next: ConnectionCandidate | null = best
+      ? {
+          nodeId: best.candidate.nodeId,
+          handleId: best.candidate.handleId,
+          distance: best.distance,
+        }
+      : null
+    updateConnectionPointer(flow, next)
+  })
 
   useEffect(() => {
-    if (!connectionState) return
+    if (!sourceId) return
     const handler = (e: PointerEvent) => {
-      const flow = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const zoom = rf.getViewport().zoom || 1
-      const snapDistanceFlow = SNAP_DISTANCE_SCREEN / zoom
-      const candidates = collectTargetHandles(nodes, connectionState.sourceId)
-        .filter(
-          (c) =>
-            validateConnection(
-              {
-                source: connectionState.sourceId,
-                target: c.nodeId,
-                sourceHandle: connectionState.sourceHandle,
-                targetHandle: c.handleId,
-              },
-              nodes,
-              edges
-            ).valid
-        )
-        .map((c) => ({
-          c,
-          distance: Math.hypot(c.position.x - flow.x, c.position.y - flow.y),
-        }))
-        .filter((entry) => entry.distance < snapDistanceFlow)
-        .sort((a, b) => a.distance - b.distance)
-      const best = candidates[0]
-      const next: ConnectionCandidate | null = best
-        ? { nodeId: best.c.nodeId, handleId: best.c.handleId, distance: best.distance }
-        : null
-      throttled.call(flow, next)
+      throttled.call(rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }))
     }
     window.addEventListener("pointermove", handler, true)
     return () => {
       throttled.cancel()
       window.removeEventListener("pointermove", handler, true)
     }
-  }, [connectionState, edges, nodes, rf, throttled])
+  }, [sourceId, rf, throttled])
 
   return null
-}
+})
 
 /**
  * Custom connection-line component passed to React Flow via
