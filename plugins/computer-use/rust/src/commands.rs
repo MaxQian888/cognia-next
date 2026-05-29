@@ -53,6 +53,11 @@ pub struct CallContext {
     /// missing driver returns a structured error result, never a black frame.
     #[serde(default)]
     screen_off_mode: bool,
+    /// ADR-0020 remote-target — when set, GUI actions run against the cua
+    /// sandbox with this connection id instead of the local host. Resolved
+    /// per-session from `computerUseTarget` (`lib/automation/sandbox-target.ts`).
+    #[serde(default)]
+    sandbox_connection_id: Option<String>,
 }
 
 impl CallContext {
@@ -129,12 +134,17 @@ pub async fn plugin_computer_use_execute(
     let canonical = Action::from(&action);
     let point = canonical.point();
     let handle = state.handle.clone();
+    let cua = state.cua.clone();
+    let remote = ctx.sandbox_connection_id.clone();
     let gctx = ctx.gate_context(point);
 
     // Audit/gate under the legacy "computer_use" command name so consent +
     // audit behaviour is unchanged; the canonical action drives execution.
+    // `remote` carries the resolved sandbox target so a remote session lands in
+    // the cua container rather than on the host.
     let output = run_gated(Some(&app), state.inner(), gctx, "computer_use", move || async move {
-        execute_action(&handle, canonical).await
+        let remote = remote.as_deref().filter(|s| !s.is_empty());
+        execute_action(&handle, &cua, remote, canonical).await
     })
     .await
     .map_err(|e| err_to_string(&e))?;
@@ -165,11 +175,14 @@ pub async fn plugin_computer_use_bash(
     // the model asked for a (no-op) session reset.
     let command = if action.restart { "bash:restart" } else { "bash" };
     let handle = state.handle.clone();
+    let cua = state.cua.clone();
     let canonical = Action::Bash(action);
     let gctx = ctx.gate_context(None);
 
+    // Bash stays local (ADR-0028 sandbox tier is a separate axis); execute_action
+    // routes only GUI actions, so the remote arg is inert for this arm.
     let output = run_gated(Some(&app), state.inner(), gctx, command, move || async move {
-        execute_action(&handle, canonical).await
+        execute_action(&handle, &cua, None, canonical).await
     })
     .await
     .map_err(|e| err_to_string(&e))?;
@@ -198,11 +211,13 @@ pub async fn plugin_computer_use_text_editor(
 ) -> std::result::Result<TextEditorResult, String> {
     let ctx = ctx.unwrap_or_default();
     let handle = state.handle.clone();
+    let cua = state.cua.clone();
     let canonical = Action::TextEditor(action);
     let gctx = ctx.gate_context(None);
 
+    // text_editor stays local (ADR-0028 axis); remote arg is inert for this arm.
     let output = run_gated(Some(&app), state.inner(), gctx, "text_editor", move || async move {
-        execute_action(&handle, canonical).await
+        execute_action(&handle, &cua, None, canonical).await
     })
     .await
     .map_err(|e| err_to_string(&e))?;

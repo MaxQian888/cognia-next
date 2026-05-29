@@ -29,6 +29,8 @@ use super::commands::{
     emit_audit, err_to_string, now_ms, record_allow, record_deny, record_policy_deny,
     AutomationState,
 };
+use super::cua_route;
+use crate::cua_sandbox::CuaSandboxRegistry;
 use super::consent::ConsentBroker;
 use super::permission::{
     maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
@@ -307,63 +309,78 @@ where
 
 /// Map a canonical [`Action`] onto the worker handle (and `tool_exec` for the
 /// bash / text-editor tools). The single backend-dispatch site; the permission
-/// pipeline has already cleared by the time this runs.
-pub async fn execute_action(handle: &AutomationHandle, action: Action) -> Result<ActionOutput> {
+/// pipeline has already cleared by the time this runs. Every GUI action routes
+/// through [`cua_route`] so a remote `CallContext` lands in the cua sandbox
+/// rather than on the local host.
+pub async fn execute_action(
+    handle: &AutomationHandle,
+    cua: &CuaSandboxRegistry,
+    remote: Option<&str>,
+    action: Action,
+) -> Result<ActionOutput> {
     Ok(match action {
-        Action::Screenshot { opts } => ActionOutput::Screenshot(handle.screenshot(opts).await?),
+        Action::Screenshot { opts } => {
+            ActionOutput::Screenshot(cua_route::screenshot(handle, cua, remote, opts).await?)
+        }
         Action::Click { target, opts } => {
-            handle.click(target, opts).await?;
+            cua_route::click(handle, cua, remote, target, opts).await?;
             ActionOutput::Void
         }
         Action::MouseMove { point } => {
-            handle.mouse_move(point).await?;
+            cua_route::mouse_move(handle, cua, remote, point).await?;
             ActionOutput::Void
         }
         Action::Drag { from, to, opts } => {
-            handle.drag(from, to, opts).await?;
+            cua_route::drag(handle, cua, remote, from, to, opts).await?;
             ActionOutput::Void
         }
         Action::MouseButton { button, transition } => {
-            handle.mouse_button(button, transition).await?;
+            cua_route::mouse_button(handle, cua, remote, button, transition).await?;
             ActionOutput::Void
         }
         Action::Scroll { target, opts } => {
-            handle.scroll(target, opts).await?;
+            cua_route::scroll(handle, cua, remote, target, opts).await?;
             ActionOutput::Void
         }
         Action::Type { text, opts } => {
-            handle.type_text(text, opts).await?;
+            cua_route::type_text(handle, cua, remote, text, opts).await?;
             ActionOutput::Void
         }
         Action::Keys { chord } => {
-            handle.send_keys(chord).await?;
+            cua_route::send_keys(handle, cua, remote, chord).await?;
             ActionOutput::Void
         }
         Action::HoldKey { chord, duration_ms } => {
-            handle.hold_key(chord, duration_ms).await?;
+            cua_route::hold_key(handle, cua, remote, chord, duration_ms).await?;
             ActionOutput::Void
         }
         Action::Wait { duration_ms } => {
             tokio::time::sleep(Duration::from_millis(duration_ms as u64)).await;
             ActionOutput::Void
         }
-        Action::CursorPosition => ActionOutput::Cursor(handle.cursor_position().await?),
+        Action::CursorPosition => {
+            ActionOutput::Cursor(cua_route::cursor_position(handle, cua, remote).await?)
+        }
         Action::Capabilities => ActionOutput::Capabilities(handle.capabilities().await?),
-        Action::GetFocus => ActionOutput::Element(handle.get_focus().await?),
-        Action::ReadTree { root, opts } => ActionOutput::Tree(handle.read_tree(root, opts).await?),
+        Action::GetFocus => ActionOutput::Element(cua_route::get_focus(handle, cua, remote).await?),
+        Action::ReadTree { root, opts } => {
+            ActionOutput::Tree(cua_route::read_tree(handle, cua, remote, root, opts).await?)
+        }
         Action::Find { locator } => ActionOutput::Found {
-            element_ref: handle.find(locator).await?,
+            element_ref: cua_route::find(handle, cua, remote, locator).await?,
         },
         Action::InvokePattern {
             target,
             pattern,
             args,
-        } => ActionOutput::Pattern(handle.invoke_pattern(target, pattern, args).await?),
+        } => ActionOutput::Pattern(cua_route::invoke_pattern(handle, cua, remote, target, pattern, args).await?),
         Action::WindowOp { target, op } => {
-            handle.window_op(target, op).await?;
+            cua_route::window_op(handle, cua, remote, target, op).await?;
             ActionOutput::Void
         }
-        Action::PickAtPoint { point } => ActionOutput::Element(handle.pick_at_point(point).await?),
+        Action::PickAtPoint { point } => {
+            ActionOutput::Element(cua_route::pick_at_point(handle, cua, remote, point).await?)
+        }
         // Pick-session start/cancel are audit-only markers — the gate records
         // them; there is no backend side effect.
         Action::PickSessionStart | Action::PickSessionCancel => ActionOutput::Void,

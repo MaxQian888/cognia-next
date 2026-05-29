@@ -84,13 +84,6 @@ pub fn scroll_request(opts: &ScrollOpts) -> WsRequest {
     WsRequest::new("scroll", json!({ "x": opts.dx, "y": opts.dy }))
 }
 
-pub fn mouse_button_request(point: Point, button: MouseButton, down: bool) -> WsRequest {
-    WsRequest::new(
-        if down { "mouse_down" } else { "mouse_up" },
-        json!({ "x": point.x, "y": point.y, "button": button_str(button) }),
-    )
-}
-
 /// Straight-line drag from `from` to `to`. `duration` is seconds (cua SDK
 /// default 0.5s).
 pub fn drag_request(from: Point, to: Point, button: MouseButton, duration_secs: f64) -> WsRequest {
@@ -155,13 +148,6 @@ mod tests {
         let r = scroll_request(&ScrollOpts { dx: 5, dy: -10 });
         assert_eq!(r.params["x"], 5);
         assert_eq!(r.params["y"], -10);
-    }
-
-    #[test]
-    fn mouse_button_carries_button_name() {
-        let r = mouse_button_request(Point { x: 0, y: 0 }, MouseButton::Middle, true);
-        assert_eq!(r.command, "mouse_down");
-        assert_eq!(r.params["button"], "middle");
     }
 
     #[test]

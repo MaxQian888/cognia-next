@@ -36,20 +36,6 @@ pub struct Capabilities {
     pub has_a11y_tree: bool,
 }
 
-/// Which execution backend a call targets. `Local` = the synchronous COM
-/// worker (existing UIA / enigo back-ends); `Remote` = the async
-/// `CuaRemoteClient` keyed by a sandbox connection id. Default = `Local`, so
-/// every existing call site that doesn't set a target keeps hitting the host.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum CallTarget {
-    #[default]
-    Local,
-    Remote {
-        connection_id: String,
-    },
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
@@ -571,21 +557,6 @@ mod tests {
         assert!(json.contains("\"hasUia\":true"));
         assert!(json.contains("\"hasA11yTree\":true"));
         assert!(json.contains("\"platform\":\"windows\""));
-    }
-
-    #[test]
-    fn call_target_defaults_to_local() {
-        assert_eq!(CallTarget::default(), CallTarget::Local);
-    }
-
-    #[test]
-    fn call_target_remote_serializes_camel() {
-        let json = serde_json::to_string(&CallTarget::Remote {
-            connection_id: "c1".into(),
-        })
-        .unwrap();
-        assert!(json.contains("\"kind\":\"remote\""));
-        assert!(json.contains("\"connectionId\":\"c1\""));
     }
 
     #[test]

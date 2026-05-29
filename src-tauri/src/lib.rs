@@ -623,6 +623,7 @@ pub fn run() {
             plugin_api::wasm::commands::plugin_wasm_list,
             plugin_api::wasm::installer::plugin_wasm_install_from_url,
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
+            plugin_api::github::installer::plugin_install_from_github,
             plugin_api::vscode::commands::plugin_vscode_install_vsix,
             plugin_api::vscode::commands::plugin_load_vscode,
             plugin_api::vscode::commands::plugin_activate_vscode,
@@ -663,6 +664,9 @@ pub fn run() {
             automation::commands::desktop_cursor_position,
             automation::commands::desktop_pick_at_point,
             automation::commands::automation_execute,
+            cua_sandbox::cua_sandbox_start,
+            cua_sandbox::cua_sandbox_stop,
+            cua_sandbox::cua_sandbox_health,
             automation::commands::automation_audit_snapshot,
             automation::commands::automation_policy_get,
             automation::commands::automation_policy_set,
@@ -748,8 +752,21 @@ pub fn run() {
                     Some(audit.clone()),
                     Some(app_handle_for_vdd),
                 );
+                // ADR-0020 remote-target — registry of running cua desktop
+                // sandboxes. Shared (Arc-backed clone) between the managed
+                // state the `cua_sandbox_*` lifecycle commands read and the
+                // `AutomationState` the `cua_route` dispatch layer reads, so
+                // both see the same running containers.
+                let cua_registry = cua_sandbox::CuaSandboxRegistry::default();
+                app.manage(cua_registry.clone());
                 app.manage(automation::commands::AutomationState::new(
-                    worker, gate, audit, consent, policy, virtual_display,
+                    worker,
+                    gate,
+                    audit,
+                    consent,
+                    policy,
+                    virtual_display,
+                    cua_registry,
                 ));
             }
 
@@ -988,6 +1005,13 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
                 cli_bridge::shutdown(state.inner());
+                // ADR-0020 remote-target — stop any running cua sandbox
+                // containers so we don't leak them past app exit.
+                let cua = app_handle
+                    .state::<cua_sandbox::CuaSandboxRegistry>()
+                    .inner()
+                    .clone();
+                tauri::async_runtime::block_on(cua.shutdown_all());
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.
                 crash::sentinel::mark_clean_exit();

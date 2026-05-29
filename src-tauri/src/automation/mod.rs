@@ -18,6 +18,7 @@ pub mod audit;
 pub mod backend;
 pub mod commands;
 pub mod consent;
+pub mod cua_route;
 pub mod dispatcher;
 pub mod permission;
 pub mod persist;

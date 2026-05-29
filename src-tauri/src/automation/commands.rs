@@ -49,6 +49,10 @@ pub struct AutomationState {
     /// `arm()`-ed by the plugin before a screen-off `computer` action;
     /// `force_release()`-ed by the kill switch / session close.
     pub virtual_display: VirtualDisplayController,
+    /// ADR-0020 remote-target — registry of running cua desktop sandboxes.
+    /// `cua_route::*` resolves a live `CuaRemoteClient` from here when a
+    /// `CallContext` carries a remote sandbox connection id.
+    pub cua: crate::cua_sandbox::CuaSandboxRegistry,
 }
 
 impl AutomationState {
@@ -59,6 +63,7 @@ impl AutomationState {
         consent: ConsentBroker,
         policy: PolicyState,
         virtual_display: VirtualDisplayController,
+        cua: crate::cua_sandbox::CuaSandboxRegistry,
     ) -> Self {
         Self {
             handle,
@@ -67,6 +72,7 @@ impl AutomationState {
             consent,
             policy,
             virtual_display,
+            cua,
         }
     }
 }
@@ -180,11 +186,25 @@ pub struct CallContext {
     /// `PerCall` actually moves the dial; `None` / others pass through).
     #[serde(default)]
     pub force_tier: Option<Tier>,
+    /// ADR-0020 remote-target — when set, the action runs against the cua
+    /// sandbox with this connection id instead of the local host. Empty /
+    /// absent = local. Resolved per-session from `computerUseTarget`
+    /// (`lib/automation/sandbox-target.ts`).
+    #[serde(default)]
+    pub sandbox_connection_id: Option<String>,
 }
 
 impl CallContext {
     fn surface(&self) -> Surface {
         self.surface.unwrap_or(Surface::Workflow)
+    }
+
+    /// The remote sandbox connection id, if this call targets one. `None`
+    /// (incl. empty string) means the local host backend.
+    pub fn remote_connection_id(&self) -> Option<&str> {
+        self.sandbox_connection_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
     }
 
     /// Project the renderer-supplied context into the borrow-tied
@@ -287,7 +307,13 @@ pub async fn desktop_get_focus(
     ctx: Option<CallContext>,
 ) -> std::result::Result<ElementInfo, String> {
     let ctx = ctx.unwrap_or_default();
-    command_body!(app, state, ctx, "get_focus", state.handle.get_focus().await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "get_focus",
+        super::cua_route::get_focus(&state.handle, &state.cua, ctx.remote_connection_id()).await
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,7 +341,7 @@ pub async fn desktop_read_tree(
         state,
         ctx,
         "read_tree",
-        state.handle.read_tree(root.clone(), opts.clone()).await
+        super::cua_route::read_tree(&state.handle, &state.cua, ctx.remote_connection_id(), root.clone(), opts.clone()).await
     )
 }
 
@@ -335,7 +361,13 @@ pub async fn desktop_find(
 ) -> std::result::Result<Option<ElementRef>, String> {
     let ctx = args.ctx;
     let locator = args.locator;
-    command_body!(app, state, ctx, "find", state.handle.find(locator.clone()).await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "find",
+        super::cua_route::find(&state.handle, &state.cua, ctx.remote_connection_id(), locator.clone()).await
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -362,7 +394,7 @@ pub async fn desktop_screenshot(
     // model sees are a black image of identical dimensions.
     let redact_enabled = state.gate.settings().redact_screenshots;
     command_body!(app, state, ctx, "screenshot", async {
-        let shot = state.handle.screenshot(opts.clone()).await?;
+        let shot = super::cua_route::screenshot(&state.handle, &state.cua, ctx.remote_connection_id(), opts.clone()).await?;
         if redact_enabled
             && super::platform::shared::credential_window::is_credential_window_focused()
         {
@@ -397,7 +429,7 @@ pub async fn desktop_click(
         state,
         ctx,
         "click",
-        state.handle.click(target.clone(), opts.clone()).await
+        super::cua_route::click(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), opts.clone()).await
     )
 }
 
@@ -425,7 +457,7 @@ pub async fn desktop_type(
         state,
         ctx,
         "type",
-        state.handle.type_text(text.clone(), opts.clone()).await
+        super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), opts.clone()).await
     )
 }
 
@@ -445,7 +477,13 @@ pub async fn desktop_keys(
 ) -> std::result::Result<(), String> {
     let ctx = args.ctx;
     let chord = args.chord;
-    command_body!(app, state, ctx, "keys", state.handle.send_keys(chord.clone()).await)
+    command_body!(
+        app,
+        state,
+        ctx,
+        "keys",
+        super::cua_route::send_keys(&state.handle, &state.cua, ctx.remote_connection_id(), chord.clone()).await
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -474,9 +512,7 @@ pub async fn desktop_invoke_pattern(
         state,
         ctx,
         "invoke_pattern",
-        state
-            .handle
-            .invoke_pattern(target.clone(), pattern, pargs.clone())
+        super::cua_route::invoke_pattern(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), pattern, pargs.clone())
             .await
     )
 }
@@ -501,6 +537,8 @@ pub async fn automation_execute(
     let point = action.point();
     let command = action.command();
     let handle = state.handle.clone();
+    let cua = state.cua.clone();
+    let remote = ctx.sandbox_connection_id.clone();
     let gctx = dispatcher::GateContext {
         surface: ctx.surface(),
         plugin_id: ctx.plugin_id.clone(),
@@ -512,7 +550,8 @@ pub async fn automation_execute(
         force_tier: ctx.force_tier,
     };
     dispatcher::run_gated(Some(&app), state.inner(), gctx, command, move || async move {
-        dispatcher::execute_action(&handle, action).await
+        let remote = remote.as_deref().filter(|s| !s.is_empty());
+        dispatcher::execute_action(&handle, &cua, remote, action).await
     })
     .await
     .map_err(|e| err_to_string(&e))
@@ -765,7 +804,7 @@ pub async fn desktop_mouse_move(
         state,
         ctx,
         "mouse_move",
-        state.handle.mouse_move(point).await
+        super::cua_route::mouse_move(&state.handle, &state.cua, ctx.remote_connection_id(), point).await
     )
 }
 
@@ -795,7 +834,7 @@ pub async fn desktop_drag(
         state,
         ctx,
         "drag",
-        state.handle.drag(from, to, opts.clone()).await
+        super::cua_route::drag(&state.handle, &state.cua, ctx.remote_connection_id(), from, to, opts.clone()).await
     )
 }
 
@@ -823,7 +862,7 @@ pub async fn desktop_scroll(
         state,
         ctx,
         "scroll",
-        state.handle.scroll(target.clone(), opts).await
+        super::cua_route::scroll(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), opts).await
     )
 }
 
@@ -850,7 +889,7 @@ pub async fn desktop_hold_key(
         state,
         ctx,
         "hold_key",
-        state.handle.hold_key(chord.clone(), duration_ms).await
+        super::cua_route::hold_key(&state.handle, &state.cua, ctx.remote_connection_id(), chord.clone(), duration_ms).await
     )
 }
 
@@ -877,7 +916,7 @@ pub async fn desktop_mouse_button(
         state,
         ctx,
         "mouse_button",
-        state.handle.mouse_button(button, transition).await
+        super::cua_route::mouse_button(&state.handle, &state.cua, ctx.remote_connection_id(), button, transition).await
     )
 }
 
@@ -904,7 +943,7 @@ pub async fn desktop_window_op(
         state,
         ctx,
         "window_op",
-        state.handle.window_op(target.clone(), op.clone()).await
+        super::cua_route::window_op(&state.handle, &state.cua, ctx.remote_connection_id(), target.clone(), op.clone()).await
     )
 }
 
@@ -920,7 +959,7 @@ pub async fn desktop_cursor_position(
         state,
         ctx,
         "cursor_position",
-        state.handle.cursor_position().await
+        super::cua_route::cursor_position(&state.handle, &state.cua, ctx.remote_connection_id()).await
     )
 }
 
@@ -945,7 +984,7 @@ pub async fn desktop_pick_at_point(
         state,
         ctx,
         "pick_at_point",
-        state.handle.pick_at_point(point).await
+        super::cua_route::pick_at_point(&state.handle, &state.cua, ctx.remote_connection_id(), point).await
     )
 }
 
