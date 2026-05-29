@@ -10,6 +10,7 @@ mod cli_bridge;
 mod commands;
 mod connectors;
 pub mod crash;
+mod cua_sandbox;
 mod external_agent;
 mod files;
 mod fs_atomic;
