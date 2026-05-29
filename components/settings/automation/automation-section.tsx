@@ -50,6 +50,7 @@ import { listAuditRows } from "@/lib/automation/audit"
 import { AutomationAuditTable } from "./automation-audit-table"
 import { WhitelistTab } from "./whitelist-tab"
 import { InspectorTab } from "./inspector-tab"
+import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
 
 interface BackendInitFailure {
@@ -73,9 +74,9 @@ interface OverviewMetrics {
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 const METRICS_REFRESH_MS = 60_000
 
-type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector"
+type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector" | "sandboxes"
 
-const TAB_IDS: TabId[] = ["overview", "permissions", "whitelist", "audit", "inspector"]
+const TAB_IDS: TabId[] = ["overview", "permissions", "whitelist", "audit", "inspector", "sandboxes"]
 
 function isTabId(v: string | null): v is TabId {
   return v !== null && (TAB_IDS as readonly string[]).includes(v)
@@ -109,6 +110,7 @@ export function AutomationSection() {
           <TabsTrigger value="whitelist">{tTabs("whitelist")}</TabsTrigger>
           <TabsTrigger value="audit">{tTabs("audit")}</TabsTrigger>
           <TabsTrigger value="inspector">{tTabs("inspector")}</TabsTrigger>
+          <TabsTrigger value="sandboxes">{tTabs("sandboxes")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="pt-4">
@@ -125,6 +127,9 @@ export function AutomationSection() {
         </TabsContent>
         <TabsContent value="inspector" className="pt-4">
           <InspectorTab />
+        </TabsContent>
+        <TabsContent value="sandboxes" className="pt-4">
+          <SandboxConnectionsTab />
         </TabsContent>
       </Tabs>
     </div>

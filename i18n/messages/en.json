@@ -3898,6 +3898,9 @@
           "enableRag": "Enable RAG",
           "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
           "ragTopK": "Retrieve top K",
+          "enableHybrid": "Hybrid keyword search",
+          "enableHybridHint": "Blend BM25 keyword retrieval with the vector search so verbatim names, ids, and file references aren't missed.",
+          "hybridKeywordWeight": "Keyword weight",
           "enableStyleFewShot": "Style few-shot",
           "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
           "styleSamplesK": "Samples per send"
@@ -6520,6 +6523,8 @@
       "metaLicense": "License",
       "metaHomepage": "Homepage",
       "metaRepository": "Repository",
+      "metaSourceUrl": "Source",
+      "readme": "README",
       "metaError": "Last error",
       "metaCreatedAt": "Installed at",
       "metaUpdatedAt": "Last updated",
@@ -6676,11 +6681,13 @@
     "toolbar": {
       "install": "Install",
       "groupManifest": "Manifest",
+      "groupGit": "Git",
       "groupLocal": "Local plugin",
       "groupWasm": "WASM bundle",
       "loadUnpacked": "Load unpacked…",
       "fromFile": "From file…",
       "fromUrl": "From URL…",
+      "fromGithub": "From GitHub…",
       "fromLocalWasm": "From local file…",
       "fromUrlSigned": "From signed URL…",
       "fromUrlPrompt": "Plugin manifest URL",
@@ -6698,6 +6705,52 @@
         "emptyError": "Please enter a URL.",
         "error": "Failed to fetch manifest: {message}"
       }
+    },
+    "githubDialog": {
+      "title": "Install from GitHub",
+      "description": "Paste a public repository — owner/repo, owner/repo@ref, a /sub/dir, or a full github.com URL. The repo must contain a conforming plugin.json and ship its built artifacts (no build runs on your machine).",
+      "label": "GitHub repository",
+      "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
+      "fetch": "Fetch",
+      "readme": "README",
+      "install": "Install",
+      "cancel": "Cancel",
+      "emptyError": "Please enter a repository.",
+      "fetchError": "Could not load the plugin: {message}",
+      "desktopOnly": "Installing from GitHub requires the Cognia desktop app.",
+      "installSucceeded": "{name} installed from GitHub.",
+      "installCancelled": "Installation cancelled.",
+      "installFailed": "Installation failed: {message}"
+    },
+    "license": {
+      "label": "License",
+      "custom": "Custom license",
+      "view": "View full license",
+      "hide": "Hide license"
+    },
+    "dependencies": {
+      "title": "Dependencies",
+      "pluginDeps": "Plugins",
+      "binaries": "Required tools",
+      "pythonDeps": "Python packages",
+      "installed": "Installed",
+      "missing": "Missing",
+      "optional": "optional",
+      "detected": "found",
+      "notFound": "not found",
+      "checking": "checking…",
+      "minVersion": "≥ {version}"
+    },
+    "marketplaceSources": {
+      "title": "GitHub marketplace sources",
+      "description": "Add a repository that ships a marketplace.json catalog. Its plugins appear in the browse grid, just like Claude Code's plugin marketplaces.",
+      "label": "Marketplace repository",
+      "placeholder": "owner/repo",
+      "add": "Add source",
+      "empty": "No sources added yet.",
+      "emptyError": "Please enter a repository.",
+      "addError": "Could not add source: {message}",
+      "remove": "Remove {name}"
     },
     "loadUnpacked": {
       "label": "Load unpacked",
@@ -6866,6 +6919,7 @@
       "declared": "Declared permissions",
       "optional": "Optional permissions",
       "dependencies": "Dependencies",
+      "readme": "README",
       "install": "Install",
       "installing": "Installing…",
       "uninstall": "Uninstall",
@@ -6933,6 +6987,7 @@
       "searchPlaceholder": "Search the marketplace…",
       "emptySection": "Nothing in this section yet.",
       "loadMore": "Load more ({shown}/{total})",
+      "manageSources": "GitHub sources",
       "sections": {
         "all": "All",
         "featured": "Featured",
@@ -16108,7 +16163,29 @@
       "permissions": "Permissions",
       "whitelist": "Whitelist",
       "audit": "Audit",
-      "inspector": "Inspector"
+      "inspector": "Inspector",
+      "sandboxes": "Sandboxes"
+    },
+    "sandboxConnections": {
+      "title": "Computer-Use Sandboxes",
+      "description": "Run computer-use actions inside an isolated cua Docker desktop instead of this machine. Requires Docker on the host.",
+      "empty": "No sandboxes configured yet.",
+      "addConnection": "Add connection",
+      "name": "Name",
+      "image": "Docker image",
+      "host": "Host",
+      "save": "Save",
+      "cancel": "Cancel",
+      "start": "Start",
+      "stop": "Stop",
+      "checkHealth": "Check health",
+      "delete": "Delete",
+      "desktopOnly": "Available in the desktop app only",
+      "statusUnknown": "Unknown",
+      "statusStarting": "Starting",
+      "statusOk": "Running",
+      "statusUnreachable": "Unreachable",
+      "statusError": "Error"
     },
     "screenOff": {
       "title": "Screen-off mode",

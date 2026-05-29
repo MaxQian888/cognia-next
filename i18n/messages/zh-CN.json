@@ -3898,6 +3898,9 @@
           "enableRag": "启用 RAG",
           "enableRagHint": "发送时检索 top-K 个孪生切片，注入到系统提示词。",
           "ragTopK": "检索 top K",
+          "enableHybrid": "混合关键词检索",
+          "enableHybridHint": "将 BM25 关键词检索与向量检索融合，避免漏掉精确的名称、ID 和文件引用。",
+          "hybridKeywordWeight": "关键词权重",
           "enableStyleFewShot": "风格少样本",
           "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
           "styleSamplesK": "每次发送的样本数"
@@ -6520,6 +6523,8 @@
       "metaLicense": "许可",
       "metaHomepage": "主页",
       "metaRepository": "代码仓库",
+      "metaSourceUrl": "来源",
+      "readme": "README",
       "metaError": "最近错误",
       "metaCreatedAt": "安装时间",
       "metaUpdatedAt": "最后更新",
@@ -6676,11 +6681,13 @@
     "toolbar": {
       "install": "安装",
       "groupManifest": "清单",
+      "groupGit": "Git",
       "groupLocal": "本地插件",
       "groupWasm": "WASM 包",
       "loadUnpacked": "加载本地目录…",
       "fromFile": "从文件…",
       "fromUrl": "从 URL…",
+      "fromGithub": "从 GitHub…",
       "fromLocalWasm": "从本地文件…",
       "fromUrlSigned": "从已签名 URL…",
       "fromUrlPrompt": "插件清单 URL",
@@ -6698,6 +6705,52 @@
         "emptyError": "请输入 URL。",
         "error": "获取清单失败：{message}"
       }
+    },
+    "githubDialog": {
+      "title": "从 GitHub 安装",
+      "description": "粘贴一个公开仓库——owner/repo、owner/repo@ref、/子目录，或完整的 github.com 链接。仓库需包含符合规范的 plugin.json 并自带构建产物（不会在本机执行构建）。",
+      "label": "GitHub 仓库",
+      "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
+      "fetch": "获取",
+      "readme": "README",
+      "install": "安装",
+      "cancel": "取消",
+      "emptyError": "请输入仓库。",
+      "fetchError": "无法加载插件：{message}",
+      "desktopOnly": "从 GitHub 安装需要 Cognia 桌面应用。",
+      "installSucceeded": "已从 GitHub 安装 {name}。",
+      "installCancelled": "已取消安装。",
+      "installFailed": "安装失败：{message}"
+    },
+    "license": {
+      "label": "许可证",
+      "custom": "自定义许可证",
+      "view": "查看完整许可证",
+      "hide": "隐藏许可证"
+    },
+    "dependencies": {
+      "title": "依赖",
+      "pluginDeps": "插件",
+      "binaries": "所需工具",
+      "pythonDeps": "Python 包",
+      "installed": "已安装",
+      "missing": "缺失",
+      "optional": "可选",
+      "detected": "已检测",
+      "notFound": "未找到",
+      "checking": "检测中…",
+      "minVersion": "≥ {version}"
+    },
+    "marketplaceSources": {
+      "title": "GitHub 市场源",
+      "description": "添加一个包含 marketplace.json 目录清单的仓库，其插件会像 Claude Code 的插件市场一样出现在浏览网格中。",
+      "label": "市场仓库",
+      "placeholder": "owner/repo",
+      "add": "添加源",
+      "empty": "尚未添加任何源。",
+      "emptyError": "请输入仓库。",
+      "addError": "无法添加源：{message}",
+      "remove": "移除 {name}"
     },
     "loadUnpacked": {
       "label": "加载本地插件目录",
@@ -6866,6 +6919,7 @@
       "declared": "声明权限",
       "optional": "可选权限",
       "dependencies": "依赖",
+      "readme": "README",
       "install": "安装",
       "installing": "安装中…",
       "uninstall": "卸载",
@@ -6933,6 +6987,7 @@
       "searchPlaceholder": "在市场中搜索…",
       "emptySection": "此分区暂无内容。",
       "loadMore": "加载更多 ({shown}/{total})",
+      "manageSources": "GitHub 源",
       "sections": {
         "all": "全部",
         "featured": "精选",
@@ -16108,7 +16163,29 @@
       "permissions": "权限",
       "whitelist": "白名单",
       "audit": "审计",
-      "inspector": "检查器"
+      "inspector": "检查器",
+      "sandboxes": "沙箱"
+    },
+    "sandboxConnections": {
+      "title": "Computer-Use 沙箱",
+      "description": "让 computer-use 动作在隔离的 cua Docker 桌面里运行，而不是本机。需要宿主机安装 Docker。",
+      "empty": "尚未配置任何沙箱。",
+      "addConnection": "添加连接",
+      "name": "名称",
+      "image": "Docker 镜像",
+      "host": "主机",
+      "save": "保存",
+      "cancel": "取消",
+      "start": "启动",
+      "stop": "停止",
+      "checkHealth": "检查健康",
+      "delete": "删除",
+      "desktopOnly": "仅在桌面应用中可用",
+      "statusUnknown": "未知",
+      "statusStarting": "启动中",
+      "statusOk": "运行中",
+      "statusUnreachable": "无法连接",
+      "statusError": "错误"
     },
     "screenOff": {
       "title": "熄屏模式",
