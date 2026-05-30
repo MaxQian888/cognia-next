@@ -46,6 +46,7 @@ import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { workflowImagePayload } from "@/lib/share/payload"
 import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
+import { usePalettePreferencesStore } from "@/stores/workflow"
 import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
@@ -614,6 +615,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         y: event.clientY,
       })
       const id = useStore.getState().addNode(kind as WorkflowNodeKind, position)
+      usePalettePreferencesStore.getState().recordUsed(kind)
       setSelectedNodes([id])
     },
     [reactFlowInstance, useStore, setSelectedNodes]
@@ -633,6 +635,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         y: window.innerHeight / 2,
       })
       const id = useStore.getState().addNode(entry.kind, center)
+      usePalettePreferencesStore.getState().recordUsed(entry.kind)
       setSelectedNodes([id])
     },
     [reactFlowInstance, useStore, setSelectedNodes]

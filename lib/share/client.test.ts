@@ -15,6 +15,7 @@ import { decryptShareEnvelope } from "./crypto"
 import { decodeShareKey } from "./keys"
 import { listSharedLinks, getSharedLinkByCode } from "@/lib/db/shared-links"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { SharePayload, ShareEnvelopeV1 } from "./types"
 
 const ENDPOINT: ShareEndpoint = { baseUrl: "https://share.test", uploadSecret: "sekret" }
@@ -146,5 +147,32 @@ describe("getShareStats", () => {
   it("returns null on 404", async () => {
     mockFetchOnce(404, {})
     expect(await getShareStats("X", ENDPOINT)).toBeNull()
+  })
+})
+
+describe("plugin share hooks", () => {
+  it("fires onShareLinkCreate with a fragment-stripped url (never the #k= key)", async () => {
+    const spy = jest.spyOn(getPluginEventHooks(), "dispatchShareLinkCreate")
+    mockFetchOnce(200, { code: "HookC", expiresAt: 42 })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    expect(spy).toHaveBeenCalledTimes(1)
+    const arg = spy.mock.calls[0][0]
+    expect(arg).toMatchObject({
+      code: "HookC",
+      kind: "chat-html",
+      title: "Greeting",
+      expiresAt: 42,
+    })
+    expect(arg.url).toBe("https://share.test/share/view?c=HookC")
+    expect(arg.url).not.toContain("#k=")
+    spy.mockRestore()
+  })
+
+  it("fires onShareLinkRevoke with the code", async () => {
+    const spy = jest.spyOn(getPluginEventHooks(), "dispatchShareLinkRevoke")
+    mockFetchOnce(204, {})
+    await revokeShareLink("RevHook", ENDPOINT)
+    expect(spy).toHaveBeenCalledWith("RevHook")
+    spy.mockRestore()
   })
 })

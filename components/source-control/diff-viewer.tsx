@@ -3,11 +3,13 @@
 /**
  * DiffViewer — Monaco `DiffEditor` for a single file, with per-hunk gutter
  * actions (Stage / Unstage / Discard Hunk). Reuses the Canvas Monaco setup:
- * `configureMonacoLoader` (offline assets) + the ResizeObserver `layout()`
- * fix for the flex-shrink bug (microsoft/monaco-editor#3393).
+ * `configureMonacoLoader` (offline assets), `automaticLayout: true` so Monaco
+ * sizes itself once the container has dimensions (the editor mounts async via
+ * `dynamic`, so a manual size-on-mount would race), plus the ResizeObserver
+ * `layout()` backstop for the flex-shrink bug (microsoft/monaco-editor#3393).
  */
 
-import { Suspense, useEffect, useMemo, useRef } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
@@ -18,6 +20,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { FileQuestionIcon } from "lucide-react"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
+import {
+  COGNIA_ACTIVE_THEME_ID,
+  syncCogniaActiveTheme,
+} from "@/lib/canvas/themes/cognia-active-theme"
+import { resolveActiveThemeColors } from "@/lib/themes"
+import { useSettingsStore } from "@/stores"
 import type { GitDiff, GitHunk } from "@/lib/git/types"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
@@ -62,9 +70,57 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
   const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
+  const monacoRef = useRef<typeof import("monaco-editor") | null>(null)
+
+  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
+  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
+  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
 
   useEffect(() => {
     configureMonacoLoader()
+  }, [])
+
+  // Register the cognia-active Monaco theme from the live appearance palette so
+  // the diff paints with the user's chosen colors instead of stock VS Code —
+  // matching the canvas / skills editors (see SkillMonacoEditor for the pattern).
+  const applyActiveTheme = useCallback(
+    (monaco: typeof import("monaco-editor")) => {
+      if (!resolvedTheme) return
+      const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
+      const resolved = resolveActiveThemeColors({
+        colorTheme: appearanceColorTheme,
+        resolvedTheme: variant,
+        activeCustomThemeId: appearanceActiveCustomThemeId,
+        customThemes: appearanceCustomThemes,
+      })
+      syncCogniaActiveTheme(
+        monaco as unknown as Parameters<typeof syncCogniaActiveTheme>[0],
+        resolved.colors,
+        variant
+      )
+      // Re-apply explicitly so an already-mounted editor follows a light/dark
+      // toggle. `defineTheme` only refreshes when cognia-active is the *active*
+      // theme — which isn't guaranteed if the static `theme` prop was applied
+      // before the theme existed (Monaco then falls back to vs/light). Mirrors
+      // the canvas `setTheme` effect.
+      monaco.editor.setTheme(COGNIA_ACTIVE_THEME_ID)
+    },
+    [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes]
+  )
+
+  // Re-sync the theme whenever the appearance palette or light/dark mode changes
+  // while the editor is mounted.
+  useEffect(() => {
+    if (monacoRef.current) applyActiveTheme(monacoRef.current)
+  }, [applyActiveTheme])
+
+  // Scroll the modified side to a hunk's first line and place the caret there.
+  const revealHunk = useCallback((hunk: GitHunk) => {
+    const modified = editorRef.current?.getModifiedEditor()
+    if (!modified) return
+    modified.revealLineInCenter(hunk.newStart)
+    modified.setPosition({ lineNumber: hunk.newStart, column: 1 })
+    modified.focus()
   }, [])
 
   // Flex-shrink layout fix (see canvas-panel.tsx for the rationale).
@@ -86,13 +142,11 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
     }
   }, [])
 
-  const monacoTheme = resolvedTheme === "dark" ? "vs-dark" : "vs"
-
   const options = useMemo<MonacoEditor.IStandaloneDiffEditorConstructionOptions>(
     () => ({
       readOnly: true,
       renderSideBySide: true,
-      automaticLayout: false,
+      automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       fontSize: 13,
@@ -140,9 +194,16 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
               className="flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5"
               data-testid={`hunk-row-${i}`}
             >
-              <span className="font-mono text-[10px] text-muted-foreground">
+              <button
+                type="button"
+                className="rounded font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => revealHunk(hunk)}
+                aria-label={t("diff.jumpToHunk", { line: hunk.newStart })}
+                title={t("diff.jumpToHunk", { line: hunk.newStart })}
+                data-testid={`hunk-jump-${i}`}
+              >
                 @@ {hunk.newStart}
-              </span>
+              </button>
               {hunkActions.map((action) => {
                 const Icon = ICON[action.icon]
                 return (
@@ -164,16 +225,18 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
           ))}
         </div>
       )}
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={containerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         <Suspense fallback={<DiffLoading />}>
           <MonacoDiff
             original={diff.oldContent}
             modified={diff.newContent}
             language={diff.language ?? "plaintext"}
-            theme={monacoTheme}
+            theme={COGNIA_ACTIVE_THEME_ID}
             options={options}
-            onMount={(editor) => {
+            onMount={(editor, monaco) => {
               editorRef.current = editor
+              monacoRef.current = monaco
+              applyActiveTheme(monaco)
             }}
           />
         </Suspense>

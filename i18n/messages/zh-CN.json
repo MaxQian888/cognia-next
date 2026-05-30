@@ -305,6 +305,8 @@
       "tokenUsage": "Token 用量",
       "noLead": "未指定领队",
       "startTeam": "启动团队",
+      "startTeamUltracode": "以 Ultracode 运行",
+      "finalResult": "最终结果",
       "abortTeam": "停止",
       "editName": "编辑名称",
       "editDescription": "编辑描述",
@@ -515,6 +517,7 @@
         "overview": "概览",
         "plugins": "插件与能力",
         "governance": "治理",
+        "ultracode": "Ultracode",
         "memory": "共享内存"
       },
       "saveIndicator": {
@@ -580,6 +583,33 @@
           "detect": "在队员输出中检测拒答模式",
           "patterns": "拒答模式（每行一条）",
           "patternsPlaceholder": "我无法协助\n我没办法"
+        }
+      },
+      "ultracode": {
+        "title": "Ultracode 编排",
+        "description": "用多智能体质量模式（多模态扫描、loop-until-dry、对抗式校验、评审团、完整性批判、综合）替代扁平任务清单运行。带工具的队友走桌面 sidecar；Web/移动端降级为纯文本推理。",
+        "enabled": "启用 Ultracode 编排",
+        "autoMode": {
+          "label": "自动触发",
+          "option": {
+            "auto": "自动（复杂任务）",
+            "always": "始终",
+            "never": "从不"
+          },
+          "hint": {
+            "auto": "仅当路由评估判定任务复杂时才编排。",
+            "always": "该团队每次运行都编排。",
+            "never": "不自动编排；改用「以 Ultracode 运行」手动触发。"
+          }
+        },
+        "skepticsPerFinding": "每个发现的质疑者数",
+        "judgesPerAttempt": "每个方案的评委数",
+        "maxFinderRounds": "最大查找轮数",
+        "dryRoundsToStop": "连续空轮停止数",
+        "workingDir": {
+          "label": "工作目录",
+          "placeholder": "/仓库的绝对路径",
+          "hint": "带工具的队友读取并执行命令的仓库路径（仅桌面）。"
         }
       },
       "memory": {
@@ -8501,7 +8531,8 @@
       "loading": "正在加载差异…",
       "selectFile": "选择一个文件以查看其更改",
       "binary": "二进制文件 — 不显示差异",
-      "hunkCount": "{count, plural, other {# 个差异块}}"
+      "hunkCount": "{count, plural, other {# 个差异块}}",
+      "jumpToHunk": "跳转到第 {line} 行的差异块"
     },
     "groups": {
       "staged": "已暂存的更改",
@@ -14149,7 +14180,15 @@
         "io": "与外部世界通信。",
         "annotation": "画布上的说明 — 不参与执行。",
         "plugin": "由启用的插件贡献的节点。"
-      }
+      },
+      "favorites": "收藏",
+      "favoritesHint": "你加星标以便快速取用的节点。",
+      "recent": "最近使用",
+      "recentHint": "你最近添加的节点。",
+      "noFavorites": "还没有收藏 — 给节点加星标即可固定到这里。",
+      "noRecent": "还没有最近使用的节点。",
+      "addToFavorites": "加入收藏",
+      "removeFromFavorites": "取消收藏"
     },
     "inspector": {
       "empty": "在画布上选择一个节点以配置。",
@@ -14171,7 +14210,44 @@
         "data": "数据",
         "io": "I/O",
         "annotation": "注解"
+      },
+      "bulk": {
+        "title": "已选择 {count} 个节点",
+        "disabled": "禁用",
+        "disabledHint": "切换后会让所有选中节点在运行时跳过。",
+        "disabledMixed": "部分选中节点已禁用 — 切换以统一设置。",
+        "notes": "备注",
+        "notesHint": "把同一条备注应用到所有选中节点。",
+        "notesPlaceholder": "给选中节点的共享备注…",
+        "notesApply": "应用到全部",
+        "notesClear": "清空全部",
+        "deleteAll": "{count, plural, other {删除 {count} 个节点}}",
+        "deleteAllConfirm": "永久删除选中的 {count} 个节点及其连线？这是一次可撤销的操作。",
+        "cancel": "取消",
+        "clearSelection": "清除选择"
       }
+    },
+    "edgeInspector": {
+      "title": "连线",
+      "multiSelected": "已选择 {count} 条连线",
+      "source": "从",
+      "target": "到",
+      "label": "标签",
+      "labelHint": "显示在连线中点的可选文本。",
+      "labelPlaceholder": "例如 true / retry",
+      "kind": "类型",
+      "kindHint": "运行时如何处理这条连线。",
+      "kindOption": {
+        "default": "默认",
+        "conditional": "条件",
+        "parallel": "并行",
+        "loop": "循环",
+        "error": "错误"
+      },
+      "errorHandleHint": "这条连线从节点的错误句柄引出 — 节点失败时触发。",
+      "reverse": "反转方向",
+      "delete": "删除连线",
+      "deleteAll": "删除连线"
     },
     "node": {
       "lastRun": {

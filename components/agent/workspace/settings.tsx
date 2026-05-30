@@ -33,6 +33,7 @@ import { createLogger } from "@/lib/logging"
 import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
+import { UltracodeSection } from "./settings/section-ultracode"
 import { MemorySection } from "./settings/section-memory"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
 import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
@@ -86,6 +87,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionTrigger>
           <AccordionContent className="pt-3">
             <GovernanceSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="ultracode" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.ultracode")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <UltracodeSection team={team} />
           </AccordionContent>
         </AccordionItem>
 

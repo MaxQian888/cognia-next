@@ -30,6 +30,7 @@ import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
+import { BulkNodeInspector } from "./bulk-node-inspector"
 import {
   getNodeConfigComponentForEntry,
   hasDedicatedConfigForEntry,
@@ -116,6 +117,9 @@ function InspectorPanelInner({
   //   3. action handlers — stable function identities on the store; this
   //      shallow selector returns the same object after the first read.
   const selectedId = useStore((s: EditorState) => s.selectedNodeIds[0] ?? null)
+  // When more than one node is selected, hand off to the bulk inspector
+  // (cross-kind-safe field edits across the whole selection).
+  const isMultiSelect = useStore((s: EditorState) => s.selectedNodeIds.length > 1)
 
   const { node, validation } = useStore(
     useShallow((s: EditorState) => ({
@@ -198,6 +202,10 @@ function InspectorPanelInner({
       .querySelector<HTMLElement>("input, textarea, select, [contenteditable], [tabindex]")
       ?.focus()
   }, [])
+
+  if (isMultiSelect) {
+    return <BulkNodeInspector useStore={useStore} className={className} embedded={embedded} />
+  }
 
   if (!node || !entry) {
     return (

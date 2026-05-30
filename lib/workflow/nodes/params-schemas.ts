@@ -457,6 +457,15 @@ export const PARAMS_SCHEMAS = {
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,
+  // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted only — the
+  // params are shaped by `synthesize-ultracode.ts`, validated by the pattern
+  // executors at run time, so the definition-level schema stays permissive.
+  "pattern.multi-modal-sweep": z.object({}).passthrough(),
+  "pattern.loop-until-dry": z.object({}).passthrough(),
+  "pattern.adversarial-verify": z.object({}).passthrough(),
+  "pattern.judge-panel": z.object({}).passthrough(),
+  "pattern.completeness-critic": z.object({}).passthrough(),
+  "pattern.synthesize": z.object({}).passthrough(),
 } satisfies Record<WorkflowNodeKind, z.ZodTypeAny>
 
 /**

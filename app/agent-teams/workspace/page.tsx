@@ -313,6 +313,9 @@ function AgentTeamWorkspaceInner() {
             team={team}
             teammates={teammates}
             onStart={() => void agentTeamManager.start(team.id).catch(() => undefined)}
+            onStartUltracode={() =>
+              void agentTeamManager.start(team.id, { ultracode: true }).catch(() => undefined)
+            }
             onAbort={() => void abortTeam(team.id, new Error("user-aborted"))}
             onUpdateTeam={(updates) => {
               updateTeam(team.id, updates)

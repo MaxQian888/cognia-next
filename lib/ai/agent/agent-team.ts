@@ -33,7 +33,7 @@ export interface AgentTeamManager {
   create(config: AgentTeamConfig): AgentTeam
   update(id: string, patch: Partial<AgentTeamConfig>): void
   delete(id: string): void
-  start(id: string): Promise<void>
+  start(id: string, opts?: { ultracode?: boolean }): Promise<void>
   pause(id: string): Promise<void>
   shutdown(id: string): Promise<void>
 }
@@ -70,6 +70,8 @@ function bindStoreWriter(): RunTeamLifecycleDeps["storeWriter"] {
       useAgentTeamStore.getState().setTaskStatus(taskId, status, result, error),
     updateTeammate: (teammateId: string, updates: Partial<AgentTeammate>) =>
       useAgentTeamStore.getState().updateTeammate(teammateId, updates),
+    setFinalResult: (teamId: string, result: string) =>
+      useAgentTeamStore.getState().updateTeam(teamId, { finalResult: result }),
   }
 }
 
@@ -86,7 +88,7 @@ export const agentTeamManager: AgentTeamManager = {
   delete: (id) => {
     useAgentTeamStore.getState().deleteTeam(id)
   },
-  start: async (id) => {
+  start: async (id, opts) => {
     if (!configuredDeps) {
       throw new Error(
         "Agent-team runtime is not configured — call configureAgentTeamRuntime(deps) at app startup."
@@ -98,6 +100,13 @@ export const agentTeamManager: AgentTeamManager = {
       storeWriter: bindStoreWriter(),
       runLeadPlanning: configuredDeps.runLeadPlanning,
       notifierDeps: configuredDeps.notifierDeps,
+      // Manual "Run with ultracode" forces orchestration; an explicit normal
+      // run turns it off. Omitted → the team's autoMode decides.
+      ...(opts?.ultracode === true
+        ? { ultracodeOverride: "force" as const }
+        : opts?.ultracode === false
+          ? { ultracodeOverride: "off" as const }
+          : {}),
     })
     // Mirror the terminal result onto the store team.status so the workspace
     // page (which currently reads from the store) sees the new state. Long-term

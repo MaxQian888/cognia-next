@@ -76,6 +76,38 @@ describe("editor store — graph mutations", () => {
   })
 })
 
+describe("editor store — updateNodeDataBatch", () => {
+  it("patches every selected node and is one undo entry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("ai.prompt", { x: 100, y: 0 })
+    const c = useStore.getState().addNode("data.code", { x: 200, y: 0 })
+
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().updateNodeDataBatch([a, b], { disabled: true, notes: "off" })
+
+    const byId = (id: string) => useStore.getState().nodes.find((n) => n.id === id)!
+    expect(byId(a).data.disabled).toBe(true)
+    expect(byId(b).data.disabled).toBe(true)
+    expect(byId(a).data.notes).toBe("off")
+    expect(byId(c).data.disabled).toBeUndefined() // untouched
+
+    // single set() → exactly one new undo entry for the whole batch
+    expect(useStore.temporal.getState().pastStates.length).toBe(before + 1)
+    useStore.temporal.getState().undo()
+    expect(byId(a).data.disabled).toBeUndefined()
+    expect(byId(b).data.disabled).toBeUndefined()
+  })
+
+  it("is a no-op for an empty id list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().updateNodeDataBatch([], { disabled: true })
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
 describe("editor store — selection", () => {
   it("tracks node and edge selection separately", () => {
     const useStore = createEditorStore(emptyWorkflow())

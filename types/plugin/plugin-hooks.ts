@@ -43,6 +43,76 @@ export interface ProjectHookEvents {
 }
 
 // =============================================================================
+// Goal Hooks
+// =============================================================================
+
+/**
+ * Redacted goal snapshot handed to goal hook listeners. Carries ONLY the
+ * safe (redacted) objective — never `rawObjective` or the redaction map —
+ * so a plugin hook can never observe PII the redactor stripped.
+ */
+export interface GoalHookPayload {
+  goalId: string
+  sessionId: string
+  characterId?: string
+  /** GoalStatus as a string (active | paused | stopped | judge_done | …). */
+  status: string
+  /** Redacted objective text. */
+  safeObjective: string
+  turnsUsed: number
+  tokensUsed: number
+}
+
+/**
+ * Goal-lifecycle hook events (ADR-0019 + plugin SDK expansion). Fired by
+ * `lib/goal/runtime.ts`, `lib/goal/turn-driver.ts`, and
+ * `lib/goal/completion-linkage.ts`.
+ */
+export interface GoalHookEvents {
+  /** A goal was created for a session. */
+  onGoalCreate?: (goal: GoalHookPayload) => void | Promise<void>
+  /** A goal's objective or config was updated mid-flight. */
+  onGoalUpdate?: (goal: GoalHookPayload) => void | Promise<void>
+  /** A turn completed — `turnsUsed` / `tokensUsed` reflect the new totals. */
+  onGoalProgress?: (goal: GoalHookPayload) => void | Promise<void>
+  /** A goal reached a terminal status (any exit path). */
+  onGoalComplete?: (goal: GoalHookPayload) => void | Promise<void>
+  /** A goal row was deleted (History "remove"). */
+  onGoalDelete?: (goalId: string) => void | Promise<void>
+}
+
+// =============================================================================
+// Share-link Hooks
+// =============================================================================
+
+/**
+ * Share-link snapshot handed to share hook listeners. The `url` is the public
+ * view URL WITHOUT the secret `#k=` fragment — the decryption key is never
+ * exposed to plugin hooks (zero-knowledge red-line, ADR-0037).
+ */
+export interface ShareLinkHookPayload {
+  code: string
+  /** Payload kind (chat | workflow | a2ui | backup | …). */
+  kind: string
+  title?: string
+  /** Public view URL, fragment-stripped (no `#k=`). */
+  url: string
+  expiresAt?: number
+}
+
+/**
+ * Public-share-link lifecycle hooks (ADR-0037). Fired by `lib/share/client.ts`.
+ * Only owner-observable transitions exist (create / revoke); reads happen on
+ * the worker/viewer, so there is intentionally no `onShareLinkAccess`.
+ */
+export interface ShareHookEvents {
+  /** A share link was created + mirrored locally. */
+  onShareLinkCreate?: (link: ShareLinkHookPayload) => void | Promise<void>
+  /** A share link was revoked. */
+  onShareLinkRevoke?: (code: string) => void | Promise<void>
+}
+
+// =============================================================================
 // Canvas Hooks
 // =============================================================================
 
@@ -501,6 +571,17 @@ export interface PluginHooksAll extends PluginHooks {
   onKnowledgeFileRemove?: ProjectHookEvents["onKnowledgeFileRemove"]
   onSessionLinked?: ProjectHookEvents["onSessionLinked"]
   onSessionUnlinked?: ProjectHookEvents["onSessionUnlinked"]
+
+  // Goal hooks
+  onGoalCreate?: GoalHookEvents["onGoalCreate"]
+  onGoalUpdate?: GoalHookEvents["onGoalUpdate"]
+  onGoalProgress?: GoalHookEvents["onGoalProgress"]
+  onGoalComplete?: GoalHookEvents["onGoalComplete"]
+  onGoalDelete?: GoalHookEvents["onGoalDelete"]
+
+  // Share-link hooks
+  onShareLinkCreate?: ShareHookEvents["onShareLinkCreate"]
+  onShareLinkRevoke?: ShareHookEvents["onShareLinkRevoke"]
 
   // Canvas hooks
   onCanvasCreate?: CanvasHookEvents["onCanvasCreate"]

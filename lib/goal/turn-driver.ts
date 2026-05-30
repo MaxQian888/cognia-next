@@ -36,7 +36,8 @@ import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
 import { evaluateExitConditions } from "./exit-conditions"
 import { evaluateGoal } from "./judge"
-import { onGoalTerminal } from "./completion-linkage"
+import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { renderContinuationMessage, resolveJudgeSystemPrompt } from "./prompts"
 
 export interface TurnCompleteInput {
@@ -109,6 +110,11 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
       tokensDelta: Math.max(0, tokensDelta),
       modelMessageId,
     },
+  })
+  void getPluginEventHooks().dispatchGoalProgress({
+    ...toGoalHookPayload(goal),
+    turnsUsed: newTurnsUsed,
+    tokensUsed: newTokensUsed,
   })
 
   // Re-read the row with the updated counters in place. This is the

@@ -36,6 +36,8 @@ import type {
   PluginTerminalSpawnRequest,
   PluginTerminalSpawnDecision,
   PluginTerminalLifecycleEvent,
+  GoalHookPayload,
+  ShareLinkHookPayload,
 } from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
@@ -1435,6 +1437,34 @@ export class PluginEventHooks {
     this.executeHook("onProjectSwitch", (hooks) =>
       hooks.onProjectSwitch?.(projectId, previousProjectId)
     )
+  }
+
+  async dispatchGoalCreate(goal: GoalHookPayload) {
+    return this.executeHook("onGoalCreate", (hooks) => hooks.onGoalCreate?.(goal))
+  }
+
+  async dispatchGoalUpdate(goal: GoalHookPayload) {
+    return this.executeHook("onGoalUpdate", (hooks) => hooks.onGoalUpdate?.(goal))
+  }
+
+  async dispatchGoalProgress(goal: GoalHookPayload) {
+    return this.executeHook("onGoalProgress", (hooks) => hooks.onGoalProgress?.(goal))
+  }
+
+  async dispatchGoalComplete(goal: GoalHookPayload) {
+    return this.executeHook("onGoalComplete", (hooks) => hooks.onGoalComplete?.(goal))
+  }
+
+  async dispatchGoalDelete(goalId: string) {
+    return this.executeHook("onGoalDelete", (hooks) => hooks.onGoalDelete?.(goalId))
+  }
+
+  async dispatchShareLinkCreate(link: ShareLinkHookPayload) {
+    return this.executeHook("onShareLinkCreate", (hooks) => hooks.onShareLinkCreate?.(link))
+  }
+
+  async dispatchShareLinkRevoke(code: string) {
+    return this.executeHook("onShareLinkRevoke", (hooks) => hooks.onShareLinkRevoke?.(code))
   }
 
   async dispatchKnowledgeFileAdd(projectId: string, file: KnowledgeFile) {

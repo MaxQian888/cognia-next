@@ -125,6 +125,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   "artifact.actions",
   "canvas.toolbar",
   "canvas.sidebar",
+  // Goal surfaces. `goal.toolbar` is the /goals route header; `goal.detail.actions`
+  // is the action row in the goal detail sheet. Both receive a `context` bag
+  // with `goalId` / `status`.
+  "goal.toolbar",
+  "goal.detail.actions",
+  // Performance dashboard — plugins mount a tile/panel (e.g. a custom metric)
+  // alongside the native Rust-sampled graphs.
+  "perf.panel",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -175,6 +183,9 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "artifact.actions",
   "canvas.toolbar",
   "canvas.sidebar",
+  "goal.toolbar",
+  "goal.detail.actions",
+  "perf.panel",
   "settings.general",
   "settings.appearance",
   "settings.ai",
@@ -244,6 +255,9 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "artifact.actions": "components/artifacts/artifact-panel.tsx",
   "canvas.toolbar": "components/canvas/canvas-panel.tsx",
   "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
+  "goal.toolbar": "components/goal/console/goal-console.tsx",
+  "goal.detail.actions": "components/goal/goal-detail-sheet.tsx",
+  "perf.panel": "components/performance/performance-dashboard.tsx",
   "settings.general": "components/settings/general-section.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.ai": "components/settings/api-key-section.tsx",
@@ -335,6 +349,19 @@ export const CANONICAL_HOOK_POINTS = [
   "onProjectUpdate",
   "onProjectDelete",
   "onProjectSwitch",
+  // Goal lifecycle (ADR-0019). Dispatched by lib/goal/runtime.ts,
+  // turn-driver.ts, and completion-linkage.ts. Payloads carry only the
+  // redacted objective (PII red-line).
+  "onGoalCreate",
+  "onGoalUpdate",
+  "onGoalProgress",
+  "onGoalComplete",
+  "onGoalDelete",
+  // Public share-link lifecycle (ADR-0037). Dispatched by lib/share/client.ts.
+  // Owner-observable transitions only — no onShareLinkAccess (reads happen on
+  // the worker/viewer, not the owner). URL payload is fragment-stripped.
+  "onShareLinkCreate",
+  "onShareLinkRevoke",
   "onKnowledgeFileAdd",
   "onKnowledgeFileRemove",
   "onSessionLinked",

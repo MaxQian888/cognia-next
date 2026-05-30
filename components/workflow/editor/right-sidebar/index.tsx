@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { InspectorPanel } from "../inspector-panel"
+import { EdgeInspector } from "../edge-inspector"
 
 // Lazy-load the chat tab so the canvas bundle stays lean AND so unit
 // tests that mount the canvas don't pay the cost of pulling the entire
@@ -75,13 +76,17 @@ function RightSidebarInner({
   // already-non-empty selection (e.g. 1 → 2 via shift-click).
   const prevSelectionCountRef = useRef(0)
 
-  const { selectionCount, workflowId, workflowName } = useStore(
+  const { selectionCount, edgeSelectionCount, workflowId, workflowName } = useStore(
     useShallow((s: EditorState) => ({
       selectionCount: s.selectedNodeIds.length,
+      edgeSelectionCount: s.selectedEdgeIds.length,
       workflowId: s.baseWorkflow.id,
       workflowName: s.baseWorkflow.name,
     }))
   )
+  // Inspector shows the node form when nodes are selected, else the edge
+  // inspector when only edges are. The tab badge tracks whichever is active.
+  const inspectorCount = selectionCount > 0 ? selectionCount : edgeSelectionCount
 
   // Auto-switch to Inspector when the user picks a node — unless they
   // explicitly pinned Chat. Only fires on the 0 → ≥1 edge: subsequent
@@ -93,11 +98,11 @@ function RightSidebarInner({
   // inspector mid-edit.
   useEffect(() => {
     const prev = prevSelectionCountRef.current
-    prevSelectionCountRef.current = selectionCount
-    if (prev === 0 && selectionCount > 0 && userPinnedTab.current !== "chat") {
+    prevSelectionCountRef.current = inspectorCount
+    if (prev === 0 && inspectorCount > 0 && userPinnedTab.current !== "chat") {
       setTab("inspector")
     }
-  }, [selectionCount])
+  }, [inspectorCount])
 
   const handleTabChange = (next: string) => {
     const v: RightSidebarTab =
@@ -137,8 +142,8 @@ function RightSidebarInner({
         </TabsTrigger>
         <TabsTrigger value="inspector" data-testid="workflow-right-sidebar-tab-inspector">
           {t("tabs.inspector")}
-          {selectionCount > 1 ? (
-            <span className="ml-1 text-[10px] opacity-70">×{selectionCount}</span>
+          {inspectorCount > 1 ? (
+            <span className="ml-1 text-[10px] opacity-70">×{inspectorCount}</span>
           ) : null}
         </TabsTrigger>
         <TabsTrigger value="runs" data-testid="workflow-right-sidebar-tab-runs">
@@ -182,7 +187,11 @@ function RightSidebarInner({
         </Activity>
       </TabsContent>
       <TabsContent value="inspector" className="flex-1 m-0 overflow-hidden">
-        <InspectorPanel useStore={useStore} className="border-l-0" />
+        {selectionCount === 0 && edgeSelectionCount > 0 ? (
+          <EdgeInspector useStore={useStore} className="border-l-0" />
+        ) : (
+          <InspectorPanel useStore={useStore} className="border-l-0" />
+        )}
       </TabsContent>
       <TabsContent value="templates" className="flex-1 m-0 overflow-hidden">
         <Suspense

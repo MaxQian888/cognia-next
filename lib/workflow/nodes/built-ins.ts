@@ -1293,15 +1293,14 @@ registerNodeExecutor({
 
 // ── action.team.task.dispatch ─────────────────────────────────────────────
 // Per ADR-0022 §3.6. Synthesizer-emitted node: one per AgentTeamTask. Looks
-// up the per-run TeamRunContext from a module-scope WeakMap (registered by
-// the synthesizer before runWorkflow), claims a teammate from the pool,
-// dispatches via executeAgent under a combined abort signal (ctx.signal +
-// per-task timeout), and records pool/budget on success/failure.
+// up the per-run TeamRunContext (registered by the synthesizer before
+// runWorkflow) and delegates to the shared `dispatchTeammate` primitive, which
+// claims a teammate, runs one turn (tool-enabled via the sidecar on desktop,
+// text-only fallback on web/mobile), validates output, and records pool /
+// budget / hooks. The same primitive powers the ultracode `pattern.*` nodes.
 //
-// Retryable: true → workflow runStep retries on transient failures, and
-// each retry re-claims from the pool, naturally rotating to a different
-// teammate. The hardening passes in PR 6 add output validation + error
-// classification before recordFailure.
+// Retryable: true → workflow runStep retries on transient failures, and each
+// retry re-claims from the pool, naturally rotating to a different teammate.
 registerNodeExecutor({
   kind: "action.team.task.dispatch",
   typeVersion: 1,
@@ -1317,166 +1316,42 @@ registerNodeExecutor({
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
     }
-    const [
-      { getTeamRunContext },
-      { executeAgent },
-      { buildTeammatePrompt },
-      { getPluginLifecycleHooks },
-      { resolveTeammateCapabilities },
-    ] = await Promise.all([
-      import("@/lib/ai/agent/team/team-run-context"),
-      import("@/lib/ai/agent/agent-executor"),
-      import("@/lib/ai/agent/agent-team-runtime-deps"),
-      import("@/lib/plugin/messaging/hooks-system"),
-      import("@/lib/ai/agent/team/capability-resolver"),
-    ])
+    const taskId = params.taskId
+    const [{ getTeamRunContext }, { buildTeammatePrompt }, { dispatchTeammate }] =
+      await Promise.all([
+        import("@/lib/ai/agent/team/team-run-context"),
+        import("@/lib/ai/agent/agent-team-runtime-deps"),
+        import("@/lib/ai/agent/team/dispatch-teammate"),
+      ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
       throw nonRetryable(
         `action.team.task.dispatch: no TeamRunContext registered for runId=${ctx.runId}`
       )
     }
-    const teammate = teamCtx.pool.claim(params.taskId)
-    if (!teammate) {
-      // Retryable — workflow runStep will back off; pool may free up.
-      throw new Error("action.team.task.dispatch: no available teammate")
-    }
-    // Resolve plugin capabilities for this teammate (cached per-run). The
-    // resolved bundle is currently passed via TeamRunContext so future
-    // upgrades to the Claude SDK path can consume it without changing the
-    // executor surface. The AI SDK path used by `executeAgent` cannot yet
-    // honour skills/mcp/native-tools — those need the sidecar route.
-    if (!teamCtx.resolvedCapabilities.has(teammate.id)) {
-      teamCtx.resolvedCapabilities.set(
-        teammate.id,
-        resolveTeammateCapabilities(teamCtx.team, teammate)
-      )
-    }
-
-    // Fire onTeammateClaim + onAgentStart now that we have a teammate; the
-    // matching onTeammateRelease + onAgentComplete / onAgentError fire on
-    // every exit path below.
-    const hooks = getPluginLifecycleHooks()
-    hooks.dispatchOnTeammateClaim({
-      teamId: teamCtx.teamId,
-      runId: ctx.runId,
-      teammateId: teammate.id,
-      taskId: params.taskId,
-    })
-    hooks.dispatchOnAgentStart(teammate.id, {
-      teamId: teamCtx.teamId,
-      runId: ctx.runId,
-      taskId: params.taskId,
-      role: teammate.role,
-      name: teammate.name,
-    })
-
-    const perTaskTimeoutMs =
-      typeof teamCtx.team.config?.defaultTimeout === "number" &&
-      teamCtx.team.config.defaultTimeout > 0
-        ? teamCtx.team.config.defaultTimeout
-        : 600_000
-    const combinedSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(perTaskTimeoutMs)])
 
     const task = {
-      id: params.taskId,
-      title: params.title ?? params.taskId,
+      id: taskId,
+      title: params.title ?? taskId,
       description: params.description ?? "",
       expectedOutput: params.expectedOutput,
     } as Parameters<typeof buildTeammatePrompt>[2]
 
-    const prompt = buildTeammatePrompt(teamCtx.team, teammate, task)
-    const modelPref = teamCtx.modelPref.get()
-    const systemPrompt =
-      teammate.config?.systemPrompt?.trim() ||
-      teamCtx.team.config?.defaultSystemPrompt?.trim() ||
-      "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
-
-    // Helper: fire the matching release + agent-end hooks on every exit
-    // path. Keeps the call sites below to one line each.
-    const dispatchTeammateRelease = (kind: "success" | "failure", error?: Error): void => {
-      hooks.dispatchOnTeammateRelease({
-        teamId: teamCtx.teamId,
-        runId: ctx.runId,
-        teammateId: teammate.id,
-        taskId: params.taskId!,
-        result: kind,
-        error: error?.message,
-      })
-      if (kind === "success") {
-        hooks.dispatchOnAgentComplete(teammate.id, undefined)
-      } else if (error) {
-        hooks.dispatchOnAgentError(teammate.id, error)
-      }
-    }
-
-    // Phase 1: executeAgent — single try/catch records exactly one failure
-    // on the breaker if the LLM call throws.
-    let result: Awaited<ReturnType<typeof executeAgent>>
-    try {
-      result = await executeAgent(prompt, {
-        systemPrompt,
-        ...(modelPref.modelHint ? { model: modelPref.modelHint } : {}),
-        abortSignal: combinedSignal,
-      })
-    } catch (err) {
-      teamCtx.pool.recordFailure(teammate.id, err)
-      teamCtx.storeWriter.setTaskStatus(
-        params.taskId,
-        "failed",
-        undefined,
-        err instanceof Error ? err.message : String(err)
-      )
-      dispatchTeammateRelease("failure", err instanceof Error ? err : new Error(String(err)))
-      throw err
-    }
-
-    // Phase 2: output validation (ADR-0022 §2 Layer 1.5). Validation failures
-    // record exactly one failure (no double-count via outer catch) and throw
-    // retryable so workflow runStep rotates to a different teammate.
-    const text = (result.text ?? "").toString()
-    const trimmed = text.trim()
-    if (trimmed.length === 0) {
-      const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
-      teamCtx.pool.recordFailure(teammate.id, empty)
-      teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, empty.message)
-      dispatchTeammateRelease("failure", empty)
-      throw empty
-    }
-    const minChars = teamCtx.team.config.minOutputChars ?? 0
-    if (minChars > 0 && trimmed.length < minChars) {
-      const short = new Error(
-        `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
-      )
-      teamCtx.pool.recordFailure(teammate.id, short)
-      teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, short.message)
-      dispatchTeammateRelease("failure", short)
-      throw short
-    }
-
-    // Phase 3: success path.
-    teamCtx.pool.recordSuccess(teammate.id)
-    const usage = (
-      result as unknown as {
-        usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
-      }
-    ).usage
-    if (usage) teamCtx.budget.add(usage)
-    teamCtx.storeWriter.addMessage({
-      teamId: teamCtx.teamId,
-      senderId: teammate.id,
-      type: "result_share",
-      content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
-      taskId: params.taskId,
+    const result = await dispatchTeammate(teamCtx, {
+      taskId,
+      // Persona-aware prompt built from the teammate the pool actually claims.
+      prompt: (teammate) => buildTeammatePrompt(teamCtx.team, teammate, task),
+      signal: ctx.signal,
+      validateOutput: true,
+      recordToStore: true,
     })
-    teamCtx.storeWriter.setTaskStatus(params.taskId, "completed", text)
-    dispatchTeammateRelease("success")
+
     return {
       output: {
-        text,
-        teammateId: teammate.id,
-        teammateName: teammate.name,
-        tokenUsage: usage,
+        text: result.text,
+        teammateId: result.teammateId,
+        teammateName: result.teammateName,
+        tokenUsage: result.usage,
         attempt: 1,
       },
     }

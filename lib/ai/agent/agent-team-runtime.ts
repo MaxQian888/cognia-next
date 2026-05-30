@@ -22,7 +22,7 @@ import {
   refreshAllInstanceCapabilityWarnings,
 } from "@/lib/ai/agent/team/capability-audit"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
-import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import { createTeammatePool } from "./team/teammate-pool"
@@ -31,9 +31,11 @@ import { createTeamNotifier, type TeamNotifierDeps } from "./team/team-notifier"
 import {
   registerTeamRunContext,
   unregisterTeamRunContext,
+  getTeamRunContext,
   type TeamStoreWriter,
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
+import { isUltracodeActive, type UltracodeOverride } from "./team/ultracode-trigger"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /** Planning result kept compatible with the legacy LeadPlanResult shape. */
@@ -68,6 +70,13 @@ export interface RunTeamLifecycleDeps {
    * their behavior unchanged (no IM fan-out).
    */
   triggeredFrom?: WorkflowTriggeredFrom
+  /**
+   * Operator override for ultracode orchestration (ADR-0022 addendum).
+   * `"force"` runs the ultracode pattern composition regardless of autoMode;
+   * `"off"` forces the flat task DAG. Omitted → the team's `ultracode.autoMode`
+   * + routing assessment decide (see `isUltracodeActive`).
+   */
+  ultracodeOverride?: UltracodeOverride
 }
 
 export interface RunTeamLifecycleResult {
@@ -133,7 +142,11 @@ export async function runTeamLifecycle(
       return { runId: "", status: "failed", reason: "No teammates available" }
     }
     const tasks = deps.storeReader.getTeamTasks(teamId)
-    if (tasks.length === 0) {
+    // Ultracode runs are driven by the team objective (team.task string) + a
+    // planned pattern composition, not the flat task list — so they don't
+    // require pre-seeded tasks. Flat runs still do.
+    const ultracodeActive = isUltracodeActive(team, deps.ultracodeOverride)
+    if (!ultracodeActive && tasks.length === 0) {
       return { runId: "", status: "failed", reason: "No tasks to dispatch" }
     }
 
@@ -367,14 +380,10 @@ export async function runTeamLifecycle(
       })
     )
 
-    // ── Synthesize VW + run via workflow ──
-    const { workflow } = synthesizeTeamWorkflow({
-      team,
-      tasks,
-      initialConcurrency: concurrency.get(),
-      wallClockTimeoutMs: team.config.defaultTimeout,
-    })
-
+    // ── Register the per-run context FIRST ──
+    // Ultracode planning + every pattern/dispatch node reads it via
+    // getTeamRunContext(runId); registering before synthesis lets the planner
+    // dispatch a teammate to author the pattern composition.
     registerTeamRunContext({
       runId,
       teamId,
@@ -385,10 +394,36 @@ export async function runTeamLifecycle(
       concurrency,
       modelPref,
       storeWriter: deps.storeWriter,
-      // Lazily populated by the dispatch executor on first claim — see
-      // `lib/workflow/nodes/built-ins.ts:action.team.task.dispatch`.
+      // Lazily populated by dispatchTeammate on first claim — see
+      // `lib/ai/agent/team/dispatch-teammate.ts`.
       resolvedCapabilities: new Map(),
     })
+
+    // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
+    let workflow: VisualWorkflow
+    if (ultracodeActive) {
+      // Side-effect import registers the pattern.* node executors.
+      await import("./team/patterns")
+      const [{ planUltracodeWorkflow }, { synthesizeUltracodeWorkflow }] = await Promise.all([
+        import("./team/ultracode-planner"),
+        import("./team/synthesize-ultracode"),
+      ])
+      const teamCtx = getTeamRunContext(runId)!
+      const plan = await planUltracodeWorkflow(teamCtx, { signal: ac.signal })
+      ;({ workflow } = synthesizeUltracodeWorkflow({
+        team,
+        plan,
+        initialConcurrency: concurrency.get(),
+        wallClockTimeoutMs: team.config.defaultTimeout,
+      }))
+    } else {
+      ;({ workflow } = synthesizeTeamWorkflow({
+        team,
+        tasks,
+        initialConcurrency: concurrency.get(),
+        wallClockTimeoutMs: team.config.defaultTimeout,
+      }))
+    }
 
     // Track final status so the finally block can fire onTeamComplete
     // with a meaningful payload even when runWorkflow throws.
@@ -432,6 +467,15 @@ export async function runTeamLifecycle(
             ? "cancelled"
             : "failed"
       finalReason = result.error?.message
+      // Ultracode runs end on a single terminal `pattern.synthesize` node;
+      // runWorkflow surfaces its output as `result.output`. Persist the report
+      // to `team.finalResult` so the workspace surfaces the synthesized answer.
+      if (ultracodeActive && finalStatus === "completed") {
+        const report = (result.output as { report?: string } | undefined)?.report
+        if (report && deps.storeWriter.setFinalResult) {
+          deps.storeWriter.setFinalResult(teamId, report)
+        }
+      }
       return {
         runId: result.runId,
         status: finalStatus,

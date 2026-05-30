@@ -1,0 +1,19 @@
+{
+  "id": "cognia-goal-insights",
+  "name": "Goal Insights",
+  "version": "0.1.0",
+  "description": "Reference plugin exercising the goal lifecycle hooks: records a redacted summary each time a goal is created or reaches a terminal status.",
+  "type": "frontend",
+  "capabilities": ["hooks"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

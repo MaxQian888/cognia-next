@@ -10,6 +10,7 @@ import { generateShareKey, encodeShareKey } from "./keys"
 import { encryptSharePayload } from "./crypto"
 import { resolveShareEndpoint, type ShareEndpoint } from "./config"
 import { recordSharedLink, markSharedLinkRevoked, type SharedLinkRow } from "@/lib/db/shared-links"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { CreateShareRequest, CreateShareResponse, SharePayload, ShareStats } from "./types"
 
 /** Raised when the upload bearer secret hasn't been configured yet. */
@@ -105,6 +106,16 @@ export async function createShareLink(
   }
   await recordSharedLink(row)
 
+  // Plugin hook — fragment-stripped URL only (the `#k=` decryption key is
+  // never exposed to plugin hooks). Best-effort.
+  void getPluginEventHooks().dispatchShareLinkCreate({
+    code,
+    kind: input.payload.kind,
+    title: input.payload.title,
+    url: `${ep.baseUrl}/share/view?c=${code}`,
+    expiresAt,
+  })
+
   return { code, url, expiresAt }
 }
 
@@ -120,6 +131,7 @@ export async function revokeShareLink(code: string, endpoint?: ShareEndpoint): P
     throw new ShareRequestError(res.status, await readError(res))
   }
   await markSharedLinkRevoked(code)
+  void getPluginEventHooks().dispatchShareLinkRevoke(code)
 }
 
 /** Owner-only live stats (view count / expiry / revoked). Null if not found. */

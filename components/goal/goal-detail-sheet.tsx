@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import type { Goal } from "@/types/goal"
 import { GoalOverviewTab } from "./tabs/overview-tab"
 import { GoalSubgoalsTab } from "./tabs/subgoals-tab"
@@ -44,6 +45,16 @@ export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
   const t = useTranslations("goal")
   const isMobile = useIsMobile()
   const title = t("detailSheet.title", { status: t(`status.${goal.status}`) })
+
+  // Plugin contribution row — e.g. "Copy summary", "Export". Conversation-
+  // scoped context so contributions don't re-derive the goal identity.
+  const pluginActions = (
+    <PluginExtensionSlot
+      point="goal.detail.actions"
+      context={{ goalId: goal.id, status: goal.status }}
+      className="flex flex-wrap items-center gap-2 empty:hidden"
+    />
+  )
 
   const tabs = (
     <Tabs defaultValue="overview" className="mt-4 flex-1 overflow-y-auto px-4 pb-4">
@@ -85,6 +96,7 @@ export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
             <DrawerDescription className="line-clamp-3 text-xs">
               {goal.safeObjective}
             </DrawerDescription>
+            {pluginActions}
           </DrawerHeader>
           {tabs}
         </DrawerContent>
@@ -98,6 +110,7 @@ export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
         <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription className="line-clamp-3 text-xs">{goal.safeObjective}</SheetDescription>
+          {pluginActions}
         </SheetHeader>
         {tabs}
       </SheetContent>

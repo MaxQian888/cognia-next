@@ -72,6 +72,14 @@ export type TeamExecutionPattern =
   | "background_handoff"
   | "external_handoff"
   | "single_agent_recommended"
+  /**
+   * Ultracode multi-agent orchestration (ADR-0022 addendum). The lead plans a
+   * composition of quality patterns (sweep → loop-until-dry → adversarial /
+   * perspective-diverse verify → judge panel → completeness critic →
+   * synthesize) that fan out tool-enabled teammates. Recommended automatically
+   * for complex tasks when `AgentTeamConfig.ultracode.enabled` is on.
+   */
+  | "ultracode_orchestration"
 
 /**
  * Main workspace tabs for the dedicated Agent Team page
@@ -332,6 +340,34 @@ export interface AgentTeamConfig {
    * the adapter and `syncSharedMemoryFromAdapter` can pull remote changes.
    */
   sharedMemoryAdapterId?: string
+  /**
+   * Ultracode orchestration settings (ADR-0022 addendum). When `enabled`, the
+   * team can run the multi-agent quality-pattern composition instead of a flat
+   * task DAG. `autoMode` decides whether a complex task triggers it
+   * automatically (`"auto"`, the default), always, or never. The numeric knobs
+   * cap fan-out for each pattern; undefined values fall back to the planner's
+   * per-stage choice clamped to the workflow concurrency ceiling.
+   */
+  ultracode?: {
+    enabled?: boolean
+    /** `"auto"` (default): orchestrate only when routing judges the task complex. */
+    autoMode?: "auto" | "always" | "never"
+    /** Hard cap on loop-until-dry finder rounds. Default 4. */
+    maxFinderRounds?: number
+    /** Independent skeptics per finding in adversarial verify. Default 3. */
+    skepticsPerFinding?: number
+    /** Independent judges per attempt in the judge panel. Default 3. */
+    judgesPerAttempt?: number
+    /** Consecutive empty finder rounds that stop loop-until-dry. Default 2. */
+    dryRoundsToStop?: number
+  }
+  /**
+   * Absolute repo path tool-enabled teammates run in (the synthesized Character's
+   * `workingDir`, scoping Read/Bash/Edit). Falls back to the originating chat
+   * session's `workingDir` when unset. Only meaningful on the desktop sidecar
+   * path; ignored by the web/mobile text-only fallback.
+   */
+  workingDir?: string
 }
 
 /**

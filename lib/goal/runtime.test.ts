@@ -6,6 +6,7 @@ import { listGoalEvents } from "@/lib/db/goals"
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("./completion-linkage", () => ({
   onGoalTerminal: (...a: unknown[]) => onGoalTerminalMock(...a),
+  toGoalHookPayload: (g: unknown) => g,
 }))
 
 import {

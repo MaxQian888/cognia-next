@@ -107,6 +107,16 @@ export type WorkflowNodeKind =
   // Annotation
   | "annotation.note"
   | "annotation.group"
+  // Ultracode orchestration patterns (ADR-0022 addendum). Higher-order
+  // Agent-Team nodes that fan out tool-enabled teammate dispatches and apply a
+  // quality pattern. Synthesizer-emitted only — not placed by users in the
+  // editor. See `lib/ai/agent/team/patterns/`.
+  | "pattern.multi-modal-sweep"
+  | "pattern.loop-until-dry"
+  | "pattern.adversarial-verify"
+  | "pattern.judge-panel"
+  | "pattern.completeness-critic"
+  | "pattern.synthesize"
 
 export type WorkflowNodeCategory =
   | "trigger"
@@ -125,6 +135,8 @@ export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCatego
   if (head === "flow") return "flow"
   if (head === "data") return "data"
   if (head === "io") return "io"
+  // Ultracode pattern nodes are a flavour of action.
+  if (head === "pattern") return "action"
   return "annotation"
 }
 
@@ -201,6 +213,12 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "io.webhook.respond",
   "annotation.note",
   "annotation.group",
+  "pattern.multi-modal-sweep",
+  "pattern.loop-until-dry",
+  "pattern.adversarial-verify",
+  "pattern.judge-panel",
+  "pattern.completeness-critic",
+  "pattern.synthesize",
 ] as const
 
 // ─────────────────────────────────────────────────────────────────────────────

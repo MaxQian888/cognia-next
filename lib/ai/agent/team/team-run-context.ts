@@ -29,6 +29,12 @@ export interface TeamStoreWriter {
   addMessage(input: SendMessageInput): void
   setTaskStatus(taskId: string, status: TeamTaskStatus, result?: string, error?: string): void
   updateTeammate(teammateId: string, updates: Partial<AgentTeammate>): void
+  /**
+   * Persist the run's final synthesized result onto the team (used by ultracode
+   * runs to write the synthesizer report to `team.finalResult`). Optional so
+   * non-ultracode callers / test fixtures need not provide it.
+   */
+  setFinalResult?(teamId: string, result: string): void
 }
 
 export interface TeamRunContext {

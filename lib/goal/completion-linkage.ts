@@ -16,9 +16,31 @@
  */
 
 import type { Goal } from "@/types/goal"
+import type { GoalHookPayload } from "@/types/plugin/plugin-hooks"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+
+/**
+ * Project a `Goal` row down to the redacted snapshot handed to plugin goal
+ * hooks. Carries ONLY `safeObjective` — never `rawObjective` / the redaction
+ * map — so a hook listener can't observe stripped PII.
+ */
+export function toGoalHookPayload(goal: Goal): GoalHookPayload {
+  return {
+    goalId: goal.id,
+    sessionId: goal.sessionId,
+    characterId: goal.characterId,
+    status: goal.status,
+    safeObjective: goal.safeObjective,
+    turnsUsed: goal.turnsUsed,
+    tokensUsed: goal.tokensUsed,
+  }
+}
 
 /** Run notification + workflow fan-out for a goal that just reached a terminal status. */
 export async function onGoalTerminal(goal: Goal): Promise<void> {
+  // Plugin goal hook — redacted payload, best-effort, alongside the existing
+  // notification + workflow fan-out.
+  void getPluginEventHooks().dispatchGoalComplete(toGoalHookPayload(goal))
   await Promise.all([notifyGoalTerminal(goal), dispatchGoalCompletedTriggers(goal)])
 }
 

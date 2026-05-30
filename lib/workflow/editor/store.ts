@@ -221,6 +221,14 @@ export interface EditorState extends EditorStateSnapshot {
   ) => string
   removeNodes: (ids: string[]) => void
   updateNodeData: (id: string, patch: Partial<WorkflowNodeData>) => void
+  /**
+   * Apply the same `data` patch to every node in `ids` in a single `set()`
+   * so the whole batch is one undo entry. Used by the multi-select inspector
+   * to toggle `disabled` / set `notes` across the selection at once. Only the
+   * cross-kind-safe fields (`disabled`, `notes`, `label`) should be patched —
+   * `params` is kind-specific and must not be bulk-written.
+   */
+  updateNodeDataBatch: (ids: string[], patch: Partial<WorkflowNodeData>) => void
   connect: (params: {
     source: string
     target: string
@@ -524,6 +532,17 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({
             nodes: get().nodes.map((n) =>
               n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
+            ),
+            dirty: true,
+          })
+        },
+
+        updateNodeDataBatch: (ids, patch) => {
+          if (ids.length === 0) return
+          const idSet = new Set(ids)
+          set({
+            nodes: get().nodes.map((n) =>
+              idSet.has(n.id) ? { ...n, data: { ...n.data, ...patch } } : n
             ),
             dirty: true,
           })

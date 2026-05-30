@@ -13,6 +13,8 @@ export interface AgentTeamOverviewProps {
   team: AgentTeam
   teammates: AgentTeammate[]
   onStart?: () => void
+  /** Manual ultracode run — forces the pattern composition regardless of autoMode. */
+  onStartUltracode?: () => void
   onAbort?: () => void
   onUpdateTeam?: (updates: Partial<AgentTeam>) => void
 }
@@ -21,6 +23,7 @@ export function AgentTeamOverview({
   team,
   teammates,
   onStart,
+  onStartUltracode,
   onAbort,
   onUpdateTeam,
 }: AgentTeamOverviewProps) {
@@ -129,6 +132,14 @@ export function AgentTeamOverview({
         </Card>
       </div>
 
+      {/* Final synthesized result (ultracode runs write the report here) */}
+      {team.finalResult && (
+        <Card className="space-y-2 p-4" data-testid="team-final-result">
+          <p className="text-sm font-medium">{t("finalResult")}</p>
+          <p className="whitespace-pre-wrap text-xs text-muted-foreground">{team.finalResult}</p>
+        </Card>
+      )}
+
       {/* Plan approval */}
       {team.config.requirePlanApproval && lead?.status === "awaiting_approval" && (
         <PlanApprovalPanel team={team} lead={lead} />
@@ -141,9 +152,21 @@ export function AgentTeamOverview({
             {t("abortTeam")}
           </Button>
         ) : (
-          <Button size="sm" onClick={onStart} data-testid="start-team">
-            {t("startTeam")}
-          </Button>
+          <>
+            {team.config.ultracode?.enabled && onStartUltracode && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onStartUltracode}
+                data-testid="start-team-ultracode"
+              >
+                {t("startTeamUltracode")}
+              </Button>
+            )}
+            <Button size="sm" onClick={onStart} data-testid="start-team">
+              {t("startTeam")}
+            </Button>
+          </>
         )}
       </div>
     </div>

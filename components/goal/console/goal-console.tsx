@@ -20,6 +20,7 @@ import { GoalsHistoryTable } from "@/components/settings/goals/history-table"
 import { GoalTemplatesManager } from "@/components/settings/goals/goal-templates-manager"
 import { GoalDefaultsForm } from "@/components/settings/goals/goal-defaults-form"
 import { GoalTrackerConfig } from "@/components/settings/goals/goal-tracker-config"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 export function GoalConsole() {
   const t = useTranslations("goal")
@@ -46,6 +47,11 @@ export function GoalConsole() {
           <Stat dot="bg-success" label={t("console.statActive", { count: activeCount })} />
           <Stat dot="bg-warning" label={t("console.statPaused", { count: pausedCount })} />
           <Stat dot="bg-muted-foreground" label={t("console.statDone", { count: doneCount })} />
+          {/* Plugin toolbar contributions for the Goals console. */}
+          <PluginExtensionSlot
+            point="goal.toolbar"
+            className="flex items-center gap-2 empty:hidden"
+          />
         </div>
       </header>
 

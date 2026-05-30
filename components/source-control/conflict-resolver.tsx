@@ -7,7 +7,7 @@
  * actions check out that stage and mark the path resolved.
  */
 
-import { Suspense, useEffect, useMemo, useRef } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
@@ -15,6 +15,12 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
+import {
+  COGNIA_ACTIVE_THEME_ID,
+  syncCogniaActiveTheme,
+} from "@/lib/canvas/themes/cognia-active-theme"
+import { resolveActiveThemeColors } from "@/lib/themes"
+import { useSettingsStore } from "@/stores"
 import { languageFromPath } from "@/lib/git/language-map"
 import type { ConflictSide, GitConflict } from "@/lib/git/types"
 
@@ -33,10 +39,43 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
   const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
+  const monacoRef = useRef<typeof import("monaco-editor") | null>(null)
+
+  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
+  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
+  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
 
   useEffect(() => {
     configureMonacoLoader()
   }, [])
+
+  // Paint the conflict diff with the user's appearance palette (cognia-active),
+  // matching the canvas / skills editors instead of stock VS Code.
+  const applyActiveTheme = useCallback(
+    (monaco: typeof import("monaco-editor")) => {
+      if (!resolvedTheme) return
+      const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
+      const resolved = resolveActiveThemeColors({
+        colorTheme: appearanceColorTheme,
+        resolvedTheme: variant,
+        activeCustomThemeId: appearanceActiveCustomThemeId,
+        customThemes: appearanceCustomThemes,
+      })
+      syncCogniaActiveTheme(
+        monaco as unknown as Parameters<typeof syncCogniaActiveTheme>[0],
+        resolved.colors,
+        variant
+      )
+      // Re-apply explicitly so an already-mounted editor follows a light/dark
+      // toggle (see DiffViewer for the rationale).
+      monaco.editor.setTheme(COGNIA_ACTIVE_THEME_ID)
+    },
+    [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes]
+  )
+
+  useEffect(() => {
+    if (monacoRef.current) applyActiveTheme(monacoRef.current)
+  }, [applyActiveTheme])
 
   useEffect(() => {
     const container = containerRef.current
@@ -60,7 +99,7 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
     () => ({
       readOnly: true,
       renderSideBySide: true,
-      automaticLayout: false,
+      automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       fontSize: 13,
@@ -102,16 +141,18 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
           {t("conflicts.acceptBoth")}
         </Button>
       </div>
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={containerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         <Suspense fallback={<Spinner className="m-4 size-4" />}>
           <MonacoDiff
             original={conflict.ours}
             modified={conflict.theirs}
             language={languageFromPath(conflict.path)}
-            theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+            theme={COGNIA_ACTIVE_THEME_ID}
             options={options}
-            onMount={(editor) => {
+            onMount={(editor, monaco) => {
               editorRef.current = editor
+              monacoRef.current = monaco
+              applyActiveTheme(monaco)
             }}
           />
         </Suspense>

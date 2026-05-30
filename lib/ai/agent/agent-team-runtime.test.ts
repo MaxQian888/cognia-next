@@ -346,3 +346,71 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.reason).toMatch(/runLeadPlanning/)
   })
 })
+
+describe("runTeamLifecycle — ultracode orchestration", () => {
+  const fence = (json: unknown) => "```json\n" + JSON.stringify(json) + "\n```"
+
+  // Route the (text-only, off-desktop) teammate dispatches by prompt content:
+  // planner → plan, sweep finder → findings, synthesize → report.
+  const wireUltracodeMock = () => {
+    ;(executeAgent as jest.Mock).mockImplementation(async (prompt: string) => {
+      if (prompt.includes("lead planner")) {
+        return {
+          text: fence({
+            summary: "sweep then synthesize",
+            stages: [
+              { pattern: "multi-modal-sweep", instruction: "find bugs", variants: ["by-file"] },
+              { pattern: "synthesize", instruction: "write report" },
+            ],
+          }),
+        }
+      }
+      if (prompt.includes("Search approach")) {
+        return { text: fence({ findings: [{ title: "Bug", detail: "d", location: "a.ts:1" }] }) }
+      }
+      if (prompt.includes("Write the final report")) {
+        return { text: fence({ report: "Final report.", citations: ["a.ts:1"] }) }
+      }
+      return { text: "{}" }
+    })
+  }
+
+  const ultracodeTeam = (): AgentTeam =>
+    ({
+      ...baseTeam,
+      task: "Audit the payments module",
+      config: {
+        ...baseTeam.config,
+        ultracode: { enabled: true, autoMode: "always" },
+      },
+    }) as AgentTeam
+
+  it("plans, fans out patterns, and writes the synthesized report to finalResult", async () => {
+    wireUltracodeMock()
+    // No tasks seeded — ultracode runs off the objective string.
+    const deps = buildDeps(ultracodeTeam(), [], [lead, worker("w1"), worker("w2")])
+    let finalResult: string | undefined
+    deps.storeWriter.setFinalResult = (_teamId, result) => {
+      finalResult = result
+    }
+
+    const result = await runTeamLifecycle("team-1", deps, undefined)
+
+    expect(result.status).toBe("completed")
+    expect(finalResult).toBe("Final report.")
+    // The synthesize node posted the report into the team chat.
+    expect(deps._messages.some((m) => m.content === "Final report.")).toBe(true)
+    // Planner + sweep finder + synthesize all dispatched through executeAgent.
+    expect((executeAgent as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("honours ultracodeOverride='off' to force the flat task DAG", async () => {
+    wireUltracodeMock()
+    // With override off and no tasks, the flat path fails fast — proving the
+    // ultracode branch was not taken.
+    const deps = buildDeps(ultracodeTeam(), [], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", { ...deps, ultracodeOverride: "off" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/No tasks/)
+  })
+})

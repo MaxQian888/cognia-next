@@ -134,6 +134,17 @@ describe("InspectorPanel", () => {
     expect(screen.getByDisplayValue("Prompt A")).toBeInTheDocument()
   })
 
+  it("hands off to the bulk inspector when more than one node is selected", () => {
+    const store = createEditorStore(buildWorkflow())
+    act(() => {
+      store.getState().setSelectedNodes(["n_a", "n_b"])
+    })
+    mountInspector(store)
+    expect(screen.getByTestId("workflow-bulk-inspector")).toBeInTheDocument()
+    // The single-node form is not mounted for a multi-selection.
+    expect(screen.queryByTestId("workflow-inspector")).toBeNull()
+  })
+
   it("surfaces a clickable error badge that jumps without throwing", () => {
     const store = createEditorStore(buildWorkflow())
     act(() => {

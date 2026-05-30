@@ -305,6 +305,8 @@
       "tokenUsage": "Token usage",
       "noLead": "No lead assigned",
       "startTeam": "Run team",
+      "startTeamUltracode": "Run with ultracode",
+      "finalResult": "Final result",
       "abortTeam": "Stop",
       "editName": "Edit name",
       "editDescription": "Edit description",
@@ -515,6 +517,7 @@
         "overview": "Overview",
         "plugins": "Plugins & capabilities",
         "governance": "Governance",
+        "ultracode": "Ultracode",
         "memory": "Shared memory"
       },
       "saveIndicator": {
@@ -580,6 +583,33 @@
           "detect": "Detect refusal patterns in teammate output",
           "patterns": "Refusal patterns (one per line)",
           "patternsPlaceholder": "I cannot help with that\nI'm not able to"
+        }
+      },
+      "ultracode": {
+        "title": "Ultracode orchestration",
+        "description": "Run the multi-agent quality patterns (sweep, loop-until-dry, adversarial verify, judge panel, completeness critic, synthesize) instead of a flat task list. Tool-enabled teammates run on the desktop sidecar; the web/mobile shells fall back to text-only reasoning.",
+        "enabled": "Enable ultracode orchestration",
+        "autoMode": {
+          "label": "Auto-trigger",
+          "option": {
+            "auto": "Auto (complex tasks)",
+            "always": "Always",
+            "never": "Never"
+          },
+          "hint": {
+            "auto": "Orchestrate only when routing judges the task complex.",
+            "always": "Orchestrate every run for this team.",
+            "never": "Never auto-orchestrate; use Run with ultracode manually."
+          }
+        },
+        "skepticsPerFinding": "Skeptics / finding",
+        "judgesPerAttempt": "Judges / attempt",
+        "maxFinderRounds": "Max finder rounds",
+        "dryRoundsToStop": "Dry rounds to stop",
+        "workingDir": {
+          "label": "Working directory",
+          "placeholder": "/absolute/path/to/repo",
+          "hint": "Repo path tool-enabled teammates read and run commands in (desktop only)."
         }
       },
       "memory": {
@@ -8501,7 +8531,8 @@
       "loading": "Loading diff…",
       "selectFile": "Select a file to view its changes",
       "binary": "Binary file — diff not shown",
-      "hunkCount": "{count, plural, one {# hunk} other {# hunks}}"
+      "hunkCount": "{count, plural, one {# hunk} other {# hunks}}",
+      "jumpToHunk": "Jump to hunk at line {line}"
     },
     "groups": {
       "staged": "Staged Changes",
@@ -14149,7 +14180,15 @@
         "io": "Talk to the outside world.",
         "annotation": "Documentation on the canvas — no execution.",
         "plugin": "Nodes contributed by enabled plugins."
-      }
+      },
+      "favorites": "Favorites",
+      "favoritesHint": "Nodes you've starred for quick access.",
+      "recent": "Recently used",
+      "recentHint": "Nodes you've added most recently.",
+      "noFavorites": "No favorites yet — star a node to pin it here.",
+      "noRecent": "No recently-used nodes yet.",
+      "addToFavorites": "Add to favorites",
+      "removeFromFavorites": "Remove from favorites"
     },
     "inspector": {
       "empty": "Select a node on the canvas to configure it.",
@@ -14171,7 +14210,44 @@
         "data": "Data",
         "io": "I/O",
         "annotation": "Annotation"
+      },
+      "bulk": {
+        "title": "{count, plural, one {# node selected} other {# nodes selected}}",
+        "disabled": "Disabled",
+        "disabledHint": "Toggle to skip every selected node during runs.",
+        "disabledMixed": "Some selected nodes are disabled — toggle to set all the same.",
+        "notes": "Notes",
+        "notesHint": "Applies the same note to every selected node.",
+        "notesPlaceholder": "Shared note for the selection…",
+        "notesApply": "Apply to all",
+        "notesClear": "Clear all",
+        "deleteAll": "{count, plural, one {Delete node} other {Delete {count} nodes}}",
+        "deleteAllConfirm": "Permanently remove the {count} selected nodes and their edges? This is a single undo step.",
+        "cancel": "Cancel",
+        "clearSelection": "Clear selection"
       }
+    },
+    "edgeInspector": {
+      "title": "Connection",
+      "multiSelected": "{count, plural, one {# connection selected} other {# connections selected}}",
+      "source": "From",
+      "target": "To",
+      "label": "Label",
+      "labelHint": "Optional text shown on the edge midpoint.",
+      "labelPlaceholder": "e.g. true / retry",
+      "kind": "Type",
+      "kindHint": "How the runtime treats this connection.",
+      "kindOption": {
+        "default": "Default",
+        "conditional": "Conditional",
+        "parallel": "Parallel",
+        "loop": "Loop",
+        "error": "Error"
+      },
+      "errorHandleHint": "This edge leaves the node's error handle — it fires when the node fails.",
+      "reverse": "Reverse direction",
+      "delete": "Delete connection",
+      "deleteAll": "Delete connections"
     },
     "node": {
       "lastRun": {

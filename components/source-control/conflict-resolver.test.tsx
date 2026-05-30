@@ -1,5 +1,12 @@
 jest.mock("next/dynamic", () => () => {
-  const Mock = () => <div data-testid="monaco-diff-mock" />
+  // Surface the construction options so we can assert Monaco gets
+  // `automaticLayout: true` (the fix for the tiny-editor sizing bug).
+  const Mock = (props: { options?: { automaticLayout?: boolean } }) => (
+    <div
+      data-testid="monaco-diff-mock"
+      data-automatic-layout={String(props?.options?.automaticLayout)}
+    />
+  )
   return Mock
 })
 jest.mock("@monaco-editor/react", () => ({
@@ -27,6 +34,11 @@ describe("ConflictResolver", () => {
     expect(screen.getByTestId("accept-ours")).toBeInTheDocument()
     expect(screen.getByTestId("accept-theirs")).toBeInTheDocument()
     expect(screen.getByTestId("accept-both")).toBeInTheDocument()
+  })
+
+  it("enables automaticLayout so the editor fills its container", () => {
+    render(<ConflictResolver conflict={conflict} onResolve={() => {}} />)
+    expect(screen.getByTestId("monaco-diff-mock")).toHaveAttribute("data-automatic-layout", "true")
   })
 
   it("resolves with a single side", () => {

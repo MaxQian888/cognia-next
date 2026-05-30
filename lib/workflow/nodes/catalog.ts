@@ -44,7 +44,13 @@ export interface NodeCatalogEntry {
   paramsSchema?: Record<string, unknown>
 }
 
-const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "category">> = {
+// `Partial` because not every `WorkflowNodeKind` ships palette metadata: some
+// kinds exist for the runtime/registry only (e.g. the agent-team `pattern.*`
+// orchestration kinds) and have no inspector/catalog presence. Consumers
+// (`groupedCatalog`, `searchCatalog`, `nodeCatalogEntry`) already tolerate a
+// missing entry, so this type just stops the table from being forced to list
+// kinds it doesn't describe.
+const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "category">>> = {
   // ── Triggers ──────────────────────────────────────────────────────────────
   "trigger.manual": {
     label: "Run manually",
@@ -476,11 +482,15 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
 }
 
 /** All catalog entries, in canonical order. */
-export const NODE_CATALOG: readonly NodeCatalogEntry[] = WORKFLOW_NODE_KINDS.map((kind) => ({
-  kind,
-  category: workflowNodeCategory(kind),
-  ...ENTRIES[kind],
-}))
+// The palette catalog covers every kind that ships palette metadata. Kinds
+// that are synthesizer-emitted only (e.g. the agent-team `pattern.*` nodes,
+// documented in `types/workflow/visual.ts` as "not placed by users in the
+// editor") have no `ENTRIES` record and are intentionally absent here.
+export const NODE_CATALOG: readonly NodeCatalogEntry[] = WORKFLOW_NODE_KINDS.flatMap((kind) => {
+  const meta = ENTRIES[kind]
+  if (!meta) return []
+  return [{ kind, category: workflowNodeCategory(kind), ...meta }]
+})
 
 // ── Plugin-contributed entries (hot-merged) ──────────────────────────────────
 

@@ -86,6 +86,41 @@ describe("AgentTeamOverview", () => {
     expect(onStart).toHaveBeenCalledTimes(1)
   })
 
+  it("shows the ultracode run button only when ultracode is enabled, and calls onStartUltracode", () => {
+    const onStartUltracode = jest.fn()
+    const { rerender } = render(
+      <AgentTeamOverview
+        team={baseTeam}
+        teammates={[lead, teammate]}
+        onStartUltracode={onStartUltracode}
+      />
+    )
+    // Disabled by default → no ultracode button.
+    expect(screen.queryByTestId("start-team-ultracode")).not.toBeInTheDocument()
+
+    rerender(
+      <AgentTeamOverview
+        team={{ ...baseTeam, config: { ...baseTeam.config, ultracode: { enabled: true } } }}
+        teammates={[lead, teammate]}
+        onStartUltracode={onStartUltracode}
+      />
+    )
+    fireEvent.click(screen.getByTestId("start-team-ultracode"))
+    expect(onStartUltracode).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders the final result card only when team.finalResult is set", () => {
+    const { rerender } = render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
+    expect(screen.queryByTestId("team-final-result")).not.toBeInTheDocument()
+    rerender(
+      <AgentTeamOverview
+        team={{ ...baseTeam, finalResult: "The synthesized report." }}
+        teammates={[lead, teammate]}
+      />
+    )
+    expect(screen.getByTestId("team-final-result")).toHaveTextContent("The synthesized report.")
+  })
+
   it("renders Stop instead of Run when team is executing, calls onAbort", () => {
     const onAbort = jest.fn()
     render(

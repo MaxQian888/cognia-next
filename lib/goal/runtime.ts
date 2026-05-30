@@ -45,7 +45,8 @@ import { getDb } from "@/lib/db/schema"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { redactObjective } from "./redact-objective"
-import { onGoalTerminal } from "./completion-linkage"
+import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /**
  * Thrown by `GoalRuntime.createGoal` when the target session is bound to
@@ -310,6 +311,7 @@ class GoalRuntime {
       kind: "goal_created",
       payload: { kind: "goal_created", safeObjective, config },
     })
+    void getPluginEventHooks().dispatchGoalCreate(toGoalHookPayload(row))
     return row
   }
 
@@ -352,6 +354,7 @@ class GoalRuntime {
       },
     })
     const goal = (await getGoal(goalId)) as Goal
+    void getPluginEventHooks().dispatchGoalUpdate(toGoalHookPayload(goal))
     return {
       goal,
       updatePrompt: renderObjectiveUpdatedMessage(current.safeObjective, newSafe),
@@ -467,6 +470,7 @@ class GoalRuntime {
     })
     const updated = (await getGoal(goalId)) ?? null
     void emitGoalStatus(updated)
+    if (updated) void getPluginEventHooks().dispatchGoalUpdate(toGoalHookPayload(updated))
     return updated
   }
 
@@ -491,6 +495,7 @@ class GoalRuntime {
     this.fireAbort(goalId)
     this.manualContinueListeners.delete(goalId)
     await deleteGoal(goalId)
+    void getPluginEventHooks().dispatchGoalDelete(goalId)
   }
 }
 

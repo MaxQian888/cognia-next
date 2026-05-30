@@ -2,8 +2,13 @@ import { NODE_CATALOG, groupedCatalog, nodeCatalogEntry, searchCatalog } from ".
 import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 
 describe("NODE_CATALOG", () => {
-  it("has one entry per known kind", () => {
-    expect(NODE_CATALOG).toHaveLength(WORKFLOW_NODE_KINDS.length)
+  it("has one fully-described entry per palette kind", () => {
+    // The palette covers every kind that ships metadata; synthesizer-only
+    // kinds (the agent-team `pattern.*` nodes, "not placed by users in the
+    // editor") are intentionally excluded, so the catalog is a subset of the
+    // full kind list.
+    expect(NODE_CATALOG.length).toBeGreaterThan(0)
+    expect(NODE_CATALOG.length).toBeLessThanOrEqual(WORKFLOW_NODE_KINDS.length)
     const seen = new Set<string>()
     for (const e of NODE_CATALOG) {
       expect(seen.has(e.kind)).toBe(false)
@@ -12,6 +17,12 @@ describe("NODE_CATALOG", () => {
       expect(e.description.length).toBeGreaterThan(0)
       expect(e.iconName.length).toBeGreaterThan(0)
     }
+  })
+
+  it("excludes synthesizer-only pattern kinds from the palette", () => {
+    const kinds = new Set(NODE_CATALOG.map((e) => e.kind))
+    expect(kinds.has("pattern.synthesize" as never)).toBe(false)
+    expect(kinds.has("pattern.judge-panel" as never)).toBe(false)
   })
 
   it("each category has at least one entry", () => {
@@ -59,8 +70,8 @@ describe("groupedCatalog", () => {
 })
 
 describe("searchCatalog", () => {
-  it("returns all entries when query is empty", () => {
-    expect(searchCatalog("")).toHaveLength(WORKFLOW_NODE_KINDS.length)
+  it("returns all palette entries when query is empty", () => {
+    expect(searchCatalog("")).toHaveLength(NODE_CATALOG.length)
   })
 
   it("ranks exact label match above contains-only", () => {

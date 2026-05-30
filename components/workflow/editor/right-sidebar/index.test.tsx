@@ -23,6 +23,9 @@ jest.mock("./changelog-tab", () => ({
 jest.mock("../inspector-panel", () => ({
   InspectorPanel: () => <div data-testid="mock-inspector-panel" />,
 }))
+jest.mock("../edge-inspector", () => ({
+  EdgeInspector: () => <div data-testid="mock-edge-inspector" />,
+}))
 
 // Mock useWorkflowEditorSession (referenced transitively through any chat
 // surface) so the chat-tab mock doesn't pull in chat plumbing.
@@ -49,6 +52,7 @@ const MESSAGES = {
 
 interface FakeState {
   selectedNodeIds: string[]
+  selectedEdgeIds: string[]
   baseWorkflow: { id: string; name: string }
 }
 
@@ -70,6 +74,13 @@ function setSelectionCount(useStore: EditorStore, count: number) {
   })
 }
 
+function setEdgeSelectionCount(useStore: EditorStore, count: number) {
+  const ids = Array.from({ length: count }, (_, i) => `e${i + 1}`)
+  ;(useStore as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
+    selectedEdgeIds: ids,
+  })
+}
+
 function harness(useStore: EditorStore) {
   return render(
     <NextIntlClientProvider locale="en" messages={MESSAGES as never} timeZone="UTC">
@@ -83,6 +94,7 @@ describe("RightSidebar", () => {
     it("starts on Chat when selection is empty", async () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
+        selectedEdgeIds: [],
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
@@ -96,6 +108,7 @@ describe("RightSidebar", () => {
     it("auto-switches to Inspector on the 0 → 1 transition", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
+        selectedEdgeIds: [],
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
@@ -108,6 +121,7 @@ describe("RightSidebar", () => {
       const user = userEvent.setup()
       const store = makeFakeStore({
         selectedNodeIds: [],
+        selectedEdgeIds: [],
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
@@ -132,6 +146,7 @@ describe("RightSidebar", () => {
     it("still auto-switches on every 0 → 1 cycle when chat was never explicitly pinned", () => {
       const store = makeFakeStore({
         selectedNodeIds: [],
+        selectedEdgeIds: [],
         baseWorkflow: { id: "wf_a", name: "Demo" },
       })
       harness(store)
@@ -151,6 +166,37 @@ describe("RightSidebar", () => {
       // path still runs without erroring on a stale prev ref.
       act(() => setSelectionCount(store, 1))
       expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+    })
+  })
+
+  describe("edge selection routing", () => {
+    it("auto-switches to Inspector and renders the EdgeInspector when only edges are selected", () => {
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+      })
+      harness(store)
+      act(() => setEdgeSelectionCount(store, 1))
+      const inspectorTrigger = screen.getByTestId("workflow-right-sidebar-tab-inspector")
+      expect(inspectorTrigger).toHaveAttribute("data-state", "active")
+      expect(screen.getByTestId("mock-edge-inspector")).toBeInTheDocument()
+      expect(screen.queryByTestId("mock-inspector-panel")).toBeNull()
+    })
+
+    it("prefers the node InspectorPanel when both nodes and edges are selected", () => {
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+      })
+      harness(store)
+      act(() => {
+        setSelectionCount(store, 1)
+        setEdgeSelectionCount(store, 2)
+      })
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+      expect(screen.queryByTestId("mock-edge-inspector")).toBeNull()
     })
   })
 

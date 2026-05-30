@@ -7,6 +7,7 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("./completion-linkage", () => ({
   onGoalTerminal: (...a: unknown[]) => onGoalTerminalMock(...a),
+  toGoalHookPayload: (g: unknown) => g,
 }))
 
 import { handleTurnComplete } from "./turn-driver"

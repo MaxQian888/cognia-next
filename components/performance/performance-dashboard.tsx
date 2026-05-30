@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { exportPerfSnapshot, type PerfExportFormat } from "@/lib/perf/backend/export"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PerfToolbar } from "./perf-toolbar"
 import { PerfOverviewTab } from "./perf-overview-tab"
 import { PerfProcessTable } from "./perf-process-table"
@@ -94,6 +95,8 @@ export function PerformanceDashboard() {
           <div className="p-4">
             <TabsContent value="overview" className="mt-0">
               <PerfOverviewTab history={history} />
+              {/* Plugin-contributed performance panels (custom metrics, etc.). */}
+              <PluginExtensionSlot point="perf.panel" className="mt-4 space-y-4 empty:hidden" />
             </TabsContent>
             <TabsContent value="processes" className="mt-0">
               <PerfProcessTable history={history} />

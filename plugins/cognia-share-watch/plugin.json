@@ -1,0 +1,19 @@
+{
+  "id": "cognia-share-watch",
+  "name": "Share Watch",
+  "version": "0.1.0",
+  "description": "Reference plugin exercising the public-share-link hooks: records each link created or revoked (fragment-stripped URL only — never the decryption key).",
+  "type": "frontend",
+  "capabilities": ["hooks"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}
