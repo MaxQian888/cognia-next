@@ -1139,6 +1139,8 @@
         "usageInput": "输入",
         "usageOutput": "输出",
         "usageCached": "缓存",
+        "compactThreshold": "{pct} 时自动压缩",
+        "contextUsageAria": "上下文窗口已用 {pct}",
         "pluginExtensionOverflow": "更多插件操作",
         "workflow": {
           "validate": "校验",

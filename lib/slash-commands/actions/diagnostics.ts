@@ -10,7 +10,31 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import {
+  AUTO_COMPACT_FRACTION,
+  computeContextWindowUsage,
+  getLatestUsage,
+} from "@/lib/claude/usage"
+import type { UIMessage } from "ai"
 import { isTauri } from "@/lib/tauri"
+
+/**
+ * Best-effort resolve of the model id driving the active session: per-session
+ * override first, then the app default. Used by `/context` and `/cost` to size
+ * the context window. Never throws — falls back to `undefined` (→ 200k window).
+ */
+async function resolveActiveModel(activeSessionId: string | null): Promise<string | undefined> {
+  let model: string | undefined
+  if (activeSessionId) {
+    try {
+      const session = await getSession(activeSessionId)
+      model = session?.model
+    } catch {
+      // ignore — fall through to the app default
+    }
+  }
+  return model ?? useSettingsStore.getState().settings?.defaultModel ?? undefined
+}
 
 /**
  * Render the active session's effective config + sidecar / API key health as
@@ -140,6 +164,16 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
   if (durationMs > 0) {
     lines.push(`- **Duration**: ${(durationMs / 1000).toFixed(1)}s`)
   }
+
+  // Context-window occupancy of the latest turn (not the cumulative sum).
+  const latest = getLatestUsage(messages as UIMessage[])
+  const model = await resolveActiveModel(ctx.activeSessionId)
+  const win = computeContextWindowUsage(latest, model)
+  lines.push(
+    `- **Context window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
+      `(${(win.fraction * 100).toFixed(1)}% used)`
+  )
+
   ctx.pushSystemMessage(lines.join("\n"))
 }
 
@@ -248,6 +282,21 @@ export async function handleContext(ctx: SlashContext): Promise<void> {
       `- Cache hits: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
     )
   }
+
+  // Window occupancy is the *latest* turn against the model's context window
+  // (matches the composer indicator) — distinct from the cumulative totals above.
+  const latest = getLatestUsage(messages as UIMessage[])
+  const model = await resolveActiveModel(ctx.activeSessionId)
+  const win = computeContextWindowUsage(latest, model)
+  lines.push(
+    `- **Window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
+      `(${(win.fraction * 100).toFixed(1)}% used, ${win.remaining.toLocaleString()} left)`
+  )
+  lines.push(
+    `- **Auto-compact at**: ${(AUTO_COMPACT_FRACTION * 100).toFixed(1)}% ` +
+      `(~${win.compactThresholdTokens.toLocaleString()} tokens)`
+  )
+
   lines.push("", "Run `/compact` to ask the SDK to summarise older turns and free up the window.")
   ctx.pushSystemMessage(lines.join("\n"))
 }

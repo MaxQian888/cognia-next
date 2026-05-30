@@ -36,22 +36,10 @@ import { useShallow } from "zustand/react/shallow"
 import { CheckCircle2Icon, HelpCircleIcon, LightbulbIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentFooter,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextCacheUsage,
-  ContextTrigger,
-} from "@/components/ai-elements/context"
+import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
-import { getLatestUsage, getModelContextWindow, tokensInWindow } from "@/lib/claude/usage"
-import type { LanguageModelUsage } from "ai"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { ModelPicker } from "./model-picker"
 import {
@@ -67,8 +55,6 @@ interface WorkflowBottomToolbarProps {
 }
 
 export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
-  const t = useTranslations("chat.composer.toolbar")
-  const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -80,19 +66,6 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   // > app default. Character / member overrides aren't relevant for the
   // workflow-editor session kind.
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
-  const usage = getLatestUsage(messages)
-  const used = usage ? tokensInWindow(usage) : 0
-  const max = getModelContextWindow(modelId)
-
-  const aiUsage: LanguageModelUsage | undefined = usage
-    ? ({
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        cachedInputTokens: usage.cacheReadInputTokens ?? 0,
-        totalTokens:
-          (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0),
-      } as unknown as LanguageModelUsage)
-    : undefined
 
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
@@ -110,20 +83,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
         null}
       </div>
 
-      <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>
-        <ContextTrigger className="h-6 gap-1.5 px-1.5 text-[11px] font-normal" />
-        <ContextContent>
-          <ContextContentHeader />
-          <ContextContentBody>
-            <div className="space-y-1.5">
-              <UsageRow label={t("usageInput")} slot={<ContextInputUsage />} />
-              <UsageRow label={t("usageOutput")} slot={<ContextOutputUsage />} />
-              <UsageRow label={t("usageCached")} slot={<ContextCacheUsage />} />
-            </div>
-          </ContextContentBody>
-          <ContextContentFooter />
-        </ContextContent>
-      </Context>
+      <ContextUsageIndicator modelId={modelId} />
     </div>
   )
 }
@@ -225,14 +185,5 @@ function QuickActionButton({
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
-  )
-}
-
-function UsageRow({ label, slot }: { label: string; slot: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{slot}</span>
-    </div>
   )
 }

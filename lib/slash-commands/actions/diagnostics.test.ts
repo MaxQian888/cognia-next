@@ -222,6 +222,8 @@ describe("handleCost", () => {
     expect(md).toContain("Cache**: write 300 / read 100")
     expect(md).toContain("Cost**: $0.0500 USD")
     expect(md).toContain("Duration**: 1.5s")
+    // Window occupancy is the LATEST turn (inputTokens 500), not the sum.
+    expect(md).toContain("Context window**: 500 / 200,000 (0.3% used)")
   })
 
   it("omits cache/cost/duration when zero", async () => {
@@ -356,7 +358,34 @@ describe("handleContext", () => {
     expect(md).toContain("Input tokens (incl. cache): 1,500")
     expect(md).toContain("Output tokens: 800")
     expect(md).toContain("write 200 / read 100")
+    // Window line uses the latest turn (200 in + 300 out = 500) vs the 200k default.
+    expect(md).toContain("**Window**: 500 / 200,000 (0.3% used, 199,500 left)")
+    expect(md).toContain("Auto-compact at**: 83.5%")
     expect(md).toContain("/compact")
+  })
+
+  it("sizes the window from the active session's model", async () => {
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 500_000 } } }],
+    })
+    mockedGetSession.mockResolvedValue({ id: "s", model: "claude-opus-4-8" })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleContext(ctx)
+    const md = ctx._pushed[0]
+    // Opus 4.8 is the 1M tier → 500k / 1M = 50%.
+    expect(md).toContain("/ 1,000,000")
+    expect(md).toContain("50.0% used")
+  })
+
+  it("falls back to the app default model when the session lookup fails", async () => {
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 100 } } }],
+    })
+    mockedGetSession.mockRejectedValue(new Error("nope"))
+    mockedSettingsGetState.mockReturnValue({ settings: { defaultModel: "claude-sonnet-4-5" } })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleContext(ctx)
+    expect(ctx._pushed[0]).toContain("/ 200,000")
   })
 
   it("omits the cache line when no cache hits", async () => {

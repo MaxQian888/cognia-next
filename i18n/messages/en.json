@@ -1139,6 +1139,8 @@
         "usageInput": "Input",
         "usageOutput": "Output",
         "usageCached": "Cached",
+        "compactThreshold": "Auto-compact at {pct}",
+        "contextUsageAria": "Context window {pct} used",
         "pluginExtensionOverflow": "More plugin actions",
         "workflow": {
           "validate": "Validate",

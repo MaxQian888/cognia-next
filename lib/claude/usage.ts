@@ -5,27 +5,60 @@
  * adapter at `lib/claude/adapter.ts` already attaches them as
  * `metadata.usage` (shape = `UsageInfo`) on the most recent assistant
  * message. The composer's bottom toolbar reads from there.
+ *
+ * This module is the SINGLE source of truth for context-window sizing and
+ * occupancy. It deliberately keeps its own model→window table rather than
+ * importing `types/provider/built-in-provider-catalog` so the provider data
+ * set isn't pulled into the chat composer bundle; the table below is correct
+ * for every model the Claude Agent SDK actually drives and falls back to a
+ * safe 200k for anything unknown.
  */
 
 import type { UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**
- * Default context-window sizes for known Claude model ids.
+ * Default context-window size for an unknown / unrecognised model id. 200k is
+ * the standard window for current Anthropic frontier tiers (Sonnet 4.5, Haiku
+ * 4.5, Opus 4 / 4.1, all Claude 3.x), so it is the safe floor.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 200_000
+
+/**
+ * Fraction of the window at which Claude Code auto-compacts the conversation
+ * (~83.5%). Drawn as the threshold marker on the indicator and reported by the
+ * `/context` slash command. Exported so callers and tests share one constant.
+ */
+export const AUTO_COMPACT_FRACTION = 0.835
+
+/**
+ * Context-window sizes keyed by model id. Order matters — the first match
+ * wins, so the explicit `[1m]` / `-1m` build suffix is checked before the
+ * family defaults, and the 1M-tier Claude 4.6+ families before the generic
+ * Claude fallback.
  *
- * The lookup tolerates partial / aliased ids (e.g. `claude-sonnet-4-5` matches
- * any string that contains it). Unknown models fall back to the safe default
- * of 200k, which is correct for current Sonnet / Opus / Haiku.
+ * Sources: Anthropic model docs (Opus/Sonnet 4.6+ = 1M; Sonnet 4.5 / Haiku 4.5
+ * / Opus 4 / 4.1 / Claude 3.x = 200k); OpenAI (GPT-4o = 128k, GPT-4.1 = 1M,
+ * o-series = 200k); Google (Gemini 1.5 / 2.5 / 3 = 1M).
  */
 const MODEL_CONTEXT_WINDOWS: Array<{ pattern: RegExp; window: number }> = [
-  // Sonnet 4.5 / 4.6 / 4.7 — 1M context tier
-  { pattern: /sonnet-4-(5|6|7).*1m/i, window: 1_000_000 },
-  { pattern: /\[1m\]$/i, window: 1_000_000 },
-  // Default 200k for current Anthropic frontier models
-  { pattern: /opus|sonnet|haiku/i, window: 200_000 },
+  // Explicit 1M build markers win regardless of family — `claude-opus-4-7[1m]`,
+  // `claude-sonnet-4-6.1m`, `claude-sonnet-4-5-1m`.
+  { pattern: /\[1m\]/i, window: 1_000_000 },
+  { pattern: /[-._]1m(\b|$)/i, window: 1_000_000 },
+  // Claude 4.6+ Opus / Sonnet — 1M context tier.
+  { pattern: /claude-opus-4-(6|7|8)/i, window: 1_000_000 },
+  { pattern: /claude-sonnet-4-(6|7|8)/i, window: 1_000_000 },
+  // Every other Claude (Opus 4 / 4.1, Sonnet 4.5, Haiku 4.x, and all Claude
+  // 3.x — `claude-3-5-sonnet` etc. still contain opus/sonnet/haiku) — 200k.
+  { pattern: /claude-(opus|sonnet|haiku)/i, window: 200_000 },
+  // OpenAI.
+  { pattern: /gpt-4o/i, window: 128_000 },
+  { pattern: /gpt-4\.1/i, window: 1_000_000 },
+  { pattern: /(^|[^a-z])o[134]([^a-z]|$)/i, window: 200_000 },
+  // Google Gemini long-context tiers.
+  { pattern: /gemini-(1\.5|2\.5|3)/i, window: 1_000_000 },
 ]
-
-export const DEFAULT_CONTEXT_WINDOW = 200_000
 
 export function getModelContextWindow(modelId: string | undefined): number {
   if (!modelId) return DEFAULT_CONTEXT_WINDOW
@@ -59,16 +92,70 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
 }
 
 /**
- * Tokens that count toward the *active* context window.
+ * Tokens occupying the *active* context window after a turn.
  *
- * `cacheCreationInputTokens` is billed but represents tokens being written
- * into the prompt cache for *future* turns — they don't add to today's
- * window. `cacheReadInputTokens` are real prompt tokens being read back, so
- * they do count.
+ * Everything the model saw on the latest turn counts: the fresh input, the
+ * tokens read back from the prompt cache, AND the tokens written into the
+ * cache (they were part of this turn's prompt), plus the assistant output
+ * (which becomes part of the next turn's prompt). This matches how Claude
+ * Code and Codex report current context occupancy.
  */
 export function tokensInWindow(usage: UsageInfo): number {
   const input = usage.inputTokens ?? 0
   const output = usage.outputTokens ?? 0
   const cacheRead = usage.cacheReadInputTokens ?? 0
-  return input + output + cacheRead
+  const cacheCreation = usage.cacheCreationInputTokens ?? 0
+  return input + output + cacheRead + cacheCreation
+}
+
+/** Severity of context-window fill, mirroring the observability threshold dots. */
+export type ContextLevel = "ok" | "warn" | "crit"
+
+/**
+ * Map a fill fraction to a severity level. `crit` is reached at the
+ * auto-compact threshold; `warn` covers the run-up to it.
+ */
+export function contextLevel(fraction: number): ContextLevel {
+  if (fraction >= AUTO_COMPACT_FRACTION) return "crit"
+  if (fraction >= 0.6) return "warn"
+  return "ok"
+}
+
+/** Fully-resolved context-window occupancy for the indicator + slash commands. */
+export interface ContextWindowUsage {
+  /** Tokens currently in the window (latest turn). */
+  used: number
+  /** Window size for the model. */
+  max: number
+  /** `used / max`, clamped to [0, 1]. */
+  fraction: number
+  /** Tokens of headroom before the window is full. */
+  remaining: number
+  /** Severity bucket for coloring. */
+  level: ContextLevel
+  /** Absolute token count at which auto-compaction triggers. */
+  compactThresholdTokens: number
+}
+
+/**
+ * Compute window occupancy from a single turn's usage. `usage` is the latest
+ * turn (or null for a fresh session → 0 used). `maxOverride` lets callers pin
+ * a window size (e.g. tests, or a non-default deployment).
+ */
+export function computeContextWindowUsage(
+  usage: UsageInfo | null,
+  modelId: string | undefined,
+  maxOverride?: number
+): ContextWindowUsage {
+  const max = maxOverride ?? getModelContextWindow(modelId)
+  const used = usage ? tokensInWindow(usage) : 0
+  const fraction = max > 0 ? Math.min(1, used / max) : 0
+  return {
+    used,
+    max,
+    fraction,
+    remaining: Math.max(0, max - used),
+    level: contextLevel(fraction),
+    compactThresholdTokens: Math.round(max * AUTO_COMPACT_FRACTION),
+  }
 }

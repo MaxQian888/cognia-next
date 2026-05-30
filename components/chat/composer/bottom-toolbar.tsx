@@ -11,22 +11,10 @@ import { useRouter } from "next/navigation"
 import { SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SkillPicker } from "@/components/chat/skill-picker"
-import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentFooter,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextCacheUsage,
-  ContextTrigger,
-} from "@/components/ai-elements/context"
+import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
-import { getLatestUsage, getModelContextWindow, tokensInWindow } from "@/lib/claude/usage"
-import type { LanguageModelUsage } from "ai"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
 import { ModelPicker } from "./model-picker"
@@ -58,7 +46,6 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
 function GenericBottomToolbar({ session }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
   const router = useRouter()
-  const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
@@ -91,21 +78,6 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
   // override > app default. (Character / member overrides aren't loaded
   // here — the user-facing display is the most-likely-active value.)
   const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
-  const usage = getLatestUsage(messages)
-  const used = usage ? tokensInWindow(usage) : 0
-  const max = getModelContextWindow(modelId)
-
-  // Map `UsageInfo` (snake-cased upstream, camelCased here) to the
-  // LanguageModelUsage shape the AI Elements `<Context>` consumes.
-  const aiUsage: LanguageModelUsage | undefined = usage
-    ? ({
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        cachedInputTokens: usage.cacheReadInputTokens ?? 0,
-        totalTokens:
-          (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0),
-      } as unknown as LanguageModelUsage)
-    : undefined
 
   // Responsive tiers (driven by the `@container/composer` declared on the
   // composer's outer wrapper):
@@ -183,29 +155,7 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
         </div>
       </div>
 
-      <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>
-        <ContextTrigger className="ml-auto h-6 shrink-0 gap-1.5 px-1.5 text-[11px] font-normal" />
-        <ContextContent>
-          <ContextContentHeader />
-          <ContextContentBody>
-            <div className="space-y-1.5">
-              <UsageRow label={t("usageInput")} slot={<ContextInputUsage />} />
-              <UsageRow label={t("usageOutput")} slot={<ContextOutputUsage />} />
-              <UsageRow label={t("usageCached")} slot={<ContextCacheUsage />} />
-            </div>
-          </ContextContentBody>
-          <ContextContentFooter />
-        </ContextContent>
-      </Context>
-    </div>
-  )
-}
-
-function UsageRow({ label, slot }: { label: string; slot: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{slot}</span>
+      <ContextUsageIndicator modelId={modelId} triggerClassName="ml-auto shrink-0" />
     </div>
   )
 }
