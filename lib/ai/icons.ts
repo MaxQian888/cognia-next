@@ -5,6 +5,8 @@
  * and model-to-provider resolution for consistent icon display.
  */
 
+import { resolveModelsDevProviderId } from "@/lib/ai/providers/models-dev-id-map"
+
 // ============================================================================
 // Provider Icon Registry
 // ============================================================================
@@ -183,28 +185,10 @@ const PROVIDER_ICON_REGISTRY: Record<string, ProviderIconInfo> = {
   },
 }
 
-// CDN fallback base URL for providers without local icons
+// CDN fallback base URL for providers without local icons. Logos are keyed by
+// the models.dev provider id, so we reuse the authoritative our-id ↔ models.dev-id
+// map (single source of truth in models-dev-id-map.ts) instead of a parallel table.
 const CDN_ICON_BASE = "https://models.dev/logos"
-
-// CDN provider ID mapping (some IDs differ between our system and models.dev)
-const CDN_PROVIDER_MAP: Record<string, string> = {
-  google: "google",
-  fireworks: "fireworks-ai",
-  togetherai: "togetherai",
-  xai: "xai",
-  openai: "openai",
-  anthropic: "anthropic",
-  deepseek: "deepseek",
-  groq: "groq",
-  mistral: "mistral",
-  zhipu: "zhipu",
-  minimax: "minimax",
-  openrouter: "openrouter",
-  cohere: "cohere",
-  cerebras: "cerebras",
-  ollama: "ollama",
-  lmstudio: "lmstudio",
-}
 
 // ============================================================================
 // Provider Icon Resolution
@@ -238,8 +222,8 @@ export function getProviderIconPath(providerId: string): string {
     return info.localIcon
   }
 
-  // Try CDN fallback
-  const cdnId = CDN_PROVIDER_MAP[providerId.toLowerCase()] || providerId.toLowerCase()
+  // Try CDN fallback — logos are keyed by the models.dev provider id.
+  const cdnId = resolveModelsDevProviderId(providerId) ?? providerId.toLowerCase()
   return `${CDN_ICON_BASE}/${cdnId}.svg`
 }
 

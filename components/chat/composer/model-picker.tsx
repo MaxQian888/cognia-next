@@ -55,12 +55,17 @@ function collectModelOptions(
   const out: ModelOption[] = []
   for (const [providerId, settings] of Object.entries(providerSettings ?? {})) {
     if (settings.enabled === false) continue
+    // Selectable models = what the user has configured (enabledModels whitelist
+    // + defaultModel) plus what live /v1/models discovery confirmed for *their*
+    // account (discoveredModels). The models.dev catalog is a global metadata
+    // registry, NOT a per-account availability source — surfacing it here would
+    // list hundreds of models the user's key/tier can't serve, which 4xx at
+    // send time. models.dev still enriches pricing/caps in the settings views.
     const allowed = new Set<string>(settings.enabledModels ?? [])
     if (settings.defaultModel) allowed.add(settings.defaultModel)
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
     }
-    if (allowed.size === 0 && settings.defaultModel) allowed.add(settings.defaultModel)
     for (const modelId of allowed) {
       out.push({ providerId, providerName: providerId, modelId })
     }

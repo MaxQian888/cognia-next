@@ -56,6 +56,12 @@ jest.mock("@tanstack/react-virtual", () => ({
   },
 }))
 
+// The timeline minimap has its own test suite; stub it here so the
+// message-list logic tests stay isolated from its scroll-sync/store wiring.
+jest.mock("./minimap/conversation-timeline", () => ({
+  ConversationTimeline: () => null,
+}))
+
 jest.mock("./message-renderer", () => {
   return {
     MessageRenderer: ({ message }: { message: { id: string; parts: { text?: string }[] } }) =>

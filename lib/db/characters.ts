@@ -23,6 +23,7 @@ import {
   BUILTIN_PLUGIN_ID,
 } from "@/plugins/cognia-builtin-characters/src/index"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newId() {
   return "char_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -260,6 +261,8 @@ export async function deleteCharacter(id: string): Promise<void> {
     throw new Error("Built-in characters cannot be deleted. Duplicate first.")
   }
   await getDb().characters.delete(id)
+  // Mirror the deletion to paired phones via the companion sync (v61).
+  await recordTombstones("characters", [id])
 }
 
 /**

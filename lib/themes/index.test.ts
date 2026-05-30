@@ -241,3 +241,80 @@ describe("resolveActiveThemeColors — legacy fallback (pre-migration rows)", ()
     expect(result.colors.primary).toBe("#ff00ff")
   })
 })
+
+describe("resolveActiveThemeColors — sidebar derives from core tokens", () => {
+  // Dark-variant neutral sidebar slots, mirroring NEUTRAL_DARK in index.ts.
+  // A theme that leaves these untouched should have them follow the core
+  // palette instead of staying on the fixed neutral values.
+  const DARK_SIDEBAR_FALLBACK: Partial<ThemeColors> = {
+    sidebar: "#0f172a",
+    sidebarForeground: "#f1f5f9",
+    sidebarPrimary: "#60a5fa",
+    sidebarPrimaryForeground: "#0b1220",
+    sidebarAccent: "#1e293b",
+    sidebarAccentForeground: "#f1f5f9",
+    sidebarBorder: "#1e293b",
+    sidebarRing: "#60a5fa",
+  }
+
+  it("preset dark: untouched sidebar slots follow the core palette", () => {
+    const result = resolveActiveThemeColors({
+      colorTheme: "default",
+      resolvedTheme: "dark",
+      activeCustomThemeId: null,
+      customThemes: [],
+    })
+    // background drives --sidebar; the fixed neutral #0f172a is gone.
+    expect(result.colors.sidebar).toBe(result.colors.background)
+    expect(result.colors.sidebar).toBe("#0b1220")
+    expect(result.colors.sidebarForeground).toBe(result.colors.foreground)
+    expect(result.colors.sidebarAccent).toBe(result.colors.accent)
+    expect(result.colors.sidebarBorder).toBe(result.colors.border)
+    expect(result.colors.sidebarRing).toBe(result.colors.ring)
+  })
+
+  it("custom theme editing only core tokens: sidebar tracks the new background", () => {
+    // The reported bug: user changed `background` but the sidebar kept the
+    // fixed neutral colour. With derivation, the sidebar follows the theme.
+    const dark = buildTokens({
+      ...DARK_SIDEBAR_FALLBACK,
+      background: "#102030",
+      foreground: "#e0e0e0",
+      accent: "#33aaff",
+      border: "#223344",
+    })
+    const result = resolveActiveThemeColors({
+      colorTheme: "default",
+      resolvedTheme: "dark",
+      activeCustomThemeId: "t1",
+      customThemes: [
+        { id: "t1", name: "X", baseVariant: "dark", tokens: { light: dark, dark } } as CustomTheme,
+      ],
+    })
+    expect(result.colors.sidebar).toBe("#102030")
+    expect(result.colors.sidebarForeground).toBe("#e0e0e0")
+    expect(result.colors.sidebarAccent).toBe("#33aaff")
+    expect(result.colors.sidebarBorder).toBe("#223344")
+  })
+
+  it("explicitly customised sidebar slots are preserved (override wins)", () => {
+    const dark = buildTokens({
+      ...DARK_SIDEBAR_FALLBACK,
+      background: "#102030",
+      // User deliberately set a distinct sidebar surface.
+      sidebar: "#abcdef",
+    })
+    const result = resolveActiveThemeColors({
+      colorTheme: "default",
+      resolvedTheme: "dark",
+      activeCustomThemeId: "t1",
+      customThemes: [
+        { id: "t1", name: "X", baseVariant: "dark", tokens: { light: dark, dark } } as CustomTheme,
+      ],
+    })
+    // The explicit value is kept...
+    expect(result.colors.sidebar).toBe("#abcdef")
+    // ...while an untouched slot still derives from core.
+    expect(result.colors.sidebarForeground).toBe(result.colors.foreground)
+  })
+})

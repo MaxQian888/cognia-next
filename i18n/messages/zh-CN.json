@@ -1554,6 +1554,13 @@
       "webFetch": {
         "empty": "无返回内容"
       }
+    },
+    "timeline": {
+      "title": "时间线",
+      "expand": "展开对话时间线",
+      "collapse": "收起时间线",
+      "jumpTo": "跳转到：{label}",
+      "replyCount": "{count} 条回复"
     }
   },
   "discover": {
@@ -2301,7 +2308,8 @@
       "subscription": "Claude 订阅",
       "network": "网络代理",
       "workflows": "工作流",
-      "goals": "目标"
+      "goals": "目标",
+      "conversation": "会话"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -2331,7 +2339,7 @@
       "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
       "diagnostics": "崩溃日志、最近错误，以及带可导出诊断包的原生日志状态。",
       "desktop": "Tauri 专属的窗口、自启与托盘行为。",
-      "about": "版本、构建信息与致谢。",
+      "about": "版本、构建、诊断、更新与致谢。",
       "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
       "a2ui": "Agent-to-UI 小应用、运行时默认值、MCP 桥接与调试器。",
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
@@ -2345,7 +2353,8 @@
       "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
       "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。",
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
-      "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。"
+      "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
+      "conversation": "自动标题与对话时间线缩略图"
     },
     "externalBridge": {
       "wikiIndex": {
@@ -2748,6 +2757,50 @@
       "languageLabel": "语言",
       "reduceMotionLabel": "减少动效",
       "reduceMotionHint": "关闭非必要的动画和过渡。",
+      "layoutType": {
+        "font": {
+          "sectionLabel": "字体",
+          "sansLabel": "界面字体",
+          "sansHint": "应用于整个界面。「继承」保留 cognia 默认字体。",
+          "monoLabel": "等宽字体",
+          "serifLabel": "衬线字体",
+          "inherit": "继承（默认）"
+        },
+        "fine": {
+          "sectionLabel": "精细调整",
+          "lineHeight": "行高",
+          "letterSpacing": "字间距"
+        },
+        "density": {
+          "sectionLabel": "密度",
+          "globalLabel": "全局密度",
+          "globalHint": "控制整个应用的间距和组件尺寸。",
+          "overrideLabel": "按区域覆盖",
+          "overrideHint": "可为特定区域单独设置不同的密度。",
+          "inherit": "继承",
+          "compact": "紧凑",
+          "comfortable": "舒适",
+          "spacious": "宽松",
+          "surface": {
+            "chat": "对话",
+            "table": "表格",
+            "sidebar": "侧边栏"
+          }
+        },
+        "radius": {
+          "sectionLabel": "圆角",
+          "label": "圆角半径",
+          "hint": "调整卡片、按钮和输入框的圆角程度。"
+        },
+        "motion": {
+          "sectionLabel": "动效速度",
+          "speed": {
+            "slow": "慢速",
+            "normal": "正常",
+            "fast": "快速"
+          }
+        }
+      },
       "wallpaper": {
         "title": "壁纸",
         "description": "把图片、渐变或纯色用作背景。内置预设已自带，上传的文件保留在本机。",
@@ -3593,20 +3646,100 @@
     },
     "about": {
       "title": "关于",
+      "description": "应用版本、构建详情、诊断信息、更新与致谢。",
       "versionLine": "版本",
+      "iconAlt": "{name} 应用图标",
+      "tagline": "面向 Claude Code 的 AI 桌面助手",
+      "webBadge": "网页预览",
+      "channel": {
+        "stable": "稳定版",
+        "rc": "候选版",
+        "beta": "测试版",
+        "alpha": "内测版",
+        "dev": "开发版"
+      },
+      "versionCard": {
+        "title": "版本与构建",
+        "version": "版本",
+        "build": "构建号",
+        "commit": "提交",
+        "builtAt": "构建于",
+        "showAdvanced": "显示运行时详情",
+        "hideAdvanced": "隐藏运行时详情",
+        "tauri": "Tauri",
+        "react": "React",
+        "engine": "网页引擎"
+      },
+      "system": {
+        "title": "系统",
+        "os": "操作系统",
+        "arch": "架构",
+        "locale": "区域设置",
+        "dataDir": "数据目录",
+        "unavailable": "不可用",
+        "copy": "复制诊断信息",
+        "copySuccess": "诊断信息已复制到剪贴板。",
+        "copyFailed": "复制失败：{error}",
+        "reveal": "打开数据目录",
+        "revealFailed": "无法打开数据目录：{error}"
+      },
+      "updates": {
+        "title": "更新",
+        "checkUpdates": "检查更新",
+        "checking": "检查中…",
+        "install": "安装 {version}",
+        "updateAvailable": "{version} 版本可用",
+        "updateAvailableToast": "可用更新：{version}",
+        "updateNoLongerAvailable": "更新已不可用。",
+        "updateCheckFailed": "检查更新失败：{error}",
+        "updateInstallFailed": "安装更新失败：{error}",
+        "alreadyLatest": "你已是最新版本。",
+        "desktopOnly": "更新通过桌面版应用推送。",
+        "lastChecked": "上次检查"
+      },
+      "whatsNew": {
+        "title": "更新日志",
+        "viewAll": "查看全部版本",
+        "highlights": {
+          "foundation": "首个公开基础版本发布",
+          "claudeCodeClient": "完整的 Claude Code 桌面客户端，含对话、智能体与工作流",
+          "crossPlatform": "一套代码同时覆盖桌面（Tauri）、网页与移动端（Capacitor）",
+          "pluginSystem": "可扩展插件系统，内置应用内市场"
+        }
+      },
+      "resources": {
+        "title": "资源",
+        "docs": {
+          "label": "文档",
+          "description": "指南、参考与教程"
+        },
+        "repo": {
+          "label": "源代码",
+          "description": "在 GitHub 上浏览项目"
+        },
+        "issues": {
+          "label": "反馈问题",
+          "description": "提交缺陷或功能请求"
+        },
+        "releases": {
+          "label": "版本发布",
+          "description": "版本历史与下载"
+        },
+        "community": {
+          "label": "社区",
+          "description": "提问与分享想法"
+        }
+      },
+      "legal": {
+        "title": "法律与致谢",
+        "copyright": "© {year} {holder}。保留所有权利。",
+        "license": "许可证",
+        "viewLicense": "查看许可证",
+        "privacy": "隐私",
+        "viewPrivacy": "隐私政策",
+        "acknowledgements": "基于开源构建"
+      },
       "versionUnknown": "—",
-      "webPreview": "（网页预览）",
-      "runningOn": "运行环境",
-      "checkUpdates": "检查更新",
-      "checking": "检查中…",
-      "install": "安装 {version}",
-      "updateAvailable": "{version} 版本可用",
-      "updateAvailableToast": "可用更新：{version}",
-      "updateNoLongerAvailable": "更新已不可用。",
-      "updateCheckFailed": "检查更新失败：{error}",
-      "updateInstallFailed": "安装更新失败：{error}",
-      "alreadyLatest": "你已是最新版本。",
-      "desktopOnly": "更新仅在桌面版可用。",
       "metadataLoadFailed": "加载应用元数据失败。"
     },
     "apiKey": {
@@ -5775,6 +5908,36 @@
         "allowedListLabel": "允许的技能 ID",
         "requireHitlForWritesLabel": "写操作需要确认卡"
       }
+    },
+    "conversation": {
+      "title": "会话",
+      "description": "自动生成标题并配置时间线缩略图。",
+      "autoTitle": {
+        "heading": "自动生成标题",
+        "description": "首次回复后用模型为对话命名。",
+        "label": "生成对话标题"
+      },
+      "titleModel": {
+        "heading": "标题模型",
+        "description": "用于生成标题的后台模型，默认使用对话模型。"
+      },
+      "timeline": {
+        "heading": "对话时间线",
+        "description": "在长对话右侧显示时间线缩略图。",
+        "label": "显示对话时间线"
+      },
+      "labelSummary": {
+        "heading": "美化时间线标签",
+        "description": "用模型把每个回合概括成短标签（每回合一次调用）。",
+        "label": "生成时间线标签"
+      },
+      "labelModel": {
+        "heading": "标签模型",
+        "description": "用于时间线标签的后台模型。"
+      },
+      "provider": "服务商",
+      "model": "模型",
+      "useDefault": "使用对话默认"
     }
   },
   "presets": {
@@ -5822,7 +5985,9 @@
       "favorites": "收藏",
       "recent": "最近使用",
       "builtIn": "内置",
-      "custom": "自定义"
+      "custom": "自定义",
+      "hasMcp": "含 MCP",
+      "hasSkills": "含技能"
     },
     "category": {
       "general": "通用",
@@ -10846,7 +11011,43 @@
       "terminalReplKill": "信号终止 REPL 会话，可重复调用。"
     }
   },
+  "toolCatalog": {
+    "title": "工具搜索与筛选",
+    "description": "搜索全部可用工具与 MCP server,构建允许或拒绝清单以收窄智能体可用范围。在每角色、每会话设置之上生效;拒绝始终优先。",
+    "modeLabel": "筛选模式",
+    "mode_all": "不筛选",
+    "mode_allow": "仅允许所选",
+    "mode_deny": "拒绝所选",
+    "selectedCount": "已选 {count} 项",
+    "searchPlaceholder": "按名称、描述或服务器搜索…",
+    "sourceLabel": "来源",
+    "sourceAll": "全部来源",
+    "source_builtin": "内置",
+    "source_mcp": "MCP",
+    "source_plugin": "插件",
+    "source_native-anthropic": "原生",
+    "riskLabel": "风险",
+    "riskAll": "全部风险",
+    "risk_low": "低",
+    "risk_medium": "中",
+    "risk_high": "高",
+    "loading": "正在加载工具目录…",
+    "noResults": "没有匹配的工具。",
+    "disabled": "已禁用",
+    "toggleTool": "在筛选中切换 {tool}"
+  },
   "providers": {
+    "modelsDev": {
+      "title": "models.dev 目录",
+      "summary": "{providers} 个服务商 · {models} 个模型",
+      "lastSynced": "上次同步：{time}",
+      "never": "尚未同步",
+      "sourceRemote": "实时",
+      "sourceBundled": "内置快照",
+      "sync": "从 models.dev 同步",
+      "syncing": "同步中…",
+      "syncError": "从 models.dev 同步失败：{message}"
+    },
     "title": "AI 服务商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入您的 API 密钥",

@@ -21,6 +21,7 @@ import { AutomationPolicyInitializer } from "@/components/providers/initializers
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
+import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
 import { TerminalBridgeInitializer } from "@/components/providers/initializers/terminal-bridge-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
@@ -124,6 +125,7 @@ export default async function RootLayout({
                     <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />
                     <LocalCharacterPackInitializer />
+                    <ModelsDevCatalogInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>

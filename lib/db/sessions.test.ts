@@ -135,3 +135,30 @@ describe("bulkDeleteSessions", () => {
     expect(await getSession(a.id)).toBeDefined()
   })
 })
+
+describe("deletion tombstones (companion sync v61)", () => {
+  it("records session + cascaded message tombstones on deleteSession", async () => {
+    const s = await createSession({ title: "X" })
+    const db = getDb()
+    await db.messages.bulkPut([
+      { id: "m1", sessionId: s.id, role: "user", parts: [], createdAt: 1 } as never,
+      { id: "m2", sessionId: s.id, role: "user", parts: [], createdAt: 2 } as never,
+    ])
+    await deleteSession(s.id)
+
+    const sessionTombs = await db.syncTombstones.where("table").equals("sessions").toArray()
+    expect(sessionTombs.map((t) => t.id)).toEqual([s.id])
+    const messageTombs = await db.syncTombstones.where("table").equals("messages").toArray()
+    expect(messageTombs.map((t) => t.id).sort()).toEqual(["m1", "m2"])
+  })
+
+  it("records session tombstones on bulkDeleteSessions", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    await bulkDeleteSessions([a.id, b.id])
+    const ids = (await getDb().syncTombstones.where("table").equals("sessions").toArray())
+      .map((t) => t.id)
+      .sort()
+    expect(ids).toEqual([a.id, b.id].sort())
+  })
+})

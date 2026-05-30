@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process"
+
 import createNextIntlPlugin from "next-intl/plugin"
 import withSerwistInit from "@serwist/next"
 import type { NextConfig } from "next"
@@ -5,6 +7,22 @@ import type { NextConfig } from "next"
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
 
 const isProd = process.env.NODE_ENV === "production"
+
+// Build-time metadata surfaced on the About page (components/settings/about/*).
+// Resolved here in Node at config-eval time and inlined into the client bundle
+// as `process.env.NEXT_PUBLIC_*`. Both reads are failure-tolerant: a tarball /
+// CI checkout without git, or a frozen clock, must never break the build.
+const gitCommit = (() => {
+  if (process.env.NEXT_PUBLIC_GIT_COMMIT) return process.env.NEXT_PUBLIC_GIT_COMMIT
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim()
+  } catch {
+    return ""
+  }
+})()
+const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
 
 // Wave 4 / ADR-0026 — Serwist PWA.
 //
@@ -81,6 +99,11 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // Build-time metadata for the About page. Inlined as NEXT_PUBLIC_* envs.
+  env: {
+    NEXT_PUBLIC_GIT_COMMIT: gitCommit,
+    NEXT_PUBLIC_BUILD_TIME: buildTime,
+  },
   // Note: This feature is required to use the Next.js Image component in SSG mode.
   // See https://nextjs.org/docs/messages/export-image-api for different workarounds.
   images: {

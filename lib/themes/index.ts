@@ -142,6 +142,51 @@ export interface ResolvedTheme {
 }
 
 /**
+ * Each sidebar slot mirrors a core surface token. A theme that only edits the
+ * core palette (`--background`, `--accent`, …) but leaves the sidebar slots
+ * untouched used to keep the fixed neutral sidebar colours, so the sidebar
+ * visually diverged from the rest of the themed app. We instead let an
+ * untouched sidebar slot DERIVE from its core counterpart, so the sidebar
+ * always belongs to the active theme's palette. A theme that *explicitly*
+ * customises a sidebar slot (its value differs from the neutral fallback)
+ * keeps that value — derivation only fills the slots the theme didn't set.
+ */
+const SIDEBAR_CORE_SOURCE: Readonly<Partial<Record<keyof ThemeColors, keyof ThemeColors>>> = {
+  sidebar: "background",
+  sidebarForeground: "foreground",
+  sidebarPrimary: "primary",
+  sidebarPrimaryForeground: "primaryForeground",
+  sidebarAccent: "accent",
+  sidebarAccentForeground: "accentForeground",
+  sidebarBorder: "border",
+  sidebarRing: "ring",
+}
+
+/**
+ * For each sidebar slot still sitting at the variant's neutral fallback,
+ * replace it with the resolved value of the core token it mirrors. Returns a
+ * new object; never mutates `colors`. The neutral fallback used as the
+ * "untouched" sentinel is the module's own `NEUTRAL_*` palette, whose sidebar
+ * values are identical to `lib/appearance` `DEFAULT_FALLBACKS` — so themes
+ * saved through the custom-theme editor (which fills unset slots from those
+ * fallbacks) are correctly detected as "not customised" and derive.
+ */
+function deriveSidebarFromCore(colors: ThemeColors, variant: "light" | "dark"): ThemeColors {
+  const neutral = variant === "dark" ? NEUTRAL_DARK : NEUTRAL_LIGHT
+  const out: ThemeColors = { ...colors }
+  for (const [sidebarKey, coreKey] of Object.entries(SIDEBAR_CORE_SOURCE) as Array<
+    [keyof ThemeColors, keyof ThemeColors]
+  >) {
+    if (out[sidebarKey] !== neutral[sidebarKey]) continue // explicitly customised — keep it
+    const coreValue = colors[coreKey]
+    if (typeof coreValue === "string" && coreValue.length > 0) {
+      out[sidebarKey] = coreValue
+    }
+  }
+  return out
+}
+
+/**
  * Resolve the colors that should currently be showing.
  *
  * If a custom theme is active and present in `customThemes`, its
@@ -184,11 +229,11 @@ export function resolveActiveThemeColors(args: ResolveActiveThemeArgs): Resolved
             : presetColors
 
       return {
-        colors: { ...baseline, ...(customColors ?? {}) },
+        colors: deriveSidebarFromCore({ ...baseline, ...(customColors ?? {}) }, resolvedTheme),
         themeSource: "custom",
       }
     }
   }
 
-  return { colors: presetColors, themeSource: "preset" }
+  return { colors: deriveSidebarFromCore(presetColors, resolvedTheme), themeSource: "preset" }
 }

@@ -5,9 +5,18 @@ import {
   listModels as listOpenRouterModels,
   parseModelPricing,
 } from "@/lib/ai/providers/openrouter"
-import type { LocalProviderName, ModelConfig, ProviderModelDiscoveryEntry } from "@/types/provider"
+import type {
+  LocalProviderName,
+  ModelConfig,
+  ModelPricing,
+  ProviderModelDiscoveryEntry,
+} from "@/types/provider"
 
-export type ProviderModelSource = "catalog-static" | "remote-discovered" | "user-curated"
+export type ProviderModelSource =
+  | "catalog-static"
+  | "models-dev"
+  | "remote-discovered"
+  | "user-curated"
 export type ProviderModelFreshness = "static" | "fresh" | "stale"
 
 export type ProviderModelCandidate = ProviderModelDiscoveryEntry
@@ -164,9 +173,72 @@ function getUserCuratedModels(
   })
 }
 
+const PRICING_KEYS = [
+  "promptPer1M",
+  "completionPer1M",
+  "cachedInputPer1M",
+  "cacheCreationPer1M",
+  "batchInputPer1M",
+  "batchOutputPer1M",
+  "audioInputPer1M",
+  "audioOutputPer1M",
+  "currency",
+] as const
+
+/**
+ * Field-level merge of two pricing records under the layered-authority rule.
+ * Exported so settings views (comparison/cost) enrich catalog pricing with
+ * models.dev through the SAME precedence + full field set instead of
+ * hand-rolling a partial copy that silently drops cache/batch/audio fields.
+ */
+export function mergePricing(
+  existing: ModelConfig["pricing"],
+  incoming: ModelConfig["pricing"],
+  overwrite: boolean
+): ModelConfig["pricing"] {
+  if (!existing) return incoming
+  if (!incoming) return existing
+  const out: ModelPricing = { ...existing }
+  for (const key of PRICING_KEYS) {
+    const inc = incoming[key]
+    if (inc === undefined) continue
+    if (overwrite || out[key] === undefined) {
+      // Each key is assigned from the matching key, so the value type lines up.
+      out[key] = inc as never
+    }
+  }
+  return out
+}
+
+/**
+ * Field-level merge realizing the layered-authority precedence. `overwrite`
+ * sources (catalog-static base, models-dev, user-curated) replace defined
+ * fields; fill-missing sources (remote-discovered) only populate gaps — so a
+ * bare `/v1/models` entry can add a new model id without clobbering the pricing
+ * or capabilities models.dev already supplied.
+ */
+function mergeModelConfig(
+  existing: ModelConfig,
+  incoming: ModelConfig,
+  overwrite: boolean
+): ModelConfig {
+  const out: ModelConfig = { ...existing }
+  for (const key of Object.keys(incoming) as (keyof ModelConfig)[]) {
+    if (key === "pricing" || key === "id") continue
+    const inc = incoming[key]
+    if (inc === undefined) continue
+    if (overwrite || out[key] === undefined) {
+      out[key] = inc as never
+    }
+  }
+  out.pricing = mergePricing(existing.pricing, incoming.pricing, overwrite)
+  return out
+}
+
 export function buildProviderModelDiscoverySnapshot(input: {
   providerId: string
   catalogModels?: ProviderModelCandidate[]
+  modelsDevModels?: ProviderModelCandidate[]
   remoteModels?: ProviderModelCandidate[]
   remoteLastFetchedAt?: number
   userCuratedModels?: ProviderModelCandidate[]
@@ -175,7 +247,8 @@ export function buildProviderModelDiscoverySnapshot(input: {
 
   const applyModels = (
     models: ProviderModelCandidate[] | undefined,
-    source: ProviderModelSource
+    source: ProviderModelSource,
+    overwrite: boolean
   ) => {
     for (const model of models || []) {
       const normalized = candidateToModelConfig(model)
@@ -192,19 +265,28 @@ export function buildProviderModelDiscoverySnapshot(input: {
       }
 
       merged.set(model.id, {
-        ...existing,
-        ...normalized,
-        source,
-        freshness: sourceFreshness(source, input.remoteLastFetchedAt),
+        ...mergeModelConfig(existing, normalized, overwrite),
+        // A fill-only pass (overwrite=false, i.e. live /v1/models) may add data
+        // to a higher-authority model but must not relabel its provenance —
+        // otherwise a models.dev-authoritative model that also appears in the
+        // live list gets stamped "remote-discovered" and can flip to a "stale"
+        // badge. `mergedSources` still records every contributing source.
+        source: overwrite ? source : existing.source,
+        freshness: overwrite
+          ? sourceFreshness(source, input.remoteLastFetchedAt)
+          : existing.freshness,
         mergedSources: mergeSources(existing.mergedSources, source),
-        provider: model.provider ?? existing.provider,
+        provider: (overwrite ? model.provider : existing.provider) ?? existing.provider,
       })
     }
   }
 
-  applyModels(input.catalogModels, "catalog-static")
-  applyModels(input.remoteModels, "remote-discovered")
-  applyModels(input.userCuratedModels, "user-curated")
+  // Layered authority: static is the base; models.dev wins model-level fields;
+  // live /v1/models only fills gaps + adds new ids; user-curated is explicit.
+  applyModels(input.catalogModels, "catalog-static", true)
+  applyModels(input.modelsDevModels, "models-dev", true)
+  applyModels(input.remoteModels, "remote-discovered", false)
+  applyModels(input.userCuratedModels, "user-curated", true)
 
   return {
     providerId: input.providerId,
@@ -216,11 +298,13 @@ export function buildProviderModelDiscoverySnapshot(input: {
 export function buildBuiltInProviderModelDiscoverySnapshot(input: {
   providerId: string
   catalogModels?: ProviderModelCandidate[]
+  modelsDevModels?: ProviderModelCandidate[]
   settings?: DiscoveredModelStateLike
 }): ProviderModelDiscoverySnapshot {
   return buildProviderModelDiscoverySnapshot({
     providerId: input.providerId,
     catalogModels: input.catalogModels,
+    modelsDevModels: input.modelsDevModels,
     remoteModels: getRemoteDiscoveredModels(input.settings),
     remoteLastFetchedAt: input.settings?.discoveredModelsLastFetched,
   })

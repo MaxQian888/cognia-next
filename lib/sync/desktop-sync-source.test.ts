@@ -15,12 +15,15 @@ import {
 describe("readDexieDelta", () => {
   beforeEach(async () => {
     __resetInstalledForTests()
-    // Wipe the four tables we touch.
+    // Wipe the tables we touch.
     const db = getDb()
     await db.characters.clear()
     await db.skills.clear()
     await db.sessions.clear()
     await db.messages.clear()
+    await db.conversationOverrides.clear()
+    await db.settings.clear()
+    await db.syncTombstones.clear()
   })
 
   it("returns characters whose updatedAt > since", async () => {
@@ -46,23 +49,87 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(10)
   })
 
-  it("returns messages capped at 200 newest, ordered ascending", async () => {
+  it("pages messages by [createdAt+id], ascending, under the page size", async () => {
     const db = getDb()
     const rows = Array.from({ length: 250 }, (_, i) => ({
-      id: `m${i}`,
+      id: `m${String(i).padStart(4, "0")}`,
       sessionId: "s",
-      createdAt: i,
-      updatedAt: i,
+      createdAt: i + 1,
+      updatedAt: i + 1,
     })) as never[]
     await db.messages.bulkPut(rows)
 
     const delta = await readDexieDelta("messages", 0)
-    expect(delta.rows).toHaveLength(200)
+    // Full history (250 < page size 500) now syncs — no global 200 cap.
+    expect(delta.rows).toHaveLength(250)
     const first = delta.rows[0] as { createdAt: number }
     const last = delta.rows[delta.rows.length - 1] as { createdAt: number }
-    // Should be ascending.
     expect(last.createdAt - first.createdAt).toBeGreaterThan(0)
-    expect(delta.next_since).toBe(249)
+    expect(delta.next_since).toBe(250)
+    expect(delta.has_more).toBe(false)
+  })
+
+  it("sets has_more when a page fills to capacity", async () => {
+    const db = getDb()
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      id: `m${String(i).padStart(4, "0")}`,
+      sessionId: "s",
+      createdAt: i + 1,
+      updatedAt: i + 1,
+    })) as never[]
+    await db.messages.bulkPut(rows)
+
+    const delta = await readDexieDelta("messages", 0)
+    expect(delta.rows).toHaveLength(500)
+    expect(delta.has_more).toBe(true)
+  })
+
+  it("surfaces tombstones as deleted_ids and folds deletedAt into next_since", async () => {
+    const db = getDb()
+    await db.sessions.bulkPut([
+      { id: "s1", title: "live", kind: "direct", createdAt: 0, updatedAt: 5 } as never,
+    ])
+    await db.syncTombstones.bulkPut([
+      { table: "sessions", id: "sGone", deletedAt: 80 },
+      { table: "sessions", id: "sOld", deletedAt: 1 }, // before the cursor
+      { table: "messages", id: "mGone", deletedAt: 90 }, // other table
+    ])
+    const delta = await readDexieDelta("sessions", 2)
+    expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["s1"])
+    expect(delta.deleted_ids).toEqual(["sGone"])
+    // next_since = max(maxUpdatedAt=5, maxDeletedAt=80)
+    expect(delta.next_since).toBe(80)
+  })
+
+  it("returns conversationOverrides whose updatedAt > since", async () => {
+    const db = getDb()
+    await db.conversationOverrides.bulkPut([
+      { id: "o1", conversationKey: "k1", updatedAt: 3 } as never,
+      { id: "o2", conversationKey: "k2", updatedAt: 30 } as never,
+    ])
+    const delta = await readDexieDelta("conversationOverrides", 10)
+    expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["o2"])
+    expect(delta.next_since).toBe(30)
+  })
+
+  it("emits the settings singleton on first pull and re-emits after a change", async () => {
+    const db = getDb()
+    await db.settings.put({ id: "singleton", theme: "dark", updatedAt: 100 } as never)
+
+    // First pull (since 0) always warms the cache.
+    const first = await readDexieDelta("settings", 0)
+    expect(first.rows).toHaveLength(1)
+    expect(first.next_since).toBe(100)
+
+    // A pull at the current cursor returns nothing…
+    const steady = await readDexieDelta("settings", 100)
+    expect(steady.rows).toHaveLength(0)
+
+    // …until the row changes (new updatedAt), then it re-emits.
+    await db.settings.put({ id: "singleton", theme: "light", updatedAt: 150 } as never)
+    const afterChange = await readDexieDelta("settings", 100)
+    expect(afterChange.rows).toHaveLength(1)
+    expect(afterChange.next_since).toBe(150)
   })
 
   it("filters skills by updatedAt", async () => {

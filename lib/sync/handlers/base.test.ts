@@ -183,4 +183,79 @@ describe("runSyncHandler", () => {
       since: 25,
     })
   })
+
+  it("does a single pull when has_more is unset", async () => {
+    const fake = makeFakeTable()
+    const transport = makeTransport({
+      rows: [{ id: "a", name: "a" }],
+      deleted_ids: [],
+      next_since: 1,
+    })
+    await runSyncHandler<FakeRow>({ table: "messages", getTable: () => fake.table }, transport, {
+      since: 0,
+    })
+    expect(transport.call).toHaveBeenCalledTimes(1)
+  })
+
+  it("drains pages while has_more is set, advancing the cursor each page", async () => {
+    const fake = makeFakeTable()
+    const deltas: SyncDelta<FakeRow>[] = [
+      { rows: [{ id: "a", name: "a" }], deleted_ids: [], next_since: 1, has_more: true },
+      { rows: [{ id: "b", name: "b" }], deleted_ids: [], next_since: 2, has_more: true },
+      { rows: [], deleted_ids: [], next_since: 2, has_more: false },
+    ]
+    let i = 0
+    const call = jest.fn(async () => deltas[Math.min(i++, deltas.length - 1)])
+    const transport = {
+      call: call as unknown as Transport["call"],
+      subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
+    }
+
+    const out = await runSyncHandler<FakeRow>(
+      { table: "messages", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+    expect(call).toHaveBeenCalledTimes(3)
+    expect((call.mock.calls[1] as unknown[])[1]).toEqual({ table: "messages", since: 1 })
+    expect((call.mock.calls[2] as unknown[])[1]).toEqual({ table: "messages", since: 2 })
+    expect(out.ok && out.result.applied).toBe(2)
+    expect(out.ok && out.result.nextSince).toBe(2)
+  })
+
+  it("uses applyRows override instead of bulkPut when provided", async () => {
+    const fake = makeFakeTable()
+    const applyRows = jest.fn(async () => {})
+    await runSyncHandler<FakeRow>(
+      { table: "settings", getTable: () => fake.table, applyRows },
+      makeTransport({ rows: [{ id: "singleton", name: "s" }], deleted_ids: [], next_since: 5 }),
+      { since: 0 }
+    )
+    expect(applyRows).toHaveBeenCalledWith([{ id: "singleton", name: "s" }])
+    expect(fake.table.bulkPut).not.toHaveBeenCalled()
+  })
+
+  it("bails out after MAX_PAGES if the server never clears has_more", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const fake = makeFakeTable()
+    let n = 0
+    const transport = {
+      call: jest.fn(async () => ({
+        rows: [{ id: `m${n}`, name: "m" }],
+        deleted_ids: [],
+        next_since: ++n,
+        has_more: true,
+      })) as unknown as Transport["call"],
+      subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
+    }
+    const out = await runSyncHandler<FakeRow>(
+      { table: "messages", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+    expect(transport.call).toHaveBeenCalledTimes(100)
+    expect(out.ok).toBe(true)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })

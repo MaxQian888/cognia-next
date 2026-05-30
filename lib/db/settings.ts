@@ -119,6 +119,13 @@ const DEFAULTS: AppSettings = {
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
   ocrSettings: { ...DEFAULT_OCR_SETTINGS },
+
+  // Conversation title auto-generation — on by default (the instant
+  // first-message truncation always runs; this gates the LLM upgrade).
+  conversationTitle: { enabled: true },
+  // Right-edge timeline minimap — feature on, collapsed by default, label
+  // summaries off (they cost one model call per turn).
+  conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -144,6 +151,15 @@ export async function getSettings(): Promise<AppSettings> {
       ...(row.biometricRequiredFor ?? {}),
     },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
+    conversationTitle: { ...DEFAULTS.conversationTitle, ...(row.conversationTitle ?? {}) },
+    conversationTimeline: {
+      ...DEFAULTS.conversationTimeline,
+      ...(row.conversationTimeline ?? {}),
+      labelSummary: {
+        ...DEFAULTS.conversationTimeline?.labelSummary,
+        ...(row.conversationTimeline?.labelSummary ?? {}),
+      },
+    },
     id: SINGLETON_ID,
   }
 }
@@ -181,7 +197,10 @@ let saveQueue: Promise<unknown> = Promise.resolve()
 export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {
   const next = saveQueue.then(async () => {
     const current = await getSettings()
-    const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID }
+    // Bump `updatedAt` on every write so the companion sync source can tell
+    // when the singleton changed and re-emit it to paired phones (see
+    // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
+    const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
     await getDb().settings.put(merged)
     return merged
   })

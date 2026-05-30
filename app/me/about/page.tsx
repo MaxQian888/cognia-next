@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl"
 
-import { AboutSection } from "@/components/settings/about-section"
+import { AboutSection } from "@/components/settings/about/about-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 
 export default function MobileAboutPage() {

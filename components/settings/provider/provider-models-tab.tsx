@@ -17,6 +17,14 @@ export interface ModelConfig {
   contextLength?: number
   supportsTools?: boolean
   supportsVision?: boolean
+  /** Reasoning effort tiers (from models.dev). */
+  variants?: string[]
+  /** Model family (from models.dev), e.g. "claude-sonnet". */
+  family?: string
+  /** ISO release date (from models.dev). */
+  releaseDate?: string
+  /** Driver/adapter hint (from models.dev npm). */
+  adapter?: string
 }
 
 export interface ProviderModelsTabProps {
@@ -53,11 +61,17 @@ interface ModelCardProps {
 
 function ModelCard({ model, isEnabled, onToggle, contextLabel }: ModelCardProps) {
   const caps: string[] = model.capabilities ?? []
+  const variants = model.variants ?? []
 
   return (
     <div className="rounded-lg border p-3 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
-        <span className="font-semibold text-sm leading-tight">{model.name}</span>
+        <div className="flex min-w-0 flex-col">
+          <span className="font-semibold text-sm leading-tight">{model.name}</span>
+          {model.family && (
+            <span className="text-[11px] text-muted-foreground">{model.family}</span>
+          )}
+        </div>
         <Switch
           checked={isEnabled}
           onCheckedChange={(checked) => onToggle(model.id, checked)}
@@ -76,11 +90,25 @@ function ModelCard({ model, isEnabled, onToggle, contextLabel }: ModelCardProps)
         </div>
       )}
 
-      {model.contextLength !== undefined && (
-        <span className="text-xs text-muted-foreground">
-          {formatContextLength(model.contextLength)} {contextLabel}
-        </span>
+      {variants.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {variants.map((v) => (
+            <Badge key={v} variant="outline" className="text-[10px] px-1.5 py-0">
+              {v}
+            </Badge>
+          ))}
+        </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        {model.contextLength !== undefined && (
+          <span>
+            {formatContextLength(model.contextLength)} {contextLabel}
+          </span>
+        )}
+        {model.releaseDate && <span>{model.releaseDate}</span>}
+        {model.adapter && <span className="font-mono text-[10px]">{model.adapter}</span>}
+      </div>
     </div>
   )
 }

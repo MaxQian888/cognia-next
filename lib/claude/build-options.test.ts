@@ -1353,3 +1353,118 @@ describe("resolveSendOptions — ADR-0028 per-`query()` env injection", () => {
     expect(opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
   })
 })
+
+describe("resolveSendOptions — tool/MCP filter overlay", () => {
+  beforeEach(() => {
+    // Reflect the chosen servers so we can assert on the filtered subset.
+    mBuildMap.mockImplementation((servers: Array<{ name: string }>) =>
+      Object.fromEntries(servers.map((s) => [s.name, {}]))
+    )
+  })
+
+  it("allow mode intersects the resolved allowedTools", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        allowedTools: ["a", "b", "c"],
+        toolFilter: { mode: "allow", tools: ["b", "c"] },
+      }),
+    })
+    expect(new Set(opts.allowedTools)).toEqual(new Set(["b", "c"]))
+  })
+
+  it("deny mode unions filtered tools into disallowedTools and leaves allow alone", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        allowedTools: ["a", "b"],
+        disallowedTools: ["x"],
+        toolFilter: { mode: "deny", tools: ["b"] },
+      }),
+    })
+    expect(new Set(opts.disallowedTools)).toEqual(new Set(["x", "b"]))
+    expect(new Set(opts.allowedTools)).toEqual(new Set(["a", "b"]))
+  })
+
+  it("session filter replaces the character filter", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        allowedTools: ["a", "b", "c"],
+        toolFilter: { mode: "allow", tools: ["a"] },
+      }),
+      session: makeSession({ id: "s1", toolFilter: { mode: "allow", tools: ["c"] } }),
+    })
+    expect(new Set(opts.allowedTools)).toEqual(new Set(["c"]))
+  })
+
+  it("mode 'all' is a no-op", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        allowedTools: ["a", "b"],
+        toolFilter: { mode: "all", tools: ["b"] },
+      }),
+    })
+    expect(new Set(opts.allowedTools)).toEqual(new Set(["a", "b"]))
+  })
+
+  it("allow mode filters the MCP server subset to listed ids", async () => {
+    mListMcp.mockResolvedValueOnce([
+      { id: "m1", name: "one", transport: "stdio", enabled: true },
+      { id: "m2", name: "two", transport: "http", enabled: true },
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", toolFilter: { mode: "allow", mcpServerIds: ["m1"] } }),
+    })
+    expect(Object.keys(opts.mcpServers ?? {})).toEqual(["one"])
+  })
+
+  it("deny mode drops the listed MCP server ids", async () => {
+    mListMcp.mockResolvedValueOnce([
+      { id: "m1", name: "one", transport: "stdio", enabled: true },
+      { id: "m2", name: "two", transport: "http", enabled: true },
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", toolFilter: { mode: "deny", mcpServerIds: ["m1"] } }),
+    })
+    expect(Object.keys(opts.mcpServers ?? {})).toEqual(["two"])
+  })
+})
+
+describe("resolveSendOptions — runtime tool-search policy", () => {
+  it("emits toolSearchEnabled + always-load lists when enabled globally", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        id: "singleton",
+        toolSearchRuntime: {
+          enabled: true,
+          alwaysLoadServers: ["cognia-tools"],
+          alwaysLoadTools: ["git_status"],
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.toolSearchEnabled).toBe(true)
+    expect(opts.alwaysLoadServers).toEqual(["cognia-tools"])
+    expect(opts.alwaysLoadTools).toEqual(["git_status"])
+  })
+
+  it("character override replaces the global runtime policy", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        id: "singleton",
+        toolSearchRuntime: { enabled: true, alwaysLoadServers: ["global"] },
+      } as unknown as AppSettings,
+      character: makeChar({
+        id: "c1",
+        toolSearchRuntimeOverride: { enabled: true, alwaysLoadServers: ["char"] },
+      }),
+    })
+    expect(opts.alwaysLoadServers).toEqual(["char"])
+  })
+
+  it("leaves toolSearchEnabled unset when disabled", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.toolSearchEnabled).toBeUndefined()
+  })
+})

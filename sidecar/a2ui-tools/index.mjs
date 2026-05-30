@@ -44,9 +44,14 @@ const widgetSchema = z
  * @param {object} options
  * @param {string} options.sessionId  Session id used to scope dispatches.
  * @param {(payload: unknown) => void} options.emit  sidecar->parent stdout writer.
+ * @param {boolean} [options.alwaysLoad]
+ *        When true (the default for this server — interactive A2UI surfaces
+ *        must never be deferred behind tool search), the four bridge tools
+ *        stay resident in the prompt. Mirrors
+ *        `createSdkMcpServer({ alwaysLoad })`.
  * @returns {ReturnType<typeof createSdkMcpServer>}
  */
-export function buildA2UIBridgeServer({ sessionId, emit }) {
+export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
   const dispatch = (message) => {
     emit({ type: "a2ui_dispatch", sessionId, message })
   }
@@ -170,6 +175,7 @@ export function buildA2UIBridgeServer({ sessionId, emit }) {
     name: SERVER_NAME,
     version: SERVER_VERSION,
     tools,
+    ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }
 

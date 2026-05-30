@@ -36,45 +36,72 @@ export const SERVER_VERSION = "0.1.0"
  * @param {Map<string, { resolve: (r: any) => void }>} options.pendingPluginToolCalls
  *        Pending-promise map keyed by toolUseId. The parent resolves
  *        entries here when it receives the matching plugin_tool_response.
+ * @param {boolean} [options.alwaysLoad]
+ *        Server-level always-load — when true every plugin tool stays
+ *        resident (never deferred behind tool search). Mirrors
+ *        `createSdkMcpServer({ alwaysLoad })`.
+ * @param {Set<string>} [options.alwaysLoadToolNames]
+ *        Per-tool always-load allowlist (bare names). Tools whose name is in
+ *        this set are pinned resident even when the server defers the rest —
+ *        applied via `tool({ alwaysLoad })`, which the SDK OR's with the
+ *        server-level flag.
  * @returns {ReturnType<typeof createSdkMcpServer> | null}
  */
-export function buildPluginToolsServer({ tools, emit, sessionId, pendingPluginToolCalls }) {
+export function buildPluginToolsServer({
+  tools,
+  emit,
+  sessionId,
+  pendingPluginToolCalls,
+  alwaysLoad,
+  alwaysLoadToolNames,
+}) {
   if (!Array.isArray(tools) || tools.length === 0) return null
+
+  const perToolAlways =
+    alwaysLoadToolNames instanceof Set ? alwaysLoadToolNames : new Set(alwaysLoadToolNames ?? [])
 
   const wrappedTools = tools.map((t) => {
     const zodShape = jsonSchemaToZodShape(t.jsonSchema)
-    return tool(t.name, t.description ?? "", zodShape, async (args) => {
-      const toolUseId = randomUUID()
-      const response = await new Promise((resolve) => {
-        pendingPluginToolCalls.set(toolUseId, { resolve })
-        emit({
-          type: "plugin_tool_exec",
-          sessionId,
-          toolUseId,
-          name: t.name,
-          args,
+    const toolExtras = perToolAlways.has(t.name) ? { alwaysLoad: true } : undefined
+    return tool(
+      t.name,
+      t.description ?? "",
+      zodShape,
+      async (args) => {
+        const toolUseId = randomUUID()
+        const response = await new Promise((resolve) => {
+          pendingPluginToolCalls.set(toolUseId, { resolve })
+          emit({
+            type: "plugin_tool_exec",
+            sessionId,
+            toolUseId,
+            name: t.name,
+            args,
+          })
         })
-      })
-      if (response && response.error) {
-        return {
-          content: [{ type: "text", text: `Error: ${response.error}` }],
-          isError: true,
+        if (response && response.error) {
+          return {
+            content: [{ type: "text", text: `Error: ${response.error}` }],
+            isError: true,
+          }
         }
-      }
-      const payload =
-        typeof response?.result === "string"
-          ? response.result
-          : JSON.stringify(response?.result ?? null)
-      return {
-        content: [{ type: "text", text: payload }],
-      }
-    })
+        const payload =
+          typeof response?.result === "string"
+            ? response.result
+            : JSON.stringify(response?.result ?? null)
+        return {
+          content: [{ type: "text", text: payload }],
+        }
+      },
+      toolExtras
+    )
   })
 
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
     tools: wrappedTools,
+    ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }
 

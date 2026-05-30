@@ -210,6 +210,22 @@ export interface SendOptions {
    */
   appendHeaders?: Record<string, string>
 
+  /**
+   * Runtime tool-search (deferred loading) switch. Sidecar-protocol field —
+   * consumed by `sidecar/dispatch/anthropic.mjs`, not forwarded to `query()`
+   * verbatim. When `true`, the dispatcher leaves the bundled CLI's default
+   * tool-search behaviour in place (MCP tools defer behind tool search) and
+   * marks only {@link alwaysLoadServers} / {@link alwaysLoadTools} as
+   * `alwaysLoad`. When `false`/unset, every in-process server is marked
+   * `alwaysLoad` so tools stay resident (legacy behaviour). Resolved from
+   * {@link AppSettings.toolSearchRuntime} / {@link Character.toolSearchRuntimeOverride}.
+   */
+  toolSearchEnabled?: boolean
+  /** MCP server names to keep always-resident when tool search is on. */
+  alwaysLoadServers?: string[]
+  /** Bare tool names to keep always-resident when tool search is on. */
+  alwaysLoadTools?: string[]
+
   // ---- Convenience modes (sidecar-protocol fields) -------------------------
   // The dispatcher in `sidecar/dispatch/anthropic.mjs` strips these three
   // fields before calling `query()`. Translation to real SDK options happens
@@ -569,6 +585,13 @@ export type SessionKind = "direct" | "team" | "workflow-editor"
 export interface ChatSession {
   id: string
   title: string
+  /**
+   * True while the title is auto-derived (instant first-message truncation
+   * or the LLM-generated upgrade). A manual rename sets this to `false`,
+   * permanently opting the session out of further auto-title generation.
+   * Undefined on legacy rows is treated as auto.
+   */
+  titleAuto?: boolean
   /** Missing means "direct" (back-compat with v2 sessions). */
   kind?: SessionKind
   /** Direct sessions: the persona driving replies. */
@@ -660,6 +683,12 @@ export interface ChatSession {
   maxThinkingTokens?: number
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
+  /**
+   * Per-session tool/MCP filter. Highest precedence — replaces the character
+   * ({@link Character.toolFilter}) and global ({@link AppSettings.toolFilter})
+   * filter for this conversation only. See {@link ToolFilterConfig}.
+   */
+  toolFilter?: ToolFilterConfig
   createdAt: number
   updatedAt: number
 }
@@ -707,16 +736,91 @@ export interface StoredMessage {
     inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
     /** Set on outbound (assistant) messages once enqueued. */
     outboundJobId?: string
+    /**
+     * Optional model-generated short label for the conversation-timeline
+     * minimap, cached on the turn's user message so it's generated at most
+     * once. Only populated when the timeline label-summary setting is on.
+     */
+    minimapLabel?: string
   }
   createdAt: number
+}
+
+/**
+ * Shared shape for a renderer-side "background utility model" — the cheap
+ * model used for non-chat helper tasks (conversation-title generation,
+ * timeline label summaries). `enabled` gates the feature; `providerOverride`
+ * / `model` are optional and fall back through the session/app defaults
+ * (see `lib/ai/generation/utility-client.ts`).
+ */
+export interface UtilityModelConfig {
+  enabled?: boolean
+  providerOverride?: string
+  model?: string
+}
+
+/** Conversation-timeline minimap preferences (see `components/chat/minimap`). */
+export interface ConversationTimelineSettings {
+  /** Master toggle for the right-edge timeline minimap. Defaults to on. */
+  enabled?: boolean
+  /** Persisted expand/collapse state of the minimap rail. Defaults to off. */
+  expanded?: boolean
+  /** Optional LLM-generated node labels (off by default — costs one call/turn). */
+  labelSummary?: UtilityModelConfig
 }
 
 export type AppTheme = "light" | "dark" | "system"
 export type AppFontScale = "xs" | "sm" | "md" | "lg" | "xl"
 export type AppLanguage = "en" | "zh-CN"
 
+/**
+ * Filtering mode for the unified tool/MCP filter (Codex / Hermes-style
+ * allow-deny lists over the catalog in `lib/tools/tool-catalog.ts`).
+ *  - `"all"`   — no filtering; every otherwise-granted tool/server passes (default).
+ *  - `"allow"` — ONLY the listed `tools` / `mcpServerIds` are permitted.
+ *  - `"deny"`  — everything EXCEPT the listed `tools` / `mcpServerIds`.
+ */
+export type ToolFilterMode = "all" | "allow" | "deny"
+
+/**
+ * Configurable tool + MCP filter. Applied by `resolveSendOptions` AFTER the
+ * existing allow/deny union, layered global (AppSettings) → character →
+ * session (later scopes replace earlier ones when set). A `deny` entry always
+ * wins over an `allow`. `tools` hold SDK-namespaced ids
+ * (`mcp__<server>__<tool>`); `mcpServerIds` hold MCP server ids.
+ */
+export interface ToolFilterConfig {
+  mode: ToolFilterMode
+  tools?: string[]
+  mcpServerIds?: string[]
+}
+
+/**
+ * Runtime tool-search (deferred loading) policy. Maps to the
+ * claude-agent-sdk `alwaysLoad` semantics (see ADR / sdk.d.ts): when
+ * `enabled`, the bundled CLI defers MCP-server tools behind tool search and
+ * only the `alwaysLoad*` set stays resident in the prompt. When disabled,
+ * `resolveSendOptions` marks every in-process server `alwaysLoad` to reproduce
+ * the legacy "everything resident" behaviour.
+ */
+export interface ToolSearchRuntimeConfig {
+  enabled: boolean
+  /** MCP server names kept always-resident (never deferred). */
+  alwaysLoadServers?: string[]
+  /** Bare tool names kept always-resident. */
+  alwaysLoadTools?: string[]
+}
+
 export interface AppSettings {
   id: "singleton"
+  /**
+   * Epoch ms of the last write, bumped by `lib/db/settings.ts:saveSettings`.
+   * Drives the companion sync cursor for the settings singleton: the desktop
+   * sync source emits the row only when `updatedAt` postdates the phone's
+   * cursor, so settings changes propagate to paired phones (pre-v61 the row
+   * had no `updatedAt` and only ever synced once, on the first pull).
+   */
+  updatedAt?: number
   /**
    * OCR subsystem preferences (default provider, cloud fallback, per-provider
    * config, cache TTL, platform overrides, wizard dismissal). Merged forward
@@ -741,6 +845,15 @@ export interface AppSettings {
   debugMode?: boolean
   /** App-wide default for cognia-next's brief-output mode. Overridden by character + session. */
   briefMode?: boolean
+  /**
+   * Auto-generate a conversation title from the first turn using a
+   * configurable background model. `enabled` defaults to true; the instant
+   * first-message truncation always runs as a placeholder regardless. See
+   * `lib/ai/generation/title.ts` and the chat hook's turn-complete path.
+   */
+  conversationTitle?: UtilityModelConfig
+  /** Right-edge conversation-timeline minimap preferences. */
+  conversationTimeline?: ConversationTimelineSettings
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**
@@ -749,6 +862,18 @@ export interface AppSettings {
    * `lib/claude/build-options.ts`. See {@link BuiltinToolsConfig}.
    */
   builtinTools: BuiltinToolsConfig
+  /**
+   * Global default tool/MCP allow-deny filter. Overridden per-character
+   * ({@link Character.toolFilter}) and per-session
+   * ({@link ChatSession.toolFilter}). Undefined ≡ `{ mode: "all" }`.
+   */
+  toolFilter?: ToolFilterConfig
+  /**
+   * Global default runtime tool-search (deferred loading) policy. Overridden
+   * per-character ({@link Character.toolSearchRuntimeOverride}). Undefined ≡
+   * disabled (legacy "all tools resident" behaviour).
+   */
+  toolSearchRuntime?: ToolSearchRuntimeConfig
   /**
    * Anthropic API key. v1 stores the key in IndexedDB plaintext — the user is
    * told this in the settings UI. Future iterations should migrate to an OS
@@ -1651,6 +1776,18 @@ export interface Character {
    * the default opt-in behaviour.
    */
   disablePluginTools?: boolean
+  /**
+   * Per-character tool/MCP filter. When set, replaces the global
+   * {@link AppSettings.toolFilter} for this character (a per-session
+   * {@link ChatSession.toolFilter} replaces this in turn). See
+   * {@link ToolFilterConfig}.
+   */
+  toolFilter?: ToolFilterConfig
+  /**
+   * Per-character runtime tool-search override. When set, replaces the global
+   * {@link AppSettings.toolSearchRuntime}. See {@link ToolSearchRuntimeConfig}.
+   */
+  toolSearchRuntimeOverride?: ToolSearchRuntimeConfig
   /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
   isBuiltIn?: boolean
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */

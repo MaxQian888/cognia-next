@@ -44,6 +44,13 @@ export interface SyncDelta<TRow> {
   deleted_ids: string[]
   /** Cursor to pass on the next pull. */
   next_since: number
+  /**
+   * Set by paged tables (messages) when this page filled to the page size,
+   * i.e. more rows exist past `next_since`. The mobile handler keeps pulling
+   * while this is true so a long history streams in full. Omitted/false for
+   * single-shot tables, which the handler pulls exactly once.
+   */
+  has_more?: boolean
 }
 
 export interface SyncResult {
@@ -80,4 +87,23 @@ export interface SyncCursorRow {
   lastSyncAt: number | null
   /** Last failure message, retained until the next success. */
   lastError: string | null
+}
+
+/**
+ * Desktop-side tombstone (Dexie `syncTombstones`, v61).
+ *
+ * V1 of the sync protocol shipped `deleted_ids: []` always — desktop
+ * deletions never reached the phone. We now record one tombstone per
+ * genuine user deletion (session/message/workflow/character) so the next
+ * `sync_pull` for that table surfaces the removed id and the phone calls
+ * `bulkDelete`. Compound PK `[table+id]` keeps the same id distinct across
+ * tables; pruned after a retention window by `pruneTombstones`.
+ */
+export interface SyncTombstoneRow {
+  /** Which syncable table the deleted row belonged to. */
+  table: SyncableTable
+  /** The deleted row's primary key. */
+  id: string
+  /** Epoch ms the deletion was recorded; doubles as the cursor watermark. */
+  deletedAt: number
 }

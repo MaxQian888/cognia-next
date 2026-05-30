@@ -32,6 +32,7 @@ import {
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 
 import { AlwaysAllowList } from "./always-allow-list"
+import { ToolCatalogBrowser } from "./tool-catalog-browser"
 
 const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   fileExtras: <FolderOpenIcon className="h-4 w-4" />,
@@ -109,6 +110,8 @@ export function ToolSettingsSection() {
           />
         ))}
       </div>
+
+      <ToolCatalogBrowser />
 
       <AlwaysAllowList />
     </div>

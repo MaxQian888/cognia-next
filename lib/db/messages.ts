@@ -277,6 +277,37 @@ export async function clearMessages(sessionId: string): Promise<void> {
 }
 
 /**
+ * Merge a metadata patch into a single message row, touching nothing else.
+ *
+ * Unlike `persistMessages` — which diffs the *whole* session array and deletes
+ * any id not present — this updates exactly one row by id. That makes it safe to
+ * call fire-and-forget from background tasks (e.g. the timeline-label model
+ * call) that hold a stale message snapshot: it can never `bulkDelete` a turn
+ * that landed after the snapshot was captured. The routing/derived keys
+ * (`senderId`/`senderKind`/`sessionId`) are stripped so they aren't
+ * double-persisted (they live in dedicated columns / are re-derived on read).
+ */
+export async function updateMessageMetadata(
+  sessionId: string,
+  messageId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const db = getDb()
+  const row = await db.messages.get(messageId)
+  if (!row || row.sessionId !== sessionId) return
+  const merged: Record<string, unknown> = { ...(row.metadata ?? {}), ...patch }
+  delete merged.senderId
+  delete merged.senderKind
+  delete merged.sessionId
+  await db.messages.update(messageId, {
+    metadata: Object.keys(merged).length > 0 ? merged : undefined,
+  })
+  // The row changed out-of-band from the persist snapshot; drop it so the next
+  // `persistMessages` re-derives existence/createdAt from disk.
+  invalidatePersistSnapshot(sessionId)
+}
+
+/**
  * Drop every message in `sessionId` whose `createdAt` is strictly greater than
  * the anchor message's `createdAt`. Used by edit-and-resend / regenerate to
  * lop off the tail before re-issuing a turn.

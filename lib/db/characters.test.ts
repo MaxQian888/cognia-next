@@ -142,6 +142,15 @@ describe("deleteCharacter", () => {
     expect(await getCharacter(c.id)).toBeUndefined()
   })
 
+  it("records a tombstone so the deletion mirrors to phones (v61)", async () => {
+    const c = await createCharacter({ name: "A", systemPrompt: "x" })
+    await deleteCharacter(c.id)
+    const ids = (await getDb().syncTombstones.where("table").equals("characters").toArray()).map(
+      (t) => t.id
+    )
+    expect(ids).toEqual([c.id])
+  })
+
   it("rejects deletion of built-ins", async () => {
     await seedBuiltInCharacters()
     const builtIn = (await listCharacters()).find((c) => c.isBuiltIn)!

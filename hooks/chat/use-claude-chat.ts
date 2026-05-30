@@ -12,6 +12,9 @@ import {
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
+import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { generateConversationTitle } from "@/lib/ai/generation/title"
+import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
@@ -51,7 +54,12 @@ import {
   isSessionAttached,
 } from "@/lib/companion/remote-attach-registry"
 import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
-import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
+import {
+  listMessages,
+  persistMessages,
+  truncateAfter,
+  updateMessageMetadata,
+} from "@/lib/db/messages"
 import { getDb } from "@/lib/db/schema"
 import { useRafThrottle, type RafThrottleHandle } from "@/hooks/workflow/use-raf-throttle"
 import {
@@ -103,6 +111,146 @@ function extractAssistantText(message: UIMessage | undefined): string {
     })
     .filter(Boolean)
     .join("\n")
+}
+
+/** Pull plain text out of any UIMessage's `text` parts (role-agnostic). */
+function extractPlainText(message: UIMessage | undefined): string {
+  if (!message) return ""
+  return message.parts
+    .map((part) => {
+      const p = part as { type?: string; text?: string }
+      return p.type === "text" && typeof p.text === "string" ? p.text : ""
+    })
+    .filter(Boolean)
+    .join("\n")
+}
+
+/**
+ * Decide whether the turn-complete path should generate an LLM conversation
+ * title: the feature is on, this is the first assistant turn, and the title
+ * hasn't been manually set. Exported for unit testing.
+ */
+export function shouldGenerateTitle(opts: {
+  titleEnabled: boolean | undefined
+  assistantCount: number
+  titleAuto: boolean | undefined
+}): boolean {
+  return opts.titleEnabled !== false && opts.assistantCount === 1 && opts.titleAuto !== false
+}
+
+/**
+ * Background "utility model" work fired once a turn seals: upgrade the
+ * machine-set conversation title to an LLM-generated one on the first
+ * assistant turn, and (opt-in) generate a short timeline-minimap label for
+ * the latest user turn. Fire-and-forget — never blocks the per-session event
+ * queue, and every failure is swallowed (the placeholder title / raw label
+ * remain). `messages` is the just-sealed turn snapshot.
+ */
+function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
+  void (async () => {
+    try {
+      const settings = useSettingsStore.getState().settings
+      if (!settings) return
+      const locale = settings.language
+      const sessionRow = await getSession(sessionId).catch(() => undefined)
+      if (!sessionRow) return
+
+      // ── Conversation title: first assistant turn, enabled, not renamed ──
+      const titleCfg = settings.conversationTitle
+      const assistantCount = messages.filter((m) => m.role === "assistant").length
+      if (
+        shouldGenerateTitle({
+          titleEnabled: titleCfg?.enabled,
+          assistantCount,
+          titleAuto: sessionRow.titleAuto,
+        })
+      ) {
+        const client = buildUtilityLlmClient({
+          session: sessionRow,
+          appSettings: settings,
+          override: titleCfg,
+          featureId: "conversation-title",
+        })
+        if (client) {
+          const firstUser = messages.find((m) => m.role === "user")
+          const firstAssistant = messages.find((m) => m.role === "assistant")
+          const title = await generateConversationTitle(client, {
+            firstUserText: extractPlainText(firstUser),
+            firstAssistantText: extractAssistantText(firstAssistant),
+            locale,
+          })
+          // Re-read titleAuto before writing — the user may have renamed the
+          // session while the model call was in flight.
+          if (title) {
+            const fresh = await getSession(sessionId).catch(() => undefined)
+            if (!fresh || fresh.titleAuto !== false) {
+              await updateSession(sessionId, { title, titleAuto: true })
+            }
+          }
+        }
+      }
+
+      // ── Timeline minimap label for the latest user turn (opt-in) ──
+      const labelCfg = settings.conversationTimeline?.labelSummary
+      if (labelCfg?.enabled) {
+        const store = useChatStore.getState()
+        const msgs = store.activeSessionId === sessionId ? store.messages : messages
+        let lastUserIdx = -1
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === "user") {
+            lastUserIdx = i
+            break
+          }
+        }
+        if (lastUserIdx >= 0) {
+          const userMsg = msgs[lastUserIdx]
+          const userMsgId = userMsg.id
+          const meta = (userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}
+          if (userMsgId && !meta.minimapLabel) {
+            const client = buildUtilityLlmClient({
+              session: sessionRow,
+              appSettings: settings,
+              override: labelCfg,
+              featureId: "timeline-label",
+            })
+            if (client) {
+              const label = await generateTurnLabel(client, {
+                userText: extractPlainText(userMsg),
+                locale,
+              })
+              if (label) {
+                // Patch the in-memory store by *id* against its current state —
+                // never replace it with the pre-await snapshot, which may have
+                // gone stale if the user sent another turn during the model call.
+                if (useChatStore.getState().activeSessionId === sessionId) {
+                  const current = useChatStore.getState().messages
+                  const idx = current.findIndex((m) => m.id === userMsgId)
+                  if (idx >= 0) {
+                    const curMeta =
+                      (current[idx] as { metadata?: Record<string, unknown> }).metadata ?? {}
+                    const next = current.slice()
+                    next[idx] = {
+                      ...current[idx],
+                      metadata: { ...curMeta, minimapLabel: label },
+                    } as UIMessage
+                    useChatStore.getState().replaceMessages(next)
+                  }
+                }
+                // Targeted single-row DB write — cannot delete a newer turn that
+                // landed while the model call was in flight (see the persist-race
+                // guard in lib/db/messages.ts).
+                await updateMessageMetadata(sessionId, userMsgId, {
+                  minimapLabel: label,
+                }).catch(() => {})
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("utility-model tasks failed", err)
+    }
+  })()
 }
 
 /** Signature of the hook's `send`, threaded into `handleEvent` via a ref. */
@@ -537,7 +685,7 @@ export function useClaudeChat() {
           await touchSession(sessionId)
           if (session && (session.title === "New chat" || !session.title)) {
             const preview = contentPreview(effectiveContent, 40)
-            if (preview) await updateSession(sessionId, { title: preview })
+            if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
           }
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
@@ -619,9 +767,12 @@ export function useClaudeChat() {
         await persistMessages(sessionId, next)
         await touchSession(sessionId)
         // If the session has no title yet, derive one from the first prompt.
+        // `titleAuto` marks the title as machine-set so the turn-complete path
+        // may later upgrade it to an LLM-generated title (until the user
+        // manually renames, which clears the flag).
         if (session && (session.title === "New chat" || !session.title)) {
           const preview = contentPreview(effectiveContent, 40)
-          if (preview) await updateSession(sessionId, { title: preview })
+          if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
         }
         // Open an agent-trace span for this chat turn. The traceId / spanId
         // are echoed through SendOptions so the sidecar (and later, tool +
@@ -1308,6 +1459,12 @@ async function handleEvent(
         } catch (err) {
           console.warn("autoCreateFromContent failed", err)
         }
+
+        // Background utility-model work: upgrade the auto title to an
+        // LLM-generated one on the first turn, and (opt-in) generate a
+        // timeline-minimap label. Fire-and-forget so it never blocks the
+        // per-session event queue.
+        runUtilityModelTasks(sessionId, nextMessages)
 
         // ── ADR-0019: drive the self-driving `/goal` loop forward ───────────
         // Runs once the turn truly sealed and no tool approval is pending.

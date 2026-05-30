@@ -115,7 +115,8 @@ export function useSessions() {
   )
 
   const rename = useCallback(async (id: string, title: string) => {
-    await updateSession(id, { title })
+    // A manual rename opts the session out of auto-title generation.
+    await updateSession(id, { title, titleAuto: false })
   }, [])
 
   const bulkRemove = useCallback(

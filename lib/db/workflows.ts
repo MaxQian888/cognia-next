@@ -16,6 +16,7 @@ import type {
 import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newWorkflowId(): string {
   return "wf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -118,6 +119,8 @@ export async function deleteWorkflow(id: string): Promise<void> {
     throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
   }
   await getDb().workflows.delete(id)
+  // Mirror the deletion to paired phones via the companion sync (v61).
+  await recordTombstones("workflows", [id])
   // Cascade-drop orphan fan-out subscriptions so they don't accumulate
   // in Dexie pointing at a workflow that no longer exists. Best-effort —
   // a failure here must not block the workflow delete. Lazy import keeps

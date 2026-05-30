@@ -19,6 +19,9 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
+import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
+import { buildBuiltInProviderModelDiscoverySnapshot } from "@/lib/ai/providers/model-discovery"
+import { ModelsDevSyncCard } from "./models-dev-sync-card"
 import { PROVIDERS } from "@/types/provider/provider"
 import type { CustomProviderSettings } from "@/types/provider/provider"
 import { ProviderDetailPanel } from "./provider-detail-panel"
@@ -303,6 +306,41 @@ export function ProviderSettings() {
 
   const selectedName = isCustom ? selectedCustom?.customName : selectedBuiltIn?.name
 
+  // models.dev catalog (reactive) → enrich the built-in provider's model list
+  // with models.dev-authoritative metadata (pricing/context/capabilities) plus
+  // the extra display fields (variants/family/release date/adapter).
+  const { row: modelsDevRow } = useModelsDevCatalog()
+  const enrichedBuiltInModels = useMemo(() => {
+    if (!selectedBuiltIn || !selectedId) return []
+    const devModels = modelsDevRow?.providers[selectedId]?.models ?? []
+    const snapshot = buildBuiltInProviderModelDiscoverySnapshot({
+      providerId: selectedId,
+      catalogModels: selectedBuiltIn.models,
+      modelsDevModels: devModels,
+      settings: selectedSettings,
+    })
+    return snapshot.models.map((m) => {
+      const meta = devModels.find((d) => d.id === m.id)
+      return {
+        id: m.id,
+        name: m.name,
+        contextLength: m.contextLength,
+        supportsTools: m.supportsTools,
+        supportsVision: m.supportsVision,
+        capabilities: [
+          m.supportsTools ? "tools" : null,
+          m.supportsVision ? "vision" : null,
+          m.supportsStreaming ? "streaming" : null,
+          m.supportsReasoning ? "reasoning" : null,
+        ].filter((c): c is string => c !== null),
+        variants: meta?.variants,
+        family: meta?.family,
+        releaseDate: meta?.releaseDate,
+        adapter: meta?.adapter,
+      }
+    })
+  }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow])
+
   // Model refresh handler
   const handleTestConnection = useCallback(async () => {
     if (!selectedId) return
@@ -346,6 +384,7 @@ export function ProviderSettings() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <ProviderOnboardingBanner />
+      <ModelsDevSyncCard />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Desktop sidebar ──────────────────────────────────────────── */}
@@ -525,15 +564,7 @@ export function ProviderSettings() {
                 ) : selectedBuiltIn ? (
                   <ProviderModelsTab
                     providerId={selectedId}
-                    models={selectedBuiltIn.models.map((m) => ({
-                      ...m,
-                      capabilities: [
-                        m.supportsTools ? "tools" : null,
-                        m.supportsVision ? "vision" : null,
-                        m.supportsStreaming ? "streaming" : null,
-                        m.supportsReasoning ? "reasoning" : null,
-                      ].filter((c): c is string => c !== null),
-                    }))}
+                    models={enrichedBuiltInModels}
                     enabledModels={selectedSettings?.enabledModels ?? []}
                     onEnabledModelsChange={(ids) =>
                       void setProviderConfig(selectedId, { enabledModels: ids })

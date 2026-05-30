@@ -7,7 +7,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/components/settings/about-section", () => ({
+jest.mock("@/components/settings/about/about-section", () => ({
   AboutSection: () => <div data-testid="stub-about-section" />,
 }))
 

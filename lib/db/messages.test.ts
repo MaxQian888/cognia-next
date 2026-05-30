@@ -4,7 +4,13 @@
 
 import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
-import { clearMessages, listMessages, persistMessages, truncateAfter } from "./messages"
+import {
+  clearMessages,
+  listMessages,
+  persistMessages,
+  truncateAfter,
+  updateMessageMetadata,
+} from "./messages"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -120,6 +126,54 @@ describe("clearMessages", () => {
     await clearMessages("s1")
     expect(await listMessages("s1")).toHaveLength(0)
     expect(await listMessages("s2")).toHaveLength(1)
+  })
+})
+
+describe("updateMessageMetadata", () => {
+  it("merges a patch into one row's metadata without touching siblings", async () => {
+    await persistMessages("s1", [msg("a", "user", "hi", { foo: 1 }), msg("b", "assistant", "yo")])
+    await updateMessageMetadata("s1", "a", { minimapLabel: "Greeting" })
+    const stored = await getDb().messages.get("a")
+    expect(stored?.metadata).toEqual({ foo: 1, minimapLabel: "Greeting" })
+    // Sibling untouched.
+    expect(await getDb().messages.get("b")).toBeDefined()
+  })
+
+  it("does NOT delete a newer message that arrived after a stale snapshot", async () => {
+    // The persist-race scenario: a background task captured [a] then writes a
+    // label for it while turn [b] already landed. A whole-array persist would
+    // bulkDelete b; the targeted update must not.
+    await persistMessages("s1", [msg("a", "user", "first")])
+    await persistMessages("s1", [msg("a", "user", "first"), msg("b", "user", "second")])
+    await updateMessageMetadata("s1", "a", { minimapLabel: "L" })
+    const ids = (await listMessages("s1")).map((m) => m.id)
+    expect(ids).toEqual(["a", "b"])
+  })
+
+  it("ignores a message id from another session", async () => {
+    await persistMessages("s1", [msg("a", "user", "1")])
+    await persistMessages("s2", [msg("b", "user", "2")])
+    await updateMessageMetadata("s1", "b", { minimapLabel: "x" })
+    expect((await getDb().messages.get("b"))?.metadata).toBeUndefined()
+  })
+
+  it("strips derived routing keys from the patch", async () => {
+    await persistMessages("s1", [msg("a", "user", "1")])
+    await updateMessageMetadata("s1", "a", {
+      minimapLabel: "L",
+      senderId: "leak",
+      sessionId: "leak",
+    })
+    expect(
+      await getDb()
+        .messages.get("a")
+        .then((r) => r?.metadata)
+    ).toEqual({ minimapLabel: "L" })
+  })
+
+  it("is a no-op for an unknown message id", async () => {
+    await updateMessageMetadata("s1", "ghost", { minimapLabel: "x" })
+    expect(await getDb().messages.get("ghost")).toBeUndefined()
   })
 })
 

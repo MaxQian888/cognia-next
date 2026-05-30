@@ -201,12 +201,12 @@ describe("useSessions", () => {
     expect(closeSessionIpcMock).not.toHaveBeenCalled()
   })
 
-  it("rename forwards to updateSession", async () => {
+  it("rename forwards to updateSession and opts out of auto-title generation", async () => {
     const { result } = renderHook(() => useSessions())
     await act(async () => {
       await result.current.rename("s1", "Hi")
     })
-    expect(updateSessionMock).toHaveBeenCalledWith("s1", { title: "Hi" })
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", { title: "Hi", titleAuto: false })
   })
 
   it("bulkRemove tears down every session via IPC then deletes them in one Dexie tx", async () => {

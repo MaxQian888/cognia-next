@@ -20,7 +20,11 @@ import { getDb } from "@/lib/db/schema"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
+import { readTombstonesSince } from "./tombstones"
 import type { SyncDelta, SyncableTable } from "./types"
+
+/** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
+const MESSAGES_PAGE_SIZE = 500
 
 interface SyncPullRequestEvent {
   request_id: string
@@ -113,6 +117,8 @@ export async function readDexieDelta(
       return readAdapterInstancesDelta(since)
     case "settings":
       return readSettingsDelta(since)
+    case "conversationOverrides":
+      return readConversationOverridesDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -122,38 +128,37 @@ async function readCharactersDelta(since: number): Promise<SyncDelta<Character>>
   const rows = (await getDb().characters.where("updatedAt").above(since).toArray()).filter(
     (row) => !row.isBuiltIn
   )
-  return finalizeDelta(rows, since)
+  return finalizeDelta("characters", rows, since)
 }
 
 async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
   const all = await getDb().skills.toArray()
   const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
-  return finalizeDelta(rows, since)
+  return finalizeDelta("skills", rows, since)
 }
 
 async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>> {
   const rows = await getDb().sessions.where("updatedAt").above(since).toArray()
-  return finalizeDelta(rows, since)
+  return finalizeDelta("sessions", rows, since)
 }
 
 async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage>> {
-  // The `messages` table only indexes `[sessionId+createdAt]`, not
-  // `createdAt` alone — so we filter + sort in memory. The size cap of
-  // 200 means at most one full table scan per pull, which is fine on
-  // desktop hardware.  V2 may add a `createdAt` index if benchmarks
-  // suggest it.
-  const all = await getDb().messages.toArray()
-  const filtered = all.filter((row) => Number(row.createdAt ?? 0) > since)
-  filtered.sort((a, b) => Number(a.createdAt) - Number(b.createdAt))
-  // Take the last 200 (newest) but return in ascending order so the
-  // phone applies them in chronological sequence.
-  const head = filtered.length > 200 ? filtered.slice(filtered.length - 200) : filtered
-  return finalizeDelta(head, since)
+  // Page chat history by creation order via the v61 `[createdAt+id]` index
+  // (no more full-table scan, no global newest-200 cap). One pull returns
+  // up to MESSAGES_PAGE_SIZE rows past the cursor; the mobile handler keeps
+  // pulling while the cursor advances, so a long conversation's full history
+  // streams across several round-trips instead of being truncated.
+  const page = await getDb()
+    .messages.where("[createdAt+id]")
+    .above([since, ""])
+    .limit(MESSAGES_PAGE_SIZE)
+    .toArray()
+  return finalizeDelta("messages", page, since, page.length === MESSAGES_PAGE_SIZE)
 }
 
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
-  return finalizeDelta(rows as UpdatedAtRow[], since)
+  return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {
@@ -161,18 +166,26 @@ async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> 
   // updatedAt always sync once and then settle.
   const all = await getDb().twinProfile.toArray()
   const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
-  return finalizeDelta(rows as UpdatedAtRow[], since)
+  return finalizeDelta("twinProfile", rows as UpdatedAtRow[], since)
 }
 
 async function readPluginsDelta(since: number): Promise<SyncDelta<unknown>> {
   const all = await getDb().plugins.toArray()
   const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
-  return finalizeDelta(rows as UpdatedAtRow[], since)
+  return finalizeDelta("plugins", rows as UpdatedAtRow[], since)
 }
 
 async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().adapterInstances.where("updatedAt").above(since).toArray()
-  return finalizeDelta(rows as UpdatedAtRow[], since)
+  return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
+}
+
+async function readConversationOverridesDelta(since: number): Promise<SyncDelta<unknown>> {
+  // v49 table; carries an `updatedAt` index (schema `&id, &conversationKey,
+  // sessionId, pinned, archived, updatedAt`). Mobile mirrors pinned /
+  // archived / lastReadAt so the Inbox renders correct buckets offline.
+  const rows = await getDb().conversationOverrides.where("updatedAt").above(since).toArray()
+  return finalizeDelta("conversationOverrides", rows as unknown as UpdatedAtRow[], since)
 }
 
 /**
@@ -202,18 +215,30 @@ interface UpdatedAtRow {
   createdAt?: number
 }
 
-function finalizeDelta<T extends UpdatedAtRow>(rows: T[], since: number): SyncDelta<T> {
+async function finalizeDelta<T extends UpdatedAtRow>(
+  table: SyncableTable,
+  rows: T[],
+  since: number,
+  hasMore = false
+): Promise<SyncDelta<T>> {
+  // Fold in tombstones recorded since the cursor (v61). The phone applies
+  // `deleted_ids` via `bulkDelete`, so a desktop deletion finally reaches
+  // it. `deletedAt` shares the cursor space with `updatedAt` — both feed
+  // `next_since` so each upsert and each tombstone crosses the wire once.
+  const { ids: deletedIds, maxDeletedAt } = await readTombstonesSince(table, since)
+
   let highestCursor = since
   for (const row of rows) {
     const candidate = Number(row.updatedAt ?? row.createdAt ?? 0)
     if (candidate > highestCursor) highestCursor = candidate
   }
+  if (maxDeletedAt > highestCursor) highestCursor = maxDeletedAt
+
   return {
     rows,
-    // V1 doesn't track tombstones in Dexie — V2 will add a per-table
-    // `deletedAt` index so we can surface deletions across the wire.
-    deleted_ids: [],
+    deleted_ids: deletedIds,
     next_since: highestCursor,
+    has_more: hasMore,
   }
 }
 

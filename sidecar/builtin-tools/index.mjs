@@ -57,9 +57,15 @@ export const SERVER_VERSION = data.serverVersion
  *
  * @param {object} options
  * @param {{ fileExtras?: boolean, git?: boolean, process?: boolean, environment?: boolean, shellAdvanced?: boolean }} options.enabled
+ * @param {boolean} [options.alwaysLoad]
+ *        When true, every tool from this server is kept resident in the
+ *        prompt and never deferred behind tool search (claude-agent-sdk
+ *        `createSdkMcpServer({ alwaysLoad })`, equivalent to the API's
+ *        `defer_loading: false`). When false/omitted and the CLI's tool
+ *        search is active, this server's tools defer until discovered.
  * @returns {ReturnType<typeof createSdkMcpServer> | null}
  */
-export function buildCogniaToolsServer({ enabled }) {
+export function buildCogniaToolsServer({ enabled, alwaysLoad }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
@@ -72,6 +78,7 @@ export function buildCogniaToolsServer({ enabled }) {
     name: SERVER_NAME,
     version: SERVER_VERSION,
     tools,
+    ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }
 

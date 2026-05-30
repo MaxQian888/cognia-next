@@ -765,6 +765,47 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (allowed.size > 0) opts.allowedTools = [...allowed]
   if (character?.disallowedTools?.length) opts.disallowedTools = [...character.disallowedTools]
 
+  // --- Tool/MCP filter overlay (global → character → session; deny wins) ---
+  // Configurable allow/deny filter over the unified tool catalog
+  // (`lib/tools/tool-catalog.ts`), Codex / Hermes style. Later scopes REPLACE
+  // earlier ones (session beats character beats app). Applied AFTER the
+  // allow/deny union above so it narrows the already-granted set. Resolved
+  // here so the MCP-subset block below can read `toolFilter.mcpServerIds`.
+  const toolFilter = session?.toolFilter ?? character?.toolFilter ?? appSettings?.toolFilter
+  if (toolFilter && toolFilter.mode !== "all") {
+    const filterTools = new Set(toolFilter.tools ?? [])
+    if (filterTools.size > 0) {
+      if (toolFilter.mode === "allow") {
+        // Intersect the resolved allowlist with the filter. When no allowlist
+        // was set (≡ "all tools available"), the filter becomes the allowlist.
+        opts.allowedTools =
+          opts.allowedTools && opts.allowedTools.length > 0
+            ? opts.allowedTools.filter((t) => filterTools.has(t))
+            : [...filterTools]
+      } else {
+        // deny: union the filtered tools into disallowedTools (deny always wins).
+        const denied = new Set(opts.disallowedTools ?? [])
+        for (const t of filterTools) denied.add(t)
+        opts.disallowedTools = [...denied]
+      }
+    }
+  }
+
+  // --- Runtime tool-search (deferred loading) policy -----------------------
+  // claude-agent-sdk `alwaysLoad` semantics (Phase 0): when enabled, the
+  // bundled CLI defers MCP tools behind tool search and only the always-load
+  // set stays resident. The sidecar dispatcher consumes these fields.
+  const toolSearchRuntime = character?.toolSearchRuntimeOverride ?? appSettings?.toolSearchRuntime
+  if (toolSearchRuntime?.enabled) {
+    opts.toolSearchEnabled = true
+    if (toolSearchRuntime.alwaysLoadServers?.length) {
+      opts.alwaysLoadServers = [...toolSearchRuntime.alwaysLoadServers]
+    }
+    if (toolSearchRuntime.alwaysLoadTools?.length) {
+      opts.alwaysLoadTools = [...toolSearchRuntime.alwaysLoadTools]
+    }
+  }
+
   if (a2uiEnabled) {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${A2UI_SYSTEM_PROMPT}` : A2UI_SYSTEM_PROMPT
@@ -802,6 +843,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         const wanted = new Set(team.mcpServerIds)
         chosen = enabled.filter((srv) => wanted.has(srv.id))
       }
+    }
+
+    // Apply the configurable filter's MCP-server subset on top of the
+    // character/team/member resolution above (deny wins, allow intersects).
+    if (toolFilter && toolFilter.mode !== "all" && toolFilter.mcpServerIds?.length) {
+      const fset = new Set(toolFilter.mcpServerIds)
+      chosen =
+        toolFilter.mode === "allow"
+          ? chosen.filter((srv) => fset.has(srv.id))
+          : chosen.filter((srv) => !fset.has(srv.id))
     }
 
     if (chosen.length > 0) {

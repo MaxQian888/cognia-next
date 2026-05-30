@@ -14,6 +14,7 @@ import React, { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores"
+import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { getBuiltInProviderCatalogEntry } from "@/types/provider/built-in-provider-catalog"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -137,8 +138,10 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
 
   // Look up catalog entry for pricing
   const catalogEntry = useMemo(() => getBuiltInProviderCatalogEntry(providerId), [providerId])
+  const { row: modelsDevRow } = useModelsDevCatalog()
 
-  // Build a model pricing map: modelId → { promptPer1M, completionPer1M }
+  // Build a model pricing map: modelId → { promptPer1M, completionPer1M }. The
+  // static catalog wins; models.dev fills pricing for models it omits.
   const pricingMap = useMemo(() => {
     const map = new Map<string, { promptPer1M: number; completionPer1M: number }>()
     if (catalogEntry?.models) {
@@ -151,8 +154,22 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
         }
       }
     }
+    const devModels = modelsDevRow?.providers[providerId]?.models ?? []
+    for (const dev of devModels) {
+      if (map.has(dev.id)) continue
+      // `dev.pricing` is only set when models.dev declares real per-token rates
+      // (cache-only entries now map to undefined, not a coerced 0), and when set
+      // it always carries both prompt+completion — so this presence check is the
+      // correct gate AND narrows the Partial<ModelPricing> fields to `number`.
+      if (dev.pricing?.promptPer1M !== undefined && dev.pricing.completionPer1M !== undefined) {
+        map.set(dev.id, {
+          promptPer1M: dev.pricing.promptPer1M,
+          completionPer1M: dev.pricing.completionPer1M,
+        })
+      }
+    }
     return map
-  }, [catalogEntry])
+  }, [catalogEntry, modelsDevRow, providerId])
 
   // Compute per-model rows filtered by the selected period
   const rows: ModelRow[] = useMemo(() => {

@@ -1554,6 +1554,13 @@
       "webFetch": {
         "empty": "No content returned"
       }
+    },
+    "timeline": {
+      "title": "Timeline",
+      "expand": "Expand conversation timeline",
+      "collapse": "Collapse timeline",
+      "jumpTo": "Jump to: {label}",
+      "replyCount": "{count} replies"
     }
   },
   "discover": {
@@ -2301,7 +2308,8 @@
       "subscription": "Claude Subscription",
       "network": "Network Proxy",
       "workflows": "Workflows",
-      "goals": "Goals"
+      "goals": "Goals",
+      "conversation": "Conversation"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -2331,7 +2339,7 @@
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
       "diagnostics": "Crash logs, recent errors, and native logging diagnostics with export bundles.",
       "desktop": "Tauri-only window, autostart and tray behavior.",
-      "about": "Version, build info and credits.",
+      "about": "Version, build, diagnostics, updates and credits.",
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
       "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
       "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
@@ -2345,7 +2353,8 @@
       "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
-      "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in."
+      "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+      "conversation": "Auto titles and the conversation timeline minimap"
     },
     "externalBridge": {
       "wikiIndex": {
@@ -2769,6 +2778,50 @@
       "languageLabel": "Language",
       "reduceMotionLabel": "Reduce motion",
       "reduceMotionHint": "Disables non-essential animations and transitions.",
+      "layoutType": {
+        "font": {
+          "sectionLabel": "Font families",
+          "sansLabel": "Interface font",
+          "sansHint": "Used across the interface. Inherit keeps the cognia default.",
+          "monoLabel": "Monospace font",
+          "serifLabel": "Serif font",
+          "inherit": "Inherit (default)"
+        },
+        "fine": {
+          "sectionLabel": "Fine-tuning",
+          "lineHeight": "Line height",
+          "letterSpacing": "Letter spacing"
+        },
+        "density": {
+          "sectionLabel": "Density",
+          "globalLabel": "Global density",
+          "globalHint": "Controls spacing and component sizing across the app.",
+          "overrideLabel": "Per-surface overrides",
+          "overrideHint": "Optionally set a different density for specific surfaces.",
+          "inherit": "Inherit",
+          "compact": "Compact",
+          "comfortable": "Comfortable",
+          "spacious": "Spacious",
+          "surface": {
+            "chat": "Chat",
+            "table": "Tables",
+            "sidebar": "Sidebar"
+          }
+        },
+        "radius": {
+          "sectionLabel": "Corner radius",
+          "label": "Radius",
+          "hint": "Adjusts the roundness of cards, buttons, and inputs."
+        },
+        "motion": {
+          "sectionLabel": "Motion speed",
+          "speed": {
+            "slow": "Slow",
+            "normal": "Normal",
+            "fast": "Fast"
+          }
+        }
+      },
       "wallpaper": {
         "title": "Wallpaper",
         "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
@@ -3593,20 +3646,100 @@
     },
     "about": {
       "title": "About",
+      "description": "App version, build details, diagnostics, updates, and credits.",
       "versionLine": "version",
+      "iconAlt": "{name} app icon",
+      "tagline": "AI desktop companion for Claude Code",
+      "webBadge": "Web preview",
+      "channel": {
+        "stable": "Stable",
+        "rc": "Release candidate",
+        "beta": "Beta",
+        "alpha": "Alpha",
+        "dev": "Dev"
+      },
+      "versionCard": {
+        "title": "Version & build",
+        "version": "Version",
+        "build": "Build number",
+        "commit": "Commit",
+        "builtAt": "Built",
+        "showAdvanced": "Show runtime details",
+        "hideAdvanced": "Hide runtime details",
+        "tauri": "Tauri",
+        "react": "React",
+        "engine": "Web engine"
+      },
+      "system": {
+        "title": "System",
+        "os": "Operating system",
+        "arch": "Architecture",
+        "locale": "Locale",
+        "dataDir": "Data directory",
+        "unavailable": "Unavailable",
+        "copy": "Copy diagnostics",
+        "copySuccess": "Diagnostics copied to clipboard.",
+        "copyFailed": "Copy failed: {error}",
+        "reveal": "Open data folder",
+        "revealFailed": "Could not open the data folder: {error}"
+      },
+      "updates": {
+        "title": "Updates",
+        "checkUpdates": "Check for updates",
+        "checking": "Checking…",
+        "install": "Install {version}",
+        "updateAvailable": "Update {version} available",
+        "updateAvailableToast": "Update available: {version}",
+        "updateNoLongerAvailable": "Update no longer available.",
+        "updateCheckFailed": "Update check failed: {error}",
+        "updateInstallFailed": "Update install failed: {error}",
+        "alreadyLatest": "You're on the latest version.",
+        "desktopOnly": "Updates are delivered through the desktop app.",
+        "lastChecked": "Last checked"
+      },
+      "whatsNew": {
+        "title": "What's new",
+        "viewAll": "View all releases",
+        "highlights": {
+          "foundation": "Initial public foundation release",
+          "claudeCodeClient": "Full Claude Code desktop client with chat, agents, and workflows",
+          "crossPlatform": "One codebase across desktop (Tauri), web, and mobile (Capacitor)",
+          "pluginSystem": "Extensible plugin system with an in-app marketplace"
+        }
+      },
+      "resources": {
+        "title": "Resources",
+        "docs": {
+          "label": "Documentation",
+          "description": "Guides, references, and tutorials"
+        },
+        "repo": {
+          "label": "Source code",
+          "description": "Browse the project on GitHub"
+        },
+        "issues": {
+          "label": "Report an issue",
+          "description": "File a bug or request a feature"
+        },
+        "releases": {
+          "label": "Releases",
+          "description": "Version history and downloads"
+        },
+        "community": {
+          "label": "Community",
+          "description": "Ask questions and share ideas"
+        }
+      },
+      "legal": {
+        "title": "Legal & credits",
+        "copyright": "© {year} {holder}. All rights reserved.",
+        "license": "License",
+        "viewLicense": "View license",
+        "privacy": "Privacy",
+        "viewPrivacy": "Privacy policy",
+        "acknowledgements": "Built with open source"
+      },
       "versionUnknown": "—",
-      "webPreview": " (web preview)",
-      "runningOn": "Running on",
-      "checkUpdates": "Check for updates",
-      "checking": "Checking…",
-      "install": "Install {version}",
-      "updateAvailable": "Update {version} available",
-      "updateAvailableToast": "Update available: {version}",
-      "updateNoLongerAvailable": "Update no longer available.",
-      "updateCheckFailed": "Update check failed: {error}",
-      "updateInstallFailed": "Update install failed: {error}",
-      "alreadyLatest": "You're on the latest version.",
-      "desktopOnly": "Updates are only available in the desktop build.",
       "metadataLoadFailed": "Failed to load app metadata."
     },
     "apiKey": {
@@ -5775,6 +5908,36 @@
         "allowedListLabel": "Allowed skill IDs",
         "requireHitlForWritesLabel": "Require confirm card for write actions"
       }
+    },
+    "conversation": {
+      "title": "Conversation",
+      "description": "Auto-generate titles and configure the timeline minimap.",
+      "autoTitle": {
+        "heading": "Auto-generate titles",
+        "description": "After the first reply, name the chat with a model.",
+        "label": "Generate conversation titles"
+      },
+      "titleModel": {
+        "heading": "Title model",
+        "description": "Background model used to generate titles. Defaults to the chat model."
+      },
+      "timeline": {
+        "heading": "Conversation timeline",
+        "description": "Show a timeline minimap on the right of long chats.",
+        "label": "Show conversation timeline"
+      },
+      "labelSummary": {
+        "heading": "Polish timeline labels",
+        "description": "Use a model to summarize each turn into a short label (one call per turn).",
+        "label": "Generate timeline labels"
+      },
+      "labelModel": {
+        "heading": "Label model",
+        "description": "Background model used for timeline labels."
+      },
+      "provider": "Provider",
+      "model": "Model",
+      "useDefault": "Use chat default"
     }
   },
   "presets": {
@@ -5822,7 +5985,9 @@
       "favorites": "Favorites",
       "recent": "Recently used",
       "builtIn": "Built-in",
-      "custom": "Custom"
+      "custom": "Custom",
+      "hasMcp": "Has MCP",
+      "hasSkills": "Has Skills"
     },
     "category": {
       "general": "General",
@@ -10846,7 +11011,43 @@
       "terminalReplKill": "Signal-terminate a REPL session. Idempotent."
     }
   },
+  "toolCatalog": {
+    "title": "Tool search & filtering",
+    "description": "Search every available tool and MCP server, then build an allow- or deny-list that narrows what agents can use. Applies on top of per-character and per-session settings; deny always wins.",
+    "modeLabel": "Filter mode",
+    "mode_all": "No filtering",
+    "mode_allow": "Allow only selected",
+    "mode_deny": "Deny selected",
+    "selectedCount": "{count} selected",
+    "searchPlaceholder": "Search by name, description, or server…",
+    "sourceLabel": "Source",
+    "sourceAll": "All sources",
+    "source_builtin": "Built-in",
+    "source_mcp": "MCP",
+    "source_plugin": "Plugin",
+    "source_native-anthropic": "Native",
+    "riskLabel": "Risk",
+    "riskAll": "All risk",
+    "risk_low": "Low",
+    "risk_medium": "Medium",
+    "risk_high": "High",
+    "loading": "Loading tool catalog…",
+    "noResults": "No tools match your search.",
+    "disabled": "Disabled",
+    "toggleTool": "Toggle {tool} in the filter"
+  },
   "providers": {
+    "modelsDev": {
+      "title": "models.dev catalog",
+      "summary": "{providers} providers · {models} models",
+      "lastSynced": "Last synced: {time}",
+      "never": "never",
+      "sourceRemote": "Live",
+      "sourceBundled": "Bundled",
+      "sync": "Sync from models.dev",
+      "syncing": "Syncing…",
+      "syncError": "Failed to sync from models.dev: {message}"
+    },
     "title": "AI Providers",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter your API key",

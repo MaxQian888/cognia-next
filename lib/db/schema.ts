@@ -16,6 +16,7 @@ import type {
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
 import type { SandboxConnectionRow } from "./sandbox-connections"
+import type { NormalizedModelsDevProvider } from "@/lib/ai/providers/models-dev"
 import type {
   CanvasDocumentRow,
   CanvasVersionRow,
@@ -64,7 +65,7 @@ import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
 import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
-import type { SyncCursorRow } from "@/lib/sync/types"
+import type { SyncCursorRow, SyncTombstoneRow, SyncableTable } from "@/lib/sync/types"
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
@@ -1572,6 +1573,30 @@ export class CogniaDB extends Dexie {
     this.version(59).stores({
       pluginMarketplaceSources: "&id, repoRef, addedAt",
     })
+
+    // v60 — models.dev provider/model catalog cache. Single "singleton" row
+    // holding the normalized catalog (keyed by our provider ids) + fetch
+    // timestamp. Bundled snapshot seeds it on first run; runtime sync refreshes
+    // it. See `lib/db/models-dev-catalog.ts` + `lib/ai/providers/models-dev-sync.ts`.
+    this.version(60).stores({
+      modelsDevCatalog: "&id, fetchedAt",
+    })
+
+    // v61 — Companion sync completeness pass (chat / workflow / settings).
+    //   1. `syncTombstones` — new table recording desktop deletions so the
+    //      `sync_pull` delta can carry `deleted_ids` (V1 always sent `[]`,
+    //      leaving deleted rows orphaned on paired phones). Compound PK
+    //      `[table+id]`; `table` + `deletedAt` indexed for per-table reads
+    //      and the boot-time retention prune (`lib/sync/tombstones.ts`).
+    //   2. `messages` gains a `[createdAt+id]` compound index so the desktop
+    //      sync source can page chat history by creation order instead of
+    //      scanning the whole table and capping at the newest 200 (see
+    //      `desktop-sync-source.ts:readMessagesDelta`). Pure index addition
+    //      on existing rows — no upgrade hook needed.
+    this.version(61).stores({
+      syncTombstones: "[table+id], table, deletedAt",
+      messages: "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1580,12 +1605,32 @@ export class CogniaDB extends Dexie {
   vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
   syncCursors!: Table<SyncCursorRow, string>
+  // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
+  syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
   inboxTelemetryEvents!: Table<InboxTelemetryEventRow, string>
   // v57 — Computer-Use sandbox connections. See `lib/db/sandbox-connections.ts`.
   sandboxConnections!: Table<SandboxConnectionRow, string>
   // v59 — GitHub marketplace-repo sources. See `lib/db/plugin-marketplace-sources.ts`.
   pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
+  // v60 — models.dev catalog cache (singleton). See `lib/db/models-dev-catalog.ts`.
+  modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
+}
+
+/**
+ * Cached models.dev catalog (Dexie v60). A single "singleton" row holding the
+ * normalized catalog keyed by our internal provider ids. `source` records
+ * whether the data came from the live API or the bundled offline snapshot.
+ */
+export interface ModelsDevCatalogRow {
+  /** Always `"singleton"`. */
+  id: string
+  /** Epoch milliseconds when this snapshot was written. */
+  fetchedAt: number
+  /** Where the data came from. */
+  source: "remote" | "bundled"
+  /** Normalized catalog, keyed by our internal provider id. */
+  providers: Record<string, NormalizedModelsDevProvider>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */

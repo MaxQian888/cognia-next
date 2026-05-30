@@ -3,6 +3,7 @@ import { getDb } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -160,11 +161,24 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
 
 export async function deleteSession(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.sessions, db.messages, db.sessionUsage, async () => {
-    await db.messages.where("sessionId").equals(id).delete()
-    await db.sessionUsage.where("sessionId").equals(id).delete()
-    await db.sessions.delete(id)
-  })
+  await db.transaction(
+    "rw",
+    db.sessions,
+    db.messages,
+    db.sessionUsage,
+    db.syncTombstones,
+    async () => {
+      // Capture message ids before the cascade so we can tombstone each one —
+      // the companion sync mirrors these deletions to paired phones (v61).
+      const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
+      await db.messages.where("sessionId").equals(id).delete()
+      await db.sessionUsage.where("sessionId").equals(id).delete()
+      await db.sessions.delete(id)
+      const at = Date.now()
+      await recordTombstones("sessions", [id], at)
+      await recordTombstones("messages", msgIds, at)
+    }
+  )
   invalidatePersistSnapshot(id)
 }
 
@@ -177,13 +191,24 @@ export async function deleteSession(id: string): Promise<void> {
 export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return
   const db = getDb()
-  await db.transaction("rw", db.sessions, db.messages, db.sessionUsage, async () => {
-    for (const id of ids) {
-      await db.messages.where("sessionId").equals(id).delete()
-      await db.sessionUsage.where("sessionId").equals(id).delete()
-      await db.sessions.delete(id)
+  await db.transaction(
+    "rw",
+    db.sessions,
+    db.messages,
+    db.sessionUsage,
+    db.syncTombstones,
+    async () => {
+      const at = Date.now()
+      for (const id of ids) {
+        const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
+        await db.messages.where("sessionId").equals(id).delete()
+        await db.sessionUsage.where("sessionId").equals(id).delete()
+        await db.sessions.delete(id)
+        await recordTombstones("sessions", [id], at)
+        await recordTombstones("messages", msgIds, at)
+      }
     }
-  })
+  )
   for (const id of ids) invalidatePersistSnapshot(id)
 }
 

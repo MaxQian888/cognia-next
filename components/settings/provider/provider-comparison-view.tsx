@@ -20,6 +20,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores"
+import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
+import { mergePricing } from "@/lib/ai/providers/model-discovery"
+import type { ModelsDevCatalogModel } from "@/lib/ai/providers/models-dev"
+import type { ModelPricing } from "@/types/provider/provider"
 import { getBuiltInProviderCatalog } from "@/types/provider/built-in-provider-catalog"
 import type {
   BuiltInProviderCatalogEntry,
@@ -75,6 +79,33 @@ function formatEstCost(entry: BuiltInProviderModelEntry): string {
   return `$${cost.toFixed(3)}`
 }
 
+/**
+ * Fill a static catalog model entry's missing model-level fields from the
+ * models.dev catalog (authoritative). Static values that already exist are kept.
+ */
+function enrichComparisonEntry(
+  entry: BuiltInProviderModelEntry,
+  dev?: ModelsDevCatalogModel
+): BuiltInProviderModelEntry {
+  if (!dev) return entry
+  return {
+    ...entry,
+    contextLength: entry.contextLength || dev.contextLength || 0,
+    maxOutputTokens: entry.maxOutputTokens ?? dev.maxOutputTokens,
+    supportsTools: entry.supportsTools || Boolean(dev.supportsTools),
+    supportsVision: entry.supportsVision || Boolean(dev.supportsVision),
+    supportsAudio: entry.supportsAudio || Boolean(dev.supportsAudio),
+    supportsVideo: entry.supportsVideo || Boolean(dev.supportsVideo),
+    supportsReasoning: entry.supportsReasoning || dev.supportsReasoning,
+    // Static catalog wins; models.dev fills missing pricing fields. Reuses the
+    // canonical field-level merge so all pricing keys (cache/batch/audio/
+    // currency) and the precedence stay consistent with model-discovery. The
+    // catalog model types pricing as Partial<ModelPricing>, but mapCost only
+    // emits it with both per-token rates present, so the widening is safe.
+    pricing: mergePricing(entry.pricing, dev.pricing as ModelPricing | undefined, false),
+  }
+}
+
 /* ── CapabilityCell ──────────────────────────────────────────────────────── */
 
 function CapabilityCell({ supported }: { supported: boolean }) {
@@ -101,6 +132,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
 
   const providerSettings = useSettingsStore((s) => s.providerSettings)
   const providerUsageStats = useSettingsStore((s) => s.providerUsageStats)
+  const { row: modelsDevRow } = useModelsDevCatalog()
 
   /* Build the list of available model options from all enabled providers */
   const availableModels = useMemo<ModelOption[]>(() => {
@@ -113,19 +145,22 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
       if (!isEnabled) continue
       if (!catalogEntry.models || catalogEntry.models.length === 0) continue
 
+      const devModels = modelsDevRow?.providers[catalogEntry.id]?.models ?? []
       for (const model of catalogEntry.models) {
+        const dev = devModels.find((d) => d.id === model.id)
         options.push({
           modelId: model.id,
           modelName: model.name,
           providerId: catalogEntry.id,
           providerName: catalogEntry.name,
-          entry: model,
+          // Fill missing model-level fields from models.dev (authoritative).
+          entry: enrichComparisonEntry(model, dev),
           catalogEntry,
         })
       }
     }
     return options
-  }, [providerSettings])
+  }, [providerSettings, modelsDevRow])
 
   /* Group available models by provider for the popover */
   const modelsByProvider = useMemo(() => {

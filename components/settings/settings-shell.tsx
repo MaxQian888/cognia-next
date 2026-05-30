@@ -72,7 +72,7 @@ const DesktopSection = dynamic(() => import("./desktop-section").then((m) => m.D
   ssr: false,
   loading: () => <SectionLoading />,
 })
-const AboutSection = dynamic(() => import("./about-section").then((m) => m.AboutSection), {
+const AboutSection = dynamic(() => import("./about/about-section").then((m) => m.AboutSection), {
   ssr: false,
   loading: () => <SectionLoading />,
 })
@@ -192,6 +192,10 @@ const GoalsSection = dynamic(() => import("./goals/goals-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const ConversationSection = dynamic(
+  () => import("./conversation/conversation-section").then((m) => m.ConversationSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -348,6 +352,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ArtifactsSection />
     case "canvas":
       return <CanvasSection />
+    case "conversation":
+      return <ConversationSection />
     case "mcp":
       return <McpServersSection />
     case "a2ui":

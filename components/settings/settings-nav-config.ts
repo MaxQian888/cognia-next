@@ -40,6 +40,7 @@ import {
   SmartphoneIcon,
   MousePointerClickIcon,
   TargetIcon,
+  MessagesSquareIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -69,6 +70,7 @@ export type SettingsSectionId =
   | "presets"
   | "artifacts"
   | "canvas"
+  | "conversation"
   | "mcp"
   | "a2ui"
   | "plugins"
@@ -314,6 +316,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "canvas",
     group: "interface",
     icon: PencilRulerIcon,
+  },
+  {
+    id: "conversation",
+    labelKey: "conversation",
+    descriptionKey: "conversation",
+    group: "interface",
+    icon: MessagesSquareIcon,
   },
 
   // === Data ===
@@ -635,6 +644,25 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "命令行",
     "终端",
     "外壳",
+  ],
+  conversation: [
+    "conversation",
+    "title",
+    "auto title",
+    "auto-generate title",
+    "session name",
+    "rename",
+    "timeline",
+    "minimap",
+    "navigation",
+    "jump",
+    "对话标题",
+    "自动标题",
+    "会话标题",
+    "时间线",
+    "缩略图",
+    "导航",
+    "跳转",
   ],
   canvas: [
     "canvas",

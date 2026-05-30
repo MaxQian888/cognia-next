@@ -22,6 +22,11 @@ import {
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import {
+  makeServerAlwaysLoad,
+  alwaysLoadToolSet,
+  stampUserServersAlwaysLoad,
+} from "./tool-search-policy.mjs"
 
 /**
  * @param {{
@@ -47,10 +52,31 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
 
+  // --- Runtime tool-search (deferred loading) policy -----------------------
+  // claude-agent-sdk `alwaysLoad` semantics: when tool search is enabled the
+  // bundled CLI defers MCP-server tools behind tool search, keeping only the
+  // `alwaysLoad` servers/tools resident. `resolveSendOptions` decides the
+  // policy from AppSettings/Character; here we apply it to every in-process
+  // server and to the user-configured `mcpServers` map.
+  //
+  // When tool search is OFF we mark *every* server `alwaysLoad` so all tools
+  // stay resident — reproducing the legacy behaviour even if the bundled CLI
+  // would otherwise auto-defer once deferred-tool tokens cross its ~10%
+  // context threshold. These are sidecar-protocol fields: they are NOT in the
+  // `options` allowlist below, so they never reach `query()` verbatim. See
+  // `./tool-search-policy.mjs` for the (unit-tested) decision logic.
+  const serverAlwaysLoad = makeServerAlwaysLoad(sendOptions)
+  const alwaysLoadToolNames = alwaysLoadToolSet(sendOptions)
+
   // Built-in cognia-tools MCP server (category-toggled).
   const builtinEnabled = sendOptions.builtinTools
-  const builtinServer = buildCogniaToolsServer({ enabled: builtinEnabled })
-  const baseUserServers = sendOptions.mcpServers ?? {}
+  const builtinServer = buildCogniaToolsServer({
+    enabled: builtinEnabled,
+    alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
+  })
+  // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
+  // policy (the map is keyed by server name, matching alwaysLoadServers).
+  const baseUserServers = stampUserServersAlwaysLoad(sendOptions.mcpServers, serverAlwaysLoad)
   const withBuiltins = builtinServer
     ? Object.prototype.hasOwnProperty.call(baseUserServers, BUILTIN_SERVER_NAME)
       ? (() => {
@@ -63,8 +89,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       : { ...baseUserServers, [BUILTIN_SERVER_NAME]: builtinServer }
     : { ...baseUserServers }
 
-  // A2UI bridge: always-on in-process MCP server.
-  const a2uiServer = buildA2UIBridgeServer({ sessionId, emit })
+  // A2UI bridge: always-on in-process MCP server. Interactive surfaces must
+  // never be deferred behind tool search, so this server is always-load
+  // regardless of the runtime policy (the builder defaults alwaysLoad=true).
+  const a2uiServer = buildA2UIBridgeServer({ sessionId, emit, alwaysLoad: true })
   const withA2UI = Object.prototype.hasOwnProperty.call(withBuiltins, A2UI_SERVER_NAME)
     ? (() => {
         log(
@@ -87,6 +115,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       emit,
       sessionId,
       pendingPluginToolCalls,
+      alwaysLoad: serverAlwaysLoad(PLUGIN_TOOLS_SERVER_NAME),
+      alwaysLoadToolNames,
     })
     if (pluginToolsServer) {
       mergedMcpServers = Object.prototype.hasOwnProperty.call(withA2UI, PLUGIN_TOOLS_SERVER_NAME)

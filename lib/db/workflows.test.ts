@@ -161,6 +161,15 @@ describe("deleteWorkflow", () => {
     expect(await getWorkflow(wf.id)).toBeUndefined()
   })
 
+  it("records a tombstone so the deletion mirrors to phones (v61)", async () => {
+    const wf = await createWorkflow({ name: "A" })
+    await deleteWorkflow(wf.id)
+    const ids = (await getDb().syncTombstones.where("table").equals("workflows").toArray()).map(
+      (t) => t.id
+    )
+    expect(ids).toEqual([wf.id])
+  })
+
   it("rejects deletion of built-ins", async () => {
     const wf = await createWorkflow({ name: "Built-in source" })
     await seedBuiltInWorkflows([{ ...wf, id: "wf_builtin_x" }])

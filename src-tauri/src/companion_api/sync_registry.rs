@@ -69,7 +69,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "characters".to_string(),
             description: "AI characters (read-only mirror; mobile creates/edits via mutating RPC)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "skills".to_string(),
@@ -78,18 +78,18 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         },
         SyncTableDescriptor {
             name: "sessions".to_string(),
-            description: "Chat sessions (newest 200 by updatedAt)".to_string(),
-            has_tombstones: false,
+            description: "Chat sessions (incremental by updatedAt; deletions via tombstones)".to_string(),
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "messages".to_string(),
-            description: "Stored chat messages (newest 200 by createdAt)".to_string(),
-            has_tombstones: false,
+            description: "Stored chat messages (paged by createdAt; deletions via tombstones)".to_string(),
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "workflows".to_string(),
-            description: "Visual workflow definitions (read-only viewer on mobile)".to_string(),
-            has_tombstones: false,
+            description: "Visual workflow definitions (read-only viewer on mobile; deletions via tombstones)".to_string(),
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "twinProfile".to_string(),

@@ -1,33 +1,76 @@
 import type { Table } from "dexie"
 
-import type { AppSettings } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
+import type { AppSettings } from "@/lib/claude/types"
 
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"
 
 /**
- * Pull the desktop `AppSettings` singleton.
+ * Settings fields that are safe to mirror from the desktop onto a phone.
  *
- * The settings table is keyed by literal `"singleton"`, so the server emits
- * at most one row per delta. The Dexie put is idempotent — repeated pulls
- * with the same `since` cursor are a no-op.
- *
- * Note that mobile reads only the fields it understands (theme, language,
- * fontScale, defaultModel, etc.). Per-platform-only fields stored on the
- * desktop are merged forward by `lib/db/settings.ts:getSettings()` when
- * the row is read.
+ * The singleton `AppSettings` row mixes portable preferences (theme,
+ * language, model defaults) with desktop-only / device-local state
+ * (filesystem `defaultWorkingDir`, `networkProxy`, `apiKey`, wallpapers,
+ * imported VSCode themes, OCR provider config, …). A blind whole-row
+ * `bulkPut` would clobber the phone's own device-local fields with the
+ * desktop's. We instead merge only this allowlist over the phone's current
+ * row, leaving everything else the phone set locally untouched.
+ */
+export const CROSS_PLATFORM_SETTING_KEYS = [
+  "theme",
+  "language",
+  "fontScale",
+  "density",
+  "radius",
+  "motion",
+  "typographyExt",
+  "a11y",
+  "autoMode",
+  "defaultModel",
+  "defaultSystemPrompt",
+  "defaultMaxThinkingTokens",
+  "permissionMode",
+  "bareMode",
+  "debugMode",
+  "briefMode",
+  "conversationTitle",
+  "conversationTimeline",
+] as const satisfies readonly (keyof AppSettings)[]
+
+/**
+ * Merge the allowlisted cross-platform fields from the desktop's settings
+ * row onto the phone's local singleton, preserving the phone's device-local
+ * fields. `rows` is the singleton delta (0 or 1 row) from `sync_pull`.
+ */
+async function applySettingsRows(rows: AppSettings[]): Promise<void> {
+  const incoming = rows[0]
+  if (!incoming) return
+  const db = getDb()
+  const current = (await db.settings.get("singleton")) ?? { id: "singleton" as const }
+  const merged: Record<string, unknown> = { ...current, id: "singleton" }
+  for (const key of CROSS_PLATFORM_SETTING_KEYS) {
+    if (incoming[key] !== undefined) merged[key] = incoming[key]
+  }
+  await db.settings.put(merged as unknown as AppSettings)
+}
+
+/**
+ * Sync the singleton AppSettings row. The desktop emits the row whenever
+ * the caller's cursor predates the row's `updatedAt` (or on the first pull
+ * when `since === 0`). Only the cross-platform subset is applied — see
+ * {@link CROSS_PLATFORM_SETTING_KEYS} — so the phone keeps its own
+ * device-local preferences.
  */
 export function syncAppSettings(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
   return runSyncHandler<AppSettings>(
     {
       table: "settings",
-      // The settings table is declared as `Table<AppSettings, "singleton">`
-      // (literal key type) but `runSyncHandler` expects `Table<TRow, string>`.
-      // "singleton" is a string-literal subtype, so the value is compatible
-      // at runtime; cast to widen the Dexie type so TypeScript accepts it.
+      // `settings` is typed `Table<AppSettings, "singleton">`; widen the key
+      // type so it satisfies `runSyncHandler`'s `Table<TRow, string>`.
       getTable: () => getDb().settings as unknown as Table<AppSettings, string>,
+      applyRows: applySettingsRows,
     },
     transport,
     cursor

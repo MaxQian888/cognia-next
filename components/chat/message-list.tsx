@@ -21,6 +21,8 @@ import { MessageRenderer } from "./message-renderer"
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
@@ -38,6 +40,11 @@ import { PerfBoundary } from "@/lib/perf"
 // overwhelming majority of sessions while keeping flow-render cost bounded;
 // longer histories still take the virtualized path.
 export const VIRTUALIZE_THRESHOLD = 40
+
+// Below this many messages the conversation is short enough to scan by
+// scrolling, so the right-edge timeline minimap stays unmounted. Wide-screen /
+// desktop gating happens in the component (it's `hidden lg:flex`).
+export const TIMELINE_THRESHOLD = 20
 
 interface Props {
   messages: UIMessage[]
@@ -65,6 +72,10 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   // stable hook only rebuilds when the id-set actually changes.
   const charactersList = useCharacters()
   const characterById = useStableCharacterById(charactersList)
+
+  // Right-edge conversation-timeline minimap: long conversations only,
+  // desktop only, and not disabled in settings.
+  const timelineEnabled = useSettingsStore((s) => s.settings?.conversationTimeline?.enabled)
 
   const handleExport = useCallback(() => {
     if (messages.length === 0) {
@@ -243,22 +254,51 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
           </div>
         )}
 
-        <div
-          ref={scrollParentRef}
-          className="relative flex-1 overflow-y-auto"
-          role="log"
-          onScroll={handleScroll}
-        >
-          {virtualize ? (
-            <div style={{ height: totalSize, position: "relative" }}>
-              {virtualItems.map((virtualItem) => {
-                const isThinkingRow = virtualItem.index === messages.length
-                if (isThinkingRow) {
+        <div className="relative flex flex-1 overflow-hidden">
+          <div
+            ref={scrollParentRef}
+            className="relative flex-1 overflow-y-auto"
+            role="log"
+            onScroll={handleScroll}
+          >
+            {virtualize ? (
+              <div style={{ height: totalSize, position: "relative" }}>
+                {virtualItems.map((virtualItem) => {
+                  const isThinkingRow = virtualItem.index === messages.length
+                  if (isThinkingRow) {
+                    return (
+                      <div
+                        key="thinking"
+                        data-index={virtualItem.index}
+                        ref={rowVirtualizer.measureElement}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualItem.start}px)`,
+                          padding: "0 1rem",
+                        }}
+                      >
+                        <Shimmer as="p" className="px-1 py-2 text-sm">
+                          {t("thinking")}
+                        </Shimmer>
+                      </div>
+                    )
+                  }
+
+                  const m = messages[virtualItem.index]!
+                  const isStreaming =
+                    virtualItem.index === lastIndex &&
+                    m.role === "assistant" &&
+                    (status === "streaming" || status === "awaiting_approval")
+                  const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
+
                   return (
                     <div
-                      key="thinking"
+                      key={m.id}
                       data-index={virtualItem.index}
-                      ref={rowVirtualizer.measureElement}
+                      ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -268,75 +308,56 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
                         padding: "0 1rem",
                       }}
                     >
-                      <Shimmer as="p" className="px-1 py-2 text-sm">
-                        {t("thinking")}
-                      </Shimmer>
+                      {renderRow(m, isStreaming)}
                     </div>
                   )
-                }
-
-                const m = messages[virtualItem.index]!
-                const isStreaming =
-                  virtualItem.index === lastIndex &&
-                  m.role === "assistant" &&
-                  (status === "streaming" || status === "awaiting_approval")
-                const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
-
-                return (
-                  <div
-                    key={m.id}
-                    data-index={virtualItem.index}
-                    ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${virtualItem.start}px)`,
-                      padding: "0 1rem",
-                    }}
-                  >
-                    {renderRow(m, isStreaming)}
+                })}
+              </div>
+            ) : (
+              // Document-flow path for short lists: intrinsic heights, no
+              // absolute positioning, no measureElement ref (zero ResizeObservers),
+              // no remount-on-scroll.
+              <div>
+                {messages.map((m, index) => {
+                  const isStreaming =
+                    index === lastIndex &&
+                    m.role === "assistant" &&
+                    (status === "streaming" || status === "awaiting_approval")
+                  return (
+                    <div key={m.id} data-msg-id={m.id} style={{ padding: "0 1rem" }}>
+                      {renderRow(m, isStreaming)}
+                    </div>
+                  )
+                })}
+                {showThinking && (
+                  <div key="thinking" style={{ padding: "0 1rem" }}>
+                    <Shimmer as="p" className="px-1 py-2 text-sm">
+                      {t("thinking")}
+                    </Shimmer>
                   </div>
-                )
-              })}
-            </div>
-          ) : (
-            // Document-flow path for short lists: intrinsic heights, no
-            // absolute positioning, no measureElement ref (zero ResizeObservers),
-            // no remount-on-scroll.
-            <div>
-              {messages.map((m, index) => {
-                const isStreaming =
-                  index === lastIndex &&
-                  m.role === "assistant" &&
-                  (status === "streaming" || status === "awaiting_approval")
-                return (
-                  <div key={m.id} style={{ padding: "0 1rem" }}>
-                    {renderRow(m, isStreaming)}
-                  </div>
-                )
-              })}
-              {showThinking && (
-                <div key="thinking" style={{ padding: "0 1rem" }}>
-                  <Shimmer as="p" className="px-1 py-2 text-sm">
-                    {t("thinking")}
-                  </Shimmer>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {!isAtBottom && (
-            <Button
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
-              onClick={scrollToBottom}
-              size="icon"
-              type="button"
-              variant="outline"
-            >
-              <ArrowDownIcon className="size-4" />
-            </Button>
+            {!isAtBottom && (
+              <Button
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
+                onClick={scrollToBottom}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <ArrowDownIcon className="size-4" />
+              </Button>
+            )}
+          </div>
+          {!isMobile && timelineEnabled !== false && messages.length > TIMELINE_THRESHOLD && (
+            <ConversationTimeline
+              messages={messages}
+              scrollRef={scrollParentRef}
+              virtualizer={rowVirtualizer}
+              virtualize={virtualize}
+            />
           )}
         </div>
 
