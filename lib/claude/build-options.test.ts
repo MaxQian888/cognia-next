@@ -71,6 +71,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
+import type { Project } from "@/types"
 
 const mGetCharacter = resolveCharacterById as jest.Mock
 const mListCharsByIds = listCharactersByIds as jest.Mock
@@ -652,6 +653,60 @@ describe("resolveSendOptions — cwd / permissionMode", () => {
 
     const opts4 = await resolveSendOptions({})
     expect(opts4.permissionMode).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — activeProject (workspace)", () => {
+  it("activeProject.rootDir sits between session override and character default", async () => {
+    // session override wins over workspace
+    const opts1 = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/sess-dir" }),
+      activeProject: { rootDir: "/ws-dir" } as Project,
+      character: makeChar({ workingDir: "/char-dir" }),
+    })
+    expect(opts1.cwd).toBe("/sess-dir")
+
+    // workspace wins over character + app when no session override
+    const opts2 = await resolveSendOptions({
+      activeProject: { rootDir: "/ws-dir" } as Project,
+      character: makeChar({ workingDir: "/char-dir" }),
+      appSettings: { defaultWorkingDir: "/app-dir" } as AppSettings,
+    })
+    expect(opts2.cwd).toBe("/ws-dir")
+
+    // falls through to character when the workspace has no rootDir
+    const opts3 = await resolveSendOptions({
+      activeProject: { additionalDirs: ["/extra"] } as Project,
+      character: makeChar({ workingDir: "/char-dir" }),
+    })
+    expect(opts3.cwd).toBe("/char-dir")
+  })
+
+  it("unions activeProject.additionalDirs with referencedPaths and dedupes", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: { rootDir: "/ws", additionalDirs: ["/extra/a", "/extra/b"] } as Project,
+      referencedPaths: [
+        { absolute: "/extra/a", isDir: true }, // dup of an additionalDir
+        { absolute: "/Users/me/folder/file.ts", isDir: false },
+      ],
+    })
+    expect(opts.additionalDirectories?.sort()).toEqual(
+      ["/extra/a", "/extra/b", "/Users/me/folder"].sort()
+    )
+  })
+
+  it("adds additionalDirs even when there are no referencedPaths", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: { additionalDirs: ["/only/extra"] } as Project,
+    })
+    expect(opts.additionalDirectories).toEqual(["/only/extra"])
+  })
+
+  it("ignores empty/nullish additionalDirs entries", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: { additionalDirs: ["", "/good"] } as Project,
+    })
+    expect(opts.additionalDirectories).toEqual(["/good"])
   })
 })
 

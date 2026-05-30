@@ -25,6 +25,17 @@ export interface BranchIndicator {
   busy: boolean
 }
 
+// The last workspace root we auto-bound the repo to. Module-scoped (NOT a
+// per-mount ref) so it survives a remount of this always-mounted hook — a
+// remount must not re-seed the guard to `null` and snap an ad-hoc git-panel
+// rebind back to the workspace root. Reset between tests via `__resetBinding`.
+let lastBoundProjectRoot: string | null = null
+
+/** Test-only: reset the module-scoped workspace-follow guard. */
+export function __resetGitIndicatorBinding(): void {
+  lastBoundProjectRoot = null
+}
+
 export function useGitBranchIndicator(): BranchIndicator {
   const available = isTauri()
   const rootDir = useGitStore((s) => s.rootDir)
@@ -39,11 +50,19 @@ export function useGitBranchIndicator(): BranchIndicator {
     return project?.rootDir ?? null
   })
 
-  // Seed the binding from the active project when nothing is bound yet.
+  // Follow the active workspace: bind the repo to its `rootDir` on first sight
+  // and re-bind whenever the user switches workspaces. We track the last
+  // workspace root we bound (not `rootDir`) so a manual git-panel rebind to an
+  // ad-hoc repo isn't snapped back — only an actual workspace switch re-binds.
+  // An empty workspace root leaves the current binding untouched. The tracker
+  // is module-scoped so a remount can't reset it and trigger a spurious rebind.
   useEffect(() => {
     if (!available) return
-    if (!rootDir && activeProjectRoot) setRootDir(activeProjectRoot)
-  }, [available, rootDir, activeProjectRoot, setRootDir])
+    if (activeProjectRoot && activeProjectRoot !== lastBoundProjectRoot) {
+      lastBoundProjectRoot = activeProjectRoot
+      setRootDir(activeProjectRoot)
+    }
+  }, [available, activeProjectRoot, setRootDir])
 
   // Own the watcher + subscription for the bound repo.
   useEffect(() => {

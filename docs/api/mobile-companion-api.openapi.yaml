@@ -104,6 +104,32 @@ tags:
     description: External-bridge MCP server status + remote MCP probing.
   - name: rpc-sync
     description: Server → client incremental sync (table delta pull).
+  # Previously used by operations but never declared — declared here for hygiene.
+  - name: rpc-messages
+    description: Desktop message/session store reads + mutations.
+  - name: rpc-push
+    description: FCM / APNs push-token registration.
+  - name: rpc-data
+    description: Wave 2 desktop-write bridge (character / skill / plugin / settings).
+  - name: rpc-remote-control
+    description: Remote session control — attach/detach, goal steering, consent.
+  # Wave 4.1 — full desktop-surface exposure.
+  - name: rpc-git
+    description: Git porcelain over a repo path (ADR-0038). Writes are control-gated.
+  - name: rpc-files
+    description: Filesystem reads/writes — raw absolute paths + sandboxed workspace variants.
+  - name: rpc-terminal
+    description: Terminal session listing/kill + one-shot command execution.
+  - name: rpc-plugin
+    description: Plugin install / uninstall / list + plugin backup.
+  - name: rpc-workflow-crud
+    description: Workflow definition CRUD, schedule pause/resume, run listing + cancel.
+  - name: rpc-twin
+    description: Digital Twin delete + source CRUD + ingest-job control.
+  - name: rpc-backup
+    description: App-data backup export / import.
+  - name: rpc-settings
+    description: User-facing settings + per-conversation overrides.
   - name: events
     description: WebSocket bridge for live Tauri events (chat messages, run state, …).
 
@@ -863,93 +889,6 @@ paths:
   # rpc — subscription / OAuth
   # ─────────────────────────────────────────────────────────────────────────
 
-  /api/v1/_rpc/claude_sub_save_token:
-    post:
-      operationId: rpcClaudeSubSaveToken
-      tags: [rpc-subscription]
-      summary: Persist a Claude OAuth credential to the OS keyring.
-      description: |
-        Writes the credential to keyring service `com.cognia.claude-subscription/v1`,
-        account `default`. Empty `accessToken` is rejected. Replaces any existing entry.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [payload]
-              properties:
-                payload: { $ref: "#/components/schemas/SubscriptionCredential" }
-      responses:
-        "200": { description: Saved., content: { application/json: { schema: { type: "null" } } } }
-        "400":
-          {
-            description: empty access_token or malformed payload,
-            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
-          }
-        "401": { $ref: "#/components/responses/JwtRejected" }
-        "500":
-          {
-            description: keyring write failed,
-            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
-          }
-
-  /api/v1/_rpc/claude_sub_load_token:
-    post:
-      operationId: rpcClaudeSubLoadToken
-      tags: [rpc-subscription]
-      summary: Read the persisted OAuth credential.
-      description: Read-only — skips the idempotency cache.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object }
-            examples: { empty: { value: {} } }
-      responses:
-        "200":
-          description: |
-            The persisted credential, or `null` when nothing is stored.
-            JSON-parse failures return 500 (corrupted credential).
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - { $ref: "#/components/schemas/SubscriptionCredential" }
-                  - type: "null"
-        "401": { $ref: "#/components/responses/JwtRejected" }
-        "500":
-          {
-            description: keyring or parse failure,
-            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
-          }
-
-  /api/v1/_rpc/claude_sub_clear_token:
-    post:
-      operationId: rpcClaudeSubClearToken
-      tags: [rpc-subscription]
-      summary: Delete the persisted OAuth credential. No-op when nothing stored.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
-      responses:
-        "200":
-          {
-            description: Cleared (or already absent).,
-            content: { application/json: { schema: { type: "null" } } },
-          }
-        "401": { $ref: "#/components/responses/JwtRejected" }
-        "500":
-          {
-            description: keyring delete failed,
-            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
-          }
-
   /api/v1/_rpc/claude_set_oauth_bearer:
     post:
       operationId: rpcClaudeSetOauthBearer
@@ -1503,6 +1442,770 @@ paths:
           description: Renderer reported an error or did not reply within the timeout.
           content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } }
 
+  /api/v1/_rpc/sync_list_tables:
+    post:
+      operationId: rpcSyncListTables
+      tags: [rpc-sync]
+      summary: List every Dexie table the phone is allowed to mirror.
+      description: Read-only — skips the idempotency cache. Surfaces plugin-added tables without a release.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: Registered syncable tables.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tables]
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+                        hasTombstones: { type: boolean }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — messages & sessions (mobile completeness P2)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/session_list:
+    post:
+      operationId: rpcSessionList
+      tags: [rpc-messages]
+      summary: Paginated list of the desktop's chat sessions, newest first.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [limit, offset]
+              properties:
+                limit: { type: integer, minimum: 0 }
+                offset: { type: integer, minimum: 0 }
+                before:
+                  { type: integer, description: "Optional ms-epoch upper bound (updatedAt <)." }
+            examples:
+              firstPage: { value: { limit: 50, offset: 0 } }
+      responses:
+        "200":
+          description: A page of sessions. `next_offset` is set when more rows remain.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, total]
+                properties:
+                  rows: { type: array, items: { type: object, additionalProperties: true } }
+                  total: { type: integer }
+                  next_offset: { type: integer }
+        "400":
+          {
+            description: missing limit/offset,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/message_get_by_session:
+    post:
+      operationId: rpcMessageGetBySession
+      tags: [rpc-messages]
+      summary: Paginated read of a session's messages.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+                limit: { type: integer, minimum: 0 }
+                offset: { type: integer, minimum: 0 }
+            examples:
+              page: { value: { session_id: "s_123", limit: 50, offset: 0 } }
+      responses:
+        "200":
+          description: A page of messages (shape owned by the data plane, forwarded verbatim).
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        "400":
+          {
+            description: missing session_id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/message_send:
+    post:
+      operationId: rpcMessageSend
+      tags: [rpc-messages]
+      summary: Append a user message to a session on the desktop store.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, content]
+              properties:
+                session_id: { type: string }
+                content: { type: string }
+                role: { type: string, description: "Defaults to 'user'." }
+            examples:
+              send: { value: { session_id: "s_123", content: "hello" } }
+      responses:
+        "200":
+          description: Send result (shape owned by the data plane).
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        "400":
+          {
+            description: missing session_id/content,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: data plane error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/message_update:
+    post:
+      operationId: rpcMessageUpdate
+      tags: [rpc-messages]
+      summary: Patch a message on the desktop store (edit-and-resend mirror).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, message_id, updates]
+              properties:
+                session_id: { type: string }
+                message_id: { type: string }
+                updates:
+                  {
+                    type: object,
+                    additionalProperties: true,
+                    description: "Partial UIMessage patch.",
+                  }
+      responses:
+        "200":
+          {
+            description: Updated.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "400":
+          {
+            description: missing field,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: data plane error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/message_delete:
+    post:
+      operationId: rpcMessageDelete
+      tags: [rpc-messages]
+      summary: Delete a message on the desktop store.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, message_id]
+              properties:
+                session_id: { type: string }
+                message_id: { type: string }
+      responses:
+        "200":
+          {
+            description: Deleted (or already absent).,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "400":
+          {
+            description: missing field,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: data plane error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — push tokens (Wave 3.4)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/register_push_token:
+    post:
+      operationId: rpcRegisterPushToken
+      tags: [rpc-push]
+      summary: Register this device's FCM / APNs push token.
+      description: Idempotent — re-registering overwrites the device's previous record.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, token]
+              properties:
+                provider: { type: string, enum: [fcm, apns] }
+                token: { type: string }
+                app_version: { type: string }
+                device_locale: { type: string }
+            examples:
+              fcm: { value: { provider: "fcm", token: "abc123" } }
+      responses:
+        "200":
+          { description: Registered., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: provider not fcm/apns or missing token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/revoke_push_token:
+    post:
+      operationId: rpcRevokePushToken
+      tags: [rpc-push]
+      summary: Clear this device's push token (sign-out / rotation).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: Revoked (or none registered).,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — data writes (Wave 2, via desktop_writes_bridge)
+  # Each round-trips through the renderer's `companion://desktop-write-request`
+  # handler; a 500 means the renderer reported an error or did not reply in time.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/character_upsert:
+    post:
+      operationId: rpcCharacterUpsert
+      tags: [rpc-data]
+      summary: Create or update a character. Presence of `id` selects update vs create.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draft]
+              properties:
+                id: { type: string, description: "Omit to create; provide to update." }
+                draft:
+                  {
+                    type: object,
+                    additionalProperties: true,
+                    description: "CharacterDraft fields.",
+                  }
+      responses:
+        "200":
+          {
+            description: The created/updated character.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "400":
+          {
+            description: missing draft,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/character_delete:
+    post:
+      operationId: rpcCharacterDelete
+      tags: [rpc-data]
+      summary: Delete a character by id.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        "200":
+          { description: Deleted., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/character_bind_twin:
+    post:
+      operationId: rpcCharacterBindTwin
+      tags: [rpc-data]
+      summary: Bind (or unbind) a Digital Twin to a character.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [characterId]
+              properties:
+                characterId: { type: string }
+                twinId:
+                  type: [string, "null"]
+                  description: "Twin id to bind, or null to unbind."
+      responses:
+        "200":
+          {
+            description: Bound / unbound.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "400":
+          {
+            description: missing characterId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/skill_set_enabled:
+    post:
+      operationId: rpcSkillSetEnabled
+      tags: [rpc-data]
+      summary: Enable or disable a skill (maps to status enabled/disabled).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, enabled]
+              properties:
+                id: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          { description: Applied., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing id or non-boolean enabled,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_set_enabled:
+    post:
+      operationId: rpcPluginSetEnabled
+      tags: [rpc-data]
+      summary: Enable or disable a plugin.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, enabled]
+              properties:
+                id: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          { description: Applied., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing id or non-boolean enabled,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/adapter_update_policy:
+    post:
+      operationId: rpcAdapterUpdatePolicy
+      tags: [rpc-data]
+      summary: Patch a connector adapter's outbound policy.
+      description: Per-field patch. `quietHours:null` clears the existing window; omitted fields are left unchanged.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+                defaultMode: { type: string, enum: [auto, manual, draft] }
+                muted: { type: boolean }
+                quietHours:
+                  type: [object, "null"]
+                  properties:
+                    from: { type: string }
+                    to: { type: string }
+                    tz: { type: string }
+      responses:
+        "200":
+          { description: Applied., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/app_settings_update:
+    post:
+      operationId: rpcAppSettingsUpdate
+      tags: [rpc-data]
+      summary: Patch user-facing AppSettings. Keys are allowlisted server-side.
+      description: |
+        Only the mobile-editable subset of AppSettings keys is accepted (theme,
+        fontScale, language, appearance, WebRTC config, etc.). A non-allowlisted
+        key or a non-object patch returns `400 validation_failed`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patch]
+              properties:
+                patch:
+                  {
+                    type: object,
+                    additionalProperties: true,
+                    description: "Allowlisted AppSettings keys only.",
+                  }
+            examples:
+              theme: { value: { patch: { theme: "dark" } } }
+      responses:
+        "200":
+          description: The persisted settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings]
+                properties:
+                  settings: { type: object, additionalProperties: true }
+        "400":
+          {
+            description: validation_failed — non-allowlisted key or non-object patch,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — twin
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/twin_profile_get:
+    post:
+      operationId: rpcTwinProfileGet
+      tags: [rpc-twin]
+      summary: Read a Digital Twin profile by id.
+      description: Read-only — skips the idempotency cache. Routed through desktop_writes_bridge.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [twinId]
+              properties:
+                twinId: { type: string }
+      responses:
+        "200":
+          description: "The profile, or `{ profile: null }` when absent."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { type: [object, "null"], additionalProperties: true }
+        "400":
+          {
+            description: missing twinId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_ingest_source:
+    post:
+      operationId: rpcTwinIngestSource
+      tags: [rpc-twin]
+      summary: Enqueue a twin ingest job. The desktop scheduler walks it asynchronously.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [twinId]
+              properties:
+                twinId: { type: string }
+      responses:
+        "200":
+          description: The enqueued job id.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId]
+                properties:
+                  jobId: { type: string }
+        "400":
+          {
+            description: missing twinId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — connectors (mobile outbound queue)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/connector_send:
+    post:
+      operationId: rpcConnectorSend
+      tags: [rpc-connectors]
+      summary: Insert a user-authored message into a session (share-target path).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, segments]
+              properties:
+                sessionId: { type: string }
+                segments:
+                  type: array
+                  description: "Content segments; `text` fields are concatenated."
+                  items:
+                    type: object
+                    properties:
+                      type: { type: string }
+                      text: { type: string }
+      responses:
+        "200":
+          description: The created message id.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messageId]
+                properties:
+                  messageId: { type: string }
+        "400":
+          {
+            description: missing sessionId,
+            non-array segments,
+            or empty text,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connector_approve_draft:
+    post:
+      operationId: rpcConnectorApproveDraft
+      tags: [rpc-connectors]
+      summary: Approve a pending connector draft so the outbound runner sends it.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draftId]
+              properties:
+                draftId: { type: string }
+      responses:
+        "200":
+          { description: Approved., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing draftId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connector_reject_draft:
+    post:
+      operationId: rpcConnectorRejectDraft
+      tags: [rpc-connectors]
+      summary: Reject a pending connector draft.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draftId]
+              properties:
+                draftId: { type: string }
+      responses:
+        "200":
+          { description: Rejected., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing draftId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — workflows
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/workflow_trigger_manual:
+    post:
+      operationId: rpcWorkflowTriggerManual
+      tags: [rpc-workflows]
+      summary: Manually trigger a workflow run from the mobile shell.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workflowId]
+              properties:
+                workflowId: { type: string }
+                input: { description: "Optional trigger payload (any JSON)." }
+      responses:
+        "200":
+          { description: Triggered., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing workflowId,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: renderer error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   # ─────────────────────────────────────────────────────────────────────────
   # WebSocket — events
   # ─────────────────────────────────────────────────────────────────────────
@@ -1646,6 +2349,2408 @@ paths:
                 - { type: object, additionalProperties: true }
                 - { type: string }
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — source control (ADR-0038, Wave 4.1). camelCase arg keys mirror the
+  # shared `lib/git/commands.ts` client. Reads are ungated; writes / network
+  # ops require the allowRemoteControl capability (403 remote_control_forbidden).
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/git_is_repo:
+    post:
+      operationId: rpcGitIsRepo
+      tags: [rpc-git]
+      summary: Whether a path is a git repo (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: boolean } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_repo_state:
+    post:
+      operationId: rpcGitRepoState
+      tags: [rpc-git]
+      summary: Branch / ahead-behind / merge state (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_status:
+    post:
+      operationId: rpcGitStatus
+      tags: [rpc-git]
+      summary: Working-tree status (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_diff_file:
+    post:
+      operationId: rpcGitDiffFile
+      tags: [rpc-git]
+      summary: Diff a single file, staged or unstaged (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, path, staged],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        path: { type: string },
+                        staged: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_diff_commit:
+    post:
+      operationId: rpcGitDiffCommit
+      tags: [rpc-git]
+      summary: Diff a file at a specific commit (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, sha, path],
+                    properties:
+                      { repoPath: { type: string }, sha: { type: string }, path: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_commit_files:
+    post:
+      operationId: rpcGitCommitFiles
+      tags: [rpc-git]
+      summary: Files changed in a commit (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, sha],
+                    properties: { repoPath: { type: string }, sha: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_log:
+    post:
+      operationId: rpcGitLog
+      tags: [rpc-git]
+      summary: Commit log, paginated (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, maxCount, skip],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        maxCount: { type: integer },
+                        skip: { type: integer },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_file_history:
+    post:
+      operationId: rpcGitFileHistory
+      tags: [rpc-git]
+      summary: Commit history for a single file (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, path, maxCount],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        path: { type: string },
+                        maxCount: { type: integer },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_branches:
+    post:
+      operationId: rpcGitBranches
+      tags: [rpc-git]
+      summary: List branches (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_remotes:
+    post:
+      operationId: rpcGitRemotes
+      tags: [rpc-git]
+      summary: List remotes (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stash_list:
+    post:
+      operationId: rpcGitStashList
+      tags: [rpc-git]
+      summary: List stashes (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_conflicts:
+    post:
+      operationId: rpcGitConflicts
+      tags: [rpc-git]
+      summary: List merge conflicts (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stage:
+    post:
+      operationId: rpcGitStage
+      tags: [rpc-git]
+      summary: Stage files or a hunk. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, paths],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        paths: { type: array, items: { type: string } },
+                        hunkPatch: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_unstage:
+    post:
+      operationId: rpcGitUnstage
+      tags: [rpc-git]
+      summary: Unstage files or a hunk. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, paths],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        paths: { type: array, items: { type: string } },
+                        hunkPatch: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_discard:
+    post:
+      operationId: rpcGitDiscard
+      tags: [rpc-git]
+      summary: Discard working-tree changes for files or a hunk. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, paths],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        paths: { type: array, items: { type: string } },
+                        hunkPatch: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_discard_all:
+    post:
+      operationId: rpcGitDiscardAll
+      tags: [rpc-git]
+      summary: Discard all working-tree changes. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, includeUntracked],
+                    properties: { repoPath: { type: string }, includeUntracked: { type: boolean } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_commit:
+    post:
+      operationId: rpcGitCommit
+      tags: [rpc-git]
+      summary: Create a commit. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, message, amend, signoff],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        message: { type: string },
+                        amend: { type: boolean },
+                        signoff: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: New commit SHA.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_checkout_branch:
+    post:
+      operationId: rpcGitCheckoutBranch
+      tags: [rpc-git]
+      summary: Checkout a branch. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, name],
+                    properties: { repoPath: { type: string }, name: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_create_branch:
+    post:
+      operationId: rpcGitCreateBranch
+      tags: [rpc-git]
+      summary: Create a branch. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, name, checkout],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        name: { type: string },
+                        checkout: { type: boolean },
+                        from: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_delete_branch:
+    post:
+      operationId: rpcGitDeleteBranch
+      tags: [rpc-git]
+      summary: Delete a branch. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, name, force],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        name: { type: string },
+                        force: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_rename_branch:
+    post:
+      operationId: rpcGitRenameBranch
+      tags: [rpc-git]
+      summary: Rename a branch. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, newName],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        newName: { type: string },
+                        old: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_fetch:
+    post:
+      operationId: rpcGitFetch
+      tags: [rpc-git]
+      summary: Fetch from a remote. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        remote: { type: string, nullable: true },
+                        prune: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_pull:
+    post:
+      operationId: rpcGitPull
+      tags: [rpc-git]
+      summary: Pull from a remote. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        remote: { type: string, nullable: true },
+                        branch: { type: string, nullable: true },
+                        rebase: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_push:
+    post:
+      operationId: rpcGitPush
+      tags: [rpc-git]
+      summary: Push to a remote. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        remote: { type: string, nullable: true },
+                        branch: { type: string, nullable: true },
+                        setUpstream: { type: boolean },
+                        forceWithLease: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_sync:
+    post:
+      operationId: rpcGitSync
+      tags: [rpc-git]
+      summary: Fetch + fast-forward + push (ahead/behind). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stash_push:
+    post:
+      operationId: rpcGitStashPush
+      tags: [rpc-git]
+      summary: Create a stash. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        message: { type: string, nullable: true },
+                        includeUntracked: { type: boolean },
+                        keepIndex: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stash_pop:
+    post:
+      operationId: rpcGitStashPop
+      tags: [rpc-git]
+      summary: Pop a stash by index. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, index],
+                    properties: { repoPath: { type: string }, index: { type: integer } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stash_apply:
+    post:
+      operationId: rpcGitStashApply
+      tags: [rpc-git]
+      summary: Apply a stash by index (keep it). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, index],
+                    properties: { repoPath: { type: string }, index: { type: integer } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_stash_drop:
+    post:
+      operationId: rpcGitStashDrop
+      tags: [rpc-git]
+      summary: Drop a stash by index. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, index],
+                    properties: { repoPath: { type: string }, index: { type: integer } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_resolve_conflict:
+    post:
+      operationId: rpcGitResolveConflict
+      tags: [rpc-git]
+      summary: Resolve a conflict (merged content or pick a side). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, path],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        path: { type: string },
+                        mergedContent: { type: string, nullable: true },
+                        side: { type: string, enum: [ours, theirs], nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_merge_abort:
+    post:
+      operationId: rpcGitMergeAbort
+      tags: [rpc-git]
+      summary: Abort an in-progress merge. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — filesystem (Wave 4.1). Raw absolute-path ops have NO sandbox (writes
+  # control-gated); the fs_*_workspace variants enforce a path-traversal check.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/read_text_file:
+    post:
+      operationId: rpcReadTextFile
+      tags: [rpc-files]
+      summary: Read a text file by absolute path (read-only, unsandboxed).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema: { type: object, required: [path], properties: { path: { type: string } } },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: File contents.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/default_export_dir:
+    post:
+      operationId: rpcDefaultExportDir
+      tags: [rpc-files]
+      summary: Default export directory path (read-only).
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: Directory path.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_search_workspace:
+    post:
+      operationId: rpcFsSearchWorkspace
+      tags: [rpc-files]
+      summary: Walk a workspace root and return matching entries (read-only, sandboxed).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root],
+                    properties:
+                      { root: { type: string }, query: { type: string }, limit: { type: integer } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_read_workspace_file:
+    post:
+      operationId: rpcFsReadWorkspaceFile
+      tags: [rpc-files]
+      summary: Read a file relative to a workspace root (read-only, sandboxed).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, relPath],
+                    properties:
+                      {
+                        root: { type: string },
+                        relPath: { type: string },
+                        maxBytes: { type: integer },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: File contents (possibly truncated).,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/write_text_file:
+    post:
+      operationId: rpcWriteTextFile
+      tags: [rpc-files]
+      summary: Write a text file by absolute path (unsandboxed). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [path, content],
+                    properties: { path: { type: string }, content: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/ensure_dir:
+    post:
+      operationId: rpcEnsureDir
+      tags: [rpc-files]
+      summary: Create a directory (recursive). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema: { type: object, required: [path], properties: { path: { type: string } } },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fs_write_workspace_file:
+    post:
+      operationId: rpcFsWriteWorkspaceFile
+      tags: [rpc-files]
+      summary: Write a file relative to a workspace root (sandboxed). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [root, relPath, content],
+                    properties:
+                      {
+                        root: { type: string },
+                        relPath: { type: string },
+                        content: { type: string },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — terminal (Wave 4.1). Live PTY stays on /ws/v1/terminal.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/terminal_list_all:
+    post:
+      operationId: rpcTerminalListAll
+      tags: [rpc-terminal]
+      summary: List all terminal sessions (read-only).
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/terminal_list_for_project:
+    post:
+      operationId: rpcTerminalListForProject
+      tags: [rpc-terminal]
+      summary: List terminal sessions for a project (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [projectId],
+                    properties: { projectId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/terminal_kill:
+    post:
+      operationId: rpcTerminalKill
+      tags: [rpc-terminal]
+      summary: Kill a terminal session. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { type: object, required: [id], properties: { id: { type: string } } } },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/terminal_exec:
+    post:
+      operationId: rpcTerminalExec
+      tags: [rpc-terminal]
+      summary: Run a one-shot command and capture output. Requires allowRemoteControl.
+      description: |
+        Arbitrary code execution on the host. Bounded by `timeoutMs` (default
+        120000, max 600000); on timeout the child is killed and `timedOut` is
+        set. The child inherits the desktop process environment plus `env`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [command],
+                    properties:
+                      {
+                        command: { type: string },
+                        args: { type: array, items: { type: string } },
+                        cwd: { type: string },
+                        env: { type: object, additionalProperties: { type: string } },
+                        timeoutMs: { type: integer },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Captured stdout/stderr/exit.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [stdout, stderr, timedOut],
+                        properties:
+                          {
+                            stdout: { type: string },
+                            stderr: { type: string },
+                            exitCode: { type: integer, nullable: true },
+                            timedOut: { type: boolean },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — plugins (Wave 4.1). Native install/uninstall touch the on-disk plugin
+  # dir + Rust snapshot; a remote install takes effect on the next renderer
+  # reload (it does not hot-load into the running PluginManager).
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/plugin_list:
+    post:
+      operationId: rpcPluginList
+      tags: [rpc-plugin]
+      summary: List installed plugin runtime snapshots (read-only).
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_runtime_snapshot:
+    post:
+      operationId: rpcPluginRuntimeSnapshot
+      tags: [rpc-plugin]
+      summary: Runtime snapshot for one plugin (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_install:
+    post:
+      operationId: rpcPluginInstall
+      tags: [rpc-plugin]
+      summary: Install a plugin from a source descriptor. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, source],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        source: { type: string },
+                        payload: { type: object, properties: { manifest_json: { type: string } } },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Installed snapshot.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_install_from_github:
+    post:
+      operationId: rpcPluginInstallFromGithub
+      tags: [rpc-plugin]
+      summary: Install a plugin from a GitHub repo. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repo],
+                    properties:
+                      {
+                        repo: { type: string },
+                        gitRef: { type: string, nullable: true },
+                        subdir: { type: string, nullable: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Install result.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_uninstall:
+    post:
+      operationId: rpcPluginUninstall
+      tags: [rpc-plugin]
+      summary: Uninstall a plugin. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_backup_create:
+    post:
+      operationId: rpcPluginBackupCreate
+      tags: [rpc-plugin]
+      summary: Create a plugin backup tarball. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties:
+                      { pluginId: { type: string }, label: { type: string, nullable: true } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Backup payload.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_backup_restore:
+    post:
+      operationId: rpcPluginBackupRestore
+      tags: [rpc-plugin]
+      summary: Restore a plugin backup. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, backupId],
+                    properties: { pluginId: { type: string }, backupId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_backup_delete:
+    post:
+      operationId: rpcPluginBackupDelete
+      tags: [rpc-plugin]
+      summary: Delete a plugin backup. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, backupId],
+                    properties: { pluginId: { type: string }, backupId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — workflow CRUD (ADR-0027 Wave 4.1). Routed through the desktop-writes
+  # bridge. create/update/schedule are ungated; delete + cancel are gated.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/workflow_run_list:
+    post:
+      operationId: rpcWorkflowRunList
+      tags: [rpc-workflow-crud]
+      summary: Paginated newest-first workflow run listing (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    properties:
+                      {
+                        workflowId: { type: string },
+                        limit: { type: integer },
+                        offset: { type: integer },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties:
+                          {
+                            runs:
+                              { type: array, items: { type: object, additionalProperties: true } },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_create:
+    post:
+      operationId: rpcWorkflowCreate
+      tags: [rpc-workflow-crud]
+      summary: Create a workflow from a draft.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [draft],
+                    properties: { draft: { type: object, additionalProperties: true } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Created workflow row.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { workflow: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_update:
+    post:
+      operationId: rpcWorkflowUpdate
+      tags: [rpc-workflow-crud]
+      summary: Patch a workflow definition.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [id, patch],
+                    properties:
+                      { id: { type: string }, patch: { type: object, additionalProperties: true } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_schedule_pause:
+    post:
+      operationId: rpcWorkflowSchedulePause
+      tags: [rpc-workflow-crud]
+      summary: Pause a workflow schedule trigger.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [triggerId],
+                    properties: { triggerId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_schedule_resume:
+    post:
+      operationId: rpcWorkflowScheduleResume
+      tags: [rpc-workflow-crud]
+      summary: Resume a workflow schedule trigger.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [triggerId],
+                    properties: { triggerId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_delete:
+    post:
+      operationId: rpcWorkflowDelete
+      tags: [rpc-workflow-crud]
+      summary: Delete a workflow (tombstoned). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { type: object, required: [id], properties: { id: { type: string } } } },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/workflow_cancel_run:
+    post:
+      operationId: rpcWorkflowCancelRun
+      tags: [rpc-workflow-crud]
+      summary: Cancel an in-flight (or mark a stale) workflow run. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  { type: object, required: [runId], properties: { runId: { type: string } } },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { cancelled: { type: boolean }, live: { type: boolean } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — Digital Twin source CRUD + job control (ADR-0003, Wave 4.1).
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/twin_source_list:
+    post:
+      operationId: rpcTwinSourceList
+      tags: [rpc-twin]
+      summary: List a twin's sources (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  { type: object, required: [twinId], properties: { twinId: { type: string } } },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties:
+                          {
+                            sources:
+                              { type: array, items: { type: object, additionalProperties: true } },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_job_status:
+    post:
+      operationId: rpcTwinJobStatus
+      tags: [rpc-twin]
+      summary: One job by id, or active jobs for a twin (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    properties: { jobId: { type: string }, twinId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_source_update:
+    post:
+      operationId: rpcTwinSourceUpdate
+      tags: [rpc-twin]
+      summary: Patch a twin source.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [id, patch],
+                    properties:
+                      { id: { type: string }, patch: { type: object, additionalProperties: true } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Updated source.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties:
+                          { source: { type: object, additionalProperties: true, nullable: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_job_pause:
+    post:
+      operationId: rpcTwinJobPause
+      tags: [rpc-twin]
+      summary: Pause an ingest job.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  { type: object, required: [jobId], properties: { jobId: { type: string } } },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_job_resume:
+    post:
+      operationId: rpcTwinJobResume
+      tags: [rpc-twin]
+      summary: Resume an ingest job.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  { type: object, required: [jobId], properties: { jobId: { type: string } } },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_job_retry:
+    post:
+      operationId: rpcTwinJobRetry
+      tags: [rpc-twin]
+      summary: Retry a dead-lettered ingest job.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  { type: object, required: [jobId], properties: { jobId: { type: string } } },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_delete:
+    post:
+      operationId: rpcTwinDelete
+      tags: [rpc-twin]
+      summary: Delete a twin (full cascade). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { type: object, required: [id], properties: { id: { type: string } } } },
+          }
+      responses:
+        "200":
+          {
+            description: Delete result counters.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { result: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_source_delete:
+    post:
+      operationId: rpcTwinSourceDelete
+      tags: [rpc-twin]
+      summary: Delete a twin source (cascades chunks). Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { type: object, required: [id], properties: { id: { type: string } } } },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/twin_job_cancel:
+    post:
+      operationId: rpcTwinJobCancel
+      tags: [rpc-twin]
+      summary: Cancel an ingest job. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [jobId],
+                    properties: { jobId: { type: string }, reason: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — settings (per-conversation overrides) + app-data backup (Wave 4.1).
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/conversation_overrides_update:
+    post:
+      operationId: rpcConversationOverridesUpdate
+      tags: [rpc-settings]
+      summary: Upsert a per-conversation override (pin / archive / title).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [input],
+                    properties: { input: { type: object, additionalProperties: true } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Upserted row.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { override: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/backup_export:
+    post:
+      operationId: rpcBackupExport
+      tags: [rpc-backup]
+      summary: Build an app-data backup package (read-only snapshot; secrets excluded).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    properties:
+                      {
+                        options:
+                          {
+                            type: object,
+                            properties:
+                              {
+                                includeSessions: { type: boolean },
+                                includeBuiltIns: { type: boolean },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Backup package.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { package: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/backup_import:
+    post:
+      operationId: rpcBackupImport
+      tags: [rpc-backup]
+      summary: Apply an app-data backup package. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [package],
+                    properties:
+                      {
+                        package: { type: object, additionalProperties: true },
+                        options:
+                          {
+                            type: object,
+                            properties:
+                              {
+                                mergeStrategy: { type: string, enum: [skip, overwrite, duplicate] },
+                                includeSessions: { type: boolean },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Import summary.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        properties: { summary: { type: object, additionalProperties: true } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
 # ───────────────────────────────────────────────────────────────────────────
 # components
 # ───────────────────────────────────────────────────────────────────────────
@@ -1685,7 +4790,7 @@ components:
       in: path
       name: name
       required: true
-      description: RPC command name. The dispatch allowlist contains 24 commands; see the dedicated `/api/v1/_rpc/<command>` paths.
+      description: RPC command name. The authoritative allowlist is the set of dedicated `/api/v1/_rpc/<command>` paths above; this enum is a non-exhaustive convenience sample.
       schema:
         type: string
         enum:
@@ -1694,9 +4799,6 @@ components:
           - claude_approve
           - claude_close_session
           - claude_sidecar_status
-          - claude_sub_save_token
-          - claude_sub_load_token
-          - claude_sub_clear_token
           - claude_set_oauth_bearer
           - claude_set_api_key
           - claude_set_provider_env

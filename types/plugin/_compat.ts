@@ -163,6 +163,13 @@ export interface Project {
   name: string
   description?: string
   rootDir?: string
+  /**
+   * Extra absolute directories mounted into this workspace alongside `rootDir`.
+   * Forwarded to the SDK as `additionalDirectories` so Read/Glob/Edit can reach
+   * them without an @-reference. Plain absolute paths — same shape the SDK's
+   * `SendOptions.additionalDirectories` expects.
+   */
+  additionalDirs?: string[]
   customInstructions?: string
   knowledgeBase: KnowledgeFile[]
   sessionIds: string[]
@@ -196,6 +203,7 @@ export interface CreateProjectInput {
   systemPrompt?: string
   tags?: string[]
   rootDir?: string
+  additionalDirs?: string[]
   metadata?: Record<string, unknown>
 }
 
@@ -203,6 +211,8 @@ export interface UpdateProjectInput {
   name?: string
   description?: string
   customInstructions?: string
+  rootDir?: string
+  additionalDirs?: string[]
   tags?: string[]
   isArchived?: boolean
   metadata?: Record<string, unknown>

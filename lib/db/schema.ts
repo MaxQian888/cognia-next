@@ -1,5 +1,13 @@
-// IndexedDB schema (via Dexie) for chat sessions, messages, and app settings.
-// Keep version numbers strictly increasing when adding tables/indexes.
+// IndexedDB schema (via Dexie) for cognia-next — the single `CogniaDB`
+// instance backing chat, plugins, connectors, workflows, twin, and more.
+//
+// HARD RULE: never reorder, edit, or delete a historical `version(N).stores()`
+// block or its `upgrade()` hook — doing so corrupts live user databases. Only
+// ever append a new, higher version. See `lib/db/CONVENTIONS.md` for the data
+// layer's ID / timestamp / error-handling / type-location conventions.
+//
+// Row types co-locate with their CRUD module (or a `*-types.ts` file) and are
+// re-exported below so `@/lib/db/schema` stays the stable import surface.
 
 import Dexie, { type Table } from "dexie"
 import type {
@@ -13,10 +21,10 @@ import type {
   SystemPromptPreset,
   Team,
 } from "@/lib/claude/types"
+import type { Project } from "@/types"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
 import type { SandboxConnectionRow } from "./sandbox-connections"
-import type { NormalizedModelsDevProvider } from "@/lib/ai/providers/models-dev"
 import type {
   CanvasDocumentRow,
   CanvasVersionRow,
@@ -34,6 +42,7 @@ import type {
   PluginAnalyticsRow,
   PluginScheduledJobRow,
   PluginMarketplaceSourceRow,
+  PluginDexieMeta,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
 import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
@@ -68,6 +77,19 @@ import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow, SyncTombstoneRow, SyncableTable } from "@/lib/sync/types"
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
+// Row types relocated out of this file but still wired into the table
+// declarations below and re-exported at the bottom for `@/lib/db/schema`
+// import-site stability. See `lib/db/CONVENTIONS.md`.
+import type { ModelsDevCatalogRow } from "./models-dev-catalog"
+import type { SessionStateRow } from "./session-state"
+import type { TrustedPublisherRow } from "./trusted-publishers"
+import type { TtsProviderKeyRow } from "@/lib/tts/types"
+import type {
+  OpenVsxCacheRow,
+  VscodeExtensionRuntimeRow,
+} from "@/types/plugin/vscode-extension-cache"
+import type { AutomationAuditLogRow } from "@/lib/automation/audit"
+import type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -1597,6 +1619,25 @@ export class CogniaDB extends Dexie {
       syncTombstones: "[table+id], table, deletedAt",
       messages: "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id]",
     })
+
+    // v62 — Workspaces. The `useProjectStore` project model gains durable
+    // persistence (was in-memory only). One row per workspace, keyed by `id`;
+    // `lastAccessedAt` indexed for recency ordering. The active-workspace
+    // pointer lives on the settings singleton, not here. See
+    // `lib/db/projects.ts`. Additive — no upgrade hook.
+    this.version(62).stores({
+      projects: "&id, isArchived, lastAccessedAt",
+    })
+
+    // v63 — Drop the `isArchived` index. `isArchived` is a JS boolean, and
+    // IndexedDB cannot index boolean keys (only number/string/Date/binary and
+    // arrays of those), so the index never populated — a `where("isArchived")`
+    // query would silently match nothing. All callers already filter archived
+    // state in memory (`getAllProjects().filter(...)`), so this just removes a
+    // dead, footgun index. Data is preserved; only the index definition changes.
+    this.version(63).stores({
+      projects: "&id, lastAccessedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1605,6 +1646,8 @@ export class CogniaDB extends Dexie {
   vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
   syncCursors!: Table<SyncCursorRow, string>
+  // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
+  projects!: Table<Project, string>
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
@@ -1617,171 +1660,20 @@ export class CogniaDB extends Dexie {
   modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
 }
 
-/**
- * Cached models.dev catalog (Dexie v60). A single "singleton" row holding the
- * normalized catalog keyed by our internal provider ids. `source` records
- * whether the data came from the live API or the bundled offline snapshot.
- */
-export interface ModelsDevCatalogRow {
-  /** Always `"singleton"`. */
-  id: string
-  /** Epoch milliseconds when this snapshot was written. */
-  fetchedAt: number
-  /** Where the data came from. */
-  source: "remote" | "bundled"
-  /** Normalized catalog, keyed by our internal provider id. */
-  providers: Record<string, NormalizedModelsDevProvider>
-}
-
-/** Web-mode fallback row for TTS provider API keys. */
-export interface TtsProviderKeyRow {
-  /** "tts.providerKey.<provider>" */
-  id: string
-  value: string
-}
-
-/**
- * Open VSX marketplace metadata cache entry (v31, 24h TTL).
- * Keyed by canonical `publisher.name` identifier.
- */
-export interface OpenVsxCacheRow {
-  /** Canonical identifier — e.g. `"esbenp.prettier-vscode"`. */
-  extensionId: string
-  /** Epoch milliseconds when this entry was written. Stale after 24h. */
-  fetchedAt: number
-  /** Display name from the Open VSX response. */
-  displayName: string
-  /** Latest available version on Open VSX. */
-  latestVersion: string
-  /** Marketplace icon URL (CDN-backed). */
-  iconUrl?: string
-  /** Tags / categories from Open VSX, for filtered browse. */
-  categories: string[]
-  /** Download count, for sort-by-popular. */
-  downloadCount: number
-  /** Star rating, for sort-by-rating. */
-  averageRating?: number
-  /** Whether Open VSX has verified the publisher. */
-  verified: boolean
-  /**
-   * Raw response payload (JSON-serialised) so the UI can render details
-   * without a second round trip. Kept compact; full README / changelog
-   * are fetched on-demand.
-   */
-  payload: unknown
-}
-
-/**
- * Per-extension runtime telemetry written by the VS Code sidecar.
- * Used by the Plugins → Extensions → VS Code surface to surface
- * "Last activated", "Last error", "Sidecar process id".
- */
-export interface VscodeExtensionRuntimeRow {
-  /** Canonical `publisher.name`. */
-  extensionId: string
-  /** Epoch ms of the most recent successful activate(). */
-  lastActivatedAt: number | null
-  /** Last sidecar-reported error message, or null if no error since last reset. */
-  lastError: string | null
-  /** PID of the Node sidecar hosting this extension when active; 0 when not running. */
-  sidecarPid: number
-  /** Sum of permission grants prompted during this extension's lifetime. */
-  runtimePermissionGrants: number
-  /** Sum of permission denials prompted during this extension's lifetime. */
-  runtimePermissionDenials: number
-}
-
-/**
- * Per-session unread tracking. Only sessions the user has actually opened
- * have a row here; everything else is treated as unread = 0.
- */
-export interface SessionStateRow {
-  sessionId: string
-  lastReadAt: number
-  unreadCount: number
-}
-
-/**
- * One row per automation Tauri command call. Mirror of
- * `src-tauri/src/automation/audit.rs:AuditEntry` (camelCase wire format).
- * Written by the `automation:event` subscriber in `lib/automation/audit.ts`.
- *
- * `conversationKey` was added at schema v41 so the inbox can surface the
- * computer-use HITL request/decision timeline scoped to the conversation
- * that drove the action (see ADR-0009 v41 / Category E3 in the IM
- * connector gap-closure plan). Existing rows have the field undefined.
- */
-export interface AutomationAuditLogRow {
-  id: string
-  ts: number
-  surface: "workflow" | "computerUse" | "mcp" | "plugin"
-  pluginId: string | null
-  command: string
-  processName: string | null
-  windowTitle: string | null
-  decision: "allow" | "deny" | "consent"
-  reason: string | null
-  durationMs: number
-  error: string | null
-  /**
-   * Connector conversation key the computer-use action was initiated
-   * from, when known. Populated when the surface is `"computerUse"` and
-   * the chat session has a `platformBinding`. Used by
-   * `components/inbox/computer-use-events-strip.tsx` to filter by
-   * conversation. Optional because workflow / MCP / plugin invocations
-   * may not have a conversation context.
-   */
-  conversationKey?: string
-}
-
-/** Registry entry for a plugin's declared Dexie tables. Written by applyPluginTables. */
-export interface PluginDexieMeta {
-  /** Primary key — the plugin's id. */
-  pluginId: string
-  /** Namespaced table names currently registered for this plugin. */
-  tableNames: string[]
-  /** The Dexie db version at which these tables were last registered. */
-  dexieVersion: number
-  appliedAt: number
-}
-
-/**
- * Trusted plugin publisher ledger — one row per Ed25519 public key the user
- * accepted during a signed-plugin install. Drives "auto-trust subsequent
- * updates from the same author" semantics across HTTP/Git install paths.
- */
-export interface TrustedPublisherRow {
-  /** Base64-encoded Ed25519 public key (primary key). */
-  publicKey: string
-  /** SHA-256 hex digest of the public key, for the install-dialog UI. */
-  fingerprint: string
-  /** Display name from `manifest.author.name` at first-trust time. */
-  authorName?: string
-  /** Optional contact email captured from `manifest.author.email`. */
-  authorEmail?: string
-  /** Optional homepage / repository URL captured at first-trust time. */
-  homepage?: string
-  /** Epoch ms of first accept. */
-  firstTrustedAt: number
-  /** Epoch ms of the most-recent install/update by this author. */
-  lastSeenAt: number
-  /** Counter — number of distinct plugins installed by this author. */
-  installCount: number
-}
-
-/**
- * Per-workflow viewport bookmark. Persists the user-saved `{x, y, zoom}` so
- * the "Views" dropdown can restore it later with a smooth tween.
- */
-export interface WorkflowViewportBookmarkRow {
-  /** `vb_` + nanoid. */
-  id: string
-  workflowId: string
-  /** User-supplied label (defaults to "View at NN%" in the UI). */
-  name: string
-  viewport: { x: number; y: number; zoom: number }
-  createdAt: number
-}
+// Row types for these tables live next to their CRUD module (or a dedicated
+// `*-types.ts` file) per `lib/db/CONVENTIONS.md`. They are re-exported here so
+// `@/lib/db/schema` remains the stable import surface for existing call sites.
+export type { ModelsDevCatalogRow } from "./models-dev-catalog"
+export type { SessionStateRow } from "./session-state"
+export type { TrustedPublisherRow } from "./trusted-publishers"
+export type { TtsProviderKeyRow } from "@/lib/tts/types"
+export type {
+  OpenVsxCacheRow,
+  VscodeExtensionRuntimeRow,
+} from "@/types/plugin/vscode-extension-cache"
+export type { AutomationAuditLogRow } from "@/lib/automation/audit"
+export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
+export type { PluginDexieMeta } from "./plugin-types"
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null

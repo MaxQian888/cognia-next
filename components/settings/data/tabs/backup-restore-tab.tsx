@@ -42,6 +42,7 @@ import { loggers } from "@/lib/logging"
 import { ShareSettingsCard } from "@/components/share/share-settings-card"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { backupPayload } from "@/lib/share/payload"
+import { WebDavSyncCard } from "@/components/settings/data/webdav-sync-card"
 
 export function BackupRestoreTab() {
   return (
@@ -52,6 +53,7 @@ export function BackupRestoreTab() {
       <QuickSessionExportBlock />
       <RotateKeyBlock />
       <ShareSettingsCard />
+      <WebDavSyncCard />
       <FullRestoreDialog />
     </div>
   )

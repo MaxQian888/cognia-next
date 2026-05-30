@@ -225,32 +225,34 @@ describe("<PerfHud>", () => {
     expect(screen.getByTestId("perf-hud-empty")).toBeInTheDocument()
   })
 
-  // jsdom marks `window.location.reload` non-configurable, so the disable-
-  // button click can't be asserted on `reload`-call mocks. We assert the
-  // observable side effect — `localStorage.setItem("cogniaPerfHud", "0")` —
-  // and trust that `window.location.reload()` runs in the real browser
-  // environment.
-  it("disable button writes '0' to localStorage", () => {
-    render(<PerfHud />)
-    // Stub reload so clicking doesn't crash the jsdom Location.
+  it("disable button hides the panel in-place without reloading", () => {
+    // Guard against a regression to the old `window.location.reload()` close
+    // behavior: if `disable()` ever calls reload again, this spy trips.
+    const reload = jest.fn()
+    let reloadStubbed = false
     try {
       Object.defineProperty(window, "location", {
         configurable: true,
-        value: { ...window.location, reload: jest.fn() },
+        value: { ...window.location, reload },
       })
+      reloadStubbed = true
     } catch {
-      // Some jsdom builds keep `location` itself non-configurable; the
-      // subsequent click will throw a navigation error, which we swallow
-      // because the assertion below is on the localStorage side effect.
+      // Some jsdom builds keep `location` non-configurable; the reload
+      // assertion is skipped in that case, the unmount assertion still runs.
     }
-    try {
-      act(() => {
-        screen.getByTestId("perf-hud-disable").click()
-      })
-    } catch {
-      // ignore jsdom navigation noise
-    }
+
+    render(<PerfHud />)
+    expect(screen.getByTestId("perf-hud")).toBeInTheDocument()
+
+    act(() => {
+      screen.getByTestId("perf-hud-disable").click()
+    })
+
+    // Panel unmounts reactively, the choice is persisted, and the page is
+    // never reloaded.
+    expect(screen.queryByTestId("perf-hud")).toBeNull()
     expect(window.localStorage.getItem(HUD_LOCALSTORAGE_KEY)).toBe("0")
+    if (reloadStubbed) expect(reload).not.toHaveBeenCalled()
   })
 
   // The `try / catch` around `localStorage.setItem` inside `disable()` is

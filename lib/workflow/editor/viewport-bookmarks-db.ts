@@ -6,7 +6,26 @@
  */
 
 import { nanoid } from "nanoid"
-import { getDb, type WorkflowViewportBookmarkRow } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+
+/**
+ * Per-workflow viewport bookmark. Persists the user-saved `{x, y, zoom}` so
+ * the "Views" dropdown can restore it later with a smooth tween.
+ *
+ * Co-located with its CRUD here (mirrors `WorkflowProposalHistoryRow` in
+ * `lib/workflow/editor/proposal-history.ts`); `lib/db/schema.ts` imports +
+ * re-exports it, so existing `@/lib/db/schema` import sites keep working.
+ * See `lib/db/CONVENTIONS.md`.
+ */
+export interface WorkflowViewportBookmarkRow {
+  /** `vb_` + nanoid. */
+  id: string
+  workflowId: string
+  /** User-supplied label (defaults to "View at NN%" in the UI). */
+  name: string
+  viewport: { x: number; y: number; zoom: number }
+  createdAt: number
+}
 
 const ID_PREFIX = "vb_"
 

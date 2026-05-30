@@ -9,6 +9,7 @@
 import type {
   VisualWorkflow,
   WorkflowRow,
+  WorkflowRunRow,
   WorkflowSettings,
   WorkflowEdge,
   WorkflowNode,
@@ -111,6 +112,33 @@ export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
     throw new Error(`Workflow ${workflow.id} not found`)
   }
   await getDb().workflows.put({ ...workflow, updatedAt: nowMs() })
+}
+
+/** Query options for {@link listWorkflowRuns}. */
+export interface WorkflowRunQuery {
+  /** Restrict to a single workflow's runs. Omit for all runs. */
+  workflowId?: string
+  /** Page size (default 50). */
+  limit?: number
+  /** Rows to skip from the newest-first ordering (default 0). */
+  offset?: number
+}
+
+/**
+ * Paginated, newest-first listing of workflow runs. Extracted from the inline
+ * query in `components/workflow/library/recent-runs-feed.tsx` so the Companion
+ * API `workflow_run_list` RPC can reuse the same read.
+ */
+export async function listWorkflowRuns(query: WorkflowRunQuery = {}): Promise<WorkflowRunRow[]> {
+  const { workflowId, limit = 50, offset = 0 } = query
+  const db = getDb()
+  if (workflowId) {
+    // `sortBy` materializes then sorts in memory — fine for one workflow's runs.
+    const rows = await db.workflowRuns.where("workflowId").equals(workflowId).sortBy("startedAt")
+    rows.reverse()
+    return rows.slice(offset, offset + limit)
+  }
+  return db.workflowRuns.orderBy("startedAt").reverse().offset(offset).limit(limit).toArray()
 }
 
 export async function deleteWorkflow(id: string): Promise<void> {

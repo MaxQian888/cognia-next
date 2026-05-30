@@ -41,6 +41,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useScheduler } from "@/hooks/scheduler"
 import {
+  type BackupDestination,
   type BackupTaskPayload,
   type BackupTaskType,
   DEFAULT_EXECUTION_CONFIG,
@@ -73,6 +74,7 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
   const [cronExpression, setCronExpression] = useState("0 2 * * *")
   const [timezone, setTimezone] = useState("UTC")
   const [backupType, setBackupType] = useState<BackupType>("full")
+  const [destination, setDestination] = useState<BackupDestination>("local")
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   const [maxRetries, setMaxRetries] = useState(DEFAULT_EXECUTION_CONFIG.maxRetries)
@@ -100,7 +102,7 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
         trigger: { type: "cron", cronExpression, timezone },
         payload: {
           backupType,
-          destination: "local",
+          destination,
           options: {
             includeSessions,
             includeSettings,
@@ -136,6 +138,7 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
     cronExpression,
     timezone,
     backupType,
+    destination,
     includeSessions,
     includeSettings,
     includeArtifacts,
@@ -232,11 +235,24 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
 
           <div className="space-y-2">
             <Label>{t("backup.destination")}</Label>
-            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-              <DatabaseIcon className="size-4 text-muted-foreground" />
-              <span>{t("backup.destinations.local")}</span>
-            </div>
-            <p className="text-[11px] text-muted-foreground">{t("backup.destinationLocalHint")}</p>
+            <Select
+              value={destination}
+              onValueChange={(v) => setDestination(v as BackupDestination)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">{t("backup.destinations.local")}</SelectItem>
+                <SelectItem value="webdav">{t("backup.destinations.webdav")}</SelectItem>
+                <SelectItem value="all">{t("backup.destinations.all")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {destination === "local"
+                ? t("backup.destinationLocalHint")
+                : t("backup.destinationWebdavHint")}
+            </p>
           </div>
 
           {backupType === "full" && (

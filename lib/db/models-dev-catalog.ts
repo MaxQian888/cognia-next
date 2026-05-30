@@ -3,8 +3,30 @@
 // Higher-level fetch/seed/refresh orchestration lives in
 // `lib/ai/providers/models-dev-sync.ts`.
 
-import type { NormalizedModelsDevCatalog } from "@/lib/ai/providers/models-dev"
-import { getDb, type ModelsDevCatalogRow } from "./schema"
+import type {
+  NormalizedModelsDevCatalog,
+  NormalizedModelsDevProvider,
+} from "@/lib/ai/providers/models-dev"
+import { getDb } from "./schema"
+
+/**
+ * Cached models.dev catalog row (Dexie v60). A single "singleton" row holding
+ * the normalized catalog keyed by our internal provider ids. `source` records
+ * whether the data came from the live API or the bundled offline snapshot.
+ *
+ * Co-located with this CRUD module; `schema.ts` imports + re-exports it, so
+ * existing `@/lib/db/schema` import sites keep working. See `CONVENTIONS.md`.
+ */
+export interface ModelsDevCatalogRow {
+  /** Always `"singleton"`. */
+  id: string
+  /** Epoch milliseconds when this snapshot was written. */
+  fetchedAt: number
+  /** Where the data came from. */
+  source: "remote" | "bundled"
+  /** Normalized catalog, keyed by our internal provider id. */
+  providers: Record<string, NormalizedModelsDevProvider>
+}
 
 const SINGLETON_ID = "singleton" as const
 

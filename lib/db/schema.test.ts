@@ -1,7 +1,7 @@
 // Coverage for the schema module — Dexie instance lifecycle, lazy seeding,
 // and the test reset helper. Also exercises the v5 (members[]) and v7
 // (appsEnabled={}) upgrade hooks indirectly: the seeder runs against a
-// freshly opened DB, which means the latest version (12) opens cleanly.
+// freshly opened DB, which means the latest schema version opens cleanly.
 
 import "fake-indexeddb/auto"
 import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"

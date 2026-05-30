@@ -23,7 +23,9 @@ export interface CapacitorHttpResponse {
 
 export interface CapacitorHttpRequest {
   url: string
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+  // WebDAV verbs (PROPFIND/MKCOL) are passed straight to the native HTTP
+  // stack (OkHttp / URLSession), which accepts arbitrary method tokens.
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "PROPFIND" | "MKCOL"
   headers?: Record<string, string>
   params?: Record<string, string>
   data?: unknown

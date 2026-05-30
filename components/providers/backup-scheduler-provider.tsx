@@ -14,10 +14,16 @@ import {
   defaultExportFileName,
   serializePackage,
 } from "@/lib/data/build-package"
-import { encryptBackupPackage } from "@/lib/data/crypto"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory, getLatestSuccessful } from "@/lib/db/backup-history"
 import { pruneScheduledBackups, shouldRunScheduledBackup } from "@/lib/data/scheduler"
+import {
+  encryptSnapshotBody,
+  uploadSnapshotToWebDav,
+  webdavSnapshotName,
+} from "@/lib/data/destinations/webdav"
+import { getSyncPassphrase, hasSyncPassphrase } from "@/lib/webdav/passphrase-cache"
+import type { BackupPackageV3 } from "@/lib/data/types"
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 
@@ -91,16 +97,7 @@ export async function runOnce(): Promise<boolean> {
     if (!passphrase) {
       throw new Error("Auto-key not available on this runtime.")
     }
-    const env = await encryptBackupPackage(plaintext, passphrase, {
-      version: pkg.manifest.version,
-      schemaVersion: pkg.manifest.schemaVersion,
-      traceId: pkg.manifest.traceId,
-      exportedAt: pkg.manifest.exportedAt,
-      appVersion: pkg.manifest.appVersion,
-      backend: pkg.manifest.backend,
-      encryption: { enabled: true, format: "encrypted-envelope-v1" },
-    })
-    const body = JSON.stringify(env)
+    const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
     const fileName = defaultExportFileName(new Date(), "encrypted")
     const sep = config.dirPath.includes("\\") ? "\\" : "/"
     const target = `${config.dirPath.replace(/[/\\]+$/, "")}${sep}${fileName}`
@@ -143,6 +140,12 @@ export async function runOnce(): Promise<boolean> {
       sizeBytes: body.length,
       filename: fileName,
     })
+
+    // WebDAV upload piggybacks on the local schedule. It re-encrypts the same
+    // package with the zero-knowledge sync passphrase (so other devices can
+    // decrypt) — only when sync is enabled AND unlocked this session.
+    await maybeUploadToWebDav(settings.webdavSync?.enabled === true, pkg, plaintext)
+
     // Stamp lastRunAt for cross-device sync + UI "next run at".
     try {
       await saveSettings({
@@ -164,5 +167,62 @@ export async function runOnce(): Promise<boolean> {
       errorMessage: err instanceof Error ? err.message : String(err),
     })
     return false
+  }
+}
+
+/**
+ * Upload the just-built package to WebDAV, re-encrypted under the session sync
+ * passphrase. No-op when sync is disabled. When enabled but locked, records a
+ * single failure row so the user understands why auto-sync didn't fire.
+ * Best-effort: a WebDAV failure never fails the local backup.
+ */
+export async function maybeUploadToWebDav(
+  enabled: boolean,
+  pkg: BackupPackageV3,
+  plaintext: string
+): Promise<void> {
+  if (!enabled) return
+  if (!hasSyncPassphrase()) {
+    await appendBackupHistory({
+      completedAt: Date.now(),
+      type: "scheduled",
+      success: false,
+      encryption: "passphrase",
+      errorMessage: "WebDAV upload skipped — sync passphrase locked this session.",
+    })
+    return
+  }
+  try {
+    const syncPass = getSyncPassphrase() as string
+    const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
+    const filename = webdavSnapshotName(pkg.manifest.exportedAt)
+    const result = await uploadSnapshotToWebDav(body, {
+      filename,
+      exportedAt: pkg.manifest.exportedAt,
+      sizeBytes: body.length,
+    })
+    await appendBackupHistory({
+      completedAt: Date.now(),
+      type: "scheduled",
+      success: result.ok,
+      encryption: "passphrase",
+      sizeBytes: result.ok ? body.length : undefined,
+      filename: result.ok ? filename : undefined,
+      errorMessage: result.ok ? undefined : result.error,
+    })
+    if (result.ok) {
+      const settings = await getSettings()
+      await saveSettings({
+        webdavSync: { ...(settings.webdavSync ?? {}), lastSyncAt: new Date().toISOString() },
+      })
+    }
+  } catch (err) {
+    await appendBackupHistory({
+      completedAt: Date.now(),
+      type: "scheduled",
+      success: false,
+      encryption: "passphrase",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
   }
 }

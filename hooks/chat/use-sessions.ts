@@ -16,6 +16,7 @@ import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"
 
@@ -89,6 +90,11 @@ export function useSessions() {
       >
     ) => {
       const s = await createSession(partial)
+      // Auto-link the new session to the active workspace so it groups under
+      // that project (persisted via `project.sessionIds`). No-op when no
+      // workspace is active.
+      const { activeProjectId, addSessionToProject } = useProjectStore.getState()
+      if (activeProjectId) addSessionToProject(activeProjectId, s.id)
       setActiveSession(s.id)
       return s
     },

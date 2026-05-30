@@ -53,6 +53,7 @@ import type { ImportMergeStrategy } from "@/lib/data/types"
 import { listBackupHistory } from "@/lib/db/backup-history"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
 import { useSettingsStore } from "@/stores/settings"
+import { WebDavSyncCard } from "@/components/settings/data/webdav-sync-card"
 import { cn } from "@/lib/utils"
 
 const NOTIF_ID_DAILY = 91_001
@@ -364,6 +365,9 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           </CardContent>
         ) : null}
       </Card>
+
+      {/* WebDAV sync — uploads an encrypted snapshot another device can restore. */}
+      <WebDavSyncCard />
 
       {/* History */}
       <Card>

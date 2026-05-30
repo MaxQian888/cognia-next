@@ -260,6 +260,43 @@ pub fn fs_read_workspace_file(
     Ok(content)
 }
 
+/// Write a text file inside a workspace, with the same sandboxed path-traversal
+/// check as [`fs_read_workspace_file`]. `rel_path` is joined to `root`; parent
+/// directories are created as needed, and the resolved parent must canonicalize
+/// back inside `root` so a `../` escape cannot write outside the workspace.
+#[tauri::command]
+pub fn fs_write_workspace_file(
+    root: String,
+    rel_path: String,
+    content: String,
+) -> Result<(), String> {
+    let root_path = PathBuf::from(&root)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
+    let target = root_path.join(&rel_path);
+    // The target file may not exist yet, so canonicalize its *parent* (which
+    // must exist after we create it) and verify containment there.
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", parent.display(), e))?;
+    if !canonical_parent.starts_with(&root_path) {
+        return Err(format!(
+            "path escapes workspace: {} (root {})",
+            canonical_parent.display(),
+            root_path.display()
+        ));
+    }
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
+    let final_path = canonical_parent.join(file_name);
+    std::fs::write(&final_path, content).map_err(|e| format!("write {}: {}", rel_path, e))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SlashCommandFile {
@@ -545,6 +582,29 @@ mod tests {
             None,
         );
         assert!(escape.is_err(), "traversal must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_workspace_file_writes_and_blocks_traversal() {
+        let root = make_sandbox("write-sandbox");
+        // Writes to a nested rel path, creating parent dirs.
+        fs_write_workspace_file(
+            root.to_string_lossy().to_string(),
+            "nested/dir/out.txt".into(),
+            "payload".into(),
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(root.join("nested").join("dir").join("out.txt")).unwrap();
+        assert_eq!(written, "payload");
+
+        // Escaping the root must be rejected.
+        let escape = fs_write_workspace_file(
+            root.to_string_lossy().to_string(),
+            "../escape.txt".into(),
+            "x".into(),
+        );
+        assert!(escape.is_err(), "traversal write must be rejected");
         let _ = std::fs::remove_dir_all(&root);
     }
 

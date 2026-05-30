@@ -49,6 +49,18 @@ const perfStore: StoreShape = {
 
 let snapshotVersion = 0
 
+// In-session dismissal triggered by the HUD's × button. The localStorage flag
+// persists the choice across reloads in production, but in dev
+// `isHudEnabledForRuntime()` always returns true, so this module flag is what
+// actually hides the panel — and lets us drop the page reload the close button
+// used to do.
+let dismissed = false
+const enabledSubscribers = new Set<() => void>()
+
+function notifyEnabledChange(): void {
+  for (const sub of enabledSubscribers) sub()
+}
+
 /**
  * Copy the durations off each consumed `workflow-ai:` entry into the bounded
  * in-memory store, then drain the raw entries from the global User Timing
@@ -128,6 +140,7 @@ function isHudEnabledForRuntime(): boolean {
   // on there via localStorage either. `detectNativePlatform()` returns "web"
   // when `window` is undefined (SSR), so this is safe to call unconditionally.
   if (detectNativePlatform() === "mobile") return false
+  if (dismissed) return false
   if (getNodeEnv() !== "production") return true
   if (typeof window === "undefined") return false
   try {
@@ -165,21 +178,34 @@ function aggregate(byName: Map<string, Entry[]>): AggregateStat[] {
   return stats.sort((a, b) => a.displayName.localeCompare(b.displayName))
 }
 
-// Cross-tab storage events also flip the HUD on/off. Subscribing via
-// useSyncExternalStore keeps React's hydration reconciliation correct
-// without a `setState`-in-effect pattern (lint rule react-hooks/set-state-in-effect).
-function subscribeStorageEvent(notify: () => void): () => void {
-  if (typeof window === "undefined") return () => {}
+// The HUD flips on/off from two sources: the in-session × button (via
+// `notifyEnabledChange`) and cross-tab `storage` events. Subscribing via
+// useSyncExternalStore keeps React's hydration reconciliation correct without a
+// `setState`-in-effect pattern (lint rule react-hooks/set-state-in-effect).
+function subscribeEnabled(notify: () => void): () => void {
+  enabledSubscribers.add(notify)
+  if (typeof window === "undefined") {
+    return () => {
+      enabledSubscribers.delete(notify)
+    }
+  }
   const handler = (e: StorageEvent) => {
-    if (e.key === HUD_LOCALSTORAGE_KEY) notify()
+    if (e.key !== HUD_LOCALSTORAGE_KEY) return
+    // A cross-tab re-enable clears an in-session dismissal so the panel can
+    // return without a reload.
+    if (e.newValue === "1") dismissed = false
+    notify()
   }
   window.addEventListener("storage", handler)
-  return () => window.removeEventListener("storage", handler)
+  return () => {
+    enabledSubscribers.delete(notify)
+    window.removeEventListener("storage", handler)
+  }
 }
 
 export function PerfHud(): ReactNode {
   const enabled = useSyncExternalStore(
-    subscribeStorageEvent,
+    subscribeEnabled,
     () => isHudEnabledForRuntime(),
     () => false
   )
@@ -213,12 +239,17 @@ function PerfHudInner() {
   const stats = aggregate(perfStore.byName)
 
   const disable = () => {
+    // Hide the panel in-place. Setting the module flag + notifying subscribers
+    // re-evaluates `isHudEnabledForRuntime()` to false so React unmounts the
+    // HUD — no full page reload. The localStorage write persists the choice
+    // across reloads in production.
+    dismissed = true
     try {
       window.localStorage.setItem(HUD_LOCALSTORAGE_KEY, "0")
     } catch {
       // ignore
     }
-    window.location.reload()
+    notifyEnabledChange()
   }
 
   const clearEntries = () => {
@@ -309,6 +340,8 @@ export const __test__ = {
     perfStore.started = false
     perfStore.subscribers.clear()
     snapshotVersion = 0
+    dismissed = false
+    enabledSubscribers.clear()
   },
   ingest: (name: string, duration: number) => {
     const slot = perfStore.byName.get(name) ?? []

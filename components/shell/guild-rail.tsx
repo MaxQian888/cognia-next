@@ -1,9 +1,18 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { avatarColor } from "@/lib/ui/avatar"
 import { listTeams } from "@/lib/db/teams"
@@ -12,65 +21,25 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore } from "@/stores/ui"
 import type { Team } from "@/lib/claude/types"
 import {
-  ActivityIcon,
-  BotIcon,
-  CalendarClockIcon,
-  CompassIcon,
-  GaugeIcon,
-  GitBranchIcon,
-  InboxIcon,
+  EllipsisIcon,
+  EyeOffIcon,
   MailIcon,
   PencilRulerIcon,
-  PlugIcon,
+  PinOffIcon,
   PlusIcon,
-  ScrollTextIcon,
   SettingsIcon,
-  SparklesIcon,
-  TargetIcon,
-  UserRoundIcon,
-  Users2Icon,
-  WorkflowIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
-import { usePlatform } from "@/hooks/use-platform"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { useSidebarLayout } from "./use-sidebar-layout"
+import { SidebarCustomizeDialog } from "./sidebar-customize-dialog"
+import { WorkspaceSwitcher } from "./workspace-switcher"
+import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 
 const log = loggers.ui
-
-interface FeatureEntry {
-  /** Top-level route under `app/`. */
-  route: string
-  /** i18n key under `desktop.guildRail.*`. */
-  i18nKey: string
-  /** Icon for the rail button. */
-  Icon: LucideIcon
-}
-
-const FEATURE_ENTRIES: FeatureEntry[] = [
-  { route: "/workflows", i18nKey: "workflows", Icon: WorkflowIcon },
-  { route: "/inbox", i18nKey: "inbox", Icon: InboxIcon },
-  { route: "/twin", i18nKey: "twin", Icon: BotIcon },
-  { route: "/discover", i18nKey: "discover", Icon: CompassIcon },
-  { route: "/skills", i18nKey: "skills", Icon: SparklesIcon },
-  { route: "/plugins", i18nKey: "plugins", Icon: PlugIcon },
-  { route: "/agent-teams", i18nKey: "agentTeams", Icon: Users2Icon },
-  { route: "/scheduler", i18nKey: "scheduler", Icon: CalendarClockIcon },
-  { route: "/goals", i18nKey: "goals", Icon: TargetIcon },
-]
-
-const AUXILIARY_ENTRIES: FeatureEntry[] = [
-  { route: "/source-control", i18nKey: "sourceControl", Icon: GitBranchIcon },
-  { route: "/observability", i18nKey: "observability", Icon: GaugeIcon },
-  { route: "/performance", i18nKey: "performance", Icon: ActivityIcon },
-  { route: "/logs", i18nKey: "logs", Icon: ScrollTextIcon },
-  { route: "/me", i18nKey: "me", Icon: UserRoundIcon },
-]
-
-/** Desktop-only auxiliary routes — hidden on the mobile (Capacitor) shell. */
-const DESKTOP_ONLY_AUX = new Set(["/performance", "/source-control"])
 
 interface Props {
   onCreateTeam: () => void
@@ -82,33 +51,33 @@ interface Props {
  * route-aware feature buttons.
  *
  *   ┌───── DM · Canvas ──────┐ ← chat guilds (set selected guild + go to /)
- *   ├──── Features (8) ──────┤ ← router.push to feature routes
+ *   ├──── Pinned features ───┤ ← user-customizable; router.push to routes
+ *   ├──── ⋯ More ───────────┤ ← overflow popover (non-pinned items + Customize)
  *   ├──── Teams (dynamic) ───┤ ← chat guilds (per-team conversation list)
- *   ├──── Aux (Logs · Me) ───┤
  *   └────── Settings ────────┘
  *
- * Active state is computed from `usePathname()` for feature buttons and
- * from `selectedGuild` for chat buttons (when on `/`).
+ * Which items are pinned vs. in "More" (vs. hidden) is user customization
+ * persisted on `settings.sidebarLayout` and resolved via `useSidebarLayout`.
+ * Active state is computed from `usePathname()` for feature buttons and from
+ * `selectedGuild` for chat buttons (when on `/`).
  */
 export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
   const t = useTranslations("desktop.guildRail")
   const router = useRouter()
   const pathname = usePathname() ?? "/"
-  const platform = usePlatform()
   const selected = useUIStore((s) => s.selectedGuild)
   const setSelected = useUIStore((s) => s.setSelectedGuild)
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
-
-  const auxiliaryEntries =
-    platform === "mobile"
-      ? AUXILIARY_ENTRIES.filter((e) => !DESKTOP_ONLY_AUX.has(e.route))
-      : AUXILIARY_ENTRIES
+  const { resolved, unpin, hide } = useSidebarLayout()
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
 
   const onHomeRoute = pathname === "/"
   const isDmActive = onHomeRoute && selected.kind === "dm"
   const isCanvasActive = onHomeRoute && selected.kind === "canvas"
 
   const isFeatureActive = (route: string) => pathname === route || pathname.startsWith(route + "/")
+  const overflowActive = resolved.overflow.some((item) => isFeatureActive(item.route))
 
   const switchToDm = () => {
     log.info("guild switch dm")
@@ -128,6 +97,14 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
   const goToFeature = (route: string) => {
     log.info("guild navigate feature", { route })
     router.push(route)
+  }
+  const openOverflowItem = (route: string) => {
+    setMoreOpen(false)
+    goToFeature(route)
+  }
+  const openCustomize = () => {
+    setMoreOpen(false)
+    setCustomizeOpen(true)
   }
   const handleCreateTeam = () => {
     log.info("guild create team click")
@@ -150,6 +127,8 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
             point="sidebar.left.top"
             className="flex flex-col items-center gap-2 empty:hidden"
           />
+          <WorkspaceSwitcher />
+          <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
           <RailButton
             active={isDmActive}
             ariaLabel={t("directMessages")}
@@ -170,18 +149,71 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
 
           <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
 
-          {FEATURE_ENTRIES.map(({ route, i18nKey, Icon }) => (
-            <RailButton
-              key={route}
-              active={isFeatureActive(route)}
-              ariaLabel={t(i18nKey)}
-              tooltip={t(i18nKey)}
-              onClick={() => goToFeature(route)}
-              testId={`guild-feature-${i18nKey}`}
-            >
-              <Icon className="size-5" />
-            </RailButton>
+          {resolved.pinned.map((item) => (
+            <NavRailButton
+              key={item.id}
+              item={item}
+              active={isFeatureActive(item.route)}
+              label={t(item.i18nKey)}
+              moveToMoreLabel={t("customize.moveToMore")}
+              hideLabel={t("customize.hideItem")}
+              customizeLabel={t("customize.title")}
+              onNavigate={() => goToFeature(item.route)}
+              onMoveToMore={() => void unpin(item.id)}
+              onHide={() => void hide(item.id)}
+              onCustomize={() => setCustomizeOpen(true)}
+            />
           ))}
+
+          {resolved.overflow.length > 0 && (
+            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("more")}
+                  data-testid="guild-more"
+                  className={cn(
+                    "size-10 rounded-2xl transition-all hover:rounded-xl",
+                    overflowActive
+                      ? "rounded-xl bg-primary/10 text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <EllipsisIcon className="size-5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent side="right" align="start" className="w-56 p-1">
+                <div className="flex flex-col">
+                  {resolved.overflow.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openOverflowItem(item.route)}
+                      data-testid={`guild-more-item-${item.id}`}
+                      className={cn(
+                        "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+                        isFeatureActive(item.route) && "bg-primary/10 text-foreground"
+                      )}
+                    >
+                      <item.Icon className="size-4 text-muted-foreground" />
+                      <span className="flex-1 text-left">{t(item.i18nKey)}</span>
+                    </button>
+                  ))}
+                  <Separator className="my-1" />
+                  <button
+                    type="button"
+                    onClick={openCustomize}
+                    data-testid="guild-more-customize"
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+                  >
+                    <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
+                    <span className="flex-1 text-left">{t("customize.title")}</span>
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
 
           <Separator className="my-1 w-8" />
 
@@ -206,21 +238,6 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
               </RailButton>
             </li>
           </ul>
-
-          <Separator className="my-1 w-8" aria-label={t("auxiliaryGroup")} />
-
-          {auxiliaryEntries.map(({ route, i18nKey, Icon }) => (
-            <RailButton
-              key={route}
-              active={isFeatureActive(route)}
-              ariaLabel={t(i18nKey)}
-              tooltip={t(i18nKey)}
-              onClick={() => goToFeature(route)}
-              testId={`guild-feature-${i18nKey}`}
-            >
-              <Icon className="size-5" />
-            </RailButton>
-          ))}
         </div>
       </ScrollArea>
 
@@ -240,7 +257,74 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
         point="sidebar.left.bottom"
         className="mt-2 flex flex-col items-center gap-2 empty:hidden"
       />
+
+      <SidebarCustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} />
     </aside>
+  )
+}
+
+interface NavRailButtonProps {
+  item: SidebarCatalogItem
+  active: boolean
+  label: string
+  moveToMoreLabel: string
+  hideLabel: string
+  customizeLabel: string
+  onNavigate: () => void
+  onMoveToMore: () => void
+  onHide: () => void
+  onCustomize: () => void
+}
+
+/**
+ * A pinned rail button with a right-click context menu offering quick
+ * customization (move to "More", hide, open the full customizer). Wrapped in a
+ * `div` so the `ContextMenuTrigger` has a single ref-forwarding child around the
+ * tooltip-wrapped button.
+ */
+function NavRailButton({
+  item,
+  active,
+  label,
+  moveToMoreLabel,
+  hideLabel,
+  customizeLabel,
+  onNavigate,
+  onMoveToMore,
+  onHide,
+  onCustomize,
+}: NavRailButtonProps) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div>
+          <RailButton
+            active={active}
+            ariaLabel={label}
+            tooltip={label}
+            onClick={onNavigate}
+            testId={`guild-feature-${item.id}`}
+          >
+            <item.Icon className="size-5" />
+          </RailButton>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={onMoveToMore}>
+          <PinOffIcon className="size-4" />
+          {moveToMoreLabel}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onHide}>
+          <EyeOffIcon className="size-4" />
+          {hideLabel}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onCustomize}>
+          <SlidersHorizontalIcon className="size-4" />
+          {customizeLabel}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

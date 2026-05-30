@@ -19,6 +19,13 @@ import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { Project, KnowledgeFile } from "@/types"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import {
+  getAllProjects,
+  loadActiveProjectId,
+  putProject,
+  deleteProjectRow,
+  persistActiveProjectId,
+} from "@/lib/db/projects"
 
 export interface CreateProjectOptions {
   name?: string
@@ -26,6 +33,7 @@ export interface CreateProjectOptions {
   systemPrompt?: string
   tags?: string[]
   rootDir?: string
+  additionalDirs?: string[]
   metadata?: Record<string, unknown>
 }
 
@@ -36,6 +44,11 @@ export type ProjectUpdates = Partial<
 interface ProjectState {
   projects: Project[]
   activeProjectId: string | null
+  /** True once `load()` has hydrated from Dexie (or determined none is available). */
+  loaded: boolean
+
+  /** Hydrate the project list + active pointer from Dexie. Idempotent. */
+  load: () => Promise<void>
 
   /** Create a project, append it to the list, and return it. Pure: does NOT auto-activate. */
   createProject: (options: CreateProjectOptions) => Project
@@ -64,220 +77,290 @@ function nowDate(): Date {
   return new Date()
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
-  projects: [],
-  activeProjectId: null,
+export const useProjectStore = create<ProjectState>((set, get) => {
+  // Mirror a single project row to Dexie after a mutation. Gated on `loaded`
+  // so we never write empty in-memory state back over persisted rows before
+  // the boot-time `load()` has hydrated — unit tests that `setState` directly
+  // (and never call `load()`) skip persistence entirely this way.
+  const persist = (id: string): void => {
+    if (!get().loaded) return
+    const row = get().projects.find((p) => p.id === id)
+    if (row) void putProject(row).catch(() => {})
+  }
+  const persistActive = (id: string | null): void => {
+    if (!get().loaded) return
+    void persistActiveProjectId(id).catch(() => {})
+  }
 
-  createProject: (options) => {
-    const now = nowDate()
-    const project: Project = {
-      id: `project-${nanoid()}`,
-      name: options.name?.trim() || "New Project",
-      description: options.description,
-      customInstructions: options.systemPrompt,
-      rootDir: options.rootDir,
-      knowledgeBase: [],
-      sessionIds: [],
-      sessionCount: 0,
-      messageCount: 0,
-      tags: options.tags ? [...options.tags] : undefined,
-      isArchived: false,
-      createdAt: now,
-      updatedAt: now,
-      lastAccessedAt: now,
-      metadata: options.metadata,
-    }
-    set((state) => ({ projects: [...state.projects, project] }))
-    void getPluginEventHooks().dispatchProjectCreate(project)
-    return project
-  },
+  return {
+    projects: [],
+    activeProjectId: null,
+    loaded: false,
 
-  updateProject: (id, updates) => {
-    let updated: Project | undefined
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== id) return p
-        const next = { ...p, ...updates, updatedAt: nowDate() }
-        updated = next
-        return next
-      }),
-    }))
-    if (updated) {
-      void getPluginEventHooks().dispatchProjectUpdate(updated, updates as Partial<Project>)
-    }
-  },
+    load: async () => {
+      if (get().loaded) return
+      try {
+        const [persisted, persistedActiveId] = await Promise.all([
+          getAllProjects(),
+          loadActiveProjectId(),
+        ])
+        // Merge rather than overwrite: a project created or activated before
+        // this async hydration resolved lives only in memory (persist() was
+        // gated on `loaded`). In-memory rows win on id conflicts, and any row
+        // that isn't yet persisted is flushed below so it survives a reload.
+        const inMemory = get().projects
+        const pending = inMemory.filter((p) => !persisted.some((q) => q.id === p.id))
+        const byId = new Map(persisted.map((p) => [p.id, p]))
+        for (const p of inMemory) byId.set(p.id, p)
+        const preloadActiveId = get().activeProjectId
+        const activeProjectId = preloadActiveId ?? persistedActiveId
+        set({ projects: [...byId.values()], activeProjectId, loaded: true })
 
-  deleteProject: (id) => {
-    let removed = false
-    set((state) => {
-      const projects = state.projects.filter((p) => p.id !== id)
-      removed = projects.length !== state.projects.length
-      const activeProjectId = state.activeProjectId === id ? null : state.activeProjectId
-      return { projects, activeProjectId }
-    })
-    if (removed) {
-      void getPluginEventHooks().dispatchProjectDelete(id)
-    }
-  },
+        // Flush mutations made while the gate was closed.
+        for (const p of pending) void putProject(p).catch(() => {})
+        if (preloadActiveId && preloadActiveId !== persistedActiveId) {
+          void persistActiveProjectId(preloadActiveId).catch(() => {})
+        }
+      } catch {
+        // No persistence available (web/test without indexedDB) — still mark
+        // loaded so the store works in-memory.
+        set({ loaded: true })
+      }
+    },
 
-  setActiveProject: (id) => {
-    const previousProjectId = get().activeProjectId
-    if (id === null) {
-      set({ activeProjectId: null })
-      getPluginEventHooks().dispatchProjectSwitch(null, previousProjectId)
-      return
-    }
-    const exists = get().projects.some((p) => p.id === id)
-    if (!exists) {
-      // Allow setting an id even when the project list hasn't hydrated yet
-      // (Dexie load is async). The next render reconciles. Don't throw —
-      // plugins shouldn't have to await load order.
-      set({ activeProjectId: id })
+    createProject: (options) => {
+      const now = nowDate()
+      const project: Project = {
+        id: `project-${nanoid()}`,
+        name: options.name?.trim() || "New Project",
+        description: options.description,
+        customInstructions: options.systemPrompt,
+        rootDir: options.rootDir,
+        additionalDirs: options.additionalDirs ? [...options.additionalDirs] : undefined,
+        knowledgeBase: [],
+        sessionIds: [],
+        sessionCount: 0,
+        messageCount: 0,
+        tags: options.tags ? [...options.tags] : undefined,
+        isArchived: false,
+        createdAt: now,
+        updatedAt: now,
+        lastAccessedAt: now,
+        metadata: options.metadata,
+      }
+      set((state) => ({ projects: [...state.projects, project] }))
+      persist(project.id)
+      void getPluginEventHooks().dispatchProjectCreate(project)
+      return project
+    },
+
+    updateProject: (id, updates) => {
+      let updated: Project | undefined
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== id) return p
+          const next = { ...p, ...updates, updatedAt: nowDate() }
+          updated = next
+          return next
+        }),
+      }))
+      if (updated) {
+        persist(id)
+        void getPluginEventHooks().dispatchProjectUpdate(updated, updates as Partial<Project>)
+      }
+    },
+
+    deleteProject: (id) => {
+      let removed = false
+      const previouslyActive = get().activeProjectId === id
+      set((state) => {
+        const projects = state.projects.filter((p) => p.id !== id)
+        removed = projects.length !== state.projects.length
+        const activeProjectId = state.activeProjectId === id ? null : state.activeProjectId
+        return { projects, activeProjectId }
+      })
+      if (removed) {
+        if (get().loaded) void deleteProjectRow(id).catch(() => {})
+        // Deleting the active workspace clears the pointer — persist that too.
+        if (previouslyActive) persistActive(get().activeProjectId)
+        void getPluginEventHooks().dispatchProjectDelete(id)
+      }
+    },
+
+    setActiveProject: (id) => {
+      const previousProjectId = get().activeProjectId
+      if (id === null) {
+        set({ activeProjectId: null })
+        persistActive(null)
+        getPluginEventHooks().dispatchProjectSwitch(null, previousProjectId)
+        return
+      }
+      const exists = get().projects.some((p) => p.id === id)
+      if (!exists) {
+        // Allow setting an id even when the project list hasn't hydrated yet
+        // (Dexie load is async). The next render reconciles. Don't throw —
+        // plugins shouldn't have to await load order.
+        set({ activeProjectId: id })
+        persistActive(id)
+        getPluginEventHooks().dispatchProjectSwitch(id, previousProjectId)
+        return
+      }
+      set((state) => ({
+        activeProjectId: id,
+        projects: state.projects.map((p) =>
+          p.id === id ? { ...p, lastAccessedAt: nowDate() } : p
+        ),
+      }))
+      persistActive(id)
+      persist(id)
       getPluginEventHooks().dispatchProjectSwitch(id, previousProjectId)
-      return
-    }
-    set((state) => ({
-      activeProjectId: id,
-      projects: state.projects.map((p) => (p.id === id ? { ...p, lastAccessedAt: nowDate() } : p)),
-    }))
-    getPluginEventHooks().dispatchProjectSwitch(id, previousProjectId)
-  },
+    },
 
-  archiveProject: (id) => {
-    set((state) => ({
-      projects: state.projects.map((p) =>
-        p.id === id ? { ...p, isArchived: true, updatedAt: nowDate() } : p
-      ),
-    }))
-  },
+    archiveProject: (id) => {
+      set((state) => ({
+        projects: state.projects.map((p) =>
+          p.id === id ? { ...p, isArchived: true, updatedAt: nowDate() } : p
+        ),
+      }))
+      persist(id)
+    },
 
-  unarchiveProject: (id) => {
-    set((state) => ({
-      projects: state.projects.map((p) =>
-        p.id === id ? { ...p, isArchived: false, updatedAt: nowDate() } : p
-      ),
-    }))
-  },
+    unarchiveProject: (id) => {
+      set((state) => ({
+        projects: state.projects.map((p) =>
+          p.id === id ? { ...p, isArchived: false, updatedAt: nowDate() } : p
+        ),
+      }))
+      persist(id)
+    },
 
-  addKnowledgeFile: (projectId, file) => {
-    const now = nowDate()
-    const newFile: KnowledgeFile = {
-      id: `kbfile-${nanoid()}`,
-      ...file,
-      createdAt: now,
-      updatedAt: now,
-    }
-    let added = false
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        added = true
-        return { ...p, knowledgeBase: [...p.knowledgeBase, newFile], updatedAt: now }
-      }),
-    }))
-    if (added) {
-      void getPluginEventHooks().dispatchKnowledgeFileAdd(projectId, newFile)
-    }
-  },
+    addKnowledgeFile: (projectId, file) => {
+      const now = nowDate()
+      const newFile: KnowledgeFile = {
+        id: `kbfile-${nanoid()}`,
+        ...file,
+        createdAt: now,
+        updatedAt: now,
+      }
+      let added = false
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          added = true
+          return { ...p, knowledgeBase: [...p.knowledgeBase, newFile], updatedAt: now }
+        }),
+      }))
+      if (added) {
+        persist(projectId)
+        void getPluginEventHooks().dispatchKnowledgeFileAdd(projectId, newFile)
+      }
+    },
 
-  removeKnowledgeFile: (projectId, fileId) => {
-    let removed = false
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        const nextKb = p.knowledgeBase.filter((f) => f.id !== fileId)
-        if (nextKb.length !== p.knowledgeBase.length) {
-          removed = true
-        }
-        return {
-          ...p,
-          knowledgeBase: nextKb,
-          updatedAt: nowDate(),
-        }
-      }),
-    }))
-    if (removed) {
-      getPluginEventHooks().dispatchKnowledgeFileRemove(projectId, fileId)
-    }
-  },
+    removeKnowledgeFile: (projectId, fileId) => {
+      let removed = false
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          const nextKb = p.knowledgeBase.filter((f) => f.id !== fileId)
+          if (nextKb.length !== p.knowledgeBase.length) {
+            removed = true
+          }
+          return {
+            ...p,
+            knowledgeBase: nextKb,
+            updatedAt: nowDate(),
+          }
+        }),
+      }))
+      if (removed) {
+        persist(projectId)
+        getPluginEventHooks().dispatchKnowledgeFileRemove(projectId, fileId)
+      }
+    },
 
-  updateKnowledgeFile: (projectId, fileId, content) => {
-    const now = nowDate()
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        return {
-          ...p,
-          knowledgeBase: p.knowledgeBase.map((f) =>
-            f.id === fileId ? { ...f, content, size: content.length, updatedAt: now } : f
-          ),
-          updatedAt: now,
-        }
-      }),
-    }))
-  },
+    updateKnowledgeFile: (projectId, fileId, content) => {
+      const now = nowDate()
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          return {
+            ...p,
+            knowledgeBase: p.knowledgeBase.map((f) =>
+              f.id === fileId ? { ...f, content, size: content.length, updatedAt: now } : f
+            ),
+            updatedAt: now,
+          }
+        }),
+      }))
+      persist(projectId)
+    },
 
-  addSessionToProject: (projectId, sessionId) => {
-    let linked = false
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        if (p.sessionIds.includes(sessionId)) return p
-        linked = true
-        const sessionIds = [...p.sessionIds, sessionId]
-        return {
-          ...p,
-          sessionIds,
-          sessionCount: sessionIds.length,
-          updatedAt: nowDate(),
-        }
-      }),
-    }))
-    if (linked) {
-      getPluginEventHooks().dispatchSessionLinked(projectId, sessionId)
-    }
-  },
+    addSessionToProject: (projectId, sessionId) => {
+      let linked = false
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          if (p.sessionIds.includes(sessionId)) return p
+          linked = true
+          const sessionIds = [...p.sessionIds, sessionId]
+          return {
+            ...p,
+            sessionIds,
+            sessionCount: sessionIds.length,
+            updatedAt: nowDate(),
+          }
+        }),
+      }))
+      if (linked) {
+        persist(projectId)
+        getPluginEventHooks().dispatchSessionLinked(projectId, sessionId)
+      }
+    },
 
-  removeSessionFromProject: (projectId, sessionId) => {
-    let unlinked = false
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        const sessionIds = p.sessionIds.filter((id) => id !== sessionId)
-        if (sessionIds.length !== p.sessionIds.length) {
-          unlinked = true
-        }
-        return {
-          ...p,
-          sessionIds,
-          sessionCount: sessionIds.length,
-          updatedAt: nowDate(),
-        }
-      }),
-    }))
-    if (unlinked) {
-      getPluginEventHooks().dispatchSessionUnlinked(projectId, sessionId)
-    }
-  },
+    removeSessionFromProject: (projectId, sessionId) => {
+      let unlinked = false
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          const sessionIds = p.sessionIds.filter((id) => id !== sessionId)
+          if (sessionIds.length !== p.sessionIds.length) {
+            unlinked = true
+          }
+          return {
+            ...p,
+            sessionIds,
+            sessionCount: sessionIds.length,
+            updatedAt: nowDate(),
+          }
+        }),
+      }))
+      if (unlinked) {
+        persist(projectId)
+        getPluginEventHooks().dispatchSessionUnlinked(projectId, sessionId)
+      }
+    },
 
-  addTag: (projectId, tag) => {
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        const tags = p.tags ?? []
-        if (tags.includes(tag)) return p
-        return { ...p, tags: [...tags, tag], updatedAt: nowDate() }
-      }),
-    }))
-  },
+    addTag: (projectId, tag) => {
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          const tags = p.tags ?? []
+          if (tags.includes(tag)) return p
+          return { ...p, tags: [...tags, tag], updatedAt: nowDate() }
+        }),
+      }))
+      persist(projectId)
+    },
 
-  removeTag: (projectId, tag) => {
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== projectId) return p
-        const tags = (p.tags ?? []).filter((t) => t !== tag)
-        return { ...p, tags, updatedAt: nowDate() }
-      }),
-    }))
-  },
-}))
+    removeTag: (projectId, tag) => {
+      set((state) => ({
+        projects: state.projects.map((p) => {
+          if (p.id !== projectId) return p
+          const tags = (p.tags ?? []).filter((t) => t !== tag)
+          return { ...p, tags, updatedAt: nowDate() }
+        }),
+      }))
+      persist(projectId)
+    },
+  }
+})

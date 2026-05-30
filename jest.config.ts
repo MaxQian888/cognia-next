@@ -187,6 +187,16 @@ const config: Config = {
   // 2 GB-class module graph into RAM 15+ times concurrently.
   maxWorkers: "50%",
 
+  // Recycle a worker once its heap crosses this ceiling. Jest reuses a worker
+  // process across many test files and never clears the module registry
+  // between them (`resetModules` is off by design, for speed), so a single
+  // worker accumulates the *union* of every module graph it has loaded. With
+  // the suite past 2.7k files (~160 files per worker on a 32-core box) a worker
+  // climbs to ~1.5 GB after just ~10 component files and stays pinned there;
+  // 16 such workers peak around ~24 GB. Restarting a worker at 1 GB resets its
+  // registry to zero and bounds total RSS without lowering parallelism.
+  workerIdleMemoryLimit: "1GB",
+
   // An array of directory names to be searched recursively up from the requiring module's location
   // moduleDirectories: [
   //   "node_modules"

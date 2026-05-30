@@ -16,8 +16,28 @@
 
 import type { Event } from "@tauri-apps/api/event"
 
-import { getDb, type AutomationAuditLogRow } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
 import { isTauri } from "@/lib/tauri"
+import type { AuditEntry } from "./client"
+
+/**
+ * Dexie row for the `automationAuditLog` table (schema v28). It is the
+ * persisted form of the Rust `AuditEntry` (re-exported here via `./client`),
+ * plus the optional `conversationKey` added at v41. `schema.ts` imports +
+ * re-exports this type, so existing `@/lib/db/schema` import sites keep
+ * working. See `lib/db/CONVENTIONS.md`.
+ */
+export interface AutomationAuditLogRow extends AuditEntry {
+  /**
+   * Connector conversation key the computer-use action was initiated from,
+   * when known. Populated when the surface is `"computerUse"` and the chat
+   * session has a `platformBinding`. Used by
+   * `components/inbox/computer-use-events-strip.tsx` to filter by
+   * conversation. Optional because workflow / MCP / plugin invocations may
+   * not have a conversation context.
+   */
+  conversationKey?: string
+}
 
 /** Cap mirror on the Dexie side. Matches `AUDIT_CAP` in `audit.rs`. */
 export const AUTOMATION_AUDIT_CAP = 5000

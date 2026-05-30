@@ -4,7 +4,33 @@
 // present means "auto-trust subsequent updates from this author".
 
 import { getDb } from "./schema"
-import type { TrustedPublisherRow } from "./schema"
+
+/**
+ * Trusted plugin publisher ledger — one row per Ed25519 public key the user
+ * accepted during a signed-plugin install. Drives "auto-trust subsequent
+ * updates from the same author" semantics across HTTP/Git install paths.
+ *
+ * Co-located with this CRUD module; `schema.ts` imports + re-exports it, so
+ * existing `@/lib/db/schema` import sites keep working. See `CONVENTIONS.md`.
+ */
+export interface TrustedPublisherRow {
+  /** Base64-encoded Ed25519 public key (primary key). */
+  publicKey: string
+  /** SHA-256 hex digest of the public key, for the install-dialog UI. */
+  fingerprint: string
+  /** Display name from `manifest.author.name` at first-trust time. */
+  authorName?: string
+  /** Optional contact email captured from `manifest.author.email`. */
+  authorEmail?: string
+  /** Optional homepage / repository URL captured at first-trust time. */
+  homepage?: string
+  /** Epoch ms of first accept. */
+  firstTrustedAt: number
+  /** Epoch ms of the most-recent install/update by this author. */
+  lastSeenAt: number
+  /** Counter — number of distinct plugins installed by this author. */
+  installCount: number
+}
 
 export interface TrustPublisherInput {
   publicKey: string

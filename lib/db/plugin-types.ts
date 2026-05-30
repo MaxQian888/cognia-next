@@ -143,3 +143,17 @@ export interface PluginScheduledJobRow {
   createdAt: number
   updatedAt: number
 }
+
+/**
+ * Registry entry for a plugin's declared Dexie tables (schema v27). Written by
+ * `applyPluginTables`; read on launch to restore the plugin table set.
+ */
+export interface PluginDexieMeta {
+  /** Primary key — the plugin's id. */
+  pluginId: string
+  /** Namespaced table names currently registered for this plugin. */
+  tableNames: string[]
+  /** The Dexie db version at which these tables were last registered. */
+  dexieVersion: number
+  appliedAt: number
+}

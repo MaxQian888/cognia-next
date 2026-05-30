@@ -9,6 +9,7 @@ import {
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -18,6 +19,7 @@ const DEFAULTS: AppSettings = {
   defaultModel: undefined,
   defaultSystemPrompt: undefined,
   defaultWorkingDir: undefined,
+  activeProjectId: undefined,
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
@@ -42,6 +44,7 @@ const DEFAULTS: AppSettings = {
   selectedMicId: undefined,
   pinnedWorkflowIds: [],
   pinnedMeRowIds: [],
+  sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
   lastInboxViewedAt: 0,
   // TTS defaults (mirror lib/tts/types.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,
@@ -151,6 +154,11 @@ export async function getSettings(): Promise<AppSettings> {
       ...(row.biometricRequiredFor ?? {}),
     },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
+    // Forward-compat: a row saved before sidebar customization existed has no
+    // `sidebarLayout` — fall back to the default so the rail renders pinned
+    // features + "More". Arrays replace wholesale (an explicit empty `pinned`
+    // is a deliberate user choice, not a missing field).
+    sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT, ...(row.sidebarLayout ?? {}) },
     conversationTitle: { ...DEFAULTS.conversationTitle, ...(row.conversationTitle ?? {}) },
     conversationTimeline: {
       ...DEFAULTS.conversationTimeline,

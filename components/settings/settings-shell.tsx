@@ -44,6 +44,10 @@ const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.App
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const SidebarSection = dynamic(
+  () => import("./sidebar/sidebar-section").then((m) => m.SidebarSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const CharactersSection = dynamic(
   () => import("./characters-section").then((m) => m.CharactersSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -334,6 +338,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <OcrSection />
     case "appearance":
       return <AppearanceSection />
+    case "sidebar":
+      return <SidebarSection />
     case "terminal":
       return <TerminalSection />
     case "speech":

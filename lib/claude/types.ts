@@ -832,6 +832,12 @@ export interface AppSettings {
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
+  /**
+   * Id of the active workspace (project). Persists the `useProjectStore`
+   * active-workspace pointer across restarts; hydrated on boot by the project
+   * store's `load()`. `null`/undefined means no workspace is active.
+   */
+  activeProjectId?: string | null
   permissionMode?: SendOptions["permissionMode"]
   /**
    * App-wide default for the SDK's extended-thinking budget. `undefined` or
@@ -1021,6 +1027,14 @@ export interface AppSettings {
    * persists without a Dexie migration.
    */
   pinnedMeRowIds?: string[]
+  /**
+   * Customization of the desktop left navigation rail (`GuildRail`): which
+   * nav items are pinned (shown directly) and which are hidden. Items neither
+   * pinned nor hidden surface in the "More" overflow popover. Lives in settings
+   * JSON (same pattern as `pinnedWorkflowIds`) so it persists without a Dexie
+   * migration. See `@/types/shell/sidebar` for the model + default.
+   */
+  sidebarLayout?: import("@/types/shell/sidebar").SidebarLayout
   /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
@@ -1343,6 +1357,25 @@ export interface AppSettings {
    * stored separately in the OS keyring, not here.
    */
   shareUrl?: string
+  /**
+   * WebDAV snapshot sync (ADR-0001 extension). Periodically uploads the
+   * encrypted backup package to a WebDAV server so another device can
+   * download + restore it. The server password lives in the OS keyring
+   * (`WEBDAV_PASSWORD_REF`); the zero-knowledge sync passphrase is never
+   * persisted (session-only, see `lib/webdav/passphrase-cache.ts`).
+   */
+  webdavSync?: {
+    enabled?: boolean
+    /** Base URL with no trailing slash, e.g. `https://dav.example.com`. */
+    baseUrl?: string
+    username?: string
+    /** Collection to store snapshots in. Default `/cognia-backups`. */
+    remoteDir?: string
+    /** ISO timestamp of the last successful upload. */
+    lastSyncAt?: string
+    /** ISO mtime of the newest remote snapshot the startup check has seen. */
+    lastRemoteSeenAt?: string
+  }
   /**
    * Additional ICE servers presented to the browser's `RTCPeerConnection`.
    * STUN entries only — TURN goes in {@link turnServers} so the UI can

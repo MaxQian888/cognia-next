@@ -1,0 +1,142 @@
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+
+let storedSettings: { webdavSync?: Record<string, unknown> } = {}
+const saveSettingsMock = jest.fn(async (..._a: unknown[]) => {})
+const setWebDavPasswordMock = jest.fn(async (..._a: unknown[]) => {})
+const getWebDavPasswordMock = jest.fn(async (..._a: unknown[]) => "stored-pwd")
+let hasPassword = false
+const setSyncPassphraseMock = jest.fn()
+let hasPass = false
+const runSyncNowMock = jest.fn(
+  async (..._a: unknown[]): Promise<{ ok: boolean; error?: string }> => ({ ok: true })
+)
+const ensureCollectionMock = jest.fn(async () => {})
+const createWebDavClientMock = jest.fn((..._a: unknown[]) => ({
+  ensureCollection: ensureCollectionMock,
+}))
+
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: async () => storedSettings,
+  saveSettings: (...a: unknown[]) => saveSettingsMock(...a),
+}))
+jest.mock("@/lib/webdav/config", () => ({
+  DEFAULT_WEBDAV_REMOTE_DIR: "/cognia-backups",
+  hasWebDavPassword: async () => hasPassword,
+  setWebDavPassword: (...a: unknown[]) => setWebDavPasswordMock(...a),
+  getWebDavPassword: (...a: unknown[]) => getWebDavPasswordMock(...a),
+}))
+jest.mock("@/lib/webdav/client", () => ({
+  createWebDavClient: (...a: unknown[]) => createWebDavClientMock(...a),
+}))
+let supported = true
+jest.mock("@/lib/webdav/transport", () => ({
+  isWebDavSupported: () => supported,
+}))
+jest.mock("@/lib/webdav/passphrase-cache", () => ({
+  setSyncPassphrase: (...a: unknown[]) => setSyncPassphraseMock(...a),
+  hasSyncPassphrase: () => hasPass,
+}))
+jest.mock("@/lib/webdav/sync-now", () => ({
+  runWebDavSyncNow: (...a: unknown[]) => runSyncNowMock(...a),
+}))
+// Stub the restore dialog so we don't drag the restore pipeline into this test.
+jest.mock("@/components/data/import/webdav-restore-dialog", () => ({
+  WebDavRestoreDialog: ({ trigger }: { trigger: React.ReactNode }) => <>{trigger}</>,
+}))
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
+}))
+
+import { WebDavSyncCard } from "./webdav-sync-card"
+
+beforeEach(() => {
+  storedSettings = {}
+  hasPassword = false
+  hasPass = false
+  supported = true
+  saveSettingsMock.mockClear()
+  setWebDavPasswordMock.mockClear()
+  setSyncPassphraseMock.mockClear()
+  runSyncNowMock.mockClear()
+  runSyncNowMock.mockResolvedValue({ ok: true })
+  ensureCollectionMock.mockClear()
+  createWebDavClientMock.mockClear()
+  toastSuccess.mockClear()
+  toastError.mockClear()
+})
+
+describe("WebDavSyncCard", () => {
+  it("hydrates from settings", async () => {
+    storedSettings = { webdavSync: { enabled: true, baseUrl: "https://d", username: "bob" } }
+    render(<WebDavSyncCard />)
+    await waitFor(() => expect(screen.getByDisplayValue("https://d")).toBeInTheDocument())
+    expect(screen.getByDisplayValue("bob")).toBeInTheDocument()
+  })
+
+  it("saves settings + password + passphrase", async () => {
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+
+    await user.type(screen.getByLabelText("Server URL"), "https://dav.example.com")
+    await user.type(screen.getByLabelText("Username"), "bob")
+    await user.type(screen.getByLabelText("Password"), "pw")
+    await user.type(screen.getByLabelText("Sync passphrase"), "secret")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalled())
+    expect(saveSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webdavSync: expect.objectContaining({
+          baseUrl: "https://dav.example.com",
+          username: "bob",
+        }),
+      })
+    )
+    expect(setWebDavPasswordMock).toHaveBeenCalledWith("pw")
+    expect(setSyncPassphraseMock).toHaveBeenCalledWith("secret")
+  })
+
+  it("test connection ensures the remote collection", async () => {
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+    await user.type(screen.getByLabelText("Server URL"), "https://d")
+    await user.type(screen.getByLabelText("Username"), "bob")
+    await user.type(screen.getByLabelText("Password"), "pw")
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+    await waitFor(() => expect(ensureCollectionMock).toHaveBeenCalled())
+    expect(toastSuccess).toHaveBeenCalled()
+  })
+
+  it("sync now requires a passphrase, then uploads", async () => {
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+
+    await user.click(screen.getByRole("button", { name: "Sync now" }))
+    expect(toastError).toHaveBeenCalled()
+    expect(runSyncNowMock).not.toHaveBeenCalled()
+
+    await user.type(screen.getByLabelText("Sync passphrase"), "secret")
+    await user.click(screen.getByRole("button", { name: "Sync now" }))
+    await waitFor(() => expect(runSyncNowMock).toHaveBeenCalledWith("secret"))
+  })
+
+  it("disables network actions and shows a note on web", async () => {
+    supported = false
+    render(<WebDavSyncCard />)
+    await waitFor(() =>
+      expect(
+        screen.getByText(/WebDAV sync runs in the desktop and mobile apps only/)
+      ).toBeInTheDocument()
+    )
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled()
+    // Save still works — persisting config is fine anywhere.
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+})

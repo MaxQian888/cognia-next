@@ -75,6 +75,7 @@ import {
 } from "@/lib/agent-trace/chat-tool-spans"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { useProjectStore } from "@/stores/project/project-store"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
@@ -1043,6 +1044,14 @@ async function buildSendOptions(
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
 
+  // Active workspace (project). Its `rootDir` joins the cwd resolution chain
+  // and its `additionalDirs` are unioned into `additionalDirectories` for this
+  // turn. `null` when no workspace is active (resolver falls back as before).
+  const projectState = useProjectStore.getState()
+  const activeProject = projectState.activeProjectId
+    ? (projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? null)
+    : null
+
   // Twin runtime injection: when the user has populated the runtime config
   // (vector store + embedding API key) and the message is a plain string,
   // hand resolveSendOptions the deps so it can call applyTwinContext for
@@ -1066,6 +1075,7 @@ async function buildSendOptions(
   return resolveSendOptions({
     session,
     appSettings,
+    activeProject,
     referencedPaths,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,

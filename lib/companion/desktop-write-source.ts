@@ -27,6 +27,39 @@ import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@/lib/claude/types"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import {
+  createWorkflow,
+  deleteWorkflow,
+  listWorkflowRuns,
+  updateWorkflow,
+  type WorkflowDraft,
+  type WorkflowPatch,
+} from "@/lib/db/workflows"
+import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
+import { requestCancelRun } from "@/lib/workflow/runtime/run-cancel-registry"
+import { deleteTwin } from "@/lib/db/twins"
+import { deleteTwinSource, listTwinSourcesByTwin, updateTwinSource } from "@/lib/db/twin-sources"
+import type { TwinSource } from "@/types/twin"
+import {
+  cancelJob,
+  getTwinJob,
+  listActiveJobsByTwin,
+  pauseJob,
+  resumeJob,
+  retryDeadLetterJob,
+} from "@/lib/db/twin-jobs"
+import {
+  upsertByConversationKey,
+  type ConversationOverrideInput,
+} from "@/lib/db/conversation-overrides"
+import { buildBackupPackage } from "@/lib/data/build-package"
+import { applyBackupPackage } from "@/lib/data/apply-package"
+import type {
+  BackupPackageV3,
+  ExportOptions,
+  ImportOptions,
+  ImportMergeStrategy,
+} from "@/lib/data/types"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -150,6 +183,50 @@ export async function dispatchCommand(
       return goalTransition(payload, "resume")
     case "goal_stop":
       return goalTransition(payload, "stop")
+    // Workflow CRUD (ADR-0027 Wave 4.1). Definitions live in Dexie; these
+    // mirror the desktop editor's create/update/delete + schedule pause/resume
+    // and a run listing + remote cancel.
+    case "workflow_create":
+      return workflowCreate(payload)
+    case "workflow_update":
+      return workflowUpdate(payload)
+    case "workflow_delete":
+      return workflowDelete(payload)
+    case "workflow_run_list":
+      return workflowRunList(payload)
+    case "workflow_cancel_run":
+      return workflowCancelRun(payload)
+    case "workflow_schedule_pause":
+      return workflowScheduleSet(payload, false)
+    case "workflow_schedule_resume":
+      return workflowScheduleSet(payload, true)
+    // Twin source CRUD + job control (ADR-0003).
+    case "twin_delete":
+      return twinDelete(payload)
+    case "twin_source_list":
+      return twinSourceList(payload)
+    case "twin_source_update":
+      return twinSourceUpdate(payload)
+    case "twin_source_delete":
+      return twinSourceDelete(payload)
+    case "twin_job_status":
+      return twinJobStatus(payload)
+    case "twin_job_cancel":
+      return twinJobAction(payload, "cancel")
+    case "twin_job_pause":
+      return twinJobAction(payload, "pause")
+    case "twin_job_resume":
+      return twinJobAction(payload, "resume")
+    case "twin_job_retry":
+      return twinJobAction(payload, "retry")
+    // Settings — per-conversation overrides (pin/archive/title).
+    case "conversation_overrides_update":
+      return conversationOverridesUpdate(payload)
+    // App-data backup.
+    case "backup_export":
+      return backupExport(payload)
+    case "backup_import":
+      return backupImport(payload)
     default:
       throw new Error(`unknown desktop-write command: ${command}`)
   }
@@ -385,6 +462,210 @@ async function twinIngestSource(payload: Record<string, unknown>): Promise<{ job
     sourceIds: [],
   })
   return { jobId: job.id }
+}
+
+// ---------------------------------------------------------------------------
+// Workflow CRUD (Wave 4.1)
+// ---------------------------------------------------------------------------
+
+async function workflowCreate(payload: Record<string, unknown>): Promise<{ workflow: unknown }> {
+  const draft = payload.draft as WorkflowDraft | undefined
+  if (!draft || typeof draft !== "object") {
+    throw new Error("workflow_create.draft is required")
+  }
+  const workflow = await createWorkflow(draft)
+  return { workflow }
+}
+
+async function workflowUpdate(payload: Record<string, unknown>): Promise<null> {
+  const id = payload.id as string | undefined
+  const patch = payload.patch as WorkflowPatch | undefined
+  if (!id) throw new Error("workflow_update.id is required")
+  if (!patch || typeof patch !== "object") {
+    throw new Error("workflow_update.patch is required")
+  }
+  await updateWorkflow(id, patch)
+  return null
+}
+
+async function workflowDelete(payload: Record<string, unknown>): Promise<null> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("workflow_delete.id is required")
+  await deleteWorkflow(id)
+  return null
+}
+
+async function workflowRunList(payload: Record<string, unknown>): Promise<{ runs: unknown[] }> {
+  const workflowId = payload.workflowId as string | undefined
+  const limit = typeof payload.limit === "number" ? payload.limit : undefined
+  const offset = typeof payload.offset === "number" ? payload.offset : undefined
+  const runs = await listWorkflowRuns({ workflowId, limit, offset })
+  return { runs }
+}
+
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
+
+async function workflowCancelRun(
+  payload: Record<string, unknown>
+): Promise<{ cancelled: boolean; live: boolean }> {
+  const runId = payload.runId as string | undefined
+  if (!runId) throw new Error("workflow_cancel_run.runId is required")
+  // Abort a run executing in this runtime, if any.
+  const live = requestCancelRun(runId, "cancelled via Companion API")
+  // Soft-cancel: when the run is not live here (e.g. already finished, or owned
+  // by another process) mark a non-terminal row as cancelled so the UI reflects
+  // it. A live abort lets the orchestrator finalize the row itself.
+  let cancelled = live
+  if (!live) {
+    const row = await getDb().workflowRuns.get(runId)
+    if (row && !TERMINAL_RUN_STATUSES.has(row.status)) {
+      await getDb().workflowRuns.update(runId, {
+        status: "cancelled",
+        completedAt: Date.now(),
+      })
+      cancelled = true
+    }
+  }
+  return { cancelled, live }
+}
+
+async function workflowScheduleSet(
+  payload: Record<string, unknown>,
+  enabled: boolean
+): Promise<null> {
+  const triggerId = payload.triggerId as string | undefined
+  if (!triggerId) {
+    throw new Error(`workflow_schedule_${enabled ? "resume" : "pause"}.triggerId is required`)
+  }
+  const source = createWorkflowSource()
+  if (enabled) {
+    await source.resume(triggerId)
+  } else {
+    await source.pause(triggerId)
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Twin source CRUD + job control (Wave 4.1)
+// ---------------------------------------------------------------------------
+
+async function twinDelete(payload: Record<string, unknown>): Promise<{ result: unknown }> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("twin_delete.id is required")
+  const result = await deleteTwin(id)
+  return { result }
+}
+
+async function twinSourceList(payload: Record<string, unknown>): Promise<{ sources: unknown[] }> {
+  const twinId = payload.twinId as string | undefined
+  if (!twinId) throw new Error("twin_source_list.twinId is required")
+  const sources = await listTwinSourcesByTwin(twinId)
+  return { sources }
+}
+
+async function twinSourceUpdate(payload: Record<string, unknown>): Promise<{ source: unknown }> {
+  const id = payload.id as string | undefined
+  const patch = payload.patch as Partial<Omit<TwinSource, "id" | "twinId">> | undefined
+  if (!id) throw new Error("twin_source_update.id is required")
+  if (!patch || typeof patch !== "object") {
+    throw new Error("twin_source_update.patch is required")
+  }
+  const source = await updateTwinSource(id, patch)
+  return { source: source ?? null }
+}
+
+async function twinSourceDelete(payload: Record<string, unknown>): Promise<null> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("twin_source_delete.id is required")
+  await deleteTwinSource(id)
+  return null
+}
+
+async function twinJobStatus(payload: Record<string, unknown>): Promise<unknown> {
+  const jobId = payload.jobId as string | undefined
+  if (jobId) {
+    const job = await getTwinJob(jobId)
+    return { job: job ?? null }
+  }
+  const twinId = payload.twinId as string | undefined
+  if (!twinId) {
+    throw new Error("twin_job_status requires jobId or twinId")
+  }
+  const jobs = await listActiveJobsByTwin(twinId)
+  return { jobs }
+}
+
+async function twinJobAction(
+  payload: Record<string, unknown>,
+  action: "cancel" | "pause" | "resume" | "retry"
+): Promise<null> {
+  const jobId = payload.jobId as string | undefined
+  if (!jobId) throw new Error(`twin_job_${action}.jobId is required`)
+  switch (action) {
+    case "cancel":
+      await cancelJob(jobId, payload.reason as string | undefined)
+      break
+    case "pause":
+      await pauseJob(jobId)
+      break
+    case "resume":
+      await resumeJob(jobId)
+      break
+    case "retry":
+      await retryDeadLetterJob(jobId)
+      break
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Settings — per-conversation overrides (Wave 4.1)
+// ---------------------------------------------------------------------------
+
+async function conversationOverridesUpdate(
+  payload: Record<string, unknown>
+): Promise<{ override: unknown }> {
+  const input = payload.input as ConversationOverrideInput | undefined
+  if (!input || typeof input !== "object") {
+    throw new Error("conversation_overrides_update.input is required")
+  }
+  const override = await upsertByConversationKey(input)
+  return { override }
+}
+
+// ---------------------------------------------------------------------------
+// App-data backup (Wave 4.1)
+// ---------------------------------------------------------------------------
+
+async function backupExport(
+  payload: Record<string, unknown>
+): Promise<{ package: BackupPackageV3 }> {
+  const opts = (payload.options as Partial<ExportOptions> | undefined) ?? {}
+  const exportOptions: ExportOptions = {
+    includeSessions: opts.includeSessions ?? true,
+    // Never ride secrets to a remote client by default.
+    includeApiKey: false,
+    includeBuiltIns: opts.includeBuiltIns ?? false,
+  }
+  const pkg = await buildBackupPackage(exportOptions)
+  return { package: pkg }
+}
+
+async function backupImport(payload: Record<string, unknown>): Promise<{ summary: unknown }> {
+  const pkg = payload.package as BackupPackageV3 | undefined
+  if (!pkg || typeof pkg !== "object") {
+    throw new Error("backup_import.package is required")
+  }
+  const opts = (payload.options as Partial<ImportOptions> | undefined) ?? {}
+  const mergeStrategy = (opts.mergeStrategy ?? "skip") as ImportMergeStrategy
+  const importOptions: ImportOptions = {
+    mergeStrategy,
+    includeSessions: opts.includeSessions ?? true,
+    includeApiKey: false,
+  }
+  const summary = await applyBackupPackage(pkg, importOptions)
+  return { summary }
 }
 
 void getSettings // keep import alive for tests that mock the module

@@ -273,15 +273,44 @@ describe("call() — idempotency key", () => {
     transport = new CompanionTransport()
 
     // All read-only commands from the Rust rpc.rs READ_ONLY_COMMANDS list.
+    // This array is the cross-language parity guard: it must stay in lockstep
+    // with READ_ONLY_COMMANDS in both rpc.rs and transport-companion.ts. A
+    // write wrongly added here would skip the Idempotency-Key on a mutation.
     const readOnlyCommands = [
       "claude_sidecar_status",
-      "claude_sub_load_token",
       "claude_has_api_key",
       "claude_has_oauth_bearer",
       "skills_load_registry",
       "skills_scan_native",
       "mcp_server_status",
       "read_agent_config",
+      "session_list",
+      "companion_can_control",
+      // Wave 4.1 reads.
+      "git_is_repo",
+      "git_repo_state",
+      "git_status",
+      "git_diff_file",
+      "git_diff_commit",
+      "git_commit_files",
+      "git_log",
+      "git_file_history",
+      "git_branches",
+      "git_remotes",
+      "git_stash_list",
+      "git_conflicts",
+      "read_text_file",
+      "default_export_dir",
+      "fs_search_workspace",
+      "fs_read_workspace_file",
+      "terminal_list_all",
+      "terminal_list_for_project",
+      "plugin_list",
+      "plugin_runtime_snapshot",
+      "workflow_run_list",
+      "twin_source_list",
+      "twin_job_status",
+      "backup_export",
     ]
 
     for (const cmd of readOnlyCommands) {
@@ -293,6 +322,39 @@ describe("call() — idempotency key", () => {
       const [, init] = call as [string, RequestInit]
       const headers = init.headers as Record<string, string>
       expect(headers["Idempotency-Key"]).toBeUndefined()
+    }
+  })
+
+  it("DOES include Idempotency-Key for new Wave 4.1 mutating commands", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({}, 200))
+    transport = new CompanionTransport()
+
+    // Representative writes across the new domains — these must NOT be in the
+    // read-only set, so each gets a fresh idempotency key.
+    const writeCommands = [
+      "git_push",
+      "git_commit",
+      "write_text_file",
+      "fs_write_workspace_file",
+      "terminal_exec",
+      "terminal_kill",
+      "plugin_install",
+      "workflow_delete",
+      "workflow_cancel_run",
+      "twin_delete",
+      "backup_import",
+    ]
+
+    for (const cmd of writeCommands) {
+      await transport.call(cmd, { repoPath: "/x" })
+    }
+
+    for (const call of fetchSpy.mock.calls) {
+      const [, init] = call as [string, RequestInit]
+      const headers = init.headers as Record<string, string>
+      expect(headers["Idempotency-Key"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      )
     }
   })
 

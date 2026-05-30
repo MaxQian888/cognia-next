@@ -64,6 +64,14 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+const mockProjectState = {
+  activeProjectId: null as string | null,
+  addSessionToProject: jest.fn(),
+}
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: { getState: () => mockProjectState },
+}))
+
 import { useSessions } from "./use-sessions"
 
 beforeEach(() => {
@@ -82,6 +90,8 @@ beforeEach(() => {
   chatStoreState.setMessages.mockClear()
   chatStoreState.activeSessionId = null
   isTauriMock.mockReset().mockReturnValue(true)
+  mockProjectState.activeProjectId = null
+  mockProjectState.addSessionToProject.mockReset()
 })
 
 describe("useSessions", () => {
@@ -170,6 +180,26 @@ describe("useSessions", () => {
     })
     expect((session as { id: string }).id).toBe("s-new")
     expect(chatStoreState.setActiveSession).toHaveBeenCalledWith("s-new")
+  })
+
+  it("create auto-links the new session to the active workspace", async () => {
+    mockProjectState.activeProjectId = "ws-1"
+    createSessionMock.mockResolvedValueOnce({ id: "s-new" })
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.create({ title: "T" } as never)
+    })
+    expect(mockProjectState.addSessionToProject).toHaveBeenCalledWith("ws-1", "s-new")
+  })
+
+  it("create does not link when no workspace is active", async () => {
+    mockProjectState.activeProjectId = null
+    createSessionMock.mockResolvedValueOnce({ id: "s-new" })
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.create({ title: "T" } as never)
+    })
+    expect(mockProjectState.addSessionToProject).not.toHaveBeenCalled()
   })
 
   it("remove tears down the IPC session and deletes the row", async () => {

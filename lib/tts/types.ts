@@ -16,6 +16,18 @@ export type TTSProvider =
   | "deepgram"
   | "xiaomi"
 
+/**
+ * Web-mode fallback row for the `tts_provider_keys` Dexie table. On the desktop
+ * the keys live in the OS keyring; in the browser (no keyring) `lib/tts/keyring.ts`
+ * falls back to this table. `schema.ts` imports + re-exports this type, so
+ * existing `@/lib/db/schema` import sites keep working. See `lib/db/CONVENTIONS.md`.
+ */
+export interface TtsProviderKeyRow {
+  /** "tts.providerKey.<provider>" */
+  id: string
+  value: string
+}
+
 export interface TTSProviderInfo {
   id: TTSProvider
   name: string

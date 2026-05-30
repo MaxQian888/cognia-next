@@ -34,7 +34,10 @@ mod tests {
                     Some(idx) => &rest[..idx],
                     None => rest,
                 };
-                if !name.is_empty() {
+                // Skip the wire-true wildcard template `/api/v1/_rpc/{name}`:
+                // it documents the single dispatch route, not a concrete
+                // command, so it has no `KNOWN_COMMANDS` entry by design.
+                if !name.is_empty() && !name.starts_with('{') {
                     names.insert(name.to_string());
                 }
             }

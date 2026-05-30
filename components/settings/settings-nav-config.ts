@@ -41,6 +41,7 @@ import {
   MousePointerClickIcon,
   TargetIcon,
   MessagesSquareIcon,
+  PanelLeftIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -61,6 +62,7 @@ export type SettingsSectionId =
   | "tools"
   | "search"
   | "appearance"
+  | "sidebar"
   | "terminal"
   | "speech"
   | "characters"
@@ -280,6 +282,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "appearance",
     group: "interface",
     icon: PaletteIcon,
+  },
+  {
+    id: "sidebar",
+    labelKey: "sidebar",
+    descriptionKey: "sidebar",
+    group: "interface",
+    icon: PanelLeftIcon,
+    desktopOnly: true,
   },
   {
     id: "speech",
@@ -626,6 +636,26 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "research",
   ],
   appearance: ["theme", "dark", "light", "font", "language"],
+  sidebar: [
+    "sidebar",
+    "rail",
+    "guild rail",
+    "navigation",
+    "nav",
+    "pin",
+    "pinned",
+    "reorder",
+    "customize",
+    "hide",
+    "more",
+    "overflow",
+    "侧边栏",
+    "导航",
+    "固定",
+    "自定义",
+    "排序",
+    "隐藏",
+  ],
   terminal: [
     "terminal",
     "shell",

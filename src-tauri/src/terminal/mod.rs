@@ -20,6 +20,7 @@
 //! (extension-driven).
 
 pub mod commands;
+pub mod exec;
 pub mod integration;
 pub mod osc633;
 pub mod replay;

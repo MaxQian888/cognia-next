@@ -2269,6 +2269,7 @@
     "tabs": {
       "general": "General",
       "appearance": "Appearance",
+      "sidebar": "Sidebar",
       "terminal": "Terminal",
       "apiKey": "API key",
       "ccswitch": "CCSwitch",
@@ -2314,6 +2315,7 @@
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "appearance": "Theme, font scale, language and motion.",
+      "sidebar": "Pin, reorder, or hide the left navigation rail items.",
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
       "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
@@ -3603,6 +3605,61 @@
         }
       },
       "reset": "Reset",
+      "webdav": {
+        "title": "WebDAV sync",
+        "description": "Periodically upload an encrypted backup to a WebDAV server so another device can download and restore it. End-to-end encrypted with your sync passphrase.",
+        "unsupported": "WebDAV sync runs in the desktop and mobile apps only — it isn't available in the browser.",
+        "enableLabel": "Enable WebDAV sync",
+        "urlLabel": "Server URL",
+        "urlPlaceholder": "https://dav.example.com",
+        "folderLabel": "Remote folder",
+        "usernameLabel": "Username",
+        "usernamePlaceholder": "your-username",
+        "passwordLabel": "Password",
+        "passwordPlaceholder": "Server password",
+        "passwordSet": "Saved — leave blank to keep",
+        "passphraseLabel": "Sync passphrase",
+        "passphrasePlaceholder": "Shared across your devices",
+        "passphraseUnlocked": "Unlocked for this session",
+        "passphraseHint": "Never stored — re-enter each session to enable auto-sync and restore. Encrypts the backup so the server never sees plaintext.",
+        "unlocked": "Unlocked",
+        "save": "Save",
+        "saved": "WebDAV settings saved.",
+        "clear": "Clear",
+        "cleared": "Password cleared.",
+        "testConnection": "Test connection",
+        "testIncomplete": "Enter the server URL, username and password first.",
+        "testSuccess": "Connected to the WebDAV server.",
+        "testFailed": "Connection failed: {error}",
+        "syncNow": "Sync now",
+        "syncing": "Syncing…",
+        "syncSuccess": "Snapshot uploaded.",
+        "syncFailed": "Upload failed: {error}",
+        "restore": "Restore…",
+        "passphraseRequired": "Enter the sync passphrase first.",
+        "lastSync": "Last synced {time}",
+        "neverSynced": "Not synced yet.",
+        "restoreDialog": {
+          "title": "Restore from WebDAV",
+          "description": "Download a snapshot from the server and merge it into this device. This overwrites or merges local data — proceed with care.",
+          "loading": "Loading snapshots…",
+          "noSnapshots": "No snapshots found on the server.",
+          "snapshotLabel": "Snapshot",
+          "latest": "Latest",
+          "strategyLabel": "If a row id already exists",
+          "strategySkip": "Keep local",
+          "strategyOverwrite": "Overwrite with imported",
+          "strategyDuplicate": "Import as a copy",
+          "restoring": "Restoring…",
+          "restoreButton": "Restore",
+          "close": "Close",
+          "failed": "Restore failed: {error}"
+        },
+        "startup": {
+          "newerFound": "A newer backup is available on your WebDAV server.",
+          "restoreAction": "Restore"
+        }
+      },
       "exportTitle": "Export",
       "exportHint": "Builds a single JSON snapshot of your characters, skills, teams, presets and MCP servers. Sessions and the API key are excluded by default — flip the switches if you want to include them.",
       "exportButton": "Export to file…",
@@ -10019,7 +10076,8 @@
       },
       "destination": "Backup Destination",
       "destinationHint": "Choose where this scheduled backup should be uploaded.",
-      "destinationLocalHint": "Saved to the app data directory under /backups/. Cloud destinations aren't wired up in cognia-next yet.",
+      "destinationLocalHint": "Saved to the app data directory under /backups/.",
+      "destinationWebdavHint": "Uploaded to the WebDAV server configured in Data & Privacy → Backup. Requires the sync passphrase to be unlocked this session.",
       "destinations": {
         "local": "Local file",
         "webdav": "WebDAV Server",
@@ -10390,7 +10448,25 @@
       "logs": "Logs",
       "me": "Me",
       "featuresGroup": "Features",
-      "auxiliaryGroup": "Profile and logs"
+      "workspacesGroup": "Workspaces",
+      "auxiliaryGroup": "Profile and logs",
+      "more": "More",
+      "customize": {
+        "title": "Customize sidebar",
+        "description": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
+        "pinned": "Pinned",
+        "more": "In More menu",
+        "hidden": "Hidden",
+        "restoreDefaults": "Restore defaults",
+        "dragHint": "Drag to reorder",
+        "pin": "Pin to rail",
+        "moveToMore": "Move to More",
+        "hideItem": "Hide",
+        "showItem": "Show",
+        "pinnedEmpty": "No pinned items — everything is in the More menu.",
+        "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
+        "hiddenEmpty": "Nothing hidden."
+      }
     },
     "memberList": {
       "show": "Show member list",
@@ -16910,6 +16986,43 @@
       "preview": "Preview",
       "previewTitle": "Preview",
       "previewClose": "Close preview"
+    }
+  },
+  "workspace": {
+    "switcher": {
+      "heading": "Workspaces",
+      "active": "Active workspace: {name}",
+      "none": "No active workspace",
+      "empty": "No workspaces yet",
+      "newWorkspace": "New workspace",
+      "manage": "Manage workspaces"
+    },
+    "manage": {
+      "title": "Workspaces",
+      "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
+      "newWorkspace": "New workspace",
+      "defaultName": "New Workspace",
+      "listLabel": "Workspaces",
+      "empty": "No workspaces yet",
+      "activeBadge": "Active",
+      "setActive": "Set active",
+      "selectHint": "Select a workspace to edit, or create a new one.",
+      "nameLabel": "Name",
+      "namePlaceholder": "Workspace name",
+      "rootDirLabel": "Primary directory",
+      "rootDirPlaceholder": "/path/to/project",
+      "pickDir": "Choose directory",
+      "pickDirTitle": "Select a directory",
+      "additionalDirsLabel": "Additional directories",
+      "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
+      "addDir": "Add",
+      "addDirManual": "Type an absolute path…",
+      "removeDir": "Remove directory",
+      "save": "Save",
+      "saved": "Workspace saved",
+      "delete": "Delete",
+      "confirmDelete": "Confirm delete",
+      "deleted": "Workspace deleted"
     }
   }
 }

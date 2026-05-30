@@ -11,8 +11,9 @@
 //     so only the leader tab fires it.
 //
 // Tauri-only: web-mode runs return a clear error rather than silently writing
-// to nowhere. Cloud destinations are intentionally unsupported here — the
-// type still allows them for forward compat, but only `local` actually fires.
+// to nowhere. Destinations: `local` writes the auto-key-encrypted package to
+// disk; `webdav` uploads a sync-passphrase-encrypted snapshot; `all` does both.
+// Other cloud targets (github/googledrive/convex) remain unsupported.
 
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type {
@@ -26,13 +27,15 @@ import {
   defaultExportFileName,
   serializePackage,
 } from "@/lib/data/build-package"
-import { encryptBackupPackage } from "@/lib/data/crypto"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
-import { appendBackupHistory } from "@/lib/db/backup-history"
+import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/backup-history"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@/lib/logging"
+import { dispatchBackupDestination } from "@/lib/data/destinations"
+import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
+import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"
 
 const log = loggers.scheduler
 
@@ -66,8 +69,20 @@ function payloadToBuildOptions(
   return { includeSessions, includeApiKey }
 }
 
-function isLocalDestination(destination: BackupDestination | undefined): boolean {
-  return destination === undefined || destination === "local"
+// Destinations the executor actually fires. `local`/`undefined` → disk;
+// `webdav` → upload; `all` → both. A destination is supported iff it targets at
+// least one wired backend — derived from the two `wants*` predicates so the
+// enum literals live in exactly one place each.
+function wantsLocal(destination: BackupDestination | undefined): boolean {
+  return destination === undefined || destination === "local" || destination === "all"
+}
+
+function wantsWebdav(destination: BackupDestination | undefined): boolean {
+  return destination === "webdav" || destination === "all"
+}
+
+function isSupportedDestination(destination: BackupDestination | undefined): boolean {
+  return wantsLocal(destination) || wantsWebdav(destination)
 }
 
 async function resolveBackupPath(filename: string): Promise<string> {
@@ -92,8 +107,8 @@ export async function executeBackupTask(
   const payload = (task.payload ?? {}) as Partial<BackupTaskPayload>
   const destination = payload.destination
 
-  if (!isLocalDestination(destination)) {
-    const error = `Backup destination "${destination}" is not supported in cognia-next; only "local" is wired up.`
+  if (!isSupportedDestination(destination)) {
+    const error = `Backup destination "${destination}" is not supported in cognia-next; only "local"/"webdav"/"all" are wired up.`
     await safelyAppendFailure(error)
     return { success: false, error }
   }
@@ -108,70 +123,77 @@ export async function executeBackupTask(
     const buildOpts = payloadToBuildOptions(payload.backupType, payload.options)
     const pkg = await buildBackupPackage(buildOpts)
     const plaintext = serializePackage(pkg)
+    const output: Record<string, unknown> = {}
 
-    const passphrase = await getDefaultBackupPassphrase()
-    if (!passphrase) {
-      throw new Error("Auto-key not available on this runtime.")
+    if (wantsLocal(destination)) {
+      const passphrase = await getDefaultBackupPassphrase()
+      if (!passphrase) throw new Error("Auto-key not available on this runtime.")
+      const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
+      const filename = defaultExportFileName(new Date(), "encrypted")
+      const target = await resolveBackupPath(filename)
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+      await writeTextFile(target, body)
+      await appendBackupHistory({
+        completedAt: Date.now(),
+        type: "scheduled",
+        success: true,
+        encryption: "auto-key",
+        sizeBytes: body.length,
+        filename,
+      })
+      output.local = { target, sizeBytes: body.length, filename }
     }
 
-    const env = await encryptBackupPackage(plaintext, passphrase, {
-      version: pkg.manifest.version,
-      schemaVersion: pkg.manifest.schemaVersion,
-      traceId: pkg.manifest.traceId,
-      exportedAt: pkg.manifest.exportedAt,
-      appVersion: pkg.manifest.appVersion,
-      backend: pkg.manifest.backend,
-      encryption: { enabled: true, format: "encrypted-envelope-v1" },
-    })
-
-    const body = JSON.stringify(env)
-    const filename = defaultExportFileName(new Date(), "encrypted")
-    const target = await resolveBackupPath(filename)
-
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-    await writeTextFile(target, body)
-
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: true,
-      encryption: "auto-key",
-      sizeBytes: body.length,
-      filename,
-    })
-
-    // Stamp settings.backupAutoSchedule.lastRunAt so cross-device sync (and
-    // the in-app "next run at" indicator) can derive recency without
-    // walking `backupHistory`. Best-effort; a failure here doesn't undo the
-    // backup itself.
-    try {
-      const settings = await getSettings()
-      const current: BackupAutoSchedule =
-        settings.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
-      await saveSettings({
-        backupAutoSchedule: {
-          ...current,
-          lastRunAt: new Date().toISOString(),
-        },
-      })
-    } catch (err) {
-      log.warn("Failed to stamp backupAutoSchedule.lastRunAt", {
-        taskId: task.id,
-        error: err instanceof Error ? err.message : String(err),
-      })
+    if (wantsWebdav(destination)) {
+      const syncPass = getSyncPassphrase()
+      if (!syncPass) {
+        const error =
+          "WebDAV upload skipped — unlock the sync passphrase this session to enable it."
+        await safelyAppendFailure(error, "passphrase")
+        // For a webdav-only task this is a hard failure; for `all` the local
+        // backup already succeeded, so keep going and report partial success —
+        // but surface the skipped leg in `output` so it isn't silent at the
+        // result level (and the next scheduled tick retries the upload).
+        if (destination === "webdav") return { success: false, error }
+        output.webdav = { skipped: true, error }
+      } else {
+        const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
+        const filename = webdavSnapshotName(pkg.manifest.exportedAt)
+        const result = await dispatchBackupDestination("webdav", body, {
+          filename,
+          exportedAt: pkg.manifest.exportedAt,
+          sizeBytes: body.length,
+        })
+        if (result.ok) {
+          await appendBackupHistory({
+            completedAt: Date.now(),
+            type: "scheduled",
+            success: true,
+            encryption: "passphrase",
+            sizeBytes: body.length,
+            filename,
+          })
+          output.webdav = { target: result.target, sizeBytes: body.length, filename }
+          await stampWebdavLastSync()
+        } else {
+          const error = result.error ?? "WebDAV upload failed."
+          await safelyAppendFailure(error, "passphrase")
+          if (destination === "webdav") return { success: false, error }
+          output.webdav = { failed: true, error }
+        }
+      }
     }
+
+    await stampBackupScheduleLastRun(task.id)
 
     log.info("Scheduler backup task complete", {
       taskId: task.id,
       executionId: execution.id,
-      target,
-      sizeBytes: body.length,
+      destination: destination ?? "local",
+      output,
     })
 
-    return {
-      success: true,
-      output: { target, sizeBytes: body.length, filename },
-    }
+    return { success: true, output }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     await safelyAppendFailure(error)
@@ -180,13 +202,47 @@ export async function executeBackupTask(
   }
 }
 
-async function safelyAppendFailure(errorMessage: string): Promise<void> {
+/**
+ * Stamp `backupAutoSchedule.lastRunAt` so cross-device sync (and the in-app
+ * "next run at" indicator) can derive recency without walking `backupHistory`.
+ * Best-effort; a failure here doesn't undo the backup itself.
+ */
+async function stampBackupScheduleLastRun(taskId: string): Promise<void> {
+  try {
+    const settings = await getSettings()
+    const current: BackupAutoSchedule = settings.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
+    await saveSettings({
+      backupAutoSchedule: { ...current, lastRunAt: new Date().toISOString() },
+    })
+  } catch (err) {
+    log.warn("Failed to stamp backupAutoSchedule.lastRunAt", {
+      taskId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/** Stamp `webdavSync.lastSyncAt` after a successful upload. Best-effort. */
+async function stampWebdavLastSync(): Promise<void> {
+  try {
+    const settings = await getSettings()
+    const current = settings.webdavSync ?? {}
+    await saveSettings({ webdavSync: { ...current, lastSyncAt: new Date().toISOString() } })
+  } catch {
+    // Non-fatal.
+  }
+}
+
+async function safelyAppendFailure(
+  errorMessage: string,
+  encryption: BackupHistoryEncryption = "auto-key"
+): Promise<void> {
   try {
     await appendBackupHistory({
       completedAt: Date.now(),
       type: "scheduled",
       success: false,
-      encryption: "auto-key",
+      encryption,
       errorMessage,
     })
   } catch {
@@ -196,5 +252,7 @@ async function safelyAppendFailure(errorMessage: string): Promise<void> {
 
 export const __TESTING__ = {
   payloadToBuildOptions,
-  isLocalDestination,
+  isSupportedDestination,
+  wantsLocal,
+  wantsWebdav,
 }

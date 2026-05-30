@@ -24,6 +24,7 @@ import type {
   Team,
   TeamMember,
 } from "@/lib/claude/types"
+import type { Project } from "@/types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -105,6 +106,14 @@ export interface BuildOptionsContext {
   /** Override the resolving character — used by team chat per-member sends. */
   character?: Character | null
   appSettings?: AppSettings | null
+  /**
+   * The active workspace (project). Its `rootDir` feeds the cwd resolution
+   * chain (between the session override and the character default) and its
+   * `additionalDirs` are unioned into `additionalDirectories` alongside any
+   * @-referenced paths. Direct chat passes the `useProjectStore` active
+   * project; team/connector/diagnostics paths pass `null` to opt out.
+   */
+  activeProject?: Project | null
   /**
    * Per-team-slot override applied on top of the character defaults. Only set
    * by the team chat hook; ignored when undefined. Override fields that are
@@ -632,15 +641,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (systemPrompt) opts.systemPrompt = systemPrompt
 
   // --- Working directory ---------------------------------------------------
-  const cwd = session?.workingDir ?? character?.workingDir ?? appSettings?.defaultWorkingDir
+  // Priority: per-session override → active workspace root → character default
+  // → app default. The active workspace sits above the character default
+  // because it reflects "which project the user is currently working in",
+  // a stronger signal than a character's standing preference.
+  const cwd =
+    session?.workingDir ??
+    ctx.activeProject?.rootDir ??
+    character?.workingDir ??
+    appSettings?.defaultWorkingDir
   if (cwd) opts.cwd = cwd
 
-  // --- Additional directories from @-referenced files/folders --------------
-  // For folders we add the folder itself; for files we add their parent dir.
-  // Deduplicate, drop empty/nullish entries, and skip when nothing to add.
-  if (ctx.referencedPaths && ctx.referencedPaths.length > 0) {
+  // --- Additional directories ----------------------------------------------
+  // Union of the active workspace's extra mounted dirs and the @-referenced
+  // files/folders. For referenced folders we add the folder itself; for files
+  // we add their parent dir. Deduplicate, drop empty/nullish entries.
+  {
     const dirs = new Set<string>()
-    for (const ref of ctx.referencedPaths) {
+    for (const dir of ctx.activeProject?.additionalDirs ?? []) {
+      if (dir) dirs.add(dir)
+    }
+    for (const ref of ctx.referencedPaths ?? []) {
       if (!ref.absolute) continue
       if (ref.isDir) {
         dirs.add(ref.absolute)

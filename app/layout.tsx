@@ -21,10 +21,12 @@ import { AutomationPolicyInitializer } from "@/components/providers/initializers
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
+import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
 import { TerminalBridgeInitializer } from "@/components/providers/initializers/terminal-bridge-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
+import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { AppSplash } from "@/components/mobile/splash/app-splash"
@@ -125,47 +127,50 @@ export default async function RootLayout({
                     <TerminalBridgeInitializer />
                     <ExternalAgentInitializer />
                     <LocalCharacterPackInitializer />
+                    <ProjectStoreInitializer />
                     <ModelsDevCatalogInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>
-                      <CompanionEventBridgeProvider>
-                        <CanvasBridgeProvider>
-                          <A2UIDispatchProvider>
-                            <DataAdapterProvider adapter={dexieAdapter}>
-                              {/* Appearance v47 — Typography / density / radius
+                      <WebDavStartupPromptProvider>
+                        <CompanionEventBridgeProvider>
+                          <CanvasBridgeProvider>
+                            <A2UIDispatchProvider>
+                              <DataAdapterProvider adapter={dexieAdapter}>
+                                {/* Appearance v47 — Typography / density / radius
                                   / motion run before color appliers so the
                                   colorblind & high-contrast transforms in
                                   CustomThemeApplier see stable base values. */}
-                              <TypographyApplier />
-                              <DensityApplier />
-                              <RadiusApplier />
-                              <MotionApplier />
-                              {/* Keeps body[data-bg-*] + the cognia user-css */}
-                              {/* style tag in sync with the appearance store. */}
-                              <BackgroundApplier />
-                              <CustomThemeApplier />
-                              <ConnectorBusProvider>
-                                <ConnectorDeepLinkRouter>
-                                  <SubscriptionUsageProvider>
-                                    <CompanionBootProvider>
-                                      <DesktopSyncSourceProvider>
-                                        <DesktopMessageSourceProvider>
-                                          <div data-bg-target="global" className="contents">
-                                            <MobileShellWrapper>
-                                              <DesktopAppShell>{children}</DesktopAppShell>
-                                            </MobileShellWrapper>
-                                          </div>
-                                        </DesktopMessageSourceProvider>
-                                      </DesktopSyncSourceProvider>
-                                    </CompanionBootProvider>
-                                  </SubscriptionUsageProvider>
-                                </ConnectorDeepLinkRouter>
-                              </ConnectorBusProvider>
-                            </DataAdapterProvider>
-                          </A2UIDispatchProvider>
-                        </CanvasBridgeProvider>
-                      </CompanionEventBridgeProvider>
+                                <TypographyApplier />
+                                <DensityApplier />
+                                <RadiusApplier />
+                                <MotionApplier />
+                                {/* Keeps body[data-bg-*] + the cognia user-css */}
+                                {/* style tag in sync with the appearance store. */}
+                                <BackgroundApplier />
+                                <CustomThemeApplier />
+                                <ConnectorBusProvider>
+                                  <ConnectorDeepLinkRouter>
+                                    <SubscriptionUsageProvider>
+                                      <CompanionBootProvider>
+                                        <DesktopSyncSourceProvider>
+                                          <DesktopMessageSourceProvider>
+                                            <div data-bg-target="global" className="contents">
+                                              <MobileShellWrapper>
+                                                <DesktopAppShell>{children}</DesktopAppShell>
+                                              </MobileShellWrapper>
+                                            </div>
+                                          </DesktopMessageSourceProvider>
+                                        </DesktopSyncSourceProvider>
+                                      </CompanionBootProvider>
+                                    </SubscriptionUsageProvider>
+                                  </ConnectorDeepLinkRouter>
+                                </ConnectorBusProvider>
+                              </DataAdapterProvider>
+                            </A2UIDispatchProvider>
+                          </CanvasBridgeProvider>
+                        </CompanionEventBridgeProvider>
+                      </WebDavStartupPromptProvider>
                     </BackupSchedulerProvider>
                     <ConsentOverlay />
                     {/* Exit-confirmation prompt — opens when the close button is

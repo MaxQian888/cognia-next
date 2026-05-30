@@ -3,7 +3,20 @@
 // streaming token. Used by the channel list to render unread dots/counts
 // like Discord.
 
-import { getDb, type SessionStateRow } from "./schema"
+import { getDb } from "./schema"
+
+/**
+ * Per-session unread tracking. Only sessions the user has actually opened
+ * have a row here; everything else is treated as unread = 0.
+ *
+ * Co-located with this CRUD module; `schema.ts` imports + re-exports it, so
+ * existing `@/lib/db/schema` import sites keep working. See `CONVENTIONS.md`.
+ */
+export interface SessionStateRow {
+  sessionId: string
+  lastReadAt: number
+  unreadCount: number
+}
 
 export async function getSessionState(sessionId: string): Promise<SessionStateRow | undefined> {
   return getDb().sessionState.get(sessionId)

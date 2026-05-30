@@ -14,7 +14,6 @@ export type { CompanionConfig } from "./companion-storage"
 
 const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "claude_sidecar_status",
-  "claude_sub_load_token",
   "claude_has_api_key",
   "claude_has_oauth_bearer",
   "skills_load_registry",
@@ -23,6 +22,40 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "read_agent_config",
   "session_list",
   "companion_can_control",
+  // Wave 4.1 reads — must stay in lockstep with READ_ONLY_COMMANDS in
+  // `src-tauri/src/companion_api/rpc.rs`. A write wrongly listed here would
+  // skip the Idempotency-Key header and risk double-execution on retry.
+  // Source control reads.
+  "git_is_repo",
+  "git_repo_state",
+  "git_status",
+  "git_diff_file",
+  "git_diff_commit",
+  "git_commit_files",
+  "git_log",
+  "git_file_history",
+  "git_branches",
+  "git_remotes",
+  "git_stash_list",
+  "git_conflicts",
+  // Filesystem reads.
+  "read_text_file",
+  "default_export_dir",
+  "fs_search_workspace",
+  "fs_read_workspace_file",
+  // Terminal session listings.
+  "terminal_list_all",
+  "terminal_list_for_project",
+  // Plugin registry reads.
+  "plugin_list",
+  "plugin_runtime_snapshot",
+  // Workflow run listing.
+  "workflow_run_list",
+  // Twin reads.
+  "twin_source_list",
+  "twin_job_status",
+  // App-data backup export (pure read/snapshot).
+  "backup_export",
 ])
 
 // ---------------------------------------------------------------------------

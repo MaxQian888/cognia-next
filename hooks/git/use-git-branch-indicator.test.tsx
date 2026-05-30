@@ -14,7 +14,7 @@ import { isTauri } from "@/lib/tauri"
 import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
-import { useGitBranchIndicator } from "./use-git-branch-indicator"
+import { useGitBranchIndicator, __resetGitIndicatorBinding } from "./use-git-branch-indicator"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 
@@ -38,6 +38,7 @@ beforeEach(() => {
     eventHandler = cb
     return jest.fn()
   })
+  __resetGitIndicatorBinding()
   act(() => {
     useGitStore.setState({ rootDir: null })
     useProjectStore.setState({ projects: [], activeProjectId: null })
@@ -54,6 +55,75 @@ describe("useGitBranchIndicator", () => {
     })
     renderHook(() => useGitBranchIndicator())
     await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj"))
+  })
+
+  it("re-binds when the active workspace switches", async () => {
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p1",
+        projects: [{ id: "p1", rootDir: "/proj" } as never],
+      })
+    })
+    renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj"))
+
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p2",
+        projects: [{ id: "p2", rootDir: "/proj2" } as never],
+      })
+    })
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj2"))
+  })
+
+  it("does not snap back to the workspace root after a manual git-panel rebind", async () => {
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p1",
+        projects: [{ id: "p1", rootDir: "/proj" } as never],
+      })
+    })
+    renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj"))
+
+    // User opens an ad-hoc repo in the panel; the workspace didn't change, so
+    // the follow effect must leave the manual binding alone.
+    act(() => useGitStore.getState().setRootDir("/adhoc"))
+    await Promise.resolve()
+    expect(useGitStore.getState().rootDir).toBe("/adhoc")
+  })
+
+  it("does not snap an ad-hoc binding back to the workspace root after a remount", async () => {
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p1",
+        projects: [{ id: "p1", rootDir: "/proj" } as never],
+      })
+    })
+    const first = renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj"))
+
+    // Manual rebind to an ad-hoc repo, then the always-mounted hook remounts
+    // (route change / StrictMode). The workspace root is unchanged, so the
+    // remount must NOT re-bind back to /proj.
+    act(() => useGitStore.getState().setRootDir("/adhoc"))
+    first.unmount()
+    renderHook(() => useGitBranchIndicator())
+    await Promise.resolve()
+    expect(useGitStore.getState().rootDir).toBe("/adhoc")
+  })
+
+  it("leaves the binding untouched when the active workspace has no rootDir", async () => {
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p1",
+        projects: [{ id: "p1" } as never],
+      })
+    })
+    renderHook(() => useGitBranchIndicator())
+    await Promise.resolve()
+    expect(useGitStore.getState().rootDir).toBe("/repo")
   })
 
   it("owns the watcher and refreshes on a matching event", async () => {

@@ -1,18 +1,24 @@
 /**
- * lib/db barrel — re-exports common DB modules and a few migrated-code
- * stub types for compatibility with upstream-style imports.
+ * lib/db barrel — re-exports the schema surface, a few common CRUD modules as
+ * namespaces, and a couple of migrated-code stub types for compatibility with
+ * upstream-style imports.
+ *
+ * Most call sites import directly from the per-table module (e.g.
+ * `@/lib/db/workflows`); this barrel mainly exists for the schema re-export
+ * and the plugin-API-shaped `db` / `messageRepository` surface below. See
+ * `lib/db/CONVENTIONS.md`. Keep the namespace exports alphabetized.
  */
 
 export * from "./schema"
-export * as messages from "./messages"
-export * as sessions from "./sessions"
-export * as sessionState from "./session-state"
 export * as characters from "./characters"
 export * as mcpServers from "./mcp-servers"
+export * as messages from "./messages"
 export * as promptPresets from "./prompt-presets"
+export * as sessions from "./sessions"
+export * as sessionState from "./session-state"
 export * as settings from "./settings"
-export * as skills from "./skills"
 export * as skillResources from "./skill-resources"
+export * as skills from "./skills"
 export * as teams from "./teams"
 export * as trustedWorkspaces from "./trusted-workspaces"
 

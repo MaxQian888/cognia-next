@@ -2269,6 +2269,7 @@
     "tabs": {
       "general": "常规",
       "appearance": "外观",
+      "sidebar": "侧边栏",
       "terminal": "终端",
       "apiKey": "API 密钥",
       "ccswitch": "CCSwitch",
@@ -2314,6 +2315,7 @@
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
       "appearance": "主题、字号、语言与动效。",
+      "sidebar": "固定、排序或隐藏左侧导航栏的项目。",
       "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "apiKey": "Anthropic API 密钥（由本地 sidecar 使用）。",
       "ccswitch": "复用 CCSwitch 中的服务商、MCP 服务器、提示词与技能，一键切换激活订阅。",
@@ -3603,6 +3605,61 @@
         }
       },
       "reset": "重置",
+      "webdav": {
+        "title": "WebDAV 同步",
+        "description": "定期把加密备份上传到 WebDAV 服务器，另一台设备即可下载并恢复。使用同步口令端到端加密。",
+        "unsupported": "WebDAV 同步仅在桌面和移动应用中可用，浏览器中不可用。",
+        "enableLabel": "启用 WebDAV 同步",
+        "urlLabel": "服务器地址",
+        "urlPlaceholder": "https://dav.example.com",
+        "folderLabel": "远程文件夹",
+        "usernameLabel": "用户名",
+        "usernamePlaceholder": "你的用户名",
+        "passwordLabel": "密码",
+        "passwordPlaceholder": "服务器密码",
+        "passwordSet": "已保存——留空则保持不变",
+        "passphraseLabel": "同步口令",
+        "passphrasePlaceholder": "在你的多台设备间共享",
+        "passphraseUnlocked": "本次会话已解锁",
+        "passphraseHint": "绝不存储——每次会话需重新输入才能启用自动同步与恢复。会对备份加密，服务器看不到明文。",
+        "unlocked": "已解锁",
+        "save": "保存",
+        "saved": "WebDAV 设置已保存。",
+        "clear": "清除",
+        "cleared": "密码已清除。",
+        "testConnection": "测试连接",
+        "testIncomplete": "请先填写服务器地址、用户名和密码。",
+        "testSuccess": "已成功连接 WebDAV 服务器。",
+        "testFailed": "连接失败：{error}",
+        "syncNow": "立即同步",
+        "syncing": "同步中…",
+        "syncSuccess": "快照已上传。",
+        "syncFailed": "上传失败：{error}",
+        "restore": "恢复…",
+        "passphraseRequired": "请先输入同步口令。",
+        "lastSync": "上次同步：{time}",
+        "neverSynced": "尚未同步。",
+        "restoreDialog": {
+          "title": "从 WebDAV 恢复",
+          "description": "从服务器下载快照并合并到本设备。此操作会覆盖或合并本地数据，请谨慎操作。",
+          "loading": "正在加载快照…",
+          "noSnapshots": "服务器上没有找到快照。",
+          "snapshotLabel": "快照",
+          "latest": "最新",
+          "strategyLabel": "若 id 已存在",
+          "strategySkip": "保留本地",
+          "strategyOverwrite": "用导入的覆盖",
+          "strategyDuplicate": "作为副本导入",
+          "restoring": "恢复中…",
+          "restoreButton": "恢复",
+          "close": "关闭",
+          "failed": "恢复失败：{error}"
+        },
+        "startup": {
+          "newerFound": "你的 WebDAV 服务器上有更新的备份。",
+          "restoreAction": "恢复"
+        }
+      },
       "exportTitle": "导出",
       "exportHint": "把角色、技能、团队、预设和 MCP 服务器打包成一份 JSON。会话和 API 密钥默认不包含，需要时勾选。",
       "exportButton": "导出到文件…",
@@ -10019,7 +10076,8 @@
       },
       "destination": "备份位置",
       "destinationHint": "选择该定时备份的上传目标。",
-      "destinationLocalHint": "保存到应用数据目录下的 /backups/。云端目标在 cognia-next 中暂未接入。",
+      "destinationLocalHint": "保存到应用数据目录下的 /backups/。",
+      "destinationWebdavHint": "上传到「数据与隐私 → 备份」中配置的 WebDAV 服务器。需要本次会话已解锁同步口令。",
       "destinations": {
         "local": "本地文件",
         "webdav": "WebDAV 服务器",
@@ -10390,7 +10448,25 @@
       "logs": "日志",
       "me": "我的",
       "featuresGroup": "功能",
-      "auxiliaryGroup": "个人与日志"
+      "workspacesGroup": "工作区",
+      "auxiliaryGroup": "个人与日志",
+      "more": "更多",
+      "customize": {
+        "title": "自定义侧边栏",
+        "description": "把常用项固定到导航栏，其余收进「更多」菜单。可拖拽排序，或隐藏从不使用的项。",
+        "pinned": "已固定",
+        "more": "更多菜单中",
+        "hidden": "已隐藏",
+        "restoreDefaults": "恢复默认",
+        "dragHint": "拖拽以排序",
+        "pin": "固定到导航栏",
+        "moveToMore": "移至更多",
+        "hideItem": "隐藏",
+        "showItem": "显示",
+        "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
+        "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
+        "hiddenEmpty": "暂无隐藏项。"
+      }
     },
     "memberList": {
       "show": "显示成员列表",
@@ -16910,6 +16986,43 @@
       "preview": "预览",
       "previewTitle": "预览",
       "previewClose": "关闭预览"
+    }
+  },
+  "workspace": {
+    "switcher": {
+      "heading": "工作区",
+      "active": "当前工作区：{name}",
+      "none": "无活动工作区",
+      "empty": "暂无工作区",
+      "newWorkspace": "新建工作区",
+      "manage": "管理工作区"
+    },
+    "manage": {
+      "title": "工作区",
+      "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
+      "newWorkspace": "新建工作区",
+      "defaultName": "新工作区",
+      "listLabel": "工作区",
+      "empty": "暂无工作区",
+      "activeBadge": "活动",
+      "setActive": "设为活动",
+      "selectHint": "选择一个工作区进行编辑，或新建一个。",
+      "nameLabel": "名称",
+      "namePlaceholder": "工作区名称",
+      "rootDirLabel": "主目录",
+      "rootDirPlaceholder": "/项目/路径",
+      "pickDir": "选择目录",
+      "pickDirTitle": "选择一个目录",
+      "additionalDirsLabel": "附加目录",
+      "additionalDirsHint": "挂载到该工作区的额外文件夹，便于智能体读取和编辑。",
+      "addDir": "添加",
+      "addDirManual": "输入绝对路径…",
+      "removeDir": "移除目录",
+      "save": "保存",
+      "saved": "工作区已保存",
+      "delete": "删除",
+      "confirmDelete": "确认删除",
+      "deleted": "工作区已删除"
     }
   }
 }

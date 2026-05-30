@@ -44,6 +44,7 @@ import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
+import { registerRun, unregisterRun } from "./run-cancel-registry"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 
 export interface RunWorkflowInput {
@@ -137,6 +138,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
 
   // 3. Set up the abort + idempotency machinery.
   const ac = new AbortController()
+  // Expose this run to the out-of-band cancel registry so a remote
+  // `workflow_cancel_run` RPC can abort it. Unregistered on every terminal
+  // path below.
+  registerRun(runId, ac)
   const externalAbort = () => ac.abort(new Error("Workflow run aborted"))
   if (input.signal) {
     if (input.signal.aborted) ac.abort(new Error("Workflow run aborted"))
@@ -182,6 +187,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const sortError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    unregisterRun(runId)
     return { runId, status: "failed", error: { message } }
   }
 
@@ -216,6 +222,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
       getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
       getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+      unregisterRun(runId)
       return { runId, status: "failed", error: { message } }
     }
     const reachable = new Set<string>([input.startStepId])
@@ -456,6 +463,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const failureError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    unregisterRun(runId)
     return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
   }
 
@@ -484,6 +492,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // Plugin host hook: workflow finished successfully.
   getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
 
+  unregisterRun(runId)
   return { runId, status: "succeeded", output: finalOutput }
 }
 

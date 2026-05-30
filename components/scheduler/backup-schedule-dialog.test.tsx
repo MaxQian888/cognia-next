@@ -45,8 +45,9 @@ const messages = {
       type: "Backup type",
       types: { full: "Full", sessions: "Sessions only", settings: "Settings only", all: "All" },
       destination: "Destination",
-      destinations: { local: "Local file" },
+      destinations: { local: "Local file", webdav: "WebDAV Server", all: "All targets" },
       destinationLocalHint: "Saved to appDataDir()/backups.",
+      destinationWebdavHint: "Uploaded to the configured WebDAV server.",
       includeOptions: "Include in backup",
       options: {
         sessions: "Sessions",
@@ -73,13 +74,13 @@ beforeEach(() => {
 })
 
 describe("BackupScheduleDialog", () => {
-  it("opens via the default trigger and renders the local-only destination", () => {
+  it("opens via the default trigger and defaults the destination to local", () => {
     renderDialog()
     fireEvent.click(screen.getByRole("button", { name: /schedule backup/i }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
+    // The destination select shows the default (local) selection.
     expect(screen.getByText(/local file/i)).toBeInTheDocument()
-    // No cloud destinations should be present.
-    expect(screen.queryByText(/webdav/i)).not.toBeInTheDocument()
+    // Unsupported clouds (github/googledrive/convex) are not offered.
     expect(screen.queryByText(/google drive/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/convex/i)).not.toBeInTheDocument()
   })

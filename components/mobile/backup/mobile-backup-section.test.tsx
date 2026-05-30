@@ -47,6 +47,12 @@ jest.mock("@/lib/db/backup-history", () => ({
   listBackupHistory: jest.fn(async () => []),
 }))
 
+// The WebDAV card has its own suite; stub it here so this section test stays
+// focused on export/import/auto/history.
+jest.mock("@/components/settings/data/webdav-sync-card", () => ({
+  WebDavSyncCard: () => <div data-testid="webdav-sync-card" />,
+}))
+
 jest.mock("@/lib/capacitor/local-notifications", () => ({
   ensureChannel: jest.fn(),
   schedule: jest.fn(),
