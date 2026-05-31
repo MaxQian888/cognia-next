@@ -335,6 +335,51 @@
           "alwaysLoad": false
         }
       ]
+    },
+    {
+      "id": "lsp",
+      "nameKey": "lspIntelligence",
+      "descriptionKey": "lspIntelligenceDesc",
+      "riskLevel": "low",
+      "requiresApproval": false,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "lsp_goto_definition",
+          "descriptionKey": "tools.lspGotoDefinition",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "lsp_find_references",
+          "descriptionKey": "tools.lspFindReferences",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "lsp_hover",
+          "descriptionKey": "tools.lspHover",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "lsp_document_symbols",
+          "descriptionKey": "tools.lspDocumentSymbols",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "lsp_diagnostics",
+          "descriptionKey": "tools.lspDiagnostics",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
     }
   ]
 }

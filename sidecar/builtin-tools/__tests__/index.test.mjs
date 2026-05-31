@@ -21,6 +21,7 @@ test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
     "environment",
     "fileExtras",
     "git",
+    "lsp",
     "process",
     "shellAdvanced",
     "terminalRepl",
@@ -84,6 +85,7 @@ test("namesForDisabledCategories returns nothing when everything is enabled", ()
     environment: true,
     shellAdvanced: true,
     terminalRepl: true,
+    lsp: true,
   })
   assert.deepEqual(out, [])
 })

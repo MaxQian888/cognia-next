@@ -27,6 +27,8 @@ import {
   alwaysLoadToolSet,
   stampUserServersAlwaysLoad,
 } from "./tool-search-policy.mjs"
+import { createSessionLspResolver } from "../lsp/service-loader.mjs"
+import { buildLspHooks } from "./lsp-hooks.mjs"
 
 /**
  * @param {{
@@ -70,9 +72,43 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
   // Built-in cognia-tools MCP server (category-toggled).
   const builtinEnabled = sendOptions.builtinTools
+
+  // LSP integration (Phase 1-3): diagnostics-after-edit hook + lsp_* tools.
+  // Lazy by design — the resolver and any language server are created only
+  // on first use, so non-coding sessions pay nothing. Reuses the
+  // vscode-ext-host `LspService` via the shared service-loader; degrades to
+  // a no-op when the LSP host is unavailable (mobile / dist not built).
+  const lspEnabled = !!(builtinEnabled && builtinEnabled.lsp && sendOptions.cwd)
+  let lspResolverPromise = null
+  const getLspResolver = () => {
+    if (!lspResolverPromise) {
+      lspResolverPromise = createSessionLspResolver({
+        cwd: sendOptions.cwd,
+        logger: { warn: (m) => log("warn", String(m)) },
+      }).catch(() => null)
+    }
+    return lspResolverPromise
+  }
+  // A lazy proxy so the MCP tools + PostToolUse hook can be wired
+  // synchronously while the real resolver initializes on demand.
+  const lspResolver = lspEnabled
+    ? {
+        async request(file, method, payload) {
+          const r = await getLspResolver()
+          if (!r) throw new Error("LSP host unavailable")
+          return r.request(file, method, payload)
+        },
+        async getDiagnostics(file, opts) {
+          const r = await getLspResolver()
+          return r ? r.getDiagnostics(file, opts) : []
+        },
+      }
+    : null
+
   const builtinServer = buildCogniaToolsServer({
     enabled: builtinEnabled,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
+    lspResolver,
   })
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
@@ -219,6 +255,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     containerSkillIds: sendOptions.containerSkillIds,
     env: baseEnv,
 
+    // Diagnostics-after-edit feedback loop (Phase 2). Omitted when LSP is
+    // disabled — the strip-undefined pass below removes the field.
+    hooks: lspEnabled ? buildLspHooks(lspResolver) : undefined,
+
     canUseTool: (toolName, input, ctx) => {
       // ADR-0020 W3 — short-circuit the chat-side approval modal when
       // the renderer has pre-approved this tool for the session. The
@@ -313,6 +353,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })
     } finally {
       session._ended = true
+      // Tear down any per-session LSP servers the resolver started.
+      if (lspResolverPromise) {
+        lspResolverPromise.then((r) => r?.dispose?.()).catch(() => {})
+      }
     }
   })()
 

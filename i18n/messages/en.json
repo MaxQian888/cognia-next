@@ -11199,6 +11199,8 @@
     "shellExecutionDesc": "Allowlist + blocklist + dangerous-pattern guard for shell commands. Off by default — overlaps SDK Bash and is high-risk.",
     "terminalRepl": "Interactive REPL",
     "terminalReplDesc": "Agent-private persistent PTY sessions backed by node-pty (lazy loaded). Use for stateful REPLs (python / sql / claude-code) where the agent needs to hold state across multiple writes. Orthogonal to the dock-relay path — REPL is invisible to the user.",
+    "lspIntelligence": "Code intelligence (LSP)",
+    "lspIntelligenceDesc": "Language-server-backed code navigation — go-to-definition, find references, hover types, document symbols, and live diagnostics. Desktop only; language servers spawn lazily on first use.",
     "alwaysAllowTitle": "Always-allow tools",
     "alwaysAllowDesc": "Tools the user has approved across the board. Future calls skip the approval dialog.",
     "alwaysAllowEmpty": "No tools have been added to the always-allow list yet.",
@@ -11242,7 +11244,12 @@
       "terminalReplSpawn": "Open a persistent interactive PTY (e.g. python / sql REPL). Returns sessionId for subsequent writes / reads.",
       "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
       "terminalReplRead": "Drain accumulated REPL output (default: destructive read). Returns '{data, truncated, exited, exitCode}'.",
-      "terminalReplKill": "Signal-terminate a REPL session. Idempotent."
+      "terminalReplKill": "Signal-terminate a REPL session. Idempotent.",
+      "lspGotoDefinition": "Find where the symbol at a position is defined.",
+      "lspFindReferences": "Find all references to the symbol at a position.",
+      "lspHover": "Get type / signature / documentation for the symbol at a position.",
+      "lspDocumentSymbols": "List the symbols (classes, functions, variables) defined in a file.",
+      "lspDiagnostics": "Get current compiler / linter diagnostics for a file."
     }
   },
   "toolCatalog": {

@@ -19,6 +19,7 @@ import { processTools } from "./process.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
+import { createLspTools } from "./lsp.mjs"
 
 /** @type {Record<string, ReadonlyArray<unknown>>} */
 const TOOLS_BY_CATEGORY = {
@@ -65,13 +66,19 @@ export const SERVER_VERSION = data.serverVersion
  *        search is active, this server's tools defer until discovered.
  * @returns {ReturnType<typeof createSdkMcpServer> | null}
  */
-export function buildCogniaToolsServer({ enabled, alwaysLoad }) {
+export function buildCogniaToolsServer({ enabled, alwaysLoad, lspResolver }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
     if (enabled[category]) {
       tools.push(...toolList)
     }
+  }
+  // The `lsp` category is resolver-bound (per-session), so it is not part of
+  // the static TOOLS_BY_CATEGORY map — build its tools on demand when the
+  // dispatch layer supplies a session LSP resolver.
+  if (enabled.lsp && lspResolver) {
+    tools.push(...createLspTools(lspResolver))
   }
   if (tools.length === 0) return null
   return createSdkMcpServer({

@@ -50,6 +50,13 @@ export interface BuiltinToolsConfig {
    * a *private* persistent shell, the dock-relay shares the user's.
    */
   terminalRepl?: boolean
+  /**
+   * LSP code-intelligence tools (goto_definition / find_references / hover /
+   * document_symbols / diagnostics) plus the diagnostics-after-edit feedback
+   * loop. Off by default — language servers spawn lazily on first use
+   * (desktop only; reuses the vscode-ext-host LSP host). See `sidecar/lsp/*`.
+   */
+  lsp?: boolean
 }
 
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
@@ -60,6 +67,7 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   environment: true,
   shellAdvanced: false,
   terminalRepl: false,
+  lsp: false,
 }
 
 export interface SendOptions {

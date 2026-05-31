@@ -11199,6 +11199,8 @@
     "shellExecutionDesc": "带白名单 + 黑名单 + 危险模式守卫的 shell 执行。默认关闭 —— 与 SDK Bash 部分重叠且属于高风险。",
     "terminalRepl": "交互式 REPL",
     "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
+    "lspIntelligence": "代码智能（LSP）",
+    "lspIntelligenceDesc": "基于语言服务器的代码导航——跳转定义、查找引用、悬停类型、文档符号与实时诊断。仅桌面端；语言服务器首次使用时懒启动。",
     "alwaysAllowTitle": "始终允许的工具",
     "alwaysAllowDesc": "用户已对其全局放行的工具，后续调用将跳过审批对话框。",
     "alwaysAllowEmpty": "暂无工具被加入「始终允许」列表。",
@@ -11242,7 +11244,12 @@
       "terminalReplSpawn": "打开持久化交互式 PTY（例如 python / sql REPL），返回 sessionId 供后续写入 / 读取。",
       "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
       "terminalReplRead": "排空累积的 REPL 输出（默认销毁性读取）。返回 '{data, truncated, exited, exitCode}'。",
-      "terminalReplKill": "信号终止 REPL 会话，可重复调用。"
+      "terminalReplKill": "信号终止 REPL 会话，可重复调用。",
+      "lspGotoDefinition": "查找某位置符号的定义所在。",
+      "lspFindReferences": "查找某位置符号的所有引用。",
+      "lspHover": "获取某位置符号的类型 / 签名 / 文档。",
+      "lspDocumentSymbols": "列出文件中定义的符号（类、函数、变量）。",
+      "lspDiagnostics": "获取文件当前的编译器 / 检查器诊断。"
     }
   },
   "toolCatalog": {
