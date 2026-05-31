@@ -13,6 +13,8 @@ export type AgentModeType =
   | "ppt-generation" // PPT/Presentation generation mode
   | "workflow" // Workflow execution mode
   | "academic" // Academic paper research mode
+  | "plan" // Read-only planning mode (no edits)
+  | "build" // Full-access build mode
   | "custom" // Custom user-defined mode
 
 export interface AgentModeConfig {
@@ -25,6 +27,14 @@ export interface AgentModeConfig {
   tools?: string[] // Available tools for this mode
   outputFormat?: "text" | "code" | "html" | "react" | "markdown"
   previewEnabled?: boolean
+  /**
+   * SDK permission mode this agent mode enforces. `"plan"` makes the agent
+   * read-only (edits / mutating commands are blocked by the SDK); `"build"`
+   * uses `"acceptEdits"`. Flows into `SendOptions.permissionMode` via
+   * `lib/claude/build-options.ts`. Mirrors OpenCode's plan/build modes —
+   * the same agent loop, a different permission ruleset.
+   */
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
   customConfig?: Record<string, unknown>
 }
 
@@ -43,6 +53,28 @@ export const BUILT_IN_AGENT_MODES: AgentModeConfig[] = [
     name: "General Assistant",
     description: "General purpose AI assistant for various tasks",
     icon: "Bot",
+    outputFormat: "text",
+    previewEnabled: false,
+  },
+  {
+    id: "plan",
+    type: "plan",
+    name: "Plan (read-only)",
+    description:
+      "Investigate and propose a step-by-step plan without editing files or running mutating commands.",
+    icon: "ClipboardList",
+    systemPrompt: `You are in PLAN MODE. Investigate the codebase and produce a clear, step-by-step implementation plan. Do NOT edit files, run mutating commands, or make any changes — only read, search, and analyze. Present the plan for approval; the user will switch you to Build mode to implement it.`,
+    permissionMode: "plan",
+    outputFormat: "markdown",
+    previewEnabled: false,
+  },
+  {
+    id: "build",
+    type: "build",
+    name: "Build",
+    description: "Full access — implement changes, edit files, and run commands.",
+    icon: "Hammer",
+    permissionMode: "acceptEdits",
     outputFormat: "text",
     previewEnabled: false,
   },

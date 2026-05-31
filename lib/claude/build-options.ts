@@ -679,7 +679,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // the character's mode, then the app default. Composer always writes a
   // concrete mode when toggled, so once a user opts in it sticks.
   const permissionMode =
-    session?.permissionMode ?? character?.permissionMode ?? appSettings?.permissionMode
+    session?.permissionMode ??
+    activeMode?.permissionMode ??
+    character?.permissionMode ??
+    appSettings?.permissionMode
   if (permissionMode) opts.permissionMode = permissionMode
 
   // --- Tool whitelist/blacklist --------------------------------------------
