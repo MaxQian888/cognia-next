@@ -8264,6 +8264,26 @@
       "unknownError": "未知错误"
     },
     "editor": {
+      "name": "名称",
+      "transport": "传输方式",
+      "config": "配置",
+      "showForm": "切换到表单",
+      "showJson": "切换到 JSON",
+      "command": "命令",
+      "args": "参数（每行一个）",
+      "env": "环境变量",
+      "url": "URL",
+      "headers": "请求头",
+      "forwardedNote": "按服务器名称原样转发给 SDK。值可引用 $HOME 等环境变量，运行时由 SDK 替换。",
+      "enabled": "已启用",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中…",
+      "kvAdd": "添加",
+      "kvEmpty": "暂无条目。",
+      "kvRemove": "删除该行",
+      "createTitle": "添加 MCP 服务器",
+      "editTitle": "编辑 MCP 服务器",
       "errors": {
         "nameRequired": "请填写服务器名称。",
         "invalidJson": "配置必须是合法 JSON：{error}",
@@ -8271,6 +8291,76 @@
         "urlRequired": "sse / http 传输需要填写 URL。",
         "jsonRevertFailed": "无法切回 — JSON 不合法：{error}"
       }
+    },
+    "panel": {
+      "searchPlaceholder": "按名称、命令或 URL 过滤服务器…",
+      "addServer": "添加服务器",
+      "addCustom": "添加自定义服务器",
+      "headerCount": "{shown}/{total}"
+    },
+    "tabs": {
+      "myServers": "我的服务器",
+      "presets": "预设市场",
+      "agents": "Agent 同步",
+      "health": "健康与日志"
+    },
+    "view": {
+      "grid": "网格视图",
+      "list": "列表视图",
+      "groupBy": "分组方式",
+      "groupNone": "不分组",
+      "groupTransport": "传输方式",
+      "groupStatus": "状态",
+      "filters": "筛选"
+    },
+    "group": {
+      "favorites": "收藏",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "ungrouped": "服务器"
+    },
+    "card": {
+      "selectAria": "选择 {name}",
+      "favorite": "将 {name} 加入收藏",
+      "unfavorite": "将 {name} 移出收藏",
+      "clone": "复制 {name}"
+    },
+    "batch": {
+      "selectedCount": "已选 {count} 项",
+      "enable": "启用",
+      "disable": "停用",
+      "sync": "同步",
+      "delete": "删除",
+      "clear": "清除选择",
+      "enabledCount": "已启用 {count} 个服务器。",
+      "disabledCount": "已停用 {count} 个服务器。",
+      "deletedCount": "已删除 {count} 个服务器。",
+      "deletedPartial": "已删除 {total} 个中的 {ok} 个。",
+      "syncedCount": "已重新同步 {count} 个服务器。"
+    },
+    "health": {
+      "title": "健康与日志",
+      "bridgeTitle": "External Bridge 服务器",
+      "bridgeSubtitle": "Cognia 自身的 MCP 服务器，向外部 Agent 暴露你的 wiki 与运行时。",
+      "running": "运行中",
+      "stopped": "已停止",
+      "port": "端口 {port}",
+      "startedAt": "启动于 {time}",
+      "openBridgeSettings": "打开 External Bridge 设置",
+      "desktopOnly": "桥接状态与审计日志仅在桌面端可用。",
+      "auditTitle": "近期 MCP 调用",
+      "auditSubtitle": "所有经过 External Bridge 的请求都会记录在此。",
+      "auditEmpty": "暂无 MCP 调用记录。",
+      "deniedOnly": "仅看被拒",
+      "clearLog": "清空日志",
+      "cleared": "审计日志已清空。",
+      "colTime": "时间",
+      "colTool": "工具",
+      "colScope": "权限范围",
+      "colResult": "结果",
+      "colLatency": "耗时",
+      "allowed": "允许",
+      "denied": "拒绝"
     },
     "gallery": {
       "title": "添加 MCP 服务器",

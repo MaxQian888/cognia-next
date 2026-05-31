@@ -8264,6 +8264,26 @@
       "unknownError": "unknown error"
     },
     "editor": {
+      "name": "Name",
+      "transport": "Transport",
+      "config": "Config",
+      "showForm": "Show form",
+      "showJson": "Show JSON",
+      "command": "Command",
+      "args": "Arguments (one per line)",
+      "env": "Environment variables",
+      "url": "URL",
+      "headers": "Headers",
+      "forwardedNote": "Forwarded verbatim to the SDK by server name. Values can reference env vars like $HOME — the SDK substitutes them at run time.",
+      "enabled": "Enabled",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "kvAdd": "Add",
+      "kvEmpty": "No entries.",
+      "kvRemove": "Remove row",
+      "createTitle": "Add MCP server",
+      "editTitle": "Edit MCP server",
       "errors": {
         "nameRequired": "Server name is required.",
         "invalidJson": "Config must be valid JSON: {error}",
@@ -8271,6 +8291,76 @@
         "urlRequired": "URL is required for sse / http transport.",
         "jsonRevertFailed": "Can't switch back — JSON is invalid: {error}"
       }
+    },
+    "panel": {
+      "searchPlaceholder": "Filter servers by name, command, or URL…",
+      "addServer": "Add server",
+      "addCustom": "Add custom server",
+      "headerCount": "{shown}/{total}"
+    },
+    "tabs": {
+      "myServers": "My Servers",
+      "presets": "Preset Market",
+      "agents": "Agent Sync",
+      "health": "Health & Logs"
+    },
+    "view": {
+      "grid": "Grid view",
+      "list": "List view",
+      "groupBy": "Group by",
+      "groupNone": "None",
+      "groupTransport": "Transport",
+      "groupStatus": "Status",
+      "filters": "Filters"
+    },
+    "group": {
+      "favorites": "Favorites",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "ungrouped": "Servers"
+    },
+    "card": {
+      "selectAria": "Select {name}",
+      "favorite": "Pin {name} to favorites",
+      "unfavorite": "Unpin {name} from favorites",
+      "clone": "Duplicate {name}"
+    },
+    "batch": {
+      "selectedCount": "{count, plural, =1 {# selected} other {# selected}}",
+      "enable": "Enable",
+      "disable": "Disable",
+      "sync": "Sync",
+      "delete": "Delete",
+      "clear": "Clear selection",
+      "enabledCount": "Enabled {count} server(s).",
+      "disabledCount": "Disabled {count} server(s).",
+      "deletedCount": "Deleted {count} server(s).",
+      "deletedPartial": "Deleted {ok} of {total} server(s).",
+      "syncedCount": "Re-synced {count} server(s)."
+    },
+    "health": {
+      "title": "Health & logs",
+      "bridgeTitle": "External Bridge server",
+      "bridgeSubtitle": "Cognia's own MCP server that exposes your wiki and runtime to external agents.",
+      "running": "Running",
+      "stopped": "Stopped",
+      "port": "Port {port}",
+      "startedAt": "Started {time}",
+      "openBridgeSettings": "Open External Bridge settings",
+      "desktopOnly": "Bridge status and the audit log are only available in desktop mode.",
+      "auditTitle": "Recent MCP calls",
+      "auditSubtitle": "Every request that flows through the External Bridge is logged here.",
+      "auditEmpty": "No MCP calls recorded yet.",
+      "deniedOnly": "Denied only",
+      "clearLog": "Clear log",
+      "cleared": "Audit log cleared.",
+      "colTime": "Time",
+      "colTool": "Tool",
+      "colScope": "Scope",
+      "colResult": "Result",
+      "colLatency": "Latency",
+      "allowed": "allowed",
+      "denied": "denied"
     },
     "gallery": {
       "title": "Add MCP server",

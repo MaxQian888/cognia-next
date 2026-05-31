@@ -1,0 +1,234 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
+import Link from "next/link"
+import { CircleIcon, ExternalLinkIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { toast } from "sonner"
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { isTauri } from "@/lib/tauri"
+import { loggers } from "@/lib/logging"
+import { getMcpServerStatus, type McpServerStatus } from "@/lib/external-bridge/tauri-control"
+import { clearMcpAuditLog, listMcpAuditLog } from "@/lib/db/mcp-audit-log"
+import type { McpAuditLogRow } from "@/types/wiki"
+
+/**
+ * "Health & Logs" tab — surfaces the inbound External Bridge server status
+ * (Cognia-as-MCP-server) and the bridge audit log. Both are desktop-only;
+ * full scope configuration stays in the dedicated External Bridge settings
+ * section, deep-linked from here. All data comes from existing helpers.
+ */
+export function McpHealthTab() {
+  const t = useTranslations("mcp.health")
+  const desktop = isTauri()
+  const [status, setStatus] = useState<McpServerStatus | null>(null)
+  const [rows, setRows] = useState<McpAuditLogRow[]>([])
+  const [deniedOnly, setDeniedOnly] = useState(false)
+  const [loadingStatus, setLoadingStatus] = useState(false)
+
+  // Manual refresh (button handler — sets the loading spinner). Not called
+  // from an effect, so the synchronous setState is fine here.
+  const refreshStatus = useCallback(async () => {
+    setLoadingStatus(true)
+    try {
+      setStatus(await getMcpServerStatus())
+    } catch (err) {
+      loggers.mcp.error("health.statusFailed", err)
+    } finally {
+      setLoadingStatus(false)
+    }
+  }, [])
+
+  // Initial status load — state is only written in the resolved callback (after
+  // the await), so no synchronous setState happens inside the effect body.
+  useEffect(() => {
+    let cancelled = false
+    getMcpServerStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s)
+      })
+      .catch((err) => loggers.mcp.error("health.statusFailed", err))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Audit log — re-fetches whenever the denied-only filter flips.
+  useEffect(() => {
+    let cancelled = false
+    listMcpAuditLog({ deniedOnly, limit: 100 })
+      .then((r) => {
+        if (!cancelled) setRows(r)
+      })
+      .catch((err) => loggers.mcp.error("health.logFailed", err))
+    return () => {
+      cancelled = true
+    }
+  }, [deniedOnly])
+
+  const handleClear = async () => {
+    try {
+      await clearMcpAuditLog()
+      setRows([])
+      toast.success(t("cleared"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const running = status?.running ?? false
+
+  return (
+    <div className="space-y-4" data-testid="mcp-health-tab">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <CircleIcon
+                  className={cn(
+                    "size-2.5",
+                    running
+                      ? "fill-emerald-500 text-emerald-500"
+                      : "fill-muted-foreground text-muted-foreground"
+                  )}
+                />
+                {t("bridgeTitle")}
+              </CardTitle>
+              <CardDescription className="text-xs">{t("bridgeSubtitle")}</CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => void refreshStatus()}
+              disabled={loadingStatus}
+              aria-label={t("title")}
+            >
+              <RefreshCwIcon className={cn("size-3.5", loadingStatus && "animate-spin")} />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2 text-xs">
+          {!desktop ? (
+            <p className="text-muted-foreground">{t("desktopOnly")}</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span
+                className={cn(
+                  "font-medium",
+                  running ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                )}
+              >
+                {running ? t("running") : t("stopped")}
+              </span>
+              {status?.port != null && (
+                <span className="text-muted-foreground">{t("port", { port: status.port })}</span>
+              )}
+              {status?.startedAt && (
+                <span className="text-muted-foreground">
+                  {t("startedAt", { time: new Date(status.startedAt).toLocaleString() })}
+                </span>
+              )}
+            </div>
+          )}
+          <Button asChild variant="outline" size="sm" className="mt-1">
+            <Link href="/settings?section=external-bridge">
+              <ExternalLinkIcon className="mr-1.5 size-3.5" />
+              {t("openBridgeSettings")}
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle className="text-sm">{t("auditTitle")}</CardTitle>
+              <CardDescription className="text-xs">{t("auditSubtitle")}</CardDescription>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Checkbox
+                  checked={deniedOnly}
+                  onCheckedChange={(v) => setDeniedOnly(!!v)}
+                  aria-label={t("deniedOnly")}
+                />
+                {t("deniedOnly")}
+              </Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                onClick={() => void handleClear()}
+                disabled={rows.length === 0}
+              >
+                <Trash2Icon className="mr-1 size-3" />
+                {t("clearLog")}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rows.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t("auditEmpty")}</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-[10px] uppercase">{t("colTime")}</TableHead>
+                  <TableHead className="text-[10px] uppercase">{t("colTool")}</TableHead>
+                  <TableHead className="text-[10px] uppercase">{t("colScope")}</TableHead>
+                  <TableHead className="text-[10px] uppercase">{t("colResult")}</TableHead>
+                  <TableHead className="text-right text-[10px] uppercase">
+                    {t("colLatency")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                      {new Date(row.ts).toLocaleTimeString()}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px]">{row.tool}</TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground">{row.scope}</TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[10px]",
+                          row.allowed
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                            : "bg-destructive/10 text-destructive"
+                        )}
+                      >
+                        {row.allowed ? t("allowed") : t("denied")}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right text-[11px] text-muted-foreground">
+                      {row.latencyMs}ms
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

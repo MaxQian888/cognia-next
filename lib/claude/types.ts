@@ -1145,6 +1145,23 @@ export interface AppSettings {
    */
   goalConsoleView?: "grid" | "list"
   /**
+   * Persisted view preferences for the MCP servers management panel
+   * (`/settings?section=mcp`). Lives in settings JSON (same pattern as
+   * `goalConsoleView` / `discoverFavorites`) so the chosen layout, grouping,
+   * and favorites follow the user across devices without a Dexie migration.
+   *
+   *  - `view`: card grid vs. dense list for the "My Servers" tab.
+   *  - `groupBy`: collapsible section grouping (`none` flat, by `transport`,
+   *    or by enabled/disabled `status`). Favorites always float to the top.
+   *  - `favorites`: server ids pinned to the top of the list, mirroring the
+   *    `pinnedWorkflowIds` / `discoverFavorites` JSON-array pattern.
+   */
+  mcpPanel?: {
+    view: "grid" | "list"
+    groupBy: "none" | "transport" | "status"
+    favorites: string[]
+  }
+  /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
    * count of `inboundLedger` rows newer than this timestamp. `0` / unset
