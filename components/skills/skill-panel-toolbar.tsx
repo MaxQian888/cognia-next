@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import {
   FolderDownIcon,
   FolderIcon,
+  LayoutTemplateIcon,
   MoreHorizontalIcon,
   PackageIcon,
   PlusIcon,
@@ -21,6 +22,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { SkillDiscovery } from "./skill-discovery"
+import { SkillTemplateDialog } from "./skill-template-dialog"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -67,6 +69,7 @@ export function SkillPanelToolbar() {
   const tDiscovery = useTranslations("skills.discovery")
   const [busy, setBusy] = useState(false)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
+  const [templateOpen, setTemplateOpen] = useState(false)
   const openCreate = useSkillsStore((s) => s.openCreate)
   const setImportStaging = useSkillsStore((s) => s.setImportStaging)
   const sync = useSkillSync()
@@ -346,7 +349,7 @@ export function SkillPanelToolbar() {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button size="sm" onClick={openCreate} disabled={busy}>
+      <Button size="sm" onClick={() => openCreate()} disabled={busy}>
         <PlusIcon className="size-3.5 sm:mr-1.5" />
         <span className="hidden sm:inline">{t("new")}</span>
       </Button>
@@ -358,6 +361,16 @@ export function SkillPanelToolbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuItem onSelect={() => setTemplateOpen(true)} className="text-xs">
+            <LayoutTemplateIcon className="mr-2 size-3.5" />
+            <div className="flex flex-col gap-0.5">
+              <span>{tCommon("templates.fromTemplate")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {tCommon("templates.fromTemplateHint")}
+              </span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void handleImportFromMarkdown()} className="text-xs">
             <UploadIcon className="mr-2 size-3.5" />
             <div className="flex flex-col gap-0.5">
@@ -525,6 +538,8 @@ export function SkillPanelToolbar() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <SkillTemplateDialog open={templateOpen} onOpenChange={setTemplateOpen} />
 
       <Sheet open={discoveryOpen} onOpenChange={setDiscoveryOpen}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-xl">

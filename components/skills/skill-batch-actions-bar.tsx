@@ -1,14 +1,19 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { DownloadIcon, PowerIcon, Trash2Icon, XIcon } from "lucide-react"
+import { DownloadIcon, PowerIcon, TagIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
-import { deleteSkill, listSkillsByIds, setSkillStatus } from "@/lib/db/skills"
+import { deleteSkill, listSkillsByIds, setSkillStatus, updateSkill } from "@/lib/db/skills"
 import { useSkillsStore } from "@/stores/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
+import { tagsAcrossSkills, unionTag, withoutTag } from "@/lib/skills/batch-tags"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { loggers } from "@/lib/logging"
 
@@ -20,12 +25,44 @@ export function SkillBatchActionsBar() {
   const t = useTranslations("skills.card")
   const tCommon = useTranslations("skills")
   const tToasts = useTranslations("skills.toasts")
+  const tTags = useTranslations("skills.batchTags")
   const selection = useSkillsStore((s) => s.selection)
   const clear = useSkillsStore((s) => s.clearSelection)
   const reduce = useReducedMotion()
   const count = selection.size
 
   const ids = Array.from(selection)
+  const [newTag, setNewTag] = useState("")
+  // Live tags across the current selection so the remove-chips stay in sync as
+  // the user adds/removes. Keyed on the id list so it re-queries on change.
+  const selectedSkills = useLiveQuery(() => listSkillsByIds(ids), [ids.join(",")]) ?? []
+  const currentTags = tagsAcrossSkills(selectedSkills)
+
+  const applyTags = async (mapTags: (tags: string[] | undefined) => string[]) => {
+    let failed = 0
+    for (const skill of selectedSkills) {
+      try {
+        await updateSkill(skill.id, { tags: mapTags(skill.tags) })
+      } catch (err) {
+        failed += 1
+        loggers.skills.error("batch tag failed", err, { id: skill.id })
+      }
+    }
+    if (failed > 0) toast.warning(tTags("partial", { ok: count - failed, total: count }))
+  }
+
+  const handleAddTag = async () => {
+    const tag = newTag.trim()
+    if (!tag) return
+    await applyTags((tags) => unionTag(tags, tag))
+    toast.success(tTags("added", { tag, count }))
+    setNewTag("")
+  }
+
+  const handleRemoveTag = async (tag: string) => {
+    await applyTags((tags) => withoutTag(tags, tag))
+    toast.success(tTags("removed", { tag, count }))
+  }
 
   const handleEnable = async () => {
     let failed = 0
@@ -119,6 +156,53 @@ export function SkillBatchActionsBar() {
               <PowerIcon className="size-3.5 rotate-180 sm:mr-1.5" />
               <span className="hidden sm:inline">{t("disable")}</span>
             </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button size="sm" variant="ghost">
+                  <TagIcon className="size-3.5 sm:mr-1.5" />
+                  <span className="hidden sm:inline">{tTags("button")}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="center"
+                className="w-64 space-y-2"
+                data-testid="skill-batch-tags-popover"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={newTag}
+                    onChange={(e) => setNewTag(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void handleAddTag()
+                      }
+                    }}
+                    placeholder={tTags("addPlaceholder")}
+                    className="h-8 text-xs"
+                  />
+                  <Button size="sm" className="h-8 shrink-0" onClick={() => void handleAddTag()}>
+                    {tTags("add")}
+                  </Button>
+                </div>
+                {currentTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {currentTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => void handleRemoveTag(tag)}
+                        aria-label={tTags("removeAria", { tag })}
+                        className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
+                      >
+                        {tag}
+                        <XIcon className="size-2.5" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
             <Button size="sm" variant="ghost" onClick={() => void handleExport()}>
               <DownloadIcon className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">{tCommon("toolbar.exportAll")}</span>

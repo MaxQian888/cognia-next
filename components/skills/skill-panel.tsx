@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
-import { useSkills } from "@/hooks/skills"
+import { useSkills, useSkillShortcuts } from "@/hooks/skills"
 import { useSkillsStore } from "@/stores/skills"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { SkillPanelHeader } from "./skill-panel-header"
@@ -44,6 +44,7 @@ export function SkillPanel({ className }: Props) {
   const view = useSkills()
   const activeTab = useSkillsStore((s) => s.activeTab)
   const reduce = useReducedMotion()
+  useSkillShortcuts(view.filtered)
   const fadeTransition = reduce
     ? { duration: 0 }
     : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
@@ -107,6 +108,7 @@ function SkillEditorHost() {
   const t = useTranslations("skills")
   const tToasts = useTranslations("skills.toasts")
   const editorTarget = useSkillsStore((s) => s.editorTarget)
+  const createSeed = useSkillsStore((s) => s.createSeed)
   const closeEditor = useSkillsStore((s) => s.closeEditor)
   const open = editorTarget !== null
   const skill = useLiveQuery(
@@ -163,7 +165,7 @@ function SkillEditorHost() {
         <div className="px-5 py-4">
           <SkillEditor
             mode={editorTarget?.mode === "create" ? "create" : "edit"}
-            initial={skill ?? null}
+            initial={editorTarget?.mode === "create" ? createSeed : (skill ?? null)}
             onCancel={closeEditor}
             onSave={onSave}
             onAiAssist={

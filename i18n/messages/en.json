@@ -6349,6 +6349,21 @@
   "skills": {
     "title": "Skills",
     "description": "Reusable instruction blobs appended to the system prompt at send time.",
+    "templates": {
+      "title": "Start from a template",
+      "subtitle": "Pick a starting point — it opens the editor pre-filled so you can tweak and save.",
+      "fromTemplate": "New from template",
+      "fromTemplateHint": "Scaffold a skill from a curated starting point."
+    },
+    "batchTags": {
+      "button": "Tags",
+      "addPlaceholder": "Add a tag…",
+      "add": "Add",
+      "added": "Tagged {count} skill(s) with \"{tag}\".",
+      "removed": "Removed \"{tag}\" from {count} skill(s).",
+      "partial": "Updated {ok} of {total} skill(s).",
+      "removeAria": "Remove tag {tag} from selected skills"
+    },
     "settingsCardTitle": "Skills",
     "settingsCardDescription": "Manage skills, browse the registry, refine with AI, and sync with ~/.claude/skills/.",
     "settingsCardFooter": "Each skill is appended to a character's system prompt under a `## name` heading at send time.",

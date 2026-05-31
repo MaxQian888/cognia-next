@@ -38,7 +38,7 @@ export function SkillPanelGrid({ skills }: Props) {
           <p className="text-sm font-medium">{t("panel.emptyTitle")}</p>
           <p className="mt-1 text-xs text-muted-foreground">{t("panel.emptyHint")}</p>
         </div>
-        <Button size="sm" onClick={openCreate}>
+        <Button size="sm" onClick={() => openCreate()}>
           {t("panel.emptyAction")}
         </Button>
       </div>

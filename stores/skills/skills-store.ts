@@ -66,6 +66,12 @@ interface SkillsStoreState {
   categorySheetOpen: boolean
   /** When non-null, show the editor pre-filled with this skill (or empty when "create"). */
   editorTarget: { mode: "create" } | { mode: "edit"; skillId: string } | null
+  /**
+   * Skill-shaped seed used to pre-fill the create editor (e.g. picked from a
+   * template). Only read while `editorTarget.mode === "create"`; cleared when
+   * the editor closes.
+   */
+  createSeed: import("@/lib/claude/types").Skill | null
   /** When non-null, show the import dialog with these draft entries staged. */
   importStaging: ImportStaging | null
   /** When non-null, show the delete confirmation. */
@@ -84,7 +90,7 @@ interface SkillsStoreState {
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
   setCategorySheetOpen: (open: boolean) => void
-  openCreate: () => void
+  openCreate: (seed?: import("@/lib/claude/types").Skill) => void
   openEdit: (skillId: string) => void
   closeEditor: () => void
   setImportStaging: (staging: ImportStaging | null) => void
@@ -154,6 +160,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   filterSheetOpen: false,
   categorySheetOpen: false,
   editorTarget: null,
+  createSeed: null,
   importStaging: null,
   deleteTarget: null,
   editorWorkspace: DEFAULT_WORKSPACE,
@@ -175,9 +182,10 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   closeDetail: () => set({ detailSkillId: null }),
   setFilterSheetOpen: (open) => set({ filterSheetOpen: open }),
   setCategorySheetOpen: (open) => set({ categorySheetOpen: open }),
-  openCreate: () => set({ editorTarget: { mode: "create" }, detailSkillId: null }),
+  openCreate: (seed) =>
+    set({ editorTarget: { mode: "create" }, createSeed: seed ?? null, detailSkillId: null }),
   openEdit: (skillId) => set({ editorTarget: { mode: "edit", skillId }, detailSkillId: null }),
-  closeEditor: () => set({ editorTarget: null }),
+  closeEditor: () => set({ editorTarget: null, createSeed: null }),
   setImportStaging: (staging) => set({ importStaging: staging }),
   setDeleteTarget: (target) => set({ deleteTarget: target }),
 

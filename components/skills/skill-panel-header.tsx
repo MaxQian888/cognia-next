@@ -50,6 +50,7 @@ export function SkillPanelHeader({ totalCount, filteredCount }: Props) {
       <div className="relative order-last w-full sm:order-none sm:w-56 md:w-64 lg:w-72">
         <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
+          data-skill-search
           value={filters.query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("filter.search")}

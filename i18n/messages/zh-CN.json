@@ -6349,6 +6349,21 @@
   "skills": {
     "title": "技能",
     "description": "在发送时拼接到系统提示词的可复用指令片段。",
+    "templates": {
+      "title": "从模板创建",
+      "subtitle": "选择一个起点，它会预填编辑器，你可以修改后保存。",
+      "fromTemplate": "从模板新建",
+      "fromTemplateHint": "基于精选起点快速搭建一个技能。"
+    },
+    "batchTags": {
+      "button": "标签",
+      "addPlaceholder": "添加标签…",
+      "add": "添加",
+      "added": "已为 {count} 个技能添加标签「{tag}」。",
+      "removed": "已从 {count} 个技能移除「{tag}」。",
+      "partial": "已更新 {total} 个中的 {ok} 个。",
+      "removeAria": "从所选技能移除标签 {tag}"
+    },
     "settingsCardTitle": "技能",
     "settingsCardDescription": "管理技能、浏览注册表、用 AI 优化，并与 ~/.claude/skills/ 同步。",
     "settingsCardFooter": "每个技能在发送时会以 `## 名称` 标题被追加到角色的系统提示词。",

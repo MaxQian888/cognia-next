@@ -53,6 +53,7 @@ jest.mock("@/hooks/skills", () => ({
     allTags: [],
   }),
   useSkillAi: () => ({ run: jest.fn(async () => null) }),
+  useSkillShortcuts: () => {},
 }))
 
 const storeState: {
