@@ -17,6 +17,8 @@
  * reopens its `/ws/v1/events` stream).
  */
 
+import { isTauri } from "@/lib/platform/detect"
+
 export interface NeedsInputPayload {
   sessionId: string
   requestId: string
@@ -24,7 +26,7 @@ export interface NeedsInputPayload {
 }
 
 export async function notifyRemoteNeedsInput(payload: NeedsInputPayload): Promise<void> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return
+  if (!isTauri()) return
   try {
     const moduleId = "@tauri-apps/api/event"
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as {

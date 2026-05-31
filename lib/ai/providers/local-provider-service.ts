@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { isTauri } from "@/lib/platform/detect"
 import type {
   LocalProviderName,
   LocalServerStatus,
@@ -21,13 +22,6 @@ import {
   normalizeBaseUrl,
   type LocalProviderConfig,
 } from "./local-providers"
-
-/**
- * Check if running in Tauri environment
- */
-function isInTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
 
 /**
  * Local provider capabilities
@@ -239,7 +233,7 @@ export class LocalProviderService {
     const startTime = Date.now()
 
     // Use Tauri command for Ollama if available
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       try {
         const status = await invoke<LocalServerStatus>("ollama_get_status", {
           baseUrl: this.baseUrl,
@@ -254,7 +248,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for generic local provider if available
-    if (isInTauri()) {
+    if (isTauri()) {
       try {
         const status = await invoke<LocalServerStatus>("local_provider_get_status", {
           providerId: this.providerId,
@@ -310,7 +304,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for Ollama if available
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       try {
         const models = await invoke<Array<{ name: string; model: string; size: number }>>(
           "ollama_list_models",
@@ -329,7 +323,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for generic local provider if available
-    if (isInTauri()) {
+    if (isTauri()) {
       try {
         return await invoke<LocalModelInfo[]>("local_provider_list_models", {
           providerId: this.providerId,
@@ -394,7 +388,7 @@ export class LocalProviderService {
     let unlisten: UnlistenFn | undefined
 
     // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       if (options?.onProgress) {
         unlisten = await listen<LocalModelPullProgress>("ollama-pull-progress", (event) => {
           if (event.payload.model === modelName) {
@@ -419,7 +413,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for generic provider
-    if (isInTauri()) {
+    if (isTauri()) {
       if (options?.onProgress) {
         unlisten = await listen<LocalModelPullProgress>("local-provider-pull-progress", (event) => {
           if (event.payload.model === modelName) {
@@ -504,7 +498,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       return invoke<boolean>("ollama_delete_model", {
         baseUrl: this.baseUrl,
         modelName,
@@ -512,7 +506,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for generic provider
-    if (isInTauri()) {
+    if (isTauri()) {
       try {
         return await invoke<boolean>("local_provider_delete_model", {
           providerId: this.providerId,
@@ -551,7 +545,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       return invoke<boolean>("ollama_stop_model", {
         baseUrl: this.baseUrl,
         modelName,
@@ -581,7 +575,7 @@ export class LocalProviderService {
     }
 
     // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isInTauri()) {
+    if (this.providerId === "ollama" && isTauri()) {
       return invoke<number[]>("ollama_generate_embedding", {
         baseUrl: this.baseUrl,
         model,
@@ -611,7 +605,7 @@ export class LocalProviderService {
 export async function checkProviderInstallation(
   providerId: LocalProviderName
 ): Promise<InstallCheckResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     try {
       return await invoke<InstallCheckResult>("local_provider_check_installation", {
         providerId,

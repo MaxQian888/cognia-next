@@ -79,9 +79,14 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { TitleBarNavArrows } from "@/components/desktop/title-bar-nav-arrows"
+import { TitleBarLayoutControls } from "@/components/desktop/title-bar-layout-controls"
+import { TitleBarCommandCenterMenu } from "@/components/desktop/title-bar-command-center-menu"
+import { recordNavigation } from "@/hooks/desktop/use-nav-history"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 const log = loggers.ui
 const NARROW_QUERY = "(max-width: 760px)"
@@ -91,11 +96,17 @@ const NARROW_QUERY = "(max-width: 760px)"
 // `animate-in` / `animate-out` enter+exit keyframes plus a soft `shadow-md`,
 // which on Windows WebView2 cause the popovers to repaint a large area on every
 // open / cross-menu hover switch. Killing the animations and dropping the
-// shadow weight removes the per-frame paint cost; `will-change` hints the
-// compositor to promote the popover to its own layer. tailwind-merge dedupes
+// shadow weight removes the per-frame paint cost. tailwind-merge dedupes
 // against the vendor classes so we don't have to fork components/ui/menubar.
+//
+// NOTE: do NOT add `will-change:transform` (or any transform/filter) here.
+// Radix positions submenu content with `position: fixed` (Popper
+// `strategy: "fixed"`) but does NOT portal it — the SubContent stays a DOM
+// descendant of this content. A `will-change`/transform on the parent
+// establishes a containing block for that fixed child, so the parent's
+// `overflow-hidden` then clips the whole second-level submenu out of view.
 const MENU_CONTENT_PERF =
-  "data-[state=open]:!animate-none data-[state=closed]:!animate-none shadow-sm [will-change:transform,opacity]"
+  "data-[state=open]:!animate-none data-[state=closed]:!animate-none shadow-sm"
 
 type WindowApi = {
   minimize: () => Promise<void>
@@ -216,6 +227,10 @@ export function TitleBar() {
   const reduceMotion = persistedReduceMotion ?? false
 
   const narrow = useNarrow()
+  const pathname = usePathname()
+  const terminalOpen = useTerminalStore((s) => s.panelOpen)
+  const setTerminalPanelOpen = useTerminalStore((s) => s.setPanelOpen)
+  const toggleTerminalPanel = useTerminalStore((s) => s.togglePanel)
 
   const [recentSessions, setRecentSessions] = useState<
     Array<{ id: string; title: string; characterId?: string }>
@@ -275,6 +290,13 @@ export function TitleBar() {
       cancelled = true
     }
   }, [activeSessionId])
+
+  // Feed the back/forward history (the title bar is mounted once for the whole
+  // desktop shell, so this observes every route change).
+  useEffect(() => {
+    if (!isTauri()) return
+    recordNavigation(pathname)
+  }, [pathname])
 
   if (!mounted || !isTauri()) return null
 
@@ -430,6 +452,18 @@ export function TitleBar() {
   // ---- Go menu -----------------------------------------------------------
 
   const handleGo = (target: MenuActionId) => () => goAction(router, target)
+
+  // ---- Terminal menu -----------------------------------------------------
+
+  const handleNewTerminal = () => {
+    log.info("title-bar terminal new")
+    // Open the dock; the dock's own "+" affordance creates project-scoped tabs.
+    setTerminalPanelOpen(true)
+  }
+  const handleToggleTerminal = () => {
+    log.info("title-bar terminal toggle")
+    toggleTerminalPanel()
+  }
 
   // ---- Tools menu --------------------------------------------------------
 
@@ -763,6 +797,24 @@ export function TitleBar() {
                     {tMenu("go.settings")}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
+                  {/* Run */}
+                  <DropdownMenuLabel>{tMenu("run.label")}</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={handleNewWorkflow}>
+                    {tMenu("run.newWorkflowRun")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleGo("go-scheduler")}>
+                    {tMenu("run.openScheduler")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleGo("go-agent-teams")}>
+                    {tMenu("run.agentTeams")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => void handleAutomationKillSwitch()}
+                  >
+                    {tMenu("run.killSwitch")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {/* Tools */}
                   <DropdownMenuLabel>{tMenu("tools.label")}</DropdownMenuLabel>
                   <DropdownMenuItem onSelect={handleCommandPalette}>
@@ -790,6 +842,21 @@ export function TitleBar() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void handleClearCache()}>
                     {tMenu("tools.clearCache")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {/* Terminal */}
+                  <DropdownMenuLabel>{tMenu("terminal.label")}</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={handleNewTerminal}>
+                    {tMenu("terminal.new")}
+                  </DropdownMenuItem>
+                  <DropdownMenuCheckboxItem
+                    checked={terminalOpen}
+                    onCheckedChange={handleToggleTerminal}
+                  >
+                    {tMenu("terminal.togglePanel")}
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuItem onSelect={() => void handleRestartSidecar()}>
+                    {tMenu("terminal.restartSidecar")}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {/* Window */}
@@ -1037,6 +1104,29 @@ export function TitleBar() {
                 </MenubarMenu>
                 <MenubarMenu>
                   <MenubarTrigger className="px-2 py-0.5 text-xs">
+                    {tMenu("run.label")}
+                  </MenubarTrigger>
+                  <MenubarContent className={MENU_CONTENT_PERF}>
+                    <MenubarItem onSelect={handleNewWorkflow}>
+                      {tMenu("run.newWorkflowRun")}
+                    </MenubarItem>
+                    <MenubarItem onSelect={handleGo("go-scheduler")}>
+                      {tMenu("run.openScheduler")}
+                    </MenubarItem>
+                    <MenubarItem onSelect={handleGo("go-agent-teams")}>
+                      {tMenu("run.agentTeams")}
+                    </MenubarItem>
+                    <MenubarSeparator />
+                    <MenubarItem
+                      onSelect={() => void handleAutomationKillSwitch()}
+                      variant="destructive"
+                    >
+                      {tMenu("run.killSwitch")}
+                    </MenubarItem>
+                  </MenubarContent>
+                </MenubarMenu>
+                <MenubarMenu>
+                  <MenubarTrigger className="px-2 py-0.5 text-xs">
                     {tMenu("tools.label")}
                   </MenubarTrigger>
                   <MenubarContent className={MENU_CONTENT_PERF}>
@@ -1067,6 +1157,24 @@ export function TitleBar() {
                     </MenubarItem>
                     <MenubarItem onSelect={() => void handleClearCache()}>
                       {tMenu("tools.clearCache")}
+                    </MenubarItem>
+                  </MenubarContent>
+                </MenubarMenu>
+                <MenubarMenu>
+                  <MenubarTrigger className="px-2 py-0.5 text-xs">
+                    {tMenu("terminal.label")}
+                  </MenubarTrigger>
+                  <MenubarContent className={MENU_CONTENT_PERF}>
+                    <MenubarItem onSelect={handleNewTerminal}>{tMenu("terminal.new")}</MenubarItem>
+                    <MenubarCheckboxItem
+                      checked={terminalOpen}
+                      onCheckedChange={handleToggleTerminal}
+                    >
+                      {tMenu("terminal.togglePanel")}
+                    </MenubarCheckboxItem>
+                    <MenubarSeparator />
+                    <MenubarItem onSelect={() => void handleRestartSidecar()}>
+                      {tMenu("terminal.restartSidecar")}
                     </MenubarItem>
                   </MenubarContent>
                 </MenubarMenu>
@@ -1115,15 +1223,25 @@ export function TitleBar() {
 
         <div
           data-tauri-drag-region
-          className="flex flex-1 items-center justify-center px-2 min-w-0"
+          className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
-          <TitleBarSearchPill
-            appName={appName}
-            separator={t("separator")}
-            placeholder={t("searchPlaceholder")}
-            kbdHint={t("kbdHint")}
-            onClick={handleCommandPalette}
-          />
+          <TitleBarNavArrows className="shrink-0" />
+          <div className="flex min-w-0 max-w-[480px] flex-1 items-center justify-center">
+            <TitleBarSearchPill
+              appName={appName}
+              separator={t("separator")}
+              placeholder={t("searchPlaceholder")}
+              kbdHint={t("kbdHint")}
+              onClick={handleCommandPalette}
+            />
+            <TitleBarCommandCenterMenu
+              className="hidden lg:inline-flex"
+              recentSessions={recentSessions}
+              onCommandPalette={handleCommandPalette}
+              onOpenRecentSession={(id) => handleOpenRecentSession(id)()}
+              onGo={(id) => goAction(router, id)}
+            />
+          </div>
           <PluginExtensionSlot
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
@@ -1134,6 +1252,8 @@ export function TitleBar() {
           point="toolbar.right"
           className="flex items-center gap-1 px-1 empty:hidden"
         />
+
+        <TitleBarLayoutControls className="px-1" />
 
         {!isMac ? (
           <div className="flex items-center">
@@ -1272,7 +1392,7 @@ function TitleBarButton({ className, ...props }: React.ComponentProps<typeof But
     <Button
       variant="ghost"
       size="icon"
-      className={cn("h-8 w-10 rounded-none", className)}
+      className={cn("h-8 w-10 rounded-none transition-colors", className)}
       {...props}
     />
   )

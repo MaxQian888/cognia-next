@@ -144,6 +144,22 @@ describe("UnifiedTaskSidebarItem", () => {
     expect(onClick).not.toHaveBeenCalled()
   })
 
+  it("keeps the checkbox visible on touch (no-hover) devices when unselected", () => {
+    const item = makeItem()
+    render(
+      <UnifiedTaskSidebarItem
+        item={item}
+        isActive={false}
+        onClick={() => {}}
+        onToggleSelect={() => {}}
+      />
+    )
+    const checkbox = screen.getByTestId(`unified-row-checkbox-${item.unifiedId}`)
+    // Hover-revealed on pointer devices, but forced visible where hover is
+    // unavailable so multi-select is discoverable on touch.
+    expect(checkbox.className).toContain("[@media(hover:none)]:opacity-100")
+  })
+
   it("reflects the isSelected prop on the checkbox's checked attribute", () => {
     const item = makeItem()
     render(

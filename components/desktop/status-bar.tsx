@@ -126,7 +126,7 @@ export function StatusBar() {
   return (
     <footer
       data-app-chrome
-      className="flex h-6 shrink-0 items-center gap-0 border-t bg-muted/40 text-[11px] select-none"
+      className="hidden h-6 shrink-0 items-center gap-0 border-t bg-muted/40 text-[11px] select-none md:flex"
       data-testid="status-bar"
     >
       <StatusItem onClick={toggleSidebar} aria-label={t("toggleSidebar")} testId="status-sidebar">

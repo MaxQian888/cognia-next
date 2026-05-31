@@ -28,7 +28,7 @@ import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import type { Character, McpServer, Skill, Team } from "@/lib/claude/types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { ConnectorMeta } from "@/lib/connectors/adapter-metadata"
-import type { DiscoverCategoryId } from "@/lib/discover/categories"
+import type { DiscoverCategoryId, DiscoverView } from "@/lib/discover/categories"
 import type { OcrProvider } from "@/lib/ocr/types"
 import type { TwinDraft, TwinSource } from "@/types/twin"
 import type { WorkflowCopilotTemplate } from "@/lib/workflow/copilot-templates"
@@ -40,7 +40,7 @@ import { getDb } from "@/lib/db/schema"
 import { setSkillStatus } from "@/lib/db/skills"
 
 export interface DiscoverInspectorProps {
-  category: DiscoverCategoryId
+  category: DiscoverView
   itemId: string | null
   items: DiscoverItem[]
   onClose: () => void

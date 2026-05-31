@@ -5,6 +5,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "../core/logger"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 
@@ -493,7 +494,7 @@ export interface DetachedSignatureCheck {
 }
 
 function isTauriRuntimeAvailable(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+  return isTauri()
 }
 
 /**

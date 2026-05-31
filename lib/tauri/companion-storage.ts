@@ -23,6 +23,7 @@
  */
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import { isCapacitor } from "@/lib/platform/detect"
 
 export interface CompanionConfig {
   /** e.g. "https://192.168.1.42:7890" */
@@ -160,17 +161,6 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
 // ---------------------------------------------------------------------------
 // Selection
 // ---------------------------------------------------------------------------
-
-function isCapacitor(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-      ?.isNativePlatform === "function" &&
-    (
-      window as unknown as { Capacitor: { isNativePlatform: () => boolean } }
-    ).Capacitor.isNativePlatform() === true
-  )
-}
 
 export function pickCompanionStorage(): CompanionConfigStorage {
   return isCapacitor() ? new SecureStorageCompanionStorage() : new LocalStorageCompanionStorage()

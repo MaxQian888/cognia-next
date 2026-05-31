@@ -332,3 +332,40 @@ jobs:
           name: playwright-report-tauri-driver
           path: playwright-report/
           retention-days: 14
+
+  cargo-test-windows:
+    name: Rust Tests (Windows)
+    runs-on: windows-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # `tauri::generate_context!()` needs the static export (../out) to exist
+      # at compile time, so produce it before compiling the Rust crate.
+      - name: Build Next.js static export
+        run: pnpm build
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked

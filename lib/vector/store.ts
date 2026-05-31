@@ -4,6 +4,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { isTauri } from "@/lib/platform/detect"
 import type { EmbeddingModelConfig } from "./embedding"
 import { generateEmbedding, generateEmbeddings } from "./embedding"
 import { vectorCloudInvoke, type CloudProvider, type FilterOpWire, type FilterWire } from "./invoke"
@@ -588,7 +589,7 @@ export class NativeVectorStore implements IVectorStore {
   }
 
   private isInTauri(): boolean {
-    return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+    return isTauri()
   }
 
   private async invoke<T>(cmd: string, payload?: Record<string, unknown>): Promise<T> {

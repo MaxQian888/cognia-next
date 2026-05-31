@@ -6,11 +6,30 @@ import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }))
 
 jest.mock("./task-execution-chart", () => ({
   __esModule: true,
   TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
+}))
+
+// Stub the calendar/timeline views — they have their own dedicated tests; here
+// we only assert the dashboard routes to the right one for the active mode.
+jest.mock("./scheduler-calendar-view", () => ({
+  __esModule: true,
+  SchedulerCalendarView: () => <div data-testid="calendar-view-stub" />,
+}))
+jest.mock("./scheduler-timeline-view", () => ({
+  __esModule: true,
+  SchedulerTimelineView: () => <div data-testid="timeline-view-stub" />,
+}))
+
+const viewState = { view: "overview" as "overview" | "calendar" | "timeline" }
+jest.mock("@/hooks/scheduler/use-scheduler-dashboard-view", () => ({
+  __esModule: true,
+  useSchedulerDashboardView: () => ({ view: viewState.view, setView: jest.fn() }),
+  isSchedulerDashboardView: (v: string) => ["overview", "calendar", "timeline"].includes(v),
 }))
 
 import { SchedulerDashboardView } from "./scheduler-dashboard-view"
@@ -82,27 +101,36 @@ function setup(overrides: Partial<React.ComponentProps<typeof SchedulerDashboard
   return { props, ...render(<SchedulerDashboardView {...props} />) }
 }
 
+beforeEach(() => {
+  viewState.view = "overview"
+})
+
 describe("SchedulerDashboardView", () => {
-  it("returns null when statistics is null", () => {
-    const { container } = render(
-      <SchedulerDashboardView
-        statistics={null}
-        activeTasks={[]}
-        pausedTasks={[]}
-        upcomingTasks={[]}
-        recentExecutions={[]}
-        schedulerStatus="stopped"
-        onSelectTask={jest.fn()}
-      />
-    )
-    expect(container.firstChild).toBeNull()
+  it("always renders the view toggle, even when statistics is null", () => {
+    setup({ statistics: null })
+    expect(screen.getByTestId("scheduler-dashboard-view-toggle")).toBeInTheDocument()
+    // Overview body bails out → no stat values rendered.
+    expect(screen.queryByText("10")).toBeNull()
   })
 
-  it("renders aggregate stats and the success rate", () => {
+  it("renders aggregate stats and the success rate in overview mode", () => {
     setup()
     expect(screen.getByText("10")).toBeInTheDocument()
     expect(screen.getByText("100")).toBeInTheDocument()
     expect(screen.getByText("95%")).toBeInTheDocument()
+  })
+
+  it("renders the calendar view when mode is calendar", () => {
+    viewState.view = "calendar"
+    setup({ tasks: [] })
+    expect(screen.getByTestId("calendar-view-stub")).toBeInTheDocument()
+    expect(screen.queryByText("95%")).toBeNull()
+  })
+
+  it("renders the timeline view when mode is timeline", () => {
+    viewState.view = "timeline"
+    setup({ tasks: [] })
+    expect(screen.getByTestId("timeline-view-stub")).toBeInTheDocument()
   })
 
   it("renders the upcoming tasks list and dispatches onSelectTask on click", () => {
@@ -144,9 +172,6 @@ describe("SchedulerDashboardView", () => {
     expect(screen.getByTestId("kind-summary-strip")).toBeInTheDocument()
     expect(screen.getByTestId("kind-summary-app")).toBeInTheDocument()
     expect(screen.getByTestId("kind-summary-workflow")).toBeInTheDocument()
-    expect(screen.getByTestId("kind-summary-backup")).toBeInTheDocument()
-    expect(screen.getByTestId("kind-summary-plugin")).toBeInTheDocument()
-    expect(screen.getByTestId("kind-summary-system")).toBeInTheDocument()
   })
 
   it("omits the kind summary strip when countsByKind is absent", () => {

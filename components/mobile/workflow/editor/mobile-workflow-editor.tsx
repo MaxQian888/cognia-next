@@ -19,7 +19,7 @@ import { useCallback, useRef, useState } from "react"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { X as CancelIcon } from "lucide-react"
+import { X as CancelIcon, Maximize2 as FitViewIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
@@ -134,6 +134,19 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             onClick={() => setPaletteOpen(true)}
             data-testid="mobile-editor-fab"
           />
+        ) : null}
+        {!tapConnect.active ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-4 z-20 size-11 rounded-full shadow-lg"
+            onClick={() => rf?.fitView({ duration: 240, padding: 0.2 })}
+            aria-label={t("fitView")}
+            data-testid="mobile-editor-recenter"
+          >
+            <FitViewIcon className="size-5" aria-hidden="true" />
+          </Button>
         ) : null}
         {tapConnect.active ? (
           <Button

@@ -17,8 +17,8 @@
  * routed children.
  */
 
-import { usePathname } from "next/navigation"
-import { useMemo } from "react"
+import { usePathname, useRouter } from "next/navigation"
+import { useEffect, useMemo, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
@@ -29,7 +29,8 @@ import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
-import { MobileTabBar, type TabId } from "./mobile-tab-bar"
+import { MobileTabBar, tabHref, type TabId } from "./mobile-tab-bar"
+import { useMobileTabLayout } from "./use-mobile-tab-layout"
 
 const TAB_BAR_HIDDEN_PREFIXES = ["/pair", "/oauth"]
 
@@ -43,7 +44,29 @@ export interface MobileShellWrapperProps {
 export function MobileShellWrapper({ children, badges, className }: MobileShellWrapperProps) {
   const platform = usePlatform()
   const pathname = usePathname() ?? "/"
+  const router = useRouter()
   const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
+  const { resolved: resolvedTabs } = useMobileTabLayout()
+
+  // One-time launch redirect to the user's chosen landing tab. The wrapper is
+  // mounted once in `app/layout.tsx` and persists across navigations, so the
+  // first mount IS the app launch. We capture the launch path, then redirect
+  // once settings resolve a non-chat landing — without hijacking later manual
+  // taps onto the Chat tab.
+  const launchPathRef = useRef<string | null>(null)
+  if (launchPathRef.current === null) launchPathRef.current = pathname
+  const landingDoneRef = useRef(false)
+  useEffect(() => {
+    if (platform !== "mobile" || landingDoneRef.current) return
+    if (launchPathRef.current !== "/") {
+      landingDoneRef.current = true
+      return
+    }
+    if (resolvedTabs.defaultLanding !== "chat") {
+      landingDoneRef.current = true
+      router.replace(tabHref(resolvedTabs.defaultLanding))
+    }
+  }, [platform, resolvedTabs.defaultLanding, router])
 
   const inboundUnread =
     useLiveQuery<number>(

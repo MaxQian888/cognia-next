@@ -268,6 +268,28 @@ describe("<EmptyChatState />", () => {
     expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
   })
 
+  // ── Mobile home slots (hideSamples / header / quick actions) ──────────
+  it("suppresses the dev-tool starters when hideSamples is set", () => {
+    render(<EmptyChatState {...baseProps()} hideSamples />)
+    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
+  })
+
+  it("renders headerExtraSlot above the greeting", () => {
+    render(<EmptyChatState {...baseProps()} headerExtraSlot={<div data-testid="header-extra" />} />)
+    const extra = screen.getByTestId("header-extra")
+    const title = screen.getByRole("heading", { name: "title" })
+    // headerExtraSlot precedes the greeting in document order.
+    expect(extra.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("renders quickActionsSlot", () => {
+    render(
+      <EmptyChatState {...baseProps()} quickActionsSlot={<div data-testid="quick-actions" />} />
+    )
+    expect(screen.getByTestId("quick-actions")).toBeInTheDocument()
+  })
+
   // ── Reduced motion ────────────────────────────────────────────────────
   it("renders all groups with reduced motion enabled", () => {
     mockUseReducedMotion.mockReturnValue(true)

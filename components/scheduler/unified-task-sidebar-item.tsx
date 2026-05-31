@@ -126,7 +126,11 @@ export function UnifiedTaskSidebarItem({
           data-testid={`unified-row-checkbox-${item.unifiedId}`}
           className={cn(
             "h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-primary transition-opacity",
-            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+            // On pointer devices the checkbox is hover-revealed; on touch (no
+            // hover) it is always shown so multi-select is discoverable.
+            isSelected
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
           )}
         />
       )}

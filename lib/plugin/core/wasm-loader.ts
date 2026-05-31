@@ -9,8 +9,9 @@
  * and `python` types.
  */
 
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
+import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 
 const wasmLoaderLogger = loggers.plugin.child("wasm-loader")
 
@@ -41,7 +42,7 @@ async function getInvoke(): Promise<InvokeFn> {
  * Browser-mode users see a "desktop required" stub instead.
  */
 export function isWasmHostAvailable(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+  return isTauri()
 }
 
 /**

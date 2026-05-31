@@ -1,27 +1,24 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useSyncExternalStore } from "react"
+
+import { getQuerySnapshot, subscribeToQuery } from "@/lib/platform/viewport-store"
 
 /**
- * Reactive media-query hook. Returns `false` on the server so SSR / static
- * export render the desktop-default layout, then flips to the real value on
- * mount. That keeps hydration deterministic.
+ * Reactive media-query hook. Returns `false` on the server / when `matchMedia`
+ * is unavailable so SSR / static export render the desktop-default layout, then
+ * `useSyncExternalStore` reconciles to the real value on mount — without the
+ * extra `false → real` effect render the old `useEffect`+`useState` version
+ * produced. All call sites multiplex onto one `MediaQueryList` per query via
+ * the shared viewport store.
  */
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false)
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return
-
-    const mq = window.matchMedia(query)
-    const update = () => setMatches(mq.matches)
-    update()
-
-    mq.addEventListener("change", update)
-    return () => mq.removeEventListener("change", update)
-  }, [query])
-
-  return matches
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeToQuery(query, onChange),
+    [query]
+  )
+  const getSnapshot = useCallback(() => getQuerySnapshot(query), [query])
+  return useSyncExternalStore(subscribe, getSnapshot, () => false)
 }
 
 /** True when the viewport is below the Tailwind `md` breakpoint (768px). */

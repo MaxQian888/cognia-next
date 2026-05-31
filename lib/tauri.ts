@@ -1,31 +1,13 @@
 import { transport } from "./tauri/transport-instance"
 
-/**
- * Detects whether the app is running inside a Tauri webview.
- * Use this to gate any code that calls into native runtime so the same
- * component works in both `pnpm dev` (web) and `pnpm tauri dev` (desktop).
- */
-export function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
-
-/**
- * Detects whether the app is running inside a Capacitor mobile shell.
- * Use this for UI gating that needs to know the native runtime is mobile
- * (versus desktop Tauri or plain browser). The transport selection itself
- * happens in `lib/tauri/transport-instance.ts` — this helper is only for
- * UI-level platform branching alongside `isTauri()`.
- */
-export function isCapacitor(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-      ?.isNativePlatform === "function" &&
-    (
-      window as unknown as { Capacitor: { isNativePlatform: () => boolean } }
-    ).Capacitor.isNativePlatform() === true
-  )
-}
+// Runtime detection delegates to the canonical, framework-free source of truth
+// in `lib/platform/detect`. Re-exported here so existing
+// `import { isTauri, isCapacitor } from "@/lib/tauri"` call sites are untouched.
+//
+// - `isTauri()`     — true inside a Tauri desktop webview (`__TAURI_INTERNALS__`).
+// - `isCapacitor()` — true inside a native Capacitor mobile shell
+//   (`Capacitor.isNativePlatform()`), for UI-level platform branching.
+export { isCapacitor, isTauri } from "@/lib/platform/detect"
 
 // Re-export the transport so consumers can `import { transport } from "@/lib/tauri"`.
 // The actual instance lives in `lib/tauri/transport-instance.ts` to stay out

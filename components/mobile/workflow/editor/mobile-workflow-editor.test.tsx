@@ -11,6 +11,7 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 // Capture the store the editor builds internally so tests can assert on
 // store mutations driven through the orchestration.
 let capturedStore: EditorStore | null = null
+const fitViewMock = jest.fn()
 
 type ChildProps = Record<string, unknown>
 
@@ -25,7 +26,10 @@ jest.mock("./mobile-canvas", () => ({
         <button data-testid="tap-n1" onClick={() => onNodeTap("n1")}>n1</button>
         <button data-testid="tap-n2" onClick={() => onNodeTap("n2")}>n2</button>
         <button data-testid="tap-pane" onClick={() => onPaneTap()}>pane</button>
-        <button data-testid="do-init" onClick={() => onInit({ screenToFlowPosition: (p: unknown) => p })}>
+        <button
+          data-testid="do-init"
+          onClick={() => onInit({ screenToFlowPosition: (p: unknown) => p, fitView: fitViewMock })}
+        >
           init
         </button>
       </div>
@@ -113,6 +117,7 @@ function buildWorkflow(): VisualWorkflow {
 
 beforeEach(() => {
   capturedStore = null
+  fitViewMock.mockReset()
 })
 
 describe("<MobileWorkflowEditor />", () => {
@@ -158,6 +163,15 @@ describe("<MobileWorkflowEditor />", () => {
     fireEvent.click(screen.getByTestId("add-ai"))
     expect(capturedStore?.getState().nodes).toHaveLength(3)
     expect(screen.getByTestId("drawer")).toBeInTheDocument()
+  })
+
+  it("recenters the canvas via the fit-view button (available in read mode)", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    // Recenter is available without entering edit mode.
+    expect(screen.getByTestId("mobile-editor-recenter")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("do-init"))
+    fireEvent.click(screen.getByTestId("mobile-editor-recenter"))
+    expect(fitViewMock).toHaveBeenCalled()
   })
 
   it("clears selection and closes the inspector on a pane tap", () => {

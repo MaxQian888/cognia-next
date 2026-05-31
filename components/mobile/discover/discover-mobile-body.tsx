@@ -19,6 +19,7 @@ import { CompassIcon, PlusIcon } from "lucide-react"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverInspector } from "@/components/discover/discover-inspector"
+import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
@@ -34,13 +35,20 @@ import { TwinSourcesPanel } from "@/components/mobile/discover/twin-sources-pane
 import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import { useDiscoverQuery } from "@/hooks/discover/use-discover-query"
 import { useDiscoverRouteState } from "@/hooks/discover/use-discover-route-state"
+import { useDiscoverView } from "@/hooks/discover/use-discover-view"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { setSkillStatus } from "@/lib/db/skills"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import type { Character } from "@/lib/claude/types"
-import { isValidCategoryId, type DiscoverCategoryId } from "@/lib/discover/categories"
+import {
+  FAVORITES_CATEGORY,
+  isValidView,
+  type DiscoverCategoryId,
+  type DiscoverView,
+} from "@/lib/discover/categories"
 
 /**
  * Categories whose content is rendered through the shared
@@ -63,10 +71,13 @@ export function DiscoverMobileBody() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
 
-  const charactersQuery = useDiscoverQuery("characters", query, { sort, filter })
-  const teamsQuery = useDiscoverQuery("teams", query, { sort, filter })
-  const skillsQuery = useDiscoverQuery("skills", query, { sort, filter })
-  const gridQuery = useDiscoverQuery(category, query, { sort, filter })
+  const { favoriteKeys } = useDiscoverFavorites()
+  const { view } = useDiscoverView()
+
+  const charactersQuery = useDiscoverQuery("characters", query, { sort, filter, favoriteKeys })
+  const teamsQuery = useDiscoverQuery("teams", query, { sort, filter, favoriteKeys })
+  const skillsQuery = useDiscoverQuery("skills", query, { sort, filter, favoriteKeys })
+  const gridQuery = useDiscoverQuery(category, query, { sort, filter, favoriteKeys })
 
   const characters = charactersQuery.items
   const teams = teamsQuery.items
@@ -77,7 +88,11 @@ export function DiscoverMobileBody() {
     .filter((c): c is Character => Boolean(c?.isBuiltIn))
 
   const trimmed = query.trim()
-  const inspectorOpen = item !== null && GRID_CATEGORIES.has(category)
+  // Favorites + the Phase-3 grid categories render through the shared grid +
+  // bottom-Sheet inspector; the legacy categories own their own row UI.
+  const isGridDriven =
+    category === FAVORITES_CATEGORY || GRID_CATEGORIES.has(category as DiscoverCategoryId)
+  const inspectorOpen = item !== null && isGridDriven
 
   // Pull-to-refresh fires the companion sync orchestrator. The downstream
   // Dexie writes flow through useLiveQuery, so no manual re-fetch is needed
@@ -100,6 +115,7 @@ export function DiscoverMobileBody() {
       <header className="flex flex-col gap-3 px-4 pt-3">
         <div className="flex items-center gap-2">
           <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
+          {isGridDriven ? <DiscoverViewToggle category={category} /> : null}
           <SortFilterSheet
             sort={sort}
             filter={filter}
@@ -110,8 +126,8 @@ export function DiscoverMobileBody() {
         <DiscoverSearch value={query} onChange={setQuery} />
         <CategoryChipStrip
           activeCategory={category}
-          onSelect={(id) => {
-            if (isValidCategoryId(id)) setCategory(id)
+          onSelect={(id: DiscoverView) => {
+            if (isValidView(id)) setCategory(id)
           }}
         />
       </header>
@@ -236,12 +252,13 @@ export function DiscoverMobileBody() {
 
           {category === "twinDrafts" ? <TwinDraftsPanel /> : null}
 
-          {GRID_CATEGORIES.has(category) ? (
+          {isGridDriven ? (
             <DiscoverGrid
               category={category}
               items={gridQuery.items}
               loading={gridQuery.loading}
               query={query}
+              view={view(category)}
               selectedItemId={item}
               onSelectItem={(id) => setItem(id)}
             />

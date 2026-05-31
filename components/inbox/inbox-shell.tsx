@@ -4,31 +4,39 @@
  * Three-pane Inbox shell: left sidebar (InboxSidebar), middle conversation
  * list (ConversationList), right detail (children).
  *
- * Uses the shadcn SidebarProvider / Sidebar / SidebarInset primitives so
- * the collapse affordance works consistently with the rest of the app.
- *
- * Responsive behaviour:
- *   - ≥ 1024 px (desktop): sidebar open by default, middle pane w-72.
- *   - 768–1023 px (tablet): sidebar starts collapsed to free space for the
- *     detail pane; the user can still expand it from the standard trigger.
- *     Middle pane uses w-64.
- *   - < 768 px (mobile): single-pane stack. We show either the middle pane
- *     (conversation list, full-width) when no conversation is selected, or
- *     the detail pane (full-width) when `conversationKey` is set. The
- *     `InboxSidebar` becomes an offcanvas Sheet automatically via the
- *     primitive's own `useIsMobile` integration; the conversation header
- *     and list expose a `SidebarTrigger` to open it.
+ * Responsive behaviour (driven by the shared `useBreakpoint()` hook):
+ *   - ≥ 1024 px (desktop): a `ResizablePanelGroup` whose three panels
+ *     (sidebar / list / detail) are draggable and whose sizes persist via
+ *     `useInboxLayoutStore`. The shadcn `<Sidebar>` chrome is *not* rendered
+ *     here — the sidebar's inner content (`<InboxSidebarContent />`) lives in
+ *     panel 1 instead — but we still mount `SidebarProvider` so the
+ *     `md:hidden` `SidebarTrigger`s inside the list/header keep a valid
+ *     `useSidebar()` context.
+ *   - 768–1023 px (tablet): `SidebarProvider` + flex layout; sidebar starts
+ *     collapsed to free space for the detail pane.
+ *   - < 768 px (mobile): single-pane stack. Either the list (full-width) when
+ *     no conversation is selected, or the detail pane when `conversationKey`
+ *     is set. `InboxSidebar` becomes an offcanvas Sheet automatically.
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion } from "motion/react"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
-import { useIsMobile } from "@/hooks/ui"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
+import { useBreakpoint } from "@/hooks/ui"
+import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
-import { InboxSidebar } from "./inbox-sidebar"
+import {
+  useInboxLayoutStore,
+  INBOX_LAYOUT_BOUNDS,
+  INBOX_LAYOUT_DEFAULTS,
+} from "@/stores/inbox/inbox-layout-store"
+import { InboxSidebar, InboxSidebarContent } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
 import { ConnectionLossBanner } from "./connection-loss-banner"
 import { OutboundSaturationBanner } from "./outbound-saturation-banner"
+import { InboxCommandPalette } from "./inbox-command-palette"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
 
@@ -45,23 +53,131 @@ export interface InboxShellProps {
   children?: React.ReactNode
 }
 
-/**
- * Returns true when the viewport is in the tablet band (768 ≤ w < 1024).
- * Server render and the first client render return false so we don't trigger
- * a hydration mismatch — the effect kicks in after mount.
- */
-function useIsTabletViewport(): boolean {
-  const [isTablet, setIsTablet] = useState(false)
+/** Cross-cutting degradation notices. Hidden on mobile to keep the single-pane
+ * stack tight — per-conversation badges surface the same signal there. */
+function DetailBanners() {
+  return (
+    <div className="hidden md:block">
+      <ConnectionLossBanner />
+      <OutboundSaturationBanner />
+    </div>
+  )
+}
 
-  useEffect(() => {
-    const mql = window.matchMedia("(min-width: 768px) and (max-width: 1023px)")
-    const onChange = () => setIsTablet(mql.matches)
-    onChange()
-    mql.addEventListener("change", onChange)
-    return () => mql.removeEventListener("change", onChange)
-  }, [])
+/** Detail-pane content with a subtle mount-in slide (each conversation route
+ * mounts a fresh shell, so this animates on open). Reduced-motion aware. */
+function DetailContent({
+  children,
+  emptyPrompt,
+}: {
+  children?: React.ReactNode
+  emptyPrompt: string
+}) {
+  const transition = useReducedMotionTransition(mobileTransition("fast"))
+  return (
+    <motion.div
+      className="flex min-h-0 flex-1 flex-col"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={transition}
+    >
+      {children ?? (
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          {emptyPrompt}
+        </div>
+      )}
+    </motion.div>
+  )
+}
 
-  return isTablet
+function DesktopInboxShell({
+  view,
+  adapterId,
+  platformKind,
+  conversationKey,
+  children,
+  emptyPrompt,
+}: InboxShellProps & { emptyPrompt: string }) {
+  const t = useTranslations("inbox.shell")
+  const setSizes = useInboxLayoutStore((s) => s.setSizes)
+  // Seed the persisted layout once at mount; the panel group owns live sizes
+  // thereafter and pushes settled splits back through `setSizes`.
+  const [initialLayout] = useState<Record<string, number>>(() => {
+    const { sidebarSize, listSize, detailSize } = useInboxLayoutStore.getState()
+    return {
+      "inbox-sidebar": sidebarSize,
+      "inbox-list": listSize,
+      "inbox-detail": detailSize,
+    }
+  })
+  const { sidebarMin, sidebarMax, listMin, listMax, detailMin } = INBOX_LAYOUT_BOUNDS
+
+  return (
+    // SidebarProvider supplies the useSidebar() context the (hidden on desktop)
+    // SidebarTriggers depend on; we render the sidebar *content* in panel 1
+    // rather than the offcanvas <Sidebar> chrome.
+    <SidebarProvider
+      data-bg-target="chat"
+      className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt safe-area-pb"
+    >
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="min-h-0 flex-1"
+        defaultLayout={initialLayout}
+        onLayoutChanged={(next: Record<string, number>) => {
+          const s = next["inbox-sidebar"]
+          const l = next["inbox-list"]
+          const d = next["inbox-detail"]
+          if (typeof s === "number" && typeof l === "number" && typeof d === "number") {
+            setSizes([s, l, d])
+          }
+        }}
+      >
+        <ResizablePanel
+          id="inbox-sidebar"
+          defaultSize={INBOX_LAYOUT_DEFAULTS.sidebarSize}
+          minSize={sidebarMin}
+          maxSize={sidebarMax}
+          className="flex flex-col overflow-hidden border-e"
+          data-testid="inbox-sidebar-pane"
+        >
+          <InboxSidebarContent
+            view={view}
+            activeAdapterId={adapterId}
+            activePlatformKind={platformKind}
+          />
+        </ResizablePanel>
+        <ResizableHandle withHandle aria-label={t("resize.sidebarHandle")} />
+        <ResizablePanel
+          id="inbox-list"
+          defaultSize={INBOX_LAYOUT_DEFAULTS.listSize}
+          minSize={listMin}
+          maxSize={listMax}
+          className="flex flex-col overflow-hidden border-e"
+          data-testid="inbox-conversation-list-pane"
+        >
+          <ConversationList
+            adapterId={adapterId}
+            platformKind={platformKind}
+            activeConversationKey={conversationKey}
+          />
+        </ResizablePanel>
+        <ResizableHandle withHandle aria-label={t("resize.detailHandle")} />
+        <ResizablePanel
+          id="inbox-detail"
+          defaultSize={INBOX_LAYOUT_DEFAULTS.detailSize}
+          minSize={detailMin}
+          className="flex min-w-0 flex-col overflow-hidden"
+          data-testid="inbox-detail-pane"
+          data-bg-target="chat"
+        >
+          <DetailBanners />
+          <DetailContent emptyPrompt={emptyPrompt}>{children}</DetailContent>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      <InboxCommandPalette />
+    </SidebarProvider>
+  )
 }
 
 export function InboxShell({
@@ -72,12 +188,27 @@ export function InboxShell({
   children,
 }: InboxShellProps) {
   const t = useTranslations("inbox.shell")
-  const isTablet = useIsTabletViewport()
-  const isMobile = useIsMobile()
+  const breakpoint = useBreakpoint()
+
+  if (breakpoint === "desktop") {
+    return (
+      <DesktopInboxShell
+        view={view}
+        adapterId={adapterId}
+        platformKind={platformKind}
+        conversationKey={conversationKey}
+        emptyPrompt={t("selectPrompt")}
+      >
+        {children}
+      </DesktopInboxShell>
+    )
+  }
+
+  const isMobile = breakpoint === "mobile"
+  const isTablet = breakpoint === "tablet"
 
   // Mobile single-pane rule: when a conversation is selected we show only the
-  // detail pane; otherwise we show only the list. md+ keeps both panes
-  // visible regardless of selection.
+  // detail pane; otherwise we show only the list. Tablet keeps both panes.
   const showList = !isMobile || !conversationKey
   const showDetail = !isMobile || Boolean(conversationKey)
 
@@ -116,25 +247,10 @@ export function InboxShell({
           !showDetail && "hidden md:flex"
         )}
       >
-        {/* Cross-cutting degradation notice: surfaces adapters whose
-         * latest heartbeat is degraded/down so operators see it without
-         * opening Settings. Hidden on mobile to preserve the single-pane
-         * stack — the per-conversation `AdapterDegradationBadge` still
-         * surfaces the same signal there. */}
-        <div className="hidden md:block">
-          <ConnectionLossBanner />
-          {/* Queue saturation notice (v49): tripped when an adapter has
-           * shed >100 pending jobs to dead-letter in the last 24h. The
-           * banner does NOT trigger reconnect — clearing the backlog is
-           * a separate operator action via the Outbound tab. */}
-          <OutboundSaturationBanner />
-        </div>
-        {children ?? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            {t("selectPrompt")}
-          </div>
-        )}
+        <DetailBanners />
+        <DetailContent emptyPrompt={t("selectPrompt")}>{children}</DetailContent>
       </SidebarInset>
+      <InboxCommandPalette />
     </SidebarProvider>
   )
 }

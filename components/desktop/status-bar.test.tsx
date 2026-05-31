@@ -377,3 +377,12 @@ test("non-interactive runtime badge has cursor-default", () => {
   render(<StatusBar />)
   expect(screen.getByTestId("status-runtime").className).toContain("cursor-default")
 })
+
+test("footer is hidden below the mobile breakpoint and shown from md up", () => {
+  render(<StatusBar />)
+  const footer = screen.getByTestId("status-bar")
+  // The VSCode-style desktop bottom bar must not leak into mobile layout
+  // (narrow viewports / phone browsers); it only re-appears from `md` (768px).
+  expect(footer.className).toContain("hidden")
+  expect(footer.className).toContain("md:flex")
+})

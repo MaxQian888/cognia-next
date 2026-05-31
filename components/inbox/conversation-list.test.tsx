@@ -4,11 +4,39 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 
+// `useReducedMotion` (motion/react) reads matchMedia; jsdom lacks it.
+beforeAll(() => {
+  if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: (query: string) =>
+        ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    })
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 const mockPush = jest.fn()
+
+// Draft counts come from a separate live subscriber; isolate the list by
+// returning an empty count map.
+jest.mock("@/hooks/connectors/use-pending-drafts", () => ({
+  usePendingDraftCounts: () => new Map<string, number>(),
+  usePendingDrafts: () => [],
+}))
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: jest.fn() }),
@@ -220,8 +248,8 @@ describe("ConversationList", () => {
     ]
     render(<ConversationList />)
     const row = screen.getByTestId("conversation-row-ck-touch")
-    expect(row).toHaveClass("min-h-11")
-    expect(row).toHaveClass("md:min-h-9")
+    expect(row).toHaveClass("min-h-12")
+    expect(row).toHaveClass("md:min-h-11")
   })
 
   it("filters rows by title via the search input", () => {

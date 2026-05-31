@@ -145,6 +145,14 @@ describe("<MobileEditorTopbar />", () => {
     expect(toastSuccess).toHaveBeenCalledWith("exported")
   })
 
+  it("links to the run history from the overflow menu", async () => {
+    const user = userEvent.setup()
+    renderTopbar()
+    await user.click(screen.getByTestId("mobile-editor-menu"))
+    const item = await screen.findByTestId("mobile-editor-run-history")
+    expect(item).toHaveAttribute("href", "/workflows/wf_top/runs")
+  })
+
   it("toasts a failure when auto-layout yields no positions", async () => {
     const user = userEvent.setup()
     renderTopbar()

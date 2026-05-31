@@ -1,11 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useDexieFirstQuery } from "@/hooks/data"
-import { ChevronRightIcon, WorkflowIcon } from "lucide-react"
+import { ChevronRightIcon, FolderIcon, WorkflowIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
@@ -16,55 +15,112 @@ import { LongPress } from "@/components/interactions/long-press"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { SwipeRow } from "@/components/interactions/swipe-row"
 import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
-import { listWorkflows } from "@/lib/db/workflows"
+import { listChildFolders, getFolderPath } from "@/lib/db/workflow-folders"
+import {
+  getRecentlyFailedWorkflowIds,
+  getRunCounts,
+  listWorkflowsInFolder,
+} from "@/lib/db/workflows"
 import { getDb } from "@/lib/db/schema"
 import { runSyncDown } from "@/lib/sync/companion-sync"
+import { filterWorkflows, sortWorkflows } from "@/lib/workflow/library-filter"
+import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useSettingsStore } from "@/stores/settings"
+import { useWorkflowLibraryStore } from "@/stores/workflow"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { cn } from "@/lib/utils"
 
+import { WorkflowCreateDialog } from "@/components/workflow/library/workflow-create-dialog"
+import { WorkflowCreateFolderDialog } from "@/components/workflow/library/workflow-create-folder-dialog"
+import { WorkflowFolderBreadcrumb } from "@/components/workflow/library/workflow-folder-breadcrumb"
 import { PinnedSection } from "./pinned-section"
 import { RecentRunsFeed } from "./recent-runs-feed"
 import { TriggerButton } from "./trigger-button"
+import { WorkflowListToolbar } from "./workflow-list-toolbar"
 import { WorkflowRowActionsSheet } from "./workflow-row-actions-sheet"
+import { useMobileWorkflowView } from "./use-mobile-workflow-view"
 
 export interface WorkflowListProps {
   className?: string
 }
 
+const RECENTLY_FAILED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+const EMPTY_FAILED_IDS: ReadonlySet<string> = new Set<string>()
+const EMPTY_RUN_COUNTS: ReadonlyMap<string, number> = new Map<string, number>()
+
 /**
- * Mobile workflow library list (Wave 3.1, refined Wave 3.6). One row per
- * workflow with a trigger button + an "active" badge driven by an outer
- * Dexie liveQuery over `workflowRuns` (status === "running"). Tap →
- * navigate to `/workflows/[id]`. Long-press → toggle pin.
+ * Mobile workflow library list. Now folder-aware and filterable: it reuses the
+ * desktop `useWorkflowLibraryStore` slice (query / sort / filters / folder) and
+ * the pure `filterWorkflows` / `sortWorkflows` helpers, so the mobile surface
+ * stays in lock-step with the desktop library without a parallel state layer.
  *
- * Layout:
- *   - Pinned grid (when any are pinned)
- *   - All workflows list
- *   - Recent runs feed
+ * Layout: toolbar → breadcrumb (in a sub-folder) → pinned grid (root only) →
+ * child folders + workflow rows → recent runs feed.
  */
 export function WorkflowList({ className }: WorkflowListProps) {
   const t = useTranslations("mobile.workflow")
-  // Wave 4 / ADR-0026 — Dexie-first read so the list survives a server
-  // drop; `table: "workflows"` kicks the sync orchestrator on mount.
-  const workflows =
-    useDexieFirstQuery<WorkflowRow[]>({
-      query: () => listWorkflows(),
-      deps: [],
-      initial: [],
-      table: "workflows",
-    }).data ?? []
+
+  const currentFolderId = useWorkflowLibraryStore((s) => s.currentFolderId)
+  const sort = useWorkflowLibraryStore((s) => s.sort)
+  const filters = useWorkflowLibraryStore((s) => s.filters)
+  const query = useWorkflowLibraryStore((s) => s.query)
+  const enterFolder = useWorkflowLibraryStore((s) => s.enterFolder)
+  const goToRoot = useWorkflowLibraryStore((s) => s.goToRoot)
+
+  const childFolders = useLiveQuery(() => listChildFolders(currentFolderId), [currentFolderId])
+  const folderPath = useLiveQuery(() => getFolderPath(currentFolderId), [currentFolderId])
+  const folderWorkflows = useLiveQuery(
+    () => listWorkflowsInFolder(currentFolderId),
+    [currentFolderId]
+  )
+  const recentlyFailedIds = useLiveQuery(
+    () =>
+      filters.recentlyFailed
+        ? getRecentlyFailedWorkflowIds(Date.now() - RECENTLY_FAILED_WINDOW_MS)
+        : Promise.resolve(EMPTY_FAILED_IDS as Set<string>),
+    [filters.recentlyFailed]
+  )
+  const runCounts = useLiveQuery(
+    () =>
+      sort === "runCount" && folderWorkflows
+        ? getRunCounts(folderWorkflows.map((w) => w.id))
+        : Promise.resolve(EMPTY_RUN_COUNTS as Map<string, number>),
+    [sort, folderWorkflows]
+  )
   const activeRuns =
     useLiveQuery<WorkflowRunRow[]>(
       () => getDb().workflowRuns.where("status").equals("running").toArray(),
       []
     ) ?? []
 
+  const visible = useMemo(() => {
+    if (!folderWorkflows) return undefined
+    const failed = recentlyFailedIds ?? EMPTY_FAILED_IDS
+    const counts = runCounts ?? EMPTY_RUN_COUNTS
+    const filtered = filterWorkflows(folderWorkflows, {
+      query,
+      filters,
+      recentlyFailedIds: failed as Set<string>,
+    })
+    return sortWorkflows(filtered, sort, counts as Map<string, number>)
+  }, [folderWorkflows, query, filters, recentlyFailedIds, sort, runCounts])
+
+  // Folder removed elsewhere — never strand the user inside it.
+  useEffect(() => {
+    if (currentFolderId !== ROOT_FOLDER_ID && folderPath !== undefined && folderPath.length === 0) {
+      goToRoot()
+    }
+  }, [currentFolderId, folderPath, goToRoot])
+
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const pinnedIds = settings?.pinnedWorkflowIds ?? []
+  const { view } = useMobileWorkflowView()
   const reduce = useReducedMotion()
+
+  const [createOpen, setCreateOpen] = useState(false)
+  const [actionSheetWorkflow, setActionSheetWorkflow] = useState<WorkflowRow | null>(null)
 
   const togglePin = async (id: string, name: string) => {
     const next = pinnedIds.includes(id) ? pinnedIds.filter((p) => p !== id) : [...pinnedIds, id]
@@ -73,11 +129,6 @@ export function WorkflowList({ className }: WorkflowListProps) {
     void name
   }
 
-  // Wave 4 / ADR-0026 — action sheet driven by long-press on each row;
-  // null when no row is targeted.
-  const [actionSheetWorkflow, setActionSheetWorkflow] = useState<WorkflowRow | null>(null)
-
-  // Pull-to-refresh: kick the sync orchestrator so workflows + runs reload.
   const handleRefresh = async (): Promise<void> => {
     try {
       await runSyncDown()
@@ -87,6 +138,11 @@ export function WorkflowList({ className }: WorkflowListProps) {
   }
 
   const activeIds = new Set(activeRuns.map((r) => r.workflowId))
+  const atRoot = currentFolderId === ROOT_FOLDER_ID
+  const compact = view === "compact"
+  const rows = visible ?? []
+  const folders = childFolders ?? []
+  const isEmpty = rows.length === 0 && folders.length === 0
 
   return (
     <main
@@ -100,14 +156,58 @@ export function WorkflowList({ className }: WorkflowListProps) {
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
       </header>
 
-      <PinnedSection workflows={workflows} pinnedIds={pinnedIds} />
+      <WorkflowListToolbar onNewWorkflow={() => setCreateOpen(true)} />
+
+      {!atRoot ? (
+        <div className="px-4 text-sm" data-testid="mobile-workflow-breadcrumb">
+          <WorkflowFolderBreadcrumb path={folderPath ?? []} />
+        </div>
+      ) : null}
+
+      {atRoot ? <PinnedSection workflows={rows} pinnedIds={pinnedIds} /> : null}
 
       <PullToRefresh onRefresh={handleRefresh}>
         <section className="flex flex-col gap-2 px-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("all")}
           </h2>
-          {workflows.length === 0 ? (
+
+          {/* Child folders (tap to enter). */}
+          {folders.length > 0 ? (
+            <ul className="flex flex-col gap-2" data-testid="mobile-workflow-folders">
+              {folders.map((folder) => (
+                <li key={folder.id}>
+                  <Card
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => enterFolder(folder.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        enterFolder(folder.id)
+                      }
+                    }}
+                    data-testid={`mobile-workflow-folder-${folder.id}`}
+                    className={cn(
+                      "flex cursor-pointer flex-row items-center gap-3 rounded-md shadow-none transition-colors active:bg-muted/50",
+                      compact ? "p-2" : "p-3"
+                    )}
+                  >
+                    <FolderIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {folder.name}
+                    </span>
+                    <ChevronRightIcon
+                      className="size-4 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {isEmpty ? (
             <EmptyState icon={WorkflowIcon} title={t("empty")} />
           ) : (
             <motion.ul
@@ -116,7 +216,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
               animate="animate"
               variants={STAGGER_CONTAINER}
             >
-              {workflows.map((wf) => (
+              {rows.map((wf) => (
                 <motion.li key={wf.id} variants={STAGGER_CHILD}>
                   <SwipeRow
                     rightActions={[
@@ -141,9 +241,10 @@ export function WorkflowList({ className }: WorkflowListProps) {
                   >
                     <LongPress onLongPress={() => setActionSheetWorkflow(wf)}>
                       <Card
-                        // Compact mobile-row treatment: tighter padding/radius +
-                        // shadow-none + horizontal flex (Card defaults to col).
-                        className="flex flex-row items-center gap-3 rounded-md p-3 py-3 shadow-none transition-colors active:bg-muted/50"
+                        className={cn(
+                          "flex flex-row items-center gap-3 rounded-md shadow-none transition-colors active:bg-muted/50",
+                          compact ? "p-2" : "p-3 py-3"
+                        )}
                         data-testid={`workflow-row-${wf.id}`}
                       >
                         <Link
@@ -172,7 +273,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
                                 </Badge>
                               ) : null}
                             </div>
-                            {wf.description ? (
+                            {!compact && wf.description ? (
                               <p className="line-clamp-1 text-xs text-muted-foreground">
                                 {wf.description}
                               </p>
@@ -194,7 +295,14 @@ export function WorkflowList({ className }: WorkflowListProps) {
         </section>
       </PullToRefresh>
 
-      <RecentRunsFeed />
+      {atRoot ? <RecentRunsFeed /> : null}
+
+      <WorkflowCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        parentFolderId={currentFolderId}
+      />
+      <WorkflowCreateFolderDialog />
 
       <WorkflowRowActionsSheet
         workflow={actionSheetWorkflow}

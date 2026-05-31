@@ -3,6 +3,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/platform/detect"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type { ApiProtocol } from "@/types/provider"
 import { getBuiltInProviderProtocol } from "@/types/provider/built-in-provider-catalog"
@@ -128,20 +129,13 @@ export async function testCustomProviderConnectionByProtocol(
 }
 
 /**
- * Check if running in Tauri environment
- */
-function isInTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
-
-/**
  * Test OpenAI API connection
  */
 export async function testOpenAIConnection(
   apiKey: string,
   baseUrl?: string
 ): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_openai_connection", {
       apiKey,
       baseUrl,
@@ -187,7 +181,7 @@ export async function testOpenAIConnection(
  * Test Anthropic API connection
  */
 export async function testAnthropicConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_anthropic_connection", { apiKey })
   }
 
@@ -208,7 +202,7 @@ export async function testAnthropicConnection(apiKey: string): Promise<ApiTestRe
  * Test Google AI API connection
  */
 export async function testGoogleConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_google_connection", { apiKey })
   }
 
@@ -247,7 +241,7 @@ export async function testGoogleConnection(apiKey: string): Promise<ApiTestResul
  * Test DeepSeek API connection
  */
 export async function testDeepSeekConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_deepseek_connection", { apiKey })
   }
 
@@ -288,7 +282,7 @@ export async function testDeepSeekConnection(apiKey: string): Promise<ApiTestRes
  * Test Groq API connection
  */
 export async function testGroqConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_groq_connection", { apiKey })
   }
 
@@ -329,7 +323,7 @@ export async function testGroqConnection(apiKey: string): Promise<ApiTestResult>
  * Test Mistral API connection
  */
 export async function testMistralConnection(apiKey: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_mistral_connection", { apiKey })
   }
 
@@ -370,7 +364,7 @@ export async function testMistralConnection(apiKey: string): Promise<ApiTestResu
  * Test Ollama connection
  */
 export async function testOllamaConnection(baseUrl: string): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_ollama_connection", { baseUrl })
   }
 
@@ -462,7 +456,7 @@ export async function testCustomProviderConnection(
   baseUrl: string,
   apiKey: string
 ): Promise<ApiTestResult> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<ApiTestResult>("test_custom_provider_connection", {
       baseUrl,
       apiKey,

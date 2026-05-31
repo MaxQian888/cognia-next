@@ -15,20 +15,20 @@
  * lets each plugin file stay focused on its own API surface.
  */
 
-export type NativePlatform = "tauri" | "mobile" | "web"
+import { detectPlatform, isNativeMobile, type Platform } from "@/lib/platform/detect"
 
-export function detectNativePlatform(): NativePlatform {
-  if (typeof window === "undefined") return "web"
-  if ("__TAURI_INTERNALS__" in window) return "tauri"
-  const cap = (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-  if (typeof cap?.isNativePlatform === "function" && cap.isNativePlatform() === true) {
-    return "mobile"
-  }
-  return "web"
-}
+/** @deprecated alias of {@link Platform} — kept so existing imports compile. */
+export type NativePlatform = Platform
+
+/**
+ * Runtime platform. Delegates to the canonical {@link detectPlatform} in
+ * `lib/platform/detect` so the `window`-marker logic lives in exactly one
+ * place. Re-exported under this historical name for the plugin wrappers.
+ */
+export const detectNativePlatform = detectPlatform
 
 export function isMobile(): boolean {
-  return detectNativePlatform() === "mobile"
+  return isNativeMobile()
 }
 
 /**

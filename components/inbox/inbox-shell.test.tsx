@@ -4,9 +4,8 @@
 
 import { render, screen } from "@testing-library/react"
 
-// jsdom does not implement `window.matchMedia`. The shell subscribes to a
-// `(min-width: 768px) and (max-width: 1023px)` media query in an effect, so
-// every test mount needs the API present.
+// jsdom does not implement `window.matchMedia`; the command palette + motion
+// hooks read it. Provide a permissive stub.
 beforeAll(() => {
   if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     Object.defineProperty(window, "matchMedia", {
@@ -44,15 +43,37 @@ jest.mock("dexie-react-hooks", () => ({
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
-// Mock the project-level mobile-viewport hook so each test can drive the
-// single-pane stacking rule deterministically without touching matchMedia.
-const mockUseIsMobile = jest.fn().mockReturnValue(false)
+// Drive the breakpoint per test. `useIsMobile` is retained for any child that
+// still consumes it.
+const mockBreakpoint = jest.fn().mockReturnValue("desktop")
 jest.mock("@/hooks/ui", () => ({
-  useIsMobile: () => mockUseIsMobile(),
+  useBreakpoint: () => mockBreakpoint(),
+  useIsMobile: () => mockBreakpoint() === "mobile",
 }))
 
-// Sidebar primitives — the full Radix implementation needs a host environment
-// that is difficult to reproduce in jsdom; stub them to render children directly.
+// Stub react-resizable-panels wrapper — the real Group measures the DOM which
+// jsdom can't satisfy. Render panels as plain divs, forwarding test hooks.
+jest.mock("@/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="resizable-group">{children}</div>
+  ),
+  ResizablePanel: ({
+    children,
+    className,
+    ...rest
+  }: {
+    children: React.ReactNode
+    className?: string
+    [k: string]: unknown
+  }) => (
+    <div className={className} data-testid={rest["data-testid"] as string}>
+      {children}
+    </div>
+  ),
+  ResizableHandle: () => <div data-testid="resizable-handle" />,
+}))
+
+// Sidebar primitives — stub to render children directly.
 jest.mock("@/components/ui/sidebar", () => ({
   SidebarProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="sidebar-provider">{children}</div>
@@ -99,102 +120,79 @@ import { InboxShell } from "./inbox-shell"
 
 describe("InboxShell", () => {
   beforeEach(() => {
-    mockUseIsMobile.mockReturnValue(false)
+    mockBreakpoint.mockReturnValue("desktop")
   })
 
-  it("renders the sidebar, conversation-list pane, and detail pane", () => {
-    render(<InboxShell view="all" />)
-
-    expect(screen.getByTestId("sidebar")).toBeInTheDocument()
-    expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
-    expect(screen.getByTestId("inbox-detail-pane")).toBeInTheDocument()
-  })
-
-  it("renders children in the detail pane", () => {
-    render(
-      <InboxShell view="all">
-        <div data-testid="child-content">Hello detail</div>
-      </InboxShell>
-    )
-
-    expect(screen.getByTestId("child-content")).toBeInTheDocument()
-  })
-
-  it("shows placeholder text when no children", () => {
-    render(<InboxShell view="all" />)
-    expect(screen.getByText("Select a conversation to start")).toBeInTheDocument()
-  })
-
-  it("middle pane uses responsive Tailwind widths (mobile → tablet → desktop)", () => {
-    render(<InboxShell view="all" />)
-    const middle = screen.getByTestId("inbox-conversation-list-pane")
-    // < 768 px: full-width single-pane (`w-full`); md+ uses w-64, lg+ w-72.
-    expect(middle.className).toContain("w-full")
-    expect(middle.className).toContain("md:w-64")
-    expect(middle.className).toContain("lg:w-72")
-  })
-
-  it("middle pane uses the RTL-safe logical border (border-e, not border-r)", () => {
-    render(<InboxShell view="all" />)
-    const middle = screen.getByTestId("inbox-conversation-list-pane")
-    expect(middle.className).toContain("border-e")
-    expect(middle.className).not.toMatch(/(^|\s)border-r(\s|$)/)
-  })
-
-  it("desktop viewport renders both panes regardless of conversationKey", () => {
-    mockUseIsMobile.mockReturnValue(false)
-    render(<InboxShell view="conversation" conversationKey="ck1" />)
-
-    const middle = screen.getByTestId("inbox-conversation-list-pane")
-    const detail = screen.getByTestId("inbox-detail-pane")
-    expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-    expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-  })
-
-  it("mobile viewport with no conversation key shows the list only", () => {
-    mockUseIsMobile.mockReturnValue(true)
-    render(<InboxShell view="all" />)
-
-    const middle = screen.getByTestId("inbox-conversation-list-pane")
-    const detail = screen.getByTestId("inbox-detail-pane")
-    // List visible by default on mobile, detail hidden until md+.
-    expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-    expect(detail.className).toContain("hidden")
-    expect(detail.className).toContain("md:flex")
-  })
-
-  it("mobile viewport with a conversation key shows the detail only", () => {
-    mockUseIsMobile.mockReturnValue(true)
-    render(<InboxShell view="conversation" conversationKey="ck-mobile" />)
-
-    const middle = screen.getByTestId("inbox-conversation-list-pane")
-    const detail = screen.getByTestId("inbox-detail-pane")
-    expect(middle.className).toContain("hidden")
-    expect(middle.className).toContain("md:flex")
-    expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
-  })
-
-  it("subscribes to matchMedia at mount and detects tablet viewport", () => {
-    const listeners: Array<(e: MediaQueryListEvent) => void> = []
-    const matchSpy = jest.spyOn(window, "matchMedia").mockImplementation((query) => {
-      const mql: MediaQueryList = {
-        matches: true, // pretend we're in the tablet band
-        media: query,
-        onchange: null,
-        addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
-          listeners.push(listener as (e: MediaQueryListEvent) => void)
-        },
-        removeEventListener: () => {},
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-      } as unknown as MediaQueryList
-      return mql
+  describe("desktop", () => {
+    it("renders a resizable three-pane group", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.getByTestId("resizable-group")).toBeInTheDocument()
+      expect(screen.getByTestId("inbox-sidebar-pane")).toBeInTheDocument()
+      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+      expect(screen.getByTestId("inbox-detail-pane")).toBeInTheDocument()
     })
 
-    render(<InboxShell view="all" />)
+    it("renders children in the detail pane", () => {
+      render(
+        <InboxShell view="all">
+          <div data-testid="child-content">Hello detail</div>
+        </InboxShell>
+      )
+      expect(screen.getByTestId("child-content")).toBeInTheDocument()
+    })
 
-    expect(matchSpy).toHaveBeenCalledWith("(min-width: 768px) and (max-width: 1023px)")
-    matchSpy.mockRestore()
+    it("shows placeholder text when no children", () => {
+      render(<InboxShell view="all" />)
+      expect(screen.getByText("Select a conversation to start")).toBeInTheDocument()
+    })
+  })
+
+  describe("tablet", () => {
+    beforeEach(() => mockBreakpoint.mockReturnValue("tablet"))
+
+    it("uses the flex layout with responsive Tailwind widths", () => {
+      render(<InboxShell view="all" />)
+      const middle = screen.getByTestId("inbox-conversation-list-pane")
+      expect(middle.className).toContain("w-full")
+      expect(middle.className).toContain("md:w-64")
+      expect(middle.className).toContain("lg:w-72")
+    })
+
+    it("uses the RTL-safe logical border (border-e, not border-r)", () => {
+      render(<InboxShell view="all" />)
+      const middle = screen.getByTestId("inbox-conversation-list-pane")
+      expect(middle.className).toContain("border-e")
+      expect(middle.className).not.toMatch(/(^|\s)border-r(\s|$)/)
+    })
+
+    it("renders both panes regardless of conversationKey", () => {
+      render(<InboxShell view="conversation" conversationKey="ck1" />)
+      const middle = screen.getByTestId("inbox-conversation-list-pane")
+      const detail = screen.getByTestId("inbox-detail-pane")
+      expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+      expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    })
+  })
+
+  describe("mobile", () => {
+    beforeEach(() => mockBreakpoint.mockReturnValue("mobile"))
+
+    it("with no conversation key shows the list only", () => {
+      render(<InboxShell view="all" />)
+      const middle = screen.getByTestId("inbox-conversation-list-pane")
+      const detail = screen.getByTestId("inbox-detail-pane")
+      expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+      expect(detail.className).toContain("hidden")
+      expect(detail.className).toContain("md:flex")
+    })
+
+    it("with a conversation key shows the detail only", () => {
+      render(<InboxShell view="conversation" conversationKey="ck-mobile" />)
+      const middle = screen.getByTestId("inbox-conversation-list-pane")
+      const detail = screen.getByTestId("inbox-detail-pane")
+      expect(middle.className).toContain("hidden")
+      expect(middle.className).toContain("md:flex")
+      expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    })
   })
 })

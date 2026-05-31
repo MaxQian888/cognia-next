@@ -13,25 +13,11 @@
  *   - Plain web      → `WebStubTransport`
  */
 
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { CompanionTransport } from "./transport-companion"
 import { TauriTransport } from "./transport-tauri"
 import type { Transport } from "./transport-types"
 import { WebStubTransport } from "./transport-web"
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
-
-function isCapacitor(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-      ?.isNativePlatform === "function" &&
-    (
-      window as unknown as { Capacitor: { isNativePlatform: () => boolean } }
-    ).Capacitor.isNativePlatform() === true
-  )
-}
 
 function pickTransport(): Transport {
   if (isTauri()) return new TauriTransport()

@@ -3,6 +3,8 @@
  */
 
 import { renderHook } from "@testing-library/react"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
 import { detectPlatform, usePlatform } from "./use-platform"
 
@@ -63,5 +65,12 @@ describe("usePlatform", () => {
   it("returns 'web' on a vanilla browser", () => {
     const { result } = renderHook(() => usePlatform())
     expect(result.current).toBe("web")
+  })
+
+  it("returns the 'web' server snapshot during SSR", () => {
+    ;(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {}
+    // Server render uses getServerSnapshot, never touching window markers.
+    const Probe = () => usePlatform()
+    expect(renderToStaticMarkup(createElement(Probe))).toBe("web")
   })
 })

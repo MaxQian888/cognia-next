@@ -6,6 +6,8 @@
  * commands.
  */
 
+import { isTauri } from "@/lib/platform/detect"
+
 export interface TunnelInfo {
   publicUrl: string
   localUrl: string
@@ -23,8 +25,7 @@ export interface TauriInvoker {
 
 const tauriInvoker: () => Promise<TauriInvoker | null> = async () => {
   try {
-    if (typeof window === "undefined") return null
-    if (!("__TAURI_INTERNALS__" in window)) return null
+    if (!isTauri()) return null
     const moduleId = "@tauri-apps/api/core"
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as TauriInvoker
     return mod

@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 import { act, renderHook } from "@testing-library/react"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { useIsMobile } from "./use-mobile"
 
 interface MQ {
@@ -49,6 +51,20 @@ function installMatchMedia(initialWidth: number): { mq: MQ; setWidth: (w: number
   }
 }
 
+function setCapacitorNative(on: boolean) {
+  if (on) {
+    ;(window as { Capacitor?: { isNativePlatform: () => boolean } }).Capacitor = {
+      isNativePlatform: () => true,
+    }
+  } else {
+    delete (window as { Capacitor?: unknown }).Capacitor
+  }
+}
+
+afterEach(() => {
+  setCapacitorNative(false)
+})
+
 describe("useIsMobile", () => {
   it("returns false when viewport is wider than the breakpoint", () => {
     installMatchMedia(1024)
@@ -78,5 +94,19 @@ describe("useIsMobile", () => {
     expect(mq.addEventListener).toHaveBeenCalledWith("change", expect.any(Function))
     unmount()
     expect(mq.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function))
+  })
+
+  it("is pinned to true on a native mobile shell regardless of viewport width", () => {
+    // iPad / large-tablet Capacitor case: 1200px viewport but native mobile.
+    installMatchMedia(1200)
+    setCapacitorNative(true)
+    const { result } = renderHook(() => useIsMobile())
+    expect(result.current).toBe(true)
+  })
+
+  it("renders the desktop-default (false) server snapshot during SSR", () => {
+    installMatchMedia(400) // narrow viewport, but SSR must ignore it
+    const Probe = () => String(useIsMobile())
+    expect(renderToStaticMarkup(createElement(Probe))).toBe("false")
   })
 })

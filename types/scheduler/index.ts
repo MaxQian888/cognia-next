@@ -689,3 +689,6 @@ export {
   isConfirmationRequired,
   isTaskOperationError,
 } from "./system-scheduler"
+
+// Task dependency graph model (derived from `trigger.dependsOn[]`).
+export type { DependencyNode, DependencyEdge, DependencyGraph } from "./dependency"

@@ -2,10 +2,12 @@ import type { Goal, GoalConfig } from "@/types/goal"
 import {
   GOAL_SECTION_MARKER,
   JUDGE_SYSTEM_PROMPT,
+  SUBGOAL_DECOMPOSE_SYSTEM_PROMPT,
   renderContinuationMessage,
   renderGoalSystemSection,
   renderJudgeUserPrompt,
   renderObjectiveUpdatedMessage,
+  renderSubgoalDecomposeUserPrompt,
   resolveJudgeSystemPrompt,
 } from "./prompts"
 
@@ -230,5 +232,66 @@ describe("resolveJudgeSystemPrompt (ADR-0019 Phase 2)", () => {
     expect(out).toContain(custom)
     expect(out).toMatch(/single JSON object/)
     expect(out).toMatch(/"done": <true\|false>/)
+  })
+})
+
+describe("subgoal decomposition prompts", () => {
+  const goalBase: Goal = {
+    id: "g1",
+    sessionId: "ses",
+    rawObjective: "ship it",
+    safeObjective: "ship the feature",
+    redactionMapEnc: "",
+    status: "active",
+    turnsUsed: 0,
+    tokensUsed: 0,
+    judgeFailureCount: 0,
+    config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+    generationId: "gen",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  it("SUBGOAL_DECOMPOSE_SYSTEM_PROMPT demands a single-line steps JSON object", () => {
+    expect(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT).toContain('"steps"')
+    expect(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT).toContain("user-provided data")
+  })
+
+  it("renderSubgoalDecomposeUserPrompt wraps the safeObjective in <objective>", () => {
+    const p = renderSubgoalDecomposeUserPrompt(goalBase)
+    expect(p).toContain("<objective>")
+    expect(p).toContain("ship the feature")
+  })
+})
+
+describe("renderJudgeUserPrompt — subgoal checklist", () => {
+  const goalBase: Goal = {
+    id: "g1",
+    sessionId: "ses",
+    rawObjective: "ship it",
+    safeObjective: "ship the feature",
+    redactionMapEnc: "",
+    status: "active",
+    turnsUsed: 0,
+    tokensUsed: 0,
+    judgeFailureCount: 0,
+    config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+    generationId: "gen",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  it("omits the checklist when there are no subgoals", () => {
+    const p = renderJudgeUserPrompt(goalBase, "response")
+    expect(p).not.toContain("completedSubgoals")
+  })
+
+  it("includes the checklist and completedSubgoals instruction when subgoals exist", () => {
+    const p = renderJudgeUserPrompt(
+      { ...goalBase, subgoals: [{ id: "a", text: "Plan", done: false, order: 0 }] },
+      "response"
+    )
+    expect(p).toContain("0. Plan")
+    expect(p).toContain("completedSubgoals")
   })
 })

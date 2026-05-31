@@ -29,7 +29,10 @@ export function MobileNodePaletteSheet({ open, onOpenChange, onAdd }: MobileNode
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="h-[80vh] gap-0 p-0"
+        // Clamp to the dynamic viewport minus the safe-area inset so the search
+        // + list never get cut off on short / notched devices (foldables,
+        // landscape) where a flat 80vh would overflow.
+        className="h-[80vh] max-h-[calc(100dvh-env(safe-area-inset-top,0px)-2rem)] gap-0 p-0"
         data-testid="mobile-node-palette"
         aria-describedby={undefined}
       >

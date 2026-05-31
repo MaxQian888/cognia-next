@@ -6,6 +6,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
   Activity,
   Pause,
@@ -23,9 +24,14 @@ import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/sched
 import type { ScheduledItemKind } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
+import { useSchedulerDashboardView } from "@/hooks/scheduler/use-scheduler-dashboard-view"
 import { TaskExecutionChart } from "./task-execution-chart"
 import { UnifiedRecentRuns } from "./unified-recent-runs"
 import { StatCard } from "./stat-card"
+import { SchedulerDashboardViewToggle } from "./scheduler-dashboard-view-toggle"
+import { SchedulerCalendarView } from "./scheduler-calendar-view"
+import { SchedulerTimelineView } from "./scheduler-timeline-view"
+import { staticIf, viewSwitchVariants } from "./scheduler-motion"
 
 export interface SchedulerDashboardViewProps {
   statistics: TaskStatistics | null
@@ -35,6 +41,12 @@ export interface SchedulerDashboardViewProps {
   recentExecutions: TaskExecution[]
   schedulerStatus: string
   onSelectTask: (taskId: string) => void
+  /**
+   * All app scheduled tasks — the calendar / timeline views project their
+   * future runs. Optional so legacy callers/tests that only render the
+   * overview keep working.
+   */
+  tasks?: ScheduledTask[]
   /** Per-kind item counts — when supplied, renders the kind summary strip. */
   countsByKind?: Record<ScheduledItemKind, number>
   activeCountsByKind?: Record<ScheduledItemKind, number>
@@ -159,7 +171,34 @@ function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStrip
   )
 }
 
-export function SchedulerDashboardView({
+export function SchedulerDashboardView(props: SchedulerDashboardViewProps) {
+  const { onSelectTask, tasks } = props
+  const { view } = useSchedulerDashboardView()
+  const prefersReduced = useReducedMotion()
+  const variants = staticIf(prefersReduced, viewSwitchVariants)
+
+  return (
+    <div className="space-y-5 p-5 sm:p-6">
+      <div className="flex items-center justify-end">
+        <SchedulerDashboardViewToggle />
+      </div>
+
+      <AnimatePresence mode="wait">
+        <motion.div key={view} variants={variants} initial="hidden" animate="show" exit="exit">
+          {view === "calendar" ? (
+            <SchedulerCalendarView tasks={tasks ?? []} onSelectTask={onSelectTask} />
+          ) : view === "timeline" ? (
+            <SchedulerTimelineView tasks={tasks ?? []} onSelectTask={onSelectTask} />
+          ) : (
+            <OverviewBody {...props} />
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function OverviewBody({
   statistics,
   upcomingTasks,
   recentExecutions,
@@ -181,7 +220,7 @@ export function SchedulerDashboardView({
     successRate >= 90 ? "text-green-500" : successRate >= 70 ? "text-yellow-500" : "text-red-500"
 
   return (
-    <div className="space-y-5 p-5 sm:p-6">
+    <div className="space-y-5">
       <KindSummaryStrip countsByKind={countsByKind} activeCountsByKind={activeCountsByKind} />
       {/* Stats cards row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">

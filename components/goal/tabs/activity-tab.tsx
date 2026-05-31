@@ -25,6 +25,7 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
   user_resumed: "▶️",
   user_stopped: "⏹️",
   config_updated: "⚙️",
+  subgoals_generated: "🧩",
 }
 
 export function GoalActivityTab({ goal }: Props) {
@@ -97,5 +98,7 @@ function summarisePayload(ev: GoalEvent, t: GoalT): string {
       return t("activity.user_stopped")
     case "config_updated":
       return t("activity.config_updated")
+    case "subgoals_generated":
+      return t("activity.subgoals_generated")
   }
 }

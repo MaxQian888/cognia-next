@@ -4,6 +4,8 @@
 import { render, screen } from "@testing-library/react"
 
 import { MobileShellWrapper } from "./mobile-shell-wrapper"
+import { useSettingsStore as realSettingsStore } from "@/stores/settings/settings-store"
+import type { MobileTabLayout } from "@/types/shell/mobile-tabs"
 
 const platformMock = jest.fn(() => "mobile")
 jest.mock("@/hooks/use-platform", () => ({
@@ -11,8 +13,10 @@ jest.mock("@/hooks/use-platform", () => ({
 }))
 
 const pathnameMock = jest.fn(() => "/")
+const replaceMock = jest.fn()
 jest.mock("next/navigation", () => ({
   usePathname: () => pathnameMock(),
+  useRouter: () => ({ replace: replaceMock }),
 }))
 
 jest.mock("next/link", () => {
@@ -79,7 +83,15 @@ describe("<MobileShellWrapper />", () => {
     platformMock.mockReset().mockReturnValue("mobile")
     pathnameMock.mockReset().mockReturnValue("/")
     inboundUnreadRef.value = 0
+    replaceMock.mockReset()
+    // The tab bar + landing redirect read the real settings-store (the
+    // `@/stores/settings` mock above only covers the wrapper's own selector).
+    realSettingsStore.setState({ settings: null } as never)
   })
+
+  function setTabLayout(layout: MobileTabLayout) {
+    realSettingsStore.setState({ settings: { mobileTabLayout: layout } } as never)
+  }
 
   it("renders the tab bar on mobile", () => {
     render(
@@ -203,6 +215,59 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("7")
+  })
+
+  it("redirects to the configured landing tab on launch", () => {
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).toHaveBeenCalledWith("/workflows")
+  })
+
+  it("does not redirect when the landing tab is chat (default)", () => {
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("does not redirect when launched on a non-root path", () => {
+    pathnameMock.mockReturnValue("/discover")
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("does not redirect on desktop platforms", () => {
+    platformMock.mockReturnValue("web")
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
   })
 
   it("sets data-tab-bar-visible attribute correctly", () => {

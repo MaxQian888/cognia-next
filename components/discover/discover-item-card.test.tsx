@@ -269,6 +269,81 @@ describe("<DiscoverItemCard />", () => {
     expect(screen.getByText("ocrBadge.needsCredentials")).toBeInTheDocument()
   })
 
+  // ── Favorites + view variants ──────────────────────────────────────────
+
+  it("renders a favorite star only when onToggleFavorite is provided", () => {
+    const { rerender } = render(
+      <DiscoverItemCard item={mkCharacter("c1", "Alpha")} selected={false} onSelect={jest.fn()} />
+    )
+    expect(screen.queryByTestId("discover-favorite-character-c1")).not.toBeInTheDocument()
+
+    rerender(
+      <DiscoverItemCard
+        item={mkCharacter("c1", "Alpha")}
+        selected={false}
+        onSelect={jest.fn()}
+        favorited={false}
+        onToggleFavorite={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-favorite-character-c1")).toBeInTheDocument()
+  })
+
+  it("toggles favorite without triggering selection", async () => {
+    const onSelect = jest.fn()
+    const onToggleFavorite = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <DiscoverItemCard
+        item={mkCharacter("c1", "Alpha")}
+        selected={false}
+        onSelect={onSelect}
+        favorited={false}
+        onToggleFavorite={onToggleFavorite}
+      />
+    )
+    await user.click(screen.getByTestId("discover-favorite-character-c1"))
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("marks the star pressed when favorited", () => {
+    render(
+      <DiscoverItemCard
+        item={mkCharacter("c1", "Alpha")}
+        selected={false}
+        onSelect={jest.fn()}
+        favorited
+        onToggleFavorite={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-favorite-character-c1")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+  })
+
+  it("still renders name in grid and compact views", () => {
+    const { rerender } = render(
+      <DiscoverItemCard
+        item={mkCharacter("c1", "Alpha")}
+        selected={false}
+        onSelect={jest.fn()}
+        view="grid"
+      />
+    )
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    rerender(
+      <DiscoverItemCard
+        item={mkCharacter("c1", "Alpha")}
+        selected={false}
+        onSelect={jest.fn()}
+        view="compact"
+      />
+    )
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+  })
+
   it("renders a workflow template with its English label + first tag", () => {
     const item: DiscoverItem = {
       kind: "workflowTemplate",

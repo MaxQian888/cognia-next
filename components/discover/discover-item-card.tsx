@@ -17,6 +17,7 @@ import {
   PuzzleIcon,
   ScanTextIcon,
   SparklesIcon,
+  StarIcon,
   UsersIcon,
   UsersRoundIcon,
   WorkflowIcon,
@@ -27,6 +28,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
+import type { DiscoverViewMode } from "@/lib/discover/categories"
 import { cn } from "@/lib/utils"
 
 interface ItemMeta {
@@ -180,61 +182,140 @@ export interface DiscoverItemCardProps {
   item: DiscoverItem
   selected: boolean
   onSelect: () => void
+  /** Layout variant — defaults to the horizontal "list" row. */
+  view?: DiscoverViewMode
+  /** Whether this item is favorited. Omit to hide the star entirely. */
+  favorited?: boolean
+  /** Toggle handler — when provided, a star overlay is rendered. */
+  onToggleFavorite?: () => void
   className?: string
 }
 
-export function DiscoverItemCard({ item, selected, onSelect, className }: DiscoverItemCardProps) {
+function Avatars({ meta, size }: { meta: ItemMeta; size: "sm" | "md" | "lg" }) {
+  const dim = size === "lg" ? "size-12" : size === "sm" ? "size-8" : "size-10"
+  const iconDim = size === "lg" ? "size-6" : size === "sm" ? "size-4" : "size-5"
+  return (
+    <div className="shrink-0">
+      {meta.avatar.kind === "color" ? (
+        <Avatar className={dim}>
+          <AvatarFallback
+            style={{ backgroundColor: meta.avatar.color }}
+            className="text-sm"
+            aria-hidden={meta.avatar.glyph ? "true" : undefined}
+          >
+            {meta.avatar.glyph}
+          </AvatarFallback>
+        </Avatar>
+      ) : (
+        <div
+          className={cn(
+            "flex items-center justify-center rounded-md bg-secondary text-secondary-foreground",
+            dim
+          )}
+        >
+          <meta.avatar.Icon className={iconDim} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardBadges({ meta, builtInLabel }: { meta: ItemMeta; builtInLabel: string }) {
+  return (
+    <>
+      {meta.builtIn ? (
+        <Badge variant="outline" className="text-[10px]">
+          {builtInLabel}
+        </Badge>
+      ) : null}
+      {meta.badge ? (
+        <Badge variant="secondary" className="text-[10px]">
+          {meta.badge}
+        </Badge>
+      ) : null}
+    </>
+  )
+}
+
+export function DiscoverItemCard({
+  item,
+  selected,
+  onSelect,
+  view = "list",
+  favorited,
+  onToggleFavorite,
+  className,
+}: DiscoverItemCardProps) {
   const t = useTranslations("discover")
   const meta = useItemMeta(item)
+  const isGrid = view === "grid"
+  const isCompact = view === "compact"
+
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      onClick={onSelect}
-      data-testid={`discover-item-${item.kind}-${item.id}`}
-      aria-pressed={selected}
-      className={cn(
-        "h-auto w-full items-start justify-start gap-3 rounded-md border border-border bg-card p-3 text-left font-normal",
-        "transition-colors hover:bg-muted/50 active:bg-muted/60",
-        selected && "border-primary ring-1 ring-primary/40 hover:bg-muted/30",
-        className
-      )}
-    >
-      <div className="shrink-0">
-        {meta.avatar.kind === "color" ? (
-          <Avatar className="size-10">
-            <AvatarFallback
-              style={{ backgroundColor: meta.avatar.color }}
-              className="text-sm"
-              aria-hidden={meta.avatar.glyph ? "true" : undefined}
-            >
-              {meta.avatar.glyph}
-            </AvatarFallback>
-          </Avatar>
-        ) : (
-          <div className="flex size-10 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-            <meta.avatar.Icon className="size-5" />
-          </div>
+    <div className={cn("relative", isGrid ? "h-full" : "w-full", className)}>
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={onSelect}
+        data-testid={`discover-item-${item.kind}-${item.id}`}
+        aria-pressed={selected}
+        className={cn(
+          "h-auto w-full rounded-md border border-border bg-card text-left font-normal",
+          "transition-colors hover:bg-muted/50 active:bg-muted/60",
+          selected && "border-primary ring-1 ring-primary/40 hover:bg-muted/30",
+          onToggleFavorite && !isGrid && "pr-9",
+          isGrid
+            ? "h-full flex-col items-start justify-start gap-2 p-3"
+            : isCompact
+              ? "items-center justify-start gap-2 p-2"
+              : "items-start justify-start gap-3 p-3"
         )}
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{meta.name}</span>
-          {meta.builtIn ? (
-            <Badge variant="outline" className="text-[10px]">
-              {t("builtInBadge")}
-            </Badge>
-          ) : null}
-          {meta.badge ? (
-            <Badge variant="secondary" className="text-[10px]">
-              {meta.badge}
-            </Badge>
+      >
+        <Avatars meta={meta} size={isGrid ? "lg" : isCompact ? "sm" : "md"} />
+        <div className={cn("flex min-w-0 flex-col gap-0.5", isGrid ? "w-full" : "flex-1")}>
+          <div className="flex w-full items-center gap-2">
+            <span
+              className={cn(
+                "truncate font-medium",
+                isCompact ? "text-xs" : "text-sm",
+                isGrid && onToggleFavorite && "pr-6"
+              )}
+            >
+              {meta.name}
+            </span>
+            <CardBadges meta={meta} builtInLabel={t("builtInBadge")} />
+          </div>
+          {meta.description && !isCompact ? (
+            <span
+              className={cn(
+                "text-xs text-muted-foreground",
+                isGrid ? "line-clamp-3" : "line-clamp-2"
+              )}
+            >
+              {meta.description}
+            </span>
           ) : null}
         </div>
-        {meta.description ? (
-          <span className="line-clamp-2 text-xs text-muted-foreground">{meta.description}</span>
-        ) : null}
-      </div>
-    </Button>
+      </Button>
+      {onToggleFavorite ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleFavorite()
+          }}
+          aria-label={favorited ? t("favorite.remove") : t("favorite.add")}
+          aria-pressed={favorited}
+          data-testid={`discover-favorite-${item.kind}-${item.id}`}
+          className={cn(
+            "absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-muted-foreground",
+            "transition-colors hover:bg-muted hover:text-foreground",
+            favorited && "text-amber-500 hover:text-amber-500"
+          )}
+        >
+          <StarIcon className={cn("size-4", favorited && "fill-current")} />
+        </button>
+      ) : null}
+    </div>
   )
 }

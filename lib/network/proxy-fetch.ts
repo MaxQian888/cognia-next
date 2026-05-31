@@ -210,7 +210,7 @@ export function createProxyFetch(customProxyUrl?: string) {
 
     // In browser environment, we can't directly use proxy
     // The browser will use system proxy settings
-    if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) {
+    if (typeof window !== "undefined" && !isTauri()) {
       // For browser, just use regular fetch
       // System/browser proxy settings will be used automatically
       if (timeout) {

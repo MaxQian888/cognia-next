@@ -42,6 +42,7 @@ import {
   TargetIcon,
   MessagesSquareIcon,
   PanelLeftIcon,
+  CompassIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -63,6 +64,7 @@ export type SettingsSectionId =
   | "search"
   | "appearance"
   | "sidebar"
+  | "discover"
   | "terminal"
   | "speech"
   | "characters"
@@ -289,6 +291,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "sidebar",
     group: "interface",
     icon: PanelLeftIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "discover",
+    labelKey: "discover",
+    descriptionKey: "discover",
+    group: "interface",
+    icon: CompassIcon,
     desktopOnly: true,
   },
   {
@@ -655,6 +665,24 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "自定义",
     "排序",
     "隐藏",
+  ],
+  discover: [
+    "discover",
+    "categories",
+    "category",
+    "favorites",
+    "pin",
+    "reorder",
+    "hide",
+    "view",
+    "grid",
+    "发现",
+    "分类",
+    "收藏",
+    "置顶",
+    "排序",
+    "隐藏",
+    "视图",
   ],
   terminal: [
     "terminal",

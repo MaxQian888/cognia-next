@@ -5,8 +5,9 @@
  * in a scrollable layout with an inline header.
  */
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Play, Pause, Pencil, MoreHorizontal, Trash2, RefreshCw } from "lucide-react"
+import { Play, Pause, Pencil, MoreHorizontal, Trash2, RefreshCw, Network } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -27,6 +28,8 @@ import { TaskExecutionHistory } from "./task-execution-history"
 import { TaskConfiguration } from "./task-configuration"
 import { TaskNotificationDisplay } from "./task-notification-display"
 import { TaskTagsDisplay } from "./task-tags-display"
+import { TaskDependencyGraph } from "./task-dependency-graph"
+import { buildDependencyGraph, hasDependencyLinks } from "@/lib/scheduler/dependency-graph"
 
 export interface TaskDetailViewProps {
   task: ScheduledTask
@@ -45,6 +48,15 @@ export interface TaskDetailViewProps {
    * execution-run view of the selected row.
    */
   onSelectExecution?: (execution: TaskExecution) => void
+  /**
+   * All app tasks — when supplied (and this task has dependency links) a
+   * "Dependencies" card renders the task's upstream/downstream neighborhood.
+   */
+  allTasks?: ScheduledTask[]
+  /** Navigate to another task (clicking a dependency node). */
+  onSelectTask?: (taskId: string) => void
+  /** Open the full dependency-graph dialog. */
+  onOpenDependencyGraph?: () => void
 }
 
 const statusBadgeClass: Record<string, string> = {
@@ -66,10 +78,19 @@ export function TaskDetailView({
   onCancelPluginExecution: _onCancelPluginExecution,
   isPluginExecutionActive: _isPluginExecutionActive,
   onSelectExecution,
+  allTasks,
+  onSelectTask,
+  onOpenDependencyGraph,
 }: TaskDetailViewProps) {
   const t = useTranslations("scheduler")
 
   const isPaused = task.status === "paused"
+
+  const showDependencies = !!allTasks && hasDependencyLinks(task, allTasks)
+  const dependencyGraph = useMemo(
+    () => (showDependencies ? buildDependencyGraph(allTasks!, { focusTaskId: task.id }) : null),
+    [showDependencies, allTasks, task.id]
+  )
 
   return (
     <TooltipProvider>
@@ -207,6 +228,35 @@ export function TaskDetailView({
           <div className="mt-5">
             <TaskConfiguration task={task} />
           </div>
+
+          {dependencyGraph && (
+            <div className="mt-5" data-testid="task-dependencies-card">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Network className="h-4 w-4 text-blue-500" aria-hidden="true" />
+                  {t("dependencyGraph.title")}
+                </h3>
+                {onOpenDependencyGraph && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={onOpenDependencyGraph}
+                    data-testid="open-dependency-graph"
+                  >
+                    {t("dependencyGraph.openFullGraph")}
+                  </Button>
+                )}
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-border/50 p-3">
+                <TaskDependencyGraph
+                  graph={dependencyGraph}
+                  focusTaskId={task.id}
+                  onSelectTask={(id) => onSelectTask?.(id)}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="mt-5">
             <TaskNotificationDisplay notification={task.notification} />

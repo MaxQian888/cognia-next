@@ -2,6 +2,7 @@
  * Plugin Loader - Handles loading plugin modules dynamically
  */
 
+import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
@@ -324,8 +325,7 @@ export class PluginLoader {
    */
   private async checkTauriAvailable(): Promise<boolean> {
     try {
-      // Check for __TAURI_INTERNALS__ which is set by Tauri's webview
-      return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+      return isTauri()
     } catch {
       return false
     }

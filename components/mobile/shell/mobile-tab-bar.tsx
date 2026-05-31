@@ -20,6 +20,8 @@ import { Badge } from "@/components/ui/badge"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { MOBILE_EASE, MOBILE_DURATION, STAGGER_INTERVAL } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { useMobileTabLayout } from "./use-mobile-tab-layout"
+import type { MobileTabId } from "@/types/shell/mobile-tabs"
 
 export interface TabSpec {
   id: TabId
@@ -29,7 +31,8 @@ export interface TabSpec {
   matchPrefixes: string[]
 }
 
-export type TabId = "chat" | "workflows" | "discover" | "me"
+/** Stable tab ids — unified with the persisted `MobileTabId` model. */
+export type TabId = MobileTabId
 
 export const MOBILE_TABS: TabSpec[] = [
   {
@@ -57,6 +60,20 @@ export const MOBILE_TABS: TabSpec[] = [
     matchPrefixes: ["/me", "/settings", "/pair"],
   },
 ]
+
+/** id → spec lookup (icon, href, match prefixes). */
+export const TAB_SPEC_BY_ID: Record<TabId, TabSpec> = MOBILE_TABS.reduce(
+  (acc, tab) => {
+    acc[tab.id] = tab
+    return acc
+  },
+  {} as Record<TabId, TabSpec>
+)
+
+/** Launch route for a tab id (used by the default-landing redirect). */
+export function tabHref(id: TabId): string {
+  return TAB_SPEC_BY_ID[id]?.href ?? "/"
+}
 
 export function pickActiveTabId(pathname: string): TabId {
   // Longest matching prefix wins so "/inbox" matches "chat" but
@@ -92,6 +109,13 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
   const t = useTranslations("mobile.tabs")
   const tBar = useTranslations("mobile.tabBar")
   const tShell = useTranslations("mobile.shell")
+  const { resolved } = useMobileTabLayout()
+
+  // Render the user's visible tabs in their chosen order; fall back to the
+  // canonical specs via the id lookup (skip any id without a spec).
+  const tabs = resolved.visible
+    .map((id) => TAB_SPEC_BY_ID[id])
+    .filter((spec): spec is TabSpec => Boolean(spec))
 
   const onTap = () => {
     // Light haptic on every tab press; failure = no-op on non-mobile.
@@ -113,7 +137,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
       aria-label={tShell("tabBarAria")}
       data-testid="mobile-tab-bar"
     >
-      {MOBILE_TABS.map((tab, index) => {
+      {tabs.map((tab, index) => {
         const Icon = tab.icon
         const active = tab.id === activeId
         const badge = badges?.[tab.id] ?? 0

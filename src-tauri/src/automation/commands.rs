@@ -1205,6 +1205,7 @@ mod tests {
             click_x: Some(123),
             click_y: Some(456),
             force_tier: None,
+            sandbox_connection_id: None,
         };
         let facts = ctx.facts();
         assert_eq!(facts.process_name, Some("Chrome"));

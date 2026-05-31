@@ -38,6 +38,7 @@ import { QuickActionGrid } from "@/components/mobile/me/quick-action-grid"
 import { SignOutButton } from "@/components/mobile/me/sign-out-button"
 import { TodayStatsCard } from "@/components/mobile/me/today-stats-card"
 import { TransportTierIndicator } from "@/components/mobile/me/transport-tier-indicator"
+import { MobileTabCustomizer } from "@/components/mobile/shell/mobile-tab-customizer"
 import { VersionRow } from "@/components/mobile/me/version-row"
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
@@ -179,6 +180,7 @@ export default function MePage() {
                   {ME_ENTRIES.filter((e) => e.section === section).map((entry) =>
                     renderEntry(entry)
                   )}
+                  {section === "appearance" ? <MobileTabCustomizer /> : null}
                   {section === "account" && !paired ? (
                     <MeRow
                       icon={ScanIcon}

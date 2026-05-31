@@ -4,27 +4,54 @@
  * Desktop Discover body — wraps the shared sidebar / grid / inspector in
  * the canonical `FeaturePageShell` 3-pane layout. Tab state lives in the
  * URL via `useDiscoverRouteState` so `/discover?category=…&item=…` deep
- * links land directly on the right pane.
+ * links land directly on the right pane. The per-category view mode + the
+ * category layout (default landing) come from settings (`useDiscoverView` /
+ * `useDiscoverLayout`).
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { DiscoverCategorySidebar } from "@/components/discover/discover-category-sidebar"
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverInspector } from "@/components/discover/discover-inspector"
+import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
+import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import { useDiscoverQuery } from "@/hooks/discover/use-discover-query"
 import { useDiscoverRouteState } from "@/hooks/discover/use-discover-route-state"
+import { useDiscoverView } from "@/hooks/discover/use-discover-view"
 
 export function DiscoverDesktopBody() {
   const t = useTranslations("discover")
-  const { category, item, sort, filter, setCategory, setItem, clearItem, setSort, setFilter } =
-    useDiscoverRouteState()
+  const {
+    category,
+    categoryExplicit,
+    item,
+    sort,
+    filter,
+    setCategory,
+    setItem,
+    clearItem,
+    setSort,
+    setFilter,
+  } = useDiscoverRouteState()
   const [query, setQuery] = useState("")
-  const { items, loading } = useDiscoverQuery(category, query, { sort, filter })
+  const { defaultCategory } = useDiscoverLayout()
+  const { view } = useDiscoverView()
+  const { favoriteKeys } = useDiscoverFavorites()
+  const { items, loading } = useDiscoverQuery(category, query, { sort, filter, favoriteKeys })
+
+  // When the URL carries no explicit category, land on the user's first
+  // visible category (their layout default) rather than the registry default.
+  useEffect(() => {
+    if (!categoryExplicit && category !== defaultCategory) {
+      setCategory(defaultCategory)
+    }
+  }, [categoryExplicit, category, defaultCategory, setCategory])
 
   return (
     <FeaturePageShell
@@ -36,6 +63,7 @@ export function DiscoverDesktopBody() {
             <div className="w-72 max-w-full">
               <DiscoverSearch value={query} onChange={setQuery} />
             </div>
+            <DiscoverViewToggle category={category} />
             <SortFilterSheet
               sort={sort}
               filter={filter}
@@ -63,6 +91,7 @@ export function DiscoverDesktopBody() {
         items={items}
         loading={loading}
         query={query}
+        view={view(category)}
         selectedItemId={item}
         onSelectItem={(id) => setItem(id)}
       />

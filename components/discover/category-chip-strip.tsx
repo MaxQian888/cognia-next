@@ -2,64 +2,38 @@
 
 /**
  * Horizontally scrollable chip strip used on mobile to navigate between
- * discover categories. Replaces the cramped `grid-cols-5` TabsList from
- * the original Wave-2.4 implementation — with the Phase 3/5 additions the
- * registry has 10 categories, which no fixed-column grid can carry on a
- * 375px-wide viewport.
+ * discover categories. Consumes the user's layout (`useDiscoverLayout`) so the
+ * visible set + order match the desktop sidebar: a pinned "Favorites" chip
+ * first, then pinned categories, then overflow, with hidden categories dropped.
  *
  * The strip auto-scrolls the active chip into view on category changes so
  * deep-links (`/discover?category=ocrProviders`) land already visible.
- * Super-group boundaries surface as subtle vertical separators between
- * the last entry of one group and the first entry of the next.
+ * Super-group boundaries surface as subtle vertical separators.
  */
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import {
-  CompassIcon,
-  FileEditIcon,
-  InboxIcon,
-  PlugIcon,
-  PuzzleIcon,
-  ScanTextIcon,
-  SparklesIcon,
-  UsersIcon,
-  UsersRoundIcon,
-  WorkflowIcon,
-  WrenchIcon,
-} from "lucide-react"
+import { CompassIcon, StarIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { DISCOVER_CATEGORIES, type DiscoverCategoryId } from "@/lib/discover/categories"
+import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
+import { FAVORITES_CATEGORY, type DiscoverView } from "@/lib/discover/categories"
+import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { cn } from "@/lib/utils"
 
-const ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
-  Users: UsersIcon,
-  UsersRound: UsersRoundIcon,
-  Sparkles: SparklesIcon,
-  Puzzle: PuzzleIcon,
-  FileEdit: FileEditIcon,
-  Wrench: WrenchIcon,
-  Plug: PlugIcon,
-  ScanText: ScanTextIcon,
-  Workflow: WorkflowIcon,
-  Inbox: InboxIcon,
-}
-
-function iconFor(iconName: string): React.ComponentType<{ className?: string }> {
-  return ICON_BY_NAME[iconName] ?? CompassIcon
-}
-
 export interface CategoryChipStripProps {
-  activeCategory: DiscoverCategoryId
-  onSelect: (id: DiscoverCategoryId) => void
+  activeCategory: DiscoverView
+  onSelect: (id: DiscoverView) => void
   className?: string
 }
 
 export function CategoryChipStrip({ activeCategory, onSelect, className }: CategoryChipStripProps) {
   const t = useTranslations("discover")
+  const { resolved } = useDiscoverLayout()
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const activeRef = useRef<HTMLButtonElement | null>(null)
+
+  const visible = [...resolved.pinned, ...resolved.overflow]
 
   // Center the active chip when the category changes (incl. deep-link mount).
   useEffect(() => {
@@ -67,6 +41,8 @@ export function CategoryChipStrip({ activeCategory, onSelect, className }: Categ
     if (!node) return
     node.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" })
   }, [activeCategory])
+
+  const favoritesActive = activeCategory === FAVORITES_CATEGORY
 
   return (
     <div
@@ -80,10 +56,29 @@ export function CategoryChipStrip({ activeCategory, onSelect, className }: Categ
       )}
       data-testid="discover-chip-strip"
     >
-      {DISCOVER_CATEGORIES.map((cat, idx) => {
-        const Icon = iconFor(cat.iconName)
+      <Button
+        ref={favoritesActive ? activeRef : undefined}
+        type="button"
+        role="tab"
+        variant={favoritesActive ? "default" : "outline"}
+        size="sm"
+        onClick={() => onSelect(FAVORITES_CATEGORY)}
+        aria-selected={favoritesActive}
+        aria-current={favoritesActive ? "page" : undefined}
+        data-testid="chip-strip-favorites"
+        className={cn(
+          "shrink-0 snap-start gap-1.5 whitespace-nowrap",
+          favoritesActive ? "font-medium" : "font-normal"
+        )}
+      >
+        <StarIcon className="size-4 shrink-0" />
+        {t("categories.favorites")}
+      </Button>
+
+      {visible.map((cat, idx) => {
+        const Icon = resolveIcon(cat.iconName) ?? CompassIcon
         const active = cat.id === activeCategory
-        const prevGroup = idx > 0 ? DISCOVER_CATEGORIES[idx - 1].group : null
+        const prevGroup = idx > 0 ? visible[idx - 1].group : null
         const showGroupDivider = prevGroup !== null && prevGroup !== cat.group
         return (
           <div key={cat.id} className="flex shrink-0 items-center gap-2 snap-start">

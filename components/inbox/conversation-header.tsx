@@ -21,6 +21,8 @@ import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
 import { ComputerUseToggle } from "./overrides/computer-use-toggle"
 import { AdapterHealthBadge } from "./adapter-health-badge"
 import { ComputerUseChip } from "./computer-use-chip"
+import { QuietHoursChip } from "./quiet-hours-chip"
+import { AtStrategyChip } from "./at-strategy-chip"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 import { Badge } from "@/components/ui/badge"
@@ -225,6 +227,10 @@ export function ConversationHeader({
        * the degradation surface so the high-blast-radius opt-in is
        * visible whenever the conversation is open. */}
       <LastInboundChip conversationKey={conversationKey} />
+      {parsedAdapterId && (
+        <QuietHoursChip adapterId={parsedAdapterId} conversationKey={conversationKey} />
+      )}
+      {parsedAdapterId && <AtStrategyChip adapterId={parsedAdapterId} />}
       {parsedAdapterId && desktop && (
         <ComputerUseToggle
           conversationKey={conversationKey}

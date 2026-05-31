@@ -11,6 +11,7 @@
  * has full visibility.
  */
 
+import { isTauri } from "@/lib/platform/detect"
 import { registerOcrProvider, getSharedOcrRegistry } from "./registry"
 import { mistralOcrProvider } from "./providers/mistral-ocr"
 import { googleVisionProvider } from "./providers/google-vision"
@@ -134,8 +135,7 @@ export function __resetOcrRuntime(): void {
 }
 
 async function tryBuildTauriInvoker(): Promise<NativeOcrInvoker | null> {
-  if (typeof window === "undefined") return null
-  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
+  if (!isTauri()) return null
   try {
     const { invoke } = (await import("@tauri-apps/api/core")) as {
       invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
@@ -157,8 +157,7 @@ async function tryBuildTauriInvoker(): Promise<NativeOcrInvoker | null> {
 }
 
 async function tryBuildMsixProbe(): Promise<(() => Promise<boolean>) | null> {
-  if (typeof window === "undefined") return null
-  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
+  if (!isTauri()) return null
   try {
     const { invoke } = (await import("@tauri-apps/api/core")) as {
       invoke: <T>(cmd: string) => Promise<T>
@@ -187,8 +186,7 @@ async function tryBuildMsixProbe(): Promise<(() => Promise<boolean>) | null> {
 async function tryBuildModelStatusProbe(): Promise<
   ((backend: "ocrs" | "paddle-ocr") => Promise<boolean>) | null
 > {
-  if (typeof window === "undefined") return null
-  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
+  if (!isTauri()) return null
   try {
     const { invoke } = (await import("@tauri-apps/api/core")) as {
       invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>

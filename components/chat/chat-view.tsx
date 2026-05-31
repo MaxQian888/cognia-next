@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, type Ref } from "react"
+import { useCallback, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { Composer, type ComposerHandle } from "./composer"
@@ -66,6 +66,17 @@ interface ChatPaneProps {
    * generic dev-tool starters for workflow-specific flows.
    */
   emptyState?: EmptyStateOverride
+  /**
+   * Mobile-home extras injected ONLY into the no-session welcome (the app
+   * launch home) — not the empty-active-session state. The mobile shell passes
+   * its customizable quick-action grid + active-runs/search header here and
+   * suppresses the generic dev-tool starter cards.
+   */
+  welcomeExtras?: {
+    quickActions?: ReactNode
+    header?: ReactNode
+    hideSamples?: boolean
+  }
 }
 
 /**
@@ -92,6 +103,7 @@ export function ChatPane({
   mobileMentionMembers,
   showHeader = true,
   emptyState,
+  welcomeExtras,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
@@ -170,6 +182,9 @@ export function ChatPane({
         recentSessions={recentSessions}
         onResumeSession={onResumeSession}
         override={emptyState}
+        hideSamples={welcomeExtras?.hideSamples}
+        headerExtraSlot={welcomeExtras?.header}
+        quickActionsSlot={welcomeExtras?.quickActions}
       />
     )
   }

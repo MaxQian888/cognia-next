@@ -27,7 +27,20 @@ import { JUDGE_SYSTEM_PROMPT, renderJudgeUserPrompt } from "./prompts"
 
 /** Discriminated outcome of one `evaluateGoal` call. */
 export type JudgeResult =
-  | { kind: "decided"; done: boolean; reason: string; rawResponse: string }
+  | {
+      kind: "decided"
+      done: boolean
+      reason: string
+      rawResponse: string
+      /**
+       * 0-based indices of subgoals the judge reports as now complete. Only
+       * present when the goal carried a subgoal checklist and the judge
+       * returned a valid `completedSubgoals` array. Always sanitised to
+       * non-negative integers. Undefined ⇒ the field was absent / malformed
+       * (subgoal decomposition is optional and never affects `done`).
+       */
+      completedSubgoals?: number[]
+    }
   | { kind: "parse_error"; raw: string; error: string }
   | { kind: "aborted" }
 
@@ -55,6 +68,21 @@ export interface EvaluateGoalInput {
 interface ParsedJudgePayload {
   done?: unknown
   reason?: unknown
+  completedSubgoals?: unknown
+}
+
+/**
+ * Sanitise the judge's optional `completedSubgoals` field into non-negative
+ * integers, or `undefined` when absent/malformed. Tolerant by design — a bad
+ * value never affects the `done` verdict.
+ */
+function parseCompletedSubgoals(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const out: number[] = []
+  for (const n of value) {
+    if (typeof n === "number" && Number.isInteger(n) && n >= 0) out.push(n)
+  }
+  return out.length > 0 ? out : undefined
 }
 
 /**
@@ -122,5 +150,6 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
     done: parsed.done,
     reason,
     rawResponse: raw,
+    completedSubgoals: parseCompletedSubgoals(parsed.completedSubgoals),
   }
 }

@@ -429,6 +429,59 @@ describe("GoalRuntime — pass-through readers + delete", () => {
   })
 })
 
+describe("GoalRuntime — subgoals", () => {
+  function client(complete: jest.Mock) {
+    return { complete }
+  }
+
+  it("generateSubgoals decomposes, persists, and logs an event", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "ship it" })
+    const complete = jest.fn().mockResolvedValue('{"steps": ["Plan", "Build", "Verify"]}')
+    const updated = await rt.generateSubgoals(goal.id, client(complete))
+    expect(updated?.subgoals?.map((s) => s.text)).toEqual(["Plan", "Build", "Verify"])
+    expect(updated?.subgoalsGeneratedAt).toBeGreaterThan(0)
+    const events = await listGoalEvents(goal.id)
+    const ev = events.find((e) => e.kind === "subgoals_generated")
+    expect(ev?.payload).toMatchObject({ kind: "subgoals_generated", count: 3 })
+  })
+
+  it("generateSubgoals fails OPEN — keeps the prior checklist on empty output", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "ship it" })
+    await rt.generateSubgoals(goal.id, client(jest.fn().mockResolvedValue('{"steps": ["A"]}')))
+    const after = await rt.generateSubgoals(goal.id, client(jest.fn().mockResolvedValue("garbage")))
+    expect(after?.subgoals?.map((s) => s.text)).toEqual(["A"])
+  })
+
+  it("returns null when the goal is missing", async () => {
+    const rt = getGoalRuntime()
+    expect(await rt.generateSubgoals("nope", client(jest.fn()))).toBeNull()
+  })
+
+  it("toggleSubgoal flips a single step's done flag", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "ship it" })
+    const withSubs = await rt.generateSubgoals(
+      goal.id,
+      client(jest.fn().mockResolvedValue('{"steps": ["A", "B"]}'))
+    )
+    const targetId = withSubs!.subgoals![0].id
+    const toggled = await rt.toggleSubgoal(goal.id, targetId)
+    expect(toggled?.subgoals?.find((s) => s.id === targetId)?.done).toBe(true)
+    const back = await rt.toggleSubgoal(goal.id, targetId)
+    expect(back?.subgoals?.find((s) => s.id === targetId)?.done).toBe(false)
+  })
+
+  it("clearSubgoals empties the checklist", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "ship it" })
+    await rt.generateSubgoals(goal.id, client(jest.fn().mockResolvedValue('{"steps": ["A"]}')))
+    const cleared = await rt.clearSubgoals(goal.id)
+    expect(cleared?.subgoals).toEqual([])
+  })
+})
+
 describe("GoalRuntime — singleton lifecycle", () => {
   it("getGoalRuntime() returns the same instance", () => {
     const a = getGoalRuntime()

@@ -17,6 +17,7 @@ import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
 import { PageLoading } from "@/components/ui/loading-states"
 import { DraftBanner } from "@/components/inbox/draft-banner"
+import { ConversationActivityLog } from "@/components/inbox/conversation-activity-log"
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connector-mode"
@@ -113,6 +114,7 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
           characterId={session.characterId}
         />
         <DraftBanner conversationKey={conversationKey} />
+        <ConversationActivityLog conversationKey={conversationKey} />
         <ChatPane
           showHeader={false}
           activeSession={session}

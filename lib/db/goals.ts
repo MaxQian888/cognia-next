@@ -88,6 +88,8 @@ export interface GoalUpdatePatch {
   config?: Goal["config"]
   generationId?: string
   endedAt?: number
+  subgoals?: Goal["subgoals"]
+  subgoalsGeneratedAt?: number
 }
 
 /**

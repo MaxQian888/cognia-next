@@ -13,7 +13,20 @@
         "history": "历史",
         "templates": "模板",
         "defaults": "默认值",
-        "tracker": "Tracker"
+        "tracker": "Tracker",
+        "analytics": "分析"
+      },
+      "stats": {
+        "active": "进行中",
+        "paused": "已暂停",
+        "done": "已完成",
+        "avgTurns": "平均轮数",
+        "tokenSpend": "Token 花费"
+      },
+      "view": {
+        "grid": "网格",
+        "list": "列表",
+        "aria": "进行中目标视图模式"
       }
     },
     "card": {
@@ -79,11 +92,20 @@
       "user_paused": "用户暂停",
       "user_resumed": "用户恢复",
       "user_stopped": "用户停止",
-      "config_updated": "配置已更新"
+      "config_updated": "配置已更新",
+      "subgoals_generated": "已生成子目标"
     },
     "subgoals": {
-      "title": "子目标 — Phase 2",
-      "body": "自动子目标拆解将在后续版本提供。目前目标作为单一任务运行，由判定决定何时完成。"
+      "title": "子目标",
+      "body": "自动子目标拆解将在后续版本提供。目前目标作为单一任务运行，由判定决定何时完成。",
+      "description": "把目标拆解为一份检查清单，供智能体逐项推进。",
+      "generate": "生成清单",
+      "regenerate": "重新生成",
+      "generating": "生成中…",
+      "empty": "还没有子目标。从目标生成一份检查清单。",
+      "error": "生成清单失败，请重试。",
+      "progress": "已完成 {done}/{total}",
+      "unavailable": "生成子目标需要一个在应用内可用 API 密钥的模型。"
     },
     "config": {
       "maxTurns": "最大回合数",
@@ -165,7 +187,23 @@
       "turns": "回合",
       "tokens": "Tokens",
       "created": "创建时间",
-      "empty": "暂无目标。在聊天里用 /goal 命令开始一个。"
+      "empty": "暂无目标。在聊天里用 /goal 命令开始一个。",
+      "search": "搜索目标",
+      "filterStatus": "状态",
+      "all": "全部",
+      "sortBy": "排序",
+      "sortCreated": "创建时间",
+      "sortTurns": "轮数",
+      "sortTokens": "Token",
+      "dirAsc": "升序",
+      "dirDesc": "降序",
+      "open": "打开",
+      "delete": "删除",
+      "deleteTitle": "删除目标？",
+      "deleteBody": "这将永久删除该目标及其活动记录。",
+      "deleteConfirm": "删除",
+      "cancel": "取消",
+      "noResults": "没有符合筛选条件的目标。"
     },
     "commands": {
       "needSession": "请先开始一个聊天会话——/goal 在活跃会话内运行。",
@@ -179,6 +217,31 @@
       "resumed": "目标已恢复。循环将在下一回合继续。",
       "stopped": "目标已停止，共用 {turns} 回合。",
       "objectiveUpdated": "目标已更新。模型将在下一回合获知。"
+    },
+    "analytics": {
+      "title": "分析",
+      "empty": "还没有目标 — 开始运行目标后会显示分析。",
+      "completionRate": "完成率",
+      "avgTurns": "平均轮数",
+      "avgTokens": "平均 Token",
+      "judgeFailureRate": "裁决失败率",
+      "totalGoals": "目标总数",
+      "tokenSpend": "Token 花费",
+      "statusDistribution": "状态分布",
+      "goalsOverTime": "目标创建趋势",
+      "tokensOverTime": "Token 花费趋势"
+    },
+    "quickCreate": {
+      "trigger": "新建目标",
+      "title": "新建目标",
+      "description": "在一个全新会话中开始一个目标，智能体会自动朝它推进。",
+      "templateLabel": "模板",
+      "templatePlaceholder": "选择一个模板…",
+      "templateNone": "不用模板 — 自己填写",
+      "objectiveLabel": "目标",
+      "objectivePlaceholder": "描述你希望智能体完成什么…",
+      "cancel": "取消",
+      "create": "创建目标"
     }
   },
   "featureShell": {
@@ -1588,7 +1651,8 @@
       "ocrProviders": "OCR 服务",
       "workflowTemplates": "工作流模板",
       "twinDrafts": "孪生草稿",
-      "twinIngest": "Twin 摄入"
+      "twinIngest": "Twin 摄入",
+      "favorites": "收藏"
     },
     "groups": {
       "agents": "智能体",
@@ -1706,10 +1770,39 @@
         "all": "全部",
         "installed": "已安装",
         "enabled": "已启用",
-        "builtin": "内置"
+        "builtin": "内置",
+        "favorites": "收藏"
       }
     },
-    "connectorInstanceCount": "{count, plural, =0 {无实例} =1 {1 个已配置} other {# 个已配置}}"
+    "connectorInstanceCount": "{count, plural, =0 {无实例} =1 {1 个已配置} other {# 个已配置}}",
+    "emptyFavorites": "还没有收藏 — 点任意项目上的星标即可固定到这里。",
+    "view": {
+      "aria": "视图模式",
+      "grid": "网格",
+      "list": "列表",
+      "compact": "紧凑"
+    },
+    "favorite": {
+      "add": "加入收藏",
+      "remove": "取消收藏"
+    },
+    "customize": {
+      "title": "自定义分类",
+      "description": "把常用分类置顶，其余归入「更多」。拖动排序，或隐藏从不使用的分类。",
+      "trigger": "自定义分类",
+      "restoreDefaults": "恢复默认",
+      "pinned": "已置顶",
+      "more": "更多",
+      "hidden": "已隐藏",
+      "dragHint": "拖动排序",
+      "pin": "置顶",
+      "moveToMore": "移到「更多」",
+      "hideItem": "隐藏",
+      "showItem": "显示",
+      "pinnedEmpty": "暂无置顶分类 — 全部都在「更多」里。",
+      "moreEmpty": "「更多」为空 — 每个分类都已置顶或隐藏。",
+      "hiddenEmpty": "没有隐藏项。"
+    }
   },
   "import": {
     "dialog": {
@@ -2310,7 +2403,8 @@
       "network": "网络代理",
       "workflows": "工作流",
       "goals": "目标",
-      "conversation": "会话"
+      "conversation": "会话",
+      "discover": "发现"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -2356,7 +2450,8 @@
       "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。",
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
       "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
-      "conversation": "自动标题与对话时间线缩略图"
+      "conversation": "自动标题与对话时间线缩略图",
+      "discover": "置顶、排序或隐藏发现页的分类。"
     },
     "externalBridge": {
       "wikiIndex": {
@@ -9973,6 +10068,39 @@
       "empty": "暂无计划",
       "ariaLabel": "即将执行与最近运行"
     },
+    "dashboardView": {
+      "aria": "仪表盘视图",
+      "overview": "总览",
+      "calendar": "月历",
+      "timeline": "时间线"
+    },
+    "calendar": {
+      "aria": "运行计划月历",
+      "prevMonth": "上一月",
+      "nextMonth": "下一月",
+      "today": "今天",
+      "noRuns": "当天没有运行计划",
+      "dayAria": "{day} 日，{count} 个运行计划"
+    },
+    "timeline": {
+      "aria": "即将运行时间线",
+      "today": "今天",
+      "tomorrow": "明天",
+      "empty": "未来两周内没有运行计划",
+      "runsCount": "{count} 次运行"
+    },
+    "dependencyGraph": {
+      "title": "依赖关系",
+      "openFullGraph": "全量依赖图",
+      "fullGraphTitle": "任务依赖关系图",
+      "fullGraphDescription": "按运行先后依赖关系连接的任务。",
+      "dependsOn": "依赖于",
+      "requiredBy": "被依赖",
+      "empty": "暂无依赖关系",
+      "cycleWarning": "检测到依赖环 —— 已用红色高亮。",
+      "nodeAria": "任务 {name}，点击打开",
+      "close": "关闭"
+    },
     "mobile": {
       "fabCreateAria": "新建计划任务",
       "statStripLabels": {
@@ -10591,7 +10719,24 @@
       "searchPlaceholder": "搜索或运行命令…",
       "kbdHint": "Ctrl+K",
       "openMenus": "打开菜单",
-      "alwaysOnTop": "置顶窗口"
+      "alwaysOnTop": "置顶窗口",
+      "back": "后退",
+      "forward": "前进",
+      "layout": {
+        "title": "自定义布局",
+        "customize": "自定义布局",
+        "toggleGuildRail": "切换工会侧栏",
+        "toggleSidebar": "切换侧栏",
+        "toggleStatusBar": "切换状态栏",
+        "toggleTerminal": "切换终端"
+      },
+      "commandCenter": {
+        "menuLabel": "命令中心菜单",
+        "recentSessions": "最近会话",
+        "goToView": "前往视图",
+        "noRecent": "暂无最近会话",
+        "untitled": "未命名"
+      }
     },
     "menu": {
       "file": {
@@ -10688,6 +10833,19 @@
         "keyboardShortcutsClose": "关闭",
         "documentation": "文档",
         "about": "关于 Cognia"
+      },
+      "terminal": {
+        "label": "终端",
+        "new": "新建终端",
+        "togglePanel": "切换终端面板",
+        "restartSidecar": "重启 Sidecar"
+      },
+      "run": {
+        "label": "运行",
+        "newWorkflowRun": "新建工作流运行",
+        "openScheduler": "打开调度器",
+        "agentTeams": "智能体团队",
+        "killSwitch": "自动化紧急停止"
       },
       "shortcut": {
         "cmdOrCtrlN": "Ctrl+N",
@@ -12992,7 +13150,16 @@
       "me": "我"
     },
     "tabBar": {
-      "unread": "{count} 未读"
+      "unread": "{count} 未读",
+      "customize": {
+        "title": "自定义标签栏",
+        "rowDescription": "重新排序、隐藏并选择启动标签",
+        "description": "拖拽以重新排序底部标签，隐藏不需要的标签，并选择启动时打开的标签。",
+        "tabs": "标签",
+        "landing": "启动标签",
+        "dragHint": "拖拽以排序",
+        "restoreDefaults": "恢复默认"
+      }
     },
     "terminal": {
       "title": "终端",
@@ -13660,6 +13827,16 @@
       "pinned_added": "已置顶。",
       "pinned_removed": "已取消置顶。",
       "graphViewerEmpty": "工作流中没有节点。",
+      "swipe": {
+        "run": "运行",
+        "runQueued": "已加入队列：{name}",
+        "favorite": "置顶",
+        "unfavorite": "取消置顶"
+      },
+      "density": {
+        "compact": "紧凑行距",
+        "comfortable": "宽松行距"
+      },
       "editor": {
         "back": "返回工作流",
         "modeRead": "查看",
@@ -13677,6 +13854,7 @@
         "fitView": "适配屏幕",
         "snapOn": "网格吸附：开",
         "snapOff": "网格吸附：关",
+        "runHistory": "运行历史",
         "export": "导出 JSON",
         "exported": "工作流已导出。",
         "import": "导入 JSON",
@@ -13884,7 +14062,8 @@
       "memberSheetTitle": "团队成员",
       "directSessionTitle": "与 {name} 的聊天",
       "tabBarAria": "主导航",
-      "clearSearch": "清空搜索"
+      "clearSearch": "清空搜索",
+      "search": "搜索"
     },
     "home": {
       "search": "搜索聊天…",
@@ -13897,7 +14076,61 @@
       "swipeUnpin": "取消置顶",
       "swipeDelete": "删除",
       "presenceStreaming": "回复中",
-      "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
+      "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
+      "quickActions": "快捷操作",
+      "edit": "编辑",
+      "actions": {
+        "newChat": "新建会话",
+        "search": "搜索",
+        "workflows": "工作流",
+        "discover": "发现",
+        "inbox": "收件箱",
+        "twin": "数字分身",
+        "agentTeams": "智能体团队",
+        "me": "我"
+      },
+      "sections": {
+        "recents": "最近会话",
+        "activeRuns": "运行中"
+      },
+      "activeRuns": {
+        "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
+        "viewRuns": "查看运行",
+        "empty": "暂无运行中的工作流"
+      },
+      "customize": {
+        "title": "自定义首页",
+        "description": "选择首页要显示的快捷操作与板块。",
+        "active": "已在首页",
+        "activeEmpty": "暂无快捷操作——从下方添加。",
+        "available": "添加操作",
+        "availableEmpty": "所有操作都已在首页。",
+        "sections": "板块",
+        "dragHint": "拖拽以排序",
+        "add": "添加",
+        "remove": "移除",
+        "restoreDefaults": "恢复默认"
+      }
+    },
+    "search": {
+      "title": "搜索",
+      "description": "搜索会话、角色与工作流，或执行快捷操作。",
+      "placeholder": "搜索或快速跳转…",
+      "empty": "无结果。",
+      "groups": {
+        "actions": "操作",
+        "workflows": "工作流",
+        "characters": "角色",
+        "teams": "团队",
+        "sessions": "会话"
+      },
+      "actions": {
+        "newChat": "新建会话",
+        "openSettings": "打开设置"
+      },
+      "titles": {
+        "chatWith": "与 {name} 对话"
+      }
     },
     "settingsPanel": {
       "theme": "主题",
@@ -16329,6 +16562,66 @@
       "conversationActions": "会话行操作",
       "composerActions": "收件箱输入框操作",
       "draftActions": "草稿审阅操作"
+    },
+    "conversationRow": {
+      "noPreview": "暂无消息",
+      "draftCount": "{count, plural, other {# 条草稿}}",
+      "draftCountAria": "{count, plural, other {# 条待审草稿}}",
+      "openConversation": "打开会话：{name}"
+    },
+    "draftCenter": {
+      "title": "草稿审批",
+      "sidebarLabel": "草稿",
+      "pendingCount": "{count, plural, =0 {无草稿} other {# 条草稿}}",
+      "empty": "暂无待审草稿",
+      "emptyDescription": "需要你审批后才能发送的回复会显示在这里。",
+      "group": "{count, plural, other {# 条草稿}}",
+      "expand": "编辑草稿",
+      "collapse": "收起",
+      "open": "打开会话"
+    },
+    "activity": {
+      "title": "动态",
+      "toggle": "切换动态记录",
+      "empty": "暂无最近动态",
+      "count": "{count, plural, other {# 条事件}}",
+      "kind": {
+        "inboundEdited": "消息已编辑",
+        "inboundDeleted": "消息已撤回",
+        "inboundReadIndicator": "消息已读",
+        "inboundMemberAdded": "成员加入",
+        "inboundMemberRemoved": "成员退出",
+        "inboundDeferredQuietHours": "回复已延后——安静时段",
+        "inboundDeferredMuted": "回复已延后——已静音",
+        "inboundHelpServed": "已发送帮助卡片",
+        "inboundWelcomeSent": "已发送欢迎卡片",
+        "goalStartedIm": "目标已启动",
+        "goalBlockedIm": "目标被拦截",
+        "overrideComputerUseChanged": "电脑操作权限变更"
+      }
+    },
+    "quietHours": {
+      "label": "安静时段",
+      "active": "静默至 {time}",
+      "inactive": "安静 {from}–{to}",
+      "ariaActive": "安静时段，静默至 {time}",
+      "ariaInactive": "安静时段 {from} 至 {to} {tz}",
+      "tooltip": "安静时段（{from}–{to} {tz}）内暂停发送回复。"
+    },
+    "atStrategy": {
+      "label": "回复",
+      "always": "所有消息",
+      "mention_only": "仅 @提及",
+      "direct_only": "仅私聊",
+      "aria": "回复策略：{strategy}",
+      "tooltip": "该适配器的回复范围：{strategy}"
+    },
+    "commandPalette": {
+      "title": "搜索会话",
+      "description": "跨连接器快速跳转到任意会话。",
+      "placeholder": "搜索会话…",
+      "empty": "未找到会话",
+      "conversations": "会话"
     }
   },
   "connectors": {

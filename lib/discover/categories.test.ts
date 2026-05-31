@@ -1,10 +1,18 @@
 import {
   DEFAULT_DISCOVER_CATEGORY,
+  DEFAULT_DISCOVER_LAYOUT,
   DISCOVER_CATEGORIES,
   DISCOVER_GROUPS,
+  DISCOVER_VIEW_MODES,
+  FAVORITES_CATEGORY,
+  firstVisibleCategory,
   getCategoriesByGroup,
   getCategory,
+  isFavoritesView,
   isValidCategoryId,
+  isValidView,
+  isValidViewMode,
+  resolveDiscoverLayout,
   type DiscoverCategoryId,
 } from "./categories"
 
@@ -81,5 +89,64 @@ describe("lib/discover/categories", () => {
     expect(templates.map((c) => c.id)).toEqual(["workflowTemplates"])
     const twin = getCategoriesByGroup("twin")
     expect(twin.map((c) => c.id)).toEqual(["twinIngest", "twinDrafts"])
+  })
+
+  describe("view modes", () => {
+    it("isValidViewMode accepts every mode and rejects others", () => {
+      for (const mode of DISCOVER_VIEW_MODES) {
+        expect(isValidViewMode(mode)).toBe(true)
+      }
+      expect(isValidViewMode("table")).toBe(false)
+      expect(isValidViewMode(null)).toBe(false)
+      expect(isValidViewMode(undefined)).toBe(false)
+    })
+  })
+
+  describe("favorites pseudo-category", () => {
+    it("is not part of the real registry", () => {
+      expect(DISCOVER_CATEGORIES.some((c) => c.id === (FAVORITES_CATEGORY as string))).toBe(false)
+      expect(isValidCategoryId(FAVORITES_CATEGORY)).toBe(false)
+    })
+
+    it("isFavoritesView only matches the sentinel", () => {
+      expect(isFavoritesView(FAVORITES_CATEGORY)).toBe(true)
+      expect(isFavoritesView("characters")).toBe(false)
+    })
+
+    it("isValidView accepts real ids and the favorites sentinel", () => {
+      expect(isValidView("characters")).toBe(true)
+      expect(isValidView(FAVORITES_CATEGORY)).toBe(true)
+      expect(isValidView("nope")).toBe(false)
+    })
+  })
+
+  describe("category layout", () => {
+    it("default layout leaves every category in overflow in registry order", () => {
+      const { pinned, overflow, hidden } = resolveDiscoverLayout(DEFAULT_DISCOVER_LAYOUT)
+      expect(pinned).toEqual([])
+      expect(hidden).toEqual([])
+      expect(overflow.map((c) => c.id)).toEqual(DISCOVER_CATEGORIES.map((c) => c.id))
+    })
+
+    it("honors pinned order and hidden set", () => {
+      const { pinned, hidden } = resolveDiscoverLayout({
+        pinned: ["skills", "characters"],
+        hidden: ["twinDrafts"],
+      })
+      expect(pinned.map((c) => c.id)).toEqual(["skills", "characters"])
+      expect(hidden.map((c) => c.id)).toEqual(["twinDrafts"])
+    })
+
+    it("firstVisibleCategory prefers the first pinned, then overflow", () => {
+      expect(firstVisibleCategory(DEFAULT_DISCOVER_LAYOUT)).toBe(DEFAULT_DISCOVER_CATEGORY)
+      expect(firstVisibleCategory({ pinned: ["plugins"], hidden: [] })).toBe("plugins")
+    })
+
+    it("firstVisibleCategory skips hidden categories", () => {
+      const first = DISCOVER_CATEGORIES[0].id
+      const result = firstVisibleCategory({ pinned: [], hidden: [first] })
+      expect(result).not.toBe(first)
+      expect(isValidCategoryId(result)).toBe(true)
+    })
   })
 })

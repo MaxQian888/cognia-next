@@ -33,6 +33,7 @@ function buildGoal(overrides: Partial<Goal> = {}): Parameters<typeof createGoal>
     judgeFailureCount: overrides.judgeFailureCount ?? 0,
     config: overrides.config ?? SAMPLE_CONFIG,
     generationId: overrides.generationId ?? "gen-1",
+    subgoals: overrides.subgoals,
   }
 }
 
@@ -454,5 +455,47 @@ describe("handleTurnComplete — generation rotation mid-turn", () => {
     // Generation rotated → driver bails out with stale before any judge call.
     expect(out.kind).toBe("stale")
     void before
+  })
+})
+
+describe("handleTurnComplete — subgoal progress", () => {
+  it("marks judge-reported subgoals complete (monotonic)", async () => {
+    await createGoal(
+      buildGoal({
+        id: "g1",
+        subgoals: [
+          { id: "s0", text: "A", done: false, order: 0 },
+          { id: "s1", text: "B", done: false, order: 1 },
+          { id: "s2", text: "C", done: true, order: 2 },
+        ],
+      })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "did A",
+      tokensDelta: 10,
+      judgeClient: mockClient(
+        () => '{"done": false, "reason": "more to do", "completedSubgoals": [0]}'
+      ),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("continue")
+    const after = await getGoal("g1")
+    expect(after?.subgoals?.find((s) => s.id === "s0")?.done).toBe(true)
+    expect(after?.subgoals?.find((s) => s.id === "s1")?.done).toBe(false)
+    expect(after?.subgoals?.find((s) => s.id === "s2")?.done).toBe(true) // stays done
+  })
+
+  it("is a no-op when the goal has no subgoals", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "x", "completedSubgoals": [0]}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("continue")
+    expect((await getGoal("g1"))?.subgoals).toBeUndefined()
   })
 })

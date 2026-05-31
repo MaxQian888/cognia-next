@@ -29,6 +29,7 @@
  */
 
 import type { AppSettings } from "@/lib/claude/types"
+import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { Goal, GoalConfig, GoalDefaults, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import {
@@ -41,10 +42,12 @@ import {
   listGoalsBySession,
   updateGoal,
 } from "@/lib/db/goals"
+import { isTauri } from "@/lib/platform/detect"
 import { getDb } from "@/lib/db/schema"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { redactObjective } from "./redact-objective"
+import { decomposeObjective, toSubgoals } from "./subgoals"
 import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
@@ -475,6 +478,63 @@ class GoalRuntime {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Subgoal decomposition (subgoal decomposition)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Run a one-shot decomposition of the goal's objective into a checklist and
+   * persist it (replacing any prior checklist). Returns the updated goal, or
+   * `null` if the goal is missing. When decomposition fails OPEN (empty list),
+   * the existing checklist is left untouched and `null`-ish progress is
+   * surfaced to the caller via an unchanged `subgoals` (so the UI shows an
+   * error/empty state without wiping prior work).
+   */
+  async generateSubgoals(goalId: string, client: LlmClient): Promise<Goal | null> {
+    const current = await getGoal(goalId)
+    if (!current) return null
+    const steps = await decomposeObjective({ goal: current, client })
+    if (steps.length === 0) {
+      // Fail-OPEN: keep whatever was there; signal "no change" to the caller.
+      return current
+    }
+    const subgoals = toSubgoals(steps)
+    await updateGoal(goalId, { subgoals, subgoalsGeneratedAt: Date.now() })
+    await appendGoalEvent({
+      goalId,
+      kind: "subgoals_generated",
+      payload: { kind: "subgoals_generated", count: subgoals.length },
+    })
+    const updated = (await getGoal(goalId)) ?? null
+    if (updated) void getPluginEventHooks().dispatchGoalUpdate(toGoalHookPayload(updated))
+    return updated
+  }
+
+  /** Flip a single subgoal's `done` flag. No-op when goal/subgoal is missing. */
+  async toggleSubgoal(goalId: string, subgoalId: string): Promise<Goal | null> {
+    const current = await getGoal(goalId)
+    if (!current?.subgoals) return current ?? null
+    let changed = false
+    const next = current.subgoals.map((s) => {
+      if (s.id === subgoalId) {
+        changed = true
+        return { ...s, done: !s.done }
+      }
+      return s
+    })
+    if (!changed) return current
+    await updateGoal(goalId, { subgoals: next })
+    return (await getGoal(goalId)) ?? null
+  }
+
+  /** Drop the goal's checklist entirely. */
+  async clearSubgoals(goalId: string): Promise<Goal | null> {
+    const current = await getGoal(goalId)
+    if (!current) return null
+    await updateGoal(goalId, { subgoals: [], subgoalsGeneratedAt: undefined })
+    return (await getGoal(goalId)) ?? null
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Pass-through readers (provided so call-sites only ever import this module).
   // ───────────────────────────────────────────────────────────────────────────
 
@@ -508,7 +568,7 @@ class GoalRuntime {
  */
 async function emitGoalStatus(goal: Goal | null): Promise<void> {
   if (!goal) return
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return
+  if (!isTauri()) return
   try {
     const moduleId = "@tauri-apps/api/event"
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as {

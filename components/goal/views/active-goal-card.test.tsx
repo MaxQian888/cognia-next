@@ -74,4 +74,15 @@ describe("ActiveGoalCard", () => {
     fireEvent.click(screen.getByTestId("active-card-details"))
     expect(await screen.findByText(/Goal · active/)).toBeInTheDocument()
   })
+
+  it("renders the compact variant with controls and objective", async () => {
+    const goal = await makeGoal()
+    render(<ActiveGoalCard goal={goal} variant="compact" />)
+    const card = screen.getByTestId("active-goal-card")
+    expect(card).toHaveAttribute("data-variant", "compact")
+    expect(screen.getByText("ship the feature")).toBeInTheDocument()
+    expect(screen.getByTestId("active-card-pause")).toBeInTheDocument()
+    // Meters are collapsed to inline text — no progress bars.
+    expect(screen.queryByText("Turns")).not.toBeInTheDocument()
+  })
 })

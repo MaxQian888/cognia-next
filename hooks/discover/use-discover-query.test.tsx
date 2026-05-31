@@ -16,6 +16,7 @@ const listTeamsMock = jest.fn<Promise<Team[]>, []>()
 const listSkillsMock = jest.fn<Promise<Skill[]>, []>()
 const listPluginsMock = jest.fn<Promise<PluginRow[]>, []>()
 const sortByMock = jest.fn<Promise<TwinDraft[]>, [string]>()
+const twinSourcesSortByMock = jest.fn<Promise<unknown[]>, [string]>()
 
 jest.mock("@/lib/db/characters", () => ({
   listCharacters: () => listCharactersMock(),
@@ -37,6 +38,11 @@ jest.mock("@/lib/db/schema", () => ({
     twinDrafts: {
       toCollection: () => ({
         sortBy: (field: string) => sortByMock(field),
+      }),
+    },
+    twinSources: {
+      toCollection: () => ({
+        sortBy: (field: string) => twinSourcesSortByMock(field),
       }),
     },
   }),
@@ -159,6 +165,7 @@ beforeEach(() => {
   listSkillsMock.mockReset()
   listPluginsMock.mockReset()
   sortByMock.mockReset()
+  twinSourcesSortByMock.mockReset()
 })
 
 afterEach(async () => {
@@ -461,5 +468,61 @@ describe("useDiscoverQuery", () => {
     ])
     const { result } = renderHook(() => useDiscoverQuery("connectors", "", { filter: "installed" }))
     expect(result.current.items.map((i) => i.id)).toEqual(["telegram"])
+  })
+
+  // ── Favorites pseudo-category + filter ──────────────────────────────────
+
+  it("favorites view aggregates favorited items across kinds", async () => {
+    listCharactersMock.mockResolvedValueOnce([mkChar("c1", "Alpha"), mkChar("c2", "Beta")])
+    listSkillsMock.mockResolvedValueOnce([mkSkill("s1", "One"), mkSkill("s2", "Two")])
+    // The favorites view flips every Dexie source live; resolve the rest so it
+    // reports loading=false.
+    listTeamsMock.mockResolvedValue([])
+    listPluginsMock.mockResolvedValue([])
+    sortByMock.mockResolvedValue([])
+    twinSourcesSortByMock.mockResolvedValue([])
+    const favoriteKeys = new Set(["character:c1", "skill:s2"])
+    const { result, rerender } = renderHook(() =>
+      useDiscoverQuery("favorites", "", { favoriteKeys })
+    )
+    await flush()
+    rerender()
+    expect(result.current.loading).toBe(false)
+    expect(result.current.items.map((i) => `${i.kind}:${i.id}`).sort()).toEqual([
+      "character:c1",
+      "skill:s2",
+    ])
+  })
+
+  it("favorites view is empty when nothing is favorited", async () => {
+    listCharactersMock.mockResolvedValueOnce([mkChar("c1", "Alpha")])
+    listTeamsMock.mockResolvedValue([])
+    listPluginsMock.mockResolvedValue([])
+    listSkillsMock.mockResolvedValue([])
+    sortByMock.mockResolvedValue([])
+    twinSourcesSortByMock.mockResolvedValue([])
+    const { result, rerender } = renderHook(() =>
+      useDiscoverQuery("favorites", "", { favoriteKeys: new Set() })
+    )
+    await flush()
+    rerender()
+    expect(result.current.items).toEqual([])
+  })
+
+  it("filter=favorites narrows a normal category to starred items", async () => {
+    listCharactersMock.mockResolvedValueOnce([
+      mkChar("c1", "Alpha"),
+      mkChar("c2", "Beta"),
+      mkChar("c3", "Gamma"),
+    ])
+    const { result, rerender } = renderHook(() =>
+      useDiscoverQuery("characters", "", {
+        filter: "favorites",
+        favoriteKeys: new Set(["character:c2"]),
+      })
+    )
+    await flush()
+    rerender()
+    expect(result.current.items.map((i) => i.id)).toEqual(["c2"])
   })
 })

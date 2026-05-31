@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/platform/detect"
 import type { ProviderName } from "@/types/provider"
 import {
   LOCAL_PROVIDER_PORTS,
@@ -13,13 +14,6 @@ import {
   isLocalProviderName,
   type LocalProviderName,
 } from "@/types/provider/local-provider"
-
-/**
- * Check if running in Tauri environment
- */
-function isInTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
 
 /**
  * Local provider configuration
@@ -235,7 +229,7 @@ export async function getLocalProviderStatus(
   const url = normalizeBaseUrl(baseUrl || config.defaultBaseURL)
 
   // For Ollama, use dedicated Tauri command if available
-  if (providerId === "ollama" && isInTauri()) {
+  if (providerId === "ollama" && isTauri()) {
     try {
       return await invoke<LocalProviderStatus>("ollama_get_status", { baseUrl: url })
     } catch {
@@ -284,7 +278,7 @@ export async function listLocalProviderModels(
   const url = normalizeBaseUrl(baseUrl || config.defaultBaseURL)
 
   // For Ollama, use dedicated Tauri command if available
-  if (providerId === "ollama" && isInTauri()) {
+  if (providerId === "ollama" && isTauri()) {
     try {
       const models = await invoke<Array<{ name: string; model: string }>>("ollama_list_models", {
         baseUrl: url,

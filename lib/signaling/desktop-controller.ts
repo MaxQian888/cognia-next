@@ -36,10 +36,11 @@ import { liveQuery, type Subscription } from "dexie"
 // is still mid-evaluation, tripping a TDZ on the underlying
 // `_transportinstance` binding. Importing the leaf bypasses the barrel
 // getter entirely.
+import { isTauri } from "@/lib/platform/detect"
 import { transport } from "@/lib/tauri/transport-instance"
 
 function isTauriRenderer(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+  return isTauri()
 }
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getSettings } from "@/lib/db/settings"

@@ -1,20 +1,29 @@
-import * as React from "react"
+"use client"
 
-const MOBILE_BREAKPOINT = 768
+import { useCallback, useSyncExternalStore } from "react"
 
-export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+import { isNativeMobile } from "@/lib/platform/detect"
+import { getQuerySnapshot, subscribeToQuery } from "@/lib/platform/viewport-store"
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
-    mql.addEventListener("change", onChange)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
-  }, [])
+const MOBILE_QUERY = "(max-width: 767.98px)"
 
-  return !!isMobile
+/**
+ * True when the UI should use its mobile layout.
+ *
+ * Two inputs, merged inside the snapshot so `useSyncExternalStore` reconciles
+ * SSR → client cleanly (no `undefined` first frame, no double render):
+ *
+ *  - **Runtime pin** — on a native Capacitor shell the answer is always `true`,
+ *    regardless of viewport width. This fixes the iPad/large-tablet case where
+ *    the app already renders the mobile shell but inner components used to read
+ *    `false` from the 1024px+ viewport and mismatch the shell.
+ *  - **Viewport** — otherwise (web / Tauri desktop) it tracks `< 768px`.
+ */
+export function useIsMobile(): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeToQuery(MOBILE_QUERY, onChange),
+    []
+  )
+  const getSnapshot = useCallback(() => isNativeMobile() || getQuerySnapshot(MOBILE_QUERY), [])
+  return useSyncExternalStore(subscribe, getSnapshot, () => false)
 }

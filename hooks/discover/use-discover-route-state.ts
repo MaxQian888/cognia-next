@@ -19,8 +19,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import {
   DEFAULT_DISCOVER_CATEGORY,
-  isValidCategoryId,
-  type DiscoverCategoryId,
+  isValidView,
+  type DiscoverView,
 } from "@/lib/discover/categories"
 
 /** Sort modes exposed by the discover grid. */
@@ -30,9 +30,10 @@ export type DiscoverSort = (typeof DISCOVER_SORTS)[number]
 /**
  * Filter chips. `installed` / `enabled` / `builtin` only apply to
  * categories that carry the corresponding concept (plugins / mcpTools /
- * connectors / skills); other categories ignore them gracefully.
+ * connectors / skills); other categories ignore them gracefully. `favorites`
+ * narrows any category to the user's starred items.
  */
-export const DISCOVER_FILTERS = ["all", "installed", "enabled", "builtin"] as const
+export const DISCOVER_FILTERS = ["all", "installed", "enabled", "builtin", "favorites"] as const
 export type DiscoverFilter = (typeof DISCOVER_FILTERS)[number]
 
 export const DEFAULT_DISCOVER_SORT: DiscoverSort = "name"
@@ -47,12 +48,14 @@ function isValidFilter(value: unknown): value is DiscoverFilter {
 }
 
 export interface DiscoverRouteState {
-  category: DiscoverCategoryId
+  category: DiscoverView
+  /** Whether `?category=` was present and valid in the URL (vs. falling back to the default). */
+  categoryExplicit: boolean
   item: string | null
   sort: DiscoverSort
   filter: DiscoverFilter
-  /** Switches the active category. Always clears the selected item to avoid stale cross-category references. */
-  setCategory: (id: DiscoverCategoryId) => void
+  /** Switches the active category (or the favorites pseudo-category). Always clears the selected item to avoid stale cross-category references. */
+  setCategory: (id: DiscoverView) => void
   /** Sets (or clears, via null) the selected item id within the current category. */
   setItem: (id: string | null) => void
   /** Convenience wrapper around setItem(null). */
@@ -66,10 +69,15 @@ export function useDiscoverRouteState(): DiscoverRouteState {
   const pathname = usePathname() ?? "/discover"
   const searchParams = useSearchParams()
 
-  const category = useMemo<DiscoverCategoryId>(() => {
+  const category = useMemo<DiscoverView>(() => {
     const raw = searchParams?.get("category") ?? null
-    return isValidCategoryId(raw) ? raw : DEFAULT_DISCOVER_CATEGORY
+    return isValidView(raw) ? raw : DEFAULT_DISCOVER_CATEGORY
   }, [searchParams])
+
+  const categoryExplicit = useMemo<boolean>(
+    () => isValidView(searchParams?.get("category") ?? null),
+    [searchParams]
+  )
 
   const item = useMemo<string | null>(() => {
     const raw = searchParams?.get("item")
@@ -97,7 +105,7 @@ export function useDiscoverRouteState(): DiscoverRouteState {
   )
 
   const setCategory = useCallback(
-    (id: DiscoverCategoryId): void => {
+    (id: DiscoverView): void => {
       replace((params) => {
         params.set("category", id)
         // Selected item is scoped to a category. Switching categories must
@@ -147,6 +155,7 @@ export function useDiscoverRouteState(): DiscoverRouteState {
 
   return {
     category,
+    categoryExplicit,
     item,
     sort,
     filter,

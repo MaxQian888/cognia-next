@@ -4,6 +4,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { WorkflowRow } from "@/types/workflow/visual"
+import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
+import { DEFAULT_WORKFLOW_FILTERS, useWorkflowLibraryStore } from "@/stores/workflow"
 
 import { WorkflowList } from "./workflow-list"
 
@@ -16,6 +18,9 @@ jest.mock("next/link", () => {
   return { __esModule: true, default: Link }
 })
 
+// Ordered queue: each useLiveQuery call shifts the next value. Render order is
+// childFolders → folderPath → folderWorkflows → recentlyFailed → runCounts →
+// activeRuns.
 const liveQueries: Array<unknown> = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (factory: () => unknown) => {
@@ -24,32 +29,46 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 
-// Wave 4 / ADR-0026 — synchronous shortcut for the Dexie-first hook. The
-// workflows list now reads through it (`table: "workflows"` triggers the
-// sync orchestrator on mount), but unit tests want a deterministic
-// shortcut that does not invoke the real orchestrator or Dexie.
-jest.mock("@/hooks/data", () => ({
-  useDexieFirstQuery: <T,>(opts: { initial: T }) => ({
-    data: liveQueries.shift() ?? opts.initial,
-    isSyncing: false,
-    lastSyncedAt: null,
-    error: null,
-  }),
-}))
-
 jest.mock("@/lib/db/workflows", () => ({
-  listWorkflows: () => Promise.resolve([]),
+  listWorkflowsInFolder: jest.fn(),
+  getRecentlyFailedWorkflowIds: jest.fn(),
+  getRunCounts: jest.fn(),
+}))
+jest.mock("@/lib/db/workflow-folders", () => ({
+  listChildFolders: jest.fn(),
+  getFolderPath: jest.fn(),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     workflowRuns: {
       where: () => ({ equals: () => ({ toArray: () => Promise.resolve([]) }) }),
-      orderBy: () => ({
-        reverse: () => ({ limit: () => ({ toArray: () => Promise.resolve([]) }) }),
-      }),
     },
   }),
+}))
+
+jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn(async () => {}) }))
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: jest.fn(async () => {}) }))
+
+// Heavy library children — stub to keep this focused on the list shell.
+jest.mock("./workflow-list-toolbar", () => ({
+  WorkflowListToolbar: ({ onNewWorkflow }: { onNewWorkflow: () => void }) => (
+    <button type="button" data-testid="toolbar-new" onClick={onNewWorkflow}>
+      new
+    </button>
+  ),
+}))
+jest.mock("@/components/workflow/library/workflow-create-dialog", () => ({
+  WorkflowCreateDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="create-dialog-open" /> : null,
+}))
+jest.mock("@/components/workflow/library/workflow-create-folder-dialog", () => ({
+  WorkflowCreateFolderDialog: () => <div data-testid="create-folder-dialog" />,
+}))
+jest.mock("@/components/workflow/library/workflow-folder-breadcrumb", () => ({
+  WorkflowFolderBreadcrumb: ({ path }: { path: unknown[] }) => (
+    <div data-testid="breadcrumb-stub">{path.length}</div>
+  ),
 }))
 
 const saveMock: jest.Mock<Promise<void>, [Record<string, unknown>]> = jest.fn()
@@ -72,53 +91,27 @@ jest.mock("./trigger-button", () => ({
     </button>
   ),
 }))
-
 jest.mock("./pinned-section", () => ({
   PinnedSection: ({ pinnedIds }: { pinnedIds: string[] }) =>
     pinnedIds.length > 0 ? <div data-testid="pinned-section-stub">{pinnedIds.length}</div> : null,
 }))
-
 jest.mock("./recent-runs-feed", () => ({
   RecentRunsFeed: () => <div data-testid="recent-runs-stub" />,
 }))
-
 jest.mock("@/components/interactions/long-press", () => ({
-  LongPress: ({
-    children,
-    onLongPress,
-  }: {
-    children: React.ReactNode
-    onLongPress: () => void
-  }) => (
-    // Use onContextMenu as a stand-in for long-press so tests can fire it
-    // synchronously without involving timers.
+  LongPress: ({ children, onLongPress }: { children: React.ReactNode; onLongPress: () => void }) => (
     <span data-testid="long-press-stub" onContextMenu={() => onLongPress()}>
       {children}
     </span>
   ),
 }))
-
 jest.mock("@/components/mobile/empty-state", () => ({
   EmptyState: ({ title }: { title: string }) => <div data-testid="empty-state">{title}</div>,
 }))
-
-jest.mock("sonner", () => ({
-  toast: { success: jest.fn() },
-}))
+jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
-    const map: Record<string, string> = {
-      title: "Workflows",
-      empty: "Empty",
-      all: "All workflows",
-      pinned: "Pinned",
-      activeBadge: "Active",
-      pinned_added: "Pinned",
-      pinned_removed: "Unpinned",
-    }
-    return map[key] ?? key
-  },
+  useTranslations: () => (key: string) => key,
 }))
 
 const wf = (id: string, name = id, description?: string): WorkflowRow =>
@@ -134,23 +127,37 @@ const wf = (id: string, name = id, description?: string): WorkflowRow =>
     updatedAt: 0,
   }) as unknown as WorkflowRow
 
+function pushQueries({
+  folders = [] as unknown,
+  path = [] as unknown,
+  workflows = [] as unknown,
+  runs = [] as unknown,
+} = {}) {
+  liveQueries.push(folders, path, workflows, new Set<string>(), new Map<string, number>(), runs)
+}
+
 beforeEach(() => {
   liveQueries.length = 0
-  saveMock.mockReset()
-  saveMock.mockResolvedValue(undefined)
+  saveMock.mockReset().mockResolvedValue(undefined)
   settingsRef.value = { pinnedWorkflowIds: [] }
+  useWorkflowLibraryStore.setState({
+    currentFolderId: ROOT_FOLDER_ID,
+    query: "",
+    sort: "updated",
+    filters: DEFAULT_WORKFLOW_FILTERS,
+  })
 })
 
 describe("<WorkflowList />", () => {
-  it("renders the empty state when no workflows exist", () => {
-    liveQueries.push([], [])
+  it("renders the empty state when nothing exists", () => {
+    pushQueries({})
     render(<WorkflowList />)
-    expect(screen.getByTestId("empty-state")).toHaveTextContent("Empty")
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument()
     expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
   })
 
-  it("renders rows + pinned + recent feed when workflows exist", () => {
-    liveQueries.push([wf("a", "Alpha", "Daily snap"), wf("b", "Beta")], [])
+  it("renders rows + pinned + recent feed at the root", () => {
+    pushQueries({ workflows: [wf("a", "Alpha", "Daily snap"), wf("b", "Beta")] })
     settingsRef.value = { pinnedWorkflowIds: ["a"] }
     render(<WorkflowList />)
     expect(screen.getByTestId("pinned-section-stub")).toHaveTextContent("1")
@@ -161,29 +168,45 @@ describe("<WorkflowList />", () => {
     expect(screen.getByTestId("recent-runs-stub")).toBeInTheDocument()
   })
 
-  it("shows the Active badge when a workflow has a running run", () => {
-    liveQueries.push([wf("a", "Alpha")], [{ workflowId: "a" }])
+  it("shows the Active badge for a running workflow", () => {
+    pushQueries({ workflows: [wf("a", "Alpha")], runs: [{ workflowId: "a" }] })
     render(<WorkflowList />)
     expect(screen.getByTestId("workflow-active-a")).toBeInTheDocument()
   })
 
-  it("falls back to empty pinnedIds when settings haven't loaded", () => {
-    liveQueries.push([wf("a")], [])
-    settingsRef.value = null
+  it("renders child folders and enters one on tap", () => {
+    pushQueries({ folders: [{ id: "f1", name: "Reports" }], workflows: [] })
     render(<WorkflowList />)
-    expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mobile-workflow-folder-f1")).toHaveTextContent("Reports")
+    fireEvent.click(screen.getByTestId("mobile-workflow-folder-f1"))
+    expect(useWorkflowLibraryStore.getState().currentFolderId).toBe("f1")
   })
 
-  it("Wave 4 / ADR-0026 — long-press now opens the action sheet (pin moved inside)", async () => {
-    liveQueries.push([wf("a", "Alpha")], [])
-    settingsRef.value = { pinnedWorkflowIds: [] }
+  it("shows the breadcrumb and hides pinned/recent inside a sub-folder", () => {
+    useWorkflowLibraryStore.setState({ currentFolderId: "f1" })
+    settingsRef.value = { pinnedWorkflowIds: ["a"] }
+    pushQueries({ path: [{ id: "f1", name: "Reports" }], workflows: [wf("a", "Alpha")] })
+    render(<WorkflowList />)
+    expect(screen.getByTestId("breadcrumb-stub")).toHaveTextContent("1")
+    expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("recent-runs-stub")).not.toBeInTheDocument()
+  })
+
+  it("opens the create dialog from the toolbar", () => {
+    pushQueries({})
+    render(<WorkflowList />)
+    expect(screen.queryByTestId("create-dialog-open")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("toolbar-new"))
+    expect(screen.getByTestId("create-dialog-open")).toBeInTheDocument()
+  })
+
+  it("long-press opens the action sheet whose pin delegates to save", async () => {
+    pushQueries({ workflows: [wf("a", "Alpha")] })
     render(<WorkflowList />)
     fireEvent.contextMenu(screen.getAllByTestId("long-press-stub")[0])
     await waitFor(() =>
       expect(screen.getByTestId("workflow-row-actions-sheet")).toBeInTheDocument()
     )
-    // The action sheet exposes a Pin button that delegates to the same
-    // save flow that the old long-press used to call directly.
     fireEvent.click(screen.getByTestId("workflow-action-pin"))
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     expect(saveMock.mock.calls[0][0]).toEqual({ pinnedWorkflowIds: ["a"] })

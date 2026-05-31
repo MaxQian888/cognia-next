@@ -13,6 +13,8 @@
  *     start/stop the broadcaster has one place to import.
  */
 
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+
 export interface DiscoveredService {
   /** Display name pulled from the service instance, e.g. `cognia-AB12CD`. */
   name: string
@@ -72,8 +74,7 @@ interface ZeroconfPluginShape {
  */
 const defaultMobileLoader: MdnsLoader = async () => {
   if (typeof window === "undefined") throw new Error("mDNS not available on server")
-  const cap = (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-  if (typeof cap?.isNativePlatform !== "function" || cap.isNativePlatform() !== true) {
+  if (!isCapacitor()) {
     throw new Error("mDNS only available on Capacitor mobile")
   }
   const moduleId = "capacitor-zeroconf"
@@ -159,8 +160,7 @@ export interface TauriInvoker {
 
 const tauriInvoker: () => Promise<TauriInvoker | null> = async () => {
   try {
-    if (typeof window === "undefined") return null
-    if (!("__TAURI_INTERNALS__" in window)) return null
+    if (!isTauri()) return null
     const moduleId = "@tauri-apps/api/core"
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as TauriInvoker
     return mod

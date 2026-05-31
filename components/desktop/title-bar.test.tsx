@@ -197,6 +197,19 @@ jest.mock("dexie-react-hooks", () => ({
 const routerPush = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPush }),
+  usePathname: () => "/",
+}))
+
+const toggleTerminalPanel = jest.fn()
+const setTerminalPanelOpen = jest.fn()
+const terminalStateRef = { panelOpen: false }
+jest.mock("@/stores/terminal/terminal-store", () => ({
+  useTerminalStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      panelOpen: terminalStateRef.panelOpen,
+      setPanelOpen: setTerminalPanelOpen,
+      togglePanel: toggleTerminalPanel,
+    }),
 }))
 
 // matchMedia mock — test toggles `narrowMatches` at will to switch between
@@ -239,8 +252,13 @@ beforeAll(() => {
 })
 
 import { TitleBar } from "./title-bar"
+import { resetNavHistory } from "@/hooks/desktop/use-nav-history"
 
 beforeEach(() => {
+  resetNavHistory()
+  toggleTerminalPanel.mockReset()
+  setTerminalPanelOpen.mockReset()
+  terminalStateRef.panelOpen = false
   logInfo.mockReset()
   logWarn.mockReset()
   logError.mockReset()
@@ -411,6 +429,63 @@ test("Win/Linux menubar renders File / Edit / View / Go / Window / Help triggers
   expect(screen.getByText("desktop.menu.go.label")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.window.label")).toBeInTheDocument()
   expect(screen.getByText("desktop.menu.help.label")).toBeInTheDocument()
+})
+
+test("wide menubar exposes the Run and Terminal menus", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.run.label")).toBeInTheDocument())
+  expect(screen.getByText("desktop.menu.terminal.label")).toBeInTheDocument()
+})
+
+test("Run > Open Scheduler navigates to /scheduler", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.run.label")).toBeInTheDocument())
+  await user.click(screen.getByText("desktop.menu.run.label"))
+  await user.click(await screen.findByText("desktop.menu.run.openScheduler"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/scheduler"))
+})
+
+test("Terminal > New Terminal opens the dock and Toggle flips the panel", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.terminal.label")).toBeInTheDocument())
+  await user.click(screen.getByText("desktop.menu.terminal.label"))
+  await user.click(await screen.findByText("desktop.menu.terminal.new"))
+  await waitFor(() => expect(setTerminalPanelOpen).toHaveBeenCalledWith(true))
+
+  await user.click(screen.getByText("desktop.menu.terminal.label"))
+  await user.click(await screen.findByText("desktop.menu.terminal.togglePanel"))
+  await waitFor(() => expect(toggleTerminalPanel).toHaveBeenCalled())
+})
+
+test("renders the nav arrows and layout controls", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar-nav-arrows")).toBeInTheDocument())
+  expect(screen.getByTestId("title-bar-layout-controls")).toBeInTheDocument()
+  expect(screen.getByTestId("title-bar-customize-layout")).toBeInTheDocument()
+  // Back is disabled at the only-entry history bound.
+  expect(screen.getByTestId("title-bar-nav-back")).toBeDisabled()
+})
+
+test("command-center caret menu surfaces quick targets", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await waitFor(() =>
+    expect(screen.getByTestId("title-bar-command-center-menu")).toBeInTheDocument()
+  )
+  await user.click(screen.getByTestId("title-bar-command-center-menu"))
+  expect(await screen.findByTestId("cc-command-palette")).toBeInTheDocument()
 })
 
 test("File > New Chat clears chat and resets guild", async () => {

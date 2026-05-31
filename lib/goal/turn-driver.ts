@@ -36,6 +36,7 @@ import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
 import { evaluateExitConditions } from "./exit-conditions"
 import { evaluateGoal } from "./judge"
+import { markSubgoalsComplete } from "./subgoals"
 import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { renderContinuationMessage, resolveJudgeSystemPrompt } from "./prompts"
@@ -197,6 +198,16 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
   })
   // Reset failure count on a successful parse, regardless of done.
   await updateGoal(goalId, { judgeFailureCount: 0 })
+
+  // Subgoal progress (subgoal decomposition): if the goal has a checklist and
+  // the judge reported completed steps, mark them done. Best-effort + monotonic
+  // — never blocks the done/reason verdict and stays a no-op without subgoals.
+  if (goal.subgoals && goal.subgoals.length > 0 && judgement.completedSubgoals?.length) {
+    const nextSubgoals = markSubgoalsComplete(goal.subgoals, judgement.completedSubgoals)
+    if (nextSubgoals !== goal.subgoals) {
+      await updateGoal(goalId, { subgoals: nextSubgoals })
+    }
+  }
 
   const postJudge = evaluateExitConditions((await getGoal(goalId)) as Goal, {
     judgeDecision: { done: judgement.done, reason: judgement.reason },

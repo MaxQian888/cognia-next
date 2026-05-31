@@ -1,0 +1,296 @@
+"use client"
+
+/**
+ * Calendar (month grid) view for the scheduler dashboard. Renders a Monday-first
+ * month matrix with a per-day run-density indicator (dots, capped with "+n")
+ * computed from {@link computeUpcomingOccurrences}. Selecting a day reveals that
+ * day's runs in an inline panel; a run row click routes to `onSelectTask`.
+ *
+ * Only future runs are projected, so days before "today" in the current month
+ * are intentionally empty. The grid is horizontally scroll-safe on narrow
+ * screens; the dashboard prefers the timeline view on mobile.
+ */
+
+import { useMemo, useState } from "react"
+import { useLocale, useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import type { ScheduledTask } from "@/types/scheduler"
+import {
+  computeUpcomingOccurrences,
+  countOccurrencesByDay,
+  dayKey,
+  type Occurrence,
+} from "@/lib/scheduler/upcoming-occurrences"
+import { listContainerVariants, listItemVariants, staticIf } from "./scheduler-motion"
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export interface MonthCell {
+  date: Date
+  inMonth: boolean
+}
+
+/**
+ * Build a 6×7 Monday-first month matrix (42 cells) covering `month` of `year`
+ * with leading/trailing days from the adjacent months. Pure + exported for
+ * direct unit testing.
+ */
+export function buildMonthMatrix(year: number, month: number): MonthCell[] {
+  const first = new Date(year, month, 1)
+  // JS getDay(): 0=Sun..6=Sat. Convert to Monday-first offset (Mon=0..Sun=6).
+  const offset = (first.getDay() + 6) % 7
+  const start = new Date(year, month, 1 - offset)
+  const cells: MonthCell[] = []
+  for (let i = 0; i < 42; i++) {
+    const date = new Date(start.getTime() + i * DAY_MS)
+    cells.push({ date, inMonth: date.getMonth() === month })
+  }
+  return cells
+}
+
+export interface SchedulerCalendarViewProps {
+  tasks: ScheduledTask[]
+  onSelectTask: (taskId: string) => void
+  /** Injectable "now" for deterministic tests. */
+  now?: Date
+  className?: string
+}
+
+export function SchedulerCalendarView({
+  tasks,
+  onSelectTask,
+  now,
+  className,
+}: SchedulerCalendarViewProps) {
+  const t = useTranslations("scheduler")
+  const locale = useLocale()
+  const prefersReduced = useReducedMotion()
+
+  const today = useMemo(() => now ?? new Date(), [now])
+  const todayKey = dayKey(today)
+
+  const [anchor, setAnchor] = useState(() => ({
+    year: today.getFullYear(),
+    month: today.getMonth(),
+  }))
+  const [selectedKey, setSelectedKey] = useState<string>(todayKey)
+
+  const cells = useMemo(() => buildMonthMatrix(anchor.year, anchor.month), [anchor])
+
+  // Project occurrences from "now" through the end of the displayed grid.
+  const occurrences = useMemo(() => {
+    const gridEnd = cells[cells.length - 1].date
+    const spanDays = Math.ceil((gridEnd.getTime() - today.getTime()) / DAY_MS) + 1
+    if (spanDays <= 0) return [] as Occurrence[]
+    return computeUpcomingOccurrences(tasks, { from: today, days: spanDays })
+  }, [tasks, today, cells])
+
+  const countsByDay = useMemo(() => countOccurrencesByDay(occurrences), [occurrences])
+  const selectedOccurrences = useMemo(
+    () => occurrences.filter((o) => dayKey(o.date) === selectedKey),
+    [occurrences, selectedKey]
+  )
+
+  const weekdayLabels = useMemo(() => {
+    // 2024-01-01 is a Monday — format 7 consecutive days for Monday-first heads.
+    const fmt = new Intl.DateTimeFormat(locale, { weekday: "short" })
+    return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(2024, 0, 1 + i)))
+  }, [locale])
+
+  const monthLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" }).format(
+        new Date(anchor.year, anchor.month, 1)
+      ),
+    [locale, anchor]
+  )
+  const timeFmt = useMemo(
+    () => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }),
+    [locale]
+  )
+
+  const shiftMonth = (delta: number) => {
+    setAnchor((prev) => {
+      const d = new Date(prev.year, prev.month + delta, 1)
+      return { year: d.getFullYear(), month: d.getMonth() }
+    })
+  }
+
+  return (
+    <div
+      data-testid="scheduler-calendar-view"
+      aria-label={t("calendar.aria")}
+      className={cn("space-y-4", className)}
+    >
+      {/* Month nav */}
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <CalendarDays className="h-4 w-4 text-blue-500" aria-hidden="true" />
+          {monthLabel}
+        </h3>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label={t("calendar.prevMonth")}
+            data-testid="calendar-prev-month"
+            onClick={() => shiftMonth(-1)}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            data-testid="calendar-today"
+            onClick={() => {
+              setAnchor({ year: today.getFullYear(), month: today.getMonth() })
+              setSelectedKey(todayKey)
+            }}
+          >
+            {t("calendar.today")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label={t("calendar.nextMonth")}
+            data-testid="calendar-next-month"
+            onClick={() => shiftMonth(1)}
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Grid (min width keeps 7 columns legible; container scrolls if narrower) */}
+      <div className="overflow-x-auto">
+        <div className="min-w-[18rem]">
+          <div className="grid grid-cols-7 gap-1 pb-1">
+            {weekdayLabels.map((label, i) => (
+              <div
+                key={i}
+                className="py-1 text-center text-[11px] font-medium text-muted-foreground"
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((cell) => {
+              const key = dayKey(cell.date)
+              const count = countsByDay.get(key) ?? 0
+              const isToday = key === todayKey
+              const isSelected = key === selectedKey
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedKey(key)}
+                  aria-pressed={isSelected}
+                  aria-label={t("calendar.dayAria", {
+                    day: cell.date.getDate(),
+                    count,
+                  })}
+                  data-testid={`calendar-day-${key}`}
+                  className={cn(
+                    "flex min-h-[3rem] flex-col items-center gap-1 rounded-md border p-1 text-center transition-colors",
+                    !cell.inMonth && "opacity-40",
+                    // Selected wins (solid fill); today shows a soft tinted ring
+                    // when not selected. Distinct states, always-legible number.
+                    isSelected
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : isToday
+                        ? "border-primary/60 bg-primary/10 hover:bg-primary/15"
+                        : "border-transparent hover:bg-muted/50"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "text-xs tabular-nums",
+                      isSelected
+                        ? "font-semibold text-primary-foreground"
+                        : isToday
+                          ? "font-semibold text-primary"
+                          : "text-foreground"
+                    )}
+                  >
+                    {cell.date.getDate()}
+                  </span>
+                  {count > 0 && <DensityDots count={count} selected={isSelected} />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Selected-day runs */}
+      <div data-testid="calendar-day-panel" className="rounded-lg border border-border/50 p-3">
+        {selectedOccurrences.length === 0 ? (
+          <p className="py-2 text-center text-xs text-muted-foreground">{t("calendar.noRuns")}</p>
+        ) : (
+          <motion.ul
+            variants={staticIf(prefersReduced, listContainerVariants)}
+            initial="hidden"
+            animate="show"
+            className="space-y-0.5"
+          >
+            {selectedOccurrences.map((occ, i) => (
+              <motion.li
+                key={`${occ.taskId}-${occ.date.getTime()}-${i}`}
+                variants={listItemVariants}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelectTask(occ.taskId)}
+                  className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
+                  data-testid={`calendar-occ-${occ.taskId}`}
+                >
+                  <span className="w-14 shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                    {timeFmt.format(occ.date)}
+                  </span>
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {occ.taskName}
+                  </span>
+                </button>
+              </motion.li>
+            ))}
+          </motion.ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Up to 3 density dots, then a "+n" count for busier days. */
+function DensityDots({ count, selected }: { count: number; selected?: boolean }) {
+  const dots = Math.min(count, 3)
+  return (
+    <span className="flex items-center gap-0.5" data-testid="calendar-density">
+      {Array.from({ length: dots }, (_, i) => (
+        <span
+          key={i}
+          className={cn("h-1 w-1 rounded-full", selected ? "bg-primary-foreground" : "bg-blue-500")}
+          aria-hidden="true"
+        />
+      ))}
+      {count > 3 && (
+        <span
+          className={cn(
+            "text-[9px] leading-none",
+            selected ? "text-primary-foreground/80" : "text-muted-foreground"
+          )}
+        >
+          +{count - 3}
+        </span>
+      )}
+    </span>
+  )
+}

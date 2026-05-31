@@ -258,3 +258,57 @@ describe("evaluateGoal — abort", () => {
     expect(result.kind).toBe("aborted")
   })
 })
+
+describe("evaluateGoal — completedSubgoals", () => {
+  it("parses a valid completedSubgoals array of non-negative integers", async () => {
+    const complete = jest
+      .fn()
+      .mockResolvedValue('{"done": false, "reason": "wip", "completedSubgoals": [0, 2]}')
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+    })
+    if (result.kind !== "decided") fail("expected decided")
+    expect(result.completedSubgoals).toEqual([0, 2])
+  })
+
+  it("sanitises non-integer / negative entries out", async () => {
+    const complete = jest
+      .fn()
+      .mockResolvedValue(
+        '{"done": false, "reason": "x", "completedSubgoals": [1, -3, "a", 2.5, 4]}'
+      )
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+    })
+    if (result.kind !== "decided") fail("expected decided")
+    expect(result.completedSubgoals).toEqual([1, 4])
+  })
+
+  it("is undefined when the field is absent", async () => {
+    const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "done"}')
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+    })
+    if (result.kind !== "decided") fail("expected decided")
+    expect(result.completedSubgoals).toBeUndefined()
+  })
+
+  it("is undefined when the field is malformed (not an array)", async () => {
+    const complete = jest
+      .fn()
+      .mockResolvedValue('{"done": false, "reason": "x", "completedSubgoals": "nope"}')
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "x",
+      client: mockClient(complete),
+    })
+    if (result.kind !== "decided") fail("expected decided")
+    expect(result.completedSubgoals).toBeUndefined()
+  })
+})

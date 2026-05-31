@@ -113,6 +113,22 @@ interface Props {
    * dev-tool ones. Each field falls back to the generic chat copy when omitted.
    */
   override?: EmptyStateOverride
+  /**
+   * Suppress the generic dev-tool "Try a prompt" starter cards. The mobile home
+   * welcome sets this to keep the screen minimal (the desktop welcome leaves it
+   * unset, so nothing changes there).
+   */
+  hideSamples?: boolean
+  /**
+   * Rendered above the greeting — the mobile home injects an active-runs card +
+   * search bar here. Hidden when omitted.
+   */
+  headerExtraSlot?: ReactNode
+  /**
+   * Rendered between the composer/prompts and the sample cards — the mobile
+   * home injects its customizable quick-action grid here. Hidden when omitted.
+   */
+  quickActionsSlot?: ReactNode
 }
 
 const GROUP_HEADING_CLASS = "mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
@@ -129,6 +145,9 @@ export function EmptyChatState({
   onResumeSession,
   characterSamples,
   override,
+  hideSamples,
+  headerExtraSlot,
+  quickActionsSlot,
 }: Props) {
   const t = useTranslations("chat.empty")
   const format = useFormatter()
@@ -164,6 +183,13 @@ export function EmptyChatState({
         animate="animate"
         variants={STAGGER_CONTAINER}
       >
+        {/* Mobile home injects an active-runs card + search bar above the greeting. */}
+        {headerExtraSlot ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD}>
+            {headerExtraSlot}
+          </motion.div>
+        ) : null}
+
         {/* Header */}
         <motion.div
           className="flex flex-col items-center gap-3 text-center"
@@ -180,6 +206,13 @@ export function EmptyChatState({
         {composerSlot ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
             {composerSlot}
+          </motion.div>
+        ) : null}
+
+        {/* Mobile home customizable quick-action grid. */}
+        {quickActionsSlot ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD}>
+            {quickActionsSlot}
           </motion.div>
         ) : null}
 
@@ -245,39 +278,43 @@ export function EmptyChatState({
           </motion.div>
         ) : null}
 
-        {/* Try a prompt — dev-tool starters (or surface-specific overrides) */}
-        <motion.div className="w-full" variants={STAGGER_CHILD}>
-          <h3 className={GROUP_HEADING_CLASS}>{samplesHeading}</h3>
-          <motion.div
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-            variants={STAGGER_CONTAINER}
-          >
-            {starters.map(({ key, icon: Icon, title, prompt }) => {
-              return (
-                <motion.div key={key} variants={STAGGER_CHILD}>
-                  <Card
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onUseSample(prompt)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        onUseSample(prompt)
-                      }
-                    }}
-                    className={`flex h-full cursor-pointer flex-col gap-0 p-4 text-left ${INTERACTIVE_CARD_CLASS}`}
-                  >
-                    <div className="mb-2 flex items-center gap-2">
-                      <Icon className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{title}</span>
-                    </div>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{prompt}</p>
-                  </Card>
-                </motion.div>
-              )
-            })}
+        {/* Try a prompt — dev-tool starters (or surface-specific overrides).
+            Suppressed on the mobile home (`hideSamples`) and when there are no
+            starters to show. */}
+        {!hideSamples && starters.length > 0 ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD}>
+            <h3 className={GROUP_HEADING_CLASS}>{samplesHeading}</h3>
+            <motion.div
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+              variants={STAGGER_CONTAINER}
+            >
+              {starters.map(({ key, icon: Icon, title, prompt }) => {
+                return (
+                  <motion.div key={key} variants={STAGGER_CHILD}>
+                    <Card
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onUseSample(prompt)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          onUseSample(prompt)
+                        }
+                      }}
+                      className={`flex h-full cursor-pointer flex-col gap-0 p-4 text-left ${INTERACTIVE_CARD_CLASS}`}
+                    >
+                      <div className="mb-2 flex items-center gap-2">
+                        <Icon className="size-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{title}</span>
+                      </div>
+                      <p className="line-clamp-2 text-xs text-muted-foreground">{prompt}</p>
+                    </Card>
+                  </motion.div>
+                )
+              })}
+            </motion.div>
           </motion.div>
-        </motion.div>
+        ) : null}
 
         {/* Continue — recent sessions */}
         {showRecents ? (

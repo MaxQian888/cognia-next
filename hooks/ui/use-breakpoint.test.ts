@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 import { act, renderHook } from "@testing-library/react"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { useBreakpoint } from "./use-breakpoint"
 
 interface MQ {
@@ -67,6 +69,20 @@ function installMatchMedia(width: number): {
   }
 }
 
+function setCapacitorNative(on: boolean) {
+  if (on) {
+    ;(window as { Capacitor?: { isNativePlatform: () => boolean } }).Capacitor = {
+      isNativePlatform: () => true,
+    }
+  } else {
+    delete (window as { Capacitor?: unknown }).Capacitor
+  }
+}
+
+afterEach(() => {
+  setCapacitorNative(false)
+})
+
 describe("useBreakpoint", () => {
   it("returns 'mobile' for viewports < 768px", () => {
     installMatchMedia(400)
@@ -96,6 +112,19 @@ describe("useBreakpoint", () => {
     expect(result.current).toBe("mobile")
     act(() => setWidth(1200))
     expect(result.current).toBe("desktop")
+  })
+
+  it("pins to 'mobile' on a native mobile shell even at desktop width", () => {
+    installMatchMedia(1440)
+    setCapacitorNative(true)
+    const { result } = renderHook(() => useBreakpoint())
+    expect(result.current).toBe("mobile")
+  })
+
+  it("renders the 'desktop' server snapshot during SSR", () => {
+    installMatchMedia(400) // narrow viewport, but SSR must ignore it
+    const Probe = () => useBreakpoint()
+    expect(renderToStaticMarkup(createElement(Probe))).toBe("desktop")
   })
 
   it("removes both media-query listeners on unmount", () => {

@@ -27,6 +27,7 @@ import type { LucideIcon } from "lucide-react"
 import { arrayMove } from "@dnd-kit/sortable"
 
 import type { Platform } from "@/hooks/use-platform"
+import { partitionByLayout } from "@/lib/shell/layout-partition"
 import { SIDEBAR_NAV_META, type SidebarLayout, type SidebarNavMeta } from "@/types/shell/sidebar"
 
 /** id → rail icon. Must cover every id in `SIDEBAR_NAV_META`. */
@@ -88,29 +89,7 @@ export function resolveSidebarLayout(
   catalog: SidebarCatalogItem[],
   layout: SidebarLayout
 ): ResolvedSidebar {
-  const byId = new Map(catalog.map((item) => [item.id, item]))
-
-  const seen = new Set<string>()
-  const pinned: SidebarCatalogItem[] = []
-  for (const id of layout.pinned) {
-    if (seen.has(id)) continue
-    const item = byId.get(id)
-    if (!item) continue
-    seen.add(id)
-    pinned.push(item)
-  }
-
-  const hiddenIds = new Set(layout.hidden.filter((id) => byId.has(id) && !seen.has(id)))
-
-  const hidden: SidebarCatalogItem[] = []
-  const overflow: SidebarCatalogItem[] = []
-  for (const item of catalog) {
-    if (seen.has(item.id)) continue
-    if (hiddenIds.has(item.id)) hidden.push(item)
-    else overflow.push(item)
-  }
-
-  return { pinned, overflow, hidden }
+  return partitionByLayout(catalog, layout)
 }
 
 /**

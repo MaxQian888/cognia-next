@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl"
 import {
   MenuIcon,
   MoreVerticalIcon,
+  SearchIcon,
   SettingsIcon,
   UserPlusIcon,
   UsersIcon,
@@ -47,6 +48,10 @@ import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
+import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
+import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
+import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
+import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -90,9 +95,11 @@ export function AppShellMobile() {
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
+  const { isSectionHidden } = useMobileHomeLayout()
 
   const [navOpen, setNavOpen] = useState(false)
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
@@ -308,6 +315,18 @@ export function AppShellMobile() {
         />
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="touch-target"
+            aria-label={tShell("search")}
+            onClick={() => setSearchOpen(true)}
+            data-testid="mobile-search-trigger"
+          >
+            <SearchIcon className="size-5" />
+          </Button>
+
           {isTeamSession ? (
             <Button
               type="button"
@@ -383,11 +402,20 @@ export function AppShellMobile() {
             onCreate={handleNewDirect}
             onUseSample={(text) => void send(text)}
             onOpenSettings={openSettings}
-            onNavigate={(href) => router.push(href)}
-            recentSessions={recentSessions}
+            recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
             onResumeSession={handleSwitchToSession}
             composerRef={composerRef}
             mobileMentionMembers={isTeamSession ? teamMembers : undefined}
+            welcomeExtras={{
+              hideSamples: true,
+              header: <MobileActiveRunsCard />,
+              quickActions: (
+                <MobileQuickActions
+                  onNewChat={handleNewDirect}
+                  onSearch={() => setSearchOpen(true)}
+                />
+              ),
+            }}
           />
         )}
       </main>
@@ -453,6 +481,14 @@ export function AppShellMobile() {
         onRespond={(decision) =>
           pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
         }
+      />
+
+      <MobileCommandPalette
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onNewChat={handleNewDirect}
+        onSelectSession={handleSwitchToSession}
+        onOpenSettings={openSettings}
       />
     </div>
   )

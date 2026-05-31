@@ -32,6 +32,7 @@ import {
   Magnet as SnapIcon,
   Download as ExportIcon,
   Upload as ImportIcon,
+  History as HistoryIcon,
   MoreVertical as MoreIcon,
 } from "lucide-react"
 
@@ -71,8 +72,9 @@ export function MobileEditorTopbar({
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
 
-  const { name, dirty, snapToGrid } = store(
+  const { id, name, dirty, snapToGrid } = store(
     useShallow((s: EditorState) => ({
+      id: s.baseWorkflow.id,
       name: s.baseWorkflow.name,
       dirty: s.dirty,
       snapToGrid: s.snapToGrid,
@@ -285,6 +287,13 @@ export function MobileEditorTopbar({
           <DropdownMenuItem onSelect={handleToggleSnap}>
             <SnapIcon className="mr-2 size-4" aria-hidden="true" />
             {snapToGrid ? t("snapOn") : t("snapOff")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild data-testid="mobile-editor-run-history">
+            <Link href={`/workflows/${encodeURIComponent(id)}/runs`}>
+              <HistoryIcon className="mr-2 size-4" aria-hidden="true" />
+              {t("runHistory")}
+            </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={handleExport}>

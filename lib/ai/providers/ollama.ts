@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { isTauri } from "@/lib/platform/detect"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type {
   OllamaModel,
@@ -12,13 +13,6 @@ import type {
   OllamaRunningModel,
   OllamaModelInfo,
 } from "@/types/provider/ollama"
-
-/**
- * Check if running in Tauri environment
- */
-function isInTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
 
 /**
  * Default Ollama base URL
@@ -31,7 +25,7 @@ export const DEFAULT_OLLAMA_URL = "http://localhost:11434"
 export async function getOllamaStatus(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaServerStatus> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<OllamaServerStatus>("ollama_get_status", { baseUrl })
   }
 
@@ -74,7 +68,7 @@ export async function getOllamaStatus(
 export async function listOllamaModels(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaModel[]> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<OllamaModel[]>("ollama_list_models", { baseUrl })
   }
 
@@ -97,7 +91,7 @@ export async function showOllamaModel(
   baseUrl: string,
   modelName: string
 ): Promise<OllamaModelInfo> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<OllamaModelInfo>("ollama_show_model", { baseUrl, modelName })
   }
 
@@ -127,7 +121,7 @@ export async function pullOllamaModel(
 ): Promise<{ success: boolean; unsubscribe: () => void }> {
   let unlisten: UnlistenFn | undefined
 
-  if (isInTauri()) {
+  if (isTauri()) {
     // Listen for progress events
     if (onProgress) {
       unlisten = await listen<OllamaPullProgress>("ollama-pull-progress", (event) => {
@@ -204,7 +198,7 @@ export async function pullOllamaModel(
  * Delete a model from Ollama
  */
 export async function deleteOllamaModel(baseUrl: string, modelName: string): Promise<boolean> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<boolean>("ollama_delete_model", { baseUrl, modelName })
   }
 
@@ -229,7 +223,7 @@ export async function deleteOllamaModel(baseUrl: string, modelName: string): Pro
 export async function listRunningModels(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaRunningModel[]> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<OllamaRunningModel[]>("ollama_list_running", { baseUrl })
   }
 
@@ -253,7 +247,7 @@ export async function copyOllamaModel(
   source: string,
   destination: string
 ): Promise<boolean> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<boolean>("ollama_copy_model", { baseUrl, source, destination })
   }
 
@@ -283,7 +277,7 @@ export async function generateOllamaEmbedding(
   if (!baseUrl) throw new Error("baseURL is required")
   if (!model) throw new Error("modelId is required")
 
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<number[]>("ollama_generate_embedding", { baseUrl, model, input })
   }
 
@@ -338,7 +332,7 @@ export async function generateOllamaEmbedding(
  * Stop/unload a running model
  */
 export async function stopOllamaModel(baseUrl: string, modelName: string): Promise<boolean> {
-  if (isInTauri()) {
+  if (isTauri()) {
     return invoke<boolean>("ollama_stop_model", { baseUrl, modelName })
   }
 

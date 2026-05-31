@@ -16,6 +16,8 @@
  * - Native (Tauri-local sqlite-vec)
  */
 
+import { isTauri } from "@/lib/platform/detect"
+
 // Embedding utilities
 export * from "./embedding"
 
@@ -89,7 +91,7 @@ export { verifyVectorBackendReadiness } from "./readiness"
  * breakdown panel is purely informational.
  */
 export async function getNativeVectorStoreSize(): Promise<number> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return 0
+  if (!isTauri()) return 0
   try {
     const { invoke } = await import("@tauri-apps/api/core")
     return await invoke<number>("vector_get_store_size", {})

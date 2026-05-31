@@ -17,8 +17,9 @@
  * in later phases of the plan (~/.claude/plans/vscode-snug-squid.md).
  */
 
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import { isTauri } from "@/lib/platform/detect"
 import { loggers } from "@/lib/logging"
+import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 import {
   configureRpcDispatcher,
   subscribeToVscodeEvents,
@@ -147,7 +148,7 @@ async function getInvoke(): Promise<InvokeFn> {
  * only). Browser-mode users see a "desktop required" stub instead.
  */
 export function isVscodeHostAvailable(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+  return isTauri()
 }
 
 /**

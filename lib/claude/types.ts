@@ -1036,6 +1036,60 @@ export interface AppSettings {
    */
   sidebarLayout?: import("@/types/shell/sidebar").SidebarLayout
   /**
+   * Customization of the mobile home (chat welcome): the ordered quick-action
+   * grid + which home sections are hidden. Lives in settings JSON (same pattern
+   * as `sidebarLayout`) so it persists without a Dexie migration. See
+   * `@/types/shell/mobile-home` for the model + default.
+   */
+  mobileHomeLayout?: import("@/types/shell/mobile-home").MobileHomeLayout
+  /**
+   * Customization of the mobile bottom tab bar: tab order, hidden tabs, and the
+   * launch landing tab. Lives in settings JSON (same pattern as `sidebarLayout`)
+   * — no Dexie migration. See `@/types/shell/mobile-tabs` for the model.
+   */
+  mobileTabLayout?: import("@/types/shell/mobile-tabs").MobileTabLayout
+  /** Row density for the mobile workflow library list. Defaults to "comfortable". */
+  mobileWorkflowView?: "compact" | "comfortable"
+  /**
+   * Customization of the `/discover` category navigation: which categories are
+   * pinned (explicit order) and which are hidden. Reuses the `SidebarLayout`
+   * `{ pinned, hidden }` shape (ids are `DiscoverCategoryId`) so the rail and
+   * the discover page share one partition algorithm + customizer UI. Lives in
+   * settings JSON (same pattern as `sidebarLayout`) — no Dexie migration.
+   */
+  discoverLayout?: import("@/types/shell/sidebar").SidebarLayout
+  /**
+   * Per-category view mode for the `/discover` grid (`grid` | `list` |
+   * `compact`). Keyed by `DiscoverCategoryId` (plus the `favorites`
+   * pseudo-category). Cross-device synced via settings JSON — unlike the
+   * workflow library toggle, which is localStorage-only.
+   */
+  discoverViewByCategory?: Partial<
+    Record<string, import("@/lib/discover/categories").DiscoverViewMode>
+  >
+  /**
+   * Favorited discover items, stored as `${kind}:${id}` keys (e.g.
+   * `character:abc`). Surfaced as the top "Favorites" pseudo-category and a
+   * per-category "favorites" filter. Same JSON-array pattern as
+   * `pinnedWorkflowIds` — no Dexie migration.
+   */
+  discoverFavorites?: string[]
+  /**
+   * Active view mode for the `/scheduler` dashboard (`overview` | `calendar` |
+   * `timeline`). `overview` is the default static dashboard; `calendar` shows a
+   * month grid of projected runs; `timeline` shows a day-grouped agenda. Lives
+   * in settings JSON (same pattern as `discoverViewByCategory`) so it syncs
+   * cross-device without a Dexie migration.
+   */
+  schedulerDashboardView?: "overview" | "calendar" | "timeline"
+  /**
+   * Active view mode for the `/goals` console open-goals grid (`grid` |
+   * `list`). Lives in settings JSON (same pattern as `schedulerDashboardView`)
+   * so the chosen layout follows the user across devices without a Dexie
+   * migration.
+   */
+  goalConsoleView?: "grid" | "list"
+  /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
    * count of `inboundLedger` rows newer than this timestamp. `0` / unset

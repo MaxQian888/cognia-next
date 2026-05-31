@@ -10,6 +10,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+
+import { isTauri } from "@/lib/platform/detect"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -227,8 +229,7 @@ export function LocalModelManager(props: LocalModelManagerProps): React.ReactEle
  * where the Rust side isn't reachable — the parent then hides the row.
  */
 export function buildTauriModelBridge(): OcrModelBridge | null {
-  if (typeof window === "undefined") return null
-  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
+  if (!isTauri()) return null
   // Late-import the Tauri SDK so the static export's tree-shaker can drop
   // it when the binding isn't reachable.
   type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>

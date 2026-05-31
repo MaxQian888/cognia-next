@@ -43,6 +43,11 @@ const mockUseLiveQuery = _useLiveQuery as jest.Mock
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
+// Drafts badge subscriber — isolate the sidebar from the draft queue.
+jest.mock("@/hooks/connectors/use-pending-drafts", () => ({
+  usePendingDrafts: () => [],
+}))
+
 jest.mock("next/link", () => ({
   __esModule: true,
   default: ({

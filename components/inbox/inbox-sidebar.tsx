@@ -18,7 +18,13 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CircleIcon, ChevronDownIcon, ChevronRightIcon, InboxIcon } from "lucide-react"
+import {
+  CircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  InboxIcon,
+  FileTextIcon,
+} from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -30,7 +36,9 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { usePendingDrafts } from "@/hooks/connectors/use-pending-drafts"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -72,8 +80,10 @@ export function InboxSidebarContent({
   activePlatformKind,
 }: InboxSidebarProps) {
   const t = useTranslations("inbox.sidebar")
+  const tDraft = useTranslations("inbox.draftCenter")
   const router = useRouter()
   const searchParams = useSearchParams()
+  const draftCount = usePendingDrafts().length
 
   const currentViewMode: InboxViewMode = ALL_VIEW_MODES.includes(view as InboxViewMode)
     ? (view as InboxViewMode)
@@ -123,6 +133,23 @@ export function InboxSidebarContent({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <Link
+          href="/inbox/drafts"
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          data-testid="inbox-drafts-link"
+        >
+          <FileTextIcon className="size-3.5 shrink-0" />
+          <span className="flex-1">{tDraft("sidebarLabel")}</span>
+          {draftCount > 0 && (
+            <Badge
+              variant="warning"
+              className="h-4 px-1 text-[10px] leading-none"
+              data-testid="inbox-drafts-count"
+            >
+              {draftCount}
+            </Badge>
+          )}
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>

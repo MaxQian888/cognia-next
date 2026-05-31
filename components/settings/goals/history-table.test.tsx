@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createGoal } from "@/lib/db/goals"
 import type { Goal } from "@/types/goal"
@@ -52,5 +52,41 @@ describe("GoalsHistoryTable", () => {
     })
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("filters rows by the search query", async () => {
+    await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha objective" }))
+    await createGoal(buildGoal({ id: "g_b", safeObjective: "beta objective" }))
+    render(<GoalsHistoryTable />)
+    await waitFor(() => expect(screen.getAllByTestId("goals-history-row")).toHaveLength(2))
+    fireEvent.change(screen.getByTestId("goals-history-search"), { target: { value: "alpha" } })
+    await waitFor(() => expect(screen.getAllByTestId("goals-history-row")).toHaveLength(1))
+    expect(screen.getByText("alpha objective")).toBeInTheDocument()
+  })
+
+  it("shows a no-results state when filters exclude everything", async () => {
+    await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha" }))
+    render(<GoalsHistoryTable />)
+    await waitFor(() => expect(screen.getByTestId("goals-history-table")).toBeInTheDocument())
+    fireEvent.change(screen.getByTestId("goals-history-search"), { target: { value: "zzzzz" } })
+    await waitFor(() => expect(screen.getByTestId("goals-history-no-results")).toBeInTheDocument())
+  })
+
+  it("opens the delete confirm and removes the goal", async () => {
+    await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha" }))
+    render(<GoalsHistoryTable />)
+    await waitFor(() => expect(screen.getByTestId("goals-history-delete")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("goals-history-delete"))
+    fireEvent.click(await screen.findByTestId("goals-history-delete-confirm"))
+    await waitFor(() => expect(screen.getByTestId("goals-history-empty")).toBeInTheDocument())
+  })
+
+  it("toggles sort direction", async () => {
+    await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha" }))
+    render(<GoalsHistoryTable />)
+    const dirBtn = await screen.findByTestId("goals-history-dir")
+    fireEvent.click(dirBtn)
+    // Still renders the table after flipping direction.
+    expect(screen.getByTestId("goals-history-table")).toBeInTheDocument()
   })
 })

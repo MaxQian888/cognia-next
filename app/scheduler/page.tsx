@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
@@ -32,6 +33,7 @@ import { SchedulerBulkToolbar } from "@/components/scheduler/scheduler-bulk-tool
 import { SchedulerUpcomingRail } from "@/components/scheduler/scheduler-upcoming-rail"
 import { QuickWorkflowTriggerDialog } from "@/components/scheduler/dialogs/quick-workflow-trigger-dialog"
 import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
+import { TaskDependencyDialog } from "@/components/scheduler/task-dependency-dialog"
 import { toUnifiedFromTaskExecution } from "@/hooks/scheduler/use-unified-recent-runs"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
@@ -125,6 +127,7 @@ export default function SchedulerPage() {
     () => false
   )
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
+  const prefersReducedMotion = useReducedMotion()
 
   // --- Dialog / sheet state ---
   const [showCreateSheet, setShowCreateSheet] = useState(false)
@@ -146,6 +149,7 @@ export default function SchedulerPage() {
   const [selectedRun, setSelectedRun] = useState<UnifiedExecutionRun | null>(null)
   const [showQuickWorkflowDialog, setShowQuickWorkflowDialog] = useState(false)
   const [showBackupDialog, setShowBackupDialog] = useState(false)
+  const [showDependencyDialog, setShowDependencyDialog] = useState(false)
 
   // Derived
   const inspectTask = useMemo(
@@ -447,35 +451,51 @@ export default function SchedulerPage() {
   return (
     <SidebarProvider
       data-bg-target="chat"
-      className="flex h-full min-h-0 w-full flex-1 overflow-hidden"
+      className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden"
     >
       {/* Mobile detail view — full-screen push. Supports both the app-kind
           rich path (selectedTask) and any unified-kind path
           (selectedUnifiedItem) so users on mobile aren't dead-ended on
           workflow / backup / plugin / connector selections. */}
-      {isMobile && mobileView === "detail" && (selectedTask || selectedUnifiedItem) && (
-        <SchedulerMobileDetailView
-          task={selectedTask ?? undefined}
-          executions={executions}
-          unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
-          isLoading={isLoading}
-          onBack={() => {
-            setMobileView("list")
-            selectTask(null)
-            setSelectedUnifiedItem(null)
-          }}
-          onPause={handlePause}
-          onResume={handleResume}
-          onRunNow={handleRunNow}
-          onDelete={setDeleteTaskId}
-          onEdit={() => setShowEditSheet(true)}
-          onUnifiedRunNow={dispatchUnified("runNow")}
-          onUnifiedPause={dispatchUnified("pause")}
-          onUnifiedResume={dispatchUnified("resume")}
-          onUnifiedDelete={dispatchUnified("delete")}
-          onSelectRun={setSelectedRun}
-        />
-      )}
+      <AnimatePresence>
+        {isMobile && mobileView === "detail" && (selectedTask || selectedUnifiedItem) && (
+          <motion.div
+            key="mobile-detail"
+            data-testid="scheduler-mobile-detail-shell"
+            className="absolute inset-0 z-30 bg-background"
+            {...(prefersReducedMotion
+              ? {}
+              : {
+                  initial: { x: "100%" },
+                  animate: { x: 0 },
+                  exit: { x: "100%" },
+                  transition: { duration: 0.22, ease: "easeOut" },
+                })}
+          >
+            <SchedulerMobileDetailView
+              task={selectedTask ?? undefined}
+              executions={executions}
+              unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
+              isLoading={isLoading}
+              onBack={() => {
+                setMobileView("list")
+                selectTask(null)
+                setSelectedUnifiedItem(null)
+              }}
+              onPause={handlePause}
+              onResume={handleResume}
+              onRunNow={handleRunNow}
+              onDelete={setDeleteTaskId}
+              onEdit={() => setShowEditSheet(true)}
+              onUnifiedRunNow={dispatchUnified("runNow")}
+              onUnifiedPause={dispatchUnified("pause")}
+              onUnifiedResume={dispatchUnified("resume")}
+              onUnifiedDelete={dispatchUnified("delete")}
+              onSelectRun={setSelectedRun}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Desktop + mobile list layout */}
       <div
@@ -549,49 +569,74 @@ export default function SchedulerPage() {
           />
 
           <div className="flex-1 min-h-0 overflow-auto">
-            {selectedTask ? (
-              <SchedulerErrorBoundary panelName="detail">
-                <TaskDetailView
-                  task={selectedTask}
-                  executions={executions}
-                  isLoading={isLoading}
-                  onPause={handlePause}
-                  onResume={handleResume}
-                  onRunNow={handleRunNow}
-                  onDelete={setDeleteTaskId}
-                  onEdit={() => setShowEditSheet(true)}
-                  onCancelPluginExecution={cancelPluginExecution}
-                  isPluginExecutionActive={isPluginExecutionActive}
-                  onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
-                />
-              </SchedulerErrorBoundary>
-            ) : selectedUnifiedItem ? (
-              <SchedulerErrorBoundary panelName="detail">
-                <UnifiedTaskDetailView
-                  item={selectedUnifiedItem}
-                  onRunNow={dispatchUnified("runNow")}
-                  onPause={dispatchUnified("pause")}
-                  onResume={dispatchUnified("resume")}
-                  onDelete={dispatchUnified("delete")}
-                  onSelectRun={setSelectedRun}
-                />
-              </SchedulerErrorBoundary>
-            ) : (
-              <SchedulerErrorBoundary panelName="dashboard">
-                <SchedulerDashboardView
-                  statistics={statistics}
-                  activeTasks={activeTasks}
-                  pausedTasks={pausedTasks}
-                  upcomingTasks={upcomingTasks}
-                  recentExecutions={recentExecutions}
-                  schedulerStatus={schedulerStatus}
-                  onSelectTask={handleSelectTask}
-                  countsByKind={countsByKind}
-                  activeCountsByKind={activeCountsByKind}
-                  onSelectRun={setSelectedRun}
-                />
-              </SchedulerErrorBoundary>
-            )}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={
+                  selectedTask
+                    ? `task:${selectedTask.id}`
+                    : selectedUnifiedItem
+                      ? `unified:${selectedUnifiedItem.unifiedId}`
+                      : "dashboard"
+                }
+                className="h-full"
+                {...(prefersReducedMotion
+                  ? {}
+                  : {
+                      initial: { opacity: 0 },
+                      animate: { opacity: 1 },
+                      exit: { opacity: 0 },
+                      transition: { duration: 0.15 },
+                    })}
+              >
+                {selectedTask ? (
+                  <SchedulerErrorBoundary panelName="detail">
+                    <TaskDetailView
+                      task={selectedTask}
+                      executions={executions}
+                      isLoading={isLoading}
+                      onPause={handlePause}
+                      onResume={handleResume}
+                      onRunNow={handleRunNow}
+                      onDelete={setDeleteTaskId}
+                      onEdit={() => setShowEditSheet(true)}
+                      onCancelPluginExecution={cancelPluginExecution}
+                      isPluginExecutionActive={isPluginExecutionActive}
+                      onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
+                      allTasks={tasks}
+                      onSelectTask={handleSelectTask}
+                      onOpenDependencyGraph={() => setShowDependencyDialog(true)}
+                    />
+                  </SchedulerErrorBoundary>
+                ) : selectedUnifiedItem ? (
+                  <SchedulerErrorBoundary panelName="detail">
+                    <UnifiedTaskDetailView
+                      item={selectedUnifiedItem}
+                      onRunNow={dispatchUnified("runNow")}
+                      onPause={dispatchUnified("pause")}
+                      onResume={dispatchUnified("resume")}
+                      onDelete={dispatchUnified("delete")}
+                      onSelectRun={setSelectedRun}
+                    />
+                  </SchedulerErrorBoundary>
+                ) : (
+                  <SchedulerErrorBoundary panelName="dashboard">
+                    <SchedulerDashboardView
+                      statistics={statistics}
+                      activeTasks={activeTasks}
+                      pausedTasks={pausedTasks}
+                      upcomingTasks={upcomingTasks}
+                      recentExecutions={recentExecutions}
+                      schedulerStatus={schedulerStatus}
+                      onSelectTask={handleSelectTask}
+                      tasks={tasks}
+                      countsByKind={countsByKind}
+                      activeCountsByKind={activeCountsByKind}
+                      onSelectRun={setSelectedRun}
+                    />
+                  </SchedulerErrorBoundary>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </SidebarInset>
 
@@ -678,6 +723,14 @@ export default function SchedulerPage() {
           if (!open) setSelectedRun(null)
         }}
         run={selectedRun}
+      />
+
+      <TaskDependencyDialog
+        open={showDependencyDialog}
+        onOpenChange={setShowDependencyDialog}
+        tasks={tasks}
+        focusTaskId={selectedTask?.id}
+        onSelectTask={handleSelectTask}
       />
 
       <SchedulerBulkToolbar

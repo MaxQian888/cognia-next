@@ -13,7 +13,20 @@
         "history": "History",
         "templates": "Templates",
         "defaults": "Defaults",
-        "tracker": "Tracker"
+        "tracker": "Tracker",
+        "analytics": "Analytics"
+      },
+      "stats": {
+        "active": "Active",
+        "paused": "Paused",
+        "done": "Completed",
+        "avgTurns": "Avg turns",
+        "tokenSpend": "Token spend"
+      },
+      "view": {
+        "grid": "Grid",
+        "list": "List",
+        "aria": "Open-goals view mode"
       }
     },
     "card": {
@@ -79,11 +92,20 @@
       "user_paused": "User paused",
       "user_resumed": "User resumed",
       "user_stopped": "User stopped",
-      "config_updated": "Config updated"
+      "config_updated": "Config updated",
+      "subgoals_generated": "Generated subgoals"
     },
     "subgoals": {
-      "title": "Subgoals — Phase 2",
-      "body": "Automatic subgoal decomposition is deferred to a later release. For now the goal runs as a single objective; the judge decides when it's complete."
+      "title": "Subgoals",
+      "body": "Automatic subgoal decomposition is deferred to a later release. For now the goal runs as a single objective; the judge decides when it's complete.",
+      "description": "Break the objective into a checklist the agent works through.",
+      "generate": "Generate checklist",
+      "regenerate": "Regenerate",
+      "generating": "Generating…",
+      "empty": "No subgoals yet. Generate a checklist from the objective.",
+      "error": "Couldn't generate a checklist. Try again.",
+      "progress": "{done}/{total} complete",
+      "unavailable": "Subgoal generation needs a model with an API key available in the app."
     },
     "config": {
       "maxTurns": "Max turns",
@@ -165,7 +187,23 @@
       "turns": "Turns",
       "tokens": "Tokens",
       "created": "Created",
-      "empty": "No goals yet. Use the /goal command in a chat to start one."
+      "empty": "No goals yet. Use the /goal command in a chat to start one.",
+      "search": "Search objectives",
+      "filterStatus": "Status",
+      "all": "All",
+      "sortBy": "Sort by",
+      "sortCreated": "Created",
+      "sortTurns": "Turns",
+      "sortTokens": "Tokens",
+      "dirAsc": "Ascending",
+      "dirDesc": "Descending",
+      "open": "Open",
+      "delete": "Delete",
+      "deleteTitle": "Delete goal?",
+      "deleteBody": "This permanently removes the goal and its activity log.",
+      "deleteConfirm": "Delete",
+      "cancel": "Cancel",
+      "noResults": "No goals match your filters."
     },
     "commands": {
       "needSession": "Start a chat session first — /goal operates inside an active session.",
@@ -179,6 +217,31 @@
       "resumed": "Goal resumed. The loop will continue on the next turn.",
       "stopped": "Goal stopped after {turns} turn(s).",
       "objectiveUpdated": "Objective updated. The model will be told on the next turn."
+    },
+    "analytics": {
+      "title": "Analytics",
+      "empty": "No goals yet — analytics will appear once you start running goals.",
+      "completionRate": "Completion rate",
+      "avgTurns": "Avg turns",
+      "avgTokens": "Avg tokens",
+      "judgeFailureRate": "Judge failure rate",
+      "totalGoals": "Total goals",
+      "tokenSpend": "Token spend",
+      "statusDistribution": "Status distribution",
+      "goalsOverTime": "Goals created",
+      "tokensOverTime": "Token spend over time"
+    },
+    "quickCreate": {
+      "trigger": "New goal",
+      "title": "New goal",
+      "description": "Start a new goal in a fresh chat. The agent will work toward it automatically.",
+      "templateLabel": "Template",
+      "templatePlaceholder": "Pick a template…",
+      "templateNone": "No template — write my own",
+      "objectiveLabel": "Objective",
+      "objectivePlaceholder": "Describe what you want the agent to achieve…",
+      "cancel": "Cancel",
+      "create": "Create goal"
     }
   },
   "featureShell": {
@@ -1588,7 +1651,8 @@
       "ocrProviders": "OCR providers",
       "workflowTemplates": "Workflow templates",
       "twinDrafts": "Twin drafts",
-      "twinIngest": "Twin ingest"
+      "twinIngest": "Twin ingest",
+      "favorites": "Favorites"
     },
     "groups": {
       "agents": "Agents",
@@ -1706,10 +1770,39 @@
         "all": "All",
         "installed": "Installed",
         "enabled": "Enabled",
-        "builtin": "Built-in"
+        "builtin": "Built-in",
+        "favorites": "Favorites"
       }
     },
-    "connectorInstanceCount": "{count, plural, =0 {No instances} =1 {1 configured} other {# configured}}"
+    "connectorInstanceCount": "{count, plural, =0 {No instances} =1 {1 configured} other {# configured}}",
+    "emptyFavorites": "No favorites yet — tap the star on any item to pin it here.",
+    "view": {
+      "aria": "View mode",
+      "grid": "Grid",
+      "list": "List",
+      "compact": "Compact"
+    },
+    "favorite": {
+      "add": "Add to favorites",
+      "remove": "Remove from favorites"
+    },
+    "customize": {
+      "title": "Customize categories",
+      "description": "Pin the categories you use most; the rest stay in More. Drag to reorder, or hide categories you never use.",
+      "trigger": "Customize categories",
+      "restoreDefaults": "Restore defaults",
+      "pinned": "Pinned",
+      "more": "More",
+      "hidden": "Hidden",
+      "dragHint": "Drag to reorder",
+      "pin": "Pin",
+      "moveToMore": "Move to More",
+      "hideItem": "Hide",
+      "showItem": "Show",
+      "pinnedEmpty": "No pinned categories — everything is in More.",
+      "moreEmpty": "Nothing in More — every category is pinned or hidden.",
+      "hiddenEmpty": "Nothing hidden."
+    }
   },
   "import": {
     "dialog": {
@@ -2310,7 +2403,8 @@
       "network": "Network Proxy",
       "workflows": "Workflows",
       "goals": "Goals",
-      "conversation": "Conversation"
+      "conversation": "Conversation",
+      "discover": "Discover"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -2356,7 +2450,8 @@
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
-      "conversation": "Auto titles and the conversation timeline minimap"
+      "conversation": "Auto titles and the conversation timeline minimap",
+      "discover": "Pin, reorder, or hide the Discover categories."
     },
     "externalBridge": {
       "wikiIndex": {
@@ -9973,6 +10068,39 @@
       "empty": "Nothing scheduled",
       "ariaLabel": "Upcoming and recent runs"
     },
+    "dashboardView": {
+      "aria": "Dashboard view",
+      "overview": "Overview",
+      "calendar": "Calendar",
+      "timeline": "Timeline"
+    },
+    "calendar": {
+      "aria": "Scheduled runs calendar",
+      "prevMonth": "Previous month",
+      "nextMonth": "Next month",
+      "today": "Today",
+      "noRuns": "No runs scheduled this day",
+      "dayAria": "Day {day}, {count} scheduled run(s)"
+    },
+    "timeline": {
+      "aria": "Upcoming runs timeline",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "empty": "No upcoming runs in the next two weeks",
+      "runsCount": "{count} run(s)"
+    },
+    "dependencyGraph": {
+      "title": "Dependencies",
+      "openFullGraph": "Full graph",
+      "fullGraphTitle": "Task dependency graph",
+      "fullGraphDescription": "Tasks linked by their run-order dependencies.",
+      "dependsOn": "Depends on",
+      "requiredBy": "Required by",
+      "empty": "No dependency links yet",
+      "cycleWarning": "A dependency cycle was detected — highlighted in red.",
+      "nodeAria": "Task {name}, click to open",
+      "close": "Close"
+    },
     "mobile": {
       "fabCreateAria": "Create scheduled task",
       "statStripLabels": {
@@ -10591,7 +10719,24 @@
       "searchPlaceholder": "Search or run command…",
       "kbdHint": "Ctrl+K",
       "openMenus": "Open menus",
-      "alwaysOnTop": "Always on top"
+      "alwaysOnTop": "Always on top",
+      "back": "Go back",
+      "forward": "Go forward",
+      "layout": {
+        "title": "Customize Layout",
+        "customize": "Customize layout",
+        "toggleGuildRail": "Toggle Guild Rail",
+        "toggleSidebar": "Toggle Sidebar",
+        "toggleStatusBar": "Toggle Status Bar",
+        "toggleTerminal": "Toggle Terminal"
+      },
+      "commandCenter": {
+        "menuLabel": "Command center menu",
+        "recentSessions": "Recent Sessions",
+        "goToView": "Go to View",
+        "noRecent": "No recent sessions",
+        "untitled": "Untitled"
+      }
     },
     "menu": {
       "file": {
@@ -10688,6 +10833,19 @@
         "keyboardShortcutsClose": "Close",
         "documentation": "Documentation",
         "about": "About Cognia"
+      },
+      "terminal": {
+        "label": "Terminal",
+        "new": "New Terminal",
+        "togglePanel": "Toggle Terminal Panel",
+        "restartSidecar": "Restart Sidecar"
+      },
+      "run": {
+        "label": "Run",
+        "newWorkflowRun": "New Workflow Run",
+        "openScheduler": "Open Scheduler",
+        "agentTeams": "Agent Teams",
+        "killSwitch": "Automation Kill-Switch"
       },
       "shortcut": {
         "cmdOrCtrlN": "Ctrl+N",
@@ -13007,7 +13165,16 @@
       }
     },
     "tabBar": {
-      "unread": "{count} unread"
+      "unread": "{count} unread",
+      "customize": {
+        "title": "Customize tabs",
+        "rowDescription": "Reorder, hide, and pick your launch tab",
+        "description": "Drag to reorder the bottom tabs, hide the ones you don't need, and choose which tab opens on launch.",
+        "tabs": "Tabs",
+        "landing": "Launch tab",
+        "dragHint": "Drag to reorder",
+        "restoreDefaults": "Restore defaults"
+      }
     },
     "pair": {
       "title": "Connect to desktop",
@@ -13660,6 +13827,16 @@
       "pinned_added": "Pinned.",
       "pinned_removed": "Unpinned.",
       "graphViewerEmpty": "No nodes in this workflow.",
+      "swipe": {
+        "run": "Run",
+        "runQueued": "Queued {name}",
+        "favorite": "Pin",
+        "unfavorite": "Unpin"
+      },
+      "density": {
+        "compact": "Compact rows",
+        "comfortable": "Comfortable rows"
+      },
       "editor": {
         "back": "Back to workflows",
         "modeRead": "View",
@@ -13677,6 +13854,7 @@
         "fitView": "Fit to screen",
         "snapOn": "Snap to grid: on",
         "snapOff": "Snap to grid: off",
+        "runHistory": "Run history",
         "export": "Export JSON",
         "exported": "Workflow exported.",
         "import": "Import JSON",
@@ -13884,7 +14062,8 @@
       "memberSheetTitle": "Team members",
       "directSessionTitle": "Chat with {name}",
       "tabBarAria": "Main navigation",
-      "clearSearch": "Clear search"
+      "clearSearch": "Clear search",
+      "search": "Search"
     },
     "home": {
       "search": "Search chats…",
@@ -13897,7 +14076,61 @@
       "swipeUnpin": "Unpin",
       "swipeDelete": "Delete",
       "presenceStreaming": "Streaming",
-      "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}"
+      "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
+      "quickActions": "Quick actions",
+      "edit": "Edit",
+      "actions": {
+        "newChat": "New chat",
+        "search": "Search",
+        "workflows": "Workflows",
+        "discover": "Discover",
+        "inbox": "Inbox",
+        "twin": "Digital twin",
+        "agentTeams": "Agent teams",
+        "me": "Me"
+      },
+      "sections": {
+        "recents": "Recent chats",
+        "activeRuns": "Active runs"
+      },
+      "activeRuns": {
+        "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
+        "viewRuns": "View runs",
+        "empty": "No active runs"
+      },
+      "customize": {
+        "title": "Customize home",
+        "description": "Pick which quick actions and sections show on your home screen.",
+        "active": "On your home",
+        "activeEmpty": "No quick actions — add some below.",
+        "available": "Add actions",
+        "availableEmpty": "Every action is on your home.",
+        "sections": "Sections",
+        "dragHint": "Drag to reorder",
+        "add": "Add",
+        "remove": "Remove",
+        "restoreDefaults": "Restore defaults"
+      }
+    },
+    "search": {
+      "title": "Search",
+      "description": "Search chats, characters, and workflows, or run a quick action.",
+      "placeholder": "Search or jump to…",
+      "empty": "No results.",
+      "groups": {
+        "actions": "Actions",
+        "workflows": "Workflows",
+        "characters": "Characters",
+        "teams": "Teams",
+        "sessions": "Chats"
+      },
+      "actions": {
+        "newChat": "New chat",
+        "openSettings": "Open settings"
+      },
+      "titles": {
+        "chatWith": "Chat with {name}"
+      }
     },
     "settingsPanel": {
       "theme": "Theme",
@@ -16329,6 +16562,66 @@
       "conversationActions": "Conversation row actions",
       "composerActions": "Inbox composer actions",
       "draftActions": "Draft review actions"
+    },
+    "conversationRow": {
+      "noPreview": "No messages yet",
+      "draftCount": "{count, plural, =1 {1 draft} other {# drafts}}",
+      "draftCountAria": "{count, plural, =1 {1 pending draft} other {# pending drafts}}",
+      "openConversation": "Open conversation: {name}"
+    },
+    "draftCenter": {
+      "title": "Draft approvals",
+      "sidebarLabel": "Drafts",
+      "pendingCount": "{count, plural, =0 {No drafts} =1 {1 draft} other {# drafts}}",
+      "empty": "No drafts waiting for review",
+      "emptyDescription": "Replies that need your approval before sending will appear here.",
+      "group": "{count, plural, =1 {1 draft} other {# drafts}}",
+      "expand": "Edit draft",
+      "collapse": "Collapse",
+      "open": "Open conversation"
+    },
+    "activity": {
+      "title": "Activity",
+      "toggle": "Toggle activity log",
+      "empty": "No recent activity",
+      "count": "{count, plural, =1 {1 event} other {# events}}",
+      "kind": {
+        "inboundEdited": "Message edited",
+        "inboundDeleted": "Message deleted",
+        "inboundReadIndicator": "Message read",
+        "inboundMemberAdded": "Member joined",
+        "inboundMemberRemoved": "Member left",
+        "inboundDeferredQuietHours": "Reply deferred — quiet hours",
+        "inboundDeferredMuted": "Reply deferred — muted",
+        "inboundHelpServed": "Help card sent",
+        "inboundWelcomeSent": "Welcome card sent",
+        "goalStartedIm": "Goal started",
+        "goalBlockedIm": "Goal blocked",
+        "overrideComputerUseChanged": "Computer Use changed"
+      }
+    },
+    "quietHours": {
+      "label": "Quiet hours",
+      "active": "Quiet until {time}",
+      "inactive": "Quiet {from}–{to}",
+      "ariaActive": "Quiet hours active until {time}",
+      "ariaInactive": "Quiet hours {from} to {to} {tz}",
+      "tooltip": "Outbound replies pause during quiet hours ({from}–{to} {tz})."
+    },
+    "atStrategy": {
+      "label": "Reply",
+      "always": "All messages",
+      "mention_only": "@mention only",
+      "direct_only": "Direct only",
+      "aria": "Reply strategy: {strategy}",
+      "tooltip": "This adapter replies to: {strategy}"
+    },
+    "commandPalette": {
+      "title": "Search conversations",
+      "description": "Jump to any conversation across your connectors.",
+      "placeholder": "Search conversations…",
+      "empty": "No conversations found",
+      "conversations": "Conversations"
     }
   },
   "connectors": {

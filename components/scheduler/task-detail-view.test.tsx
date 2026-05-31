@@ -152,4 +152,72 @@ describe("TaskDetailView", () => {
     )
     expect(screen.getByTestId("task-tags-display-stub")).toBeInTheDocument()
   })
+
+  describe("dependencies card", () => {
+    const focus = buildTask({
+      id: "t1",
+      trigger: { type: "cron", cronExpression: "* * * * *", dependsOn: ["up"] },
+    })
+    const up = buildTask({ id: "up", name: "Upstream" })
+    const down = buildTask({
+      id: "down",
+      name: "Downstream",
+      trigger: { type: "cron", cronExpression: "* * * * *", dependsOn: ["t1"] },
+    })
+    const allTasks = [focus, up, down]
+
+    it("is omitted when allTasks is not provided", () => {
+      const cbs = callbacks()
+      render(<TaskDetailView task={focus} executions={[]} {...cbs} />)
+      expect(screen.queryByTestId("task-dependencies-card")).toBeNull()
+    })
+
+    it("is omitted when the task has no dependency links", () => {
+      const cbs = callbacks()
+      const solo = buildTask({ id: "solo", trigger: { type: "cron", cronExpression: "* * * * *" } })
+      render(<TaskDetailView task={solo} executions={[]} allTasks={[solo]} {...cbs} />)
+      expect(screen.queryByTestId("task-dependencies-card")).toBeNull()
+    })
+
+    it("renders the neighborhood graph when the task has links", () => {
+      const cbs = callbacks()
+      render(<TaskDetailView task={focus} executions={[]} allTasks={allTasks} {...cbs} />)
+      expect(screen.getByTestId("task-dependencies-card")).toBeInTheDocument()
+      expect(screen.getByTestId("dependency-node-t1")).toBeInTheDocument()
+      expect(screen.getByTestId("dependency-node-up")).toBeInTheDocument()
+      expect(screen.getByTestId("dependency-node-down")).toBeInTheDocument()
+    })
+
+    it("opens the full graph dialog via the button", () => {
+      const cbs = callbacks()
+      const onOpenDependencyGraph = jest.fn()
+      render(
+        <TaskDetailView
+          task={focus}
+          executions={[]}
+          allTasks={allTasks}
+          onOpenDependencyGraph={onOpenDependencyGraph}
+          {...cbs}
+        />
+      )
+      fireEvent.click(screen.getByTestId("open-dependency-graph"))
+      expect(onOpenDependencyGraph).toHaveBeenCalled()
+    })
+
+    it("navigates when a dependency node is clicked", () => {
+      const cbs = callbacks()
+      const onSelectTask = jest.fn()
+      render(
+        <TaskDetailView
+          task={focus}
+          executions={[]}
+          allTasks={allTasks}
+          onSelectTask={onSelectTask}
+          {...cbs}
+        />
+      )
+      fireEvent.click(screen.getByTestId("dependency-node-up"))
+      expect(onSelectTask).toHaveBeenCalledWith("up")
+    })
+  })
 })
