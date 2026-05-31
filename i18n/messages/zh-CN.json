@@ -255,6 +255,16 @@
       "closePane": "关闭分屏",
       "resize": "拖动调整终端 dock 高度（方向键亦可）"
     },
+    "shellPicker": {
+      "label": "选择 Shell",
+      "auto": "默认 Shell",
+      "pwsh": "PowerShell 7",
+      "powershell": "Windows PowerShell",
+      "cmd": "命令提示符",
+      "bash": "bash",
+      "zsh": "zsh",
+      "profilesLabel": "配置文件"
+    },
     "fileViewer": {
       "title": "文件查看器",
       "description": "只读源码预览",
@@ -275,7 +285,12 @@
         "close": "关闭",
         "closeOthers": "关闭其他",
         "trustAgent": "信任此 tab 的智能体",
-        "locateInChat": "在对话中定位"
+        "locateInChat": "在对话中定位",
+        "copy": "复制",
+        "paste": "粘贴",
+        "selectAll": "全选",
+        "clear": "清屏",
+        "find": "查找…"
       },
       "rename": {
         "label": "重命名终端 tab",
@@ -4658,14 +4673,58 @@
         "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按项目覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。"
       },
       "fontFamily": {
-        "label": "字体"
+        "label": "字体",
+        "nerdFontHelper": "oh-my-posh 和 powerline 提示符的图标需要 Nerd Font。请先安装一款（如 CaskaydiaCove Nerd Font），再在此处填写。",
+        "useNerdFont": "使用推荐的 Nerd Font 字体栈"
       },
       "fontSize": {
         "label": "字号"
       },
+      "cursor": {
+        "label": "光标样式",
+        "block": "方块",
+        "bar": "竖线",
+        "underline": "下划线",
+        "blink": "光标闪烁"
+      },
       "scrollback": {
         "label": "回滚行数",
         "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。"
+      },
+      "ligatures": {
+        "label": "字体连字",
+        "helper": "渲染编程字体连字（Cascadia Code、JetBrains Mono、Fira Code）。默认关闭；切换会重新加载终端。"
+      },
+      "forceUtf8": {
+        "label": "强制 UTF-8 输出",
+        "helper": "将 PowerShell / cmd 的控制台输出锁定为 UTF-8，使 powerline 字形与中文在非 UTF-8 系统代码页（如中文 Windows 的 GBK）下正常显示。除非依赖旧代码页，否则保持开启。"
+      },
+      "colorScheme": {
+        "label": "配色方案",
+        "auto": "自动（跟随应用主题）"
+      },
+      "renderer": {
+        "label": "渲染器",
+        "auto": "自动",
+        "webgl": "WebGL",
+        "canvas": "Canvas",
+        "dom": "DOM",
+        "helper": "自动优先 GPU 加速的 WebGL，失败时回退到 Canvas 再到 DOM。若终端渲染为空白或花屏，可切换到 Canvas 或 DOM。"
+      },
+      "profiles": {
+        "title": "启动配置文件",
+        "helper": "命名的 Shell 预设（shell + 工作目录），新建标签菜单可直接启动。可将其中一个设为默认，供普通“+ 新建”按钮使用。",
+        "empty": "暂无配置文件。",
+        "add": "添加配置文件",
+        "newName": "新配置文件",
+        "nameLabel": "配置文件名称",
+        "namePlaceholder": "配置文件名称",
+        "shellLabel": "Shell",
+        "cwdLabel": "工作目录",
+        "cwdPlaceholder": "工作目录（可选）",
+        "setDefault": "设为默认",
+        "isDefault": "默认",
+        "remove": "删除配置文件"
       },
       "shellIntegration": {
         "label": "启用 shell 集成",

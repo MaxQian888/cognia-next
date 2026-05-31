@@ -75,12 +75,18 @@ jest.mock("@xterm/addon-webgl", () => ({
 jest.mock("@xterm/addon-canvas", () => ({
   CanvasAddon: jest.fn(() => ({ dispose: jest.fn() })),
 }))
+const mockLigaturesAddon = jest.fn(() => ({ dispose: jest.fn() }))
+jest.mock("@xterm/addon-ligatures", () => ({
+  LigaturesAddon: mockLigaturesAddon,
+}))
 
 // Mock the settings + terminal stores so xterm settings reactivity has
-// a stable surface during tests.
+// a stable surface during tests. `mockTerminalSettings` is mutable so a
+// single test can opt into e.g. font ligatures.
+let mockTerminalSettings: Record<string, unknown> = {}
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: jest.fn((selector: (s: unknown) => unknown) =>
-    selector({ settings: { terminal: {} } })
+    selector({ settings: { terminal: mockTerminalSettings } })
   ),
 }))
 jest.mock("@/stores/terminal/terminal-store", () => {
@@ -117,6 +123,7 @@ jest.mock("@/lib/terminal/session-registry", () => ({
   getLiveSession: () => sessionRegistry.current,
 }))
 
+import { Terminal as MockTerminal } from "@xterm/xterm"
 import { TerminalInstance } from "./terminal-instance"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 
@@ -166,6 +173,9 @@ beforeEach(() => {
   mockSearchInstance.findPrevious.mockReset().mockReturnValue(true)
   mockSearchInstance.clearDecorations.mockReset()
   mockSearchInstance.dispose.mockReset()
+  mockTerminalSettings = {}
+  mockLigaturesAddon.mockClear()
+  ;(MockTerminal as unknown as jest.Mock).mockClear()
   sessionRegistry.current = makeFakeSession()
 })
 
@@ -263,6 +273,85 @@ describe("TerminalInstance", () => {
     render(<TerminalInstance sessionId="s-1" />)
     await flushAsync()
     expect(mockTermInstance.attachCustomKeyEventHandler).toHaveBeenCalled()
+  })
+
+  it("constructs the Terminal with a full ANSI palette and cursor options", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: Record<string, string>
+      cursorStyle: string
+      cursorBlink: boolean
+    }
+    // 16-color ANSI palette is present so colored output renders correctly.
+    expect(opts.theme.red).toMatch(/^#/)
+    expect(opts.theme.brightWhite).toMatch(/^#/)
+    expect(Object.keys(opts.theme)).toEqual(
+      expect.arrayContaining([
+        "black",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan",
+        "white",
+        "brightBlack",
+        "brightRed",
+        "brightCyan",
+        "brightWhite",
+      ])
+    )
+    // Cursor defaults.
+    expect(opts.cursorStyle).toBe("block")
+    expect(opts.cursorBlink).toBe(true)
+  })
+
+  it("does not load the ligatures addon by default", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    expect(mockLigaturesAddon).not.toHaveBeenCalled()
+    // 4 mandatory addons + renderer only.
+    expect(mockTermInstance.loadAddon).toHaveBeenCalledTimes(5)
+  })
+
+  it("loads the ligatures addon when fontLigatures is enabled", async () => {
+    mockTerminalSettings = { fontLigatures: true }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    expect(mockLigaturesAddon).toHaveBeenCalled()
+    // 4 mandatory + renderer + ligatures = 6.
+    expect(mockTermInstance.loadAddon).toHaveBeenCalledTimes(6)
+  })
+
+  it("skips accelerated renderers when renderer is 'dom'", async () => {
+    mockTerminalSettings = { renderer: "dom" }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    // Only the 4 mandatory addons — no WebGL/Canvas renderer addon.
+    expect(mockTermInstance.loadAddon).toHaveBeenCalledTimes(4)
+  })
+
+  it("applies a named color scheme to the constructed theme", async () => {
+    mockTerminalSettings = { colorScheme: "dracula" }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { background: string }
+    }
+    expect(opts.theme.background).toBe("#282a36")
+  })
+
+  it("applies cursorStyle from settings", async () => {
+    mockTerminalSettings = { cursorStyle: "bar", cursorBlink: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      cursorStyle: string
+      cursorBlink: boolean
+    }
+    expect(opts.cursorStyle).toBe("bar")
+    expect(opts.cursorBlink).toBe(false)
   })
 
   it("live-updates term.options.fontSize when prop changes", async () => {

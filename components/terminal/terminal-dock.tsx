@@ -24,9 +24,10 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { PlusIcon, XIcon } from "lucide-react"
+import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
 import { killFromDock, restartFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
@@ -41,6 +42,7 @@ import { TerminalHistoryPanel } from "./terminal-history-panel"
 import { type TerminalInstanceHandle } from "./terminal-instance"
 import { TerminalPaneGroup } from "./terminal-pane-group"
 import { TerminalSearchOverlay } from "./terminal-search-overlay"
+import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
 
@@ -65,6 +67,15 @@ export function TerminalDock() {
 
   const settingsTerminalShell = useSettingsStore(
     (s) => (s.settings?.terminal as { defaultShell?: string } | undefined)?.defaultShell
+  )
+  const settingsForceUtf8 = useSettingsStore(
+    (s) => (s.settings?.terminal as { forceUtf8?: boolean } | undefined)?.forceUtf8 ?? true
+  )
+  const settingsProfiles = useSettingsStore(
+    (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
+  )
+  const settingsDefaultProfileId = useSettingsStore(
+    (s) => (s.settings?.terminal as { defaultProfileId?: string } | undefined)?.defaultProfileId
   )
 
   const projectKey = activeProjectId ?? ""
@@ -96,26 +107,69 @@ export function TerminalDock() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
-  const handleNew = useCallback(async () => {
-    const shell = resolveDefaultShell({
-      projectShell: project?.terminalConfig?.shell,
-      settingShell: settingsTerminalShell,
-    })
-    const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
-    const env = project?.terminalConfig?.env
-    await spawnFromDock({
-      req: {
-        shell,
-        rows: 24,
-        cols: 80,
-        cwd,
-        env,
-        projectId: activeProjectId ?? undefined,
-        enableShellIntegration: true,
-      },
-      store: useTerminalStore.getState(),
-    })
-  }, [project, activeProjectId, settingsTerminalShell])
+  const handleNewWithShell = useCallback(
+    async (shellOverride?: string) => {
+      // An explicit override (from the new-tab shell picker) wins over the
+      // resolved default; otherwise fall back to project / settings / platform.
+      const shell =
+        shellOverride && shellOverride.trim().length > 0
+          ? shellOverride
+          : resolveDefaultShell({
+              projectShell: project?.terminalConfig?.shell,
+              settingShell: settingsTerminalShell,
+            })
+      const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
+      const env = project?.terminalConfig?.env
+      await spawnFromDock({
+        req: {
+          shell,
+          rows: 24,
+          cols: 80,
+          cwd,
+          env,
+          projectId: activeProjectId ?? undefined,
+          enableShellIntegration: true,
+          forceUtf8: settingsForceUtf8,
+        },
+        store: useTerminalStore.getState(),
+      })
+    },
+    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8]
+  )
+
+  const handleNewFromProfile = useCallback(
+    async (profileId: string) => {
+      const profile = findProfile(settingsProfiles, profileId)
+      const fields = profile ? profileToSpawnFields(profile) : null
+      if (!fields) {
+        // Profile gone or shell blank — fall back to the resolved default.
+        await handleNewWithShell()
+        return
+      }
+      await spawnFromDock({
+        req: {
+          ...fields,
+          rows: 24,
+          cols: 80,
+          projectId: activeProjectId ?? undefined,
+          enableShellIntegration: true,
+          forceUtf8: settingsForceUtf8,
+        },
+        store: useTerminalStore.getState(),
+      })
+    },
+    [settingsProfiles, activeProjectId, settingsForceUtf8, handleNewWithShell]
+  )
+
+  // Plain "+ New": launch the default profile when one is set, else resolve
+  // the default shell (project → settings → platform).
+  const handleNew = useCallback(() => {
+    if (settingsDefaultProfileId && findProfile(settingsProfiles, settingsDefaultProfileId)) {
+      void handleNewFromProfile(settingsDefaultProfileId)
+    } else {
+      void handleNewWithShell()
+    }
+  }, [settingsDefaultProfileId, settingsProfiles, handleNewFromProfile, handleNewWithShell])
 
   // Close a single split pane — kills just that session; the group's
   // other panes (and the tab) survive via the store's anchor-promotion.
@@ -182,6 +236,7 @@ export function TerminalDock() {
           env: project?.terminalConfig?.env,
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
+          forceUtf8: settingsForceUtf8,
         },
         store: useTerminalStore.getState(),
       })
@@ -189,7 +244,7 @@ export function TerminalDock() {
         addPaneToGroup(anchor, outcome.sessionId, direction)
       }
     },
-    [project, activeProjectId, settingsTerminalShell, projectKey, addPaneToGroup]
+    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8, projectKey, addPaneToGroup]
   )
 
   // Alt+Arrow cycles focus through the panes of the active group.
@@ -291,19 +346,11 @@ export function TerminalDock() {
         trailing={
           <>
             {transport === "tauri-channel" ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  void handleNew()
-                }}
-                aria-label={t("newSession")}
-                data-testid="terminal-dock-new"
-                className="h-7 px-2 text-xs"
-              >
-                <PlusIcon className="mr-1 h-3 w-3" />
-                {t("newSession")}
-              </Button>
+              <TerminalShellPicker
+                onNew={handleNewWithShell}
+                profiles={settingsProfiles}
+                onNewProfile={handleNewFromProfile}
+              />
             ) : null}
             <Button
               size="sm"
@@ -332,6 +379,11 @@ export function TerminalDock() {
               onCloseOthers={handleCloseOthers}
               onToggleAgentTrust={handleToggleTrust}
               onLocateInChat={handleLocateInChat}
+              onCopy={() => void focusedHandleRef.current?.copySelection()}
+              onPaste={() => void focusedHandleRef.current?.pasteFromClipboard()}
+              onSelectAll={() => focusedHandleRef.current?.selectAll()}
+              onClear={() => focusedHandleRef.current?.clearScreen()}
+              onFind={() => setSearchOpen(true)}
             >
               <div
                 className="h-full w-full"

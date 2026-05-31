@@ -111,4 +111,63 @@ describe("TerminalCard", () => {
       terminal: expect.objectContaining({ enableShellIntegration: false }),
     })
   })
+
+  it("applies the recommended Nerd Font stack", async () => {
+    render(<TerminalCard />)
+    const button = screen.getByTestId("terminal-card-use-nerd-font")
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        fontFamily: expect.stringContaining("Nerd Font"),
+      }),
+    })
+  })
+
+  it("toggles font ligatures", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-ligatures")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ fontLigatures: true }),
+    })
+  })
+
+  it("turns force-UTF-8 off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-force-utf8")
+    // Defaults to checked → clicking turns it off.
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ forceUtf8: false }),
+    })
+  })
+
+  it("toggles cursor blink off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-cursor-blink")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ cursorBlink: false }),
+    })
+  })
+
+  it("renders the color-scheme and renderer selectors", () => {
+    render(<TerminalCard />)
+    expect(screen.getByTestId("terminal-card-color-scheme")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-card-renderer")).toBeInTheDocument()
+  })
+
+  it("mounts the launch-profiles manager", () => {
+    render(<TerminalCard />)
+    expect(screen.getByTestId("terminal-profiles")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-profiles-add")).toBeInTheDocument()
+  })
 })

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use uuid::Uuid;
 
-use super::integration::{self, IntegrationSetup, ShellKind};
+use super::integration::{self, ShellKind};
 use super::osc633::{IntegrationEvent, Osc633Parser};
 use super::replay::ReplayBuffer;
 
@@ -79,12 +79,77 @@ pub struct SpawnRequest {
     /// entirely — useful for users on shells we don't recognise.
     #[serde(default = "default_true")]
     pub enable_shell_integration: bool,
+    /// Default true. When true, PowerShell/cmd are launched with their
+    /// console output encoding pinned to UTF-8 so xterm.js (which always
+    /// decodes PTY bytes as UTF-8) renders correctly on non-UTF-8 system
+    /// codepages (e.g. GBK/cp936 on Chinese Windows). Users who depend on
+    /// the legacy codepage can opt out via the terminal settings toggle.
+    #[serde(default = "default_true")]
+    pub force_utf8: bool,
     #[serde(default)]
     pub origin: SessionOrigin,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// Resolve the shell binary to actually spawn.
+///
+/// * A path containing a separator is trusted verbatim (the user pointed at
+///   an explicit binary).
+/// * A bare name that resolves on `PATH` is kept as-is — `CommandBuilder`
+///   finds it via the OS loader.
+/// * A bare `pwsh` / `pwsh.exe` that does *not* resolve falls back to
+///   `powershell.exe` (Windows PowerShell 5.1) when that is present. This is
+///   the common Windows case: the dock defaults to `pwsh.exe`, but many
+///   machines only ship Windows PowerShell.
+/// * Anything else is returned unchanged so the spawn surfaces a clear
+///   "binary not found" error rather than guessing.
+fn resolve_shell_binary(requested: &str) -> String {
+    if requested.contains('/') || requested.contains('\\') {
+        return requested.to_string();
+    }
+    if find_on_path(requested).is_some() {
+        return requested.to_string();
+    }
+    let stem = Path::new(requested)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem == "pwsh"
+        && (find_on_path("powershell.exe").is_some() || find_on_path("powershell").is_some())
+    {
+        return "powershell.exe".to_string();
+    }
+    requested.to_string()
+}
+
+/// `which`-style lookup. Honors `PATHEXT` on Windows when `name` has no
+/// extension so a bare `pwsh` matches `pwsh.exe`. Returns the first hit.
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let has_ext = Path::new(name).extension().is_some();
+    let exts: Vec<String> = if cfg!(windows) && !has_ext {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".to_string())
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    for dir in std::env::split_paths(&path_var) {
+        for ext in &exts {
+            let candidate = dir.join(format!("{name}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// Tagged event the reader / waiter push back to the renderer through the
@@ -300,14 +365,24 @@ pub fn spawn_session_with_sink(
     sink: EventSink,
     channel_slot: DeskChannel,
 ) -> Result<PtySession, String> {
+    let mut req = req;
+    // Resolve the shell binary up front so a missing `pwsh.exe` (PowerShell 7
+    // not installed) transparently falls back to Windows PowerShell rather
+    // than surfacing a cryptic `spawn_command failed`.
+    req.shell = resolve_shell_binary(&req.shell);
+
     let nonce = Uuid::new_v4().simple().to_string();
     let shell_kind = ShellKind::from_shell_path(&req.shell);
-    let setup = if req.enable_shell_integration {
-        integration::build(shell_kind, script_dir, &nonce)
-            .map_err(|e| format!("integration setup failed: {e}"))?
-    } else {
-        IntegrationSetup::empty()
-    };
+    // The UTF-8 prelude is applied independently of the integration toggle;
+    // `build` gates the OSC 633 hooks on `enable_shell_integration` itself.
+    let setup = integration::build(
+        shell_kind,
+        script_dir,
+        &nonce,
+        req.enable_shell_integration,
+        req.force_utf8,
+    )
+    .map_err(|e| format!("integration setup failed: {e}"))?;
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -329,6 +404,12 @@ pub fn spawn_session_with_sink(
     if let Some(cwd) = req.cwd.as_deref().filter(|s| !s.is_empty()) {
         cmd.cwd(cwd);
     }
+    // Advertise a sane terminal type + truecolor so prompt frameworks
+    // (oh-my-posh, starship) and color-aware tools (git, less, vim) emit
+    // ANSI sequences. ConPTY/xterm.js are xterm-compatible. Set these first
+    // so an explicit user/project `env` entry still wins.
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
     for (k, v) in &req.env {
         cmd.env(k, v);
     }
@@ -644,7 +725,41 @@ mod tests {
         assert_eq!(req.rows, 24);
         assert!(req.args.is_empty());
         assert!(req.enable_shell_integration);
+        assert!(req.force_utf8);
         assert_eq!(req.origin, SessionOrigin::Local);
+    }
+
+    #[test]
+    fn resolve_shell_binary_passes_through_absolute_paths() {
+        // Paths with a separator are trusted verbatim, even if absent — the
+        // spawn surfaces the real "not found" error rather than guessing.
+        assert_eq!(
+            resolve_shell_binary("/usr/bin/zsh"),
+            "/usr/bin/zsh".to_string()
+        );
+        assert_eq!(
+            resolve_shell_binary("C:\\Windows\\System32\\cmd.exe"),
+            "C:\\Windows\\System32\\cmd.exe".to_string()
+        );
+    }
+
+    #[test]
+    fn resolve_shell_binary_keeps_unknown_bare_names() {
+        // A bare name that isn't pwsh and isn't on PATH is returned as-is.
+        let name = "definitely-not-a-real-shell-binary-xyz";
+        assert_eq!(resolve_shell_binary(name), name.to_string());
+    }
+
+    #[test]
+    fn resolve_shell_binary_pwsh_fallback_is_bounded() {
+        // Resolving bare `pwsh` yields either `pwsh` (PowerShell 7 present),
+        // `powershell.exe` (only Windows PowerShell present), or `pwsh`
+        // (neither — clear error downstream). Never anything else.
+        let resolved = resolve_shell_binary("pwsh");
+        assert!(
+            resolved == "pwsh" || resolved == "powershell.exe",
+            "unexpected resolution: {resolved}"
+        );
     }
 
     #[test]
@@ -660,6 +775,7 @@ mod tests {
             project_id: None,
             extension_id: None,
             enable_shell_integration: false,
+            force_utf8: false,
             origin: SessionOrigin::Local,
         };
         let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
@@ -692,6 +808,7 @@ mod tests {
             project_id: Some("p1".to_string()),
             extension_id: None,
             enable_shell_integration: false,
+            force_utf8: false,
             origin: SessionOrigin::Local,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -750,6 +867,7 @@ mod tests {
             project_id: None,
             extension_id: None,
             enable_shell_integration: false,
+            force_utf8: false,
             origin: SessionOrigin::Local,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -784,6 +902,7 @@ mod tests {
             project_id: Some("proj-a".to_string()),
             extension_id: Some("ext-b".to_string()),
             enable_shell_integration: false,
+            force_utf8: false,
             origin: SessionOrigin::Remote,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -815,6 +934,7 @@ mod tests {
             project_id: None,
             extension_id: None,
             enable_shell_integration: false,
+            force_utf8: false,
             origin: SessionOrigin::Local,
         };
         spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()

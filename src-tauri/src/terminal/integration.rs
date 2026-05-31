@@ -98,20 +98,43 @@ impl IntegrationSetup {
 /// * `nonce` — per-spawn random string. Stamped into `$COGNIA_TERM_NONCE`
 ///   and verified by `osc633::Osc633Parser` so untrusted processes in the
 ///   PTY can't forge prompt decorations.
+/// * `enable_integration` — when false, OSC 633 prompt hooks are skipped.
+///   The UTF-8 prelude (below) is *independent* of this flag.
+/// * `force_utf8` — when true, PowerShell/cmd are launched with their
+///   console output encoding pinned to UTF-8 (PowerShell:
+///   `[Console]::OutputEncoding`, cmd: `chcp 65001`). This is the fix for
+///   mojibake on non-UTF-8 system codepages (e.g. GBK/cp936 on Chinese
+///   Windows), where the shell would otherwise emit bytes xterm.js — which
+///   always decodes as UTF-8 — cannot render. Applies even when shell
+///   integration is disabled.
 pub fn build(
     kind: ShellKind,
     script_dir: &Path,
     nonce: &str,
+    enable_integration: bool,
+    force_utf8: bool,
 ) -> io::Result<IntegrationSetup> {
     match kind {
-        ShellKind::Bash => build_bash(script_dir, nonce),
-        ShellKind::Zsh => build_zsh(script_dir, nonce),
-        ShellKind::Pwsh | ShellKind::PowerShell => build_pwsh(script_dir, nonce),
-        ShellKind::Fish => build_fish(script_dir, nonce),
-        ShellKind::Nu => build_nu(script_dir, nonce),
-        // cmd.exe + anything unrecognised both fall through to an empty
-        // setup — the shell spawns normally without OSC 633 events.
-        ShellKind::Cmd | ShellKind::Unknown => Ok(IntegrationSetup::empty()),
+        // POSIX shells: integration is the only reason to touch argv; when
+        // disabled they spawn untouched (no codepage concept to fix).
+        ShellKind::Bash if enable_integration => build_bash(script_dir, nonce),
+        ShellKind::Zsh if enable_integration => build_zsh(script_dir, nonce),
+        ShellKind::Fish if enable_integration => build_fish(script_dir, nonce),
+        ShellKind::Nu if enable_integration => build_nu(script_dir, nonce),
+        ShellKind::Bash | ShellKind::Zsh | ShellKind::Fish | ShellKind::Nu => {
+            Ok(IntegrationSetup::empty())
+        }
+        // PowerShell composes a single `-Command` that pins UTF-8 first
+        // (when requested), then optionally sources the integration script.
+        ShellKind::Pwsh | ShellKind::PowerShell => {
+            build_pwsh(script_dir, nonce, enable_integration, force_utf8)
+        }
+        // cmd.exe has no rc hook — the only thing we can do is fix the
+        // codepage via `/K chcp 65001`.
+        ShellKind::Cmd => Ok(build_cmd(force_utf8)),
+        // Unrecognised shells spawn normally — we know neither their rc
+        // mechanism nor their encoding knob.
+        ShellKind::Unknown => Ok(IntegrationSetup::empty()),
     }
 }
 
@@ -173,32 +196,81 @@ source "{script}"
     })
 }
 
-fn build_pwsh(script_dir: &Path, nonce: &str) -> io::Result<IntegrationSetup> {
+/// UTF-8 prelude injected at the front of PowerShell's `-Command`. Pins all
+/// three encodings PowerShell consults so that subsequent output (and pipes
+/// to native commands) are UTF-8 regardless of the system codepage. The
+/// `($false)` argument selects the no-BOM UTF-8 encoder. Wrapped in
+/// try/catch so a locked-down host that forbids touching `[Console]` can't
+/// abort the rest of the command.
+const PWSH_UTF8_PRELUDE: &str = "try { [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); $OutputEncoding=[System.Text.UTF8Encoding]::new($false) } catch {}";
+
+fn build_pwsh(
+    script_dir: &Path,
+    nonce: &str,
+    enable_integration: bool,
+    force_utf8: bool,
+) -> io::Result<IntegrationSetup> {
     let script = script_dir.join("shell-integration.ps1");
-    if !script.exists() {
+    let want_integration = enable_integration && script.exists();
+
+    // Nothing to do — let PowerShell launch with its own defaults.
+    if !force_utf8 && !want_integration {
         return Ok(IntegrationSetup::empty());
     }
+
+    let mut command = String::new();
+    if force_utf8 {
+        command.push_str(PWSH_UTF8_PRELUDE);
+    }
+
     let mut env = HashMap::new();
-    env.insert("COGNIA_TERM_NONCE".to_string(), nonce.to_string());
+    if want_integration {
+        if !command.is_empty() {
+            command.push_str(" ; ");
+        }
+        // Dot-source $PROFILE first (try/catch so a missing/erroring profile
+        // doesn't abort), then our integration script. Single quotes in the
+        // path are doubled per PowerShell single-quote escaping rules.
+        let script_str = script.to_string_lossy();
+        command.push_str(&format!(
+            "try {{ if (Test-Path $PROFILE) {{ . $PROFILE }} }} catch {{}} ; . '{script}'",
+            script = script_str.replace('\'', "''")
+        ));
+        env.insert("COGNIA_TERM_NONCE".to_string(), nonce.to_string());
+    }
+
+    // `-ExecutionPolicy Bypass` lets us dot-source the bundled (unsigned)
+    // integration script even when the machine policy is `Restricted` — the
+    // default for `powershell.exe` (Windows PowerShell 5.1) on client SKUs.
     // `-NoExit -Command "..."` runs the inline command then drops to the
-    // interactive prompt. We dot-source $PROFILE first (with try/catch so
-    // a missing/erroring profile doesn't abort) and then our integration
-    // script.
-    let script_str = script.to_string_lossy();
-    let cmd = format!(
-        "try {{ if (Test-Path $PROFILE) {{ . $PROFILE }} }} catch {{}} ; . '{script}'",
-        script = script_str.replace('\'', "''")
-    );
+    // interactive prompt.
     Ok(IntegrationSetup {
         extra_args: vec![
-            "-NoExit".to_string(),
             "-NoLogo".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-NoExit".to_string(),
             "-Command".to_string(),
-            cmd,
+            command,
         ],
         env_overrides: env,
         tempdir: None,
     })
+}
+
+/// cmd.exe setup. There is no rc-file hook for OSC 633 integration, so the
+/// only thing we can do is pin the console codepage to UTF-8 (65001) when
+/// requested. `/K <cmd>` runs the command then stays interactive; the
+/// `>nul` suppresses chcp's "Active code page: 65001" banner.
+fn build_cmd(force_utf8: bool) -> IntegrationSetup {
+    if !force_utf8 {
+        return IntegrationSetup::empty();
+    }
+    IntegrationSetup {
+        extra_args: vec!["/K".to_string(), "chcp 65001>nul".to_string()],
+        env_overrides: HashMap::new(),
+        tempdir: None,
+    }
 }
 
 fn build_fish(script_dir: &Path, nonce: &str) -> io::Result<IntegrationSetup> {
@@ -323,7 +395,7 @@ mod tests {
     fn build_fish_returns_empty_when_script_missing() {
         let tempdir = std::env::temp_dir().join("cognia-test-fish-noscript");
         let _ = fs::create_dir_all(&tempdir);
-        let setup = build(ShellKind::Fish, &tempdir, "n").unwrap();
+        let setup = build(ShellKind::Fish, &tempdir, "n", true, true).unwrap();
         assert!(setup.extra_args.is_empty());
     }
 
@@ -333,7 +405,7 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.fish");
         let _ = fs::write(&script, "# test stub");
-        let setup = build(ShellKind::Fish, &tempdir, "nonce-xyz").unwrap();
+        let setup = build(ShellKind::Fish, &tempdir, "nonce-xyz", true, true).unwrap();
         assert_eq!(setup.extra_args.first().map(String::as_str), Some("--init-command"));
         let cmd = setup.extra_args.get(1).cloned().unwrap_or_default();
         assert!(cmd.starts_with("source "));
@@ -351,7 +423,7 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.nu");
         let _ = fs::write(&script, "# test nu stub");
-        let setup = build(ShellKind::Nu, &tempdir, "n-abc").unwrap();
+        let setup = build(ShellKind::Nu, &tempdir, "n-abc", true, true).unwrap();
         assert_eq!(setup.extra_args.first().map(String::as_str), Some("--config"));
         let cfg_path = setup.extra_args.get(1).cloned().unwrap_or_default();
         let cfg_body = fs::read_to_string(&cfg_path).expect("temp config readable");
@@ -362,13 +434,24 @@ mod tests {
     }
 
     #[test]
-    fn build_cmd_returns_empty_setup() {
+    fn build_cmd_returns_empty_setup_without_utf8() {
         let tempdir = std::env::temp_dir().join("cognia-test-cmd-int");
         let _ = fs::create_dir_all(&tempdir);
-        let setup = build(ShellKind::Cmd, &tempdir, "n").unwrap();
+        let setup = build(ShellKind::Cmd, &tempdir, "n", true, false).unwrap();
         assert!(setup.extra_args.is_empty());
         assert!(setup.env_overrides.is_empty());
         assert!(setup.tempdir.is_none());
+    }
+
+    #[test]
+    fn build_cmd_pins_codepage_when_force_utf8() {
+        let tempdir = std::env::temp_dir().join("cognia-test-cmd-utf8");
+        let _ = fs::create_dir_all(&tempdir);
+        // force_utf8 applies even with integration disabled — cmd has no hook.
+        let setup = build(ShellKind::Cmd, &tempdir, "n", false, true).unwrap();
+        assert_eq!(setup.extra_args.first().map(String::as_str), Some("/K"));
+        assert!(setup.extra_args.iter().any(|a| a.contains("chcp 65001")));
+        assert!(setup.env_overrides.is_empty());
     }
 
     #[test]
@@ -384,7 +467,7 @@ mod tests {
         // Use a temp dir we know is empty so the script lookup fails.
         let tempdir = std::env::temp_dir().join("cognia-test-empty-int");
         let _ = fs::create_dir_all(&tempdir);
-        let setup = build(ShellKind::Bash, &tempdir, "n").unwrap();
+        let setup = build(ShellKind::Bash, &tempdir, "n", true, true).unwrap();
         assert!(setup.extra_args.is_empty());
         assert!(setup.env_overrides.is_empty());
     }
@@ -395,7 +478,7 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.bash");
         fs::write(&script, "# stub").unwrap();
-        let setup = build(ShellKind::Bash, &tempdir, "nonce-123").unwrap();
+        let setup = build(ShellKind::Bash, &tempdir, "nonce-123", true, true).unwrap();
         assert_eq!(setup.extra_args[0], "--rcfile");
         assert!(setup.extra_args[1].ends_with("shell-integration.bash"));
         assert_eq!(setup.env_overrides.get("COGNIA_TERM_NONCE"), Some(&"nonce-123".to_string()));
@@ -408,7 +491,7 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.zsh");
         fs::write(&script, "# stub").unwrap();
-        let setup = build(ShellKind::Zsh, &tempdir, "zsh-nonce").unwrap();
+        let setup = build(ShellKind::Zsh, &tempdir, "zsh-nonce", true, true).unwrap();
         let zdot = setup.env_overrides.get("ZDOTDIR").expect("ZDOTDIR set");
         let shim_path = PathBuf::from(zdot).join(".zshrc");
         let shim = fs::read_to_string(&shim_path).unwrap();
@@ -426,17 +509,76 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.ps1");
         fs::write(&script, "# stub").unwrap();
-        let setup = build(ShellKind::Pwsh, &tempdir, "ps-nonce").unwrap();
+        let setup = build(ShellKind::Pwsh, &tempdir, "ps-nonce", true, true).unwrap();
         assert!(setup.extra_args.contains(&"-NoExit".to_string()));
         assert!(setup.extra_args.contains(&"-Command".to_string()));
+        // -ExecutionPolicy Bypass is required so the bundled (unsigned)
+        // integration script can be dot-sourced under a Restricted policy.
+        let policy_idx = setup
+            .extra_args
+            .iter()
+            .position(|a| a == "-ExecutionPolicy")
+            .expect("-ExecutionPolicy present");
+        assert_eq!(setup.extra_args.get(policy_idx + 1).map(String::as_str), Some("Bypass"));
         let cmd_idx = setup
             .extra_args
             .iter()
             .position(|a| a == "-Command")
             .unwrap();
         let cmd = &setup.extra_args[cmd_idx + 1];
+        // UTF-8 prelude runs before the profile/integration sourcing.
+        assert!(cmd.contains("OutputEncoding"));
         assert!(cmd.contains("$PROFILE"));
         assert!(cmd.contains("shell-integration.ps1"));
+        assert_eq!(
+            setup.env_overrides.get("COGNIA_TERM_NONCE").map(String::as_str),
+            Some("ps-nonce")
+        );
+        let _ = fs::remove_file(script);
+    }
+
+    #[test]
+    fn build_pwsh_force_utf8_only_skips_integration() {
+        // No script present + integration disabled, but force_utf8 on: we
+        // still launch with the UTF-8 prelude and ExecutionPolicy Bypass,
+        // but no $PROFILE/integration sourcing and no nonce.
+        let tempdir = std::env::temp_dir().join("cognia-test-pwsh-utf8only");
+        let _ = fs::create_dir_all(&tempdir);
+        let setup = build(ShellKind::Pwsh, &tempdir, "n", false, true).unwrap();
+        let cmd_idx = setup
+            .extra_args
+            .iter()
+            .position(|a| a == "-Command")
+            .expect("-Command present");
+        let cmd = &setup.extra_args[cmd_idx + 1];
+        assert!(cmd.contains("OutputEncoding"));
+        assert!(!cmd.contains("$PROFILE"));
+        assert!(!cmd.contains("shell-integration.ps1"));
+        assert!(setup.env_overrides.is_empty());
+        assert!(setup.extra_args.contains(&"Bypass".to_string()));
+        let _ = fs::remove_dir_all(&tempdir);
+    }
+
+    #[test]
+    fn build_pwsh_empty_when_no_integration_and_no_utf8() {
+        let tempdir = std::env::temp_dir().join("cognia-test-pwsh-noop");
+        let _ = fs::create_dir_all(&tempdir);
+        let setup = build(ShellKind::Pwsh, &tempdir, "n", false, false).unwrap();
+        assert!(setup.extra_args.is_empty());
+        assert!(setup.env_overrides.is_empty());
+        let _ = fs::remove_dir_all(&tempdir);
+    }
+
+    #[test]
+    fn build_bash_skipped_when_integration_disabled() {
+        // Even with the script present, a disabled toggle spawns bash clean.
+        let tempdir = std::env::temp_dir().join("cognia-test-bash-disabled");
+        let _ = fs::create_dir_all(&tempdir);
+        let script = tempdir.join("shell-integration.bash");
+        fs::write(&script, "# stub").unwrap();
+        let setup = build(ShellKind::Bash, &tempdir, "n", false, true).unwrap();
+        assert!(setup.extra_args.is_empty());
+        assert!(setup.env_overrides.is_empty());
         let _ = fs::remove_file(script);
     }
 
@@ -446,7 +588,7 @@ mod tests {
         let _ = fs::create_dir_all(&tempdir);
         let script = tempdir.join("shell-integration.ps1");
         fs::write(&script, "# stub").unwrap();
-        let setup = build(ShellKind::Pwsh, &tempdir, "n").unwrap();
+        let setup = build(ShellKind::Pwsh, &tempdir, "n", true, true).unwrap();
         let cmd_idx = setup
             .extra_args
             .iter()
@@ -463,7 +605,7 @@ mod tests {
     fn unknown_shell_returns_empty_setup() {
         let tempdir = std::env::temp_dir().join("cognia-test-unknown-int");
         let _ = fs::create_dir_all(&tempdir);
-        let setup = build(ShellKind::Unknown, &tempdir, "n").unwrap();
+        let setup = build(ShellKind::Unknown, &tempdir, "n", true, true).unwrap();
         assert!(setup.extra_args.is_empty());
         assert!(setup.env_overrides.is_empty());
         assert!(setup.tempdir.is_none());

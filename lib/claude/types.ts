@@ -999,6 +999,53 @@ export interface AppSettings {
      * (via the `timeoutSec` schema field) clamp to [5, 600]. Wave 4.
      */
     runInDockTimeoutSec?: number
+    /**
+     * xterm.js cursor shape. Defaults to `"block"`. Mapped 1:1 to the
+     * `cursorStyle` Terminal option.
+     */
+    cursorStyle?: "block" | "bar" | "underline"
+    /**
+     * Whether the cursor blinks. Defaults to true (matches the xterm.js
+     * `cursorBlink` default we set in `terminal-instance.tsx`).
+     */
+    cursorBlink?: boolean
+    /**
+     * Enable programming-font ligatures via `@xterm/addon-ligatures`. Off by
+     * default — the addon shapes glyph runs at render time, a small cost only
+     * worth paying for fonts that ship ligatures (Cascadia Code, JetBrains
+     * Mono, Fira Code). Toggling remounts the terminal.
+     */
+    fontLigatures?: boolean
+    /**
+     * Force the spawned shell's console output encoding to UTF-8 (PowerShell
+     * `[Console]::OutputEncoding` / cmd `chcp 65001`). Defaults to true. The
+     * Rust spawn path (`src-tauri/src/terminal/integration.rs`) honors this;
+     * it fixes mojibake on non-UTF-8 system codepages (e.g. GBK on Chinese
+     * Windows). Disable only if you deliberately depend on the legacy
+     * codepage.
+     */
+    forceUtf8?: boolean
+    /**
+     * Active terminal color scheme id (`lib/terminal/color-schemes.ts`).
+     * `"auto"` (default) follows the app's light/dark mode with a neutral
+     * palette; named schemes (campbell, dracula, solarized-dark, …) are fixed.
+     */
+    colorScheme?: string
+    /**
+     * xterm.js renderer preference. `"auto"` (default) tries WebGL → Canvas →
+     * DOM. `"webgl"` / `"canvas"` force that renderer (still falling back if it
+     * fails to initialize). `"dom"` skips both accelerated renderers — the
+     * escape hatch when WebGL renders blank/garbled in a given WebView2.
+     */
+    renderer?: "auto" | "webgl" | "canvas" | "dom"
+    /**
+     * Named launch profiles (Windows-Terminal style). Each bundles a shell +
+     * cwd + env + args the dock's profile picker can spawn directly. See
+     * `lib/terminal/profiles.ts`.
+     */
+    profiles?: import("@/lib/terminal/profiles").TerminalProfile[]
+    /** Id of the profile the plain "+ New" affordance uses, if any. */
+    defaultProfileId?: string
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string

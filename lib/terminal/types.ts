@@ -31,6 +31,13 @@ export interface SpawnRequest {
   extensionId?: string
   /** Default `true`. Disables OSC 633 env injection when `false`. */
   enableShellIntegration?: boolean
+  /**
+   * Default `true`. Pins the spawned shell's console output encoding to
+   * UTF-8 (PowerShell `[Console]::OutputEncoding` / cmd `chcp 65001`) so the
+   * xterm.js renderer — which decodes PTY bytes as UTF-8 — doesn't garble
+   * output on non-UTF-8 system codepages (e.g. GBK on Chinese Windows).
+   */
+  forceUtf8?: boolean
   /** Defaults to `"local"`. The LAN-only WS bridge sets `"remote"`. */
   origin?: SessionOrigin
 }

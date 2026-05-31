@@ -17,8 +17,10 @@
 
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { AUTO_SCHEME_ID, TERMINAL_COLOR_SCHEMES } from "@/lib/terminal/color-schemes"
 import {
   Select,
   SelectContent,
@@ -29,6 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 
+import { TerminalProfiles } from "./terminal-profiles"
 import { TerminalProjectOverride } from "./terminal-project-override"
 
 type TerminalSettings = NonNullable<
@@ -44,7 +47,30 @@ const DEFAULT_VALUES: TerminalSettings = {
   copyOnSelect: false,
   exposeDockToAgents: false,
   runInDockTimeoutSec: 60,
+  cursorStyle: "block",
+  cursorBlink: true,
+  fontLigatures: false,
+  forceUtf8: true,
+  colorScheme: AUTO_SCHEME_ID,
+  renderer: "auto",
 }
+
+const RENDERERS: ReadonlyArray<"auto" | "webgl" | "canvas" | "dom"> = [
+  "auto",
+  "webgl",
+  "canvas",
+  "dom",
+]
+
+/**
+ * Recommended font stack for oh-my-posh / powerline prompts. The leading
+ * Nerd Font carries the glyphs; the rest are plain-coding-font fallbacks the
+ * machine is likely to already have. The user must install a Nerd Font for
+ * the icons to render — we can only point the font-family at one.
+ */
+const NERD_FONT_STACK = '"CaskaydiaCove Nerd Font", "JetBrains Mono", "Cascadia Code", monospace'
+
+const CURSOR_STYLES: ReadonlyArray<"block" | "bar" | "underline"> = ["block", "bar", "underline"]
 
 const AUTO = "__auto__"
 const CUSTOM = "__custom__"
@@ -150,6 +176,99 @@ export function TerminalCard() {
         </div>
       </div>
 
+      <div className="space-y-1.5">
+        <p className="text-[11px] text-muted-foreground">
+          {t("settings.terminal.fontFamily.nerdFontHelper")}
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={() => update({ fontFamily: NERD_FONT_STACK })}
+          data-testid="terminal-card-use-nerd-font"
+        >
+          {t("settings.terminal.fontFamily.useNerdFont")}
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="text-xs">{t("settings.terminal.cursor.label")}</Label>
+          <Select
+            value={terminal.cursorStyle ?? "block"}
+            onValueChange={(value) =>
+              update({ cursorStyle: value as "block" | "bar" | "underline" })
+            }
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-cursor-style">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CURSOR_STYLES.map((style) => (
+                <SelectItem key={style} value={style} className="text-xs">
+                  {t(`settings.terminal.cursor.${style}` as never)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end justify-between rounded border p-3">
+          <Label className="text-xs">{t("settings.terminal.cursor.blink")}</Label>
+          <Switch
+            checked={terminal.cursorBlink ?? true}
+            onCheckedChange={(checked) => update({ cursorBlink: checked })}
+            aria-label={t("settings.terminal.cursor.blink")}
+            data-testid="terminal-card-cursor-blink"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="text-xs">{t("settings.terminal.colorScheme.label")}</Label>
+          <Select
+            value={terminal.colorScheme || AUTO_SCHEME_ID}
+            onValueChange={(value) => update({ colorScheme: value })}
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-color-scheme">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={AUTO_SCHEME_ID} className="text-xs">
+                {t("settings.terminal.colorScheme.auto")}
+              </SelectItem>
+              {TERMINAL_COLOR_SCHEMES.map((scheme) => (
+                <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
+                  {scheme.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">{t("settings.terminal.renderer.label")}</Label>
+          <Select
+            value={terminal.renderer ?? "auto"}
+            onValueChange={(value) =>
+              update({ renderer: value as "auto" | "webgl" | "canvas" | "dom" })
+            }
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-renderer">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RENDERERS.map((r) => (
+                <SelectItem key={r} value={r} className="text-xs">
+                  {t(`settings.terminal.renderer.${r}` as never)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{t("settings.terminal.renderer.helper")}</p>
+
       <div className="space-y-2">
         <Label className="text-xs">{t("settings.terminal.scrollback.label")}</Label>
         <Input
@@ -204,6 +323,36 @@ export function TerminalCard() {
 
       <div className="flex items-center justify-between rounded border p-3">
         <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.ligatures.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.ligatures.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.fontLigatures ?? false}
+          onCheckedChange={(checked) => update({ fontLigatures: checked })}
+          aria-label={t("settings.terminal.ligatures.label")}
+          data-testid="terminal-card-ligatures"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs">{t("settings.terminal.forceUtf8.label")}</Label>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.terminal.forceUtf8.helper")}
+          </p>
+        </div>
+        <Switch
+          checked={terminal.forceUtf8 ?? true}
+          onCheckedChange={(checked) => update({ forceUtf8: checked })}
+          aria-label={t("settings.terminal.forceUtf8.label")}
+          data-testid="terminal-card-force-utf8"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded border p-3">
+        <div className="space-y-0.5">
           <Label className="text-xs">{t("settings.terminal.exposeDockToAgents.label")}</Label>
           <p className="text-[11px] text-muted-foreground">
             {t("settings.terminal.exposeDockToAgents.helper")}
@@ -242,6 +391,8 @@ export function TerminalCard() {
           data-testid="terminal-card-run-in-dock-timeout"
         />
       </div>
+
+      <TerminalProfiles />
 
       <TerminalProjectOverride />
     </div>

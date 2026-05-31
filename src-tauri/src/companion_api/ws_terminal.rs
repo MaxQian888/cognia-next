@@ -507,6 +507,10 @@ fn build_spawn_request(params: &WsTerminalParams) -> Result<SpawnRequest, String
         project_id: params.project_id.clone(),
         extension_id: params.extension_id.clone(),
         enable_shell_integration,
+        // Pin UTF-8 even on remote sessions: the WS path streams raw PTY
+        // bytes that the client's xterm.js decodes as UTF-8, so a non-UTF-8
+        // server codepage would still corrupt output.
+        force_utf8: true,
         origin: SessionOrigin::Remote,
     })
 }

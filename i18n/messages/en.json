@@ -255,6 +255,16 @@
       "closePane": "Close pane",
       "resize": "Drag to resize the terminal dock (arrow keys also work)"
     },
+    "shellPicker": {
+      "label": "Choose a shell",
+      "auto": "Default shell",
+      "pwsh": "PowerShell 7",
+      "powershell": "Windows PowerShell",
+      "cmd": "Command Prompt",
+      "bash": "bash",
+      "zsh": "zsh",
+      "profilesLabel": "Profiles"
+    },
     "fileViewer": {
       "title": "File viewer",
       "description": "Read-only source file preview",
@@ -275,7 +285,12 @@
         "close": "Close",
         "closeOthers": "Close others",
         "trustAgent": "Trust agent in this tab",
-        "locateInChat": "Locate in conversation"
+        "locateInChat": "Locate in conversation",
+        "copy": "Copy",
+        "paste": "Paste",
+        "selectAll": "Select all",
+        "clear": "Clear",
+        "find": "Find…"
       },
       "rename": {
         "label": "Rename terminal tab",
@@ -4658,14 +4673,58 @@
         "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration."
       },
       "fontFamily": {
-        "label": "Font family"
+        "label": "Font family",
+        "nerdFontHelper": "oh-my-posh and powerline prompts need a Nerd Font for their icons. Install one (e.g. CaskaydiaCove Nerd Font), then set it here.",
+        "useNerdFont": "Use recommended Nerd Font stack"
       },
       "fontSize": {
         "label": "Font size"
       },
+      "cursor": {
+        "label": "Cursor style",
+        "block": "Block",
+        "bar": "Bar",
+        "underline": "Underline",
+        "blink": "Cursor blink"
+      },
       "scrollback": {
         "label": "Scrollback lines",
         "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000."
+      },
+      "ligatures": {
+        "label": "Font ligatures",
+        "helper": "Render programming-font ligatures (Cascadia Code, JetBrains Mono, Fira Code). Off by default; toggling reloads the terminal."
+      },
+      "forceUtf8": {
+        "label": "Force UTF-8 output",
+        "helper": "Pin PowerShell / cmd console output to UTF-8 so powerline glyphs and CJK text render correctly on non-UTF-8 system codepages (e.g. GBK on Chinese Windows). Leave on unless you depend on the legacy codepage."
+      },
+      "colorScheme": {
+        "label": "Color scheme",
+        "auto": "Auto (follow app theme)"
+      },
+      "renderer": {
+        "label": "Renderer",
+        "auto": "Auto",
+        "webgl": "WebGL",
+        "canvas": "Canvas",
+        "dom": "DOM",
+        "helper": "Auto picks GPU-accelerated WebGL, falling back to Canvas then DOM. Switch to Canvas or DOM if the terminal renders blank or garbled."
+      },
+      "profiles": {
+        "title": "Launch profiles",
+        "helper": "Named shell presets (shell + working directory) the new-tab menu can launch. Set one as default for the plain \"+ New\" button.",
+        "empty": "No profiles yet.",
+        "add": "Add profile",
+        "newName": "New profile",
+        "nameLabel": "Profile name",
+        "namePlaceholder": "Profile name",
+        "shellLabel": "Shell",
+        "cwdLabel": "Working directory",
+        "cwdPlaceholder": "Working directory (optional)",
+        "setDefault": "Set as default",
+        "isDefault": "Default",
+        "remove": "Remove profile"
       },
       "shellIntegration": {
         "label": "Enable shell integration",

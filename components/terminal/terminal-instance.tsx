@@ -54,6 +54,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, type ForwardedRef }
 import type { IDecoration, ILink, ILinkProvider, IMarker } from "@xterm/xterm"
 
 import { TerminalBackpressure } from "@/lib/terminal/backpressure"
+import { resolveTerminalTheme } from "@/lib/terminal/color-schemes"
 import { exitMarkerColor, nextMarkerLine, prevMarkerLine } from "@/lib/terminal/command-markers"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { matchFileLinks, resolveLinkPath } from "@/lib/terminal/terminal-links"
@@ -88,6 +89,10 @@ export interface TerminalInstanceHandle {
   copySelection: () => Promise<void>
   /** Trigger a paste from the system clipboard (or no-op if unavailable). */
   pasteFromClipboard: () => Promise<void>
+  /** Select the entire terminal buffer. */
+  selectAll: () => void
+  /** Reset any keyboard zoom back to the configured font size. */
+  resetZoom: () => void
   /** Scroll to the previous OSC 633 command boundary (no-op when none above). */
   jumpToPrevCommand: () => void
   /** Scroll to the next OSC 633 command boundary (no-op when none below). */
@@ -137,25 +142,28 @@ function jumpToCommand(
 const DEFAULT_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
 const DEFAULT_FONT_SIZE = 13
 const DEFAULT_SCROLLBACK = 10000
+const MIN_ZOOM_FONT_SIZE = 6
+const MAX_ZOOM_FONT_SIZE = 40
 
-/** xterm.js theme tokens. Pulled into helpers so dock + tests can share. */
-function makeTheme(isDark: boolean) {
-  // Match the app's neutral palette (oklch in `globals.css`). Picked sRGB
-  // approximations that look correct against the light/dark `bg-background`.
-  if (isDark) {
-    return {
-      background: "#0a0a0a",
-      foreground: "#e5e5e5",
-      cursor: "#e5e5e5",
-      selectionBackground: "#3b82f680",
-    }
-  }
-  return {
-    background: "#ffffff",
-    foreground: "#171717",
-    cursor: "#171717",
-    selectionBackground: "#3b82f640",
-  }
+/** Clamp a (possibly zoomed) font size to a sane rendering range. */
+function clampFontSize(size: number): number {
+  return Math.max(MIN_ZOOM_FONT_SIZE, Math.min(MAX_ZOOM_FONT_SIZE, size))
+}
+
+/**
+ * xterm.js theme for the active color scheme. Delegates to the shared
+ * `resolveTerminalTheme` so the full ANSI 16-color palette and the named
+ * scheme presets live in one place. `"auto"` (default) follows the app's
+ * light/dark mode; named schemes are fixed.
+ */
+function makeTheme(isDark: boolean, schemeId?: string) {
+  // Match the app's neutral palette (oklch in `globals.css`) for the base
+  // tokens, and supply a full ANSI 16-color palette so colored output
+  // (oh-my-posh, starship, `ls --color`, git) renders with intentional,
+  // legible colors instead of xterm's washed-out defaults. The dark palette
+  // is Windows Terminal's "Campbell" — the canonical PowerShell scheme — so
+  // PowerShell prompts look exactly as the user expects.
+  return resolveTerminalTheme(schemeId, isDark)
 }
 
 function isHtmlDark(): boolean {
@@ -184,6 +192,17 @@ function TerminalInstanceImpl(
   // OSC 633 command markers (1B) — newest last. Each holds the xterm
   // marker, its current gutter decoration, and the captured exit code.
   const markersRef = useRef<CommandMarkerEntry[]>([])
+  // Active color-scheme id, mirrored into a ref so the `.dark` MutationObserver
+  // (which only re-runs on app theme flips) always reads the current scheme
+  // without re-running the setup effect.
+  const colorSchemeRef = useRef<string>("auto")
+  // Ephemeral per-instance font zoom (Ctrl+= / Ctrl+- / Ctrl+0). Stored as a
+  // delta on top of the configured font size so it survives setting changes
+  // and never mutates global settings. `applyZoomRef` is wired during setup so
+  // the imperative `resetZoom` can re-apply from outside the effect closure.
+  const zoomRef = useRef<number>(0)
+  const fontSizeRef = useRef<number>(DEFAULT_FONT_SIZE)
+  const applyZoomRef = useRef<(() => void) | null>(null)
 
   // Settings-store derived defaults. Component props override; this lets
   // the mobile screen pin a fontSize while desktop follows user settings.
@@ -198,6 +217,25 @@ function TerminalInstanceImpl(
   )
   const settingsCopyOnSelect = useSettingsStore(
     (s) => (s.settings?.terminal as { copyOnSelect?: boolean } | undefined)?.copyOnSelect ?? false
+  )
+  const cursorStyle = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { cursorStyle?: "block" | "bar" | "underline" } | undefined)
+        ?.cursorStyle ?? "block"
+  )
+  const cursorBlink = useSettingsStore(
+    (s) => (s.settings?.terminal as { cursorBlink?: boolean } | undefined)?.cursorBlink ?? true
+  )
+  const fontLigatures = useSettingsStore(
+    (s) => (s.settings?.terminal as { fontLigatures?: boolean } | undefined)?.fontLigatures ?? false
+  )
+  const colorScheme = useSettingsStore(
+    (s) => (s.settings?.terminal as { colorScheme?: string } | undefined)?.colorScheme ?? "auto"
+  )
+  const renderer = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { renderer?: "auto" | "webgl" | "canvas" | "dom" } | undefined)
+        ?.renderer ?? "auto"
   )
 
   const fontFamily =
@@ -268,6 +306,21 @@ function TerminalInstanceImpl(
           /* noop — Safari without permission, headless test env */
         }
       },
+      selectAll: () => {
+        try {
+          termRef.current?.selectAll?.()
+        } catch {
+          /* noop */
+        }
+      },
+      resetZoom: () => {
+        zoomRef.current = 0
+        try {
+          applyZoomRef.current?.()
+        } catch {
+          /* noop */
+        }
+      },
       jumpToPrevCommand: () => jumpToCommand(termRef.current, markersRef.current, "prev"),
       jumpToNextCommand: () => jumpToCommand(termRef.current, markersRef.current, "next"),
     }),
@@ -313,13 +366,15 @@ function TerminalInstanceImpl(
 
       if (disposedRef.current) return
 
+      colorSchemeRef.current = colorScheme
       const term = new Terminal({
-        cursorBlink: true,
+        cursorBlink,
+        cursorStyle,
         fontFamily,
         fontSize,
         scrollback,
         allowProposedApi: true,
-        theme: makeTheme(isHtmlDark()),
+        theme: makeTheme(isHtmlDark(), colorScheme),
       })
       termRef.current = term
 
@@ -348,12 +403,45 @@ function TerminalInstanceImpl(
       term.loadAddon(search)
       searchAddonRef.current = search
 
-      // Keyboard handlers: Ctrl/Cmd+Shift+C/V for clipboard, Ctrl+L for clear.
+      // Apply the configured font size plus the active zoom delta, then re-fit
+      // so the PTY's cols/rows track the new cell size. Wired into a ref so the
+      // imperative `resetZoom` can call it from outside this effect.
+      const applyZoom = () => {
+        try {
+          term.options.fontSize = clampFontSize(fontSizeRef.current + zoomRef.current)
+          fit.fit()
+          void session.resize(term.rows, term.cols)
+        } catch {
+          /* noop — container may not be laid out */
+        }
+      }
+      applyZoomRef.current = applyZoom
+
+      // Keyboard handlers: Ctrl/Cmd+Shift+C/V for clipboard, Ctrl+L for clear,
+      // Ctrl/Cmd+= / +- / +0 for font zoom.
       // Returning false from `attachCustomKeyEventHandler` suppresses xterm's
       // default; returning true lets xterm process the event (default).
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true
         const mod = e.ctrlKey || e.metaKey
+        // Font zoom. `=`/`+` zoom in, `-`/`_` zoom out, `0` resets. Guard on
+        // !shift for the digit so it doesn't swallow shifted symbols, but allow
+        // shift for `+` (which is Shift+= on most layouts).
+        if (mod && (e.key === "=" || e.key === "+")) {
+          zoomRef.current += 1
+          applyZoom()
+          return false
+        }
+        if (mod && (e.key === "-" || e.key === "_")) {
+          zoomRef.current -= 1
+          applyZoom()
+          return false
+        }
+        if (mod && e.key === "0") {
+          zoomRef.current = 0
+          applyZoom()
+          return false
+        }
         if (mod && e.shiftKey && (e.key === "C" || e.key === "c")) {
           const sel = term.getSelection()
           if (sel && navigator.clipboard) {
@@ -397,11 +485,17 @@ function TerminalInstanceImpl(
 
       term.open(container)
 
-      // Try WebGL first; fall back to canvas. Both are quiet about errors —
-      // if neither loads, xterm uses its built-in DOM renderer.
+      // Renderer selection. "auto" tries WebGL → Canvas → DOM (the robust
+      // default). "webgl"/"canvas" force that renderer but still fall back if
+      // it refuses to initialize (some WebView2 setups break WebGL — the
+      // forced choice is an *intent*, not a guarantee). "dom" skips both
+      // accelerated renderers entirely (slowest, but always works) — the
+      // escape hatch for "the terminal renders blank/garbled" reports.
       let webglAddon: { dispose: () => void } | null = null
       let canvasAddon: { dispose: () => void } | null = null
-      if (webglCtor) {
+      const tryWebgl = renderer === "auto" || renderer === "webgl"
+      const tryCanvas = renderer === "auto" || renderer === "webgl" || renderer === "canvas"
+      if (tryWebgl && webglCtor) {
         try {
           webglAddon = new webglCtor()
           term.loadAddon(webglAddon as unknown as Parameters<typeof term.loadAddon>[0])
@@ -409,12 +503,31 @@ function TerminalInstanceImpl(
           webglAddon = null
         }
       }
-      if (!webglAddon && canvasCtor) {
+      if (!webglAddon && tryCanvas && canvasCtor) {
         try {
           canvasAddon = new canvasCtor()
           term.loadAddon(canvasAddon as unknown as Parameters<typeof term.loadAddon>[0])
         } catch {
           canvasAddon = null
+        }
+      }
+
+      // Programming-font ligatures (opt-in). Loaded after the renderer so it
+      // shapes the active glyph cache. The dynamic import + try/catch mirror
+      // the renderer addons: a missing module or unsupported font must not
+      // crash the dock. Disposed in cleanup. Toggling the setting remounts
+      // (the setup effect depends on `fontLigatures`), so we only need to
+      // load — never unload — here.
+      let ligaturesAddon: { dispose: () => void } | null = null
+      if (fontLigatures) {
+        try {
+          const { LigaturesAddon } = await import("@xterm/addon-ligatures")
+          if (!disposedRef.current) {
+            ligaturesAddon = new LigaturesAddon()
+            term.loadAddon(ligaturesAddon as unknown as Parameters<typeof term.loadAddon>[0])
+          }
+        } catch {
+          ligaturesAddon = null
         }
       }
 
@@ -494,7 +607,7 @@ function TerminalInstanceImpl(
       // Watch `<html>` for `.dark` flips and retheme on demand.
       const themeObserver = new MutationObserver(() => {
         try {
-          term.options.theme = makeTheme(isHtmlDark())
+          term.options.theme = makeTheme(isHtmlDark(), colorSchemeRef.current)
         } catch {
           /* noop */
         }
@@ -568,6 +681,11 @@ function TerminalInstanceImpl(
           /* noop */
         }
         try {
+          ligaturesAddon?.dispose()
+        } catch {
+          /* noop */
+        }
+        try {
           search.dispose()
         } catch {
           /* noop */
@@ -586,22 +704,42 @@ function TerminalInstanceImpl(
     }
     // copyOnSelect is read inside the selection handler each time, so we
     // don't need to re-run setup when it changes. Settings updates flow
-    // through the live-settings effect below.
+    // through the live-settings effect below. `fontLigatures` and `renderer`
+    // ARE setup deps: their addons can't be cleanly hot-swapped, so changing
+    // either remounts the terminal (cheap — a fresh xterm, the PTY survives).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [sessionId, fontLigatures, renderer])
 
   // Live settings: mutate the live xterm's options without rebuilding it.
   useEffect(() => {
+    fontSizeRef.current = fontSize
     const term = termRef.current
     if (!term) return
     try {
       if (term.options.fontFamily !== fontFamily) term.options.fontFamily = fontFamily
-      if (term.options.fontSize !== fontSize) term.options.fontSize = fontSize
+      // Apply the configured size plus any active zoom delta.
+      const effectiveSize = clampFontSize(fontSize + zoomRef.current)
+      if (term.options.fontSize !== effectiveSize) term.options.fontSize = effectiveSize
       if (term.options.scrollback !== scrollback) term.options.scrollback = scrollback
+      if (term.options.cursorStyle !== cursorStyle) term.options.cursorStyle = cursorStyle
+      if (term.options.cursorBlink !== cursorBlink) term.options.cursorBlink = cursorBlink
     } catch {
       /* noop */
     }
-  }, [fontFamily, fontSize, scrollback])
+  }, [fontFamily, fontSize, scrollback, cursorStyle, cursorBlink])
+
+  // Live color-scheme switch: re-theme in place (no remount). Also keeps the
+  // ref the `.dark` observer reads in sync.
+  useEffect(() => {
+    colorSchemeRef.current = colorScheme
+    const term = termRef.current
+    if (!term) return
+    try {
+      term.options.theme = makeTheme(isHtmlDark(), colorScheme)
+    } catch {
+      /* noop */
+    }
+  }, [colorScheme])
 
   return (
     <div

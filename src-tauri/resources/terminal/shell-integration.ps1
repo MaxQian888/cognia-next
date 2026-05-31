@@ -13,6 +13,18 @@
 # behaviour. Missing PSReadLine is silently tolerated — `Get-Module` is
 # our gate.
 
+# Pin UTF-8 output so non-UTF-8 system codepages (e.g. GBK/cp936 on Chinese
+# Windows) don't corrupt powerline glyphs, box-drawing, or CJK text in the
+# xterm.js renderer (which always decodes PTY bytes as UTF-8). The spawn argv
+# already does this; repeating it here keeps the script correct when a user
+# sources it from their own $PROFILE. Runs before the nonce guard because it
+# is independent of OSC 633 integration.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {}
+
 if (-not $env:COGNIA_TERM_NONCE) { return }
 
 $Global:__CogniaTermNonce = $env:COGNIA_TERM_NONCE

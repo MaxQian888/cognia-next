@@ -42,6 +42,17 @@ export interface TerminalTabContextMenuProps {
   onToggleAgentTrust: (id: string, trusted: boolean) => void
   /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
   onLocateInChat?: (chatSessionId: string) => void
+  /**
+   * Clipboard / edit actions on the focused pane. When provided, an edit
+   * group (Copy / Paste / Select all / Clear / Find) renders at the top of
+   * the menu — the dock wires these to the focused `TerminalInstanceHandle`.
+   * Omitted by callers that only want tab-level actions.
+   */
+  onCopy?: () => void
+  onPaste?: () => void
+  onSelectAll?: () => void
+  onClear?: () => void
+  onFind?: () => void
 }
 
 export function TerminalTabContextMenu({
@@ -53,12 +64,51 @@ export function TerminalTabContextMenu({
   onCloseOthers,
   onToggleAgentTrust,
   onLocateInChat,
+  onCopy,
+  onPaste,
+  onSelectAll,
+  onClear,
+  onFind,
 }: TerminalTabContextMenuProps) {
   const t = useTranslations("terminal.tab.menu")
+  const hasEditGroup = !!(onCopy || onPaste || onSelectAll || onClear || onFind)
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent data-testid="terminal-tab-menu" className="w-44">
+        {hasEditGroup ? (
+          <>
+            {onCopy ? (
+              <ContextMenuItem onSelect={() => onCopy()} data-testid="terminal-tab-menu-copy">
+                {t("copy")}
+              </ContextMenuItem>
+            ) : null}
+            {onPaste ? (
+              <ContextMenuItem onSelect={() => onPaste()} data-testid="terminal-tab-menu-paste">
+                {t("paste")}
+              </ContextMenuItem>
+            ) : null}
+            {onSelectAll ? (
+              <ContextMenuItem
+                onSelect={() => onSelectAll()}
+                data-testid="terminal-tab-menu-select-all"
+              >
+                {t("selectAll")}
+              </ContextMenuItem>
+            ) : null}
+            {onClear ? (
+              <ContextMenuItem onSelect={() => onClear()} data-testid="terminal-tab-menu-clear">
+                {t("clear")}
+              </ContextMenuItem>
+            ) : null}
+            {onFind ? (
+              <ContextMenuItem onSelect={() => onFind()} data-testid="terminal-tab-menu-find">
+                {t("find")}
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuSeparator />
+          </>
+        ) : null}
         <ContextMenuItem onSelect={() => onRename(row.id)} data-testid="terminal-tab-menu-rename">
           {t("rename")}
         </ContextMenuItem>
