@@ -107,6 +107,14 @@ import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-ap
 import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
 import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
+import { createGitAPI, type PluginGitAPI } from "../api/git-api"
+import { createGoalAPI, type PluginGoalAPI } from "../api/goal-api"
+import { createSubscriptionAPI, type PluginSubscriptionAPI } from "../api/subscription-api"
+import { createTerminalAPI, type PluginTerminalAPI } from "../api/terminal-api"
+import { createPerfAPI, type PluginPerfAPI } from "../api/perf-api"
+import { createConnectorsAPI, type PluginConnectorsAPI } from "../api/connectors-api"
+import { createShareAPI, type PluginShareAPI } from "../api/share-api"
+import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -142,6 +150,22 @@ export type FullPluginContext = Omit<PluginContext, "storage"> &
     chat: PluginChatAPI
     /** Read-only platform-capability flags (ADR-0026 §5 §C). */
     capabilities: PluginCapabilitiesAPI
+    /** Active source-control repository read/write (gated `git:read`/`git:write`). */
+    git: PluginGitAPI
+    /** Self-driving goal read/drive (gated `goal:read`/`goal:write`). */
+    goals: PluginGoalAPI
+    /** Read-only subscription plan + usage metrics (gated `subscription:read`). */
+    subscription: PluginSubscriptionAPI
+    /** Integrated-terminal dock spawn/write/kill (gated `terminal:*`, ownership-checked). */
+    terminal: PluginTerminalAPI
+    /** Read-only performance dashboard snapshots + live samples (gated `perf:read`). */
+    perf: PluginPerfAPI
+    /** Connector adapter list + outbound send (gated `connectors:read`/`connectors:send`). */
+    connectors: PluginConnectorsAPI
+    /** Public share-link create/revoke/inspect (gated `share:read`/`share:create`). */
+    share: PluginShareAPI
+    /** Encrypted backup build/restore/history (gated `backup:read`/`backup:write`; never the API key). */
+    backup: PluginBackupAPI
   }
 
 // =============================================================================
@@ -274,6 +298,14 @@ export function createFullPluginContext(
     modal: createModalAPI(pluginId),
     chat: createChatAPI(pluginId),
     capabilities: createCapabilitiesAPI(),
+    git: createGitAPI(pluginId),
+    goals: createGoalAPI(pluginId),
+    subscription: createSubscriptionAPI(pluginId),
+    terminal: createTerminalAPI(pluginId),
+    perf: createPerfAPI(pluginId),
+    connectors: createConnectorsAPI(pluginId),
+    share: createShareAPI(pluginId),
+    backup: createBackupAPI(pluginId),
   }
 }
 
@@ -579,9 +611,91 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       }
 
       const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-      const { prompt: _ignored, ...agentConfig } = config
+      const { getBackgroundAgentManager } = await import("@/lib/ai/agent/background-agent-manager")
+      const { prompt: _ignored, agentId: providedId, label, ...agentConfig } = config
 
-      return executeAgent(prompt, agentConfig as unknown as Parameters<typeof executeAgent>[1])
+      // Tool-enabled runs reach the host's full tool surface through the
+      // sidecar — gate them behind the plugin's declared `agent:control`
+      // permission. Text-only runs stay ungated (parity with prior behaviour).
+      if (agentConfig.toolsEnabled === true) {
+        const { pluginHasApiPermission } = await import("@/lib/plugin/api/permission-api")
+        if (!pluginHasApiPermission(pluginId, "agent:control")) {
+          throw new Error(
+            'agent.executeAgent: tool-enabled runs require the "agent:control" permission — declare it in the plugin manifest.'
+          )
+        }
+      }
+
+      // Register the run so `agent.cancelAgent(id)` can abort it mid-flight.
+      // A caller-supplied `agentId` lets the plugin choose the cancellation
+      // handle up front (fire-and-forget pattern); otherwise we mint one and
+      // return it on the result.
+      const backgroundManager = getBackgroundAgentManager()
+      const agentId =
+        typeof providedId === "string" && providedId ? providedId : crypto.randomUUID()
+      const managedSignal = backgroundManager.registerAgent(agentId, {
+        pluginId,
+        ...(typeof label === "string" ? { label } : {}),
+      })
+      const callerSignal = agentConfig.abortSignal as AbortSignal | undefined
+      const signal = callerSignal ? AbortSignal.any([callerSignal, managedSignal]) : managedSignal
+
+      try {
+        const result = await executeAgent(prompt, {
+          ...(agentConfig as Parameters<typeof executeAgent>[1]),
+          abortSignal: signal,
+        })
+        return { ...result, agentId }
+      } finally {
+        backgroundManager.finishAgent(agentId)
+      }
+    },
+
+    runExternalAgent: async (
+      presetOrAgentId: string,
+      prompt: string,
+      options?: Record<string, unknown>
+    ) => {
+      const { pluginHasApiPermission } = await import("@/lib/plugin/api/permission-api")
+      if (!pluginHasApiPermission(pluginId, "agent:dispatch-external")) {
+        throw new Error(
+          'agent.runExternalAgent requires the "agent:dispatch-external" permission — declare it in the plugin manifest.'
+        )
+      }
+      if (typeof presetOrAgentId !== "string" || !presetOrAgentId) {
+        throw new Error("agent.runExternalAgent requires a preset or agent id")
+      }
+      if (typeof prompt !== "string" || !prompt) {
+        throw new Error("agent.runExternalAgent requires a non-empty prompt")
+      }
+
+      const [{ getExternalAgentManager }, { createAgentFromPreset }] = await Promise.all([
+        import("@/lib/ai/agent/external/manager"),
+        import("@/lib/ai/agent/external/presets"),
+      ])
+      const externalManager = getExternalAgentManager()
+
+      // If the id is a known live instance, execute against it directly.
+      // Otherwise treat it as a preset id (including plugin-contributed
+      // overlay presets, which `createAgentFromPreset` resolves) and add a
+      // fresh instance first.
+      let agentId = presetOrAgentId
+      if (!externalManager.getAgent(presetOrAgentId)) {
+        const config = createAgentFromPreset(presetOrAgentId)
+        if (!config) {
+          throw new Error(
+            `agent.runExternalAgent: no live agent or preset "${presetOrAgentId}" found`
+          )
+        }
+        const instance = await externalManager.addAgent(config)
+        agentId = instance.config.id
+      }
+
+      return externalManager.execute(
+        agentId,
+        prompt,
+        options as Parameters<typeof externalManager.execute>[2]
+      )
     },
 
     cancelAgent: (agentId: string) => {

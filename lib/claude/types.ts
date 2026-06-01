@@ -1046,6 +1046,26 @@ export interface AppSettings {
     profiles?: import("@/lib/terminal/profiles").TerminalProfile[]
     /** Id of the profile the plain "+ New" affordance uses, if any. */
     defaultProfileId?: string
+    /**
+     * GitHub-Copilot-style inline command autocomplete (ADR-0039). As you
+     * type at a shell prompt, a debounced suggestion is shown as dim ghost
+     * text after the cursor; Tab / → accepts it (writing the suffix into the
+     * PTY — it never auto-runs), Esc dismisses.
+     */
+    autocomplete?: {
+      /** Master switch. Off by default — the user opts in. */
+      enabled?: boolean
+      /**
+       * Which built-in suggestion sources to use:
+       *  - `"history"` — offline prefix-match of this session's history only.
+       *  - `"ai"` — LLM completions only (needs a configured model).
+       *  - `"both"` (default) — history + AI, ranked AI-first.
+       * Plugin-contributed providers run regardless of this setting.
+       */
+      source?: "history" | "ai" | "both"
+      /** Debounce before querying, ms. Default 350. Clamped [50, 2000]. */
+      debounceMs?: number
+    }
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string
@@ -1144,6 +1164,23 @@ export interface AppSettings {
    * migration.
    */
   goalConsoleView?: "grid" | "list"
+  /**
+   * Chat welcome page (`EmptyChatState`) personalization. All three live in
+   * settings JSON (same pattern as `goalConsoleView`) so they persist without a
+   * Dexie migration.
+   *
+   *  - `userName`: optional display name woven into the time-of-day greeting
+   *    ("Good evening, {name}"). Empty → greeting shows without a name.
+   *  - `welcomeStyle`: `"rich"` (default — aurora + bento cards) vs `"minimal"`
+   *    (flat, compact). Toggled inline on the welcome page and from Settings →
+   *    General. Mobile/narrow viewports force `"minimal"` regardless.
+   *  - `welcomeHidden`: per-section dismissals. Once the user closes the
+   *    "Quick start" capability grid or the "Try a prompt" starters, the flag
+   *    keeps it hidden across reloads.
+   */
+  userName?: string
+  welcomeStyle?: "rich" | "minimal"
+  welcomeHidden?: { quickStart?: boolean; tryPrompt?: boolean }
   /**
    * Persisted view preferences for the MCP servers management panel
    * (`/settings?section=mcp`). Lives in settings JSON (same pattern as

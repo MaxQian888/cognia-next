@@ -2,7 +2,12 @@
  * @jest-environment node
  */
 
-import { detectPlatform, platformDefaultShell, resolveDefaultShell } from "./shell-detect"
+import {
+  detectPlatform,
+  detectShellKind,
+  platformDefaultShell,
+  resolveDefaultShell,
+} from "./shell-detect"
 
 describe("detectPlatform", () => {
   it("detects Windows UA", () => {
@@ -34,6 +39,25 @@ describe("platformDefaultShell", () => {
     ["other", "/bin/sh"],
   ] as const)("returns the expected default for %s", (platform, expected) => {
     expect(platformDefaultShell(platform)).toBe(expected)
+  })
+})
+
+describe("detectShellKind", () => {
+  it.each([
+    ["/bin/bash", "bash"],
+    ["/usr/bin/zsh", "zsh"],
+    ["/bin/sh", "sh"],
+    ["/usr/bin/dash", "sh"],
+    ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh"],
+    ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "powershell"],
+    ["C:\\Windows\\System32\\cmd.exe", "cmd"],
+    ["/usr/local/bin/fish", "fish"],
+    ["/usr/bin/nu", "nu"],
+    ["nushell", "nu"],
+    ["/usr/bin/elvish", "unknown"],
+    ["", "unknown"],
+  ] as const)("classifies %s as %s", (path, kind) => {
+    expect(detectShellKind(path)).toBe(kind)
   })
 })
 

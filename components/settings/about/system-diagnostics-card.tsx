@@ -121,7 +121,7 @@ export function SystemDiagnosticsCard({
         ) : (
           <InfoRow
             label={t("system.locale")}
-            value={osInfo?.locale ?? t("system.unavailable")}
+            value={t("system.unavailable")}
             testid="row-locale-fallback"
           />
         )}

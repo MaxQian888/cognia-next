@@ -207,10 +207,33 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       if (options?.stop?.length) {
         streamOptions.stopSequences = options.stop
       }
+      if (options?.signal) {
+        streamOptions.abortSignal = options.signal
+      }
 
       const result = streamText(streamOptions as Parameters<typeof streamText>[0])
       for await (const chunk of result.textStream) {
         yield { content: chunk }
+      }
+
+      // Surface end-of-stream token usage on a trailing chunk so plugins can
+      // track cost. `streamText` resolves `.usage` after the stream drains;
+      // only emit when the provider actually reported counts. Tolerates both
+      // the AI-SDK field naming (`inputTokens`/`outputTokens`) and the legacy
+      // `promptTokens`/`completionTokens` shape.
+      const usage = (await Promise.resolve(result.usage).catch(() => undefined)) as
+        | Record<string, number | undefined>
+        | undefined
+      const promptTokens = usage?.inputTokens ?? usage?.promptTokens
+      const completionTokens = usage?.outputTokens ?? usage?.completionTokens
+      if (typeof promptTokens === "number" || typeof completionTokens === "number") {
+        const p = promptTokens ?? 0
+        const c = completionTokens ?? 0
+        yield {
+          content: "",
+          finishReason: "stop",
+          usage: { promptTokens: p, completionTokens: c, totalTokens: usage?.totalTokens ?? p + c },
+        }
       }
     },
 

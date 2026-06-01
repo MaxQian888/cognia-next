@@ -24,6 +24,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { createLogger } from "@/lib/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { PersonalizationCard } from "./personalization-card"
 
 const log = createLogger("settings.general")
 
@@ -222,6 +223,10 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
             aria-label={t("briefMode")}
           />
         </div>
+      </div>
+
+      <div className="border-t pt-4">
+        <PersonalizationCard />
       </div>
 
       <div className="space-y-2">

@@ -47,6 +47,8 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "artifact:write": ["artifact:write"],
   "ai:chat": ["ai:chat"],
   "ai:embed": ["ai:embed"],
+  "agent:control": ["agent:control"],
+  "agent:dispatch-external": ["agent:dispatch-external"],
   "export:session": ["export:session"],
   "export:project": ["export:project"],
   "theme:read": ["theme:read"],
@@ -187,6 +189,17 @@ export function createPermissionAPI(
       return permissions.some((p) => granted.has(p))
     },
   }
+}
+
+/**
+ * Synchronous host-side check: does `pluginId` hold `permission` in its
+ * granted API-permission set? Used by imperative context APIs (e.g. the
+ * tool-enabled `agent.executeAgent` / `agent.runExternalAgent` branches) to
+ * gate behind the plugin's declared manifest permissions before reaching the
+ * sidecar. Returns `false` when the plugin has no initialised permission set.
+ */
+export function pluginHasApiPermission(pluginId: string, permission: PluginAPIPermission): boolean {
+  return grantedPermissions.get(pluginId)?.has(permission) ?? false
 }
 
 /**

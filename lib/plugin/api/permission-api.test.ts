@@ -8,6 +8,7 @@ import {
   revokePluginPermissions,
   grantPermission,
   revokePermission,
+  pluginHasApiPermission,
 } from "./permission-api"
 import type { PluginAPIPermission } from "@/types/plugin/plugin-extended"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
@@ -235,6 +236,24 @@ describe("Permission API", () => {
       // Should have default permissions only
       expect(grantedAfter).toContain("notification:show")
       expect(grantedAfter).toContain("theme:read")
+    })
+  })
+
+  describe("pluginHasApiPermission", () => {
+    it("returns false for a plugin with no initialised permission set", () => {
+      revokePluginPermissions("ghost-plugin")
+      expect(pluginHasApiPermission("ghost-plugin", "agent:control")).toBe(false)
+    })
+
+    it("returns true once the manifest permission maps in", () => {
+      initializePluginPermissions("agent-plugin", ["agent:control", "agent:dispatch-external"])
+      expect(pluginHasApiPermission("agent-plugin", "agent:control")).toBe(true)
+      expect(pluginHasApiPermission("agent-plugin", "agent:dispatch-external")).toBe(true)
+    })
+
+    it("returns false for a permission the plugin did not declare", () => {
+      initializePluginPermissions("narrow-plugin", ["session:read"])
+      expect(pluginHasApiPermission("narrow-plugin", "agent:control")).toBe(false)
     })
   })
 

@@ -123,6 +123,31 @@ jest.mock("@/lib/terminal/session-registry", () => ({
   getLiveSession: () => sessionRegistry.current,
 }))
 
+// Controllable autocomplete hook — the hook internals are unit-tested
+// separately (use-terminal-autocomplete.test.ts). Here we only verify the
+// terminal-instance glue (overlay render, feed wiring, Tab/Esc handling,
+// prompt-reset).
+const mockAutocomplete: {
+  enabled: boolean
+  ghost: string
+  suggestion: { source: "history" | "ai" | "plugin" } | null
+  feed: jest.Mock
+  accept: jest.Mock
+  dismiss: jest.Mock
+  reset: jest.Mock
+} = {
+  enabled: false,
+  ghost: "",
+  suggestion: null,
+  feed: jest.fn(),
+  accept: jest.fn(() => null),
+  dismiss: jest.fn(),
+  reset: jest.fn(),
+}
+jest.mock("@/hooks/terminal/use-terminal-autocomplete", () => ({
+  useTerminalAutocomplete: () => mockAutocomplete,
+}))
+
 import { Terminal as MockTerminal } from "@xterm/xterm"
 import { TerminalInstance } from "./terminal-instance"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
@@ -177,6 +202,13 @@ beforeEach(() => {
   mockLigaturesAddon.mockClear()
   ;(MockTerminal as unknown as jest.Mock).mockClear()
   sessionRegistry.current = makeFakeSession()
+  mockAutocomplete.enabled = false
+  mockAutocomplete.ghost = ""
+  mockAutocomplete.suggestion = null
+  mockAutocomplete.feed.mockReset()
+  mockAutocomplete.accept.mockReset().mockReturnValue(null)
+  mockAutocomplete.dismiss.mockReset()
+  mockAutocomplete.reset.mockReset()
 })
 
 describe("TerminalInstance", () => {
@@ -475,5 +507,106 @@ describe("TerminalInstance", () => {
     expect(viewer.path).toBe("/proj/src/foo.ts") // resolved against cwd "/proj"
     expect(viewer.line).toBe(12)
     expect(viewer.column).toBe(3)
+  })
+
+  describe("autocomplete integration", () => {
+    function captureKeyHandler() {
+      const captured: { cb: ((e: KeyboardEvent) => boolean) | null } = { cb: null }
+      mockTermInstance.attachCustomKeyEventHandler = jest.fn(
+        (cb: (e: KeyboardEvent) => boolean) => {
+          captured.cb = cb
+        }
+      )
+      return captured
+    }
+    function key(over: Partial<KeyboardEvent>): KeyboardEvent {
+      return {
+        type: "keydown",
+        key: "a",
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        ...over,
+      } as KeyboardEvent
+    }
+
+    it("renders the ghost overlay when there is a suggestion", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.ghost = "status"
+      mockAutocomplete.suggestion = { source: "ai" }
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const ghost = container.querySelector('[data-testid="terminal-ghost-text"]')
+      expect(ghost).toBeTruthy()
+      expect(ghost?.textContent).toContain("status")
+    })
+
+    it("does not render the overlay when disabled", async () => {
+      mockAutocomplete.enabled = false
+      mockAutocomplete.ghost = "status"
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      expect(container.querySelector('[data-testid="terminal-ghost-text"]')).toBeNull()
+    })
+
+    it("feeds user keystrokes into the autocomplete model", async () => {
+      const captured: { cb: ((text: string) => void) | null } = { cb: null }
+      mockTermInstance.onData = jest.fn((cb: (text: string) => void) => {
+        captured.cb = cb
+        return { dispose: jest.fn() }
+      })
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      captured.cb?.("l")
+      expect(mockAutocomplete.feed).toHaveBeenCalledWith("l")
+    })
+
+    it("accepts on Tab: writes the suffix to the PTY and swallows the key", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.accept.mockReturnValue("status")
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      expect(mockAutocomplete.accept).toHaveBeenCalled()
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith("status")
+      expect(result).toBe(false)
+    })
+
+    it("lets Tab through to the shell when there is no suggestion", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.accept.mockReturnValue(null) // not at end / nothing to accept
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      expect(result).toBe(true) // falls through to xterm default
+    })
+
+    it("dismisses on Escape when a suggestion is active", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.suggestion = { source: "history" }
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Escape" }))
+      expect(mockAutocomplete.dismiss).toHaveBeenCalled()
+      expect(result).toBe(false)
+    })
+
+    it("resets the autocomplete line on a new prompt", async () => {
+      const captured: { cb: ((ev: { kind: string }) => void) | null } = { cb: null }
+      sessionRegistry.current!.onIntegration = jest.fn((cb: (ev: { kind: string }) => void) => {
+        captured.cb = cb
+        return () => undefined
+      })
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      captured.cb?.({ kind: "prompt_start" })
+      expect(mockAutocomplete.reset).toHaveBeenCalled()
+    })
   })
 })

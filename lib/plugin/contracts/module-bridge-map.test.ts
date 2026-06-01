@@ -94,12 +94,13 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "density-preset",
         "chat-middleware",
         "modal-mount",
+        "terminal-completion",
         "scheduler",
       ])
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(11)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(12)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

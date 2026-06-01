@@ -255,6 +255,9 @@
       "closePane": "Close pane",
       "resize": "Drag to resize the terminal dock (arrow keys also work)"
     },
+    "ghost": {
+      "acceptHint": "Tab"
+    },
     "shellPicker": {
       "label": "Choose a shell",
       "auto": "Default shell",
@@ -1294,6 +1297,20 @@
       "title": "What do you want to get done?",
       "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
       "newChat": "New chat",
+      "brandAlt": "Cognia",
+      "dismiss": "Hide this section",
+      "greeting": {
+        "morning": "Good morning",
+        "afternoon": "Good afternoon",
+        "evening": "Good evening",
+        "night": "Working late",
+        "named": "{greeting}, {name}"
+      },
+      "style": {
+        "rich": "Rich",
+        "minimal": "Minimal",
+        "toggleLabel": "Switch welcome layout"
+      },
       "sections": {
         "quickStart": "Quick start",
         "tryPrompt": "Try a prompt",
@@ -1307,6 +1324,14 @@
         "twin": "Digital twin",
         "computerUse": "Computer use",
         "ocr": "OCR"
+      },
+      "capabilitiesDesc": {
+        "workflows": "Orchestrate multi-step tasks into reusable automations — build once, run again and again.",
+        "agentTeams": "Multiple agents that plan, divide work, and execute in parallel.",
+        "connectors": "Bring the assistant into Lark, Slack, and other platforms.",
+        "twin": "Teach the assistant your context, preferences, and voice.",
+        "computerUse": "Let it click, type, and operate the screen for you.",
+        "ocr": "Pull text out of images and screenshots."
       },
       "samples": {
         "exploreTitle": "Explore the project",
@@ -3929,6 +3954,17 @@
       "ccswitchHintAction": "Open CCSwitch"
     },
     "general": {
+      "personalization": {
+        "title": "Personalization",
+        "description": "How the chat welcome page greets you and how much it shows.",
+        "nameLabel": "Your name",
+        "namePlaceholder": "e.g. Max",
+        "styleLabel": "Welcome layout",
+        "styleRich": "Rich",
+        "styleMinimal": "Minimal",
+        "styleHint": "Rich shows an animated backdrop and capability cards; minimal keeps it compact. Mobile always uses minimal.",
+        "restoreSections": "Restore hidden welcome sections"
+      },
       "defaultModel": "Default model",
       "useSdkDefault": "Use SDK default",
       "orPasteModelId": "Or paste a custom model id",
@@ -4549,6 +4585,8 @@
       },
       "addGroup": "Add group",
       "noGroupsForEvent": "No groups configured for {event}. Click \"Add group\" to attach a matcher.",
+      "noTriggerBadge": "No trigger source yet",
+      "noTriggerNote": "This event is recognised and saved, but the runtime has no trigger source for it yet — hooks configured here will not fire.",
       "save": "Save",
       "saving": "Saving…",
       "saved": "Saved.",
@@ -4741,6 +4779,20 @@
       "runInDockTimeout": {
         "label": "Run-in-dock timeout (seconds)",
         "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60."
+      },
+      "autocomplete": {
+        "label": "AI command autocomplete",
+        "helper": "Show GitHub-Copilot-style inline command suggestions as you type. Tab or → accepts; Esc dismisses. Accepting only fills the line — it never runs the command.",
+        "source": {
+          "label": "Suggestion source",
+          "both": "History + AI",
+          "ai": "AI only",
+          "history": "History only"
+        },
+        "debounce": {
+          "label": "Debounce (ms)"
+        },
+        "privacy": "When AI is enabled, the current command, working directory, and recent history are sent to your configured model to generate a suggestion. Context that looks like a secret (API keys, tokens, credentials) is detected and skipped. Plugin-contributed providers are unaffected by this setting."
       },
       "projectOverride": {
         "title": "Per-project override",
@@ -7824,6 +7876,63 @@
         "colCost": "Cost",
         "colActions": "Actions",
         "resume": "Resume"
+      },
+      "range": {
+        "label": "Time range",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days",
+        "all": "All time"
+      },
+      "export": {
+        "label": "Export",
+        "csv": "Download CSV",
+        "json": "Download JSON"
+      },
+      "window": {
+        "title": "Current quota windows",
+        "description": "Live utilization from the newest rate-limit snapshot, with time until each window resets.",
+        "noSnapshot": "No quota snapshot yet. Send a chat message or enable the active probe.",
+        "fiveHour": "5-hour window",
+        "sevenDay": "7-day window",
+        "noData": "not reported",
+        "representative": "Representative",
+        "resetUnknown": "Reset time unknown",
+        "resetExpired": "Resetting now",
+        "resetsInHm": "Resets in {hours}h {minutes}m",
+        "resetsInM": "Resets in {minutes}m",
+        "fallback": "Fallback buffer at {pct}%.",
+        "overageDisabled": "Overage disabled: {reason}.",
+        "level": {
+          "ok": "Healthy",
+          "warn": "Approaching limit",
+          "crit": "At limit"
+        }
+      },
+      "trend": {
+        "title": "Utilization trend",
+        "description": "5-hour and 7-day window utilization over the selected range.",
+        "empty": "No snapshots in this range yet.",
+        "fiveHour": "5h",
+        "sevenDay": "7d"
+      },
+      "models": {
+        "title": "Cost by model",
+        "description": "Per-model tokens and estimated cost. Costs the SDK did not report are back-filled from model pricing.",
+        "empty": "No usage in this range yet.",
+        "totalTokens": "Total tokens",
+        "totalCost": "Total cost",
+        "totalTurns": "Total turns",
+        "colModel": "Model",
+        "colTurns": "Turns",
+        "colInput": "Input",
+        "colOutput": "Output",
+        "colCache": "Cache read",
+        "colCost": "Cost"
+      },
+      "costOverTime": {
+        "title": "Cost over time",
+        "description": "Estimated daily spend across the selected range.",
+        "empty": "No usage in this range yet."
       }
     },
     "settings": {

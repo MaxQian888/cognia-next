@@ -3,6 +3,8 @@
  * https://jestjs.io/docs/configuration
  */
 
+import os from "node:os"
+
 import type { Config } from "jest"
 import nextJest from "next/jest.js"
 
@@ -10,6 +12,26 @@ const createJestConfig = nextJest({
   // Provide the path to your Next.js app to load next.config.js and .env files in your test environment
   dir: "./",
 })
+
+// Coverage runs are dramatically more memory-hungry than plain test runs. The
+// V8 coverage provider makes every worker retain coverage maps for the *union*
+// of every module graph it has loaded, and `collectCoverageFrom` forces the
+// main process to build an "empty coverage" istanbul map for all ~3k source
+// files — a single-threaded ~2GB cost on its own (measured: a 1-test
+// `--coverage` run already peaks at ~1.9GB and takes ~35s, none of it the
+// test). Plain `jest` runs pay neither cost, so the clamps below are scoped to
+// coverage only and the fast non-coverage path keeps Jest's defaults.
+const isCoverage = process.env.JEST_COVERAGE === "1" || process.argv.includes("--coverage")
+
+// Pick the coverage worker count from whichever is scarcer: CPU or RAM.
+// Budget ~1.5GB of *currently-free* RAM per worker and reserve ~2GB for the
+// parent's empty-coverage aggregation. This self-tunes across machines — a
+// RAM-rich CI box stays CPU-bound (50% of cores), while a high-core but
+// RAM-modest dev box (e.g. 32 cores / 34GB with other apps resident) drops the
+// worker count so 16 heavy coverage workers don't gang up and swap-thrash.
+const halfCores = Math.max(1, Math.ceil(os.cpus().length / 2))
+const ramBudgetedWorkers = Math.max(1, Math.floor((os.freemem() / 1e9 - 2) / 1.5))
+const coverageWorkers = Math.min(halfCores, ramBudgetedWorkers)
 
 const config: Config = {
   // Automatically clear mock calls, instances, contexts and results before every test
@@ -83,8 +105,21 @@ const config: Config = {
   // Indicates which provider should be used to instrument code for coverage
   coverageProvider: "v8",
 
-  // A list of reporter names that Jest uses when writing coverage reports
-  coverageReporters: ["json", "text", "lcov", "html", "clover", "cobertura"],
+  // A list of reporter names that Jest uses when writing coverage reports.
+  // Trimmed to the two that are actually consumed, because every reporter walks
+  // and serializes the full coverage map (~3k files) in the main process at the
+  // tail of the run, multiplying peak RSS:
+  //   - `lcov`     → CI reads `coverage/lcov-report/index.html` (the workflow
+  //                  summary step) and the optional Codecov upload reads
+  //                  `coverage/lcov.info`; both come from this one reporter.
+  //   - `text-summary` → a single-block console total (the per-file `text`
+  //                  table builds ~3k formatted rows in the parent for no CI
+  //                  consumer; open the lcov HTML report for per-file detail).
+  // `json` / `html` (redundant with lcov's bundled HTML) / `clover` /
+  // `cobertura` had no active consumer — re-add a specific one if a tool needs
+  // it. `coverage/junit.xml` is produced by the separate `jest-junit` reporter
+  // below and is unaffected.
+  coverageReporters: ["text-summary", "lcov"],
 
   // Coverage thresholds — enforced by `pnpm test:coverage` and CI.
   //
@@ -185,17 +220,27 @@ const config: Config = {
   // `ENOMEM: not enough memory, open '…semver/sort.js'` mid-run. Jest's
   // default uses every core, which on a 16-core box pulls the same
   // 2 GB-class module graph into RAM 15+ times concurrently.
-  maxWorkers: "50%",
+  //
+  // Under `--coverage` each worker is far heavier (it also retains V8 coverage
+  // maps for every module it loads), so 50%-of-cores (16 on a 32-core box) was
+  // measured at ~8.8 GB of Jest RSS across 17 processes for a 121-file subset —
+  // the full suite holds those 16 workers the whole run. `coverageWorkers`
+  // (computed above) drops to whatever currently-free RAM can afford so the
+  // coverage run no longer swap-thrashes; non-coverage runs keep the fast 50%.
+  maxWorkers: isCoverage ? coverageWorkers : "50%",
 
   // Recycle a worker once its heap crosses this ceiling. Jest reuses a worker
   // process across many test files and never clears the module registry
   // between them (`resetModules` is off by design, for speed), so a single
   // worker accumulates the *union* of every module graph it has loaded. With
   // the suite past 2.7k files (~160 files per worker on a 32-core box) a worker
-  // climbs to ~1.5 GB after just ~10 component files and stays pinned there;
-  // 16 such workers peak around ~24 GB. Restarting a worker at 1 GB resets its
-  // registry to zero and bounds total RSS without lowering parallelism.
-  workerIdleMemoryLimit: "1GB",
+  // climbs to ~1.5 GB after just ~10 component files and stays pinned there.
+  // Restarting a worker resets its registry to zero and bounds total RSS
+  // without lowering parallelism. Coverage workers carry the extra V8 coverage
+  // maps, so we recycle them sooner (768MB) to keep the (already RAM-budgeted)
+  // pool's footprint low; non-coverage workers keep the 1GB ceiling tuned for
+  // the plain suite.
+  workerIdleMemoryLimit: isCoverage ? "768MB" : "1GB",
 
   // An array of directory names to be searched recursively up from the requiring module's location
   // moduleDirectories: [

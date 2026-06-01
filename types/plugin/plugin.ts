@@ -25,6 +25,7 @@ import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
 import type { PluginMessageRendererDef } from "./plugin-message-renderer"
 import type { PluginAiProviderDef } from "./plugin-ai-provider"
+import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
@@ -86,6 +87,8 @@ export type PluginCapability =
   | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
   | "shared-memory-adapter" // Contributes a bidirectional backing store for agent-team shared memory
   | "workflow-template" // Contributes complete visual-workflow blueprints surfaced in the editor (ADR-0017/0032)
+  | "automation" // Drives the desktop via Computer Use (screenshot/click/type/…) — gates ctx.automation
+  | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
 
 /**
  * Plugin status in the lifecycle
@@ -276,7 +279,8 @@ export type PluginPermission =
   | "media:video:read" // Read video media assets
   | "media:video:write" // Write video media assets
   | "media:video:export" // Export rendered video output
-  | "agent:control" // Control agent execution
+  | "agent:control" // Control agent execution (tool-enabled headless runs)
+  | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
@@ -284,6 +288,32 @@ export type PluginPermission =
   | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
   | "terminal:write" // Pipe bytes into an existing terminal session's stdin
   | "terminal:kill" // Signal-terminate an existing terminal session
+  | "terminal:completion" // Contribute inline command completions + read the in-progress input line
+  | "git:read" // Read the active source-control repository (status/log/diff/branches)
+  | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
+  | "goal:read" // Read the user's goals and their progress
+  | "goal:write" // Create, update, complete, and decompose goals
+  | "subscription:read" // Read subscription plan + usage metrics (never raw credentials)
+  | "perf:read" // Read performance dashboard snapshots + live sample stream
+  | "connectors:read" // List connector adapters + subscribe to inbound bus events
+  | "connectors:send" // Send outbound messages through a connector adapter
+  | "connectors:manage" // Create / update / delete / enable connector adapter instances
+  | "share:read" // Read the local mirror of created public share links + their stats
+  | "share:create" // Create / revoke public share links (publishes data to the share worker)
+  | "backup:read" // Build + read encrypted backup packages and the backup history
+  | "backup:write" // Restore a backup package (overwrites local data)
+  // Desktop automation (Computer Use) — drives the real desktop. All DANGEROUS.
+  // Reuses the host Rust gate→policy→consent→audit pipeline (surface:"plugin").
+  | "automation:screenshot" // Capture desktop screenshots / regions
+  | "automation:read" // Read a11y tree, find elements, cursor position, pick-at-point
+  | "automation:click" // Mouse click / double / triple / button down-up
+  | "automation:type" // Keyboard input, key chords, hold-key
+  | "automation:pointer" // Mouse move, drag, scroll
+  | "automation:window" // Window focus / close / minimize / maximize / resize
+  // Companion remote-control management (host-side). read is sensitive, control is DANGEROUS.
+  | "companion:read" // List paired devices, read remote-control grants + inbound activity
+  | "companion:control" // Grant / revoke a device's remote-control capability
+  | "companion:goal-control" // Pause / resume / stop a host goal loop
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -721,6 +751,16 @@ export interface PluginManifest {
    * `network:fetch` + `secrets:read`.
    */
   aiProviders?: PluginAiProviderDef[]
+
+  /**
+   * Copilot-style terminal completion providers contributed by this plugin
+   * (ADR-0039). Lazy `{ id, label, entry, export }` factories; registered
+   * with the terminal completion registry via
+   * `lib/plugin/bridge/terminal-completion-bridge.ts` on plugin enable and
+   * auto-unregistered on disable. Suggestions feed the integrated
+   * terminal's inline ghost text. Permission gate: `terminal:completion`.
+   */
+  terminalCompletionProviders?: PluginTerminalCompletionProviderDef[]
 
   /**
    * Modal mounts that the host can open by id (declarative + deep-linkable).
@@ -1773,6 +1813,19 @@ export interface PluginAgentAPI {
   unregisterMode: (id: string) => void
   executeAgent: (config: Record<string, unknown>) => Promise<unknown>
   cancelAgent: (agentId: string) => void
+  /**
+   * Imperatively run an external coding agent (Claude Code / Codex / Gemini
+   * CLI / Cursor / …) and resolve with its result. `presetOrAgentId` is either
+   * a live external-agent instance id or a preset id — including presets a
+   * plugin contributed via `registerExternalAgentPreset`. Requires the
+   * `agent:dispatch-external` manifest permission. Desktop-only (external
+   * agents are spawned through the Tauri process bridge).
+   */
+  runExternalAgent: (
+    presetOrAgentId: string,
+    prompt: string,
+    options?: Record<string, unknown>
+  ) => Promise<unknown>
   /**
    * Plugin-first Computer Use plan (M1·T5). The four register*Preset / *Tool
    * / *Skill methods below are the imperative-style entry points that mirror

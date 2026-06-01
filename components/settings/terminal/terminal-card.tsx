@@ -53,7 +53,10 @@ const DEFAULT_VALUES: TerminalSettings = {
   forceUtf8: true,
   colorScheme: AUTO_SCHEME_ID,
   renderer: "auto",
+  autocomplete: { enabled: false, source: "both", debounceMs: 350 },
 }
+
+const AUTOCOMPLETE_SOURCES: ReadonlyArray<"both" | "ai" | "history"> = ["both", "ai", "history"]
 
 const RENDERERS: ReadonlyArray<"auto" | "webgl" | "canvas" | "dom"> = [
   "auto",
@@ -94,6 +97,7 @@ export function TerminalCard() {
     ...DEFAULT_VALUES,
     ...(settings?.terminal ?? {}),
   }
+  const autocomplete = terminal.autocomplete ?? DEFAULT_VALUES.autocomplete!
 
   function update(patch: Partial<TerminalSettings>): void {
     void save({ terminal: { ...terminal, ...patch } })
@@ -390,6 +394,92 @@ export function TerminalCard() {
           aria-label={t("settings.terminal.runInDockTimeout.label")}
           data-testid="terminal-card-run-in-dock-timeout"
         />
+      </div>
+
+      <div className="space-y-3 rounded border p-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("settings.terminal.autocomplete.label")}</Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.autocomplete.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={autocomplete.enabled ?? false}
+            onCheckedChange={(checked) =>
+              update({ autocomplete: { ...autocomplete, enabled: checked } })
+            }
+            aria-label={t("settings.terminal.autocomplete.label")}
+            data-testid="terminal-card-autocomplete-enabled"
+          />
+        </div>
+
+        {autocomplete.enabled ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-xs">
+                  {t("settings.terminal.autocomplete.source.label")}
+                </Label>
+                <Select
+                  value={autocomplete.source ?? "both"}
+                  onValueChange={(value) =>
+                    update({
+                      autocomplete: {
+                        ...autocomplete,
+                        source: value as "both" | "ai" | "history",
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    className="h-8 text-xs"
+                    data-testid="terminal-card-autocomplete-source"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AUTOCOMPLETE_SOURCES.map((s) => (
+                      <SelectItem key={s} value={s} className="text-xs">
+                        {t(`settings.terminal.autocomplete.source.${s}` as never)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs" htmlFor="terminal-card-autocomplete-debounce">
+                  {t("settings.terminal.autocomplete.debounce.label")}
+                </Label>
+                <Input
+                  id="terminal-card-autocomplete-debounce"
+                  type="number"
+                  min={50}
+                  max={2000}
+                  step={50}
+                  value={autocomplete.debounceMs ?? 350}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (Number.isFinite(n)) {
+                      update({
+                        autocomplete: {
+                          ...autocomplete,
+                          debounceMs: Math.max(50, Math.min(2000, Math.floor(n))),
+                        },
+                      })
+                    }
+                  }}
+                  className="h-8 text-xs"
+                  aria-label={t("settings.terminal.autocomplete.debounce.label")}
+                  data-testid="terminal-card-autocomplete-debounce"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.autocomplete.privacy")}
+            </p>
+          </>
+        ) : null}
       </div>
 
       <TerminalProfiles />

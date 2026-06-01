@@ -46,6 +46,11 @@ import { OpenCodeClientAdapter } from "./opencode-client"
 import { acpToolsToAgentTools } from "./translators"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 import {
+  observeExternalAgentEvent,
+  gateExternalAgentPermission,
+  type AgentHookContext,
+} from "./agent-hooks"
+import {
   getExternalAgentExecutionBlock,
   getExternalAgentEcosystemReadiness,
   probeExternalAgentEcosystemReadiness,
@@ -1580,6 +1585,11 @@ export class ExternalAgentManager {
       timestamp: new Date(),
     }
 
+    const hookCtx: AgentHookContext = {
+      agentId,
+      sessionId: session.id,
+      cwd: options?.workingDirectory || instance.config.process?.cwd || undefined,
+    }
     const idleTimeoutMs = this.resolveStreamIdleTimeoutMs(instance, options)
     let streamSuccess = true
     let streamError: string | undefined
@@ -1620,6 +1630,23 @@ export class ExternalAgentManager {
           streamSuccess = false
           streamError = event.error
         }
+
+        // Settings.json (System B) + plugin (System A) hooks. A blocking
+        // PreToolUse hook denies the permission and suppresses the event so the
+        // user is never prompted for a tool the hook already rejected.
+        if (event.type === "permission_request") {
+          const blocked = await gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
+            this.respondToPermission(agentId, session.id, {
+              requestId,
+              granted: false,
+              reason: `hook denied: ${reason}`,
+            })
+          )
+          if (blocked) continue
+        } else {
+          observeExternalAgentEvent(hookCtx, event)
+        }
+
         // Emit to listeners
         this.emitEvent(agentId, event)
         options?.onEvent?.(event)
@@ -1747,6 +1774,11 @@ export class ExternalAgentManager {
 
     const retryConfig = this.resolveRetryConfig(instance)
     const executionTimeoutMs = this.resolveExecutionTimeoutMs(instance, options)
+    const hookCtx: AgentHookContext = {
+      agentId,
+      sessionId: session.id,
+      cwd: options?.workingDirectory || instance.config.process?.cwd || undefined,
+    }
 
     try {
       let result: ExternalAgentResult | null = null
@@ -1765,6 +1797,20 @@ export class ExternalAgentManager {
           const wrappedOptions: ExternalAgentExecutionOptions = {
             ...options,
             onEvent: (event) => {
+              // Headless path: hooks fire-and-forget. A blocking PreToolUse hook
+              // still denies the tool via respondToPermission; there is no
+              // permission UI to suppress on this path.
+              if (event.type === "permission_request") {
+                void gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
+                  this.respondToPermission(agentId, session.id, {
+                    requestId,
+                    granted: false,
+                    reason: `hook denied: ${reason}`,
+                  })
+                )
+              } else {
+                observeExternalAgentEvent(hookCtx, event)
+              }
               options?.onEvent?.(event)
               void traceBridge.onEvent(event)
             },

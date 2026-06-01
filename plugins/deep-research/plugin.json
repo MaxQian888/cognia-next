@@ -1,0 +1,76 @@
+{
+  "id": "cognia-deep-research",
+  "name": "Deep Research",
+  "version": "0.1.0",
+  "description": "Autonomous web deep-research: search → read → reason → cited answer. Adds the /research command and a deep_research agent tool.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands", "skills"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["network:fetch", "secrets:read", "secrets:write"],
+  "activationEvents": ["onStartup"],
+  "commands": [
+    {
+      "id": "research",
+      "name": "/research",
+      "description": "Autonomous web deep-research → a cited answer."
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "searchProvider": {
+        "type": "string",
+        "enum": ["exa", "tavily"],
+        "default": "exa",
+        "title": "Search provider",
+        "description": "Which web-search API the research loop uses."
+      },
+      "exaApiKey": {
+        "type": "string",
+        "secret": true,
+        "title": "Exa API key",
+        "description": "Stored securely. Used when the search provider is Exa."
+      },
+      "tavilyApiKey": {
+        "type": "string",
+        "secret": true,
+        "title": "Tavily API key",
+        "description": "Stored securely. Used when the search provider is Tavily."
+      },
+      "tokenBudget": {
+        "type": "number",
+        "default": 120000,
+        "title": "Token budget",
+        "description": "Soft cap; past this the loop forces a best-effort answer."
+      },
+      "maxSteps": {
+        "type": "number",
+        "default": 24,
+        "title": "Max steps",
+        "description": "Hard ceiling on search/read/reason iterations."
+      },
+      "readTopK": {
+        "type": "number",
+        "default": 3,
+        "title": "Sources per read",
+        "description": "How many pages to read per read step."
+      },
+      "locale": {
+        "type": "string",
+        "title": "Answer locale",
+        "description": "BCP-47 locale to bias query rewriting + the final answer (e.g. zh-CN)."
+      }
+    }
+  },
+  "defaultConfig": {
+    "searchProvider": "exa",
+    "tokenBudget": 120000,
+    "maxSteps": 24,
+    "readTopK": 3
+  }
+}

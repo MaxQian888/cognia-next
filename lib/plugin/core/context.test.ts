@@ -7,6 +7,17 @@ import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { PluginManager } from "./manager"
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/native/utils"
+import { executeAgent } from "@/lib/ai/agent/agent-executor"
+import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import {
+  initializePluginPermissions,
+  revokePluginPermissions,
+} from "@/lib/plugin/api/permission-api"
+import {
+  getBackgroundAgentManager,
+  __resetBackgroundAgentManagerForTesting,
+} from "@/lib/ai/agent/background-agent-manager"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -101,6 +112,24 @@ jest.mock("@/stores/settings", () => ({
     getState: () => ({}),
     subscribe: jest.fn(() => () => {}),
   },
+}))
+
+// Mock the imperative agent-execution entry points (dynamically imported by
+// `createAgentAPI`). The background-agent-manager + permission-api stay REAL
+// so cancellation registration and permission gating are exercised end-to-end.
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(async () => ({
+    text: "agent reply",
+    channel: "text",
+    toolsAvailable: false,
+  })),
+}))
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: jest.fn(),
+}))
+jest.mock("@/lib/ai/agent/external/presets", () => ({
+  registerPreset: jest.fn(),
+  createAgentFromPreset: jest.fn(),
 }))
 
 const mockManifest: PluginManifest = {
@@ -797,5 +826,148 @@ describe("isFullPluginContext", () => {
     const context = createPluginContext(plugin, mockManager)
 
     expect(isFullPluginContext(context)).toBe(false)
+  })
+})
+
+describe("agent imperative API", () => {
+  const mockExecuteAgent = executeAgent as jest.MockedFunction<typeof executeAgent>
+  const mockGetExternalManager = getExternalAgentManager as jest.MockedFunction<
+    typeof getExternalAgentManager
+  >
+  const mockCreateAgentFromPreset = createAgentFromPreset as jest.MockedFunction<
+    typeof createAgentFromPreset
+  >
+
+  const PLUGIN_ID = "test-plugin"
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    revokePluginPermissions(PLUGIN_ID)
+    __resetBackgroundAgentManagerForTesting()
+    mockExecuteAgent.mockResolvedValue({
+      text: "agent reply",
+      channel: "text",
+      toolsAvailable: false,
+    })
+  })
+
+  describe("executeAgent", () => {
+    it("returns the run result with a generated agentId", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = (await ctx.agent.executeAgent({ prompt: "hi" })) as {
+        text: string
+        agentId: string
+      }
+      expect(result.text).toBe("agent reply")
+      expect(typeof result.agentId).toBe("string")
+      expect(result.agentId.length).toBeGreaterThan(0)
+      // The caller signal is threaded through to the executor.
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ abortSignal: expect.any(AbortSignal) })
+      )
+    })
+
+    it("uses a caller-supplied agentId and de-registers it after completion", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = (await ctx.agent.executeAgent({ prompt: "hi", agentId: "run-1" })) as {
+        agentId: string
+      }
+      expect(result.agentId).toBe("run-1")
+      // finishAgent dropped the entry → nothing left to cancel.
+      expect(getBackgroundAgentManager().cancelAgent("run-1")).toBe(false)
+    })
+
+    it("throws on empty prompt", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.executeAgent({})).rejects.toThrow(/requires config.prompt/)
+    })
+
+    it("rejects tool-enabled runs without the agent:control permission", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.executeAgent({ prompt: "hi", toolsEnabled: true })).rejects.toThrow(
+        /agent:control/
+      )
+      expect(mockExecuteAgent).not.toHaveBeenCalled()
+    })
+
+    it("allows tool-enabled runs once agent:control is granted", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      mockExecuteAgent.mockResolvedValue({
+        text: "tool reply",
+        channel: "sidecar",
+        toolsAvailable: true,
+      })
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = (await ctx.agent.executeAgent({ prompt: "go", toolsEnabled: true })) as {
+        channel: string
+      }
+      expect(result.channel).toBe("sidecar")
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "go",
+        expect.objectContaining({ toolsEnabled: true })
+      )
+    })
+  })
+
+  describe("runExternalAgent", () => {
+    it("rejects without the agent:dispatch-external permission", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.runExternalAgent("codex", "do it")).rejects.toThrow(
+        /agent:dispatch-external/
+      )
+    })
+
+    it("adds an instance from a preset then executes it", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch-external"])
+      const execute = jest.fn(async () => ({ output: "done" }))
+      const addAgent = jest.fn(async () => ({ config: { id: "ext-1" } }))
+      mockGetExternalManager.mockReturnValue({
+        getAgent: jest.fn(() => undefined),
+        addAgent,
+        execute,
+      } as unknown as ReturnType<typeof getExternalAgentManager>)
+      mockCreateAgentFromPreset.mockReturnValue({ id: "ext-1", name: "Codex" } as never)
+
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.runExternalAgent("codex", "do it")
+
+      expect(mockCreateAgentFromPreset).toHaveBeenCalledWith("codex")
+      expect(addAgent).toHaveBeenCalled()
+      expect(execute).toHaveBeenCalledWith("ext-1", "do it", undefined)
+      expect(result).toEqual({ output: "done" })
+    })
+
+    it("executes directly against a live instance id without re-adding", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch-external"])
+      const execute = jest.fn(async () => ({ output: "live" }))
+      const addAgent = jest.fn()
+      mockGetExternalManager.mockReturnValue({
+        getAgent: jest.fn(() => ({ config: { id: "live-1" } })),
+        addAgent,
+        execute,
+      } as unknown as ReturnType<typeof getExternalAgentManager>)
+
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.runExternalAgent("live-1", "ping")
+
+      expect(addAgent).not.toHaveBeenCalled()
+      expect(execute).toHaveBeenCalledWith("live-1", "ping", undefined)
+    })
+
+    it("throws when neither a live agent nor a preset matches", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch-external"])
+      mockGetExternalManager.mockReturnValue({
+        getAgent: jest.fn(() => undefined),
+        addAgent: jest.fn(),
+        execute: jest.fn(),
+      } as unknown as ReturnType<typeof getExternalAgentManager>)
+      mockCreateAgentFromPreset.mockReturnValue(null)
+
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.runExternalAgent("unknown", "x")).rejects.toThrow(
+        /no live agent or preset/
+      )
+    })
   })
 })

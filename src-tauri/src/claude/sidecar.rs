@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -38,6 +39,17 @@ struct Inner {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     ready: bool,
+    /// Per-session hook context: the send-time cwd (for project/local scope
+    /// resolution) and the in-flight tool_use map used to correlate a
+    /// `tool_result` back to the tool name/input that produced it (PostToolUse).
+    sessions: HashMap<String, SessionHookCtx>,
+}
+
+#[derive(Default)]
+struct SessionHookCtx {
+    cwd: Option<String>,
+    /// tool_use_id → (tool_name, input), pending until the matching tool_result.
+    pending_tools: HashMap<String, (String, Value)>,
 }
 
 impl SidecarState {
@@ -78,6 +90,61 @@ impl SidecarState {
 
     pub async fn is_ready(&self) -> bool {
         self.inner.lock().await.ready
+    }
+
+    /// Record the send-time cwd for a session so the hook observer can resolve
+    /// project/local-scope settings (trust-gated). Called from `claude_send`.
+    pub async fn register_session_cwd(&self, session_id: &str, cwd: Option<String>) {
+        let mut guard = self.inner.lock().await;
+        guard.sessions.entry(session_id.to_string()).or_default().cwd = cwd;
+    }
+
+    /// The send-time cwd for a session, if known.
+    async fn session_cwd(&self, session_id: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .await
+            .sessions
+            .get(session_id)
+            .and_then(|s| s.cwd.clone())
+    }
+
+    /// Remember in-flight tool_use blocks so a later tool_result can resolve its
+    /// tool name + input for the PostToolUse payload. Called INLINE from the
+    /// sequential reader (not the spawned observer) so the assistant message is
+    /// always recorded before its tool_result task runs — otherwise concurrent
+    /// observer tasks could `take` before the `record` and drop the tool name.
+    async fn record_tool_uses_from_message(&self, value: &Value) {
+        let Some(evt) = value.get("event") else { return };
+        let uses = hooks::extract_tool_uses(evt);
+        if uses.is_empty() {
+            return;
+        }
+        let session_id = value
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let mut guard = self.inner.lock().await;
+        let ctx = guard.sessions.entry(session_id).or_default();
+        for (id, name, input) in uses {
+            ctx.pending_tools.insert(id, (name, input));
+        }
+    }
+
+    /// Remove and return the `(tool_name, input)` recorded for `tool_use_id`.
+    async fn take_tool(&self, session_id: &str, tool_use_id: &str) -> Option<(String, Value)> {
+        self.inner
+            .lock()
+            .await
+            .sessions
+            .get_mut(session_id)
+            .and_then(|s| s.pending_tools.remove(tool_use_id))
+    }
+
+    /// Drop all per-session hook state when a session ends.
+    async fn clear_session(&self, session_id: &str) {
+        self.inner.lock().await.sessions.remove(session_id);
     }
 }
 
@@ -280,6 +347,23 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                     }
                                     continue;
                                 }
+                                // Lifecycle hooks: observe the SDK event stream
+                                // and fire the matching settings.json hooks
+                                // (PostToolUse, Stop, SessionStart/End, …). Spawn
+                                // so the reader keeps draining; skip the
+                                // stream-event flood via the cheap predicate.
+                                if hooks::classify::is_hook_relevant(&value) {
+                                    // Record tool_use blocks synchronously so a
+                                    // later tool_result observer can always
+                                    // resolve the tool name despite task concurrency.
+                                    state.record_tool_uses_from_message(&value).await;
+                                    let app = app.clone();
+                                    let state = state.clone();
+                                    let observed = value.clone();
+                                    tokio::spawn(async move {
+                                        observe_hooks(app, state, observed).await;
+                                    });
+                                }
                                 if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
                                     log::error!("failed to emit sidecar event: {e}");
                                 }
@@ -344,8 +428,24 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
 
     // Hook config: read fresh per request so the user can edit settings without
     // restarting the sidecar. Read is cheap (one or two small JSON files).
-    let cwd: Option<String> = None; // user-scope only; project hooks land with workspace trust.
+    // Project/local-scope hooks load only for the session's trusted cwd.
+    let raw_cwd = state.session_cwd(&session_id).await;
+    let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
     let settings = hooks::load_effective_settings(cwd.as_deref());
+
+    // PermissionRequest is the observational sibling of PreToolUse — fire it so
+    // plugins/hooks can audit every gate, regardless of the allow/deny outcome.
+    let pr = hooks::run_tool_scoped(
+        &settings,
+        hooks::HookEvent::PermissionRequest,
+        &session_id,
+        cwd.as_deref(),
+        &tool_name,
+        json!({ "tool_name": tool_name, "tool_input": input }),
+    )
+    .await;
+    emit_hook_diagnostics(&app, hooks::HookEvent::PermissionRequest, &pr);
+
     let decision =
         hooks::run_pre_tool_use(&settings, &session_id, cwd.as_deref(), &tool_name, &input).await;
 
@@ -374,12 +474,117 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
               "message": format!("PreToolUse hook denied {tool_name}: {reason}"),
             }),
         );
+        // PermissionDenied fires after a hook-driven deny.
+        let denied = hooks::run_tool_scoped(
+            &settings,
+            hooks::HookEvent::PermissionDenied,
+            &session_id,
+            cwd.as_deref(),
+            &tool_name,
+            json!({ "tool_name": tool_name, "reason": reason }),
+        )
+        .await;
+        emit_hook_diagnostics(&app, hooks::HookEvent::PermissionDenied, &denied);
         return;
     }
 
     // No block — forward to the frontend so the normal approval flow can run.
     if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
         log::error!("failed to emit permission_request: {e}");
+    }
+}
+
+/// Log a hook's warnings and surface any `additionalContext` it contributed as
+/// a compact frontend log line. Observational lifecycle hooks can't re-inject
+/// context mid-stream, so this is how the user sees a hook did something.
+fn emit_hook_diagnostics(app: &AppHandle, event: hooks::HookEvent, decision: &hooks::HookDecision) {
+    let name = hooks::hook_event_name(event);
+    for w in &decision.warnings {
+        log::warn!("{name}: {w}");
+    }
+    if let Some(ctx) = &decision.additional_context {
+        let _ = app.emit(
+            SIDECAR_EVENT,
+            &json!({
+              "type": "log",
+              "level": "info",
+              "message": format!("{name} hook context: {ctx}"),
+            }),
+        );
+    }
+}
+
+/// Observe one SDK-stream message and fire the matching settings.json lifecycle
+/// hooks for the built-in agent. Records in-flight tool_use blocks, correlates
+/// tool_result → PostToolUse(/Failure), then fires the stateless lifecycle
+/// hooks (SessionStart/End, Stop, SubagentStop, Notification, PostCompact,
+/// Task*). All firing is observational — blocking stays on the permission path.
+async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
+    let session_id = value
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // tool_use blocks were already recorded inline by the reader (see
+    // `record_tool_uses_from_message`) so the take below resolves reliably.
+
+    // Resolve the session's trusted cwd once for every fire below.
+    let raw_cwd = state.session_cwd(&session_id).await;
+    let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
+
+    // PostToolUse / PostToolUseFailure from tool_result blocks.
+    if let Some(evt) = value.get("event") {
+        let results = hooks::extract_tool_results(evt);
+        for (tool_use_id, is_error, result) in results {
+            let Some((tool_name, input)) = state.take_tool(&session_id, &tool_use_id).await else {
+                continue; // No recorded tool_use (e.g. resumed session) — skip.
+            };
+            let event = if is_error {
+                hooks::HookEvent::PostToolUseFailure
+            } else {
+                hooks::HookEvent::PostToolUse
+            };
+            let settings = hooks::load_effective_settings(cwd.as_deref());
+            let fields = json!({
+                "tool_name": tool_name,
+                "tool_input": input,
+                "tool_response": result,
+                "is_error": is_error,
+            });
+            let decision = hooks::run_tool_scoped(
+                &settings,
+                event,
+                &session_id,
+                cwd.as_deref(),
+                &tool_name,
+                fields,
+            )
+            .await;
+            emit_hook_diagnostics(&app, event, &decision);
+        }
+    }
+
+    // Stateless lifecycle hooks.
+    let classified = hooks::classify_sidecar_message(&value);
+    if !classified.is_empty() {
+        let settings = hooks::load_effective_settings(cwd.as_deref());
+        for ch in classified {
+            let decision = hooks::run_session_scoped(
+                &settings,
+                ch.event,
+                &session_id,
+                cwd.as_deref(),
+                ch.fields,
+            )
+            .await;
+            emit_hook_diagnostics(&app, ch.event, &decision);
+        }
+    }
+
+    // Tear down per-session hook state when the session ends.
+    if value.get("type").and_then(|v| v.as_str()) == Some("session_ended") {
+        state.clear_session(&session_id).await;
     }
 }
 

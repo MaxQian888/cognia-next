@@ -20,6 +20,56 @@
 
 export type ShellPlatform = "windows" | "macos" | "linux" | "other"
 
+/**
+ * Shell family. Renderer-side mirror of the Rust `ShellKind`
+ * (`src-tauri/src/terminal/integration.rs`) — kept aligned so shell-aware
+ * features (OSC 633 integration, AI completion syntax hints) agree on both
+ * sides. A superset: `sh` is recognised here for completion purposes even
+ * though the Rust integration layer treats a bare `sh` as `unknown`.
+ */
+export type ShellKind =
+  | "bash"
+  | "zsh"
+  | "sh"
+  | "pwsh"
+  | "powershell"
+  | "cmd"
+  | "fish"
+  | "nu"
+  | "unknown"
+
+/**
+ * Classify a shell binary path into a `ShellKind`. Mirrors the Rust
+ * `ShellKind::from_shell_path`: take the file stem, drop a trailing
+ * `.exe`, lowercase, and pattern-match. Unknown shells fall back to
+ * `"unknown"` (still spawnable — this only drives shell-aware hints).
+ */
+export function detectShellKind(shellPath: string): ShellKind {
+  const base = (shellPath.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.exe$/, "")
+  switch (base) {
+    case "bash":
+      return "bash"
+    case "zsh":
+      return "zsh"
+    case "sh":
+    case "dash":
+      return "sh"
+    case "pwsh":
+      return "pwsh"
+    case "powershell":
+      return "powershell"
+    case "cmd":
+      return "cmd"
+    case "fish":
+      return "fish"
+    case "nu":
+    case "nushell":
+      return "nu"
+    default:
+      return "unknown"
+  }
+}
+
 export function detectPlatform(ua?: string): ShellPlatform {
   const haystack = (
     ua ?? (typeof navigator !== "undefined" ? navigator.userAgent : "")

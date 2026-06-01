@@ -75,6 +75,26 @@ const HOOK_EVENTS: HookEvent[] = [
   "UserPromptExpansion",
 ]
 
+/**
+ * Events the runtime recognises (settings round-trip) but has no trigger source
+ * for yet — they never fire. Surfaced with a muted badge so users aren't misled
+ * into configuring a dead event. Keep in sync with the design doc's "no real
+ * trigger" list and the Rust observer coverage.
+ */
+const NO_TRIGGER_EVENTS = new Set<HookEvent>([
+  "PreCompact",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "FileChanged",
+  "CwdChanged",
+  "InstructionsLoaded",
+  "ConfigChange",
+  "Elicitation",
+  "ElicitationResult",
+  "UserPromptExpansion",
+  "TeammateIdle",
+])
+
 interface Props {
   /** Override for tests — when omitted, the project/local scopes use this cwd. */
   cwd?: string
@@ -288,6 +308,13 @@ export function HooksSection({ cwd }: Props) {
                     data-active={activeEvent === evt ? "true" : "false"}
                   >
                     <span className="truncate">{evt}</span>
+                    {NO_TRIGGER_EVENTS.has(evt) ? (
+                      <span
+                        className="ml-auto size-1.5 shrink-0 rounded-full bg-muted-foreground/40"
+                        title={t("noTriggerBadge")}
+                        data-testid={`event-no-trigger-${evt}`}
+                      />
+                    ) : null}
                     {count > 0 ? (
                       <span className="ml-auto rounded bg-primary/15 px-1 text-[10px]">
                         {count}
@@ -301,6 +328,15 @@ export function HooksSection({ cwd }: Props) {
         </Card>
 
         <div className="space-y-2">
+          {NO_TRIGGER_EVENTS.has(activeEvent) ? (
+            <p
+              className="rounded border border-dashed bg-muted/20 p-2 text-xs text-muted-foreground"
+              data-testid="hooks-no-trigger-note"
+            >
+              {t("noTriggerNote")}
+            </p>
+          ) : null}
+
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">{activeEvent}</h3>
             <Button

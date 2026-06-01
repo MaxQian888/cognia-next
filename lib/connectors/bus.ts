@@ -21,6 +21,9 @@ import type {
   PlatformAdapter,
   OutboundRequest,
   OutboundResult,
+  AttachmentDescriptor,
+  AdapterAttachmentRef,
+  HistoryFetchOpts,
 } from "@/types/connectors"
 import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
@@ -72,6 +75,27 @@ export type CallbackHandler = (
 export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
   private inboundHandler: BusInboundHandler | null = null
+  /**
+   * Passive inbound observers (plugin `ctx.connectors.onInbound`). Notified
+   * for every event the bus processes, BEFORE the routing pipeline. Purely
+   * read-only — a throwing observer is swallowed and never affects routing.
+   * Distinct from `inboundHandler`/`routeHandler`, which own the single
+   * authoritative routing decision.
+   */
+  private inboundObservers = new Set<(event: NormalizedInboundEvent) => void>()
+  /**
+   * Passive interactive-callback observers (plugin
+   * `ctx.connectors.onCallback`). Notified for every callback that passes
+   * dedup + binding resolution, with the resolved `boundConversationKey`,
+   * BEFORE any kind-specific short-circuit or the authoritative
+   * `callbackHandler`. Purely read-only — a throwing observer is swallowed
+   * and never affects callback routing. The plugin parallel of
+   * `inboundObservers` for the interactive (button / select / form) channel,
+   * which `dispatchInbound`/`subscribeInbound` never sees.
+   */
+  private callbackObservers = new Set<
+    (event: ConnectorCallbackEvent, boundConversationKey: string | null) => void
+  >()
   /** Optional: set by Task 37 runtime. */
   routeHandler: RouteHandler | null = null
   /**
@@ -102,12 +126,66 @@ export class ConnectorBus {
   }
 
   /**
+   * Subscribe a passive observer to every inbound event the bus processes.
+   * Returns a disposer. Used by plugins via `ctx.connectors.onInbound`.
+   * Observers run synchronously before routing and must not throw (errors
+   * are caught); they cannot alter the routing decision.
+   */
+  subscribeInbound(observer: (event: NormalizedInboundEvent) => void): () => void {
+    this.inboundObservers.add(observer)
+    return () => {
+      this.inboundObservers.delete(observer)
+    }
+  }
+
+  private notifyInboundObservers(event: NormalizedInboundEvent): void {
+    for (const observer of this.inboundObservers) {
+      try {
+        observer(event)
+      } catch {
+        // A throwing plugin observer must never break inbound routing.
+      }
+    }
+  }
+
+  /**
+   * Subscribe a passive observer to every interactive callback the bus
+   * resolves (button / select / form submit / dismiss). Returns a disposer.
+   * Used by plugins via `ctx.connectors.onCallback`. Observers run
+   * synchronously after binding resolution and before the authoritative
+   * `callbackHandler`; they must not throw (errors are caught) and cannot
+   * alter the callback routing decision.
+   */
+  subscribeCallback(
+    observer: (event: ConnectorCallbackEvent, boundConversationKey: string | null) => void
+  ): () => void {
+    this.callbackObservers.add(observer)
+    return () => {
+      this.callbackObservers.delete(observer)
+    }
+  }
+
+  private notifyCallbackObservers(
+    event: ConnectorCallbackEvent,
+    boundConversationKey: string | null
+  ): void {
+    for (const observer of this.callbackObservers) {
+      try {
+        observer(event, boundConversationKey)
+      } catch {
+        // A throwing plugin observer must never break callback routing.
+      }
+    }
+  }
+
+  /**
    * Simple inbound dispatch — Task 25 interface.
    *
    * After Task 28 the bus pipeline supersedes this for real events. Kept so
    * Task 25 tests continue to pass without touching them.
    */
   async dispatchInbound(event: NormalizedInboundEvent): Promise<void> {
+    this.notifyInboundObservers(event)
     if (!this.inboundHandler) throw new Error("ConnectorBus: inbound handler not set")
     await this.inboundHandler(event)
   }
@@ -126,6 +204,9 @@ export class ConnectorBus {
    */
   async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
     const now = Date.now()
+
+    // Passive plugin observers see every event up front (read-only tap).
+    this.notifyInboundObservers(event)
 
     // ── Edit / Delete / System short-circuit ─────────────────────────────────
     if (event.kind === "edit") {
@@ -492,6 +573,110 @@ export class ConnectorBus {
   }
 
   /**
+   * Edit an already-sent message in place through an adapter that supports it
+   * (`PlatformAdapter.edit`). Mirrors {@link sendOutbound}: returns a failed
+   * {@link OutboundResult} (rather than throwing) when the adapter is not
+   * registered or the platform does not support editing, so callers get a
+   * uniform result shape.
+   */
+  async editOutbound(
+    adapterId: string,
+    messageId: string,
+    patch: OutboundRequest
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.edit) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot edit messages", retryable: false },
+      }
+    }
+    return a.edit(messageId, patch)
+  }
+
+  /**
+   * Delete an already-sent message through an adapter that supports it
+   * (`PlatformAdapter.delete`). Returns an `{ ok }` result; `adapter.delete`
+   * itself returns void, so success is reported as `{ ok: true }`.
+   */
+  async deleteOutbound(adapterId: string, messageId: string): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.delete) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot delete messages", retryable: false },
+      }
+    }
+    await a.delete(messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Toggle a typing indicator in a conversation through an adapter that
+   * supports it (`PlatformAdapter.setTyping`). Best-effort: silently no-ops
+   * when the adapter is missing or the platform has no typing surface.
+   * Returns whether the call was actually delivered.
+   */
+  async setTypingOutbound(
+    adapterId: string,
+    conversationKey: string,
+    on: boolean
+  ): Promise<boolean> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.setTyping) return false
+    await a.setTyping(conversationKey, on)
+    return true
+  }
+
+  /**
+   * Upload an attachment through an adapter that supports it
+   * (`PlatformAdapter.uploadFile`), returning the platform reference. Returns
+   * `null` when the adapter is missing or the platform has no upload surface.
+   */
+  async uploadFileOutbound(
+    adapterId: string,
+    file: AttachmentDescriptor
+  ): Promise<AdapterAttachmentRef | null> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.uploadFile) return null
+    return a.uploadFile(file)
+  }
+
+  /**
+   * Drain an adapter's message-history stream (`PlatformAdapter.fetchHistory`)
+   * into a bounded array. Returns `[]` when the adapter is missing or does
+   * not implement history fetching. `opts.max` caps the drained count even if
+   * the adapter ignores it (defends against an unbounded async iterable).
+   */
+  async fetchHistoryAll(
+    adapterId: string,
+    conversationKey: string,
+    opts: HistoryFetchOpts = {}
+  ): Promise<NormalizedInboundEvent[]> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.fetchHistory) return []
+    const cap = typeof opts.max === "number" && opts.max > 0 ? opts.max : 100
+    const out: NormalizedInboundEvent[] = []
+    for await (const event of a.fetchHistory(conversationKey, opts)) {
+      out.push(event)
+      if (out.length >= cap) break
+    }
+    return out
+  }
+
+  /**
    * Dispatch a connector-side callback (interactive button / select /
    * form submit / dismiss) into the A2UI Action channel.
    *
@@ -590,6 +775,11 @@ export class ConnectorBus {
         bindingFound,
       },
     })
+
+    // Passive plugin observers (ctx.connectors.onCallback) see every bound
+    // callback here, with the resolved conversation key, before any
+    // kind-specific short-circuit or the authoritative callbackHandler.
+    this.notifyCallbackObservers(event, resolvedConversationKey)
 
     // ── Step 4-pre-b: wf_fanout_approve / wf_fanout_cancel short-circuit ──
     //

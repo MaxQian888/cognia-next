@@ -12,12 +12,17 @@
 // trusted (Phase 2 ships the trust UI); for now we read the user-scope file
 // only, which lives at `~/.claude/settings.json`.
 
+pub mod classify;
 pub mod command;
+pub mod commands;
+pub mod trust;
 pub mod types;
+pub mod webhook;
 
 use regex::Regex;
 use serde_json::{json, Value};
 
+pub use classify::{classify_sidecar_message, extract_tool_results, extract_tool_uses};
 pub use types::{HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler, HookOutcome};
 
 use crate::settings::{ClaudeSettings, EffectiveSettings};
@@ -115,9 +120,11 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
         HookHandler::Command { command, timeout } => {
             command::run_command_handler(&command, timeout, payload_json).await
         }
-        HookHandler::Webhook { .. } => HookOutcome::InternalError {
-            reason: "webhook handler not implemented yet (Phase 2)".to_string(),
-        },
+        HookHandler::Webhook {
+            url,
+            headers,
+            timeout,
+        } => webhook::run_webhook_handler(&url, &headers, timeout, payload_json).await,
         HookHandler::Unsupported => HookOutcome::InternalError {
             reason: "unsupported handler type".to_string(),
         },
@@ -160,6 +167,56 @@ pub async fn run_pre_tool_use(
         }),
     };
     run_event(&settings.merged, HookEvent::PreToolUse, tool_name, &payload).await
+}
+
+/// The PascalCase wire name of a `HookEvent` (the key used in settings.json
+/// and the `hook_event_name` payload field). Derived from the serde rename so
+/// it can never drift from the enum.
+pub fn hook_event_name(event: HookEvent) -> String {
+    match serde_json::to_value(event) {
+        Ok(Value::String(s)) => s,
+        _ => String::new(),
+    }
+}
+
+/// Run a session-scoped lifecycle hook (matcher target `""`). Used for
+/// observational events such as `SessionStart`, `SessionEnd`, `Stop`,
+/// `SubagentStop`, `Notification`, `PostCompact`, `TaskCreated`/`TaskCompleted`.
+/// The returned `HookDecision` carries any `additionalContext` + warnings; for
+/// observational events the caller ignores `block`.
+pub async fn run_session_scoped(
+    settings: &EffectiveSettings,
+    event: HookEvent,
+    session_id: &str,
+    cwd: Option<&str>,
+    fields: Value,
+) -> HookDecision {
+    let payload = HookEventPayload {
+        hook_event_name: hook_event_name(event),
+        session_id: session_id.to_string(),
+        cwd: cwd.map(String::from),
+        fields,
+    };
+    run_event(&settings.merged, event, "", &payload).await
+}
+
+/// Run a tool-scoped hook whose matcher is tested against `tool_name`. Used for
+/// `PostToolUse` / `PostToolUseFailure` / `PermissionRequest` / `PermissionDenied`.
+pub async fn run_tool_scoped(
+    settings: &EffectiveSettings,
+    event: HookEvent,
+    session_id: &str,
+    cwd: Option<&str>,
+    tool_name: &str,
+    fields: Value,
+) -> HookDecision {
+    let payload = HookEventPayload {
+        hook_event_name: hook_event_name(event),
+        session_id: session_id.to_string(),
+        cwd: cwd.map(String::from),
+        fields,
+    };
+    run_event(&settings.merged, event, tool_name, &payload).await
 }
 
 /// Load merged settings for the given cwd. Returns an empty `EffectiveSettings`

@@ -197,13 +197,22 @@ pub async fn claude_send(
         .get("cwd")
         .and_then(|v| v.as_str())
         .map(String::from);
+    // Remember the send-time cwd so the sidecar's lifecycle-hook observer can
+    // resolve project/local-scope settings for this session's later events.
+    state.register_session_cwd(&session_id, cwd.clone()).await;
     let prompt_text = extract_prompt_text(&prompt);
     let mut prompt = prompt;
     if !prompt_text.is_empty() {
-        let settings = hooks::load_effective_settings(cwd.as_deref());
-        let decision =
-            hooks::run_user_prompt_submit(&settings, &session_id, cwd.as_deref(), &prompt_text)
-                .await;
+        // Project/local hooks load only for a trusted cwd; untrusted → user scope.
+        let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
+        let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
+        let decision = hooks::run_user_prompt_submit(
+            &settings,
+            &session_id,
+            trusted_cwd.as_deref(),
+            &prompt_text,
+        )
+        .await;
         if let Some(reason) = decision.block {
             return Err(format!("hook blocked: {reason}"));
         }

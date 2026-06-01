@@ -329,6 +329,53 @@ describe("AI Provider API", () => {
       expect(mockStreamText).not.toHaveBeenCalled()
     })
 
+    it("should forward an abort signal to the underlying stream", async () => {
+      const api = createAIProviderAPI(testPluginId)
+      const controller = new AbortController()
+
+      await collectChunks(
+        api.chat([{ role: "user", content: "Hello" }], { signal: controller.signal })
+      )
+
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({ abortSignal: controller.signal })
+      )
+    })
+
+    it("should surface end-of-stream token usage on a trailing chunk", async () => {
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          yield "Hi"
+        })(),
+        usage: Promise.resolve({ inputTokens: 12, outputTokens: 4, totalTokens: 16 }),
+      } as never)
+
+      const api = createAIProviderAPI(testPluginId)
+      const chunks = await collectChunks(api.chat([{ role: "user", content: "Hello" }]))
+
+      const usageChunk = chunks.find((c) => c.usage)
+      expect(usageChunk?.usage).toEqual({
+        promptTokens: 12,
+        completionTokens: 4,
+        totalTokens: 16,
+      })
+    })
+
+    it("should not emit a usage chunk when the provider reports none", async () => {
+      mockStreamText.mockReturnValue({
+        textStream: (async function* () {
+          yield "Hi"
+        })(),
+        // no usage promise — mirrors providers that don't report counts
+      } as never)
+
+      const api = createAIProviderAPI(testPluginId)
+      const chunks = await collectChunks(api.chat([{ role: "user", content: "Hello" }]))
+
+      expect(chunks.every((c) => c.usage === undefined)).toBe(true)
+      expect(chunks.map((c) => c.content)).toEqual(["Hi"])
+    })
+
     it("should throw a structured NO_PROVIDER_AVAILABLE error when built-in fallback is unavailable", async () => {
       mockResolveFeatureProvider.mockReturnValue({
         kind: "blocked",

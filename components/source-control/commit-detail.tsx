@@ -43,7 +43,7 @@ export function CommitDetail({ rootDir, commit }: CommitDetailProps) {
   const [prevSelected, setPrevSelected] = useState<string | null>(selected)
   if (prevSelected !== selected) {
     setPrevSelected(selected)
-    setDiff(selectedKey ? getCachedDiff(selectedKey) : null)
+    setDiff(selectedKey ? (getCachedDiff(selectedKey) ?? null) : null)
   }
 
   useEffect(() => {

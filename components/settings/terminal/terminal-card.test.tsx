@@ -170,4 +170,41 @@ describe("TerminalCard", () => {
     expect(screen.getByTestId("terminal-profiles")).toBeInTheDocument()
     expect(screen.getByTestId("terminal-profiles-add")).toBeInTheDocument()
   })
+
+  describe("AI autocomplete", () => {
+    it("enables AI autocomplete via the switch (default off)", async () => {
+      render(<TerminalCard />)
+      const toggle = screen.getByTestId("terminal-card-autocomplete-enabled")
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(settingsSave).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({
+          autocomplete: expect.objectContaining({ enabled: true }),
+        }),
+      })
+    })
+
+    it("hides source + debounce controls until enabled", () => {
+      render(<TerminalCard />)
+      expect(screen.queryByTestId("terminal-card-autocomplete-source")).toBeNull()
+      expect(screen.queryByTestId("terminal-card-autocomplete-debounce")).toBeNull()
+    })
+
+    it("shows + clamps the debounce control when enabled", async () => {
+      settingsState = {
+        terminal: { autocomplete: { enabled: true, source: "both", debounceMs: 350 } },
+      }
+      render(<TerminalCard />)
+      const debounce = screen.getByTestId("terminal-card-autocomplete-debounce") as HTMLInputElement
+      await act(async () => {
+        fireEvent.change(debounce, { target: { value: "9000" } })
+      })
+      expect(settingsSave).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({
+          autocomplete: expect.objectContaining({ debounceMs: 2000 }),
+        }),
+      })
+    })
+  })
 })

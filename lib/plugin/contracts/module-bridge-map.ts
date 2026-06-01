@@ -68,6 +68,10 @@ import {
   unregisterChatMiddlewaresForPlugin,
 } from "@/lib/plugin/bridge/chat-middleware-bridge"
 import {
+  registerTerminalCompletionProvidersForPlugin,
+  unregisterTerminalCompletionProvidersForPlugin,
+} from "@/lib/plugin/bridge/terminal-completion-bridge"
+import {
   registerDensityPresetsForPlugin,
   unregisterDensityPresetsByPlugin,
 } from "@/lib/appearance/density-preset-registry"
@@ -239,6 +243,22 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterModalMountsForPlugin(pluginId)
+    },
+  },
+  "terminal-completion": {
+    // Synthetic key. Declarative `manifest.terminalCompletionProviders[]` →
+    // the terminal completion registry (ADR-0039). Lazy-factory entries are
+    // imported on enable; providers feed the integrated terminal's inline
+    // ghost text. Field-driven gating. Permission gate: `terminal:completion`.
+    key: "terminal-completion",
+    manifestField: "terminalCompletionProviders",
+    register: async (ctx) => {
+      await registerTerminalCompletionProvidersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterTerminalCompletionProvidersForPlugin(pluginId)
     },
   },
   scheduler: {

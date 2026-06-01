@@ -1039,6 +1039,13 @@ export interface AIChatOptions {
   topP?: number
   stop?: string[]
   stream?: boolean
+  /**
+   * Cancellation signal. When it aborts, the underlying provider stream is
+   * torn down so the plugin stops accruing tokens mid-generation. Forwarded
+   * to the built-in fallback provider; custom providers receive it too and
+   * may honour it.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -1183,6 +1190,8 @@ export type PluginAPIPermission =
   | "artifact:write"
   | "ai:chat"
   | "ai:embed"
+  | "agent:control"
+  | "agent:dispatch-external"
   | "export:session"
   | "export:project"
   | "theme:read"

@@ -255,6 +255,33 @@ describe("HooksSection — editing + save", () => {
   })
 })
 
+describe("HooksSection — no-trigger event annotations", () => {
+  it("marks events with no trigger source and leaves wired events unmarked", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    // PreCompact has no trigger source → dot present.
+    expect(screen.getByTestId("event-no-trigger-PreCompact")).toBeInTheDocument()
+    // PostToolUse is wired → no dot.
+    expect(screen.queryByTestId("event-no-trigger-PostToolUse")).not.toBeInTheDocument()
+  })
+
+  it("shows the no-trigger note when a dead event is active, and hides it for wired events", async () => {
+    searchString = "hookTab=PreCompact"
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    const { rerender } = render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+    expect(screen.getByTestId("hooks-no-trigger-note")).toBeInTheDocument()
+
+    searchString = "hookTab=PostToolUse"
+    rerender(<HooksSection />)
+    await waitFor(() =>
+      expect(screen.queryByTestId("hooks-no-trigger-note")).not.toBeInTheDocument()
+    )
+  })
+})
+
 describe("HooksSection — URL-driven event tab", () => {
   it("respects ?hookTab=PostToolUse on initial render", async () => {
     searchString = "hookTab=PostToolUse"

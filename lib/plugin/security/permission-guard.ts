@@ -92,7 +92,12 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   database: ["database:read", "database:write"],
   settings: ["settings:read", "settings:write"],
   session: ["session:read", "session:write"],
-  terminal: ["terminal:spawn", "terminal:write", "terminal:kill"],
+  terminal: ["terminal:spawn", "terminal:write", "terminal:kill", "terminal:completion"],
+  git: ["git:read", "git:write"],
+  goal: ["goal:read", "goal:write"],
+  connectors: ["connectors:read", "connectors:send", "connectors:manage"],
+  share: ["share:read", "share:create"],
+  backup: ["backup:read", "backup:write"],
   dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
 }
 
@@ -118,6 +123,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "media:video:write": "Write video media assets",
   "media:video:export": "Export rendered video outputs",
   "agent:control": "Control agent execution",
+  "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
   "python:execute": "Execute Python code",
   "sandbox:web-execute": "Execute code inside the browser sandbox",
   "secrets:read": "Read secrets from the OS keyring",
@@ -125,6 +131,20 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "terminal:spawn": "Open a new terminal session in the integrated dock",
   "terminal:write": "Pipe input into an existing terminal session",
   "terminal:kill": "Terminate an existing terminal session",
+  "terminal:completion": "Suggest terminal commands and read the line you are typing",
+  "git:read": "Read the active source-control repository (status, log, diff, branches)",
+  "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
+  "goal:read": "Read your goals and their progress",
+  "goal:write": "Create, update, complete, and decompose your goals",
+  "subscription:read": "Read subscription plan and usage metrics",
+  "perf:read": "Read performance dashboard snapshots and the live sample stream",
+  "connectors:read": "List connector adapters and observe inbound platform events",
+  "connectors:send": "Send outbound messages through a connected platform",
+  "connectors:manage": "Create, reconfigure, enable, or delete your connected platform accounts",
+  "share:read": "Read your created public share links and their view stats",
+  "share:create": "Create and revoke public share links (publishes data online)",
+  "backup:read": "Build and read encrypted backups and the backup history",
+  "backup:write": "Restore a backup, overwriting your local data",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
@@ -133,11 +153,30 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "python:execute",
   "filesystem:write",
   "secrets:write",
+  // Dispatching an external coding agent spawns an outside process that can
+  // read/edit files and run commands — same risk tier as `process:spawn`.
+  "agent:dispatch-external",
   "terminal:spawn",
   // Wave 3 — writing to an existing terminal session is equivalent to
   // executing arbitrary shell commands in that shell, so it sits in
   // the same risk tier as `shell:execute` and `terminal:spawn`.
   "terminal:write",
+  // Mutating the repository can rewrite history, force-push, or discard
+  // working-tree changes — destructive and hard to undo. Reads stay safe.
+  "git:write",
+  // Sending outbound messages reaches real people on real platforms (IM,
+  // email, …) — outward-facing and unrecallable. Same tier as shell exec.
+  "connectors:send",
+  // Managing adapter instances can re-point, disable, or delete the user's
+  // live IM/email connections (e.g. silently swap a bot's routing or drop a
+  // configured channel) — config-destructive and affects real delivery.
+  "connectors:manage",
+  // Creating a public share link publishes (encrypted) data to an external
+  // worker — outward-facing data egress; the user should consent.
+  "share:create",
+  // Restoring a backup overwrites the local database — destructive and not
+  // reversible from inside the app.
+  "backup:write",
 ]
 
 // =============================================================================

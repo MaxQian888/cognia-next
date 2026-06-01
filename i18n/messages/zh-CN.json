@@ -255,6 +255,9 @@
       "closePane": "关闭分屏",
       "resize": "拖动调整终端 dock 高度（方向键亦可）"
     },
+    "ghost": {
+      "acceptHint": "Tab"
+    },
     "shellPicker": {
       "label": "选择 Shell",
       "auto": "默认 Shell",
@@ -1294,6 +1297,20 @@
       "title": "今天想完成点什么？",
       "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
       "newChat": "新建会话",
+      "brandAlt": "Cognia",
+      "dismiss": "隐藏此区块",
+      "greeting": {
+        "morning": "早上好",
+        "afternoon": "下午好",
+        "evening": "晚上好",
+        "night": "夜深了",
+        "named": "{greeting}，{name}"
+      },
+      "style": {
+        "rich": "丰富",
+        "minimal": "精简",
+        "toggleLabel": "切换欢迎页布局"
+      },
       "sections": {
         "quickStart": "快速开始",
         "tryPrompt": "试试这些",
@@ -1307,6 +1324,14 @@
         "twin": "数字分身",
         "computerUse": "计算机操作",
         "ocr": "OCR"
+      },
+      "capabilitiesDesc": {
+        "workflows": "把多步任务编排成可复用的自动化流程——搭一次，反复运行。",
+        "agentTeams": "多个智能体分工规划、并行执行。",
+        "connectors": "把助手接入飞书、Slack 等平台。",
+        "twin": "让助手了解你的背景、偏好和语气。",
+        "computerUse": "代你点击、输入、操作界面。",
+        "ocr": "从图片与截图中提取文字。"
       },
       "samples": {
         "exploreTitle": "探索项目",
@@ -3929,6 +3954,17 @@
       "ccswitchHintAction": "打开 CCSwitch"
     },
     "general": {
+      "personalization": {
+        "title": "个性化",
+        "description": "聊天欢迎页如何称呼你、展示多少内容。",
+        "nameLabel": "你的称呼",
+        "namePlaceholder": "例如 Max",
+        "styleLabel": "欢迎页布局",
+        "styleRich": "丰富",
+        "styleMinimal": "精简",
+        "styleHint": "丰富版带动态背景与能力卡片；精简版更紧凑。移动端始终使用精简版。",
+        "restoreSections": "恢复已隐藏的欢迎区块"
+      },
       "defaultModel": "默认模型",
       "useSdkDefault": "使用 SDK 默认值",
       "orPasteModelId": "或粘贴自定义模型 id",
@@ -4549,6 +4585,8 @@
       },
       "addGroup": "新建分组",
       "noGroupsForEvent": "{event} 事件下还没有任何分组,点击\"新建分组\"添加 matcher。",
+      "noTriggerBadge": "暂无触发源",
+      "noTriggerNote": "该事件可被识别并保存,但运行时暂无对应的触发源——在此配置的 hook 不会被触发。",
       "save": "保存",
       "saving": "正在保存…",
       "saved": "已保存。",
@@ -4741,6 +4779,20 @@
       "runInDockTimeout": {
         "label": "Run-in-dock 超时（秒）",
         "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。"
+      },
+      "autocomplete": {
+        "label": "AI 命令自动补全",
+        "helper": "输入时显示类似 GitHub Copilot 的内联命令建议。Tab 或 → 接受，Esc 取消。接受只会补全当前行，绝不会自动执行命令。",
+        "source": {
+          "label": "建议来源",
+          "both": "历史 + AI",
+          "ai": "仅 AI",
+          "history": "仅历史"
+        },
+        "debounce": {
+          "label": "防抖（毫秒）"
+        },
+        "privacy": "启用 AI 后，当前命令、工作目录与近期历史会发送给你配置的模型以生成建议。形似密钥的内容（API key、令牌、凭据）会被检测并跳过该次请求。插件提供的补全源不受此设置影响。"
       },
       "projectOverride": {
         "title": "按项目覆盖",
@@ -7824,6 +7876,63 @@
         "colCost": "成本",
         "colActions": "操作",
         "resume": "切换"
+      },
+      "range": {
+        "label": "时间范围",
+        "7d": "最近 7 天",
+        "30d": "最近 30 天",
+        "all": "全部时间"
+      },
+      "export": {
+        "label": "导出",
+        "csv": "下载 CSV",
+        "json": "下载 JSON"
+      },
+      "window": {
+        "title": "当前配额窗口",
+        "description": "来自最新速率限制快照的实时利用率，以及各窗口距离重置的时间。",
+        "noSnapshot": "尚无配额快照。发一条对话或启用主动探测。",
+        "fiveHour": "5 小时窗口",
+        "sevenDay": "7 天窗口",
+        "noData": "未上报",
+        "representative": "代表窗口",
+        "resetUnknown": "重置时间未知",
+        "resetExpired": "正在重置",
+        "resetsInHm": "{hours} 小时 {minutes} 分后重置",
+        "resetsInM": "{minutes} 分后重置",
+        "fallback": "回退缓冲位于 {pct}%。",
+        "overageDisabled": "超额已禁用：{reason}。",
+        "level": {
+          "ok": "正常",
+          "warn": "接近上限",
+          "crit": "已达上限"
+        }
+      },
+      "trend": {
+        "title": "利用率趋势",
+        "description": "所选范围内 5 小时与 7 天窗口的利用率变化。",
+        "empty": "该范围内还没有快照。",
+        "fiveHour": "5h",
+        "sevenDay": "7d"
+      },
+      "models": {
+        "title": "按模型成本",
+        "description": "各模型的 Token 与估算成本。SDK 未上报的成本会按模型定价回填。",
+        "empty": "该范围内还没有用量。",
+        "totalTokens": "总 Token",
+        "totalCost": "总成本",
+        "totalTurns": "总轮次",
+        "colModel": "模型",
+        "colTurns": "轮次",
+        "colInput": "输入",
+        "colOutput": "输出",
+        "colCache": "缓存读取",
+        "colCost": "成本"
+      },
+      "costOverTime": {
+        "title": "成本随时间",
+        "description": "所选范围内每日估算花费。",
+        "empty": "该范围内还没有用量。"
       }
     },
     "settings": {

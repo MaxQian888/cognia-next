@@ -24,6 +24,11 @@ const eslintConfig = defineConfig([
     // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
     // by its own config; its dist/ is a minified build artifact.
     "share-server/**",
+    // Standalone Cloudflare worker (workers-rs / Rust) with its own toolchain.
+    // Its build/ and .wrangler/ dirs are minified JS bundles emitted by wrangler,
+    // never authored here (same rationale as share-server/**).
+    "signaling-server/worker/build/**",
+    "signaling-server/worker/.wrangler/**",
     "node_modules/**",
     // VS Code extension fixture under sidecar/vscode-ext-host — simulates
     // a real CJS extension on purpose (require("vscode")), and the .js file

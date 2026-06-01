@@ -124,8 +124,9 @@ pub async fn run_command_handler(
 }
 
 /// Parse the stdout of a zero-exit handler. JSON output overrides default
-/// behaviour; plain stdout is treated as additional context.
-fn parse_zero_exit_output(stdout: &str) -> HookOutcome {
+/// behaviour; plain stdout is treated as additional context. Shared with the
+/// webhook handler so command + webhook honour the identical decision protocol.
+pub(super) fn parse_zero_exit_output(stdout: &str) -> HookOutcome {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
         return HookOutcome::Allow;

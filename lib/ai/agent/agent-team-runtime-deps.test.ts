@@ -148,7 +148,11 @@ describe("runLeadPlanning", () => {
     const lead = makeLead()
     seedStore(team, [lead, makeTeammate()])
     const planText = '```json\n{ "summary": "Plan", "steps": [] }\n```'
-    const executeAgent = jest.fn(async () => ({ text: planText }))
+    const executeAgent = jest.fn(async () => ({
+      text: planText,
+      channel: "text" as const,
+      toolsAvailable: false,
+    }))
     const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
 
     const out = await runLeadPlanning!({
@@ -166,7 +170,11 @@ describe("runLeadPlanning", () => {
     const team = makeTeam()
     const lead = makeLead()
     seedStore(team, [lead, makeTeammate()])
-    const executeAgent = jest.fn(async () => ({ text: "```json\n{}\n```" }))
+    const executeAgent = jest.fn(async () => ({
+      text: "```json\n{}\n```",
+      channel: "text" as const,
+      toolsAvailable: false,
+    }))
     const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
 
     await runLeadPlanning!({

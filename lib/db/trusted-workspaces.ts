@@ -36,6 +36,7 @@ export async function trustWorkspace(path: string, note?: string): Promise<void>
     note,
   }
   await getDb().trustedWorkspaces.put(row)
+  syncTrustGateToRust()
 }
 
 /** List all trusted workspaces (most recently trusted first). */
@@ -47,6 +48,18 @@ export async function listTrustedWorkspaces(): Promise<TrustedWorkspace[]> {
 export async function revokeWorkspaceTrust(path: string): Promise<void> {
   if (!path) return
   await getDb().trustedWorkspaces.delete(normalize(path))
+  syncTrustGateToRust()
+}
+
+/**
+ * Re-push the trust ledger into the Rust hooks gate after a change. Fire-and-
+ * forget via a dynamic import so this Dexie module stays decoupled from Tauri
+ * (the sync helper is a no-op on web). Errors are swallowed inside the helper.
+ */
+function syncTrustGateToRust(): void {
+  void import("@/lib/claude/hook-trust-sync")
+    .then((m) => m.syncTrustedWorkspacesToRust())
+    .catch(() => {})
 }
 
 /**

@@ -12,7 +12,7 @@ const getRuntimeVersionsMock = jest.fn(async () => ({
   react: "19.2.0",
   engine: "Chromium 130.0.0.0",
 }))
-const getNativeBuildNumberMock = jest.fn(async () => null as string | null)
+const getNativeBuildNumberMock = jest.fn(async (_locale?: unknown) => null as string | null)
 jest.mock("@/lib/app-metadata", () => ({
   APP_VERSION: "9.9.9",
   getBuildInfo: () => getBuildInfoMock(),

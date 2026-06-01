@@ -302,6 +302,11 @@ pub fn run() {
             claude::commands::claude_sidecar_status,
             claude::commands::sidecar_restart_count,
             claude::mcp_test::test_mcp_server,
+            // Hooks runtime bridge — external agents (claude-code/codex/opencode)
+            // reach the settings.json hook runtime via run_agent_hook; the trust
+            // gate for project/local-scope hooks is seeded by set_trusted_workspaces.
+            hooks::commands::run_agent_hook,
+            hooks::commands::set_trusted_workspaces,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
             ccswitch::commands::ccswitch_status,

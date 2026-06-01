@@ -42,10 +42,67 @@ function baseProps() {
 }
 
 describe("<EmptyChatState />", () => {
-  it("renders the greeting header", () => {
+  it("renders the time-of-day greeting header + subtitle", () => {
     render(<EmptyChatState {...baseProps()} />)
-    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    // Heading is now the greeting slot (key echoed by the mocked translator).
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
     expect(screen.getByText("subtitle")).toBeInTheDocument()
+  })
+
+  it("weaves the userName into the greeting via the named key", () => {
+    render(<EmptyChatState {...baseProps()} userName="Max" />)
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("greeting.named")
+  })
+
+  // ── Welcome style (rich vs minimal) ───────────────────────────────────
+  it("renders the aurora backdrop + capability descriptions in the rich style", () => {
+    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
+    expect(screen.getByTestId("welcome-aurora")).toBeInTheDocument()
+    expect(screen.getByText("capabilitiesDesc.workflows")).toBeInTheDocument()
+  })
+
+  it("drops the aurora + descriptions in the minimal style", () => {
+    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} welcomeStyle="minimal" />)
+    expect(screen.queryByTestId("welcome-aurora")).not.toBeInTheDocument()
+    expect(screen.queryByText("capabilitiesDesc.workflows")).not.toBeInTheDocument()
+    // Capability cards themselves are still present in minimal.
+    expect(screen.getByRole("button", { name: "capabilities.workflows" })).toBeInTheDocument()
+  })
+
+  it("shows the style toggle only when onToggleStyle is provided and fires the opposite style", async () => {
+    const onToggleStyle = jest.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(<EmptyChatState {...baseProps()} />)
+    expect(screen.queryByRole("button", { name: "style.toggleLabel" })).not.toBeInTheDocument()
+    rerender(<EmptyChatState {...baseProps()} onToggleStyle={onToggleStyle} />)
+    await user.click(screen.getByRole("button", { name: "style.toggleLabel" }))
+    // Default style is "rich" → toggling targets "minimal".
+    expect(onToggleStyle).toHaveBeenCalledWith("minimal")
+  })
+
+  it("toggles back to rich from the minimal style", async () => {
+    const onToggleStyle = jest.fn()
+    const user = userEvent.setup()
+    render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" onToggleStyle={onToggleStyle} />)
+    expect(screen.getByText("style.rich")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "style.toggleLabel" }))
+    expect(onToggleStyle).toHaveBeenCalledWith("rich")
+  })
+
+  it("renders the full minimal layout (brand, quick actions, outline New chat)", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        welcomeStyle="minimal"
+        variant="fullscreen"
+        quickActionsSlot={<div data-testid="quick-actions" />}
+      />
+    )
+    // Minimal heading (no action line), brand, quick actions, and the New chat
+    // button (outline variant) all render together.
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
+    expect(screen.getByTestId("quick-actions")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /newChat/ })).toBeInTheDocument()
   })
 
   // ── Dev-tool starter prompts ──────────────────────────────────────────
@@ -69,6 +126,47 @@ describe("<EmptyChatState />", () => {
     await user.keyboard("a")
     expect(props.onUseSample).toHaveBeenCalledTimes(2)
     expect(props.onUseSample).toHaveBeenCalledWith("samples.reviewPrompt")
+  })
+
+  // ── Section dismissal (quickStart / tryPrompt) ────────────────────────
+  it("shows ✕ on Quick start + Try a prompt and fires onDismissSection", async () => {
+    const onDismissSection = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <EmptyChatState {...baseProps()} onNavigate={jest.fn()} onDismissSection={onDismissSection} />
+    )
+    const dismissers = screen.getAllByRole("button", { name: "dismiss" })
+    expect(dismissers).toHaveLength(2)
+    // Document order: Quick start precedes Try a prompt.
+    await user.click(dismissers[0])
+    expect(onDismissSection).toHaveBeenCalledWith("quickStart")
+    await user.click(dismissers[1])
+    expect(onDismissSection).toHaveBeenCalledWith("tryPrompt")
+  })
+
+  it("omits the ✕ affordance when onDismissSection is absent", () => {
+    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
+    expect(screen.queryByRole("button", { name: "dismiss" })).not.toBeInTheDocument()
+  })
+
+  it("hides Quick start when hiddenSections.quickStart is set", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        onNavigate={jest.fn()}
+        hiddenSections={{ quickStart: true }}
+      />
+    )
+    expect(screen.queryByText("sections.quickStart")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "capabilities.workflows" })).not.toBeInTheDocument()
+    // Try a prompt is unaffected.
+    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
+  })
+
+  it("hides Try a prompt when hiddenSections.tryPrompt is set", () => {
+    render(<EmptyChatState {...baseProps()} hiddenSections={{ tryPrompt: true }} />)
+    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
   })
 
   // ── Surface-specific override (workflow editor chat tab) ─────────────
@@ -103,13 +201,13 @@ describe("<EmptyChatState />", () => {
     expect(props.onUseSample).toHaveBeenCalledWith("Build it for me")
   })
 
-  it("falls back to generic copy for override fields left undefined", () => {
+  it("falls back to the greeting for override fields left undefined", () => {
     const samples: StarterSample[] = [
       { key: "build", icon: SparklesIcon, title: "Scaffold a workflow", prompt: "Build it" },
     ]
-    // Only `samples` provided — heading/subtitle/section keep the generic keys.
+    // Only `samples` provided — heading/subtitle/section keep the generic copy.
     render(<EmptyChatState {...baseProps()} override={{ samples }} />)
-    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
     expect(screen.getByText("subtitle")).toBeInTheDocument()
     expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Scaffold a workflow/ })).toBeInTheDocument()
@@ -237,7 +335,7 @@ describe("<EmptyChatState />", () => {
       />
     )
     const slot = screen.getByTestId("composer-slot")
-    const title = screen.getByRole("heading", { name: "title" })
+    const title = screen.getByRole("heading", { level: 2 })
     const tryHeading = screen.getByText("sections.tryPrompt")
     // greeting → composerSlot → suggestion groups
     expect(title.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -278,7 +376,7 @@ describe("<EmptyChatState />", () => {
   it("renders headerExtraSlot above the greeting", () => {
     render(<EmptyChatState {...baseProps()} headerExtraSlot={<div data-testid="header-extra" />} />)
     const extra = screen.getByTestId("header-extra")
-    const title = screen.getByRole("heading", { name: "title" })
+    const title = screen.getByRole("heading", { level: 2 })
     // headerExtraSlot precedes the greeting in document order.
     expect(extra.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -294,7 +392,7 @@ describe("<EmptyChatState />", () => {
   it("renders all groups with reduced motion enabled", () => {
     mockUseReducedMotion.mockReturnValue(true)
     render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
-    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
     expect(screen.getByText("sections.quickStart")).toBeInTheDocument()
     expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
   })

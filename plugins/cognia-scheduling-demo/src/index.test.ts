@@ -13,7 +13,7 @@ describe("cognia-scheduling-demo", () => {
 
   it("registers its handler on activate and disposes it on deactivate", async () => {
     const dispose = jest.fn()
-    const registerHandler = jest.fn(() => dispose)
+    const registerHandler = jest.fn((_name: string, _handler: () => Promise<unknown>) => dispose)
     const ctx = {
       pluginId: manifest.id,
       logger: { info: jest.fn() },
@@ -24,8 +24,8 @@ describe("cognia-scheduling-demo", () => {
     expect(registerHandler).toHaveBeenCalledWith("demoHeartbeat", expect.any(Function))
 
     // The registered handler is benign and resolves ok.
-    const handler = registerHandler.mock.calls[0][1] as () => Promise<{ ok: boolean }>
-    await expect(handler()).resolves.toEqual({ ok: true })
+    const handler = registerHandler.mock.calls[0][1] as () => Promise<{ success: boolean }>
+    await expect(handler()).resolves.toEqual({ success: true })
 
     await definition.deactivate?.(ctx)
     expect(dispose).toHaveBeenCalledTimes(1)

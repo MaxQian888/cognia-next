@@ -312,35 +312,35 @@ describe("Plugin Validation", () => {
         manifest.capabilities = ["scheduler"]
         const result = validatePluginManifest(manifest, { governanceMode: "warn" })
         expect(result.valid).toBe(true)
-        expect(result.diagnostics.some((d) => d.code === "manifest.capability.field_missing")).toBe(
-          true
-        )
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.capability.field_missing")
+        ).toBe(true)
       })
 
       it("warns when a contribution field is populated without its capability tag", () => {
         const manifest = createValidManifest()
         manifest.capabilities = ["tools"]
-        ;(manifest as Record<string, unknown>).tools = [
+        ;(manifest as unknown as Record<string, unknown>).tools = [
           { name: "t", description: "d", parametersSchema: {} },
         ]
-        ;(manifest as Record<string, unknown>).fonts = [
+        ;(manifest as unknown as Record<string, unknown>).fonts = [
           { family: "X", files: [{ weight: 400, src: "a.woff2" }] },
         ]
         const result = validatePluginManifest(manifest, { governanceMode: "warn" })
         expect(
-          result.diagnostics.some((d) => d.code === "manifest.capability.field_undeclared")
+          result.diagnostics!.some((d) => d.code === "manifest.capability.field_undeclared")
         ).toBe(true)
       })
 
       it("does not warn field_missing when the gating field is populated", () => {
         const manifest = createValidManifest()
         manifest.capabilities = ["fonts"]
-        ;(manifest as Record<string, unknown>).fonts = [
+        ;(manifest as unknown as Record<string, unknown>).fonts = [
           { family: "X", files: [{ weight: 400, src: "a.woff2" }] },
         ]
         const result = validatePluginManifest(manifest, { governanceMode: "warn" })
         expect(
-          result.diagnostics.some(
+          result.diagnostics!.some(
             (d) => d.code === "manifest.capability.field_missing" && d.message.includes("fonts")
           )
         ).toBe(false)

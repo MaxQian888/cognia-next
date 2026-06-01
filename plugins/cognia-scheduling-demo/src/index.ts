@@ -26,7 +26,7 @@ const definition: PluginDefinition = {
     disposeHandler =
       ctx.scheduler?.registerHandler?.(HANDLER_NAME, async () => {
         ctx.logger?.info("scheduling-demo heartbeat fired")
-        return { ok: true as const }
+        return { success: true as const }
       }) ?? null
   },
   deactivate: async (ctx?: PluginContext) => {

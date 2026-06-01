@@ -49,7 +49,15 @@
  *     `TerminalSearchOverlay` to drive.
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, type ForwardedRef } from "react"
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ForwardedRef,
+} from "react"
+import { useTranslations } from "next-intl"
 
 import type { IDecoration, ILink, ILinkProvider, IMarker } from "@xterm/xterm"
 
@@ -62,6 +70,8 @@ import type { IntegrationEvent } from "@/lib/terminal/types"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings"
+import { useTerminalAutocomplete } from "@/hooks/terminal/use-terminal-autocomplete"
+import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
 
 export interface TerminalInstanceProps {
   sessionId: string
@@ -137,6 +147,33 @@ function jumpToCommand(
   const ref = term.buffer?.active?.viewportY ?? 0
   const target = dir === "prev" ? prevMarkerLine(lines, ref) : nextMarkerLine(lines, ref)
   if (target != null) term.scrollToLine(target)
+}
+
+/**
+ * Pixel position of the xterm cursor relative to the terminal container,
+ * for anchoring the autocomplete ghost text. Reads xterm's render-service
+ * cell dimensions (guarded — the field is internal and may be absent in
+ * the DOM renderer / before first paint). Returns null when it can't be
+ * resolved, so the overlay simply isn't shown.
+ */
+function cursorPixelPosition(term: unknown): { left: number; top: number } | null {
+  try {
+    const t = term as {
+      buffer?: { active?: { cursorX?: number; cursorY?: number } }
+      _core?: {
+        _renderService?: { dimensions?: { css?: { cell?: { width?: number; height?: number } } } }
+      }
+    }
+    const cell = t._core?._renderService?.dimensions?.css?.cell
+    const cw = cell?.width
+    const ch = cell?.height
+    if (!cw || !ch) return null
+    const x = t.buffer?.active?.cursorX ?? 0
+    const y = t.buffer?.active?.cursorY ?? 0
+    return { left: Math.round(x * cw), top: Math.round(y * ch) }
+  } catch {
+    return null
+  }
 }
 
 const DEFAULT_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
@@ -247,6 +284,28 @@ function TerminalInstanceImpl(
     scrollbackProp ??
     (typeof settingsScrollback === "number" ? settingsScrollback : DEFAULT_SCROLLBACK)
   const copyOnSelect = copyOnSelectProp ?? settingsCopyOnSelect
+
+  const t = useTranslations("terminal")
+
+  // Copilot-style inline autocomplete (ADR-0039). The hook owns the
+  // debounce / provider fan-out / line model; we feed it keystrokes, render
+  // its ghost suffix, and intercept Tab/→/Esc below. `acRef` lets the
+  // setup-effect closures (onData / key handler / integration) read the
+  // latest API without re-running setup.
+  const autocomplete = useTerminalAutocomplete(sessionId)
+  const acRef = useRef(autocomplete)
+  useEffect(() => {
+    acRef.current = autocomplete
+  })
+  const [ghostPos, setGhostPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
+
+  // Re-anchor the ghost text to the cursor whenever the suffix changes
+  // (covers both keystroke-driven and async-resolved suggestions).
+  useEffect(() => {
+    if (!autocomplete.ghost) return
+    const pos = cursorPixelPosition(termRef.current)
+    if (pos) setGhostPos(pos)
+  }, [autocomplete.ghost])
 
   // Imperative API for the search overlay + context-menu actions.
   useImperativeHandle(
@@ -424,6 +483,26 @@ function TerminalInstanceImpl(
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true
         const mod = e.ctrlKey || e.metaKey
+
+        // Autocomplete ghost-text acceptance / dismissal. Tab and → accept
+        // (writing the suffix into the PTY — never auto-running); Esc
+        // dismisses. Accept is a no-op (falls through) when there is no
+        // active suggestion, so Tab still reaches the shell for its own
+        // completion and → still moves the cursor.
+        const ac = acRef.current
+        if (ac.enabled) {
+          if (e.key === "Escape" && ac.suggestion) {
+            ac.dismiss()
+            return false
+          }
+          if (e.key === "Tab" || (e.key === "ArrowRight" && !e.shiftKey && !e.altKey && !mod)) {
+            const suffix = ac.accept()
+            if (suffix) {
+              void session.write(suffix)
+              return false
+            }
+          }
+        }
         // Font zoom. `=`/`+` zoom in, `-`/`_` zoom out, `0` resets. Guard on
         // !shift for the digit so it doesn't swallow shifted symbols, but allow
         // shift for `+` (which is Shift+= on most layouts).
@@ -546,6 +625,10 @@ function TerminalInstanceImpl(
       const offData = session.onData((bytes) => bp.push(bytes))
       const offInput = term.onData((text: string) => {
         void session.write(text)
+        // Mirror the keystroke into the autocomplete line model (no-op when
+        // the feature is off). Accepted suffixes go through session.write
+        // directly, not onData, so there's no double-feed.
+        acRef.current.feed(text)
       })
 
       // OSC 633 command markers (1B). Register a marker + gutter decoration
@@ -553,6 +636,12 @@ function TerminalInstanceImpl(
       // store still receives the same events (via spawn-orchestrator) for
       // the history rail — this listener only owns the in-terminal gutter.
       const offIntegration = session.onIntegration((ev: IntegrationEvent) => {
+        // A fresh prompt or a submitted command means the previous input
+        // line is gone — reset the autocomplete line model so a stale ghost
+        // doesn't linger across commands.
+        if (ev.kind === "prompt_start" || ev.kind === "command_start") {
+          acRef.current.reset()
+        }
         if (ev.kind === "command_start") {
           const marker = term.registerMarker?.()
           if (!marker) return
@@ -742,12 +831,25 @@ function TerminalInstanceImpl(
   }, [colorScheme])
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="terminal-instance"
-      data-session-id={sessionId}
-      className="h-full w-full overflow-hidden bg-background"
-    />
+    <div className="relative h-full w-full overflow-hidden">
+      <div
+        ref={containerRef}
+        data-testid="terminal-instance"
+        data-session-id={sessionId}
+        className="h-full w-full overflow-hidden bg-background"
+      />
+      {autocomplete.enabled && autocomplete.ghost ? (
+        <TerminalGhostText
+          ghost={autocomplete.ghost}
+          left={ghostPos.left}
+          top={ghostPos.top}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
+          source={autocomplete.suggestion?.source}
+          acceptHint={t("ghost.acceptHint")}
+        />
+      ) : null}
+    </div>
   )
 }
 
