@@ -21,6 +21,7 @@ import { WeChatPersonalConfigDialog } from "../forms/wechat-personal-config"
 import { MatrixConfigDialog } from "../forms/matrix-config"
 import { QQOfficialConfigDialog } from "../forms/qq-official-config"
 import { WechatOaConfigDialog } from "../forms/wechat-oa-config"
+import { DingTalkConfigDialog } from "../forms/dingtalk-config"
 import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
 import { AdapterSidebar, type AdapterStatusFilter } from "../adapters/adapter-sidebar"
 import { getPlatformMeta } from "../adapters/platform-meta"
@@ -41,6 +42,7 @@ type ConfigurableKind =
   | "matrix"
   | "qq-official"
   | "wechat-oa"
+  | "dingtalk"
 
 const CONFIGURABLE_KINDS: ConfigurableKind[] = [
   "telegram",
@@ -53,6 +55,7 @@ const CONFIGURABLE_KINDS: ConfigurableKind[] = [
   "matrix",
   "qq-official",
   "wechat-oa",
+  "dingtalk",
 ]
 
 function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
@@ -303,6 +306,11 @@ export function AdaptersTab() {
         open={editing?.kind === "wechat-oa"}
         onOpenChange={closeDialog}
         row={editing?.kind === "wechat-oa" ? editing.row : null}
+      />
+      <DingTalkConfigDialog
+        open={editing?.kind === "dingtalk"}
+        onOpenChange={closeDialog}
+        row={editing?.kind === "dingtalk" ? editing.row : null}
       />
     </div>
   )

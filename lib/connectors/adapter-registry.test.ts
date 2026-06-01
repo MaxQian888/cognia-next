@@ -35,18 +35,28 @@ jest.mock("./adapters/onebot", () => ({
   createOneBotAdapter: jest.fn().mockReturnValue({ platform: "onebot", id: "ob-mock" }),
 }))
 
+jest.mock("./adapters/dingtalk", () => ({
+  createDingTalkAdapter: jest.fn().mockReturnValue({ platform: "dingtalk", id: "dt-mock" }),
+}))
+
+jest.mock("./adapters/dingtalk/auth", () => ({
+  getDingTalkAccessToken: jest.fn().mockResolvedValue("dt-token"),
+}))
+
 import {
   buildAdapterFromRow,
   buildDiscordAdapter,
   buildSlackAdapter,
   buildLarkAdapter,
   buildOneBotAdapter,
+  buildDingTalkAdapter,
 } from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
 import { createOneBotAdapter } from "./adapters/onebot"
+import { createDingTalkAdapter } from "./adapters/dingtalk"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
@@ -55,6 +65,7 @@ const mockCreateDiscordAdapter = createDiscordAdapter as jest.Mock
 const mockCreateSlackAdapter = createSlackAdapter as jest.Mock
 const mockCreateLarkAdapter = createLarkAdapter as jest.Mock
 const mockCreateOneBotAdapter = createOneBotAdapter as jest.Mock
+const mockCreateDingTalkAdapter = createDingTalkAdapter as jest.Mock
 
 function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   return {
@@ -129,6 +140,7 @@ beforeEach(() => {
   mockCreateSlackAdapter.mockClear()
   mockCreateLarkAdapter.mockClear()
   mockCreateOneBotAdapter.mockClear()
+  mockCreateDingTalkAdapter.mockClear()
 })
 
 // ---------------------------------------------------------------------------
@@ -211,6 +223,37 @@ describe("buildAdapterFromRow", () => {
     expect(adapter).not.toBeNull()
     expect(mockCreateOneBotAdapter).toHaveBeenCalledTimes(1)
     expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
+  })
+
+  it("routes 'dingtalk' type to buildDingTalkAdapter and returns an adapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "FAKE-CRED"
+      return null
+    })
+    const row = makeRow({
+      id: "dt-1",
+      type: "dingtalk",
+      transportMode: "longpoll",
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["appKey", "appSecret"] },
+    })
+    const adapter = await buildAdapterFromRow(row)
+    expect(adapter).not.toBeNull()
+    expect(mockCreateDingTalkAdapter).toHaveBeenCalledTimes(1)
+    expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
+  })
+
+  it("buildDingTalkAdapter wires lazy resolvers that read credentials from the keyring", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "cred"
+      return null
+    })
+    await buildDingTalkAdapter(makeRow({ id: "dt-2", type: "dingtalk" }))
+    const opts = mockCreateDingTalkAdapter.mock.calls[0][0]
+    expect(opts.id).toBe("dt-2")
+    expect(opts.displayName).toBe("Test Adapter")
+    expect(await opts.appKey()).toBe("cred")
+    expect(await opts.appSecret()).toBe("cred")
+    expect(await opts.accessToken()).toBe("dt-token")
   })
 
   it("returns null and warns for an unsupported type", async () => {

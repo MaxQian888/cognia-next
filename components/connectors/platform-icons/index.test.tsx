@@ -26,6 +26,14 @@ describe("getPlatformIcon", () => {
     expect(svg?.querySelector("path")).not.toBeNull()
   })
 
+  it("renders the DingTalk brand mark (not a lucide fallback)", () => {
+    const Icon = getPlatformIcon("dingtalk")
+    const { container } = render(<Icon className="size-4" />)
+    const svg = container.querySelector("svg")
+    expect(svg).toHaveAttribute("aria-label", "DingTalk")
+    expect(svg).toHaveAttribute("fill", "currentColor")
+  })
+
   it("shares one mark across the WeChat family and the QQ family", () => {
     expect(getPlatformIcon("wechat-personal")).toBe(getPlatformIcon("wechat-oa"))
     expect(getPlatformIcon("wechat-personal")).toBe(getPlatformIcon("wecom"))

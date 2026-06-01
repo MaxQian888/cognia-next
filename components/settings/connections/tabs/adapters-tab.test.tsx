@@ -215,6 +215,16 @@ describe("AdaptersTab", () => {
     })
   })
 
+  it("opens the DingTalk dialog when its picker card is clicked", async () => {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-card-dingtalk"))
+    fireEvent.click(screen.getByTestId("add-connector-card-dingtalk"))
+    await waitFor(() => {
+      expect(screen.getByText(/add dingtalk connector/i)).toBeInTheDocument()
+    })
+  })
+
   it("opens Telegram configure dialog from the row menu", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByText("Configure"))

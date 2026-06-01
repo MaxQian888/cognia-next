@@ -5320,7 +5320,8 @@
           "unknown": "适配器",
           "matrix": "Matrix",
           "wechat-oa": "微信公众号",
-          "qq-official": "QQ 官方机器人"
+          "qq-official": "QQ 官方机器人",
+          "dingtalk": "钉钉 / DingTalk"
         },
         "actions": {
           "menuAria": "{name} 的操作",
@@ -5420,6 +5421,7 @@
           "matrix": "通过 /sync 的 Matrix homeserver",
           "wechat-oa": "通过 Webhook 的微信公众号",
           "qq-official": "通过网关的 QQ 官方机器人",
+          "dingtalk": "通过 Stream 模式的钉钉机器人",
           "unknown": "平台连接器"
         },
         "addConnector": {
@@ -5989,7 +5991,8 @@
           "wechat-personal": "仅回复——个人微信无法主动发起会话，测试发送会被拒绝。",
           "matrix": "房间 ID（例如 !abcd:matrix.org）。请先把机器人邀请进房间。",
           "wechat-oa": "粉丝的 OpenID（来自一条入站消息）。",
-          "qq-official": "频道 ID 或群 openid。"
+          "qq-official": "频道 ID 或群 openid。",
+          "dingtalk": "单聊：发送者的 staffId；群聊：来自入站回调的 conversationId。"
         },
         "bodyLabel": "内容",
         "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
@@ -6056,6 +6059,30 @@
         "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
         "adapterCreated": "已添加 QQ 官方机器人",
         "adapterUpdated": "已更新 QQ 官方机器人",
+        "create": "添加连接器",
+        "save": "保存"
+      },
+      "dingtalk": {
+        "titleNew": "添加钉钉连接器",
+        "titleEdit": "编辑钉钉连接器",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "钉钉机器人",
+        "displayNameRequired": "显示名称不能为空",
+        "appKeyLabel": "App Key",
+        "appKeyHelp": "来自钉钉开放平台 → 你的应用 → 凭证。",
+        "appKeyPlaceholder": "dingxxxxxxxx",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "用于 Stream 模式与换取访问令牌的 AppSecret。",
+        "appSecretPlaceholder": "app secret",
+        "credentialUnchangedPlaceholder": "留空则保留当前值",
+        "credentialsRequired": "App Key 和 App Secret 不能为空",
+        "sectionIdentity": "身份",
+        "sectionIdentityDesc": "钉钉开放平台的应用凭据。",
+        "sectionAdvanced": "高级",
+        "sectionAdvancedDesc": "免打扰时段与静音。",
+        "quietHoursIncomplete": "免打扰时段需要开始、结束时间和时区。",
+        "adapterCreated": "已添加钉钉连接器",
+        "adapterUpdated": "已更新钉钉连接器",
         "create": "添加连接器",
         "save": "保存"
       },

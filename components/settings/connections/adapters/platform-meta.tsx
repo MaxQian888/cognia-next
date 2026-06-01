@@ -32,6 +32,7 @@ const LABEL_KEY: Partial<Record<PlatformKind, string>> = {
   "wechat-oa": "wechat-oa",
   "qq-official": "qq-official",
   matrix: "matrix",
+  dingtalk: "dingtalk",
 }
 
 export function getPlatformMeta(kind: PlatformKind): PlatformMeta {

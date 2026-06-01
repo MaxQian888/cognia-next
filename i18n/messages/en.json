@@ -5320,7 +5320,8 @@
           "unknown": "Adapter",
           "matrix": "Matrix",
           "wechat-oa": "WeChat Official Account / 公众号",
-          "qq-official": "QQ (Official Bot)"
+          "qq-official": "QQ (Official Bot)",
+          "dingtalk": "DingTalk / 钉钉"
         },
         "actions": {
           "menuAria": "Actions for {name}",
@@ -5420,6 +5421,7 @@
           "matrix": "Matrix homeserver via /sync",
           "wechat-oa": "WeChat Official Account via webhook",
           "qq-official": "QQ official bot via gateway",
+          "dingtalk": "DingTalk bot via Stream Mode",
           "unknown": "Platform connector"
         },
         "addConnector": {
@@ -5989,7 +5991,8 @@
           "wechat-personal": "Reply-only — personal WeChat cannot be messaged proactively, so the test send will be rejected.",
           "matrix": "The room id (e.g. !abcd:matrix.org). Invite the bot to the room first.",
           "wechat-oa": "The follower's OpenID (from an inbound message).",
-          "qq-official": "The channel id or group openid."
+          "qq-official": "The channel id or group openid.",
+          "dingtalk": "1:1: the sender's staff id. Group: the conversationId from an inbound callback."
         },
         "bodyLabel": "Body",
         "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
@@ -6056,6 +6059,30 @@
         "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
         "adapterCreated": "QQ Official Bot added",
         "adapterUpdated": "QQ Official Bot updated",
+        "create": "Add connector",
+        "save": "Save"
+      },
+      "dingtalk": {
+        "titleNew": "Add DingTalk connector",
+        "titleEdit": "Edit DingTalk connector",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "DingTalk bot",
+        "displayNameRequired": "Display name is required",
+        "appKeyLabel": "App Key",
+        "appKeyHelp": "From DingTalk Open Platform → your app → Credentials.",
+        "appKeyPlaceholder": "dingxxxxxxxx",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "The AppSecret used for Stream Mode and to mint access tokens.",
+        "appSecretPlaceholder": "app secret",
+        "credentialUnchangedPlaceholder": "Leave blank to keep the current value",
+        "credentialsRequired": "App Key and App Secret are required",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "DingTalk open-platform app credentials.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and mute.",
+        "quietHoursIncomplete": "Quiet hours need a start, end, and timezone.",
+        "adapterCreated": "DingTalk connector added",
+        "adapterUpdated": "DingTalk connector updated",
         "create": "Add connector",
         "save": "Save"
       },

@@ -10,13 +10,17 @@
  * marks without adding an npm dependency — the SVGs use `currentColor` so the
  * caller's `colorClass` tints them.
  *
- * Platforms Simple Icons does not cover keep a clean lucide glyph:
+ * DingTalk is not in Simple Icons, so its mark is vendored from Remix Icon
+ * (`ri:dingding-fill`, Apache-2.0, https://remixicon.com) — same 24×24
+ * currentColor convention.
+ *
+ * Platforms with no vendored brand mark keep a clean lucide glyph:
  *   - Lark/Feishu → bird (Lark ≙ bird).
  *   - WeCom / WeChat OA → share the WeChat brand mark (same family; the
  *     per-platform colour distinguishes them in the badge).
  *   - OneBot (QQ via NapCat/Lagrange) → shares the QQ brand mark.
- *   - DingTalk / Email / KOOK / LINE / Mattermost / GitHub / unknown →
- *     lucide fallbacks so every kind still renders a distinct glyph.
+ *   - Email / KOOK / LINE / Mattermost / GitHub / unknown → lucide fallbacks
+ *     so every kind still renders a distinct glyph.
  */
 
 import { createElement } from "react"
@@ -63,6 +67,9 @@ const WECHAT_PATH =
   "M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.047c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 0 1-.023-.156.49.49 0 0 1 .201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-6.656-6.088V8.89c-.135-.01-.27-.027-.407-.03zm-2.53 3.274c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.969-.982z"
 const QQ_PATH =
   "M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"
+// Remix Icon `ri:dingding-fill` (Apache-2.0) — Simple Icons has no DingTalk mark.
+const DINGTALK_PATH =
+  "M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10s10-4.477 10-10S17.523 2 12 2m4.49 9.04l-.006.014c-.42.898-1.516 2.66-1.516 2.66l-.005-.012l-.32.558h1.543l-2.948 3.919l.67-2.666h-1.215l.422-1.763a17 17 0 0 0-1.223.349s-.646.378-1.862-.729c0 0-.82-.722-.344-.902c.202-.077.981-.175 1.595-.257a80 80 0 0 1 1.338-.172s-2.555.039-3.161-.057c-.606-.095-1.375-1.107-1.539-1.996c0 0-.253-.488.545-.257s4.101.9 4.101.9S8.27 9.312 7.983 8.99c-.286-.32-.841-1.754-.769-2.634c0 0 .031-.22.257-.16c0 0 3.176 1.45 5.347 2.245s4.06 1.199 3.816 2.228c-.02.087-.072.216-.144.37"
 
 const TelegramIcon = brandIcon(TELEGRAM_PATH, "Telegram")
 const DiscordIcon = brandIcon(DISCORD_PATH, "Discord")
@@ -70,6 +77,7 @@ const SlackIcon = brandIcon(SLACK_PATH, "Slack")
 const MatrixIcon = brandIcon(MATRIX_PATH, "Matrix")
 const WeChatIcon = brandIcon(WECHAT_PATH, "WeChat")
 const QQIcon = brandIcon(QQ_PATH, "QQ")
+const DingTalkIcon = brandIcon(DINGTALK_PATH, "DingTalk")
 
 /**
  * Per-platform glyph. Brand SVGs where available; lucide fallbacks otherwise.
@@ -85,7 +93,7 @@ const PLATFORM_ICON: Record<PlatformKind, PlatformIconComponent> = {
   wecom: WeChatIcon,
   "wechat-oa": WeChatIcon,
   "wechat-personal": WeChatIcon,
-  dingtalk: MessageCircleIcon,
+  dingtalk: DingTalkIcon,
   email: MailIcon,
   kook: MessageCircleIcon,
   line: MessageCircleIcon,

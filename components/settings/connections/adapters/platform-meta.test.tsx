@@ -19,6 +19,7 @@ describe("getPlatformMeta", () => {
     ["wechat-oa", "wechat-oa"],
     ["qq-official", "qq-official"],
     ["matrix", "matrix"],
+    ["dingtalk", "dingtalk"],
   ])("maps %s to its label key + shared brand icon", (kind, labelKey) => {
     const meta = getPlatformMeta(kind)
     expect(meta.labelKey).toBe(labelKey)

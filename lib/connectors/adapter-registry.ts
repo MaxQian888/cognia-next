@@ -29,6 +29,8 @@ import { createQQOfficialAdapter } from "./adapters/qq-official"
 import { getQQAccessToken } from "./adapters/qq-official/auth"
 import { createWechatOaAdapter } from "./adapters/wechat-oa"
 import { getWechatOaAccessToken } from "./adapters/wechat-oa/auth"
+import { createDingTalkAdapter } from "./adapters/dingtalk"
+import { getDingTalkAccessToken } from "./adapters/dingtalk/auth"
 import { getTenantAccessToken } from "./adapters/lark/auth"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 
@@ -61,6 +63,8 @@ export async function buildAdapterFromRow(
       return buildQQOfficialAdapter(row)
     case "wechat-oa":
       return buildWechatOaAdapter(row)
+    case "dingtalk":
+      return buildDingTalkAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -410,6 +414,28 @@ export async function buildWechatOaAdapter(row: AdapterInstanceRow): Promise<Pla
       const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
       const appSecret = (await connectorsKeyringGet(row.id, "appSecret")) ?? ""
       return getWechatOaAccessToken(appId, appSecret)
+    },
+  })
+}
+
+/**
+ * Instantiate a DingTalk PlatformAdapter from a persisted AdapterInstanceRow.
+ *
+ * Reads the AppKey + AppSecret from the keyring. Inbound uses Stream mode
+ * (clientId/clientSecret = appKey/appSecret); outbound mints an app access
+ * token from the same credentials. All three are resolvers so a rotated
+ * credential is picked up on the next call without a restart.
+ */
+export async function buildDingTalkAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  return createDingTalkAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    appKey: () => connectorsKeyringGet(row.id, "appKey").then((v) => v ?? ""),
+    appSecret: () => connectorsKeyringGet(row.id, "appSecret").then((v) => v ?? ""),
+    accessToken: async () => {
+      const appKey = (await connectorsKeyringGet(row.id, "appKey")) ?? ""
+      const appSecret = (await connectorsKeyringGet(row.id, "appSecret")) ?? ""
+      return getDingTalkAccessToken(appKey, appSecret)
     },
   })
 }
