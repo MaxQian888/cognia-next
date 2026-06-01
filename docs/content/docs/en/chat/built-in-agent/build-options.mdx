@@ -1,11 +1,11 @@
 ---
 title: Build-options Pipeline
-description: resolveSendOptions — the single convergence point that collapses all UI state into one SendOptions payload. The 40 ordered contributors, the precedence chains, and the system-prompt assembly.
+description: resolveSendOptions — the single convergence point that collapses all UI state into one SendOptions payload. The 41 ordered contributors, the precedence chains, and the system-prompt assembly.
 ---
 
 # Build-options Pipeline
 
-`lib/claude/build-options.ts` exists so that **every** capability — character, skills, Twin, memory, goal, A2UI, computer-use, sandbox, plugins, routing — influences a turn through exactly one function. `resolveSendOptions` (`:336`) mutates a single `opts: SendOptions` object across ~40 ordered sections and returns it (`:1380`). Nothing else in the codebase constructs a `SendOptions`.
+`lib/claude/build-options.ts` exists so that **every** capability — character, skills, Twin, memory, goal, A2UI, computer-use, sandbox, plugins, routing — influences a turn through exactly one function. `resolveSendOptions` (`:336`) mutates a single `opts: SendOptions` object across ~41 ordered sections and returns it (`:1380`). Nothing else in the codebase constructs a `SendOptions`.
 
 <TLDR>
   `resolveSendOptions(ctx)` (`build-options.ts:336`) builds one `opts` object. Contributors run in a
@@ -13,7 +13,7 @@ description: resolveSendOptions — the single convergence point that collapses 
   > agentMode > character > appSettings`. The system prompt is assembled once at `:695` from a
   six-element array joined by `\n\n---\n\n`; everything after only appends to `appendSystemPrompt`.
   Twin (`:551`) *replaces* the base prompt; memory (`:595`) *appends*. Tools accrete into an `allowed`
-  set committed at `:864`. The workflow-editor branch (`:1264`) overwrites the prompt and tools
+  set committed at `:864`. The workflow-editor branch (`:1285`) overwrites the prompt and tools
   wholesale. Every optional injection is wrapped in try/catch and degrades silently.
 </TLDR>
 
@@ -21,7 +21,7 @@ description: resolveSendOptions — the single convergence point that collapses 
 
 | Export | Line | Role |
 | --- | --- | --- |
-| **`resolveSendOptions(ctx)`** | `:336-1381` | The pipeline. Async; returns the full `SendOptions`. |
+| **`resolveSendOptions(ctx)`** | `:336-1380` | The pipeline. Async; returns the full `SendOptions`. |
 | `resolveMemberConfig(team, member, character)` | `:307-323` | Pure per-teammate override resolution (`systemPrompt`/`model`/`allowedTools`/`mcpServerIds`). Reused by UI preview. |
 | `listTeamMembers(ids)` | `:1387-1389` | Pre-resolve teammate character rows. |
 | `BRIEF_OUTPUT_SNIPPET` | `:52` | The brief-mode appendix (also reused by the ACP route). |
@@ -30,7 +30,7 @@ The input is `BuildOptionsContext` (`:105-221`): `session`, `character`, `appSet
 
 ## The Assembly Flow
 
-The function is a straight-line accretion. This diagram groups the 40 sections into phases; each node is annotated with its line.
+The function is a straight-line accretion. This diagram groups the 41 sections into phases; each node is annotated with its line.
 
 ```mermaid
 flowchart TB
@@ -72,7 +72,7 @@ flowchart TB
     GOAL["active goal :1211"]
     INBOX["inbox suppression :1224"]
     THINK["thinking budget :1253"]
-    WF["workflow-editor OVERRIDE :1264"]
+    WF["workflow-editor OVERRIDE :1285"]
     TEAM["team subagents :1348"]
     RESUME["resume/fork :1364"]
   end
@@ -154,9 +154,9 @@ The exhaustive list. "Precedence" reads left-to-right, highest first.
 | 36 | Active `/goal` | `appendGoalContext` (ADR-0013/0019) | `:1211` |
 | 37 | Inbox suppression | manual > muted > quietHours → `opts.suppressedReason` | `:1224` |
 | 38 | Thinking budget | session > character > appDefault | `:1253` |
-| 39 | **Workflow-editor branch** | **overwrites** `systemPrompt`/`appendSystemPrompt`/`allowedTools`/`additionalDirectories`; deletes `mcpServers` | `:1264` |
-| 39b | Team branch | unions `resolveAllSubagents({context:"team"})` into `opts.agents` | `:1348` |
-| 40 | Resume / fork | `forkFromSessionId` or `resumeSessionId` | `:1364` |
+| 39 | **Workflow-editor branch** | **overwrites** `systemPrompt`/`appendSystemPrompt`/`allowedTools`/`additionalDirectories`; deletes `mcpServers` | `:1285` |
+| 40 | Team branch | unions `resolveAllSubagents({context:"team"})` into `opts.agents` | `:1348` |
+| 41 | Resume / fork | `forkFromSessionId` or `resumeSessionId` | `:1364` |
 
 ## The Precedence Chain
 
@@ -171,7 +171,7 @@ flowchart LR
   class S,P,M,AM,CH,AP,IMO n
 ```
 
-The IM channel override (`imOverrideRow`, fetched once at `:407`) sits *above* the session for **model**, **provider**, and the **computer-use** gate only — so a per-channel binding can pin a cheaper model without touching the session.
+The IM channel override (`imOverrideRow`, fetched once at `:413`) sits *above* the session for **model**, **provider**, and the **computer-use** gate only — so a per-channel binding can pin a cheaper model without touching the session.
 
 ## System-Prompt vs Append-System-Prompt
 
@@ -204,18 +204,18 @@ flowchart TB
 
 - Anything that must **replace** the base prompt (like Twin) runs at/before `:695`.
 - Anything that **adds** runs after, appending to `opts.appendSystemPrompt` with the join idiom (keep the existing value, separate the new section with a blank line).
-- The **workflow-editor branch** (`:1264`) overwrites both `systemPrompt` (`:1327`) and `appendSystemPrompt` (`:1328`) wholesale, so a new appender must run *before* it to survive in that session kind.
+- The **workflow-editor branch** (`:1285`) overwrites both `systemPrompt` (`:1327`) and `appendSystemPrompt` (`:1328`) wholesale, so a new appender must run *before* it to survive in that session kind.
 
 ## Adding a Contributor
 
 1. Resolve a value through the precedence chain (`session > activeProject > memberOverride > agentMode > character > appSettings`).
 2. For prompt text, append to `opts.appendSystemPrompt` (preserve existing via the join idiom). For a base-prompt replacement, do it before `:695`.
 3. For tools, add to the `allowed` set **before** the commit at `:864`; the `toolFilter` overlay (`:867`) and computer-use filters narrow the committed set afterward.
-4. Add the field to `SendOptions` in `lib/claude/types.ts`, and to the Rust `SendOptions` struct (`commands.rs:15`) if the sidecar must read it.
+4. Add the field to `SendOptions` in `lib/claude/types.ts`, and to the Rust `SendOptions` struct (`commands.rs:17`) **only if the sidecar must deserialize it** — renderer/sidecar-JS-only fields like `permissionRuleset` are deliberately *not* mirrored in the Rust struct.
 5. Wrap any I/O (Dexie, IPC) in try/catch — every optional injection is **fail-open** (twin `:590`, memory `:629`, plugin skills `:669`, MCP `:960`, plugin tools `:1036`, computer-use `:1106`).
 
 <Callout type="warn" title="Don't re-read the IM override">
-  `imOverrideRow` is fetched once at `:407` and reused for the computer-use gate at `:991`. Re-reading
+  `imOverrideRow` is fetched once at `:413` and reused for the computer-use gate at `:991`. Re-reading
   Dexie for the same row is explicitly flagged against in the comments (`:986-989`).
 </Callout>
 

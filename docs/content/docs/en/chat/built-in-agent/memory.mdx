@@ -51,7 +51,7 @@ flowchart TB
     EXT["extractMemories (LLM)<br/>extractor.ts:74"]
     PII["hasNoLeakingPii gate<br/>run-memory-extraction.ts:87"]
     CON["consolidate ADD/UPDATE/DELETE/NOOP<br/>consolidator.ts:110"]
-    DB["createMemory + vector upsert<br/>memories.ts:36"]
+    DB["createMemory + vector upsert<br/>memories.ts:48"]
   end
   subgraph READ["READ — at send time (build-options.ts:595)"]
     APPLY["applyMemoryContext<br/>apply-memory-context.ts:76"]
@@ -120,7 +120,7 @@ The whole memory subsystem **reuses the shared RAG toolkit**: `BM25Index` / `nor
 
 ## Persistence
 
-`lib/db/memories.ts` is purely mechanical (no LLM, no gating — the gate is in the callers). The retriever's candidate pool is `listActiveForReader(characterId?)` (`:143`) — global base ∪ character override via the `[scope+status]` index. `touchMemories` (`:100`) bumps recency on a hit. Only the management panel calls `hardDeleteMemory` / `clearMemories` — consolidation only ever soft-invalidates.
+`lib/db/memories.ts` is purely mechanical (no LLM, no gating — the gate is in the callers). The retriever's candidate pool is `listActiveForReader(characterId?)` (`:155`) — global base ∪ character override via the `[scope+status]` index. `touchMemories` (`:112`) bumps recency on a hit. Only the management panel calls `hardDeleteMemory` / `clearMemories` — consolidation only ever soft-invalidates.
 
 Schema: `version(65).stores({ memories })` at `schema.ts:1692`; index string includes `[scope+type]`, `[scope+status]`, `[type+status]` (`:1694`). Additive, no upgrade hook.
 

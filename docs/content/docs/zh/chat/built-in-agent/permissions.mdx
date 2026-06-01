@@ -10,7 +10,7 @@ description: ADR-0041 双层安全门——sidecar canUseTool 短路（A 层）�
 <TLDR>
   **A 层**在 sidecar 里：SDK 的 `canUseTool` 回调（`anthropic.mjs:263`）查阅 build-options 序列化出的静态
   `permissionRuleset`，*仅*在显式 allow/deny 时短路——未命中的调用回传到 renderer。**B 层**在聊天 hook 里：
-  `permission_request` 处理器（`use-claude-chat.ts:1300`）运行 Auto-mode，一条**用户 glob 规则 → 确定性
+  `permission_request` 处理器（`use-claude-chat.ts:1267`）运行 Auto-mode，一条**用户 glob 规则 → 确定性
   分类器 → 可选小模型裁决**的优先级阶梯，自动放行/拒绝，或落到手动弹窗。纯核心是
   `lib/claude/permissions/` 里的 `command-parse → command-safety → command-judge → auto-mode`。
 </TLDR>
@@ -32,12 +32,12 @@ flowchart TB
     EA["显式 allow → behavior:allow :284"]
     ED["显式 deny → behavior:deny :287"]
   end
-  subgraph B["B 层 —— renderer（use-claude-chat.ts:1255 permission_request）"]
-    AL["总是放行列表 :1257"]
-    AM["runAutoModeForTool :1312"]
-    APV["allow → approveTool :1320"]
-    DNY["deny → approveTool deny :1324"]
-    MODAL["ask → 手动弹窗 :1336"]
+  subgraph B["B 层 —— renderer（use-claude-chat.ts:1267 permission_request）"]
+    AL["总是放行列表 :1269"]
+    AM["runAutoModeForTool :1324"]
+    APV["allow → approveTool :1333"]
+    DNY["deny → approveTool deny :1337"]
+    MODAL["ask → 手动弹窗 :1360"]
   end
 
   TOOL --> RR
@@ -62,16 +62,16 @@ sidecar 里，`canUseTool`（`anthropic.mjs:263`）读 `sendOptions.permissionRu
 - 显式 **deny** → `{behavior:"deny", message:"denied by permission ruleset"}`（`:287`）
 - 其它 → 落到 `permission_request` 发出（`:297`）
 
-该解析器是 `ruleset.ts` 故意**更弱**的 JS 镜像：`splitBash`（`permission-resolver.mjs:99`）是忽略引号的朴素顶层切分，且**没有**内置 `"*": "allow"`。任一段 deny 即胜出；仅当*每*段都显式 allow 才返回 allow（`:143/:153`）。完整的复合命令解析器在 B 层，未命中调用会回传到那里——所以削弱 A 层是安全的。
+该解析器是 `ruleset.ts` 故意**更弱**的 JS 镜像：`splitBash`（`permission-resolver.mjs:100`）是忽略引号的朴素顶层切分，且**没有**内置 `"*": "allow"`。任一段 deny 即胜出；仅当*每*段都显式 allow 才返回 allow（`:143/:153`）。完整的复合命令解析器在 B 层，未命中调用会回传到那里——所以削弱 A 层是安全的。
 
 ### B 层 —— renderer Auto-mode
 
-`permission_request` 分支（`use-claude-chat.ts:1255-1350`）：
+`permission_request` 分支（`use-claude-chat.ts:1267-1362`）：
 
-1. **总是放行列表**（`:1257`）——已有的每会话授权。
-2. **非活跃/远程会话**（`:1265`）——带兜底 deny 的远程控制路由；非 Auto-mode。
-3. **Auto-mode**（`:1300`）：构建裁决客户端（`buildUtilityLlmClient`，featureId `command-safety`，`:1306`），用 `pluginRules: getPluginCommandRulesets()` 调用 `runAutoModeForTool`（`:1312`）。`allow` → `approveTool(..., "allow")`（`:1320`）；`deny` → `approveTool(..., "deny", reason)`（`:1324`）；`try/catch` fail-open（`:1333`）。
-4. `ask`/`null` → 手动弹窗 `pushApproval`（`:1336`）。
+1. **总是放行列表**（`:1269`）——已有的每会话授权。
+2. **非活跃/远程会话**（`:1277`）——带兜底 deny 的远程控制路由；非 Auto-mode。
+3. **Auto-mode**（`:1316`）：构建裁决客户端（`buildUtilityLlmClient`，featureId `command-safety`，`:1318`），用 `pluginRules: getPluginCommandRulesets()` 调用 `runAutoModeForTool`（`:1324`）。`allow` → `approveTool(..., "allow")`（`:1333`）；`deny` → `approveTool(..., "deny", reason)`（`:1337`）；`try/catch` fail-open（`:1345`）。
+4. `ask`/`null` → 手动弹窗 `pushApproval`（`:1360`）。
 
 ## 纯核心管线
 
@@ -122,7 +122,7 @@ flowchart LR
 flowchart TB
   D0["禁用 → ASK_DEFAULT :81"] --> D1
   D1["显式用户规则？resolveBashPermission<br/>→ source:user-rule :84"] -->|否| D2
-  D2["分类器决断（allow/deny）？<br/>→ source:rule :94"] -->|ask| D3
+  D2["分类器决断（allow/deny）？<br/>→ source:rule :95"] -->|ask| D3
   D3["mode = rules+model 且有 client？<br/>judgeCommandSafety :100"] -->|high risk| DENY["denyOnHighRisk 则 deny 否则 ask"]
   D3 -->|safe & low| ALLOW["allow :108"]
   D3 -->|其它 / 无模型| ASK["ask（安全默认） :116"]
@@ -131,7 +131,7 @@ flowchart TB
   class D0,D1,D2,D3,DENY,ALLOW,ASK n
 ```
 
-完整阶梯（最高 → 最低）：**用户 `commandRules` glob → 插件规则 → 确定性分类器 → 模型裁决 → ask**。`auto-mode-runner.ts:54` 用数组顺序编码——插件规则在前，用户 `{Bash: commandRules}` 最后 push，使用户总是压过插件。
+完整阶梯（最高 → 最低）：**用户 `commandRules` glob → 插件规则 → 确定性分类器 → 模型裁决 → ask**。`auto-mode-runner.ts:56` 用数组顺序编码——插件规则在前，用户 `{Bash: commandRules}` 最后 push，使用户总是压过插件。
 
 ## command-from-tool —— 哪些工具是命令
 
@@ -170,7 +170,7 @@ agentPermissions?: {
 
 ## 不变量与坑点
 
-- **两层都 fail-open**（ADR §56）：A 层 catch（`anthropic.mjs:293`）、B 层 catch（`use-claude-chat.ts:1333`）、裁决器每条失败路径返回 `null`、`evaluateAutoDecision` 绝不抛（`auto-mode.ts:70`）。
+- **两层都 fail-open**（ADR §56）：A 层 catch（`anthropic.mjs:293`）、B 层 catch（`use-claude-chat.ts:1345`）、裁决器每条失败路径返回 `null`、`evaluateAutoDecision` 绝不抛（`auto-mode.ts:70`）。
 - **A 层无 `*: allow` 通配**——sidecar 解析器刻意省略 `DEFAULT_RULESET` 的 `"*":"allow"`；只有显式序列化规则生效（`permission-resolver.mjs:6-11`）。完整默认（含 `*.env`→ask）只在 renderer/SDK 侧（`ruleset.ts:49`）。
 - **隐私**——模型层从不见 PII（`command-judge.ts:96`），且非显式启用不开（`auto-mode.ts:100`）。
 - **隐藏替换防御**——解析器递归进入 `$(...)`/反引号（`command-parse.ts:162`），于是埋藏的 `rm -rf /` 经最差裁定胜出（`command-safety.ts:574`）拒绝整条链。

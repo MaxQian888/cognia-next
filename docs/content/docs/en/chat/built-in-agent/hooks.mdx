@@ -84,7 +84,7 @@ sequenceDiagram
   participant SK as Node sidecar
 
   SC->>HP: permission_request detected (:330)
-  HP->>HP: resolve_trusted_cwd (:432)
+  HP->>HP: resolve_trusted_cwd (:433)
   HP->>HP: fire observational PermissionRequest (:438)
   HP->>HK: run_pre_tool_use (BLOCKING, :450)
   alt hook blocks
@@ -142,7 +142,7 @@ flowchart LR
   class OBS,GATE,FIRE,RUST,SUPP n
 ```
 
-`gateExternalAgentPermission` (`agent-hooks.ts:117`) fires the System-A plugin hook, the observational `PermissionRequest`, then the blocking `PreToolUse`; on block it calls `deny(...)` and returns `true` so the manager suppresses the event. The manager seams are `manager.ts:1637` (interactive, true suppression) and `:1803` (headless, deny still enforced). `run_agent_hook` (`commands.rs:55`) applies the same `resolve_trusted_cwd` gate (`:65`) before routing to `run_tool_scoped` / `run_session_scoped`.
+`gateExternalAgentPermission` (`agent-hooks.ts:117`) fires the System-A plugin hook, the observational `PermissionRequest`, then the blocking `PreToolUse`; on block it calls `deny(...)` and returns `true` so the manager suppresses the event. The manager seams are `manager.ts:1638` (interactive, true suppression) and `:1804` (headless, deny still enforced). `run_agent_hook` (`commands.rs:55`) applies the same `resolve_trusted_cwd` gate (`:65`) before routing to `run_tool_scoped` / `run_session_scoped`.
 
 This also wired the two previously-orphaned System-A hook kinds: `dispatchExternalAgentPermissionRequest` (`hooks-system.ts:2095`) and `dispatchExternalAgentToolCall` (`:2115`).
 

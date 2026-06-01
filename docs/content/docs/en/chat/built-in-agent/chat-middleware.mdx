@@ -8,7 +8,7 @@ description: The plugin-contributed around-style middleware chain on the full-re
 Chat middleware lets a plugin wrap the agent's **full reply** — inspect or transform the request and the response, Koa-style — without touching the streaming UI path. It is the one capability module that sits on the *non-streaming* `run-and-capture` path rather than inside `resolveSendOptions`.
 
 <TLDR>
-  A middleware is `(req, next) => Promise<Response>` (`plugin-chat-middleware.ts:116`). Plugins register
+  A middleware is `(req, next) => Promise<Response>` (`plugin-chat-middleware.ts:115`). Plugins register
   via `ctx.chat.use` → `registerChatMiddleware` (`registry.ts:79`). The runner builds the chain
   **back-to-front** by priority and calls each with a per-middleware timeout (`runner.ts:72`); a
   timeout or error **skips** that middleware (calls `next` unchanged) and trips a **circuit breaker**
@@ -67,7 +67,7 @@ The runner reads the active chain fresh (`listActiveChatMiddlewares()`, `runner.
 
 `runChatMiddlewareChain(request, terminal, options)` (`runner.ts:72`). For each middleware (`:93`):
 
-- **timeout** — `Promise.race` against `entry.timeoutMs` (`raceWithTimeout`, `:136`). Default 5s, cap 60s (`registry.ts:24`).
+- **timeout** — `Promise.race` against `entry.timeoutMs` (`raceWithTimeout`, `:136`). Default 5s (`registry.ts:24`), cap 60s (`:25`).
 - **on timeout** (`:98`) — push to `timedOut[]`, `recordMiddlewareFailure`, **skip → `next(req)`** unchanged.
 - **on error** (`:107`) — same skip behavior.
 - **on success** (`:116`) — push `succeeded[]`, `recordMiddlewareSuccess`, return its value.
@@ -93,7 +93,7 @@ flowchart LR
   class RC,GATE,CORE,CHAIN n
 ```
 
-`runAndCaptureAssistantReply` (`:217`) short-circuits straight to the core capture when the flag is off (`:223`) **or** no middleware is active (`:226`). When on, it builds a `ChatMiddlewareRequest` (`:231`), runs the chain with the real capture as `terminal` (`:250`), and applies any returned text transform (`:260`). Streaming chat is deliberately excluded — its text is already rendered, so a post-hoc transform would be a visible flicker (rationale comment, `:208`).
+`runAndCaptureAssistantReply` (`:217`) short-circuits straight to the core capture when the flag is off (`:223`) **or** no middleware is active (`:226`). When on, it builds a `ChatMiddlewareRequest` (`:231`), runs the chain with the real capture as `terminal` (`:250`), and applies any returned text transform (`:266`). Streaming chat is deliberately excluded — its text is already rendered, so a post-hoc transform would be a visible flicker (rationale comment, `:208`).
 
 ## Plugin Wiring
 
@@ -102,7 +102,7 @@ flowchart LR
 | `ctx.chat.use(middleware)` | `lib/plugin/api/chat-api.ts:53` → `registerChatMiddleware` |
 | Bridge | `lib/plugin/bridge/chat-middleware-bridge.ts:30` |
 | Contract | `lib/plugin/contracts/plugin-points.ts:752` (`"chat.middleware"`) |
-| Types | `types/plugin/plugin-chat-middleware.ts` (`ChatMiddlewareRequest:71`, signature `:116`) |
+| Types | `types/plugin/plugin-chat-middleware.ts` (`ChatMiddlewareRequest:71`, signature `:115`) |
 
 Registration always happens on plugin enable; only the **runner call-site** consults the default-off feature flag (`feature-flag.ts:18`), so a deployment can ship middlewares dormant and flip them on centrally.
 

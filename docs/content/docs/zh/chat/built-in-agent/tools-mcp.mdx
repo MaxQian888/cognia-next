@@ -13,7 +13,7 @@ description: 打包在 sidecar 里的进程内 cognia-tools MCP 服务器、内�
   工具，并解析工作流子代理的 `wf_*` 名。技能以两种方式成为工具表面：anthropic-managed 技能作为
   `containerSkillIds` 透传，body 技能折入 `appendSystemPrompt`（`skills-bridge.ts`）。computer-use 发出
   Anthropic *原生*工具加一个 `anthropic-beta` 头，并在连接器通道上默认拒绝的 IM 黑名单。预设市场
-  （`mcp-presets.ts`，16 个预设）只是“添加服务器”UI 目录。
+  （`mcp-presets.ts`，15 个预设）只是“添加服务器”UI 目录。
 </TLDR>
 
 ## 工具从哪来
@@ -23,14 +23,14 @@ flowchart TB
   subgraph SDK["sidecar query() mcpServers"]
     CT["cognia-tools（进程内）<br/>builtin-tools/index.mjs:84"]
     PT["cognia-plugin-tools（进程内）<br/>plugin-tools.mjs"]
-    UM["用户 MCP 服务器<br/>build-options.ts:922"]
+    UM["用户 MCP 服务器<br/>build-options.ts:958"]
   end
   subgraph PROMPT["系统提示词 / 原生"]
     SK["技能 → containerSkillIds + 追加<br/>skills-bridge.ts"]
     CU["computer-use → anthropicTools + beta 头<br/>computer-use-tools.ts:97"]
   end
   subgraph CONFIG["仅配置"]
-    PRE["mcp-presets.ts（16）—— 添加服务器市场"]
+    PRE["mcp-presets.ts（15）—— 添加服务器市场"]
     BM["builtin-mcp resolve —— 外部 Agent 投影"]
   end
 
@@ -58,11 +58,11 @@ flowchart TB
 
 LSP 工具是**绑定解析器且每会话**的——仅当 `enabled.lsp && lspResolver` 时经 `createLspTools(resolver)`（`lsp.mjs:85`）加入，不在静态 map 中。`shell_execute_advanced` 与 `start_process` 经 `safety.mjs`（路径穿越守卫 + 允许/阻止/危险模式扫描），镜像自 Cognia shell 工具。
 
-开关来源是 `opts.builtinTools`（`build-options.ts:965`）——启用/禁用各类别的设置 JSON。
+开关来源是 `opts.builtinTools`（`build-options.ts:972`）——启用/禁用各类别的设置 JSON。
 
 ## cognia-plugin-tools —— renderer 代理
 
-`buildPluginToolsServer`（`plugin-tools.mjs`）构建第二个进程内服务器（`cognia-plugin-tools`），包装 renderer 转发的插件工具：每个工具被调用时向 renderer 发出 `plugin_tool_exec` 并等待 `plugin_tool_response`。这就是工作流子代理的 `mcp__cognia-plugin-tools__wf_*` 名所解析到的服务器。清单在 build-options 构建（`buildPluginToolsManifest`，`:995`），它还折入内置技能清单，并在 computer-use 未授权时丢弃 `cognia-computer-use`。
+`buildPluginToolsServer`（`plugin-tools.mjs`）构建第二个进程内服务器（`cognia-plugin-tools`），包装 renderer 转发的插件工具：每个工具被调用时向 renderer 发出 `plugin_tool_exec` 并等待 `plugin_tool_response`。这就是工作流子代理的 `mcp__cognia-plugin-tools__wf_*` 名所解析到的服务器。清单在 build-options 构建（`buildPluginToolsManifest`，`:1009`），它还折入内置技能清单，并在 computer-use 未授权时丢弃 `cognia-computer-use`。
 
 ## 内置 MCP 解析
 
@@ -93,7 +93,7 @@ flowchart LR
 `applyComputerUseTools(input)`（`computer-use-tools.ts:97`）为一轮解析 Anthropic 的*原生* computer-use 工具——区别于 MCP 工具。流程：
 
 1. `!enableComputerUse` 早退（清缓存设置，`:100`）
-2. **IM 黑名单短路**（`:118`）：`if (imSession && allowImComputerUse !== true) return {attachedCount:0}` —— 连接器通道默认拒绝屏幕控制
+2. **IM 黑名单短路**（`:122`）：`if (imSession && allowImComputerUse !== true) return {attachedCount:0}` —— 连接器通道默认拒绝屏幕控制
 3. 读原生工具注册表，按 `allowedToolIds` 过滤，应用 consent/tier 逻辑（`:139`）
 4. 映射到 `opts.anthropicTools`（`:186`）并组合 `anthropic-beta` 头（`:205`）
 
@@ -101,15 +101,15 @@ flowchart LR
 
 ## 预设 MCP 市场
 
-`mcp-presets.ts` 是**仅代码**目录（`MCP_PRESETS`，`:46`），含 16 个一键服务器：filesystem、github、gitlab、brave-search、puppeteer、fetch、memory、sqlite、postgres、slack、time、deepwiki（http）、http-generic、sse-generic、custom。`applyPresetFields(preset, values)`（`:365`）把用户值放进 env / args / url / headers。这只填充“添加服务器”UI——区别于进程内 `cognia-tools` 服务器。
+`mcp-presets.ts` 是**仅代码**目录（`MCP_PRESETS`，`:46`），含 15 个一键服务器：filesystem、github、gitlab、brave-search、puppeteer、fetch、memory、sqlite、postgres、slack、time、deepwiki（http）、http-generic、sse-generic、custom。`applyPresetFields(preset, values)`（`:365`）把用户值放进 env / args / url / headers。这只填充“添加服务器”UI——区别于进程内 `cognia-tools` 服务器。
 
 ## 跨模块小结
 
 | 来源 | 以何形式抵达 SDK | build-options 位点 |
 | --- | --- | --- |
-| cognia-tools | `query()` mcpServers（进程内） | `opts.builtinTools` `:965` |
-| 插件工具 | `cognia-plugin-tools`（进程内代理） | `opts.pluginTools` `:995` |
-| 用户 MCP | `opts.mcpServers` | `:922` |
+| cognia-tools | `query()` mcpServers（进程内） | `opts.builtinTools` `:972` |
+| 插件工具 | `cognia-plugin-tools`（进程内代理） | `opts.pluginTools` `:1009` |
+| 用户 MCP | `opts.mcpServers` | `:958` |
 | 技能（managed） | `opts.containerSkillIds` | `:655` |
 | 技能（body） | `appendSystemPrompt` | `:659` |
 | computer-use | `opts.anthropicTools` + beta 头 | `:1075` |

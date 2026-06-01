@@ -9,7 +9,7 @@ The **built-in agent** is the Claude agent that runs *inside* Cognia: the one yo
 
 <TLDR>
   One chat turn is a pipeline: the composer calls `send` in
-  `hooks/chat/use-claude-chat.ts:584`, which calls `resolveSendOptions`
+  `hooks/chat/use-claude-chat.ts:596`, which calls `resolveSendOptions`
   (`lib/claude/build-options.ts:336`) to collapse **all** UI state — character prompt, skills,
   Twin, long-term memory, goal, A2UI capability, tools, MCP, permissions — into one `SendOptions`
   payload. That payload crosses the Tauri IPC seam (`lib/claude/ipc.ts:19`) into Rust
@@ -21,7 +21,7 @@ The **built-in agent** is the Claude agent that runs *inside* Cognia: the one yo
 </TLDR>
 
 <StatGrid>
-  <Stat label="Assembly contributors" value="40" hint="ordered sections in resolveSendOptions, build-options.ts:336-1381" />
+  <Stat label="Assembly contributors" value="41" hint="ordered sections in resolveSendOptions, build-options.ts:336-1380" />
   <Stat label="Sidecar protocol msgs" value="5 / 6" hint="inbound send/interrupt/permission_response/plugin_tool_response/close · outbound event/permission_request/…" />
   <Stat label="Permission layers" value="2" hint="sidecar canUseTool (Layer A) + use-claude-chat Auto-mode (Layer B)" />
   <Stat label="Hook lifecycle events" value="27" hint="HookEvent enum, src-tauri/src/hooks/types.rs:14" />
@@ -44,13 +44,13 @@ Each box is annotated with the file and line where the work happens. The five-st
 ```mermaid
 flowchart TB
   subgraph SURFACE["1 · Surface — hooks/chat/"]
-    SEND["use-claude-chat.ts:584<br/>send()"]
-    SUBS["use-claude-chat.ts:530<br/>onClaudeMessage subscription"]
-    HANDLE["use-claude-chat.ts:1171<br/>handleEvent dispatcher"]
+    SEND["use-claude-chat.ts:596<br/>send()"]
+    SUBS["use-claude-chat.ts:543<br/>onClaudeMessage subscription"]
+    HANDLE["use-claude-chat.ts:1183<br/>handleEvent dispatcher"]
   end
 
   subgraph ASSEMBLY["2 · Assembly — lib/claude/"]
-    BUILD["build-options.ts:336<br/>resolveSendOptions — 40 contributors"]
+    BUILD["build-options.ts:336<br/>resolveSendOptions — 41 contributors"]
     SYS["build-options.ts:695<br/>system-prompt array join"]
   end
 
@@ -112,7 +112,7 @@ Read the per-module page for line-accurate internals. Each card is one documenta
 
 <Cards>
   <Card title="Runtime loop" href="./runtime-loop" description="The send → stream → render spine: use-claude-chat, adapter, the JSON-lines sidecar protocol, the Rust lifecycle, and the SDK query() pump." />
-  <Card title="Build-options pipeline" href="./build-options" description="resolveSendOptions — the single convergence point. All 40 ordered contributors, the precedence chains, and the system-prompt assembly." />
+  <Card title="Build-options pipeline" href="./build-options" description="resolveSendOptions — the single convergence point. All 41 ordered contributors, the precedence chains, and the system-prompt assembly." />
   <Card title="Permissions & Auto-mode" href="./permissions" description="ADR-0041 two-layer safety gate: sidecar canUseTool short-circuit + the small-model command judge in the chat hook." />
   <Card title="Hooks" href="./hooks" description="ADR-0040 settings.json lifecycle runtime in Rust: 27 events, PreToolUse blocking, the trust gate, webhooks, external-agent wiring." />
   <Card title="Subagents" href="./subagents" description="The 4 built-in workflow subagents, how they reach opts.agents, the runtime→UI bridge, and the external-subagent import pipeline." />
@@ -137,11 +137,11 @@ sequenceDiagram
   participant A as adapter.ts
 
   U->>H: submit composer
-  H->>H: onUserPromptSubmit plugin hook (662)
-  H->>B: buildSendOptions → resolveSendOptions (622→336)
-  Note over B: 40 contributors mutate one opts object;<br/>system prompt joined at 695
+  H->>H: onUserPromptSubmit plugin hook (674)
+  H->>B: buildSendOptions → resolveSendOptions (634→336)
+  Note over B: 41 contributors mutate one opts object;<br/>system prompt joined at 695
   B-->>H: SendOptions
-  H->>I: sendPrompt(sessionId, content, opts) (855)
+  H->>I: sendPrompt(sessionId, content, opts) (867)
   Note over I: Rust runs UserPromptSubmit hooks (commands.rs:209)<br/>then writes {type:"send"} to sidecar stdin
   I->>N: stdin · JSON line
   N->>Q: query({ prompt, options }) (333)
@@ -149,20 +149,20 @@ sequenceDiagram
     Q-->>N: SDK event
     N-->>I: stdout · {type:"event"}
     I-->>H: claude://message (SIDECAR_EVENT)
-    H->>A: applySdkEvent(current, evt) (1367→219)
+    H->>A: applySdkEvent(current, evt) (1383→219)
     A-->>H: {messages, turnComplete, result?}
-    H->>H: write to mirror / store (1454)
+    H->>H: write to mirror / store (1466)
   end
   alt model wants a tool
-    Q->>Q: canUseTool — Layer A static ruleset (anthropic.mjs:280)
+    Q->>Q: canUseTool — Layer A static ruleset (anthropic.mjs:263)
     Q-->>I: permission_request (if not resolved)
     Note over I: Rust PreToolUse hook may deny (sidecar.rs:450)
     I-->>H: permission_request event
-    H->>H: Auto-mode — Layer B judge (1304) or prompt user
+    H->>H: Auto-mode — Layer B judge (1324) or prompt user
     H->>I: claude_approve(decision)
   end
   Q-->>N: result (usage)
-  N-->>H: turnComplete → merge twin+memory sources (1429), seal (1464)
+  N-->>H: turnComplete → merge twin+memory sources (1445), seal (1475)
 ```
 
 ## Key Invariants
@@ -171,12 +171,12 @@ These are the load-bearing rules that make the spine composable. Break one and t
 
 | Invariant | Where | Why |
 | --- | --- | --- |
-| **One convergence point.** All context injection happens in `resolveSendOptions`; no other code mutates a `SendOptions`. | `build-options.ts:336-1381` | A new capability needs to touch exactly one file. The [build-options page](./build-options) is the contract. |
-| **`systemPrompt` is sealed early; `appendSystemPrompt` accretes late.** Anything replacing the base prompt must run at/before `:695`; everything after only appends. | `build-options.ts:695` vs A2UI `:908`, goal `:1218`, sandbox `:1151` | The workflow-editor branch (`:1264`) clobbers both wholesale, so new appenders must run before it. |
+| **One convergence point.** All context injection happens in `resolveSendOptions`; no other code mutates a `SendOptions`. | `build-options.ts:336-1380` | A new capability needs to touch exactly one file. The [build-options page](./build-options) is the contract. |
+| **`systemPrompt` is sealed early; `appendSystemPrompt` accretes late.** Anything replacing the base prompt must run at/before `:695`; everything after only appends. | `build-options.ts:695` vs A2UI `:908`, goal `:1218`, sandbox `:1151` | The workflow-editor branch (`:1285`) clobbers both wholesale, so new appenders must run before it. |
 | **The adapter is pure.** `applySdkEvent` has zero `invoke`/`listen`; the Tauri seam is `ipc.ts` only. | `adapter.ts` (no IPC) · `ipc.ts:192` | The reducer is unit-testable without Tauri; events arrive push-based through one channel. |
 | **`SendOptions` skips `null`.** Passing an explicit `null` (not absent) for `systemPrompt` etc. crashes the SDK option parser. | `commands.rs:11-14`, `anthropic.mjs:327` | serde `skip_serializing_if` + a strip-undefined pass enforce it on both sides. |
 | **Every injection is fail-open.** Twin, memory, plugin skills, connector capability, MCP, computer-use are each wrapped in try/catch that degrades silently. | `build-options.ts:590,629,669,…` | A broken capability must never block a send. Memory in particular: see [its fail-open table](./memory). |
-| **Two enforcement layers, explicit-only.** Layer A (sidecar) never honors a wildcard `*:allow`; Layer B (chat hook) runs the deterministic + small-model judge. | `anthropic.mjs:280`, `use-claude-chat.ts:1304` | A compromised renderer cannot auto-approve dangerous tools. See [Permissions](./permissions). |
+| **Two enforcement layers, explicit-only.** Layer A (sidecar) never honors a wildcard `*:allow`; Layer B (chat hook) runs the deterministic + small-model judge. | `anthropic.mjs:263`, `use-claude-chat.ts:1324` | A compromised renderer cannot auto-approve dangerous tools. See [Permissions](./permissions). |
 
 ## How It Differs From Agent Teams
 

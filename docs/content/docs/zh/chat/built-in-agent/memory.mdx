@@ -49,7 +49,7 @@ flowchart TB
     EXT["extractMemories（LLM）<br/>extractor.ts:74"]
     PII["hasNoLeakingPii 门<br/>run-memory-extraction.ts:87"]
     CON["consolidate ADD/UPDATE/DELETE/NOOP<br/>consolidator.ts:110"]
-    DB["createMemory + 向量 upsert<br/>memories.ts:36"]
+    DB["createMemory + 向量 upsert<br/>memories.ts:48"]
   end
   subgraph READ["读 —— 发送时（build-options.ts:595）"]
     APPLY["applyMemoryContext<br/>apply-memory-context.ts:76"]
@@ -118,7 +118,7 @@ build-options 在 `:595-633` 调用 `applyMemoryContext`（受守卫，`catch` �
 
 ## 持久化
 
-`lib/db/memories.ts` 纯机械（无 LLM、无门控——门在调用方）。检索器的候选池是 `listActiveForReader(characterId?)`（`:143`）——经 `[scope+status]` 索引取 global base ∪ character 覆盖。`touchMemories`（`:100`）命中时抬升 recency。只有管理面板调用 `hardDeleteMemory` / `clearMemories`——整合只软失效。
+`lib/db/memories.ts` 纯机械（无 LLM、无门控——门在调用方）。检索器的候选池是 `listActiveForReader(characterId?)`（`:155`）——经 `[scope+status]` 索引取 global base ∪ character 覆盖。`touchMemories`（`:112`）命中时抬升 recency。只有管理面板调用 `hardDeleteMemory` / `clearMemories`——整合只软失效。
 
 Schema：`version(65).stores({ memories })` 于 `schema.ts:1692`；索引串含 `[scope+type]`、`[scope+status]`、`[type+status]`（`:1694`）。增量、无 upgrade hook。
 

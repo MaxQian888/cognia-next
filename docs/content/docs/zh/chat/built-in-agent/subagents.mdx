@@ -28,10 +28,14 @@ description: 4 个内置工作流子代理、它们如何经 build-options 进�
 | --- | --- | --- | --- | --- |
 | **Workflow Designer** | `workflow-designer.ts:43` | 15（read/add/remove/connect/configure/propose_batch/templates/auto_layout/group） | 20 | 是（构建图） |
 | **Workflow Debugger** | `workflow-debugger.ts:29` | 5 个**只读**（read_graph/selection/node/validation_errors/last_run） | 10 | 否（诊断） |
-| **Workflow Refactorer** | `workflow-refactorer.ts:26` | 10（读 + 改 + `wf_batch_apply` + 布局） | 15 | 是 |
+| **Workflow Refactorer** | `workflow-refactorer.ts:26` | 11（读 + 改 + `wf_batch_apply` + 布局 + group） | 15 | 是 |
 | **Workflow Doc Writer** | `workflow-doc-writer.ts:23` | 5（读 + add + configure + focus —— **不能 remove**） | 15 | 仅标注 |
 
 每个文件的 `SYSTEM_PROMPT` 常量就是 `prompt`。工具白名单强制角色：debugger 只持只读工具，物理上无法改图。
+
+## Markdown agents（休眠）
+
+兄弟模块 `lib/claude/agents/markdown-agents.ts`（`665a6b81` 引入）把用户撰写的 `*.md` agent 文件——YAML frontmatter + Markdown 正文——经 `buildMarkdownAgents()`（`:101`）与 `markdownAgentsToSdkMap()`（`:120`）解析成**同一个** SDK `AgentDefinition` 形状。其 docstring 意图把结果合并进 `resolveAllSubagents`（`markdown-agents.ts:13`），但目前**还没有生产调用方**——`buildMarkdownAgents` 仅被自身测试引用，所以用户 markdown agent 目前**不会**进入 `opts.agents`。这区别于下文的 `subagent-importers/` 管线，后者物化的是*模板 / 角色*，而非活跃的 `opts.agents` 条目。
 
 ## 它们如何进入 SDK
 

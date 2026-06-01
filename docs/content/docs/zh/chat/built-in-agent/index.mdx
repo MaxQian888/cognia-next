@@ -8,7 +8,7 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
 **内置 Agent** 是运行在 Cognia *内部* 的那个 Claude——也就是你在聊天面板里对话的那个。它不同于 [Agent Teams](./agent-teams)（多角色小队）或外部 CLI Agent（Codex / Cursor / Claude Code，以子进程方式拉起）：内置 Agent 是一个长驻的单会话，由打包在 Node **sidecar** 中的官方 [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 驱动。
 
 <TLDR>
-  一次对话就是一条管线：输入框调用 `hooks/chat/use-claude-chat.ts:584` 的 `send`，它调用
+  一次对话就是一条管线：输入框调用 `hooks/chat/use-claude-chat.ts:596` 的 `send`，它调用
   `resolveSendOptions`（`lib/claude/build-options.ts:336`）把**所有** UI 状态——角色提示词、技能、
   Twin、长期记忆、目标、A2UI 能力、工具、MCP、权限——坍缩成单个 `SendOptions`。该负载跨过 Tauri IPC
   边界（`lib/claude/ipc.ts:19`）进入 Rust（`src-tauri/src/claude/sidecar.rs`），由后者拉起 Node host
@@ -19,7 +19,7 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
 </TLDR>
 
 <StatGrid>
-  <Stat label="装配贡献者" value="40" hint="resolveSendOptions 中的有序段落，build-options.ts:336-1381" />
+  <Stat label="装配贡献者" value="41" hint="resolveSendOptions 中的有序段落，build-options.ts:336-1380" />
   <Stat label="Sidecar 协议消息" value="5 / 6" hint="入站 send/interrupt/permission_response/plugin_tool_response/close · 出站 event/permission_request/…" />
   <Stat label="权限层数" value="2" hint="sidecar canUseTool（A 层）+ use-claude-chat Auto-mode（B 层）" />
   <Stat label="Hook 生命周期事件" value="27" hint="HookEvent 枚举，src-tauri/src/hooks/types.rs:14" />
@@ -42,13 +42,13 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
 ```mermaid
 flowchart TB
   subgraph SURFACE["1 · 表层 — hooks/chat/"]
-    SEND["use-claude-chat.ts:584<br/>send()"]
-    SUBS["use-claude-chat.ts:530<br/>onClaudeMessage 订阅"]
-    HANDLE["use-claude-chat.ts:1171<br/>handleEvent 分发"]
+    SEND["use-claude-chat.ts:596<br/>send()"]
+    SUBS["use-claude-chat.ts:543<br/>onClaudeMessage 订阅"]
+    HANDLE["use-claude-chat.ts:1183<br/>handleEvent 分发"]
   end
 
   subgraph ASSEMBLY["2 · 装配 — lib/claude/"]
-    BUILD["build-options.ts:336<br/>resolveSendOptions — 40 个贡献者"]
+    BUILD["build-options.ts:336<br/>resolveSendOptions — 41 个贡献者"]
     SYS["build-options.ts:695<br/>系统提示词数组拼接"]
   end
 
@@ -110,7 +110,7 @@ flowchart TB
 
 <Cards>
   <Card title="运行时主链" href="./runtime-loop" description="send → 流式 → 渲染 的主链：use-claude-chat、adapter、JSON-lines sidecar 协议、Rust 生命周期与 SDK query() 泵。" />
-  <Card title="Build-options 管线" href="./build-options" description="resolveSendOptions —— 唯一汇聚点。全部 40 个有序贡献者、优先级链与系统提示词装配。" />
+  <Card title="Build-options 管线" href="./build-options" description="resolveSendOptions —— 唯一汇聚点。全部 41 个有序贡献者、优先级链与系统提示词装配。" />
   <Card title="权限与 Auto-mode" href="./permissions" description="ADR-0041 双层安全门：sidecar canUseTool 短路 + 聊天 hook 里的小模型命令裁决。" />
   <Card title="Hooks" href="./hooks" description="ADR-0040 settings.json 生命周期运行时（Rust）：27 个事件、PreToolUse 阻断、信任门、Webhook、外部 Agent 接线。" />
   <Card title="子代理" href="./subagents" description="4 个内置工作流子代理、如何进入 opts.agents、运行时→UI 桥，以及外部子代理导入管线。" />
@@ -135,11 +135,11 @@ sequenceDiagram
   participant A as adapter.ts
 
   U->>H: 提交输入框
-  H->>H: onUserPromptSubmit 插件 hook (662)
-  H->>B: buildSendOptions → resolveSendOptions (622→336)
-  Note over B: 40 个贡献者修改同一个 opts 对象;<br/>系统提示词在 695 拼接
+  H->>H: onUserPromptSubmit 插件 hook (674)
+  H->>B: buildSendOptions → resolveSendOptions (634→336)
+  Note over B: 41 个贡献者修改同一个 opts 对象;<br/>系统提示词在 695 拼接
   B-->>H: SendOptions
-  H->>I: sendPrompt(sessionId, content, opts) (855)
+  H->>I: sendPrompt(sessionId, content, opts) (867)
   Note over I: Rust 运行 UserPromptSubmit hooks (commands.rs:209)<br/>再向 sidecar stdin 写入 {type:"send"}
   I->>N: stdin · JSON 行
   N->>Q: query({ prompt, options }) (333)
@@ -147,20 +147,20 @@ sequenceDiagram
     Q-->>N: SDK 事件
     N-->>I: stdout · {type:"event"}
     I-->>H: claude://message (SIDECAR_EVENT)
-    H->>A: applySdkEvent(current, evt) (1367→219)
+    H->>A: applySdkEvent(current, evt) (1383→219)
     A-->>H: {messages, turnComplete, result?}
-    H->>H: 写入 mirror / store (1454)
+    H->>H: 写入 mirror / store (1466)
   end
   alt 模型要调用工具
-    Q->>Q: canUseTool — A 层静态规则集 (anthropic.mjs:280)
+    Q->>Q: canUseTool — A 层静态规则集 (anthropic.mjs:263)
     Q-->>I: permission_request（若未解析）
     Note over I: Rust PreToolUse hook 可拒绝 (sidecar.rs:450)
     I-->>H: permission_request 事件
-    H->>H: Auto-mode — B 层裁决 (1304) 或提示用户
+    H->>H: Auto-mode — B 层裁决 (1324) 或提示用户
     H->>I: claude_approve(decision)
   end
   Q-->>N: result（用量）
-  N-->>H: turnComplete → 合并 twin+memory 来源 (1429)，封板 (1464)
+  N-->>H: turnComplete → 合并 twin+memory 来源 (1445)，封板 (1475)
 ```
 
 ## 关键不变量
@@ -169,12 +169,12 @@ sequenceDiagram
 
 | 不变量 | 位置 | 原因 |
 | --- | --- | --- |
-| **唯一汇聚点。** 所有上下文注入都在 `resolveSendOptions` 内发生；别处不构造 `SendOptions`。 | `build-options.ts:336-1381` | 新增能力只需改一个文件。[build-options 页](./build-options)就是契约。 |
-| **`systemPrompt` 早早封板；`appendSystemPrompt` 后续累加。** 要替换基础提示词必须在 `:695` 处或之前运行；其后只能追加。 | `build-options.ts:695` 对比 A2UI `:908`、goal `:1218`、sandbox `:1151` | 工作流编辑器分支（`:1264`）会整体覆写两者，所以新追加者必须在它之前运行。 |
+| **唯一汇聚点。** 所有上下文注入都在 `resolveSendOptions` 内发生；别处不构造 `SendOptions`。 | `build-options.ts:336-1380` | 新增能力只需改一个文件。[build-options 页](./build-options)就是契约。 |
+| **`systemPrompt` 早早封板；`appendSystemPrompt` 后续累加。** 要替换基础提示词必须在 `:695` 处或之前运行；其后只能追加。 | `build-options.ts:695` 对比 A2UI `:908`、goal `:1218`、sandbox `:1151` | 工作流编辑器分支（`:1285`）会整体覆写两者，所以新追加者必须在它之前运行。 |
 | **adapter 是纯的。** `applySdkEvent` 零 `invoke`/`listen`；Tauri 接缝只有 `ipc.ts`。 | `adapter.ts`（无 IPC）· `ipc.ts:192` | 归约器无需 Tauri 即可单测；事件经单一通道以 push 方式抵达。 |
 | **`SendOptions` 跳过 `null`。** 对 `systemPrompt` 等传显式 `null`（而非缺省）会崩掉 SDK 选项解析器。 | `commands.rs:11-14`、`anthropic.mjs:327` | serde `skip_serializing_if` + 一遍 strip-undefined 在两侧共同保证。 |
 | **每个注入都 fail-open。** Twin、记忆、插件技能、连接器能力、MCP、computer-use 各自包在 try/catch 里，静默降级。 | `build-options.ts:590,629,669,…` | 损坏的能力绝不能阻断发送。记忆尤其如此：见[其 fail-open 表](./memory)。 |
-| **两层强制，仅显式。** A 层（sidecar）永不认 `*:allow` 通配；B 层（聊天 hook）跑确定性 + 小模型裁决。 | `anthropic.mjs:280`、`use-claude-chat.ts:1304` | 被攻陷的 renderer 也无法自动放行危险工具。见[权限](./permissions)。 |
+| **两层强制，仅显式。** A 层（sidecar）永不认 `*:allow` 通配；B 层（聊天 hook）跑确定性 + 小模型裁决。 | `anthropic.mjs:263`、`use-claude-chat.ts:1324` | 被攻陷的 renderer 也无法自动放行危险工具。见[权限](./permissions)。 |
 
 ## 与 Agent Teams 的区别
 

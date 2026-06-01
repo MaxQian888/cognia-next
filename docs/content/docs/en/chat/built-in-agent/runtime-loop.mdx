@@ -8,11 +8,11 @@ description: The send → stream → render spine — use-claude-chat, the pure 
 This is the spine every built-in-agent turn travels. A React hook builds the payload and fires it; a Rust process owns the Node sidecar; the sidecar runs the SDK `query()` loop; events stream back over one Tauri channel and a **pure** reducer folds them into messages.
 
 <TLDR>
-  `send` (`use-claude-chat.ts:584`) builds options, optimistically appends the user message, and
+  `send` (`use-claude-chat.ts:596`) builds options, optimistically appends the user message, and
   calls `sendPrompt` (`ipc.ts:19`). The Rust sidecar (`sidecar.rs:198`) spawns `node
   claude-host.mjs`, writes a `{type:"send"}` JSON line to its stdin, and fans every sidecar stdout
-  line out on the `claude://message` Tauri event. A single subscription (`use-claude-chat.ts:530`)
-  funnels events through a per-session serialized queue into `handleEvent` (`:1171`), whose `event`
+  line out on the `claude://message` Tauri event. A single subscription (`use-claude-chat.ts:543`)
+  funnels events through a per-session serialized queue into `handleEvent` (`:1183`), whose `event`
   branch calls the pure reducer `applySdkEvent` (`adapter.ts:219`) and writes the result to a
   frame-coalesced mirror + the store. Streaming input/output is the SDK's
   `query({ prompt: asyncIterable })` (`anthropic.mjs:333`).
@@ -23,9 +23,9 @@ This is the spine every built-in-agent turn travels. A React hook builds the pay
 ```mermaid
 flowchart LR
   subgraph FE["React (webview)"]
-    SEND["send()<br/>use-claude-chat.ts:584"]
-    SUB["onClaudeMessage<br/>:530"]
-    HE["handleEvent<br/>:1171"]
+    SEND["send()<br/>use-claude-chat.ts:596"]
+    SUB["onClaudeMessage<br/>:543"]
+    HE["handleEvent<br/>:1183"]
     AD["applySdkEvent<br/>adapter.ts:219"]
   end
   subgraph TS["IPC wrapper"]
@@ -33,7 +33,7 @@ flowchart LR
     OM["transport.subscribe<br/>ipc.ts:192"]
   end
   subgraph RS["Rust · src-tauri/src/claude/"]
-    CMD["claude_send<br/>commands.rs:171"]
+    CMD["claude_send<br/>commands.rs:172"]
     SC["spawn + stdout reader<br/>sidecar.rs:198 / :306"]
   end
   subgraph NODE["Node sidecar"]
@@ -56,23 +56,23 @@ flowchart LR
 
 ## Stage 1 — `send` (the React entry)
 
-`send` is a `useCallback` at `hooks/chat/use-claude-chat.ts:584-882`, signature `send(content, opts?, callOptions?)`. It is **fire-and-write**: it does not consume the stream (that is push-based, Stage 5).
+`send` is a `useCallback` at `hooks/chat/use-claude-chat.ts:596-894`, signature `send(content, opts?, callOptions?)`. It is **fire-and-write**: it does not consume the stream (that is push-based, Stage 5).
 
 | Step | What happens | Line |
 | --- | --- | --- |
-| Validate | resolve active session id, reject empty content | `:594-602` |
-| Goal pause | ADR-0019 pause-on-fresh-user-turn | `:609-612` |
-| **Build options** | `opts ?? await buildSendOptions(session, text)` — wraps [`resolveSendOptions`](./build-options) | call `:622`, wrapper `:1140` |
-| Command frontmatter | merge per-slash-command overrides | `:633-646` |
-| Plugin `onUserPromptSubmit` | may **block** / modify / inject `additionalContext` | `:662-698` |
-| **Optimistic append** | `makeUserMessage` → `replaceMessages`; status → `"streaming"` | `:715-721` |
-| External-agent branch | non-SDK path (bypasses the sidecar entirely) | `:726-823` |
-| Persist + title | write messages, touch session, derive title | `:826-835` |
-| Trace span | `startSpan("invoke_agent")`, stamp `traceId`/`spanId` onto `opts` | `:842-854` |
-| **Invoke** | `await sendPrompt(sessionId, content, opts)` | `:855` |
-| Cache send | `lastSendBySession[sid] = {options}` (fallback retry + twin/memory readback) | `:861-865` |
+| Validate | resolve active session id, reject empty content | `:606-612` |
+| Goal pause | ADR-0019 pause-on-fresh-user-turn | `:621-624` |
+| **Build options** | `opts ?? await buildSendOptions(session, text)` — wraps [`resolveSendOptions`](./build-options) | call `:634`, wrapper `:1105` |
+| Command frontmatter | merge per-slash-command overrides | `:645-658` |
+| Plugin `onUserPromptSubmit` | may **block** / modify / inject `additionalContext` | `:674-710` |
+| **Optimistic append** | `makeUserMessage` → `replaceMessages`; status → `"streaming"` | `:728-733` |
+| External-agent branch | non-SDK path (bypasses the sidecar entirely) | `:738-835` |
+| Persist + title | write messages, touch session, derive title | `:838-847` |
+| Trace span | `startSpan("invoke_agent")`, stamp `traceId`/`spanId` onto `opts` | `:854-865` |
+| **Invoke** | `await sendPrompt(sessionId, content, opts)` | `:867` |
+| Cache send | `setLastSend(sid, { options })` (fallback retry + twin/memory readback) | `:873-877` |
 
-`sendRef.current = send` is kept fresh (`:886-891`) so module-scope event handling can fire silent goal-continuation sends.
+`sendRef.current = send` is kept fresh (`:898-903`) so module-scope event handling can fire silent goal-continuation sends.
 
 ## Stage 2 — IPC wrapper (`lib/claude/ipc.ts`)
 
@@ -97,7 +97,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   autonumber
-  participant CMD as claude_send<br/>commands.rs:171
+  participant CMD as claude_send<br/>commands.rs:172
   participant SP as spawn<br/>sidecar.rs:198
   participant CH as Node child
   participant RD as stdout reader<br/>sidecar.rs:306
@@ -105,14 +105,14 @@ sequenceDiagram
 
   CMD->>SP: spawn_sidecar (no-op if alive)
   SP->>CH: Command::new("node") claude-host.mjs<br/>+ auth env (OAuth bearer ≻ API key, :230)<br/>+ proxy env (:249) + CREATE_NO_WINDOW (:272)
-  CMD->>CMD: validate SendOptions (:181)<br/>register_session_cwd (:202)<br/>run UserPromptSubmit hooks (:209)
-  CMD->>SP: write_command {type:"send", …} (:227)
+  CMD->>CMD: validate SendOptions (:183)<br/>register_session_cwd (:202)<br/>run UserPromptSubmit hooks (:209)
+  CMD->>SP: write_command {type:"send", …} (:233)
   loop per stdout line
     CH-->>RD: JSON line
     alt permission_request
-      RD->>RD: handle_permission_request → PreToolUse may deny (:330)
+      RD->>RD: handle_permission_request → PreToolUse may deny (:336)
     else a2ui_dispatch
-      RD->>FE: emit a2ui://dispatch (:342)
+      RD->>FE: emit a2ui://dispatch (:343)
     end
     RD->>FE: emit claude://message (:367)
   end
@@ -122,8 +122,8 @@ sequenceDiagram
 Key lifecycle triggers:
 
 - **First `claude_send`** lazily spawns; subsequent sends reuse the process (`sidecar.rs:199-204`).
-- **`claude_set_api_key`** (`lib.rs:70`) writes `ApiKeyState` in memory — never to disk.
-- **`claude_restart_sidecar`** (`lib.rs:118`) calls `kill_sidecar` (`:593`); the next send respawns so the SDK re-reads env at init.
+- **`claude_set_api_key`** (`lib.rs:71`) writes `ApiKeyState` in memory — never to disk.
+- **`claude_restart_sidecar`** (`lib.rs:119`) calls `kill_sidecar` (`:593`); the next send respawns so the SDK re-reads env at init.
 - **App exit** kills the sidecar from `RunEvent::ExitRequested` to avoid orphaned Node processes.
 - Auth is mutually exclusive: the OAuth bearer path `env_remove`s `ANTHROPIC_API_KEY` (`:221-238`).
 
@@ -139,11 +139,11 @@ Each message is one JSON object per line. The dispatch table is the `switch(msg.
 | → | `plugin_tool_response` | `handlePluginToolResponse` | `:187` |
 | → | `close` | `handleClose` | `:197` |
 | ← | `event` | the SDK stream envelope `{sessionId, event}` | `anthropic.mjs:367` |
-| ← | `permission_request` | model wants a tool, not statically resolved | `anthropic.mjs:297` |
-| ← | `plugin_tool_exec` | proxy a plugin tool back to the renderer | `anthropic.mjs:148` |
+| ← | `permission_request` | model wants a tool, not statically resolved | `anthropic.mjs:298` |
+| ← | `plugin_tool_exec` | proxy a plugin tool back to the renderer | `builtin-tools/plugin-tools.mjs` |
 | ← | `session_ended` / `ready` / `log` / `sdk_session_id` / `a2ui_dispatch` | lifecycle + telemetry | various |
 
-`fetch-interceptor.mjs` **must** be the first import (`claude-host.mjs:24`) so the global `fetch` patch is in place before the SDK loads. At boot the host emits `{type:"ready", …}` (`:271`).
+`fetch-interceptor.mjs` **must** be the first import (`claude-host.mjs:24`) so the global `fetch` patch is in place before the SDK loads. At boot the host emits `{type:"ready", …}` (`:272`).
 
 ## Stage 5 — The SDK pump (`sidecar/dispatch/anthropic.mjs`)
 
@@ -156,15 +156,15 @@ flowchart TB
   IN["makeInputStream()<br/>:44 — async-iterable user turns"]
   MCP1["cognia builtin tools<br/>:109"]
   MCP2["A2UI bridge (always-load)<br/>:132"]
-  MCP3["plugin-tools bridge<br/>:148 → plugin_tool_exec"]
+  MCP3["plugin-tools bridge<br/>:150 → plugin_tool_exec"]
   OPTS["SDK options allowlist<br/>:233 — incl. canUseTool :263"]
   Q["query({ prompt, options })<br/>:333"]
-  PUMP["for await (evt of q)<br/>:356"]
+  PUMP["for await (evt of q)<br/>:358"]
   EMIT["emit {type:'event'}<br/>:367"]
 
   IN --> Q
   MCP1 & MCP2 & MCP3 --> OPTS --> Q --> PUMP --> EMIT
-  PUMP -->|"first evt w/ session_id"| SID["emit sdk_session_id :359"]
+  PUMP -->|"first evt w/ session_id"| SID["emit sdk_session_id :361"]
   PUMP -->|"loop end"| END["emit session_ended :369"]
 
   classDef n fill:#1e293b,stroke:#34d399,color:#d1fae5
@@ -204,19 +204,19 @@ A pure type/guard module (222 lines) defining the six non-text part kinds the re
 
 ## Stage 2′ — Event handling (`handleEvent`)
 
-Events are not consumed inside `send`. A single subscription (`use-claude-chat.ts:530-576`) funnels every event into a **per-session serialized promise queue** (`eventQueuesRef`, `:540-562`) so out-of-order writes can't interleave, then calls `handleEvent` (`:1171`). The `switch(evt.type)` (`:1193`):
+Events are not consumed inside `send`. A single subscription (`use-claude-chat.ts:543-588`) funnels every event into a **per-session serialized promise queue** (`eventQueuesRef`, `:556-566`) so out-of-order writes can't interleave, then calls `handleEvent` (`:1183`). The `switch(evt.type)` (`:1205`):
 
 | Event | Action | Line |
 | --- | --- | --- |
-| `sdk_session_id` | persist the resume id | `:1198` |
-| `session_ended` | on error try routing fallback, else flush + `setError` + `endSpan`; clean end → flush + idle | `:1206` |
-| `permission_request` | allowlist auto-allow → Auto-mode judge → prompt user | `:1257` (see [Permissions](./permissions)) |
-| **`event`** | read mirror-first base → `applySdkEvent` (`:1367`) → tool spans → on `turnComplete` merge twin (`:1429`) + memory (`:1440`) sources → write | `:1351` |
-| `result` | `recordResultUsage` + `endSpan(extractUsage)` | `:1487` |
+| `sdk_session_id` | persist the resume id | `:1210` |
+| `session_ended` | on error try routing fallback, else flush + `setError` + `endSpan`; clean end → flush + idle | `:1218` |
+| `permission_request` | allowlist auto-allow → Auto-mode judge → prompt user | `:1267` (see [Permissions](./permissions)) |
+| **`event`** | read mirror-first base → `applySdkEvent` (`:1383`) → tool spans → on `turnComplete` merge twin (`:1445`) + memory (`:1454`) sources → write | `:1363` |
+| _(within `event`)_ | when `applySdkEvent` returns a `result`: `recordResultUsage` + `endSpan(extractUsage)` (there is no separate `result` case) | `:1499-1525` |
 
 ### Why a mirror and frame coalescing
 
-The store commit is `requestAnimationFrame`-throttled (`commit`, `:494`) and the persist is debounced 250ms (`persistDebounced`, `:503`). So the authoritative read base for the *next* event is the synchronous **mirror** (`messagesMirrorRef`, set at `:1454`), not the store — which is a frame behind. On `turnComplete` the hook uses an explicit synchronous `replaceMessages` + `persistMessages` (`:1455-1464`) rather than `commit.flush()`, because the twin/memory merge rewrote `nextMessages` *after* the last `commit.call`. Twin and memory sources come from the `lastSendBySession` cache (runtime context), **not** the SDK stream.
+The store commit is `requestAnimationFrame`-throttled (`commit`, `:506`) and the persist is debounced 250ms (`persistDebounced`, `:516`). So the authoritative read base for the *next* event is the synchronous **mirror** (`messagesMirrorRef`, set at `:1466`), not the store — which is a frame behind. On `turnComplete` the hook uses an explicit synchronous `replaceMessages` + `persistMessages` (`:1475-1476`) rather than `commit.flush()`, because the twin/memory merge rewrote `nextMessages` *after* the last `commit.call`. Twin and memory sources come from the `lastSendBySession` cache (runtime context), **not** the SDK stream.
 
 ## Gotchas
 
@@ -225,7 +225,7 @@ The store commit is `requestAnimationFrame`-throttled (`commit`, `:494`) and the
 - **cwd change forces a session restart** — other option changes need an explicit `close` (`claude-host.mjs:131-138`).
 - **`allow_always` is parent-enforced** — the sidecar only allows the individual call; the parent stops re-asking (`claude-host.mjs:168-174`).
 - **A2UI bridge is always-load** — interactive surfaces must never be deferred behind tool search (`anthropic.mjs:129-132`).
-- **Permission backstop** — the sidecar `canUseTool` has no timeout; remote-routed approvals arm a backstop deny that the next SDK event cancels (`use-claude-chat.ts:1271-1291`).
+- **Permission backstop** — the sidecar `canUseTool` has no timeout; remote-routed approvals arm a backstop deny that the next SDK event cancels (`use-claude-chat.ts:1286-1294`).
 - **AI-SDK provider path has no tools/MCP/A2UI** — the composer disables non-Anthropic providers when `allowedTools` is set (`dispatch/index.mjs:6-9`).
 
 ## Next

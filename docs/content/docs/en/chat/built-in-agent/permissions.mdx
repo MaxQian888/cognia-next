@@ -11,7 +11,7 @@ When the model wants to run a tool — especially a shell command — Cognia dec
   **Layer A** lives in the sidecar: the SDK's `canUseTool` callback (`anthropic.mjs:263`) consults the
   static `permissionRuleset` serialized by build-options and short-circuits *only* on an explicit
   allow/deny — unmatched calls round-trip to the renderer. **Layer B** lives in the chat hook: the
-  `permission_request` handler (`use-claude-chat.ts:1300`) runs Auto-mode, a precedence ladder of
+  `permission_request` handler (`use-claude-chat.ts:1267`) runs Auto-mode, a precedence ladder of
   **user glob rule → deterministic classifier → optional small-model judge**, and auto-approves /
   auto-denies or falls through to the manual modal. The pure core is
   `command-parse → command-safety → command-judge → auto-mode` in `lib/claude/permissions/`.
@@ -34,12 +34,12 @@ flowchart TB
     EA["explicit allow → behavior:allow :284"]
     ED["explicit deny → behavior:deny :287"]
   end
-  subgraph B["Layer B — renderer (use-claude-chat.ts:1255 permission_request)"]
-    AL["always-allow list :1257"]
-    AM["runAutoModeForTool :1312"]
-    APV["allow → approveTool :1320"]
-    DNY["deny → approveTool deny :1324"]
-    MODAL["ask → manual modal :1336"]
+  subgraph B["Layer B — renderer (use-claude-chat.ts:1267 permission_request)"]
+    AL["always-allow list :1269"]
+    AM["runAutoModeForTool :1324"]
+    APV["allow → approveTool :1333"]
+    DNY["deny → approveTool deny :1337"]
+    MODAL["ask → manual modal :1360"]
   end
 
   TOOL --> RR
@@ -64,16 +64,16 @@ In the sidecar, `canUseTool` (`anthropic.mjs:263`) reads `sendOptions.permission
 - explicit **deny** → `{behavior:"deny", message:"denied by permission ruleset"}` (`:287`)
 - anything else → fall through to a `permission_request` emit (`:297`)
 
-The resolver is a deliberately **weaker** JS mirror of `ruleset.ts`: `splitBash` (`permission-resolver.mjs:99`) is a naive top-level split that ignores quotes, and there is **no** baked-in `"*": "allow"`. Any segment that denies wins; allow is returned only when *every* segment is explicitly allowed (`:143/:153`). The full compound-command parser lives in Layer B, and unmatched calls round-trip there — so weakening Layer A is safe.
+The resolver is a deliberately **weaker** JS mirror of `ruleset.ts`: `splitBash` (`permission-resolver.mjs:100`) is a naive top-level split that ignores quotes, and there is **no** baked-in `"*": "allow"`. Any segment that denies wins; allow is returned only when *every* segment is explicitly allowed (`:143/:153`). The full compound-command parser lives in Layer B, and unmatched calls round-trip there — so weakening Layer A is safe.
 
 ### Layer B — renderer Auto-mode
 
-The `permission_request` case (`use-claude-chat.ts:1255-1350`):
+The `permission_request` case (`use-claude-chat.ts:1267-1362`):
 
-1. **Always-allow list** (`:1257`) — pre-existing per-session grants.
-2. **Inactive/remote session** (`:1265`) — remote-control routing with a backstop deny; not Auto-mode.
-3. **Auto-mode** (`:1300`): builds the judge client (`buildUtilityLlmClient`, featureId `command-safety`, `:1306`), calls `runAutoModeForTool` (`:1312`) with `pluginRules: getPluginCommandRulesets()`. `allow` → `approveTool(..., "allow")` (`:1320`); `deny` → `approveTool(..., "deny", reason)` (`:1324`); `try/catch` fail-open (`:1333`).
-4. `ask`/`null` → the manual modal `pushApproval` (`:1336`).
+1. **Always-allow list** (`:1269`) — pre-existing per-session grants.
+2. **Inactive/remote session** (`:1277`) — remote-control routing with a backstop deny; not Auto-mode.
+3. **Auto-mode** (`:1316`): builds the judge client (`buildUtilityLlmClient`, featureId `command-safety`, `:1318`), calls `runAutoModeForTool` (`:1324`) with `pluginRules: getPluginCommandRulesets()`. `allow` → `approveTool(..., "allow")` (`:1333`); `deny` → `approveTool(..., "deny", reason)` (`:1337`); `try/catch` fail-open (`:1345`).
+4. `ask`/`null` → the manual modal `pushApproval` (`:1360`).
 
 ## The Pure Core Pipeline
 
@@ -124,7 +124,7 @@ Specialized classifiers: `matchCatastrophic` (pipe-to-shell RCE, fork bombs → 
 flowchart TB
   D0["disabled → ASK_DEFAULT :81"] --> D1
   D1["explicit user rule? resolveBashPermission<br/>→ source:user-rule :84"] -->|no| D2
-  D2["classifier decisive (allow/deny)?<br/>→ source:rule :94"] -->|ask| D3
+  D2["classifier decisive (allow/deny)?<br/>→ source:rule :95"] -->|ask| D3
   D3["mode = rules+model & client?<br/>judgeCommandSafety :100"] -->|high risk| DENY["deny if denyOnHighRisk else ask"]
   D3 -->|safe & low| ALLOW["allow :108"]
   D3 -->|else / no model| ASK["ask (safe default) :116"]
@@ -133,7 +133,7 @@ flowchart TB
   class D0,D1,D2,D3,DENY,ALLOW,ASK n
 ```
 
-The full ladder (highest → lowest): **user `commandRules` glob → plugin rules → deterministic classifier → model judge → ask**. `auto-mode-runner.ts:54` encodes it by array order — plugin rules first, then the user `{Bash: commandRules}` pushed last so the user always outranks plugins.
+The full ladder (highest → lowest): **user `commandRules` glob → plugin rules → deterministic classifier → model judge → ask**. `auto-mode-runner.ts:56` encodes it by array order — plugin rules first, then the user `{Bash: commandRules}` pushed last so the user always outranks plugins.
 
 ## command-from-tool — which tools are commands
 
@@ -172,7 +172,7 @@ Plugins extend Layer B with their own command rules through `ctx.terminal`:
 
 ## Invariants & Gotchas
 
-- **Fail-open on both layers** (ADR §56): Layer A catch (`anthropic.mjs:293`), Layer B catch (`use-claude-chat.ts:1333`), judge returns `null` on every failure, `evaluateAutoDecision` never throws (`auto-mode.ts:70`).
+- **Fail-open on both layers** (ADR §56): Layer A catch (`anthropic.mjs:293`), Layer B catch (`use-claude-chat.ts:1345`), judge returns `null` on every failure, `evaluateAutoDecision` never throws (`auto-mode.ts:70`).
 - **No blanket `*: allow` in Layer A** — the sidecar resolver omits `DEFAULT_RULESET`'s `"*":"allow"`; only explicit serialized rules act (`permission-resolver.mjs:6-11`). The full default (incl. `*.env`→ask) lives renderer/SDK-side only (`ruleset.ts:49`).
 - **Privacy** — the model tier never sees PII (`command-judge.ts:96`) and is off unless explicitly enabled (`auto-mode.ts:100`).
 - **Substitution-hiding defense** — the parser recurses into `$(...)`/backticks (`command-parse.ts:162`) so a buried `rm -rf /` denies the whole chain via worst-verdict-wins (`command-safety.ts:574`).

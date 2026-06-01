@@ -82,7 +82,7 @@ sequenceDiagram
   participant SK as Node sidecar
 
   SC->>HP: 检测到 permission_request(:330)
-  HP->>HP: resolve_trusted_cwd(:432)
+  HP->>HP: resolve_trusted_cwd(:433)
   HP->>HP: 触发观察型 PermissionRequest(:438)
   HP->>HK: run_pre_tool_use（阻断，:450）
   alt hook 阻断
@@ -140,7 +140,7 @@ flowchart LR
   class OBS,GATE,FIRE,RUST,SUPP n
 ```
 
-`gateExternalAgentPermission`（`agent-hooks.ts:117`）触发 System-A 插件 hook、观察型 `PermissionRequest`，再触发阻断型 `PreToolUse`；阻断时调用 `deny(...)` 并返回 `true` 使 manager 抑制该事件。manager 接缝是 `manager.ts:1637`（交互式，真抑制）与 `:1803`（无头，deny 仍强制）。`run_agent_hook`（`commands.rs:55`）在路由到 `run_tool_scoped` / `run_session_scoped` 前应用同一 `resolve_trusted_cwd` 门（`:65`）。
+`gateExternalAgentPermission`（`agent-hooks.ts:117`）触发 System-A 插件 hook、观察型 `PermissionRequest`，再触发阻断型 `PreToolUse`；阻断时调用 `deny(...)` 并返回 `true` 使 manager 抑制该事件。manager 接缝是 `manager.ts:1638`（交互式，真抑制）与 `:1804`（无头，deny 仍强制）。`run_agent_hook`（`commands.rs:55`）在路由到 `run_tool_scoped` / `run_session_scoped` 前应用同一 `resolve_trusted_cwd` 门（`:65`）。
 
 这也接通了两个此前孤立的 System-A hook 种类：`dispatchExternalAgentPermissionRequest`（`hooks-system.ts:2095`）与 `dispatchExternalAgentToolCall`（`:2115`）。
 

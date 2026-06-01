@@ -1,18 +1,18 @@
 ---
 title: Build-options 管线
-description: resolveSendOptions —— 把所有 UI 状态坍缩成单个 SendOptions 负载的唯一汇聚点。全部 40 个有序贡献者、优先级链与系统提示词装配。
+description: resolveSendOptions —— 把所有 UI 状态坍缩成单个 SendOptions 负载的唯一汇聚点。全部 41 个有序贡献者、优先级链与系统提示词装配。
 ---
 
 # Build-options 管线
 
-`lib/claude/build-options.ts` 之所以存在，是为了让**每一个**能力——角色、技能、Twin、记忆、目标、A2UI、computer-use、sandbox、插件、路由——都通过恰好一个函数影响一次对话。`resolveSendOptions`（`:336`）在约 40 个有序段落里修改单个 `opts: SendOptions` 对象并返回它（`:1380`）。代码库中别处都不构造 `SendOptions`。
+`lib/claude/build-options.ts` 之所以存在，是为了让**每一个**能力——角色、技能、Twin、记忆、目标、A2UI、computer-use、sandbox、插件、路由——都通过恰好一个函数影响一次对话。`resolveSendOptions`（`:336`）在约 41 个有序段落里修改单个 `opts: SendOptions` 对象并返回它（`:1380`）。代码库中别处都不构造 `SendOptions`。
 
 <TLDR>
   `resolveSendOptions(ctx)`（`build-options.ts:336`）构建一个 `opts` 对象。贡献者按固定顺序运行并遵循
   **优先级链**——通常是 `session > activeProject > memberOverride > agentMode > character > appSettings`。
   系统提示词在 `:695` 处由一个六元素数组用 `\n\n---\n\n` 拼接一次而成；之后一切只追加到
   `appendSystemPrompt`。Twin（`:551`）*替换*基础提示词；记忆（`:595`）*追加*。工具汇入一个在 `:864`
-  提交的 `allowed` 集合。工作流编辑器分支（`:1264`）整体覆写提示词与工具。每个可选注入都包在 try/catch
+  提交的 `allowed` 集合。工作流编辑器分支（`:1285`）整体覆写提示词与工具。每个可选注入都包在 try/catch
   里静默降级。
 </TLDR>
 
@@ -20,7 +20,7 @@ description: resolveSendOptions —— 把所有 UI 状态坍缩成单个 SendOp
 
 | 导出 | 行号 | 角色 |
 | --- | --- | --- |
-| **`resolveSendOptions(ctx)`** | `:336-1381` | 管线。异步；返回完整 `SendOptions`。 |
+| **`resolveSendOptions(ctx)`** | `:336-1380` | 管线。异步；返回完整 `SendOptions`。 |
 | `resolveMemberConfig(team, member, character)` | `:307-323` | 纯函数，按 teammate 解析覆盖（`systemPrompt`/`model`/`allowedTools`/`mcpServerIds`）。UI 预览复用。 |
 | `listTeamMembers(ids)` | `:1387-1389` | 预解析 teammate 角色行。 |
 | `BRIEF_OUTPUT_SNIPPET` | `:52` | brief 模式附录（ACP 路径也复用）。 |
@@ -29,7 +29,7 @@ description: resolveSendOptions —— 把所有 UI 状态坍缩成单个 SendOp
 
 ## 装配流程
 
-函数是一条直线式累加。下图把 40 个段落归为若干阶段；每个节点标注行号。
+函数是一条直线式累加。下图把 41 个段落归为若干阶段；每个节点标注行号。
 
 ```mermaid
 flowchart TB
@@ -71,7 +71,7 @@ flowchart TB
     GOAL["活跃目标 :1211"]
     INBOX["收件箱抑制 :1224"]
     THINK["思考预算 :1253"]
-    WF["工作流编辑器 覆写 :1264"]
+    WF["工作流编辑器 覆写 :1285"]
     TEAM["团队子代理 :1348"]
     RESUME["resume/fork :1364"]
   end
@@ -153,9 +153,9 @@ flowchart TB
 | 36 | 活跃 `/goal` | `appendGoalContext`（ADR-0013/0019） | `:1211` |
 | 37 | 收件箱抑制 | manual > muted > quietHours → `opts.suppressedReason` | `:1224` |
 | 38 | 思考预算 | session > character > appDefault | `:1253` |
-| 39 | **工作流编辑器分支** | **覆写** `systemPrompt`/`appendSystemPrompt`/`allowedTools`/`additionalDirectories`；删 `mcpServers` | `:1264` |
-| 39b | 团队分支 | 把 `resolveAllSubagents({context:"team"})` 并入 `opts.agents` | `:1348` |
-| 40 | resume / fork | `forkFromSessionId` 或 `resumeSessionId` | `:1364` |
+| 39 | **工作流编辑器分支** | **覆写** `systemPrompt`/`appendSystemPrompt`/`allowedTools`/`additionalDirectories`；删 `mcpServers` | `:1285` |
+| 40 | 团队分支 | 把 `resolveAllSubagents({context:"team"})` 并入 `opts.agents` | `:1348` |
+| 41 | resume / fork | `forkFromSessionId` 或 `resumeSessionId` | `:1364` |
 
 ## 优先级链
 
@@ -170,7 +170,7 @@ flowchart LR
   class S,P,M,AM,CH,AP,IMO n
 ```
 
-IM 通道覆盖（`imOverrideRow`，在 `:407` 一次性取得）仅在 **model**、**provider** 与 **computer-use** 门上位于 session *之上*——这样一个每通道绑定可以钉住更便宜的模型而不触碰会话。
+IM 通道覆盖（`imOverrideRow`，在 `:413` 一次性取得）仅在 **model**、**provider** 与 **computer-use** 门上位于 session *之上*——这样一个每通道绑定可以钉住更便宜的模型而不触碰会话。
 
 ## systemPrompt 与 appendSystemPrompt
 
@@ -203,18 +203,18 @@ flowchart TB
 
 - 任何必须**替换**基础提示词的（如 Twin）在 `:695` 处或之前运行。
 - 任何**追加**的在其后运行，用拼接习语追加到 `opts.appendSystemPrompt`（保留已有值，新段落用空行分隔）。
-- **工作流编辑器分支**（`:1264`）整体覆写 `systemPrompt`（`:1327`）与 `appendSystemPrompt`（`:1328`），所以新追加者必须在它*之前*运行才能在该会话类型里存活。
+- **工作流编辑器分支**（`:1285`）整体覆写 `systemPrompt`（`:1327`）与 `appendSystemPrompt`（`:1328`），所以新追加者必须在它*之前*运行才能在该会话类型里存活。
 
 ## 新增一个贡献者
 
 1. 沿优先级链解析一个值（`session > activeProject > memberOverride > agentMode > character > appSettings`）。
 2. 提示词文本追加到 `opts.appendSystemPrompt`（用拼接习语保留已有）。要替换基础提示词则在 `:695` 之前做。
 3. 工具在 `:864` 提交**之前**加入 `allowed` 集合；`toolFilter` 叠加（`:867`）与 computer-use 过滤随后收窄已提交集合。
-4. 在 `lib/claude/types.ts` 给 `SendOptions` 加字段；若 sidecar 需读取，同步加到 Rust `SendOptions` 结构（`commands.rs:15`）。
+4. 在 `lib/claude/types.ts` 给 `SendOptions` 加字段；**仅当 sidecar 需反序列化它时**才同步加到 Rust `SendOptions` 结构（`commands.rs:17`）——像 `permissionRuleset` 这类仅 renderer/sidecar-JS 使用的字段刻意*不*镜像到 Rust 结构。
 5. 任何 I/O（Dexie、IPC）包 try/catch——每个可选注入都是 **fail-open**（twin `:590`、memory `:629`、插件技能 `:669`、MCP `:960`、插件工具 `:1036`、computer-use `:1106`）。
 
 <Callout type="warn" title="别重复读 IM 覆盖">
-  `imOverrideRow` 在 `:407` 取一次，并在 `:991` 的 computer-use 门复用。注释里明确反对为同一行重复读 Dexie
+  `imOverrideRow` 在 `:413` 取一次，并在 `:991` 的 computer-use 门复用。注释里明确反对为同一行重复读 Dexie
   （`:986-989`）。
 </Callout>
 

@@ -30,10 +30,14 @@ All four operate on the [Visual Workflows](../subsystems/visual-workflows) edito
 | --- | --- | --- | --- | --- |
 | **Workflow Designer** | `workflow-designer.ts:43` | 15 (read/add/remove/connect/configure/propose_batch/templates/auto_layout/group) | 20 | yes (builds graphs) |
 | **Workflow Debugger** | `workflow-debugger.ts:29` | 5 **read-only** (read_graph/selection/node/validation_errors/last_run) | 10 | no (diagnostic) |
-| **Workflow Refactorer** | `workflow-refactorer.ts:26` | 10 (read + mutate + `wf_batch_apply` + layout) | 15 | yes |
+| **Workflow Refactorer** | `workflow-refactorer.ts:26` | 11 (read + mutate + `wf_batch_apply` + layout + group) | 15 | yes |
 | **Workflow Doc Writer** | `workflow-doc-writer.ts:23` | 5 (read + add + configure + focus — **cannot remove**) | 15 | annotate only |
 
 Each file's `SYSTEM_PROMPT` constant is the `prompt`. The tool whitelist is what enforces the role: the debugger physically cannot mutate because it holds only read tools.
+
+## Markdown agents (dormant)
+
+A sibling module, `lib/claude/agents/markdown-agents.ts` (added in `665a6b81`), parses user-authored `*.md` agent files — YAML frontmatter + Markdown body — into the **same** SDK `AgentDefinition` shape via `buildMarkdownAgents()` (`:101`) and `markdownAgentsToSdkMap()` (`:120`). Its docstring intends the result to merge into `resolveAllSubagents` (`markdown-agents.ts:13`), but it has **no production caller yet** — `buildMarkdownAgents` is referenced only by its own test, so user markdown agents do **not** currently reach `opts.agents`. This is distinct from the `subagent-importers/` pipeline below, which materializes *templates / characters*, not live `opts.agents` entries.
 
 ## How They Reach the SDK
 

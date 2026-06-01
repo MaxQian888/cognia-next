@@ -8,7 +8,7 @@ description: 挂在完整回复路径上的插件 around 式中间件链——�
 Chat middleware 让插件以 Koa 风格**包裹** Agent 的**完整回复**——检视或变换请求与响应——而不触碰流式 UI 路径。它是唯一一个挂在*非流式* `run-and-capture` 路径上、而非 `resolveSendOptions` 内部的能力模块。
 
 <TLDR>
-  一个中间件是 `(req, next) => Promise<Response>`（`plugin-chat-middleware.ts:116`）。插件经 `ctx.chat.use`
+  一个中间件是 `(req, next) => Promise<Response>`（`plugin-chat-middleware.ts:115`）。插件经 `ctx.chat.use`
   → `registerChatMiddleware`（`registry.ts:79`）注册。runner 按优先级**从后向前**构建链，并以每中间件超时
   调用各个（`runner.ts:72`）；超时或出错会**跳过**该中间件（原样 `next`），并在 3 次失败后触发**熔断**。
   执行**默认关闭**（`feature-flag.ts:15`），且只包裹 `run-and-capture.ts` 的完整回复路径——绝不包裹流式
@@ -65,7 +65,7 @@ runner 实时读取活跃链（`listActiveChatMiddlewares()`，`runner.ts:77`）
 
 `runChatMiddlewareChain(request, terminal, options)`（`runner.ts:72`）。对每个中间件（`:93`）：
 
-- **超时**——`Promise.race` 对抗 `entry.timeoutMs`（`raceWithTimeout`，`:136`）。默认 5s，上限 60s（`registry.ts:24`）。
+- **超时**——`Promise.race` 对抗 `entry.timeoutMs`（`raceWithTimeout`，`:136`）。默认 5s（`registry.ts:24`），上限 60s（`:25`）。
 - **超时时**（`:98`）—— 推入 `timedOut[]`、`recordMiddlewareFailure`、**跳过 → 原样 `next(req)`**。
 - **出错时**（`:107`）—— 同样跳过。
 - **成功时**（`:116`）—— 推入 `succeeded[]`、`recordMiddlewareSuccess`、返回其值。
@@ -91,7 +91,7 @@ flowchart LR
   class RC,GATE,CORE,CHAIN n
 ```
 
-`runAndCaptureAssistantReply`（`:217`）在开关关闭（`:223`）**或**无活跃中间件（`:226`）时直接短路到核心 capture。开启时构建 `ChatMiddlewareRequest`（`:231`），以真实 capture 为 `terminal` 运行链（`:250`），并应用返回的文本变换（`:260`）。流式聊天被刻意排除——其文本已渲染，事后变换会是可见的闪烁（理由注释，`:208`）。
+`runAndCaptureAssistantReply`（`:217`）在开关关闭（`:223`）**或**无活跃中间件（`:226`）时直接短路到核心 capture。开启时构建 `ChatMiddlewareRequest`（`:231`），以真实 capture 为 `terminal` 运行链（`:250`），并应用返回的文本变换（`:266`）。流式聊天被刻意排除——其文本已渲染，事后变换会是可见的闪烁（理由注释，`:208`）。
 
 ## 插件接线
 
@@ -100,7 +100,7 @@ flowchart LR
 | `ctx.chat.use(middleware)` | `lib/plugin/api/chat-api.ts:53` → `registerChatMiddleware` |
 | 桥 | `lib/plugin/bridge/chat-middleware-bridge.ts:30` |
 | 契约 | `lib/plugin/contracts/plugin-points.ts:752`（`"chat.middleware"`） |
-| 类型 | `types/plugin/plugin-chat-middleware.ts`（`ChatMiddlewareRequest:71`，签名 `:116`） |
+| 类型 | `types/plugin/plugin-chat-middleware.ts`（`ChatMiddlewareRequest:71`，签名 `:115`） |
 
 注册总在插件启用时发生；只有 **runner 调用点**查阅默认关闭的开关（`feature-flag.ts:18`），因此一次部署可让中间件以休眠态发布、再集中开启。
 
