@@ -217,12 +217,21 @@ describe("PluginsSection (governance panel)", () => {
     expect(JSON.parse(stored as string).signatureRequired).toBe(false)
   })
 
+  // Switch order: [0] governance, [1] signatureRequired, [2] trustedPublishersOnly, [3] autoUpdate.
   it("policy tab auto-update toggle persists", () => {
+    renderWithTab("policy")
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[3])
+    const stored = window.localStorage.getItem("cognia.plugins.policy")
+    expect(JSON.parse(stored as string).autoUpdate).toBe(true)
+  })
+
+  it("policy tab trusted-publishers-only toggle persists", () => {
     renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
     fireEvent.click(switches[2])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
-    expect(JSON.parse(stored as string).autoUpdate).toBe(true)
+    expect(JSON.parse(stored as string).trustedPublishersOnly).toBe(true)
   })
 
   it("policy tab applies the persisted snapshot to the runtime on mount", () => {
@@ -234,6 +243,8 @@ describe("PluginsSection (governance panel)", () => {
     expect(applyPolicy).toHaveBeenCalledWith({
       governance: "block",
       signatureRequired: true,
+      // Missing key in stored JSON defaults to false via readPolicy.
+      trustedPublishersOnly: false,
       autoUpdate: true,
     })
   })
@@ -251,6 +262,10 @@ describe("PluginsSection (governance panel)", () => {
       expect.objectContaining({ signatureRequired: false })
     )
     fireEvent.click(switches[2])
+    expect(applyPolicy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ trustedPublishersOnly: true })
+    )
+    fireEvent.click(switches[3])
     expect(applyPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ autoUpdate: true }))
   })
 

@@ -35,7 +35,11 @@ describe("applyPluginPolicyToRuntime", () => {
     })
 
     expect(setGovernance).toHaveBeenCalledWith("block")
-    expect(setSignatureConfig).toHaveBeenCalledWith({ requireSignatures: true })
+    expect(setSignatureConfig).toHaveBeenCalledWith({
+      requireSignatures: true,
+      trustedPublishersOnly: false,
+      allowUntrusted: true,
+    })
     expect(configureAutoUpdate).toHaveBeenCalledWith({
       enabled: true,
       checkInterval: 24 * 60 * 60 * 1000,
@@ -54,8 +58,26 @@ describe("applyPluginPolicyToRuntime", () => {
     })
 
     expect(setGovernance).toHaveBeenCalledWith("warn")
-    expect(setSignatureConfig).toHaveBeenCalledWith({ requireSignatures: false })
+    expect(setSignatureConfig).toHaveBeenCalledWith({
+      requireSignatures: false,
+      trustedPublishersOnly: false,
+      allowUntrusted: true,
+    })
     expect(configureAutoUpdate).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }))
+  })
+
+  it("trustedPublishersOnly tightens the verifier (rejects unknown signers)", () => {
+    applyPluginPolicyToRuntime({
+      governance: "warn",
+      signatureRequired: true,
+      trustedPublishersOnly: true,
+      autoUpdate: false,
+    })
+    expect(setSignatureConfig).toHaveBeenCalledWith({
+      requireSignatures: true,
+      trustedPublishersOnly: true,
+      allowUntrusted: false,
+    })
   })
 
   it("swallows manager errors so an uninitialized manager doesn't bring down the other two", () => {

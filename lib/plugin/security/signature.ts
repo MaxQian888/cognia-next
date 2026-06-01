@@ -60,16 +60,40 @@ export interface SignatureConfig {
 }
 
 const USER_PUBLISHERS_STORAGE_KEY = "plugin:security:user-publishers"
-const OFFICIAL_TRUSTED_PUBLISHERS: TrustedPublisher[] = [
-  {
-    id: "cognia-official",
-    name: "Cognia Official",
-    publicKey: "",
-    trustLevel: "official",
-    addedAt: new Date("2024-01-01T00:00:00.000Z"),
-    domains: ["cognia.app"],
-  },
-]
+
+/**
+ * Official Cognia plugin-signing public key (base64 Ed25519). Injected at
+ * BUILD TIME via `NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY` so the private key never
+ * lives in the repo — the maintainer holds it and signs first-party plugins
+ * out-of-band (see `docs/content/docs/en/plugins/plugin-signing.md`). Empty =
+ * not yet configured.
+ */
+export const OFFICIAL_PLUGIN_PUBLIC_KEY: string = (
+  process.env.NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY ?? ""
+).trim()
+
+/** True once a real official publisher key has been injected at build time. */
+export function isOfficialPublisherKeyConfigured(): boolean {
+  return OFFICIAL_PLUGIN_PUBLIC_KEY.length > 0
+}
+
+// When the official key has NOT been configured we deliberately seed NO
+// official publisher. Previously this carried `publicKey: ""`, which made any
+// signature claiming an empty public key match the "official" anchor — a
+// spoofable trust hole. With no anchor, `trustedPublishersOnly` correctly
+// rejects everything until a real key is injected.
+const OFFICIAL_TRUSTED_PUBLISHERS: TrustedPublisher[] = isOfficialPublisherKeyConfigured()
+  ? [
+      {
+        id: "cognia-official",
+        name: "Cognia Official",
+        publicKey: OFFICIAL_PLUGIN_PUBLIC_KEY,
+        trustLevel: "official",
+        addedAt: new Date("2024-01-01T00:00:00.000Z"),
+        domains: ["cognia.app"],
+      },
+    ]
+  : []
 
 // =============================================================================
 // Signature Verifier

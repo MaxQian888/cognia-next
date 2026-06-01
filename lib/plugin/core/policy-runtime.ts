@@ -30,6 +30,13 @@ import type { PluginPointGovernanceMode } from "@/lib/plugin/contracts/plugin-po
 export interface PluginPolicySnapshot {
   governance: PluginPointGovernanceMode
   signatureRequired: boolean
+  /**
+   * When true, a valid signature is only accepted from a trusted publisher
+   * (the official build-time-injected key + user-added publishers). Unsigned
+   * or unknown-signer plugins are rejected. Optional for back-compat; defaults
+   * to `false` (any valid signature passes, unknown signers warn).
+   */
+  trustedPublishersOnly?: boolean
   autoUpdate: boolean
 }
 
@@ -58,6 +65,11 @@ export function applyPluginPolicyToRuntime(policy: PluginPolicySnapshot): void {
   try {
     getPluginSignatureVerifier().setConfig({
       requireSignatures: policy.signatureRequired,
+      // `trustedPublishersOnly` rejects unknown signers; `allowUntrusted` is
+      // its inverse on the "valid signature, untrusted signer" path, so keep
+      // them consistent.
+      trustedPublishersOnly: policy.trustedPublishersOnly ?? false,
+      allowUntrusted: !(policy.trustedPublishersOnly ?? false),
     })
   } catch {
     // Verifier hasn't been seeded yet.

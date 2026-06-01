@@ -6,12 +6,46 @@ import {
   PluginSignatureVerifier,
   getPluginSignatureVerifier,
   resetPluginSignatureVerifier,
+  isOfficialPublisherKeyConfigured,
 } from "./signature"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
+
+describe("official publisher anchor (Ed25519 build-time key)", () => {
+  // The env var is unset in the test environment, so the official key is the
+  // empty placeholder and NO official publisher should be seeded — closing the
+  // prior spoof hole where an empty-key signature matched the official anchor.
+  it("reports the official key as unconfigured by default", () => {
+    expect(isOfficialPublisherKeyConfigured()).toBe(false)
+  })
+
+  it("does NOT seed an empty-key official publisher (no spoofable anchor)", async () => {
+    const verifier = new PluginSignatureVerifier()
+    await verifier.initialize()
+    // An attacker-supplied empty public key must not be considered trusted.
+    expect(verifier.isPublisherTrusted("")).toBe(false)
+    expect(verifier.getTrustedPublishers().some((p) => p.id === "cognia-official")).toBe(false)
+  })
+
+  it("seeds the official publisher once a real key is injected at build time", () => {
+    jest.isolateModules(() => {
+      const prev = process.env.NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY
+      process.env.NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY = "Zm9vYmFyLXJlYWwta2V5"
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const mod = require("./signature") as typeof import("./signature")
+        expect(mod.isOfficialPublisherKeyConfigured()).toBe(true)
+        expect(mod.OFFICIAL_PLUGIN_PUBLIC_KEY).toBe("Zm9vYmFyLXJlYWwta2V5")
+      } finally {
+        if (prev === undefined) delete process.env.NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY
+        else process.env.NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY = prev
+      }
+    })
+  })
+})
 
 describe("PluginSignatureVerifier", () => {
   let verifier: PluginSignatureVerifier

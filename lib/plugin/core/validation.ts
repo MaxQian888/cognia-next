@@ -98,6 +98,15 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "share:create",
   "backup:read",
   "backup:write",
+  "automation:screenshot",
+  "automation:read",
+  "automation:click",
+  "automation:type",
+  "automation:pointer",
+  "automation:window",
+  "companion:read",
+  "companion:control",
+  "companion:goal-control",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [

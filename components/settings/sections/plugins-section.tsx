@@ -369,6 +369,7 @@ const POLICY_STORAGE_KEY = "cognia.plugins.policy"
 interface PluginsPolicy {
   governance: PluginPointGovernanceMode
   signatureRequired: boolean
+  trustedPublishersOnly: boolean
   autoUpdate: boolean
 }
 
@@ -378,6 +379,10 @@ interface PluginsPolicy {
 const DEFAULT_POLICY: PluginsPolicy = {
   governance: "warn",
   signatureRequired: true,
+  // Default off for back-compat: requiring a *trusted* signer is stricter than
+  // requiring any valid signature, and only becomes meaningful once an official
+  // publisher key is configured at build time.
+  trustedPublishersOnly: false,
   autoUpdate: false,
 }
 
@@ -394,6 +399,7 @@ function readPolicy(): PluginsPolicy {
       // still get strict enforcement.
       signatureRequired:
         typeof parsed.signatureRequired === "boolean" ? parsed.signatureRequired : true,
+      trustedPublishersOnly: !!parsed.trustedPublishersOnly,
       autoUpdate: !!parsed.autoUpdate,
     }
   } catch {
@@ -462,6 +468,18 @@ function PolicyTab() {
           id="plugins-signature-required"
           checked={policy.signatureRequired}
           onCheckedChange={(checked) => update({ signatureRequired: checked })}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 border-t pt-4">
+        <div className="space-y-1 min-w-0">
+          <Label htmlFor="plugins-trusted-publishers-only">{t("trustedPublishersOnly")}</Label>
+          <p className="text-xs text-muted-foreground">{t("trustedPublishersOnlyHint")}</p>
+        </div>
+        <Switch
+          id="plugins-trusted-publishers-only"
+          checked={policy.trustedPublishersOnly}
+          onCheckedChange={(checked) => update({ trustedPublishersOnly: checked })}
         />
       </div>
 

@@ -628,4 +628,86 @@ describe("runMarketplaceInstall", () => {
       expect(client.installPlugin).not.toHaveBeenCalled()
     })
   })
+
+  describe("dependency requirements (Step 1.5)", () => {
+    const clientWithDeps = (dependencies: Record<string, string>) => ({
+      getPlugin: jest
+        .fn()
+        .mockResolvedValue({ manifest: makeManifest({ dependencies } as never), name: "Demo" }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    })
+
+    it("blocks when a required dependency is missing and no review UI is wired", async () => {
+      const client = clientWithDeps({ "dep-a": "^1.0.0" })
+      const opts = makeOpts({
+        client,
+        checkInstalledPlugin: jest.fn().mockResolvedValue(null), // not installed
+      })
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "cancelled", stage: "dependencies" })
+      expect(client.installPlugin).not.toHaveBeenCalled()
+    })
+
+    it("surfaces missing + conflicting deps to the review callback", async () => {
+      const client = clientWithDeps({ "dep-a": "^1.0.0", "dep-b": "^2.0.0" })
+      const requestDependencyReview = jest.fn().mockResolvedValue("cancel")
+      const checkInstalledPlugin = jest.fn(async (id: string) =>
+        id === "dep-b" ? { version: "1.5.0" } : null
+      )
+      const opts = makeOpts({ client, requestDependencyReview, checkInstalledPlugin })
+      const result = await runMarketplaceInstall(opts)
+
+      expect(result).toEqual({ status: "cancelled", stage: "dependencies" })
+      const payload = requestDependencyReview.mock.calls[0][0] as {
+        missing: string[]
+        conflicts: Array<{ pluginId: string; required: string; available: string }>
+      }
+      expect(payload.missing).toEqual(["dep-a"])
+      expect(payload.conflicts).toEqual([
+        { pluginId: "dep-b", required: "^2.0.0", available: "1.5.0" },
+      ])
+    })
+
+    it("proceeds when the user continues past unmet dependencies", async () => {
+      const client = clientWithDeps({ "dep-a": "^1.0.0" })
+      const opts = makeOpts({
+        client,
+        checkInstalledPlugin: jest.fn().mockResolvedValue(null),
+        requestDependencyReview: jest.fn().mockResolvedValue("continue"),
+      })
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+      expect(client.installPlugin).toHaveBeenCalled()
+    })
+
+    it("does not gate when every required dependency is satisfied", async () => {
+      const client = clientWithDeps({ "dep-a": "^1.0.0" })
+      const requestDependencyReview = jest.fn()
+      const opts = makeOpts({
+        client,
+        requestDependencyReview,
+        checkInstalledPlugin: jest.fn().mockResolvedValue({ version: "1.4.0" }),
+      })
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+      expect(requestDependencyReview).not.toHaveBeenCalled()
+    })
+
+    it("ignores optionalDependencies (only required `dependencies` gate)", async () => {
+      const client = {
+        getPlugin: jest.fn().mockResolvedValue({
+          manifest: makeManifest({ optionalDependencies: { "opt-a": "^1.0.0" } } as never),
+          name: "Demo",
+        }),
+        installPlugin: jest.fn().mockResolvedValue({ success: true }),
+      }
+      const requestDependencyReview = jest.fn()
+      const checkInstalledPlugin = jest.fn().mockResolvedValue(null)
+      const opts = makeOpts({ client, requestDependencyReview, checkInstalledPlugin })
+      const result = await runMarketplaceInstall(opts)
+      expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+      expect(requestDependencyReview).not.toHaveBeenCalled()
+      expect(checkInstalledPlugin).not.toHaveBeenCalled()
+    })
+  })
 })

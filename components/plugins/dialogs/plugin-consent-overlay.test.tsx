@@ -24,12 +24,19 @@ function fireRequestEvent(detail: PluginConsentRequestEvent) {
   })
 }
 
+// Silence the jest.setup global consent auto-responder so THIS overlay is the
+// sole responder to `plugin:consent-request` events (otherwise both race to
+// resolve the same broker request and the overlay assertions become flaky).
+const consentFlags = globalThis as { __PLUGIN_CONSENT_AUTO?: "allow" | "deny" | "off" }
+
 beforeEach(() => {
+  consentFlags.__PLUGIN_CONSENT_AUTO = "off"
   resetPluginConsentBroker()
 })
 
 afterEach(() => {
   resetPluginConsentBroker()
+  consentFlags.__PLUGIN_CONSENT_AUTO = "allow"
 })
 
 describe("PluginConsentOverlay", () => {

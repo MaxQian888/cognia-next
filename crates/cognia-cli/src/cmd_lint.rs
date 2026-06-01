@@ -61,6 +61,15 @@ const VALID_PERMISSIONS: &[&str] = &[
     "share:create",
     "backup:read",
     "backup:write",
+    "automation:screenshot",
+    "automation:read",
+    "automation:click",
+    "automation:type",
+    "automation:pointer",
+    "automation:window",
+    "companion:read",
+    "companion:control",
+    "companion:goal-control",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with

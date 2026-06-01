@@ -289,8 +289,16 @@ describe("PermissionGuard", () => {
   })
 
   describe("confirmDangerousByDefault (C4 hardening flag)", () => {
-    it("defaults off: dangerous declared permissions stay 'silent'", () => {
+    it("defaults ON: dangerous declared permissions register at the 'confirm' tier", () => {
       const g = new PermissionGuard()
+      g.registerPlugin("p1", ["shell:execute", "network:fetch"])
+      // Secure by default — dangerous perms prompt; non-dangerous stay silent.
+      expect(g.getTier("p1", "shell:execute")).toBe("confirm")
+      expect(g.getTier("p1", "network:fetch")).toBe("silent")
+    })
+
+    it("when explicitly off: dangerous declared permissions stay 'silent'", () => {
+      const g = new PermissionGuard({ confirmDangerousByDefault: false })
       g.registerPlugin("p1", ["shell:execute", "network:fetch"])
       expect(g.getTier("p1", "shell:execute")).toBe("silent")
     })
@@ -410,6 +418,52 @@ describe("createGuardedAPI", () => {
     })
 
     expect(guarded.publicMethod()).toBe("public")
+  })
+
+  // Per-call consent path: a dangerous (confirm-tier) permission routes the
+  // guarded async method through the consent broker before running. The
+  // jest.setup auto-responder honors `globalThis.__PLUGIN_CONSENT_AUTO`.
+  describe("consent path (confirm tier)", () => {
+    const flags = globalThis as { __PLUGIN_CONSENT_AUTO?: "allow" | "deny" | "off" }
+    afterEach(() => {
+      flags.__PLUGIN_CONSENT_AUTO = "allow"
+    })
+
+    it("routes a confirm-tier async method through consent and runs it on allow", async () => {
+      // filesystem:write is DANGEROUS → confirm tier under the default posture.
+      guard.registerPlugin("p", ["filesystem:write"])
+      expect(guard.getTier("p", "filesystem:write")).toBe("confirm")
+      const fn = jest.fn(async () => "ok")
+      const guarded = createGuardedAPI("p", { writeFile: fn }, { writeFile: "filesystem:write" })
+      flags.__PLUGIN_CONSENT_AUTO = "allow"
+      await expect(guarded.writeFile()).resolves.toBe("ok")
+      expect(fn).toHaveBeenCalled()
+    })
+
+    it("rejects the call when consent is denied, without running the method", async () => {
+      guard.registerPlugin("p", ["filesystem:write"])
+      const fn = jest.fn(async () => "ok")
+      const guarded = createGuardedAPI("p", { writeFile: fn }, { writeFile: "filesystem:write" })
+      flags.__PLUGIN_CONSENT_AUTO = "deny"
+      await expect(guarded.writeFile()).rejects.toThrow(PermissionError)
+      expect(fn).not.toHaveBeenCalled()
+    })
+
+    it("consentExempt methods skip the prompt and stay synchronous", () => {
+      guard.registerPlugin("p", ["filesystem:write"])
+      const fn = jest.fn(() => "sync-result")
+      const guarded = createGuardedAPI(
+        "p",
+        { query: fn },
+        { query: "filesystem:write" },
+        { consentExempt: ["query"] }
+      )
+      // Even with consent set to deny, an exempt method skips the prompt and
+      // returns synchronously (the granted permission still gates access).
+      flags.__PLUGIN_CONSENT_AUTO = "deny"
+      expect(guarded.query()).toBe("sync-result")
+      expect(fn).toHaveBeenCalled()
+    })
   })
 })
 

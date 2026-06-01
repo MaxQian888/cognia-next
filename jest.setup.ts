@@ -355,6 +355,43 @@ jest.mock("next-intl", () => {
   }
 })
 
+// Plugin per-call consent auto-responder. The PermissionGuard now registers
+// declared *dangerous* permissions at the "confirm" tier by default
+// (`confirmDangerousByDefault: true`), so a guarded dangerous-permission API
+// call routes through the consent broker + overlay before running. In tests
+// there is no overlay, so without this the broker would hang until its 30 s
+// timeout and every dangerous-permission forwarding test would fail.
+//
+// Default mode is "allow" (auto-grant once, no session persist). Tests that
+// exercise the consent flow itself set `globalThis.__PLUGIN_CONSENT_AUTO` to
+// "deny" (auto-reject) or "off" (ignore — let the test's own listener/overlay
+// respond) in their setup.
+if (typeof window !== "undefined") {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const consent = require("@/lib/plugin/security/consent-broker") as {
+      getPluginConsentBroker: () => {
+        respond: (id: string, r: { allow: boolean; persist: boolean }) => boolean
+      }
+      PLUGIN_CONSENT_REQUEST_EVENT: string
+    }
+    const flags = globalThis as { __PLUGIN_CONSENT_AUTO?: "allow" | "deny" | "off" }
+    flags.__PLUGIN_CONSENT_AUTO ??= "allow"
+    window.addEventListener(consent.PLUGIN_CONSENT_REQUEST_EVENT, (event: Event) => {
+      const mode = flags.__PLUGIN_CONSENT_AUTO
+      if (mode === "off") return
+      const detail = (event as CustomEvent<{ requestId: string }>).detail
+      if (!detail?.requestId) return
+      consent.getPluginConsentBroker().respond(detail.requestId, {
+        allow: mode !== "deny",
+        persist: false,
+      })
+    })
+  } catch {
+    // consent-broker not resolvable in this environment — skip.
+  }
+}
+
 // Suppress console errors in tests (optional)
 // global.console = {
 //   ...console,

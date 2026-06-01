@@ -7,6 +7,8 @@
 
 import type { PluginPermission } from "@/types/plugin"
 
+import { getPluginConsentBroker } from "./consent-broker"
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -92,12 +94,27 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   database: ["database:read", "database:write"],
   settings: ["settings:read", "settings:write"],
   session: ["session:read", "session:write"],
-  terminal: ["terminal:spawn", "terminal:write", "terminal:kill", "terminal:completion"],
+  terminal: [
+    "terminal:spawn",
+    "terminal:write",
+    "terminal:kill",
+    "terminal:completion",
+    "terminal:safety",
+  ],
   git: ["git:read", "git:write"],
   goal: ["goal:read", "goal:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
   share: ["share:read", "share:create"],
   backup: ["backup:read", "backup:write"],
+  automation: [
+    "automation:screenshot",
+    "automation:read",
+    "automation:click",
+    "automation:type",
+    "automation:pointer",
+    "automation:window",
+  ],
+  companion: ["companion:read", "companion:control", "companion:goal-control"],
   dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
 }
 
@@ -132,6 +149,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "terminal:write": "Pipe input into an existing terminal session",
   "terminal:kill": "Terminate an existing terminal session",
   "terminal:completion": "Suggest terminal commands and read the line you are typing",
+  "terminal:safety": "Add command-safety rules and check whether a command is safe to run",
   "git:read": "Read the active source-control repository (status, log, diff, branches)",
   "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
   "goal:read": "Read your goals and their progress",
@@ -145,6 +163,15 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "share:create": "Create and revoke public share links (publishes data online)",
   "backup:read": "Build and read encrypted backups and the backup history",
   "backup:write": "Restore a backup, overwriting your local data",
+  "automation:screenshot": "Capture screenshots of your desktop",
+  "automation:read": "Read the on-screen UI tree, cursor position, and focused element",
+  "automation:click": "Click and press mouse buttons on your desktop",
+  "automation:type": "Type text and send keyboard input to your desktop",
+  "automation:pointer": "Move, drag, and scroll the mouse on your desktop",
+  "automation:window": "Focus, close, minimize, maximize, or resize desktop windows",
+  "companion:read": "List paired devices and their remote-control grants",
+  "companion:control": "Grant or revoke a paired device's remote-control capability",
+  "companion:goal-control": "Pause, resume, or stop your running goal loops",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
@@ -177,6 +204,20 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // Restoring a backup overwrites the local database — destructive and not
   // reversible from inside the app.
   "backup:write",
+  // Driving the real desktop — reading the screen (a11y tree / screenshots)
+  // exposes everything on screen, and click/type/pointer/window can take any
+  // action the user could. The whole automation surface is consent-worthy.
+  "automation:screenshot",
+  "automation:read",
+  "automation:click",
+  "automation:type",
+  "automation:pointer",
+  "automation:window",
+  // Granting a paired device remote-control capability lets that device drive
+  // the host — same outward-facing risk tier as enabling remote access.
+  // (`companion:goal-control` is NOT dangerous: it is a strict subset of the
+  // non-dangerous `goal:write` — pause/resume/stop only.)
+  "companion:control",
 ]
 
 // =============================================================================
@@ -206,7 +247,11 @@ export class PermissionGuard {
       maxAuditEntries: 1000,
       allowRuntimeGrants: true,
       defaultDenyMessage: "Permission denied",
-      confirmDangerousByDefault: false,
+      // Secure by default: declared dangerous permissions register at the
+      // "confirm" tier so they prompt for per-call consent (with a session
+      // grant cache) instead of being silently granted. Hosts/tests can pass
+      // `false` to restore the historic silent-grant posture.
+      confirmDangerousByDefault: true,
       ...config,
     }
   }
@@ -732,9 +777,22 @@ export function __resetPermissionGuardForTesting(): void {
 export function createGuardedAPI<T extends object>(
   pluginId: string,
   api: T,
-  permissionMap: Partial<Record<keyof T, PluginPermission | PluginPermission[]>>
+  permissionMap: Partial<Record<keyof T, PluginPermission | PluginPermission[]>>,
+  options: {
+    /**
+     * Method names that must NOT route through the async per-call consent
+     * overlay even when their permission sits at the "confirm" tier. Use for
+     * *synchronous* query / subscribe / pure-helper methods that happen to
+     * share a dangerous permission with an async action (e.g. the terminal
+     * API gates `list` / `onData` / `detectScriptType` with `terminal:spawn`,
+     * but only the actual `spawn` is a consent-worthy action). Exempt methods
+     * still require the granted permission — they just skip the prompt.
+     */
+    consentExempt?: ReadonlyArray<keyof T>
+  } = {}
 ): T {
   const guard = getPermissionGuard()
+  const consentExempt = new Set<keyof T>(options.consentExempt ?? [])
 
   return new Proxy(api, {
     get(target, prop: string | symbol) {
@@ -753,12 +811,46 @@ export function createGuardedAPI<T extends object>(
         const permissions = Array.isArray(requiredPermissions)
           ? requiredPermissions
           : [requiredPermissions]
+        const context = `API call: ${String(prop)}`
 
-        for (const permission of permissions) {
-          guard.require(pluginId, permission, `API call: ${String(prop)}`)
+        // Fast path — keep the historic synchronous gate when (a) this method
+        // is consent-exempt (a sync query/helper), or (b) no required
+        // permission sits at the "confirm" tier. This preserves sync-returning
+        // guarded methods; the async consent path below is only taken by
+        // async action methods.
+        const needsConsent =
+          !consentExempt.has(prop as keyof T) &&
+          permissions.some((permission) => guard.getTier(pluginId, permission) === "confirm")
+        if (!needsConsent) {
+          for (const permission of permissions) {
+            guard.require(pluginId, permission, context)
+          }
+          return (value as (...args: unknown[]) => unknown).apply(target, args)
         }
 
-        return (value as (...args: unknown[]) => unknown).apply(target, args)
+        // Consent path — at least one permission needs the per-call overlay.
+        // Hard-require the grant first (throws if missing/revoked), then defer
+        // each "confirm"-tier permission to the consent broker; a denied or
+        // timed-out prompt rejects the call.
+        return (async () => {
+          const broker = getPluginConsentBroker()
+          for (const permission of permissions) {
+            guard.require(pluginId, permission, context)
+            if (guard.getTier(pluginId, permission) !== "confirm") continue
+            const allowed = await guard.checkWithConsent(pluginId, permission, broker, {
+              reason: context,
+              context,
+            })
+            if (!allowed) {
+              throw new PermissionError(
+                `Consent denied for permission "${permission}"`,
+                pluginId,
+                permission
+              )
+            }
+          }
+          return (value as (...args: unknown[]) => unknown).apply(target, args)
+        })()
       }
     },
   })

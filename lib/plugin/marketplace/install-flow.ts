@@ -17,8 +17,9 @@
  */
 
 import type { PluginBinaryRequirement, PluginManifest, PluginPermission } from "@/types/plugin"
-import { listPlugins, setPluginConfig } from "@/lib/db/plugins"
+import { listPlugins, getPlugin, setPluginConfig } from "@/lib/db/plugins"
 import { ConflictDetector } from "@/lib/plugin/package/conflict-detector"
+import { satisfiesConstraint } from "@/lib/plugin/package/dependency-resolver"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
 // =============================================================================
@@ -27,10 +28,30 @@ import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
 export type PreInstallStage =
   | "conflict"
+  | "dependencies"
   | "permission"
   | "binary-requirements"
   | "config"
   | "install"
+
+/** A required plugin dependency whose installed version conflicts. */
+export interface PreInstallDependencyConflict {
+  /** Dependency plugin id. */
+  pluginId: string
+  /** Version constraint the target plugin requires. */
+  required: string
+  /** Version currently installed (which fails the constraint). */
+  available: string
+}
+
+export interface PreInstallDependencyPayload {
+  /** The install target. */
+  pluginId: string
+  /** Required dependency ids that are not installed at all. */
+  missing: string[]
+  /** Required dependencies installed at an incompatible version. */
+  conflicts: PreInstallDependencyConflict[]
+}
 
 export interface PreInstallBinaryPayload {
   pluginId: string
@@ -67,6 +88,23 @@ export interface RunMarketplaceInstallOpts {
    * Return `"continue"` to advance, `"cancel"` to abort.
    */
   requestConflictReview: (conflict: PreInstallConflict) => Promise<"continue" | "cancel">
+
+  /**
+   * Resolve the dependency-review step. Invoked only when the manifest
+   * declares `dependencies` AND at least one required dependency is missing
+   * or installed at an incompatible version. Return `"continue"` to advance
+   * (the user will install the dependency separately) or `"cancel"` to abort.
+   * Optional — when absent, an unmet required dependency aborts the install
+   * with a `cancelled/dependencies` result (the plugin can't function without
+   * it, so silently proceeding is not acceptable).
+   */
+  requestDependencyReview?: (payload: PreInstallDependencyPayload) => Promise<"continue" | "cancel">
+
+  /**
+   * Look up an installed plugin's version by id. Injected so tests don't need
+   * a live Dexie; defaults to `getPlugin` from `@/lib/db/plugins`.
+   */
+  checkInstalledPlugin?: (id: string) => Promise<{ version: string } | null>
 
   /**
    * Resolve the permission-review step. Invoked only when the manifest
@@ -250,6 +288,39 @@ async function defaultDetectBinary(
   }
 }
 
+/**
+ * Resolve the manifest's required `dependencies` against installed plugins.
+ * Returns the missing ids + version conflicts. `optionalDependencies` are
+ * intentionally NOT gated — they degrade gracefully by design.
+ *
+ * `checkInstalled` is injected (defaulting to `getPlugin`) so this stays
+ * unit-testable without a live Dexie.
+ */
+async function resolveDependencyIssues(
+  pluginId: string,
+  manifest: PluginManifest,
+  checkInstalled: (id: string) => Promise<{ version: string } | null>
+): Promise<PreInstallDependencyPayload> {
+  const required = manifest.dependencies ?? {}
+  const missing: string[] = []
+  const conflicts: PreInstallDependencyConflict[] = []
+  for (const [depId, constraint] of Object.entries(required)) {
+    const installed = await checkInstalled(depId)
+    if (!installed) {
+      missing.push(depId)
+    } else if (!satisfiesConstraint(installed.version, constraint)) {
+      conflicts.push({ pluginId: depId, required: constraint, available: installed.version })
+    }
+  }
+  return { pluginId, missing, conflicts }
+}
+
+/** Default installed-plugin probe — reads the Dexie plugin row. */
+async function defaultCheckInstalledPlugin(id: string): Promise<{ version: string } | null> {
+  const row = await getPlugin(id)
+  return row ? { version: row.version } : null
+}
+
 // =============================================================================
 // Orchestrator
 // =============================================================================
@@ -283,6 +354,25 @@ export async function runMarketplaceInstall(
     const decision = await opts.requestConflictReview(conflict)
     if (decision === "cancel") {
       return { status: "cancelled", stage: "conflict" }
+    }
+  }
+
+  // Step 1.5 — dependency review (only when the manifest declares required
+  // `dependencies` AND at least one is missing / version-incompatible). Like
+  // the binary step: absent review callback blocks the install, since the
+  // plugin can't function without its dependencies.
+  const depIssues = await resolveDependencyIssues(
+    pluginId,
+    manifest,
+    opts.checkInstalledPlugin ?? defaultCheckInstalledPlugin
+  )
+  if (depIssues.missing.length > 0 || depIssues.conflicts.length > 0) {
+    if (!opts.requestDependencyReview) {
+      return { status: "cancelled", stage: "dependencies" }
+    }
+    const decision = await opts.requestDependencyReview(depIssues)
+    if (decision === "cancel") {
+      return { status: "cancelled", stage: "dependencies" }
     }
   }
 

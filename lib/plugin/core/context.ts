@@ -115,6 +115,8 @@ import { createPerfAPI, type PluginPerfAPI } from "../api/perf-api"
 import { createConnectorsAPI, type PluginConnectorsAPI } from "../api/connectors-api"
 import { createShareAPI, type PluginShareAPI } from "../api/share-api"
 import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
+import { createAutomationAPI, type PluginAutomationAPI } from "../api/automation-api"
+import { createCompanionAPI, type PluginCompanionAPI } from "../api/companion-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -166,6 +168,10 @@ export type FullPluginContext = Omit<PluginContext, "storage"> &
     share: PluginShareAPI
     /** Encrypted backup build/restore/history (gated `backup:read`/`backup:write`; never the API key). */
     backup: PluginBackupAPI
+    /** Desktop automation / Computer Use action surface (gated `automation:*`, all DANGEROUS). */
+    automation: PluginAutomationAPI
+    /** Paired-device + remote-control + host goal-loop steering (gated `companion:*`). */
+    companion: PluginCompanionAPI
   }
 
 // =============================================================================
@@ -306,6 +312,8 @@ export function createFullPluginContext(
     connectors: createConnectorsAPI(pluginId),
     share: createShareAPI(pluginId),
     backup: createBackupAPI(pluginId),
+    automation: createAutomationAPI(pluginId),
+    companion: createCompanionAPI(pluginId),
   }
 }
 

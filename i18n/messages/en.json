@@ -5104,6 +5104,8 @@
         "governanceBlock": "Block",
         "signatureRequired": "Require signed plugins",
         "signatureRequiredHint": "Refuse to load plugins without a verified publisher signature.",
+        "trustedPublishersOnly": "Trusted publishers only",
+        "trustedPublishersOnlyHint": "Accept signatures only from the official key or publishers you trust; reject unknown signers.",
         "autoUpdate": "Auto-update plugins",
         "autoUpdateHint": "Apply marketplace updates automatically when available.",
         "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in /plugins."
