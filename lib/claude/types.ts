@@ -371,6 +371,25 @@ export interface SendOptions {
   }
 
   /**
+   * Long-term memory context injected this turn (ADR — autonomous memory).
+   * Set by `resolveSendOptions` when `applyMemoryContext` recalled any
+   * semantic/episodic memory. Mirrors `twinContext` — stashed so the chat hook
+   * can render a "Memory" SourcesPart on the assistant message (transparency).
+   * Stripped before the SDK call (no behavioural impact). `degraded` is true
+   * when the memory runtime failed and fell back to no context.
+   */
+  memoryContext?: {
+    retrievedMemories: Array<{
+      id: string
+      type: import("@/types/memory/memory").MemoryType
+      text: string
+      score: number
+    }>
+    proceduralCount: number
+    degraded: boolean
+  }
+
+  /**
    * Agent-trace correlation identifiers — set by the chat hook before the
    * sidecar call so downstream events (tool spans, sub-agent spans,
    * connector callbacks) can attach to the same trace. Both are W3C-style
@@ -1243,6 +1262,16 @@ export interface AppSettings {
     groupBy: "none" | "transport" | "status"
     favorites: string[]
   }
+  /**
+   * Autonomous long-term memory configuration. Lives in settings JSON (same
+   * pattern as `goalConsoleView` / `mcpPanel`) so it follows the user across
+   * devices without a Dexie migration. Partial — unset fields fall back to
+   * `DEFAULT_MEMORY_CONFIG`. The `memories` rows themselves live in their own
+   * Dexie table (schema v65). See `@/types/memory/memory`.
+   */
+  memory?: Partial<import("@/types/memory/memory").MemoryConfig>
+  /** View mode for the `/memory` management panel (`grid` | `list`). */
+  memoryView?: import("@/types/memory/memory").MemoryViewMode
   /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —

@@ -19,6 +19,7 @@ import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchRememberCommand } from "./actions/remember"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 
 /**
@@ -342,6 +343,17 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
           `_Objective change prompt staged — the model will be told on the next turn._`
         )
       }
+    },
+  },
+  {
+    name: "remember",
+    description: "Save a durable fact about you to long-term memory.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "<fact>",
+    handler: async (ctx) => {
+      const result = await dispatchRememberCommand(ctx)
+      if (result?.system) ctx.pushSystemMessage(result.system)
     },
   },
   // Workflow Copilot commands — only active inside workflow-editor sessions.

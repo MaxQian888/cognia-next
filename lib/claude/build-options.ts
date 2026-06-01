@@ -25,6 +25,7 @@ import type {
   TeamMember,
 } from "@/lib/claude/types"
 import type { Project } from "@/types"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
@@ -159,6 +160,22 @@ export interface BuildOptionsContext {
    * multiple twin-bound members per turn.
    */
   precomputedQueryEmbedding?: number[]
+  /**
+   * Optional long-term memory runtime dependencies (ADR — autonomous memory).
+   * When supplied AND `memoryUserMessage` is set AND `appSettings.memory` is
+   * enabled (and not in temporary mode), `resolveSendOptions` invokes
+   * `applyMemoryContext` and APPENDS a "What you remember about the user"
+   * section to the system prompt — coexisting with, never replacing, the Twin
+   * section. Built by `tryBuildMemoryDeps`. Structurally typed + lazily used so
+   * non-memory callers omit it cleanly. Undefined → memory injection skipped.
+   */
+  memoryDeps?: import("@/lib/memory/runtime/apply-memory-context").ApplyMemoryContextDeps
+  /**
+   * The user's current message text for memory recall. Usually the same value
+   * as `twinUserMessage`; kept separate so a caller can drive one without the
+   * other. Ignored when `memoryDeps` is missing.
+   */
+  memoryUserMessage?: string
   /**
    * Per-message ephemeral skill ids unioned with the active character's
    * `skillIds`. The composer's SkillPicker drives this; the chat send hook
@@ -575,6 +592,46 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Long-term memory injection (opt-in) ---------------------------------
+  // When `memoryDeps` + `memoryUserMessage` are supplied and memory is enabled
+  // (and not in temporary mode), recall semantic/episodic facts + the learned
+  // procedural block and APPEND them as a dedicated section. This coexists with
+  // the Twin section (Twin = persona, Memory = durable user facts) — it never
+  // replaces `baseSystem`. The runtime never throws; failures degrade silently.
+  let memorySection = ""
+  if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
+    const memoryConfig = resolveMemoryConfig(appSettings?.memory)
+    if (memoryConfig.enabled && !memoryConfig.temporary) {
+      try {
+        const { applyMemoryContext } = await import("@/lib/memory/runtime/apply-memory-context")
+        const twinChunkTexts = opts.twinContext?.retrievedChunks.map((c) => c.chunk.content) ?? []
+        const result = await applyMemoryContext({
+          userMessage: ctx.memoryUserMessage,
+          characterId: character?.id,
+          topK: memoryConfig.retrievalTopK,
+          relevanceFloor: memoryConfig.relevanceFloor,
+          twinChunkTexts,
+          deps: ctx.memoryDeps,
+        })
+        if (result.systemPromptSection) memorySection = result.systemPromptSection
+        if (result.retrievedMemories.length > 0 || result.proceduralCount > 0 || result.degraded) {
+          opts.memoryContext = {
+            retrievedMemories: result.retrievedMemories.map((m) => ({
+              id: m.id,
+              type: m.type,
+              text: m.text,
+              score: m.score,
+            })),
+            proceduralCount: result.proceduralCount,
+            degraded: result.degraded,
+          }
+        }
+      } catch {
+        // Memory runtime failure is non-fatal — keep the prompt as-is.
+      }
+    }
+  }
+
   const skillSection = renderSkillsSection(skills)
   const modeSection = activeMode?.systemPrompt?.trim() || ""
 
@@ -635,7 +692,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
-  const systemPrompt = [baseSystem, personaSection, modeSection, skillSection, pluginSkillSection]
+  const systemPrompt = [
+    baseSystem,
+    personaSection,
+    memorySection,
+    modeSection,
+    skillSection,
+    pluginSkillSection,
+  ]
     .filter((p) => p && p.trim().length > 0)
     .join("\n\n---\n\n")
   if (systemPrompt) opts.systemPrompt = systemPrompt

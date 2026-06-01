@@ -93,6 +93,7 @@ import type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
 import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
+import type { Memory } from "@/types/memory/memory"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -1676,6 +1677,22 @@ export class CogniaDB extends Dexie {
       evalRuns: "&runId, datasetId, [datasetId+createdAt], createdAt",
       traceAnnotations: "&id, &traceId, sessionId, failureMode, createdAt",
     })
+
+    // v65 — Autonomous long-term memory. Additive only; no upgrade hook (no
+    // pre-existing rows carry this shape). One table holds all three memory
+    // types (semantic/episodic/procedural). Indexes:
+    //   • `scope` / `type` / `characterId`     — panel grouping + scope-union retrieval.
+    //   • `status`                             — retrieval filters to `active` only.
+    //   • `lastAccessedAt`                     — recency factor + access-time expiry.
+    //   • `vectorDocId`                        — reverse lookup on vector cleanup.
+    //   • `sourceSessionId`                    — provenance "jump to source".
+    //   • `pinned`                             — eviction exemption.
+    //   • `[scope+type]` / `[scope+status]` / `[type+status]` — composite reads.
+    // See `lib/db/memories.ts` and `@/types/memory/memory`.
+    this.version(65).stores({
+      memories:
+        "&id, scope, type, characterId, status, lastAccessedAt, vectorDocId, sourceSessionId, pinned, [scope+type], [scope+status], [type+status]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1686,6 +1703,8 @@ export class CogniaDB extends Dexie {
   syncCursors!: Table<SyncCursorRow, string>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
+  // v65 — Autonomous long-term memory. See `lib/db/memories.ts`.
+  memories!: Table<Memory, string>
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.

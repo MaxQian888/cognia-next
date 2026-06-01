@@ -4,6 +4,7 @@ import {
   applySdkEvent,
   contentPreview,
   makeUserMessage,
+  mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "./adapter"
 import type { SourcesPart, SourcesPartItem } from "./parts-extensions"
@@ -624,6 +625,70 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
         },
       ],
       selectedStyleSamples: [],
+    })
+    expect(next).toBe(userOnly)
+  })
+})
+
+describe("mergeMemorySourcesIntoLastAssistant", () => {
+  const baseMessages: UIMessage[] = [
+    { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "hello" } as never] },
+  ]
+
+  it("returns the same array when memoryContext is empty/nullish", () => {
+    expect(mergeMemorySourcesIntoLastAssistant(baseMessages, undefined)).toBe(baseMessages)
+    expect(mergeMemorySourcesIntoLastAssistant(baseMessages, null)).toBe(baseMessages)
+    expect(mergeMemorySourcesIntoLastAssistant(baseMessages, { retrievedMemories: [] })).toBe(
+      baseMessages
+    )
+  })
+
+  it("attaches memory-origin sources onto the last assistant message", () => {
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [
+        { id: "m1", type: "semantic", text: "The user prefers pnpm", score: 0.9 },
+      ],
+    })
+    expect(next).not.toBe(baseMessages)
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    const item = sources.sources.find((s) => s.origin === "memory") as SourcesPartItem
+    expect(item.id).toBe("memory-m1")
+    expect(item.title).toBe("The user prefers pnpm")
+    expect(item.score).toBe(0.9)
+  })
+
+  it("truncates long memory text for title and snippet", () => {
+    const long = "x".repeat(300)
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: long, score: 0.5 }],
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    const item = sources.sources[0]
+    expect(item.title!.endsWith("…")).toBe(true)
+    expect(item.title!.length).toBeLessThanOrEqual(81)
+    expect(item.snippet!.endsWith("…")).toBe(true)
+  })
+
+  it("is idempotent", () => {
+    const ctx = {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+    }
+    const once = mergeMemorySourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeMemorySourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
+  })
+
+  it("returns the same array when there is no assistant message", () => {
+    const userOnly: UIMessage[] = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
+    ]
+    const next = mergeMemorySourcesIntoLastAssistant(userOnly, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
     })
     expect(next).toBe(userOnly)
   })

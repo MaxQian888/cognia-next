@@ -7,6 +7,7 @@ import {
   contentPreview,
   extractUsage,
   makeUserMessage,
+  mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -83,6 +84,8 @@ import {
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
 } from "@/lib/claude/adapter-hooks"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import type {
   ApprovalDecision,
   ChatSession,
@@ -252,6 +255,70 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
       }
     } catch (err) {
       console.warn("utility-model tasks failed", err)
+    }
+  })()
+}
+
+/**
+ * Background long-term-memory extraction for the just-finished turn. Fire-and-
+ * forget — mirrors `runUtilityModelTasks`; never blocks the event queue and
+ * swallows every failure. Gated by `memory.enabled && autoExtract && !temporary`
+ * and provenance (connector-inbound sessions are excluded inside
+ * `runMemoryExtraction`). `messages` is the just-sealed turn snapshot.
+ */
+function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
+  void (async () => {
+    try {
+      const settings = useSettingsStore.getState().settings
+      if (!settings) return
+      const config = resolveMemoryConfig(settings.memory)
+      if (!config.enabled || !config.autoExtract || config.temporary) return
+      const sessionRow = await getSession(sessionId).catch(() => undefined)
+      if (!sessionRow) return
+
+      const lastUser = [...messages].reverse().find((m) => m.role === "user")
+      const userText = extractPlainText(lastUser)
+      if (!userText.trim()) return
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
+      const assistantText = extractAssistantText(lastAssistant)
+
+      const { buildAutoExtractionDeps, runMemoryExtraction, sessionProvenance } =
+        await import("@/lib/memory/write/run-memory-extraction")
+      const provenance = sessionProvenance(sessionRow)
+      const deps = await buildAutoExtractionDeps(
+        { session: sessionRow, appSettings: settings },
+        config
+      )
+      if (deps) {
+        const recentMessages = messages
+          .slice(-10)
+          .map((m) => ({ role: m.role, text: extractPlainText(m) }))
+        await runMemoryExtraction(
+          {
+            newPair: { userText, assistantText },
+            recentMessages,
+            scope: config.scopeDefault,
+            characterId: sessionRow.characterId,
+            provenance,
+            source: { sessionId },
+            config,
+          },
+          deps
+        )
+      }
+
+      // Schedule idle episodic distillation + capacity eviction (once/session).
+      const { scheduleMemoryMaintenance } = await import("@/lib/memory/lifecycle/maintenance")
+      scheduleMemoryMaintenance({
+        sessionId,
+        session: sessionRow,
+        appSettings: settings,
+        transcript: messages.map((m) => ({ role: m.role, text: extractPlainText(m) })),
+        provenance,
+        config,
+      })
+    } catch (err) {
+      console.warn("memory extraction failed", err)
     }
   })()
 }
@@ -1061,6 +1128,13 @@ async function buildSendOptions(
   // run the injection based on `character.twinId`.
   const twinHandshake = userMessage?.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Long-term memory: build the read-runtime deps when memory is enabled and
+  // the turn carries a user message. `resolveSendOptions` decides (per its own
+  // enabled/temporary gate) whether to actually recall + inject.
+  const memoryHandshake = userMessage?.trim()
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    : undefined
+
   // Per-message ephemeral skills attached via the composer's SkillPicker.
   // These are unioned with character.skillIds in resolveSendOptions and
   // cleared after the send dispatches.
@@ -1081,6 +1155,8 @@ async function buildSendOptions(
     referencedPaths,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
+    memoryDeps: memoryHandshake,
+    memoryUserMessage: memoryHandshake ? userMessage : undefined,
     ephemeralSkillIds,
     activeGoal,
   })
@@ -1370,6 +1446,15 @@ async function handleEvent(
             nextMessages = withTwin
           }
         }
+        // Long-term memory sources — same lastSend-cache read as twin, stashed
+        // by `resolveSendOptions` onto `options.memoryContext`.
+        const memoryCtx = last?.options.memoryContext
+        if (memoryCtx) {
+          const withMemory = mergeMemorySourcesIntoLastAssistant(nextMessages, memoryCtx)
+          if (withMemory !== nextMessages) {
+            nextMessages = withMemory
+          }
+        }
       }
 
       if (nextMessages !== current) {
@@ -1513,6 +1598,8 @@ async function handleEvent(
         // timeline-minimap label. Fire-and-forget so it never blocks the
         // per-session event queue.
         runUtilityModelTasks(sessionId, nextMessages)
+        // Long-term memory: extract + consolidate durable facts from this turn.
+        runMemoryTasks(sessionId, nextMessages)
 
         // ── ADR-0019: drive the self-driving `/goal` loop forward ───────────
         // Runs once the turn truly sealed and no tool approval is pending.

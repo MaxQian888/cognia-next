@@ -687,6 +687,10 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
   const referencedPaths = useChatStore
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
+  // NOTE: long-term memory injection is wired for direct chat only. Team chat
+  // builds twin deps + the shared query embedding exactly once per turn; reusing
+  // that for memory recall (without a second `tryBuildTwinDeps`) needs a small
+  // deps-reuse refactor, deferred to keep the per-turn embed invariant intact.
   const baseOpts = await resolveSendOptions({
     session: session as never,
     character,

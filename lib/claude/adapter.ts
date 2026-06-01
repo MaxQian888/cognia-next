@@ -491,9 +491,21 @@ export function mergeTwinSourcesIntoLastAssistant(
       sample.summary.length > 200 ? sample.summary.slice(0, 199).trimEnd() + "…" : sample.summary,
     origin: "twin-style",
   }))
-  if (chunkSources.length === 0 && styleSources.length === 0) return messages
+  return appendSourcesToLastAssistant(messages, [...chunkSources, ...styleSources])
+}
 
-  // Locate the most recent assistant message (the turn that just finished).
+/**
+ * Shared fold: merge `additions` onto the most recent assistant message's
+ * SourcesPart. Returns the same reference when nothing changes (so callers can
+ * skip a re-persist). Idempotent — `mergeSources` dedupes by `url || title`, and
+ * a same-length/same-id result short-circuits. Used by both the Twin and Memory
+ * source merges.
+ */
+function appendSourcesToLastAssistant(
+  messages: UIMessage[],
+  additions: SourcesPartItem[]
+): UIMessage[] {
+  if (additions.length === 0) return messages
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
@@ -501,7 +513,7 @@ export function mergeTwinSourcesIntoLastAssistant(
     const sourcesIdx = parts.findIndex((p) => (p as { type?: string }).type === "sources")
     const existingPart = sourcesIdx >= 0 ? (parts[sourcesIdx] as unknown as SourcesPart) : null
     const existingSources = existingPart?.sources ?? []
-    const merged = mergeSources(existingSources, chunkSources, styleSources)
+    const merged = mergeSources(existingSources, additions)
     // Idempotent guard — same length + same ids means we already injected.
     if (
       merged.length === existingSources.length &&
@@ -524,4 +536,29 @@ export function mergeTwinSourcesIntoLastAssistant(
     return nextMessages
   }
   return messages
+}
+
+/** Recalled-memory context stashed on `SendOptions.memoryContext`. */
+export interface MemorySourcesContext {
+  retrievedMemories: Array<{ id: string; type: string; text: string; score: number }>
+}
+
+/**
+ * Merge recalled long-term memories onto the last assistant message's
+ * SourcesPart as `origin: "memory"` items. Mirrors
+ * `mergeTwinSourcesIntoLastAssistant`; shares the idempotent fold helper.
+ */
+export function mergeMemorySourcesIntoLastAssistant(
+  messages: UIMessage[],
+  memoryContext: MemorySourcesContext | undefined | null
+): UIMessage[] {
+  if (!memoryContext || memoryContext.retrievedMemories.length === 0) return messages
+  const memorySources: SourcesPartItem[] = memoryContext.retrievedMemories.map((m) => ({
+    id: `memory-${m.id}`,
+    title: m.text.length > 80 ? m.text.slice(0, 79).trimEnd() + "…" : m.text,
+    snippet: m.text.length > 200 ? m.text.slice(0, 199).trimEnd() + "…" : m.text,
+    origin: "memory",
+    score: m.score,
+  }))
+  return appendSourcesToLastAssistant(messages, memorySources)
 }

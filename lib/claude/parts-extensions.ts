@@ -163,9 +163,10 @@ export interface SourcesPartItem {
    * - `anthropic` — Anthropic Citations API (web search, page_location, …)
    * - `twin-rag`  — chunk pulled from the user's Digital Twin vector store
    * - `twin-style`— style few-shot sample selected for this turn
+   * - `memory`    — long-term memory recalled for this turn (autonomous memory)
    * - `footnote`  — markdown footnote definition in the assistant text
    */
-  origin: "anthropic" | "twin-rag" | "twin-style" | "footnote"
+  origin: "anthropic" | "twin-rag" | "twin-style" | "memory" | "footnote"
   /** Optional similarity / confidence score (0..1). */
   score?: number
   /**

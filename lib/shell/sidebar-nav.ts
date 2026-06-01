@@ -10,6 +10,7 @@
 import {
   ActivityIcon,
   BotIcon,
+  BrainIcon,
   CalendarClockIcon,
   ClipboardCheckIcon,
   CompassIcon,
@@ -43,6 +44,7 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   scheduler: CalendarClockIcon,
   goals: TargetIcon,
   "source-control": GitBranchIcon,
+  memory: BrainIcon,
   observability: GaugeIcon,
   eval: ClipboardCheckIcon,
   performance: ActivityIcon,

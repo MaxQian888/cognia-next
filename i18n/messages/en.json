@@ -1636,11 +1636,13 @@
       "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
       "retrievedChunksHeader": "Retrieved chunks ({count})",
       "styleSamplesHeader": "Style samples ({count})",
+      "recalledMemoriesHeader": "Recalled memories ({count})",
       "viewSource": "View source",
       "originLabel": {
         "anthropic": "Web",
         "twinRag": "Twin",
         "twinStyle": "Style",
+        "memory": "Memory",
         "footnote": "Note"
       }
     },
@@ -2444,6 +2446,7 @@
       "workflows": "Workflows",
       "goals": "Goals",
       "conversation": "Conversation",
+      "memory": "Memory",
       "discover": "Discover"
     },
     "descriptions": {
@@ -2491,6 +2494,7 @@
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "conversation": "Auto titles and the conversation timeline minimap",
+      "memory": "Autonomous long-term memory — what the assistant remembers about you across sessions, plus extraction, recall, and privacy controls.",
       "discover": "Pin, reorder, or hide the Discover categories."
     },
     "externalBridge": {
@@ -6222,6 +6226,51 @@
         "requireHitlForWritesLabel": "Require confirm card for write actions"
       }
     },
+    "memory": {
+      "title": "Memory",
+      "description": "What the assistant remembers about you across sessions.",
+      "enabled": {
+        "heading": "Enable long-term memory",
+        "description": "Recall durable facts about you and inject them into future chats.",
+        "label": "Enable long-term memory"
+      },
+      "autoExtract": {
+        "heading": "Learn automatically",
+        "description": "After each turn, quietly extract durable facts from what you said.",
+        "label": "Learn automatically"
+      },
+      "temporary": {
+        "heading": "Temporary mode",
+        "description": "Pause memory for now — neither read nor write this session.",
+        "label": "Temporary mode"
+      },
+      "scope": {
+        "heading": "Default scope",
+        "description": "Where new memories are stored. Global is shared across all characters.",
+        "global": "Global (all characters)",
+        "character": "Per character"
+      },
+      "hybrid": {
+        "heading": "Hybrid retrieval",
+        "description": "Combine semantic (vector) and keyword search when recalling.",
+        "label": "Hybrid retrieval"
+      },
+      "cloudEmbedding": {
+        "heading": "Allow cloud embeddings",
+        "description": "Let memory text be embedded by a cloud provider. Off keeps it on-device (keyword-only).",
+        "label": "Allow cloud embeddings"
+      },
+      "topK": { "label": "Memories injected per turn" },
+      "cap": { "label": "Max active memories per scope" },
+      "manage": "Manage memories",
+      "clearAll": {
+        "button": "Clear all",
+        "title": "Clear all memories?",
+        "description": "This permanently deletes every stored memory. This cannot be undone.",
+        "confirm": "Delete everything",
+        "cancel": "Cancel"
+      }
+    },
     "conversation": {
       "title": "Conversation",
       "description": "Auto-generate titles and configure the timeline minimap.",
@@ -9324,6 +9373,41 @@
       "cost": "Cost"
     }
   },
+  "memory": {
+    "types": {
+      "semantic": "Fact",
+      "episodic": "Event",
+      "procedural": "Preference"
+    },
+    "panel": {
+      "title": "Memory",
+      "subtitle": "What the assistant remembers about you.",
+      "stats": { "active": "Active" },
+      "searchLabel": "Search memories",
+      "searchPlaceholder": "Search memories…",
+      "sortLabel": "Sort",
+      "sort": {
+        "recent": "Recently updated",
+        "importance": "Importance",
+        "accessed": "Recently used"
+      },
+      "showInvalidated": "Show archived",
+      "empty": {
+        "title": "No memories yet",
+        "description": "As you chat, durable facts about you are saved here. You can also use /remember."
+      },
+      "editLabel": "Edit memory text",
+      "accessedRelative": "used {time}",
+      "viewSource": "View source",
+      "invalidated": "archived",
+      "saveEdit": "Save",
+      "cancelEdit": "Cancel",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "edit": "Edit",
+      "delete": "Delete"
+    }
+  },
   "observability": {
     "title": "Observability",
     "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
@@ -10953,6 +11037,7 @@
       "scheduler": "Scheduler",
       "goals": "Goals",
       "sourceControl": "Source Control",
+      "memory": "Memory",
       "observability": "Observability",
       "eval": "Evaluation",
       "performance": "Performance",

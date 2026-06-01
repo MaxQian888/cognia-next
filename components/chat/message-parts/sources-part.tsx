@@ -13,7 +13,7 @@ import Link from "next/link"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { BookIcon, ChevronDownIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
+import { BookIcon, BrainIcon, ChevronDownIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 
 interface SourcesPartProps {
@@ -28,25 +28,30 @@ const ORIGIN_LABEL_KEY: Record<SourcesPartItem["origin"], string> = {
   anthropic: "anthropic",
   "twin-rag": "twinRag",
   "twin-style": "twinStyle",
+  memory: "memory",
   footnote: "footnote",
 }
 
-const TWIN_ORIGINS: SourcesPartItem["origin"][] = ["twin-rag", "twin-style"]
+// Origins that are "retrieval feedback" worth auto-expanding when they're the
+// only thing shown (twin chunks/style + recalled memory).
+const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = ["twin-rag", "twin-style", "memory"]
 
-function isOnlyTwin(sources: SourcesPartItem[]): boolean {
-  return sources.length > 0 && sources.every((s) => TWIN_ORIGINS.includes(s.origin))
+function isOnlyRetrieval(sources: SourcesPartItem[]): boolean {
+  return sources.length > 0 && sources.every((s) => AUTO_OPEN_ORIGINS.includes(s.origin))
 }
 
 function partition(sources: SourcesPartItem[]) {
   const twinRag: SourcesPartItem[] = []
   const twinStyle: SourcesPartItem[] = []
+  const memory: SourcesPartItem[] = []
   const other: SourcesPartItem[] = []
   for (const s of sources) {
     if (s.origin === "twin-rag") twinRag.push(s)
     else if (s.origin === "twin-style") twinStyle.push(s)
+    else if (s.origin === "memory") memory.push(s)
     else other.push(s)
   }
-  return { twinRag, twinStyle, other }
+  return { twinRag, twinStyle, memory, other }
 }
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
@@ -55,8 +60,8 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
-  const open = defaultOpen ?? isOnlyTwin(part.sources)
-  const { twinRag, twinStyle, other } = partition(part.sources)
+  const open = defaultOpen ?? isOnlyRetrieval(part.sources)
+  const { twinRag, twinStyle, memory, other } = partition(part.sources)
 
   return (
     <Collapsible
@@ -98,6 +103,18 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
             </div>
           </section>
         )}
+        {memory.length > 0 && (
+          <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
+            <h4 className="text-[11px] font-medium text-muted-foreground">
+              {t("recalledMemoriesHeader", { count: memory.length })}
+            </h4>
+            <div className="flex flex-col gap-1">
+              {memory.map((s) => (
+                <SourceRow key={s.id} source={s} />
+              ))}
+            </div>
+          </section>
+        )}
         {other.length > 0 && (
           <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
             {other.map((s) => (
@@ -114,6 +131,11 @@ function originIcon(origin: SourcesPartItem["origin"]) {
   if (origin === "twin-style") {
     return (
       <SparklesIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    )
+  }
+  if (origin === "memory") {
+    return (
+      <BrainIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     )
   }
   return <BookIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />

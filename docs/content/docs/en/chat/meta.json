@@ -2,6 +2,7 @@
   "title": "Chat & Agents",
   "pages": [
     "chat-and-skills",
+    "built-in-agent",
     "skills-system",
     "agent-teams",
     "slash-commands",

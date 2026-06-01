@@ -43,6 +43,7 @@ import {
   MessagesSquareIcon,
   PanelLeftIcon,
   CompassIcon,
+  BrainIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -75,6 +76,7 @@ export type SettingsSectionId =
   | "artifacts"
   | "canvas"
   | "conversation"
+  | "memory"
   | "mcp"
   | "a2ui"
   | "plugins"
@@ -343,6 +345,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "conversation",
     group: "interface",
     icon: MessagesSquareIcon,
+  },
+  {
+    id: "memory",
+    labelKey: "memory",
+    descriptionKey: "memory",
+    group: "ai",
+    icon: BrainIcon,
   },
 
   // === Data ===
@@ -804,6 +813,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "代码",
     "预览",
   ],
+  memory: ["memory", "long-term", "remember", "recall", "facts", "记忆", "preferences"],
   mcp: ["model context", "stdio", "server", "tool"],
   a2ui: [
     "a2ui",

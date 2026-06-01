@@ -2,6 +2,7 @@
   "title": "聊天与智能体",
   "pages": [
     "chat-and-skills",
+    "built-in-agent",
     "skills-system",
     "agent-teams",
     "slash-commands",

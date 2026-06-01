@@ -140,4 +140,23 @@ describe("SourcesPart", () => {
     // Mixed origin → caller decides; default-open heuristic does not fire.
     expect(screen.queryByTestId("sources-part-section-twin-rag")).toBeNull()
   })
+
+  it("renders recalled memories in a dedicated memory section", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "memory-m1", title: "prefers pnpm", origin: "memory", score: 0.8 }],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getByTestId("sources-part-section-memory")).toBeTruthy()
+    expect(screen.getByText("prefers pnpm")).toBeTruthy()
+  })
+
+  it("auto-expands when the only sources are recalled memories", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "memory-m1", title: "prefers pnpm", origin: "memory" }],
+    }
+    render(<SourcesPart part={part} />)
+    expect(screen.getByTestId("sources-part-section-memory")).toBeTruthy()
+  })
 })

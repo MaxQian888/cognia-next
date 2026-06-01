@@ -1,0 +1,13 @@
+{
+  "title": "A2UI",
+  "pages": [
+    "index",
+    "protocol-core",
+    "catalog-rendering",
+    "mcp-bridge",
+    "output-profiles",
+    "app-generator",
+    "im-bridge",
+    "state-persistence"
+  ]
+}

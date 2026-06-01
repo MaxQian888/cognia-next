@@ -1,0 +1,14 @@
+{
+  "title": "内置 Agent",
+  "pages": [
+    "index",
+    "runtime-loop",
+    "build-options",
+    "permissions",
+    "hooks",
+    "subagents",
+    "memory",
+    "tools-mcp",
+    "chat-middleware"
+  ]
+}

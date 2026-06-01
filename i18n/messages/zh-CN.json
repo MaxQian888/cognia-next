@@ -1636,11 +1636,13 @@
       "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
       "retrievedChunksHeader": "检索片段（{count}）",
       "styleSamplesHeader": "风格样本（{count}）",
+      "recalledMemoriesHeader": "召回的记忆（{count}）",
       "viewSource": "查看原文",
       "originLabel": {
         "anthropic": "网络",
         "twinRag": "数字分身",
         "twinStyle": "风格",
+        "memory": "记忆",
         "footnote": "脚注"
       }
     },
@@ -2444,6 +2446,7 @@
       "workflows": "工作流",
       "goals": "目标",
       "conversation": "会话",
+      "memory": "记忆",
       "discover": "发现"
     },
     "descriptions": {
@@ -2491,6 +2494,7 @@
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
       "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
       "conversation": "自动标题与对话时间线缩略图",
+      "memory": "自治长期记忆——助手跨会话记住关于你的事，含抽取、召回与隐私控制。",
       "discover": "置顶、排序或隐藏发现页的分类。"
     },
     "externalBridge": {
@@ -6222,6 +6226,51 @@
         "requireHitlForWritesLabel": "写操作需要确认卡"
       }
     },
+    "memory": {
+      "title": "记忆",
+      "description": "助手跨会话记住关于你的内容。",
+      "enabled": {
+        "heading": "启用长期记忆",
+        "description": "召回关于你的耐久事实，并注入到后续对话中。",
+        "label": "启用长期记忆"
+      },
+      "autoExtract": {
+        "heading": "自动学习",
+        "description": "每轮对话后，悄悄从你说的话里抽取耐久事实。",
+        "label": "自动学习"
+      },
+      "temporary": {
+        "heading": "临时模式",
+        "description": "暂停记忆——本次会话既不读取也不写入。",
+        "label": "临时模式"
+      },
+      "scope": {
+        "heading": "默认作用域",
+        "description": "新记忆存放的位置。全局记忆在所有人格间共享。",
+        "global": "全局（所有人格）",
+        "character": "按人格"
+      },
+      "hybrid": {
+        "heading": "混合检索",
+        "description": "召回时结合语义（向量）与关键词检索。",
+        "label": "混合检索"
+      },
+      "cloudEmbedding": {
+        "heading": "允许云端向量化",
+        "description": "允许记忆文本由云端服务做向量化。关闭则仅在本机（关键词检索）。",
+        "label": "允许云端向量化"
+      },
+      "topK": { "label": "每轮注入的记忆数" },
+      "cap": { "label": "每个作用域的最大活跃记忆数" },
+      "manage": "管理记忆",
+      "clearAll": {
+        "button": "全部清除",
+        "title": "清除所有记忆？",
+        "description": "这将永久删除所有已存记忆，且不可恢复。",
+        "confirm": "全部删除",
+        "cancel": "取消"
+      }
+    },
     "conversation": {
       "title": "会话",
       "description": "自动生成标题并配置时间线缩略图。",
@@ -9324,6 +9373,41 @@
       "cost": "成本"
     }
   },
+  "memory": {
+    "types": {
+      "semantic": "事实",
+      "episodic": "事件",
+      "procedural": "偏好"
+    },
+    "panel": {
+      "title": "记忆",
+      "subtitle": "助手记住的关于你的内容。",
+      "stats": { "active": "活跃" },
+      "searchLabel": "搜索记忆",
+      "searchPlaceholder": "搜索记忆…",
+      "sortLabel": "排序",
+      "sort": {
+        "recent": "最近更新",
+        "importance": "重要性",
+        "accessed": "最近使用"
+      },
+      "showInvalidated": "显示已归档",
+      "empty": {
+        "title": "暂无记忆",
+        "description": "随着对话进行，关于你的耐久事实会保存在这里。也可以用 /remember。"
+      },
+      "editLabel": "编辑记忆内容",
+      "accessedRelative": "{time}使用",
+      "viewSource": "查看来源",
+      "invalidated": "已归档",
+      "saveEdit": "保存",
+      "cancelEdit": "取消",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "edit": "编辑",
+      "delete": "删除"
+    }
+  },
   "observability": {
     "title": "可观测性",
     "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
@@ -10953,6 +11037,7 @@
       "scheduler": "调度器",
       "goals": "目标",
       "sourceControl": "源代码管理",
+      "memory": "记忆",
       "observability": "可观测性",
       "eval": "评估",
       "performance": "性能",

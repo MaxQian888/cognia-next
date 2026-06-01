@@ -204,6 +204,10 @@ const ConversationSection = dynamic(
   () => import("./conversation/conversation-section").then((m) => m.ConversationSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const MemorySection = dynamic(
+  () => import("./sections/memory-section").then((m) => m.MemorySection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -366,6 +370,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <CanvasSection />
     case "conversation":
       return <ConversationSection />
+    case "memory":
+      return <MemorySection />
     case "mcp":
       return <McpServersSection />
     case "a2ui":
