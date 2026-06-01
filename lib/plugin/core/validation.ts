@@ -85,6 +85,7 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "terminal:write",
   "terminal:kill",
   "terminal:completion",
+  "terminal:safety",
   "git:read",
   "git:write",
   "goal:read",

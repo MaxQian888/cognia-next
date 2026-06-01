@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { PermissionsToolsTab } from "./permissions-tools-tab"
+import { BUILTIN_TOOL_CATEGORIES } from "@/lib/settings/builtin-tools"
+
+const CATEGORY_COUNT = BUILTIN_TOOL_CATEGORIES.length
 
 const setBuiltinToolEnabled = jest.fn().mockResolvedValue(undefined)
 const toggleAlwaysAllow = jest.fn().mockResolvedValue(undefined)
@@ -42,6 +45,12 @@ jest.mock("@/components/settings/tools/always-allow-list", () => ({
   AlwaysAllowList: () => <div data-testid="always-allow-list" />,
 }))
 
+// The Command Auto-mode card has its own suite; stub it so this tab's
+// switch-count / category assertions stay scoped to the built-in tools.
+jest.mock("@/components/settings/agent-runtime/command-auto-mode-card", () => ({
+  CommandAutoModeCard: () => null,
+}))
+
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriRef.current,
 }))
@@ -69,11 +78,11 @@ describe("PermissionsToolsTab", () => {
     }
   })
 
-  it("renders 6 category cards with switches", () => {
+  it("renders a switch per built-in tool category", () => {
     render(<PermissionsToolsTab />)
-    // 6 category switches + 1 "always allow" Add button + AlwaysAllowList stub.
+    // One switch per category (Auto-mode card is stubbed out above).
     const switches = screen.getAllByRole("switch")
-    expect(switches).toHaveLength(6)
+    expect(switches).toHaveLength(CATEGORY_COUNT)
     expect(screen.getByTestId("always-allow-list")).toBeInTheDocument()
   })
 
@@ -150,7 +159,7 @@ describe("PermissionsToolsTab", () => {
       } as Record<string, unknown>,
     }
     render(<PermissionsToolsTab />)
-    // Six switches still render; their state defaults to false.
-    expect(screen.getAllByRole("switch")).toHaveLength(6)
+    // One switch per category still renders; their state defaults to false.
+    expect(screen.getAllByRole("switch")).toHaveLength(CATEGORY_COUNT)
   })
 })

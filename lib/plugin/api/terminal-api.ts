@@ -36,8 +36,29 @@ import {
   adaptPluginCompletionProvider,
   registerPluginCompletionProvider,
 } from "@/lib/plugin/bridge/terminal-completion-bridge"
+import { registerPluginCommandRules } from "@/lib/plugin/registries/command-safety-registry"
+import { classifyCommand as classifyCommandImpl } from "@/lib/claude/permissions/command-safety"
+import type { CommandVerdict } from "@/lib/claude/permissions/command-safety"
+import type { ToolRules } from "@/lib/claude/permissions/ruleset"
 import type { PluginTerminalCompletionProvider } from "@/types/plugin/plugin-terminal-completion"
 import type { SpawnRequest } from "@/lib/terminal/types"
+
+/** A plugin-contributed command-safety rule (`command-glob → verdict`). */
+export interface PluginCommandRule {
+  /** Command glob; author with a trailing `*`, e.g. `"deploy-prod*"`. */
+  pattern: string
+  /** Verdict applied when a command segment matches the glob. */
+  verdict: CommandVerdict
+}
+
+/** Result of `ctx.terminal.classifyCommand`. */
+export interface PluginCommandClassification {
+  verdict: CommandVerdict
+  /** Short English rationale for the most severe finding. */
+  reason: string
+  /** Head command that drove the verdict, when known. */
+  matched?: string
+}
 
 const DEFAULT_ROWS = 24
 const DEFAULT_COLS = 80
@@ -120,6 +141,22 @@ export interface PluginTerminalAPI {
    * disable. Requires `terminal:completion`.
    */
   registerCompletionProvider(provider: PluginTerminalCompletionProvider): () => void
+  /**
+   * Contribute command-safety rules consulted by the agent's shell Auto-mode
+   * (`lib/claude/permissions/auto-mode.ts`). Each rule maps a command glob to
+   * an allow/ask/deny verdict; they sit BELOW the user's own
+   * `agentPermissions.commandRules` in precedence, so a plugin can tighten or
+   * loosen the policy for its own commands without overriding the user. The
+   * rules merge across calls; returns a disposer (also dropped on plugin
+   * disable). Requires `terminal:safety`.
+   */
+  registerCommandSafetyRule(rules: PluginCommandRule | PluginCommandRule[]): () => void
+  /**
+   * Classify how risky a shell command is, using the same deterministic engine
+   * Auto-mode uses (`classifyCommand`). Pure / read-only. Requires
+   * `terminal:safety`.
+   */
+  classifyCommand(command: string): PluginCommandClassification
 }
 
 /** Thrown when a plugin touches a session it doesn't own / that's gone. */
@@ -246,17 +283,52 @@ export function createTerminalAPI(pluginId: string): PluginTerminalAPI {
       )
       return registerPluginCompletionProvider(pluginId, host)
     },
+
+    registerCommandSafetyRule: (rules) => {
+      const list = Array.isArray(rules) ? rules : [rules]
+      const map: ToolRules = {}
+      for (const r of list) {
+        if (
+          r &&
+          typeof r.pattern === "string" &&
+          r.pattern.length > 0 &&
+          (r.verdict === "allow" || r.verdict === "ask" || r.verdict === "deny")
+        ) {
+          map[r.pattern] = r.verdict
+        }
+      }
+      if (Object.keys(map).length === 0) return () => {}
+      return registerPluginCommandRules(pluginId, map)
+    },
+
+    classifyCommand: (command) => {
+      const c = classifyCommandImpl(String(command ?? ""))
+      return { verdict: c.verdict, reason: c.reason, matched: c.matched }
+    },
   }
 
-  return createGuardedAPI(pluginId, api, {
-    spawn: "terminal:spawn",
-    runScript: "terminal:spawn",
-    detectScriptType: "terminal:spawn",
-    list: "terminal:spawn",
-    readRecent: "terminal:spawn",
-    onData: "terminal:spawn",
-    write: "terminal:write",
-    kill: "terminal:kill",
-    registerCompletionProvider: "terminal:completion",
-  })
+  return createGuardedAPI(
+    pluginId,
+    api,
+    {
+      spawn: "terminal:spawn",
+      runScript: "terminal:spawn",
+      detectScriptType: "terminal:spawn",
+      list: "terminal:spawn",
+      readRecent: "terminal:spawn",
+      onData: "terminal:spawn",
+      write: "terminal:write",
+      kill: "terminal:kill",
+      registerCompletionProvider: "terminal:completion",
+      registerCommandSafetyRule: "terminal:safety",
+      classifyCommand: "terminal:safety",
+    },
+    {
+      // These are synchronous queries / a subscription / a pure helper — they
+      // return non-Promises and (for the owned-session ones) throw ownership
+      // errors synchronously. They share `terminal:spawn` with the actual
+      // spawn action but must not route through the async consent overlay.
+      consentExempt: ["detectScriptType", "list", "readRecent", "onData", "classifyCommand"],
+    }
+  )
 }

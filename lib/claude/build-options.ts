@@ -685,6 +685,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.permissionMode
   if (permissionMode) opts.permissionMode = permissionMode
 
+  // --- Permission ruleset (OpenCode-style static command rules) ------------
+  // Serialize the user's explicit `command-glob → allow|ask|deny` overrides
+  // into SendOptions so the sidecar `canUseTool` can short-circuit obvious
+  // allows/denies without a round-trip (Layer A). Only explicit rules are
+  // sent — no blanket default — so absent a rule the normal approval flow is
+  // untouched. The renderer's Auto-mode (Layer B) handles the richer cases.
+  const commandRules = appSettings?.agentPermissions?.commandRules
+  if (commandRules && Object.keys(commandRules).length > 0) {
+    opts.permissionRuleset = { Bash: commandRules }
+  }
+
   // --- Tool whitelist/blacklist --------------------------------------------
   // Member override REPLACES the character's allowedTools (does not union).
   // Skills still contribute their tools so an override doesn't accidentally

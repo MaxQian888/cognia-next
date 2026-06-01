@@ -13,6 +13,10 @@ import {
   getCompletions,
   listProviders,
 } from "@/lib/terminal/completion/registry"
+import {
+  __resetCommandSafetyRegistry,
+  getPluginCommandRulesets,
+} from "@/lib/plugin/registries/command-safety-registry"
 import type { TerminalCompletionContext } from "@/lib/terminal/completion/types"
 
 const spawnFromDock = jest.fn(async (..._a: unknown[]) => ({}) as unknown)
@@ -239,6 +243,44 @@ describe("createTerminalAPI", () => {
       expect(out[0]).toMatchObject({ text: "git status", source: "plugin" })
       off()
       expect(listProviders().map((p) => p.id)).not.toContain(`${PLUGIN}:fig`)
+    })
+  })
+
+  describe("command safety", () => {
+    beforeEach(() => __resetCommandSafetyRegistry())
+
+    it("registerCommandSafetyRule requires terminal:safety", () => {
+      guard.registerPlugin(PLUGIN, ["terminal:spawn"])
+      const api = createTerminalAPI(PLUGIN)
+      expect(() => api.registerCommandSafetyRule({ pattern: "x*", verdict: "deny" })).toThrow(
+        PermissionError
+      )
+    })
+
+    it("registers and disposes plugin command rules", () => {
+      guard.registerPlugin(PLUGIN, ["terminal:safety"])
+      const api = createTerminalAPI(PLUGIN)
+      const off = api.registerCommandSafetyRule([{ pattern: "deploy*", verdict: "deny" }])
+      expect(getPluginCommandRulesets()).toEqual([{ Bash: { "deploy*": "deny" } }])
+      off()
+      expect(getPluginCommandRulesets()).toEqual([])
+    })
+
+    it("ignores malformed rules without registering an entry", () => {
+      guard.registerPlugin(PLUGIN, ["terminal:safety"])
+      const api = createTerminalAPI(PLUGIN)
+      api.registerCommandSafetyRule([
+        { pattern: "", verdict: "deny" },
+        { pattern: "ok*", verdict: "nope" } as never,
+      ])
+      expect(getPluginCommandRulesets()).toEqual([])
+    })
+
+    it("classifyCommand returns a deterministic verdict", () => {
+      guard.registerPlugin(PLUGIN, ["terminal:safety"])
+      const api = createTerminalAPI(PLUGIN)
+      expect(api.classifyCommand("rm -rf /").verdict).toBe("deny")
+      expect(api.classifyCommand("git status").verdict).toBe("allow")
     })
   })
 })

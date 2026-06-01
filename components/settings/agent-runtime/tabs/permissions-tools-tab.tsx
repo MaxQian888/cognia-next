@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 
 import { AlwaysAllowList } from "@/components/settings/tools/always-allow-list"
+import { CommandAutoModeCard } from "@/components/settings/agent-runtime/command-auto-mode-card"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import {
@@ -71,6 +72,8 @@ export function PermissionsToolsTab() {
 
   return (
     <div className="space-y-4">
+      <CommandAutoModeCard />
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">

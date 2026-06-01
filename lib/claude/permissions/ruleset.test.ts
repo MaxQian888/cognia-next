@@ -1,5 +1,7 @@
 import {
   resolvePermission,
+  resolvePermissionDetailed,
+  resolveBashPermission,
   matchGlob,
   mergeRulesets,
   DEFAULT_RULESET,
@@ -102,5 +104,55 @@ describe("mergeRulesets", () => {
 
   it("skips nullish inputs", () => {
     expect(mergeRulesets(undefined, null, { Read: "allow" })).toEqual({ Read: "allow" })
+  })
+})
+
+describe("resolvePermissionDetailed", () => {
+  it("reports layer 0 for the baked-in default", () => {
+    expect(resolvePermissionDetailed("Bash", "ls", [])).toEqual({ verdict: "allow", layer: 0 })
+  })
+
+  it("reports the explicit layer when a caller rule wins", () => {
+    const rs: Ruleset[] = [{ Bash: { "git push*": "ask" } }]
+    expect(resolvePermissionDetailed("Bash", "git push origin", rs)).toEqual({
+      verdict: "ask",
+      layer: 1,
+    })
+  })
+})
+
+describe("resolveBashPermission", () => {
+  it("returns explicit:false when nothing user-defined matches", () => {
+    expect(resolveBashPermission("git status", [])).toEqual({ verdict: "allow", explicit: false })
+  })
+
+  it("matches a full-segment glob", () => {
+    const rs: Ruleset[] = [{ Bash: { "git push*": "ask" } }]
+    expect(resolveBashPermission("git push origin main", rs)).toEqual({
+      verdict: "ask",
+      explicit: true,
+    })
+  })
+
+  it("matches a bare-head rule against any args", () => {
+    const rs: Ruleset[] = [{ Bash: { rm: "deny" } }]
+    expect(resolveBashPermission("rm foo.txt", rs)).toEqual({ verdict: "deny", explicit: true })
+  })
+
+  it("takes the worst verdict across a compound command", () => {
+    const rs: Ruleset[] = [{ Bash: { ls: "allow", "git push*": "deny" } }]
+    expect(resolveBashPermission("ls && git push", rs)).toEqual({
+      verdict: "deny",
+      explicit: true,
+    })
+  })
+
+  it("surfaces destructive commands hidden in substitutions", () => {
+    const rs: Ruleset[] = [{ Bash: { rm: "ask" } }]
+    expect(resolveBashPermission("echo $(rm x)", rs).explicit).toBe(true)
+  })
+
+  it("resolves an empty command against the rules directly", () => {
+    expect(resolveBashPermission("", []).explicit).toBe(false)
   })
 })

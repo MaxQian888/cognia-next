@@ -289,6 +289,7 @@ export type PluginPermission =
   | "terminal:write" // Pipe bytes into an existing terminal session's stdin
   | "terminal:kill" // Signal-terminate an existing terminal session
   | "terminal:completion" // Contribute inline command completions + read the in-progress input line
+  | "terminal:safety" // Contribute command-safety rules + classify command risk for Auto-mode
   | "git:read" // Read the active source-control repository (status/log/diff/branches)
   | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
   | "goal:read" // Read the user's goals and their progress

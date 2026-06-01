@@ -13,6 +13,8 @@ import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
+import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety-registry"
 import { generateConversationTitle } from "@/lib/ai/generation/title"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
@@ -1229,6 +1231,42 @@ async function handleEvent(
           console.error("non-active deny failed", err)
         }
         return
+      }
+      // Auto mode: auto-decide shell-command safety (deterministic rules +
+      // optional small-model judge). A non-"ask" decision short-circuits the
+      // approval modal; anything uncertain falls through to the manual prompt.
+      // Fail-open: any error here just shows the normal approval.
+      try {
+        const settings = useSettingsStore.getState().settings
+        const judgeClient = buildUtilityLlmClient({
+          session: null,
+          appSettings: settings,
+          override: settings?.agentPermissions?.autoApprove?.judgeModel,
+          featureId: "command-safety",
+        })
+        const decision = await runAutoModeForTool({
+          toolName: evt.toolName,
+          input: evt.input,
+          settings,
+          client: judgeClient,
+          locale: settings?.language,
+          pluginRules: getPluginCommandRulesets(),
+        })
+        if (decision && decision.decision === "allow") {
+          await approveTool(evt.sessionId, evt.requestId, "allow")
+          return
+        }
+        if (decision && decision.decision === "deny") {
+          await approveTool(
+            evt.sessionId,
+            evt.requestId,
+            "deny",
+            `auto-denied (${decision.source}): ${decision.reason}`
+          )
+          return
+        }
+      } catch (err) {
+        console.error("auto-mode evaluation failed", err)
       }
       const approval: PendingApproval = {
         sessionId: evt.sessionId,

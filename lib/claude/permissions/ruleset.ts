@@ -19,7 +19,11 @@
  * (the patterns we need are file/tool globs, not full extglob).
  */
 
+import { splitCommandSegments } from "./command-parse"
+
 export type PermissionVerdict = "allow" | "ask" | "deny"
+
+const VERDICT_RANK: Record<PermissionVerdict, number> = { allow: 0, ask: 1, deny: 2 }
 
 /** Map of glob → verdict for a single tool (or the `*` wildcard tool). */
 export type ToolRules = Record<string, PermissionVerdict>
@@ -160,6 +164,28 @@ export function resolvePermission(
   rulesets: Ruleset[],
   opts: ResolveOptions = {}
 ): PermissionVerdict {
+  return resolvePermissionDetailed(tool, target, rulesets, opts).verdict
+}
+
+/** Resolved verdict plus the layer it came from (0 = baked-in default). */
+export interface ResolvedPermission {
+  verdict: PermissionVerdict
+  /** 0 = baked-in {@link DEFAULT_RULESET}; >0 = an explicit caller ruleset. */
+  layer: number
+}
+
+/**
+ * Like {@link resolvePermission} but also reports which layer won, so callers
+ * can tell an *explicit* user/character/plugin rule (layer > 0) apart from the
+ * permissive baked-in default — the Auto-mode orchestrator only lets an
+ * explicit rule short-circuit the command classifier.
+ */
+export function resolvePermissionDetailed(
+  tool: string,
+  target: string | undefined,
+  rulesets: Ruleset[],
+  opts: ResolveOptions = {}
+): ResolvedPermission {
   const layers = [DEFAULT_RULESET, ...rulesets]
   let best: Candidate | null = null
 
@@ -182,16 +208,52 @@ export function resolvePermission(
     }
   })
 
-  if (!best) return "allow"
+  if (!best) return { verdict: "allow", layer: 0 }
 
   // Safety: an allow that came only from the baked-in defaults is
   // escalated to a prompt when the target escapes the workspace. An
   // explicit user/character/agent rule (layer > 0) is respected as-is.
   const winner: Candidate = best
   if (winner.verdict === "allow" && winner.layer === 0 && isExternalPath(target, opts.cwd)) {
-    return "ask"
+    return { verdict: "ask", layer: 0 }
   }
-  return winner.verdict
+  return { verdict: winner.verdict, layer: winner.layer }
+}
+
+/**
+ * Command-aware permission resolution for the agent's shell tool. Splits a
+ * (possibly compound) command line into its head commands and resolves each
+ * against the `Bash` rules — the worst verdict wins, and `explicit` is true
+ * when any segment matched a caller-supplied rule (layer > 0). Rules are
+ * matched against the full segment text, so author them with trailing globs
+ * (e.g. `"git push*": "ask"`). Returns `explicit: false` with the default
+ * verdict when nothing user-defined matched, signalling the caller to fall
+ * back to the classifier.
+ */
+export function resolveBashPermission(
+  command: string,
+  rulesets: Ruleset[],
+  opts: ResolveOptions = {}
+): { verdict: PermissionVerdict; explicit: boolean } {
+  const segments = splitCommandSegments(command)
+  if (segments.length === 0) {
+    const r = resolvePermissionDetailed("Bash", (command ?? "").trim(), rulesets, opts)
+    return { verdict: r.verdict, explicit: r.layer > 0 }
+  }
+  let worst: PermissionVerdict = "allow"
+  let explicit = false
+  for (const seg of segments) {
+    // Match the full segment first; fall back to the bare head so a rule like
+    // `"rm": "ask"` still covers `rm foo.txt`.
+    let r = resolvePermissionDetailed("Bash", seg.raw, rulesets, opts)
+    if (r.layer === 0 && seg.head !== seg.raw) {
+      const byHead = resolvePermissionDetailed("Bash", seg.head, rulesets, opts)
+      if (byHead.layer > 0) r = byHead
+    }
+    if (r.layer > 0) explicit = true
+    if (VERDICT_RANK[r.verdict] > VERDICT_RANK[worst]) worst = r.verdict
+  }
+  return { verdict: worst, explicit }
 }
 
 /**

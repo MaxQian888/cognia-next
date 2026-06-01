@@ -159,6 +159,13 @@ const settingsState = {
   toggleAlwaysAllow: jest.fn().mockResolvedValue(undefined),
 }
 const settingsSubscribers: Array<(s: typeof settingsState) => void> = []
+
+// The background utility client is irrelevant to these tests (Auto-mode uses
+// the deterministic rules tier without it); stub it to null so no real
+// provider resolution runs.
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: () => null,
+}))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: Object.assign(
     <T>(selector: (s: typeof settingsState) => T): T => selector(settingsState),
@@ -562,6 +569,51 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "req-1", "allow")
     settingsState.settings.alwaysAllowTools = []
+  })
+
+  it("Auto-mode auto-approves a safe shell command without prompting", async () => {
+    ;(settingsState.settings as Record<string, unknown>).agentPermissions = {
+      autoApprove: { enabled: true },
+    }
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-auto-allow",
+        toolUseID: "tu-a",
+        toolName: "Bash",
+        input: { command: "git status" },
+      })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "req-auto-allow", "allow")
+    delete (settingsState.settings as Record<string, unknown>).agentPermissions
+  })
+
+  it("Auto-mode auto-denies a catastrophic shell command", async () => {
+    ;(settingsState.settings as Record<string, unknown>).agentPermissions = {
+      autoApprove: { enabled: true },
+    }
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-auto-deny",
+        toolUseID: "tu-d",
+        toolName: "Bash",
+        input: { command: "rm -rf /" },
+      })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-auto-deny",
+      "deny",
+      expect.stringContaining("auto-denied")
+    )
+    delete (settingsState.settings as Record<string, unknown>).agentPermissions
   })
 
   it("incoming permission_request for a non-active session is auto-denied", async () => {

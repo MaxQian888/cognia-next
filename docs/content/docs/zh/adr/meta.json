@@ -25,6 +25,7 @@
     "0032-agent-team-plugin-integration",
     "0033-integrated-terminal-phase-3",
     "0036-wechat-wecom-connectors",
-    "0037-public-share-links"
+    "0037-public-share-links",
+    "0041-agent-command-auto-mode"
   ]
 }

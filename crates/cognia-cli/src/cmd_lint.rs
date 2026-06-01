@@ -48,6 +48,7 @@ const VALID_PERMISSIONS: &[&str] = &[
     "terminal:write",
     "terminal:kill",
     "terminal:completion",
+    "terminal:safety",
     "git:read",
     "git:write",
     "goal:read",

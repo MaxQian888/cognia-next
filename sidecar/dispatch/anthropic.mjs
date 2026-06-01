@@ -22,6 +22,7 @@ import {
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { resolveForToolCall } from "./permission-resolver.mjs"
 import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
@@ -271,6 +272,27 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         : null
       if (suppressList && suppressList.includes(toolName)) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      // OpenCode-style static ruleset short-circuit (Layer A). Only EXPLICIT
+      // allow/deny rules act here; anything else ("ask") falls through to the
+      // normal round-trip so the renderer's richer Auto-mode (Layer B) and the
+      // manual approval modal still run. Fail-open on any resolver error.
+      const ruleset = sendOptions.permissionRuleset
+      if (ruleset) {
+        try {
+          const verdict = resolveForToolCall(ruleset, toolName, input)
+          if (verdict === "allow") {
+            return Promise.resolve({ behavior: "allow", updatedInput: input })
+          }
+          if (verdict === "deny") {
+            return Promise.resolve({
+              behavior: "deny",
+              message: "denied by permission ruleset",
+            })
+          }
+        } catch {
+          // fall through to the approval round-trip
+        }
       }
       const requestId = randomUUID()
       emit({

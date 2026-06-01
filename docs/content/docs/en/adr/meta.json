@@ -32,6 +32,7 @@
     "0034-workflow-editor-completeness-and-plugin-parity",
     "0035-rust-performance-dashboard",
     "0036-wechat-wecom-connectors",
-    "0037-public-share-links"
+    "0037-public-share-links",
+    "0041-agent-command-auto-mode"
   ]
 }

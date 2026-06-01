@@ -2783,6 +2783,17 @@ export class PluginManager {
       // optional dep — non-Tauri builds and tests without the modules wired
     }
 
+    // Command-safety cleanup — drop every command rule the plugin contributed
+    // via `ctx.terminal.registerCommandSafetyRule(...)`. Idempotent no-op for
+    // plugins that never registered any.
+    try {
+      const { unregisterPluginCommandRules } =
+        await import("@/lib/plugin/registries/command-safety-registry")
+      unregisterPluginCommandRules(pluginId)
+    } catch {
+      // optional dep — safe to ignore in environments without it wired
+    }
+
     // VS Code shim cleanup — lm provider registrations + chat participants.
     // For non-vscode-extension plugins these are no-ops (the maps will be
     // empty); for VS Code extensions they tear down every recorded handle.

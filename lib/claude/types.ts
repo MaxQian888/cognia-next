@@ -209,6 +209,18 @@ export interface SendOptions {
   suppressApprovalForTools?: string[]
 
   /**
+   * OpenCode-style glob permission ruleset consulted by the sidecar
+   * `canUseTool` before emitting a `permission_request`. A resolved
+   * `tool → glob → allow|ask|deny` map (see
+   * `lib/claude/permissions/ruleset.ts`). `allow` runs without prompting,
+   * `deny` rejects the tool call, `ask` falls through to the existing
+   * round-trip. Assembled by `resolveSendOptions` from the baked-in
+   * defaults + permission mode + character + `agentPermissions.commandRules`.
+   * The fine-grained layer that augments the coarse allow/deny tool union.
+   */
+  permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
+
+  /**
    * Extra HTTP headers the sidecar should merge into the Anthropic
    * request. Populated by `resolveSendOptions` from
    * `computeAnthropicBetaHeaders` when at least one Anthropic native
@@ -866,6 +878,39 @@ export interface AppSettings {
    * `lib/ai/generation/title.ts` and the chat hook's turn-complete path.
    */
   conversationTitle?: UtilityModelConfig
+  /**
+   * Agent command-execution permission policy — the "Auto mode" that
+   * auto-decides whether a shell command the agent runs is safe (allow),
+   * needs confirmation (ask), or must be blocked (deny). Modeled on
+   * OpenCode's permission ruleset + OpenClaw's exec-approval gate, with an
+   * optional small-model judge. See `lib/claude/permissions/`.
+   */
+  agentPermissions?: {
+    /** Command Auto-mode — auto-approve/deny shell commands. */
+    autoApprove?: {
+      /** Master switch. Off by default — every command prompts as today. */
+      enabled?: boolean
+      /**
+       * `rules` = deterministic classifier only (offline). `rules+model`
+       * = also consult a cheap background model when the classifier is
+       * uncertain. Defaults to `rules`.
+       */
+      mode?: "rules" | "rules+model"
+      /**
+       * When true (default), a model `high`-risk verdict denies the command
+       * instead of merely prompting.
+       */
+      denyOnHighRisk?: boolean
+      /** Per-feature model override for the safety judge (provider/model). */
+      judgeModel?: UtilityModelConfig
+    }
+    /**
+     * OpenCode-style `command-glob → allow|ask|deny` overrides for the
+     * agent's shell tool. Highest authority — an explicit match wins over
+     * the classifier. Author with trailing globs, e.g. `"git push*": "ask"`.
+     */
+    commandRules?: import("@/lib/claude/permissions/ruleset").ToolRules
+  }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
   // Tools the user has chosen to always allow for this app (per-tool name).
