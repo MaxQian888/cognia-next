@@ -24,7 +24,10 @@ import type {
   AttachmentDescriptor,
   AdapterAttachmentRef,
   HistoryFetchOpts,
+  StreamReplyRequest,
+  A2UICapabilityMatrix,
 } from "@/types/connectors"
+import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
@@ -655,6 +658,22 @@ export class ConnectorBus {
   }
 
   /**
+   * Push an incremental assistant reply through an adapter that supports
+   * platform-side streaming (`PlatformAdapter.streamReply`, e.g. WeCom's
+   * `stream`-framed responses). Best-effort, mirroring {@link setTypingOutbound}:
+   * resolves `false` when the adapter is missing or the platform has no
+   * streaming surface, so callers can feature-detect and fall back to a
+   * normal {@link sendOutbound}. `req.text` is the full accumulated reply so
+   * far (not a delta) — adapters diff against their own last frame.
+   */
+  async streamReplyOutbound(adapterId: string, req: StreamReplyRequest): Promise<boolean> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.streamReply) return false
+    await a.streamReply(req)
+    return true
+  }
+
+  /**
    * Drain an adapter's message-history stream (`PlatformAdapter.fetchHistory`)
    * into a bounded array. Returns `[]` when the adapter is missing or does
    * not implement history fetching. `opts.max` caps the drained count even if
@@ -1013,6 +1032,33 @@ export class ConnectorBus {
    */
   getAdapter(adapterId: string): PlatformAdapter | undefined {
     return this.adapters.get(adapterId)
+  }
+
+  /**
+   * Read an adapter's A2UI component-support matrix
+   * (`PlatformAdapter.a2uiCapability`) — the per-component-kind
+   * `native`/`simulated`/`fallback`/`unsupported` table the assistant and
+   * platform mappers use to decide how a surface degrades. Returns `null`
+   * when no adapter with that id is registered, so callers can pick a
+   * rendering strategy (rich card vs. plain-text mirror) per platform
+   * without holding the live adapter.
+   */
+  getAdapterA2UICapability(adapterId: string): A2UICapabilityMatrix | null {
+    const a = this.adapters.get(adapterId)
+    return a ? a.a2uiCapability() : null
+  }
+
+  /**
+   * Read which built-in skill families an adapter can serve on its channel
+   * (`PlatformAdapter.platformSkillCapabilities`, e.g. `lark.calendar`
+   * read+write). Returns `null` when no adapter with that id is registered
+   * and `[]` when the adapter does not declare any — so callers can tell
+   * "unknown adapter" apart from "adapter with no skill families".
+   */
+  getAdapterSkillCapabilities(adapterId: string): readonly PlatformSkillCapability[] | null {
+    const a = this.adapters.get(adapterId)
+    if (!a) return null
+    return a.platformSkillCapabilities ? a.platformSkillCapabilities() : []
   }
 
   /** Test-only: inspect or reset policy state. */

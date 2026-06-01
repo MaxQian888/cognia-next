@@ -13,12 +13,22 @@ import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 
 // ── bus mock ──────────────────────────────────────────────────────────────────
-const sendOutbound = jest.fn(async () => ({ ok: true, platformMessageId: "m1" }))
-const editOutbound = jest.fn(async () => ({ ok: true, platformMessageId: "m2" }))
-const deleteOutbound = jest.fn(async () => ({ ok: true }))
-const setTypingOutbound = jest.fn(async () => true)
-const uploadFileOutbound = jest.fn(async () => ({ localUrl: "file://x", remoteRef: "rr" }))
-const fetchHistoryAll = jest.fn(async () => [{ messageId: "h1" }])
+const sendOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m1" }))
+const editOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m2" }))
+const deleteOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const setTypingOutbound = jest.fn(async (..._a: unknown[]) => true)
+const uploadFileOutbound = jest.fn(async (..._a: unknown[]) => ({
+  localUrl: "file://x",
+  remoteRef: "rr",
+}))
+const streamReplyOutbound = jest.fn(async (..._a: unknown[]) => true)
+const getAdapterA2UICapability = jest.fn((id: string) =>
+  id === "sl" ? { Button: "native", Card: "native" } : null
+)
+const getAdapterSkillCapabilities = jest.fn((id: string) =>
+  id === "sl" ? [{ family: "lark.calendar", mutations: ["read", "write"] }] : null
+)
+const fetchHistoryAll = jest.fn(async (..._a: unknown[]) => [{ messageId: "h1" }])
 const inboundObservers = new Set<(e: unknown) => void>()
 const callbackObservers = new Set<(e: unknown, k: string | null) => void>()
 const subscribeInbound = jest.fn((obs: (e: unknown) => void) => {
@@ -72,6 +82,10 @@ jest.mock("@/lib/connectors/bus", () => ({
     deleteOutbound: (...a: unknown[]) => deleteOutbound(...a),
     setTypingOutbound: (...a: unknown[]) => setTypingOutbound(...a),
     uploadFileOutbound: (...a: unknown[]) => uploadFileOutbound(...a),
+    streamReplyOutbound: (...a: unknown[]) => streamReplyOutbound(...(a as [string, unknown])),
+    getAdapterA2UICapability: (...a: unknown[]) => getAdapterA2UICapability(...(a as [string])),
+    getAdapterSkillCapabilities: (...a: unknown[]) =>
+      getAdapterSkillCapabilities(...(a as [string])),
     fetchHistoryAll: (...a: unknown[]) => fetchHistoryAll(...a),
     subscribeInbound: (...a: unknown[]) => subscribeInbound(...(a as [(e: unknown) => void])),
     subscribeCallback: (...a: unknown[]) =>
@@ -94,9 +108,12 @@ const INSTANCE_ROW = {
   createdAt: 1,
   updatedAt: 1,
 }
-const createAdapterInstance = jest.fn(async () => ({ ...INSTANCE_ROW, id: "cai_new" }))
-const updateAdapterInstance = jest.fn(async () => undefined)
-const deleteAdapterInstance = jest.fn(async () => undefined)
+const createAdapterInstance = jest.fn(async (..._a: unknown[]) => ({
+  ...INSTANCE_ROW,
+  id: "cai_new",
+}))
+const updateAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
+const deleteAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
 const getAdapterInstance = jest.fn(async (id: string) =>
   id === "cai_1" ? INSTANCE_ROW : undefined
 )
@@ -143,6 +160,8 @@ describe("createConnectorsAPI", () => {
       expect(() => api.listInstances()).toThrow(PermissionError)
       expect(() => api.getInstance("cai_1")).toThrow(PermissionError)
       expect(() => api.getRuntimeState("tg")).toThrow(PermissionError)
+      expect(() => api.getA2UICapabilityMatrix("sl")).toThrow(PermissionError)
+      expect(() => api.getSkillCapabilities("sl")).toThrow(PermissionError)
       expect(() => api.fetchHistory("tg", "k")).toThrow(PermissionError)
       expect(() => api.onCallback(jest.fn())).toThrow(PermissionError)
     })
@@ -156,7 +175,9 @@ describe("createConnectorsAPI", () => {
       expect(() => api.deleteMessage("tg", "m")).toThrow(PermissionError)
       expect(() => api.setTyping("tg", "k", true)).toThrow(PermissionError)
       expect(() => api.uploadFile("tg", { url: "u" })).toThrow(PermissionError)
+      expect(() => api.streamReply("tg", {} as never)).toThrow(PermissionError)
       expect(sendOutbound).not.toHaveBeenCalled()
+      expect(streamReplyOutbound).not.toHaveBeenCalled()
     })
 
     it("manage-tier methods need connectors:manage (send is insufficient)", () => {
@@ -215,6 +236,22 @@ describe("createConnectorsAPI", () => {
       const api = createConnectorsAPI(PLUGIN)
       expect(api.getAdapter("sl")?.id).toBe("sl")
       expect(api.getAdapter("nope")).toBeNull()
+    })
+
+    it("getA2UICapabilityMatrix forwards to the bus", () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(api.getA2UICapabilityMatrix("sl")).toEqual({ Button: "native", Card: "native" })
+      expect(getAdapterA2UICapability).toHaveBeenCalledWith("sl")
+      expect(api.getA2UICapabilityMatrix("nope")).toBeNull()
+    })
+
+    it("getSkillCapabilities forwards to the bus", () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(api.getSkillCapabilities("sl")).toEqual([
+        { family: "lark.calendar", mutations: ["read", "write"] },
+      ])
+      expect(getAdapterSkillCapabilities).toHaveBeenCalledWith("sl")
+      expect(api.getSkillCapabilities("nope")).toBeNull()
     })
 
     it("listInstances strips the keyring pointer", async () => {
@@ -317,6 +354,43 @@ describe("createConnectorsAPI", () => {
         remoteRef: "rr",
       })
       expect(uploadFileOutbound).toHaveBeenCalledWith("tg", { url: "u" })
+    })
+
+    it("streamReply forwards to the bus and returns its boolean", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = { conversationRef: { conv: "c1" }, text: "partial reply" }
+      expect(await api.streamReply("sl", req as never)).toBe(true)
+      expect(streamReplyOutbound).toHaveBeenCalledWith("sl", req)
+    })
+  })
+
+  describe("a2ui builder (ungated)", () => {
+    it("is usable with no permissions granted (pure construction)", () => {
+      guard.registerPlugin(PLUGIN, [])
+      const api = createConnectorsAPI(PLUGIN)
+      const content = api.a2ui.surface({
+        components: [api.a2ui.component.text("root", "Hello")],
+      })
+      expect(content.rootId).toBe("root")
+
+      const seg = api.a2ui.segment("s1", content)
+      expect(seg).toMatchObject({ type: "a2ui", surfaceId: "s1" })
+
+      const req = api.a2ui.message({
+        conversationRef: { conv: "c1" } as never,
+        surfaceId: "s2",
+        components: [
+          api.a2ui.component.card("root", { title: "Hi", children: ["btn"] }),
+          api.a2ui.component.button("btn", "Go", "go"),
+        ],
+      })
+      expect(req.segments[0]).toMatchObject({ type: "a2ui", surfaceId: "s2" })
+    })
+
+    it("newIdempotencyKey is usable with no permissions and mints a key", () => {
+      guard.registerPlugin(PLUGIN, [])
+      const api = createConnectorsAPI(PLUGIN)
+      expect(api.newIdempotencyKey()).toBe("idem-123")
     })
   })
 

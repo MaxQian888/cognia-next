@@ -262,6 +262,42 @@ describe("ConnectorBus — adapter-operation wrappers", () => {
     expect(await bus.uploadFileOutbound("a2", { url: "u" })).toBeNull()
   })
 
+  it("streamReplyOutbound delegates (true) and no-ops (false) when missing/unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { streamReply: jest.Mock }
+    a.streamReply = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    const req = { conversationRef: { platform: "telegram", adapterId: "a1" }, text: "partial" }
+    expect(await bus.streamReplyOutbound("a1", req as never)).toBe(true)
+    expect(a.streamReply).toHaveBeenCalledWith(req)
+    bus.registerAdapter(makeAdapter("a2")) // no streamReply
+    expect(await bus.streamReplyOutbound("a2", req as never)).toBe(false)
+    expect(await bus.streamReplyOutbound("missing", req as never)).toBe(false)
+  })
+
+  it("getAdapterA2UICapability returns the adapter matrix or null", () => {
+    const bus = getBus()
+    const matrix = { Button: "native", Card: "simulated" }
+    const a = makeAdapter("a1") as PlatformAdapter & { a2uiCapability: jest.Mock }
+    a.a2uiCapability = jest.fn().mockReturnValue(matrix)
+    bus.registerAdapter(a)
+    expect(bus.getAdapterA2UICapability("a1")).toBe(matrix)
+    expect(a.a2uiCapability).toHaveBeenCalled()
+    expect(bus.getAdapterA2UICapability("missing")).toBeNull()
+  })
+
+  it("getAdapterSkillCapabilities returns the declared families, [] when undeclared, null when missing", () => {
+    const bus = getBus()
+    const caps = [{ family: "lark.calendar", mutations: ["read", "write"] }]
+    const a = makeAdapter("a1") as PlatformAdapter & { platformSkillCapabilities: jest.Mock }
+    a.platformSkillCapabilities = jest.fn().mockReturnValue(caps)
+    bus.registerAdapter(a)
+    expect(bus.getAdapterSkillCapabilities("a1")).toBe(caps)
+    bus.registerAdapter(makeAdapter("a2")) // no platformSkillCapabilities
+    expect(bus.getAdapterSkillCapabilities("a2")).toEqual([])
+    expect(bus.getAdapterSkillCapabilities("missing")).toBeNull()
+  })
+
   it("fetchHistoryAll drains the adapter stream", async () => {
     const bus = getBus()
     async function* gen(): AsyncGenerator<NormalizedInboundEvent> {

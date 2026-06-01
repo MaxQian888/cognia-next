@@ -31,6 +31,10 @@ import { getBus } from "@/lib/connectors/bus"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import {
+  createA2UIBuilder,
+  type PluginConnectorsA2UIBuilder,
+} from "@/lib/connectors/a2ui-bridge/surface-builder"
+import {
   createAdapterInstance,
   updateAdapterInstance,
   deleteAdapterInstance,
@@ -57,7 +61,12 @@ import type {
   AttachmentDescriptor,
   AdapterAttachmentRef,
   HistoryFetchOpts,
+  StreamReplyRequest,
+  A2UICapabilityMatrix,
 } from "@/types/connectors"
+import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
+
+export type { PluginConnectorsA2UIBuilder } from "@/lib/connectors/a2ui-bridge/surface-builder"
 
 /** Optional-method support flags so plugins can feature-detect per adapter. */
 export interface PluginConnectorAdapterSupport {
@@ -100,6 +109,19 @@ export interface PluginConnectorsAPI {
   listAdapters(): PluginConnectorAdapterInfo[]
   /** Summary of one adapter, or `null` if not connected. */
   getAdapter(adapterId: string): PluginConnectorAdapterInfo | null
+  /**
+   * The adapter's A2UI component-support matrix (per-component-kind
+   * `native`/`simulated`/`fallback`/`unsupported`). Lets a plugin pick a
+   * rendering strategy per platform before sending. `null` when the adapter
+   * is not connected.
+   */
+  getA2UICapabilityMatrix(adapterId: string): A2UICapabilityMatrix | null
+  /**
+   * Which built-in skill families the adapter serves on its channel (e.g.
+   * `lark.calendar` read+write). `null` when the adapter is not connected,
+   * `[]` when it declares none.
+   */
+  getSkillCapabilities(adapterId: string): readonly PlatformSkillCapability[] | null
   /** Configured adapter instances (credential-free), from the Dexie table. */
   listInstances(): Promise<PluginAdapterInstanceInfo[]>
   /** One configured instance (credential-free), or `null` if not found. */
@@ -157,6 +179,28 @@ export interface PluginConnectorsAPI {
    * adapter is missing or the platform has no upload surface.
    */
   uploadFile(adapterId: string, file: AttachmentDescriptor): Promise<AdapterAttachmentRef | null>
+  /**
+   * Push an incremental assistant reply through an adapter that supports
+   * platform-side streaming (e.g. WeCom). `req.text` is the full accumulated
+   * reply so far, not a delta. Resolves `true` when streamed, `false` when
+   * the adapter is missing or the platform has no streaming surface — so the
+   * plugin can fall back to {@link send}.
+   */
+  streamReply(adapterId: string, req: StreamReplyRequest): Promise<boolean>
+
+  // ── A2UI rich-content builder (pure, ungated) ────────────────────────────
+  /**
+   * Construct rich, interactive A2UI surfaces (cards / buttons / forms) for
+   * outbound messages. Pure local construction — no permission needed; the
+   * `send()` that delivers the result is what's gated by `connectors:send`.
+   */
+  a2ui: PluginConnectorsA2UIBuilder
+  /**
+   * Mint a fresh idempotency key for an {@link OutboundRequest} built by hand
+   * (the `a2ui.message` / `sendText` helpers already do this internally).
+   * Pure; no permission required.
+   */
+  newIdempotencyKey(): string
 
   // ── Instance management (connectors:manage, DANGEROUS) ───────────────────
   /** Create a new adapter instance configuration; returns its summary. */
@@ -209,6 +253,8 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
       const a = getBus().getAdapter(adapterId)
       return a ? toInfo(a) : null
     },
+    getA2UICapabilityMatrix: (adapterId) => getBus().getAdapterA2UICapability(adapterId),
+    getSkillCapabilities: (adapterId) => getBus().getAdapterSkillCapabilities(adapterId),
     listInstances: async () => (await listAdapterInstances()).map(toInstanceInfo),
     getInstance: async (id) => {
       const row = await getAdapterInstance(id)
@@ -234,6 +280,11 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     setTyping: (adapterId, conversationKey, on) =>
       getBus().setTypingOutbound(adapterId, conversationKey, on),
     uploadFile: (adapterId, file) => getBus().uploadFileOutbound(adapterId, file),
+    streamReply: (adapterId, req) => getBus().streamReplyOutbound(adapterId, req),
+
+    // ── a2ui builder (pure) ──────────────────────────────────────────────────
+    a2ui: createA2UIBuilder(),
+    newIdempotencyKey: () => newIdempotencyKey(),
 
     // ── instance management ──────────────────────────────────────────────────
     createInstance: async (input) => toInstanceInfo(await createAdapterInstance(input)),
@@ -245,6 +296,8 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
   return createGuardedAPI(pluginId, api, {
     listAdapters: "connectors:read",
     getAdapter: "connectors:read",
+    getA2UICapabilityMatrix: "connectors:read",
+    getSkillCapabilities: "connectors:read",
     listInstances: "connectors:read",
     getInstance: "connectors:read",
     getRuntimeState: "connectors:read",
@@ -257,6 +310,7 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     deleteMessage: "connectors:send",
     setTyping: "connectors:send",
     uploadFile: "connectors:send",
+    streamReply: "connectors:send",
     createInstance: "connectors:manage",
     updateInstance: "connectors:manage",
     setInstanceEnabled: "connectors:manage",

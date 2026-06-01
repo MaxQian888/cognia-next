@@ -45,6 +45,21 @@ export { createMediaAPI, getMediaRegistry } from "./media-api"
 export { createStorageAPI, clearPluginStorage, getAllPluginStorageUsage } from "./storage-api"
 export type { PluginStorageAPI } from "./storage-api"
 
+// Connectors / IM messaging API (ctx.connectors) — gated read/send/manage plus
+// the ungated A2UI rich-content builder. Exported here so SDK authors import
+// the surface + its types from the canonical `@/lib/plugin/api` barrel rather
+// than deep-importing the implementation module.
+export { createConnectorsAPI } from "./connectors-api"
+export type {
+  PluginConnectorsAPI,
+  PluginConnectorAdapterInfo,
+  PluginConnectorAdapterSupport,
+  PluginAdapterInstanceInfo,
+  PluginAdapterInstancePatch,
+  PluginAdapterInstanceInput,
+  PluginConnectorsA2UIBuilder,
+} from "./connectors-api"
+
 // Re-export types
 export type {
   PluginSessionAPI,
