@@ -6,12 +6,16 @@ import { createPerfAPI } from "./perf-api"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 
-const perfSnapshot = jest.fn(async () => ({ samples: [{ t: 1 }], running: true, intervalMs: 1000 }))
-const perfHotspots = jest.fn(async () => [{ name: "render", totalMs: 5 }])
-const perfSystemDetails = jest.fn(async () => ({ os: "win" }))
-const perfListTraces = jest.fn(async () => [{ path: "/t.json" }])
+const perfSnapshot = jest.fn(async (..._a: unknown[]) => ({
+  samples: [{ t: 1 }],
+  running: true,
+  intervalMs: 1000,
+}))
+const perfHotspots = jest.fn(async (..._a: unknown[]) => [{ name: "render", totalMs: 5 }])
+const perfSystemDetails = jest.fn(async (..._a: unknown[]) => ({ os: "win" }))
+const perfListTraces = jest.fn(async (..._a: unknown[]) => [{ path: "/t.json" }])
 const unsubscribe = jest.fn()
-const subscribePerfSample = jest.fn(() => unsubscribe)
+const subscribePerfSample = jest.fn((..._a: unknown[]) => unsubscribe)
 jest.mock("@/lib/perf/backend/commands", () => ({
   perfSnapshot: (...a: unknown[]) => perfSnapshot(...a),
   perfHotspots: (...a: unknown[]) => perfHotspots(...a),

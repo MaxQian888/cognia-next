@@ -32,7 +32,7 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: { getState: () => mockTerminalState },
 }))
 
-const mockBuildClient = jest.fn(() => null as unknown)
+const mockBuildClient = jest.fn((..._args: unknown[]) => null as unknown)
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...args: unknown[]) => mockBuildClient(...args),
 }))
