@@ -159,7 +159,7 @@ test("the More button is hidden when nothing is in overflow", () => {
       settings: {
         sidebarLayout: {
           pinned: [...DEFAULT_SIDEBAR_LAYOUT.pinned, "observability", "logs", "me"],
-          hidden: ["source-control", "performance"],
+          hidden: ["source-control", "performance", "eval"],
         },
       } as never,
     })

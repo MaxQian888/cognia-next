@@ -90,6 +90,9 @@ import type {
 } from "@/types/plugin/vscode-extension-cache"
 import type { AutomationAuditLogRow } from "@/lib/automation/audit"
 import type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
+import type { EvalCase, EvalDataset } from "@/types/eval/eval"
+import type { EvalRunRow } from "./eval-runs"
+import type { TraceAnnotationRow } from "./trace-annotations"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -265,6 +268,20 @@ export class CogniaDB extends Dexie {
    * aggregation helpers in `./agent-traces.ts`.
    */
   agentTraces!: Table<AgentTraceSpan, string>
+  /**
+   * v64 — Agent evaluation subsystem. `evalDatasets` holds versioned,
+   * capability-scoped collections; `evalCases` holds the per-dataset test
+   * items; `evalRuns` holds one {@link EvalReport} per executed run (the
+   * dashboard's trend source); `traceAnnotations` records error-analysis
+   * labels on real `agentTraces` (open/axial coding + "save as eval case").
+   * Per-row types + CRUD live in `./eval-datasets.ts`, `./eval-runs.ts`,
+   * `./trace-annotations.ts`. See the design doc
+   * `docs/superpowers/specs/2026-06-01-cognia-agent-eval-design.md`.
+   */
+  evalDatasets!: Table<EvalDataset, string>
+  evalCases!: Table<EvalCase, string>
+  evalRuns!: Table<EvalRunRow, string>
+  traceAnnotations!: Table<TraceAnnotationRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1638,6 +1655,27 @@ export class CogniaDB extends Dexie {
     this.version(63).stores({
       projects: "&id, lastAccessedAt",
     })
+
+    // v64 — Agent evaluation subsystem. Additive only; no upgrade hook (no
+    // pre-existing rows carry these shapes). Indexes:
+    //   • evalDatasets    — `&id` primary; `capability` for the per-capability
+    //                       dataset list; `updatedAt` for newest-first sort.
+    //   • evalCases       — `&id` primary; `datasetId` + `[datasetId+createdAt]`
+    //                       for in-order per-dataset listing; `capability` and
+    //                       `failureMode` for the error-analysis filters;
+    //                       `sourceTraceId` to dedupe "save as eval case".
+    //   • evalRuns        — `&runId` primary (the report IS the row); `datasetId` +
+    //                       `[datasetId+createdAt]` for the per-dataset trend
+    //                       chart; `createdAt` for the global recent-runs view.
+    //   • traceAnnotations— `&id` primary; `traceId` (one annotation per trace)
+    //                       and `sessionId` for the panel; `failureMode` for the
+    //                       taxonomy roll-up; `createdAt` for newest-first.
+    this.version(64).stores({
+      evalDatasets: "&id, capability, updatedAt, createdAt",
+      evalCases: "&id, datasetId, [datasetId+createdAt], capability, failureMode, sourceTraceId",
+      evalRuns: "&runId, datasetId, [datasetId+createdAt], createdAt",
+      traceAnnotations: "&id, &traceId, sessionId, failureMode, createdAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1674,6 +1712,8 @@ export type {
 export type { AutomationAuditLogRow } from "@/lib/automation/audit"
 export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 export type { PluginDexieMeta } from "./plugin-types"
+export type { EvalRunRow } from "./eval-runs"
+export type { TraceAnnotationRow } from "./trace-annotations"
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null

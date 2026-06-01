@@ -9242,6 +9242,65 @@
       "openSourceControl": "Open Source Control"
     }
   },
+  "eval": {
+    "title": "Agent Evaluation",
+    "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",
+    "tabs": {
+      "datasets": "Datasets & runs",
+      "annotate": "Trace analysis"
+    },
+    "datasets": {
+      "heading": "Datasets",
+      "empty": "No datasets yet. Create one to start evaluating.",
+      "new": "New dataset",
+      "namePlaceholder": "Dataset name",
+      "capabilityPlaceholder": "Capability (e.g. chat.tool-use)",
+      "create": "Create",
+      "cancel": "Cancel",
+      "cases": "{count, plural, =1 {# case} other {# cases}}",
+      "version": "v{version}",
+      "delete": "Delete dataset",
+      "select": "Select a dataset to see its runs."
+    },
+    "runs": {
+      "heading": "Runs",
+      "run": "Run evaluation",
+      "running": "Running…",
+      "empty": "No runs yet for this dataset.",
+      "passAt1": "pass@1",
+      "passHatK": "pass^k",
+      "cost": "Cost",
+      "latency": "Avg latency",
+      "cases": "Cases",
+      "scorers": "Scorers",
+      "deterministicOnly": "No judge provider configured — running deterministic scorers only.",
+      "failed": "Run failed: {error}"
+    },
+    "annotate": {
+      "heading": "Trace analysis",
+      "subtitle": "Read real traces, label the first failure, save the worst as eval cases.",
+      "empty": "No recent traces to analyze.",
+      "firstFailure": "First failure",
+      "firstFailurePlaceholder": "What went wrong first in this trace?",
+      "failureMode": "Failure mode",
+      "failureModePlaceholder": "Cluster label (e.g. wrong-tool)",
+      "save": "Save annotation",
+      "saved": "Saved",
+      "saveAsCase": "Save as eval case",
+      "savedAsCase": "Saved as case",
+      "taxonomy": "Failure taxonomy",
+      "saturation": "Saturation reached — you can stop reading.",
+      "pickDataset": "Choose a dataset",
+      "session": "Session {id}",
+      "count": "{count, plural, =1 {# annotation} other {# annotations}}"
+    },
+    "dimensions": {
+      "tool-use": "Tool use",
+      "response-quality": "Response quality",
+      "rag": "RAG",
+      "cost": "Cost"
+    }
+  },
   "observability": {
     "title": "Observability",
     "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
@@ -10872,6 +10931,7 @@
       "goals": "Goals",
       "sourceControl": "Source Control",
       "observability": "Observability",
+      "eval": "Evaluation",
       "performance": "Performance",
       "logs": "Logs",
       "me": "Me",

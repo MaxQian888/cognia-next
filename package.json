@@ -36,6 +36,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "cross-env JEST_COVERAGE=1 jest --coverage",
+    "test:evals": "jest lib/ai/eval/ci",
     "test:e2e": "playwright test",
     "test:e2e:workflows": "playwright test tests/e2e/workflows/",
     "test:e2e:workflows:nodes": "playwright test tests/e2e/workflows/nodes/",

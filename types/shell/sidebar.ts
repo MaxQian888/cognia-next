@@ -50,6 +50,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     desktopOnly: true,
   },
   { id: "observability", route: "/observability", i18nKey: "observability", group: "auxiliary" },
+  { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
   {
     id: "performance",
     route: "/performance",

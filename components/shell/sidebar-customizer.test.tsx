@@ -139,7 +139,7 @@ describe("SidebarCustomizer", () => {
   })
 
   it("shows the More-empty placeholder when every item is pinned or hidden", () => {
-    // Pin all 14 catalog ids → nothing left for overflow.
+    // Pin all 15 catalog ids → nothing left for overflow.
     const allIds = [
       "workflows",
       "inbox",
@@ -152,6 +152,7 @@ describe("SidebarCustomizer", () => {
       "goals",
       "source-control",
       "observability",
+      "eval",
       "performance",
       "logs",
       "me",

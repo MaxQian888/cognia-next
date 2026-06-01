@@ -9242,6 +9242,65 @@
       "openSourceControl": "打开源代码管理"
     }
   },
+  "eval": {
+    "title": "Agent 评估",
+    "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",
+    "tabs": {
+      "datasets": "评测集与运行",
+      "annotate": "轨迹分析"
+    },
+    "datasets": {
+      "heading": "评测集",
+      "empty": "还没有评测集。创建一个开始评估。",
+      "new": "新建评测集",
+      "namePlaceholder": "评测集名称",
+      "capabilityPlaceholder": "能力（如 chat.tool-use）",
+      "create": "创建",
+      "cancel": "取消",
+      "cases": "{count, plural, other {# 个用例}}",
+      "version": "v{version}",
+      "delete": "删除评测集",
+      "select": "选择一个评测集查看其运行记录。"
+    },
+    "runs": {
+      "heading": "运行记录",
+      "run": "运行评估",
+      "running": "运行中…",
+      "empty": "该评测集还没有运行记录。",
+      "passAt1": "pass@1",
+      "passHatK": "pass^k",
+      "cost": "成本",
+      "latency": "平均延迟",
+      "cases": "用例数",
+      "scorers": "评分器",
+      "deterministicOnly": "未配置评判模型——仅运行确定性评分器。",
+      "failed": "运行失败：{error}"
+    },
+    "annotate": {
+      "heading": "轨迹分析",
+      "subtitle": "阅读真实轨迹，标注首个失败，把最差的存为评测用例。",
+      "empty": "没有可分析的近期轨迹。",
+      "firstFailure": "首个失败",
+      "firstFailurePlaceholder": "这条轨迹里最先出错的是什么？",
+      "failureMode": "失败分类",
+      "failureModePlaceholder": "聚类标签（如 wrong-tool）",
+      "save": "保存标注",
+      "saved": "已保存",
+      "saveAsCase": "存为评测用例",
+      "savedAsCase": "已存为用例",
+      "taxonomy": "失败分类统计",
+      "saturation": "已达饱和——可以停止阅读了。",
+      "pickDataset": "选择评测集",
+      "session": "会话 {id}",
+      "count": "{count, plural, other {# 条标注}}"
+    },
+    "dimensions": {
+      "tool-use": "工具使用",
+      "response-quality": "回答质量",
+      "rag": "RAG",
+      "cost": "成本"
+    }
+  },
   "observability": {
     "title": "可观测性",
     "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
@@ -10872,6 +10931,7 @@
       "goals": "目标",
       "sourceControl": "源代码管理",
       "observability": "可观测性",
+      "eval": "评估",
       "performance": "性能",
       "logs": "日志",
       "me": "我的",
