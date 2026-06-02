@@ -301,15 +301,46 @@ registerNodeExecutor({
       baseURL: params.baseURL,
       defaultTemperature: params.temperature,
     })
-    const completion = await client.complete(userPrompt, {
-      system: systemPrompt,
-      temperature: params.temperature,
+    // Emit a `chat` span for the LLM call so eval (and observability) can
+    // assemble the workflow run. The eval workflow target threads `ctx.traceId`;
+    // ai.classify / ai.extract delegate to this executor, so they're covered too.
+    const { startSpan, endSpan } = await import("@/lib/agent-trace/emitter")
+    const span = startSpan({
+      operationName: "chat",
+      providerName: "cognia.workflow",
+      surface: "workflow",
+      sessionId: ctx.runId,
+      ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+      ...(params.model ? { requestModel: params.model } : {}),
     })
+    let completion: string
+    try {
+      completion = await client.complete(userPrompt, {
+        system: systemPrompt,
+        temperature: params.temperature,
+      })
+    } catch (err) {
+      endSpan(span.spanId, {
+        errorType: err instanceof Error ? err.name : "Error",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
     const usage = client.getUsageSnapshot?.() ?? {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
     }
+    endSpan(span.spanId, {
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      ...(params.model ? { responseModel: params.model } : {}),
+      outputPreview: completion.slice(0, 200),
+    })
     return finalize({
       provider: params.provider,
       model: params.model,

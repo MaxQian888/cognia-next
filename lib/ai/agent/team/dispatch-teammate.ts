@@ -18,6 +18,8 @@
  */
 
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { startSpan, endSpan } from "@/lib/agent-trace/emitter"
+import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
@@ -67,6 +69,15 @@ export interface DispatchTeammateResult {
   teammateName: string
   usage?: TokenUsage
   channel: TeammateChannel
+}
+
+function toSpanUsage(usage: TokenUsage): SpanUsage {
+  return {
+    inputTokens: usage.promptTokens,
+    outputTokens: usage.completionTokens,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  }
 }
 
 function readUsage(result: unknown): TokenUsage | undefined {
@@ -229,6 +240,20 @@ export async function dispatchTeammate(
     if (isTauri()) channel = "sidecar"
   }
 
+  // Emit one `invoke_agent` span per dispatch so eval (and observability) can
+  // assemble the run. The eval team target threads `teamCtx.traceId` so all
+  // dispatch spans share one trace; normal runs fall back to a generated one.
+  const span = startSpan({
+    operationName: "invoke_agent",
+    providerName: "cognia.team",
+    surface: "agent-team",
+    sessionId: teamCtx.runId,
+    ...(teamCtx.traceId ? { traceId: teamCtx.traceId } : {}),
+    agentId: teammate.id,
+    agentName: teammate.name,
+    ...(modelHint ? { requestModel: modelHint } : {}),
+  })
+
   let turn: { text: string; usage?: TokenUsage }
   try {
     turn =
@@ -244,6 +269,10 @@ export async function dispatchTeammate(
           )
         : await runTextOnly(promptText, systemPrompt, modelHint, combinedSignal)
   } catch (err) {
+    endSpan(span.spanId, {
+      errorType: err instanceof Error ? err.name : "Error",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
     teamCtx.pool.recordFailure(teammate.id, err)
     if (args.recordToStore) {
       teamCtx.storeWriter.setTaskStatus(
@@ -257,6 +286,12 @@ export async function dispatchTeammate(
     release("failure", error)
     throw error
   }
+
+  endSpan(span.spanId, {
+    ...(turn.usage ? { usage: toSpanUsage(turn.usage) } : {}),
+    ...(modelHint ? { responseModel: modelHint } : {}),
+    outputPreview: (turn.text ?? "").slice(0, 200),
+  })
 
   const text = (turn.text ?? "").toString()
   const trimmed = text.trim()

@@ -100,6 +100,12 @@ export interface RunWorkflowInput {
    * its (unseeded) ancestors without touching descendants or siblings.
    */
   restrictToStepIds?: ReadonlyArray<string>
+  /**
+   * Optional run-scoped agent-trace id. Threaded into every step's
+   * {@link StepExecutionContext} so AI nodes emit their LLM spans under one
+   * trace, letting the eval workflow target assemble the run via `queryByTrace`.
+   */
+  traceId?: string
 }
 
 export interface RunWorkflowResult {
@@ -350,6 +356,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           secretResolver,
           logger,
           honorPinData: input.honorPinData,
+          ...(input.traceId ? { traceId: input.traceId } : {}),
         })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)

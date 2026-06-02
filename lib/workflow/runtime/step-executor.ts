@@ -35,6 +35,8 @@ export interface RunStepInput {
    * for production triggers. Mirrors n8n's pin-data semantics.
    */
   honorPinData?: boolean
+  /** Run-scoped agent-trace id, threaded onto the step context for AI-node spans. */
+  traceId?: string
 }
 
 export interface StepExecution {
@@ -102,6 +104,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     signal,
     log: (level, message, payload) => void logger.log(level, message, payload, node.id),
     resolveSecret: (refId) => input.secretResolver.resolve(refId),
+    ...(input.traceId ? { traceId: input.traceId } : {}),
   }
 
   let attempt = 0

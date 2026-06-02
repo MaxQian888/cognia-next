@@ -539,6 +539,12 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   runId: string
   workflowId: string
   stepId: string
+  /**
+   * Optional run-scoped agent-trace id. When set (e.g. by the eval workflow
+   * target), AI nodes emit their LLM spans under this trace so the run can be
+   * assembled via `queryByTrace`. Undefined for normal runs.
+   */
+  traceId?: string
   /** Resolved params after expression evaluation. */
   params: TParams
   /**

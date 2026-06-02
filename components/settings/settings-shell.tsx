@@ -212,6 +212,10 @@ const ConversationSection = dynamic(
   () => import("./conversation/conversation-section").then((m) => m.ConversationSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const NotificationsSection = dynamic(
+  () => import("./notifications/notifications-section").then((m) => m.NotificationsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const MemorySection = dynamic(
   () => import("./sections/memory-section").then((m) => m.MemorySection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -380,6 +384,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <CanvasSection />
     case "conversation":
       return <ConversationSection />
+    case "notifications":
+      return <NotificationsSection />
     case "memory":
       return <MemorySection />
     case "mcp":

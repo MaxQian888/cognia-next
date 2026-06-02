@@ -27,6 +27,7 @@ export type SpanProviderName =
   | "cognia.plugin"
   | "cognia.team"
   | "cognia.connector"
+  | "cognia.workflow"
 
 /** Surface that produced the span — drives the agent-trace UI grouping. */
 export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"

@@ -40,6 +40,13 @@ export interface TeamStoreWriter {
 export interface TeamRunContext {
   readonly runId: string
   readonly teamId: string
+  /**
+   * Optional run-scoped agent-trace id. When set (e.g. by the eval team
+   * target), every teammate dispatch emits its `invoke_agent` span under this
+   * trace so the run can be assembled via `queryByTrace`. Undefined for normal
+   * runs — dispatch spans then fall back to their own generated trace id.
+   */
+  readonly traceId?: string
   readonly team: AgentTeam
   readonly pool: TeammatePool
   readonly budget: BudgetGuard

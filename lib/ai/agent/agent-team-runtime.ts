@@ -77,6 +77,12 @@ export interface RunTeamLifecycleDeps {
    * + routing assessment decide (see `isUltracodeActive`).
    */
   ultracodeOverride?: UltracodeOverride
+  /**
+   * Optional run-scoped agent-trace id (eval target). Threaded onto the
+   * TeamRunContext so every teammate dispatch emits its span under this trace,
+   * letting the caller assemble the run via `queryByTrace`.
+   */
+  traceId?: string
 }
 
 export interface RunTeamLifecycleResult {
@@ -84,6 +90,10 @@ export interface RunTeamLifecycleResult {
   runId: string
   status: "completed" | "failed" | "cancelled"
   reason?: string
+  /** The synthesized workflow's terminal output (e.g. `{ report }` for ultracode). */
+  output?: unknown
+  /** Echo of the run-scoped trace id when one was supplied. */
+  traceId?: string
 }
 
 const inflightControllers = new Map<string, AbortController>()
@@ -387,6 +397,7 @@ export async function runTeamLifecycle(
     registerTeamRunContext({
       runId,
       teamId,
+      ...(deps.traceId ? { traceId: deps.traceId } : {}),
       team,
       pool,
       budget,
@@ -480,6 +491,8 @@ export async function runTeamLifecycle(
         runId: result.runId,
         status: finalStatus,
         reason: finalReason,
+        output: result.output,
+        ...(deps.traceId ? { traceId: deps.traceId } : {}),
       }
     } catch (err) {
       finalReason = err instanceof Error ? err.message : String(err)

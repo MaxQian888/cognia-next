@@ -43,6 +43,7 @@ import {
   TargetIcon,
   PawPrintIcon,
   MessagesSquareIcon,
+  BellIcon,
   PanelLeftIcon,
   CompassIcon,
   BrainIcon,
@@ -79,6 +80,7 @@ export type SettingsSectionId =
   | "artifacts"
   | "canvas"
   | "conversation"
+  | "notifications"
   | "memory"
   | "mcp"
   | "a2ui"
@@ -357,6 +359,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "conversation",
     group: "interface",
     icon: MessagesSquareIcon,
+  },
+  {
+    id: "notifications",
+    labelKey: "notifications",
+    descriptionKey: "notifications",
+    group: "interface",
+    icon: BellIcon,
   },
   {
     id: "memory",
@@ -749,6 +758,31 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "缩略图",
     "导航",
     "跳转",
+  ],
+  notifications: [
+    "notifications",
+    "notification center",
+    "alerts",
+    "toast",
+    "desktop notification",
+    "push",
+    "quiet hours",
+    "do not disturb",
+    "dnd",
+    "snooze",
+    "mute",
+    "badge",
+    "retention",
+    "通知",
+    "通知中心",
+    "提醒",
+    "桌面通知",
+    "推送",
+    "安静时段",
+    "勿扰",
+    "静音",
+    "角标",
+    "保留",
   ],
   canvas: [
     "canvas",
