@@ -28,6 +28,7 @@ import {
   WrenchIcon,
   BlocksIcon,
   ArrowLeftRightIcon,
+  ShieldCheckIcon,
   ZapIcon,
   RadioTowerIcon,
   BoxesIcon,
@@ -60,6 +61,7 @@ export type SettingsSectionId =
   | "agent-runtime"
   | "agent-teams"
   | "hooks"
+  | "workspace-trust"
   | "slash-commands"
   | "tools"
   | "search"
@@ -188,6 +190,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "hooks",
     group: "ai",
     icon: WebhookIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "workspace-trust",
+    labelKey: "workspaceTrust",
+    descriptionKey: "workspaceTrust",
+    group: "ai",
+    icon: ShieldCheckIcon,
     desktopOnly: true,
   },
   {
@@ -926,6 +936,17 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "回调",
     "触发",
     "生命周期",
+  ],
+  "workspace-trust": [
+    "trust",
+    "workspace",
+    "restricted",
+    "security",
+    "folder",
+    "信任",
+    "工作区",
+    "受限",
+    "安全",
   ],
   "slash-commands": [
     "slash",

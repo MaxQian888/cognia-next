@@ -2423,6 +2423,7 @@
       "agentRuntime": "内置代理运行时",
       "agentTeams": "代理团队",
       "hooks": "钩子",
+      "workspaceTrust": "工作区信任",
       "slashCommands": "斜杠命令",
       "tools": "内置工具",
       "search": "联网搜索",
@@ -2471,6 +2472,7 @@
       "agentRuntime": "内置 Anthropic SDK 侧载 — 默认值、权限模式、始终允许的工具、内置工具分类、侧载诊断与 A2UI 桥接。",
       "agentTeams": "多代理团队模板 — 经理-工作者、并行专家、研究小组。可浏览内置模板、复制为自定义副本，或新建模板。",
       "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
+      "workspaceTrust": "在智能体于文件夹内执行命令前先信任它。未受信任的工作区以受限模式运行。",
       "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
@@ -3243,6 +3245,7 @@
       "ccswitch": "CCSwitch",
       "mcp": "MCP 服务器",
       "hooks": "Hook",
+      "workspaceTrust": "工作区信任",
       "slashCommands": "Slash 命令",
       "subagents": "子代理",
       "tools": "工具"
@@ -4116,6 +4119,7 @@
       "subtitle": "仅在原生桌面 App 运行时生效的设置。",
       "launchAtLogin": "登录时启动",
       "launchAtLoginHint": "登录电脑后自动启动 Cognia。",
+      "schedulerBackgroundHint": "定时任务（聊天、智能体、脚本）仅在 Cognia 运行时执行。开启“登录时启动”并将关闭按钮设为“最小化到托盘”，即可让它们在后台持续触发。",
       "launchAtLoginToggle": "切换登录时启动",
       "launchOnToast": "Cognia 将在登录时自动启动。",
       "launchOffToast": "已关闭登录时启动。",
@@ -4672,6 +4676,18 @@
           "pickFailed": "无法读取所选文件。"
         }
       }
+    },
+    "workspaceTrust": {
+      "title": "工作区信任",
+      "description": "智能体可以在工作区的文件夹内运行 Bash、编辑文件并驱动计算机操作。在允许之前请先信任该文件夹；未受信任的工作区以受限模式运行（仅只读工具）。",
+      "enabledLabel": "启用工作区信任",
+      "enabledHint": "关闭后，所有工作区都视为受信任，不再应用受限模式。",
+      "promptOnSwitchLabel": "切换工作区时提示",
+      "promptOnSwitchHint": "一旦切换到未受信任的工作区就提示信任，而非等到首次发消息。",
+      "trustedFoldersLabel": "已信任的文件夹",
+      "noTrusted": "尚未信任任何文件夹。",
+      "revoke": "撤销",
+      "trustedAt": "信任于 {date}"
     },
     "hooks": {
       "title": "生命周期钩子",
@@ -10211,6 +10227,27 @@
     "answeredVia": "已通过 {provider}（{model}）回应"
   },
   "scheduler": {
+    "cronDescribe": {
+      "invalid": "无效的表达式",
+      "everyNSeconds": "每 {n} 秒",
+      "atSecond": "在第 {value} 秒",
+      "everyMinute": "每分钟",
+      "everyNMinutes": "每 {n} 分钟",
+      "atMinute": "在第 {value} 分钟",
+      "ofEveryHour": "每小时",
+      "everyNHours": "每 {n} 小时",
+      "atHour": "在 {value}:00",
+      "onLastDay": "在每月最后一天",
+      "everyNDays": "每 {n} 天",
+      "onDay": "在 {value} 号",
+      "everyNMonths": "每 {n} 个月",
+      "inMonth": "在 {month}",
+      "onWeekdays": "在工作日",
+      "onWeekends": "在周末",
+      "onNthWeekday": "在每月第 {nth} 个 {day}",
+      "onLastWeekday": "在每月最后一个 {day}",
+      "onDayOfWeek": "在 {day}"
+    },
     "title": "定时任务",
     "subtitle": "管理自动化任务与工作流",
     "initializing": "正在初始化调度器...",

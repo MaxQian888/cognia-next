@@ -140,6 +140,10 @@ const HooksSection = dynamic(() => import("./hooks/hooks-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const WorkspaceTrustSection = dynamic(
+  () => import("./workspace-trust/workspace-trust-section").then((m) => m.WorkspaceTrustSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const SubagentsSection = dynamic(
   () => import("./subagents/subagents-section").then((m) => m.SubagentsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -336,6 +340,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <AgentTeamTemplatesSection />
     case "hooks":
       return <HooksSection />
+    case "workspace-trust":
+      return <WorkspaceTrustSection />
     case "slash-commands":
       return <SlashCommandsSection />
     case "tools":

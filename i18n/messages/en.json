@@ -2423,6 +2423,7 @@
       "agentRuntime": "Built-in agent runtime",
       "agentTeams": "Agent teams",
       "hooks": "Hooks",
+      "workspaceTrust": "Workspace Trust",
       "slashCommands": "Slash commands",
       "tools": "Tools",
       "search": "Web search",
@@ -2471,6 +2472,7 @@
       "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
       "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
+      "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode.",
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
@@ -3243,6 +3245,7 @@
       "ccswitch": "CCSwitch",
       "mcp": "MCP servers",
       "hooks": "Hooks",
+      "workspaceTrust": "Workspace Trust",
       "slashCommands": "Slash commands",
       "subagents": "Sub-agents",
       "tools": "Tools"
@@ -4116,6 +4119,7 @@
       "subtitle": "Settings that only apply when running as the native desktop app.",
       "launchAtLogin": "Launch at login",
       "launchAtLoginHint": "Start Cognia automatically when you sign in to your computer.",
+      "schedulerBackgroundHint": "Scheduled tasks (chat, agent, scripts) only run while Cognia is running. Enable launch-at-login and set the close button to “Minimize to tray” so they keep firing in the background.",
       "launchAtLoginToggle": "Toggle launch at login",
       "launchOnToast": "Cognia will launch at login.",
       "launchOffToast": "Launch-at-login disabled.",
@@ -4672,6 +4676,18 @@
           "pickFailed": "Could not read the selected files."
         }
       }
+    },
+    "workspaceTrust": {
+      "title": "Workspace Trust",
+      "description": "Agents can run Bash, edit files and drive Computer-Use inside a workspace's folders. Trust a folder before allowing that; untrusted workspaces run in Restricted Mode (read-only tools only).",
+      "enabledLabel": "Enable Workspace Trust",
+      "enabledHint": "When off, every workspace is treated as trusted and no Restricted Mode is applied.",
+      "promptOnSwitchLabel": "Prompt when switching workspaces",
+      "promptOnSwitchHint": "Ask to trust as soon as you switch to an untrusted workspace, instead of waiting for the first message.",
+      "trustedFoldersLabel": "Trusted folders",
+      "noTrusted": "No folders trusted yet.",
+      "revoke": "Revoke",
+      "trustedAt": "Trusted {date}"
     },
     "hooks": {
       "title": "Lifecycle hooks",
@@ -10211,6 +10227,27 @@
     "answeredVia": "Answered via {provider} ({model})"
   },
   "scheduler": {
+    "cronDescribe": {
+      "invalid": "Invalid expression",
+      "everyNSeconds": "every {n} seconds",
+      "atSecond": "at second {value}",
+      "everyMinute": "every minute",
+      "everyNMinutes": "every {n} minutes",
+      "atMinute": "at minute {value}",
+      "ofEveryHour": "of every hour",
+      "everyNHours": "every {n} hours",
+      "atHour": "at {value}:00",
+      "onLastDay": "on the last day of the month",
+      "everyNDays": "every {n} days",
+      "onDay": "on day {value}",
+      "everyNMonths": "every {n} months",
+      "inMonth": "in {month}",
+      "onWeekdays": "on weekdays",
+      "onWeekends": "on weekends",
+      "onNthWeekday": "on the {nth} occurrence of {day}",
+      "onLastWeekday": "on the last {day} of the month",
+      "onDayOfWeek": "on {day}"
+    },
     "title": "Task Scheduler",
     "subtitle": "Manage automated tasks and workflows",
     "initializing": "Initializing scheduler...",
