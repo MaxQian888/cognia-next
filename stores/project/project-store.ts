@@ -18,6 +18,8 @@
 import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { Project, KnowledgeFile } from "@/types"
+import type { WorkspaceRoot } from "@/types/workspace"
+import { normalizeRoots, syncDerivedDirFields, rootsFromLegacy } from "@/lib/workspace/roots"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import {
   getAllProjects,
@@ -32,6 +34,8 @@ export interface CreateProjectOptions {
   description?: string
   systemPrompt?: string
   tags?: string[]
+  /** Explicit roots; takes precedence over rootDir/additionalDirs when provided. */
+  roots?: WorkspaceRoot[]
   rootDir?: string
   additionalDirs?: string[]
   metadata?: Record<string, unknown>
@@ -130,13 +134,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     createProject: (options) => {
       const now = nowDate()
-      const project: Project = {
+      const roots =
+        options.roots != null
+          ? normalizeRoots(options.roots)
+          : rootsFromLegacy(options.rootDir, options.additionalDirs)
+      const base: Project = {
         id: `project-${nanoid()}`,
         name: options.name?.trim() || "New Project",
         description: options.description,
         customInstructions: options.systemPrompt,
-        rootDir: options.rootDir,
-        additionalDirs: options.additionalDirs ? [...options.additionalDirs] : undefined,
+        roots,
         knowledgeBase: [],
         sessionIds: [],
         sessionCount: 0,
@@ -148,6 +155,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         lastAccessedAt: now,
         metadata: options.metadata,
       }
+      // syncDerivedDirFields owns rootDir/additionalDirs — they mirror `roots`.
+      const project = syncDerivedDirFields(base)
       set((state) => ({ projects: [...state.projects, project] }))
       persist(project.id)
       void getPluginEventHooks().dispatchProjectCreate(project)
@@ -159,7 +168,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((state) => ({
         projects: state.projects.map((p) => {
           if (p.id !== id) return p
-          const next = { ...p, ...updates, updatedAt: nowDate() }
+          let merged = { ...p, ...updates, updatedAt: nowDate() }
+          if (updates.roots != null) {
+            merged = { ...merged, roots: normalizeRoots(updates.roots) }
+          } else if (updates.rootDir !== undefined || updates.additionalDirs !== undefined) {
+            // Legacy-shape update: rebuild roots from the (possibly partial) mirrors.
+            const rootDir = updates.rootDir !== undefined ? updates.rootDir : p.rootDir
+            const additionalDirs =
+              updates.additionalDirs !== undefined ? updates.additionalDirs : p.additionalDirs
+            merged = { ...merged, roots: rootsFromLegacy(rootDir, additionalDirs) }
+          }
+          const next = syncDerivedDirFields(merged)
           updated = next
           return next
         }),

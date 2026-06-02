@@ -186,3 +186,59 @@ describe("removeSessionFromProject dispatch", () => {
     expect(dispatchSessionUnlinked).not.toHaveBeenCalled()
   })
 })
+
+import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
+
+describe("project-store roots", () => {
+  beforeEach(() => {
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+  })
+
+  it("createProject seeds roots from rootDir + additionalDirs and syncs mirrors", () => {
+    const p = useProjectStore
+      .getState()
+      .createProject({ name: "W", rootDir: "/a", additionalDirs: ["/b"] })
+    expect(primaryRootOf(p)?.path).toBe("/a")
+    expect(additionalDirsOf(p)).toEqual(["/b"])
+    expect(p.rootDir).toBe("/a")
+    expect(p.additionalDirs).toEqual(["/b"])
+  })
+
+  it("createProject with no dirs yields empty roots", () => {
+    const p = useProjectStore.getState().createProject({ name: "W" })
+    expect(p.roots).toEqual([])
+    expect(p.rootDir).toBeUndefined()
+  })
+
+  it("createProject accepts an explicit roots array", () => {
+    const p = useProjectStore.getState().createProject({
+      name: "W",
+      roots: [
+        { id: "r1", path: "/x" },
+        { id: "r2", path: "/y", isPrimary: true },
+      ],
+    })
+    expect(primaryRootOf(p)?.path).toBe("/y")
+    expect(p.rootDir).toBe("/y")
+  })
+
+  it("updateProject with roots recomputes the derived mirrors", () => {
+    const p = useProjectStore.getState().createProject({ name: "W", rootDir: "/a" })
+    useProjectStore.getState().updateProject(p.id, {
+      roots: [
+        { id: "r1", path: "/x", isPrimary: true },
+        { id: "r2", path: "/y" },
+      ],
+    })
+    const updated = useProjectStore.getState().projects.find((q) => q.id === p.id)!
+    expect(updated.rootDir).toBe("/x")
+    expect(updated.additionalDirs).toEqual(["/y"])
+  })
+
+  it("updateProject with legacy rootDir rebuilds roots", () => {
+    const p = useProjectStore.getState().createProject({ name: "W" })
+    useProjectStore.getState().updateProject(p.id, { rootDir: "/z" })
+    const updated = useProjectStore.getState().projects.find((q) => q.id === p.id)!
+    expect(primaryRootOf(updated)?.path).toBe("/z")
+  })
+})
