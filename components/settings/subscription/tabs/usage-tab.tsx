@@ -69,6 +69,9 @@ import { listSessions } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
 import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
 import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
+import { useAccounts } from "@/lib/subscription/core/hooks"
+import { BalanceCard } from "@/components/settings/subscription/balance-card"
+import type { ProviderId } from "@/types/subscription"
 import {
   buildUtilizationSeries,
   splitCountdown,
@@ -162,6 +165,7 @@ export function SubscriptionUsageTab() {
   return (
     <div className="space-y-4" data-testid="usage-tab">
       <UsageToolbar range={range} onRange={setRange} exportRows={filteredSessionRows} />
+      <BalancesSection />
       <CurrentWindowCard latest={latest} now={now} />
       <UtilizationTrendCard rows={snapshotRows} rangeDays={rangeDays} now={now} />
       <ModelBreakdownCard rows={filteredSessionRows} />
@@ -229,6 +233,38 @@ function UsageToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  )
+}
+
+/* ── Non-anthropic account balances ────────────────────────────────────── */
+
+const BALANCE_PROVIDERS: readonly ProviderId[] = ["codex", "opencode"]
+
+function BalancesSection() {
+  return (
+    <div className="space-y-3" data-testid="balances-section">
+      {BALANCE_PROVIDERS.map((provider) => (
+        <ProviderBalances key={provider} provider={provider} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Render a balance card for the active account of one non-anthropic provider.
+ * Only the active account is shown — the relay/preset it's bound to drives
+ * which balance adapter (if any) matches. No active account → nothing renders.
+ */
+function ProviderBalances({ provider }: { provider: ProviderId }) {
+  const { accounts, activeAccountId } = useAccounts(provider)
+  if (!activeAccountId) return null
+  const active = accounts.find((a) => a.id === activeAccountId)
+  return (
+    <BalanceCard
+      provider={provider}
+      accountId={activeAccountId}
+      label={active?.label ?? active?.email ?? activeAccountId}
+    />
   )
 }
 

@@ -1,0 +1,44 @@
+import type { BalanceQuery } from "@/types/subscription"
+
+import { moonshotBalanceAdapter as a } from "./moonshot"
+
+const Q: BalanceQuery = {
+  accountId: "acc-1",
+  providerKey: "moonshot",
+  baseUrl: "https://api.moonshot.cn/v1",
+  token: "sk-moon-test",
+}
+
+const FIXTURE = JSON.stringify({
+  code: 0,
+  status: true,
+  data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 },
+})
+
+describe("moonshotBalanceAdapter", () => {
+  it("matches by providerKey and host", () => {
+    expect(a.matches({ providerKey: "moonshot" })).toBe(true)
+    expect(a.matches({ baseUrl: "https://api.moonshot.cn/v1" })).toBe(true)
+    expect(a.matches({ baseUrl: "https://api.moonshot.ai/v1" })).toBe(true)
+    expect(a.matches({ providerKey: "deepseek" })).toBe(false)
+    expect(a.matches({})).toBe(false)
+  })
+
+  it("builds the /users/me/balance request", () => {
+    const req = a.request(Q)
+    expect(req.url).toBe("https://api.moonshot.cn/v1/users/me/balance")
+    expect(req.headers.Authorization).toBe("Bearer sk-moon-test")
+  })
+
+  it("parses available_balance as remaining", () => {
+    const snap = a.parse(200, FIXTURE, Q)
+    expect(snap.kind).toBe("credit")
+    expect(snap.remaining).toBeCloseTo(49.58894)
+    expect(snap.currency).toBe("CNY")
+  })
+
+  it("errors on non-2xx and missing data", () => {
+    expect(a.parse(401, "{}", Q).error).toBe("HTTP 401")
+    expect(a.parse(200, JSON.stringify({ code: 0 }), Q).error).toBe("no data")
+  })
+})

@@ -8045,6 +8045,18 @@
     }
   },
   "subscription": {
+    "balance": {
+      "description": "Remaining credit / quota for this account's provider.",
+      "refresh": "Refresh",
+      "remaining": "remaining",
+      "total": "Total {value}",
+      "used": "Used {value}",
+      "noValue": "—",
+      "empty": "No balance fetched yet. Click Refresh.",
+      "unavailable": "Balance lookup isn't available for this provider.",
+      "error": "Balance query failed: {message}",
+      "fetchedAt": "Updated {time}"
+    },
     "title": "Claude Subscription",
     "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
     "tabs": {
@@ -13906,6 +13918,7 @@
       "provider": "Provider",
       "model": "Model",
       "apiKey": "API key",
+      "baseURL": "Base URL",
       "backend": "Backend",
       "url": "URL",
       "apiKeyOptional": "API key (optional)",

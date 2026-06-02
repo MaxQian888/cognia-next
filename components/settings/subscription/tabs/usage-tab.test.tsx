@@ -37,6 +37,17 @@ jest.mock("@/stores/chat", () => ({
     selector({ setActiveSession: setActiveSessionMock }),
 }))
 
+const useAccountsMock = jest.fn()
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useAccounts: (provider: string) => useAccountsMock(provider),
+}))
+
+jest.mock("@/components/settings/subscription/balance-card", () => ({
+  BalanceCard: ({ provider, accountId }: { provider: string; accountId: string }) => (
+    <div data-testid={`mock-balance-${provider}-${accountId}`}>balance</div>
+  ),
+}))
+
 import { SubscriptionUsageTab } from "./usage-tab"
 
 const NOW = Date.now()
@@ -89,6 +100,7 @@ function setup({
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
+  useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: null })
 })
 
 describe("SubscriptionUsageTab", () => {
@@ -161,5 +173,24 @@ describe("SubscriptionUsageTab", () => {
     setup({ sessionRows: [usageRow({ at: NOW - 60 * 86_400_000 })] })
     render(<SubscriptionUsageTab />)
     expect(screen.getByTestId("usage-export-trigger")).toBeDisabled()
+  })
+
+  it("renders a balance card for the active non-anthropic account", () => {
+    setup()
+    useAccountsMock.mockImplementation((provider: string) =>
+      provider === "codex"
+        ? { accounts: [{ id: "acc-1", label: "DeepSeek" }], activeAccountId: "acc-1" }
+        : { accounts: [], activeAccountId: null }
+    )
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("balances-section")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-balance-codex-acc-1")).toBeInTheDocument()
+  })
+
+  it("renders no balance card when no non-anthropic account is active", () => {
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("balances-section")).toBeInTheDocument()
+    expect(screen.queryByTestId(/^mock-balance-/)).not.toBeInTheDocument()
   })
 })

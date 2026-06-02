@@ -8045,6 +8045,18 @@
     }
   },
   "subscription": {
+    "balance": {
+      "description": "该账号所用提供商的剩余额度 / 配额。",
+      "refresh": "刷新",
+      "remaining": "剩余",
+      "total": "总额 {value}",
+      "used": "已用 {value}",
+      "noValue": "—",
+      "empty": "尚未获取余额，点击刷新。",
+      "unavailable": "该提供商不支持余额查询。",
+      "error": "余额查询失败：{message}",
+      "fetchedAt": "更新于 {time}"
+    },
     "title": "Claude 订阅",
     "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
     "tabs": {
@@ -13906,6 +13918,7 @@
       "provider": "提供方",
       "model": "模型",
       "apiKey": "API key",
+      "baseURL": "服务地址 (Base URL)",
       "backend": "后端",
       "url": "URL",
       "apiKeyOptional": "API key（可选）",

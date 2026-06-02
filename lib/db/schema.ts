@@ -46,7 +46,7 @@ import type {
   PluginDexieMeta,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
-import type { SubscriptionUsageRow } from "@/types/subscription"
+import type { SubscriptionBalanceRow, SubscriptionUsageRow } from "@/types/subscription"
 import type {
   AdapterInstanceRow,
   PlatformIdentityRow,
@@ -177,6 +177,9 @@ export class CogniaDB extends Dexie {
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
   subscriptionUsage!: Table<SubscriptionUsageRow, number>
+  // v70 — Subscription balance snapshots (ADR-0025 Phase 3). Capped at 500
+  // newest-first by `lib/subscription/balance/store.ts`.
+  subscriptionBalance!: Table<SubscriptionBalanceRow, number>
   // v22 — Visual workflows subsystem (n8n-style). The `workflows` table holds
   // user-authored definitions; `workflowRuns` is one row per execution with
   // a frozen snapshot of the def at run start; `workflowRunEvents` is the
@@ -1773,6 +1776,15 @@ export class CogniaDB extends Dexie {
     this.version(69).stores({
       evalDatasetVersions: "&id, datasetId, [datasetId+version], tag, createdAt",
       evalRunCaseResults: "&id, runId, [runId+caseId], caseId",
+    })
+
+    // v70 — Subscription balance snapshots (ADR-0025 Phase 3). Additive; no
+    // upgrade hook. One row per `queryAccountBalance` result, capped at 500
+    // newest-first by `lib/subscription/balance/store.ts`.
+    //   • [providerKey+accountId] — latest snapshot per account+adapter.
+    // See `lib/subscription/balance/` and `@/types/subscription`.
+    this.version(70).stores({
+      subscriptionBalance: "++localId, fetchedAt, accountId, [providerKey+accountId]",
     })
   }
 
