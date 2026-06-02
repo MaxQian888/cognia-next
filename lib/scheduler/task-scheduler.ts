@@ -22,7 +22,10 @@ import { schedulerDb } from "./scheduler-db"
 import { notifyTaskEvent } from "./notification-integration"
 import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
-import { isLeaderTab, startLeaderElection, stopLeaderElection, onLeaderChange } from "./tab-lock"
+import { RendererTimingDriver } from "./timing/renderer-driver"
+import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
+import { isTauri } from "@/lib/platform/detect"
+import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/scheduler"
 import { loggers } from "@/lib/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin"
 import { normalizeTaskTrigger } from "./trigger-normalizer"
@@ -78,7 +81,8 @@ interface ExecuteTaskContext {
 }
 
 class TaskSchedulerImpl {
-  private timers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  /** Ids currently armed in the timing driver (mirrors driver state for getStatus). */
+  private armedTaskIds: Set<string> = new Set()
   private runningExecutions: Map<string, TaskExecution> = new Map()
   private retryChains: Set<string> = new Set()
   private isInitialized = false
@@ -87,6 +91,23 @@ class TaskSchedulerImpl {
   private leaderUnsubscribe: (() => void) | null = null
   private visibilityHandler: (() => void) | null = null
   private executionChannel: BroadcastChannel | null = null
+  /**
+   * Pluggable timing source. Resolved on `initialize()` to the Rust alarm
+   * daemon driver (Tauri) or the renderer driver (web/mobile), unless a driver
+   * was injected via `createTaskScheduler(driver)` for tests.
+   */
+  private driver: SchedulerTimingDriver | null
+
+  constructor(driver?: SchedulerTimingDriver) {
+    this.driver = driver ?? null
+  }
+
+  /** True when this instance is the timing authority allowed to arm tasks. */
+  private isTimingAuthority(): boolean {
+    const driver = this.driver
+    if (!driver || !driver.supportsLeaderElection) return true
+    return (driver as LeaderAwareTimingDriver).isLeader()
+  }
 
   /**
    * Initialize the scheduler
@@ -97,26 +118,44 @@ class TaskSchedulerImpl {
     log.info("Initializing task scheduler...")
 
     try {
-      // Start leader election — only the leader tab will execute scheduled tasks
-      await startLeaderElection()
-      this.leaderUnsubscribe = onLeaderChange((isLeader) => {
-        if (isLeader) {
-          log.info("This tab became leader — scheduling all active tasks")
-          this.scheduleAllActiveTasks().catch((err) => {
-            log.error("Error scheduling tasks after becoming leader:", err)
-          })
-        } else {
-          log.info("This tab lost leadership — unscheduling all tasks")
-          this.unscheduleAllTasks()
-        }
-      })
+      // Resolve the timing driver: Rust alarm daemon on desktop (fires while
+      // minimized to tray), renderer timers + leader election elsewhere.
+      if (!this.driver) {
+        this.driver = isTauri() ? new RustDaemonTimingDriver() : new RendererTimingDriver()
+      }
+      const driver = this.driver
 
-      // Load all active tasks and schedule them (only if leader)
-      if (isLeaderTab()) {
+      // A task becomes due → execute it through the normal pipeline.
+      driver.onDue((taskId, firedAtMs) => {
+        void this.handleTaskDue(taskId, firedAtMs)
+      })
+      await driver.start()
+
+      if (driver.supportsLeaderElection) {
+        // Renderer: only the leader tab arms/executes. Subscribe to leadership
+        // changes to (re)arm or disarm all tasks.
+        const leaderAware = driver as LeaderAwareTimingDriver
+        this.leaderUnsubscribe = leaderAware.onLeaderChange((isLeader) => {
+          if (isLeader) {
+            log.info("This tab became leader — scheduling all active tasks")
+            this.scheduleAllActiveTasks().catch((err) => {
+              log.error("Error scheduling tasks after becoming leader:", err)
+            })
+          } else {
+            log.info("This tab lost leadership — unscheduling all tasks")
+            this.unscheduleAllTasks()
+          }
+        })
+        if (leaderAware.isLeader()) {
+          await this.scheduleAllActiveTasks()
+        }
+      } else {
+        // Rust daemon: single native process is the sole authority.
         await this.scheduleAllActiveTasks()
       }
 
-      // Start periodic check for missed tasks
+      // Start periodic check for missed tasks (belt-and-suspenders in both
+      // modes — the executeTask concurrency guard prevents double-fire).
       this.startPeriodicCheck()
 
       // Start auto-cleanup for old executions (runs every 24 hours)
@@ -129,10 +168,12 @@ class TaskSchedulerImpl {
         log.warn("BroadcastChannel not available for execution status updates")
       }
 
-      // Visibility-aware scheduling: catch up on missed tasks when tab becomes visible
-      if (typeof document !== "undefined") {
+      // Visibility-aware catch-up only matters when renderer timers can be
+      // throttled on a hidden tab; the Rust daemon fires regardless.
+      if (driver.supportsLeaderElection && typeof document !== "undefined") {
+        const leaderAware = driver as LeaderAwareTimingDriver
         this.visibilityHandler = () => {
-          if (!document.hidden && isLeaderTab()) {
+          if (!document.hidden && leaderAware.isLeader()) {
             log.debug("Tab became visible — checking for missed tasks")
             this.checkMissedTasks().catch((err) => {
               log.error("Error checking missed tasks on visibility change:", err)
@@ -168,9 +209,26 @@ class TaskSchedulerImpl {
    * Unschedule all tasks (called when losing leadership)
    */
   private unscheduleAllTasks(): void {
-    for (const taskId of this.timers.keys()) {
+    for (const taskId of Array.from(this.armedTaskIds)) {
       this.unscheduleTask(taskId)
     }
+  }
+
+  /**
+   * Handle a task becoming due (fired by the timing driver). Resolves the
+   * latest task row and runs it through the same execution path as before.
+   * `firedAtMs` is the originally-armed slot so interval cadence stays stable.
+   */
+  private async handleTaskDue(taskId: string, firedAtMs: number): Promise<void> {
+    this.armedTaskIds.delete(taskId)
+    const task = await schedulerDb.getTask(taskId)
+    if (!task || task.status !== "active") return
+    this.executeTask(task, 0, {
+      triggerSource: "schedule",
+      scheduledFor: new Date(firedAtMs),
+    }).catch((err) => {
+      log.error(`Error executing scheduled task ${task.name}:`, err)
+    })
   }
 
   /**
@@ -378,12 +436,11 @@ class TaskSchedulerImpl {
   stop(): void {
     log.info("Stopping task scheduler...")
 
-    // Stop leader election
+    // Unsubscribe leader-change listener (renderer driver only)
     if (this.leaderUnsubscribe) {
       this.leaderUnsubscribe()
       this.leaderUnsubscribe = null
     }
-    stopLeaderElection()
 
     // Remove visibility handler
     if (this.visibilityHandler && typeof document !== "undefined") {
@@ -391,12 +448,10 @@ class TaskSchedulerImpl {
       this.visibilityHandler = null
     }
 
-    // Clear all timers
-    for (const [taskId, timer] of this.timers) {
-      clearTimeout(timer)
-      log.debug(`Cleared timer for task: ${taskId}`)
-    }
-    this.timers.clear()
+    // Tear down the timing driver (clears its timers / leader election /
+    // event listener) and forget armed ids.
+    this.driver?.stop()
+    this.armedTaskIds.clear()
 
     // Clear periodic check
     if (this.checkInterval) {
@@ -635,7 +690,9 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * Schedule a task for execution
+   * Schedule a task for execution by arming the timing driver at its next-run
+   * instant. The driver (renderer timers or the Rust alarm daemon) invokes
+   * `handleTaskDue` when the instant elapses; overdue instants fire promptly.
    */
   private async scheduleTask(task: ScheduledTask): Promise<void> {
     if (task.status !== "active") return
@@ -646,81 +703,26 @@ class TaskSchedulerImpl {
       return
     }
 
-    const delay = nextRun.getTime() - Date.now()
-
-    if (delay <= 0) {
-      // Run immediately if the scheduled time has passed
-      log.debug(`Task ${task.name} is overdue, running now`)
-      this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: nextRun }).catch(
-        (err) => {
-          log.error(`Error executing overdue task ${task.name}:`, err)
-        }
-      )
+    const driver = this.driver
+    if (!driver) {
+      log.warn("Cannot schedule task before scheduler initialization")
       return
     }
 
-    // Clear existing timer
-    this.unscheduleTask(task.id)
+    this.armedTaskIds.add(task.id)
+    await driver.arm(task.id, nextRun.getTime())
 
-    // For long delays (> 60s), use polling to avoid browser timer throttling
-    // and setTimeout drift on background tabs. For short delays, use
-    // direct setTimeout for better precision.
-    const DRIFT_THRESHOLD_MS = 60_000
-
-    if (delay > DRIFT_THRESHOLD_MS) {
-      const targetTime = nextRun.getTime()
-      const timer = setInterval(() => {
-        const remaining = targetTime - Date.now()
-        if (remaining <= 0) {
-          clearInterval(timer)
-          this.timers.delete(task.id)
-          this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: nextRun }).catch(
-            (err) => {
-              log.error(`Error executing scheduled task ${task.name}:`, err)
-            }
-          )
-        } else if (remaining <= DRIFT_THRESHOLD_MS) {
-          // Switch to precise setTimeout for the final stretch
-          clearInterval(timer)
-          const finalTimer = setTimeout(() => {
-            this.timers.delete(task.id)
-            this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: nextRun }).catch(
-              (err) => {
-                log.error(`Error executing scheduled task ${task.name}:`, err)
-              }
-            )
-          }, remaining)
-          this.timers.set(task.id, finalTimer)
-        }
-      }, DRIFT_THRESHOLD_MS)
-      this.timers.set(task.id, timer)
-    } else {
-      const timer = setTimeout(() => {
-        this.timers.delete(task.id)
-        this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: nextRun }).catch(
-          (err) => {
-            log.error(`Error executing scheduled task ${task.name}:`, err)
-          }
-        )
-      }, delay)
-      this.timers.set(task.id, timer)
-    }
-
-    log.debug(
-      `Scheduled task ${task.name} for ${nextRun.toISOString()} (in ${Math.round(delay / 1000)}s)`
-    )
+    log.debug(`Scheduled task ${task.name} for ${nextRun.toISOString()}`)
   }
 
   /**
    * Unschedule a task
    */
   private unscheduleTask(taskId: string): void {
-    const timer = this.timers.get(taskId)
-    if (timer) {
-      clearTimeout(timer)
-      this.timers.delete(taskId)
+    if (this.armedTaskIds.delete(taskId)) {
       log.debug(`Unscheduled task: ${taskId}`)
     }
+    void this.driver?.disarm(taskId)
   }
 
   /**
@@ -1380,7 +1382,7 @@ class TaskSchedulerImpl {
         importedTask.nextRunAt = this.calculateNextRunTime(importedTask, { fromDate: new Date() })
         await schedulerDb.createTask(importedTask)
 
-        if (importedTask.status === "active" && isLeaderTab()) {
+        if (importedTask.status === "active" && this.isTimingAuthority()) {
           await this.scheduleTask(importedTask)
         }
 
@@ -1403,7 +1405,7 @@ class TaskSchedulerImpl {
   getStatus(): { initialized: boolean; scheduledCount: number; runningCount: number } {
     return {
       initialized: this.isInitialized,
-      scheduledCount: this.timers.size,
+      scheduledCount: this.armedTaskIds.size,
       runningCount: this.runningExecutions.size,
     }
   }
@@ -1416,8 +1418,8 @@ let schedulerInstance: TaskSchedulerImpl | null = null
  * Create a new task scheduler instance (factory pattern).
  * Useful for testing or creating isolated scheduler instances.
  */
-export function createTaskScheduler(): TaskSchedulerImpl {
-  return new TaskSchedulerImpl()
+export function createTaskScheduler(driver?: SchedulerTimingDriver): TaskSchedulerImpl {
+  return new TaskSchedulerImpl(driver)
 }
 
 /**

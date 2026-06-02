@@ -203,9 +203,16 @@ export interface ExternalAgentTaskPayload extends Record<string, unknown> {
 }
 
 /**
- * Cron expression parts for validation and display
+ * Cron expression parts for validation and display.
+ *
+ * `seconds` is optional and only populated for 6-field expressions (the
+ * OCPS/`cron-parser@5` "seconds minute hour dom month dow" form). 5-field
+ * expressions leave it `undefined`, so existing 5-field round-trips through
+ * `parseCronExpression` → `formatCronExpression` stay byte-identical.
  */
 export interface CronParts {
+  /** Optional leading seconds field (6-field expressions only). */
+  seconds?: string
   minute: string
   hour: string
   dayOfMonth: string
@@ -692,3 +699,11 @@ export {
 
 // Task dependency graph model (derived from `trigger.dependsOn[]`).
 export type { DependencyNode, DependencyEdge, DependencyGraph } from "./dependency"
+
+// Pluggable timing-source contracts (Rust alarm daemon vs renderer timers).
+export type {
+  SchedulerTimingDriver,
+  LeaderAwareTimingDriver,
+  TaskDueCallback,
+  DaemonTaskDueEvent,
+} from "./daemon"

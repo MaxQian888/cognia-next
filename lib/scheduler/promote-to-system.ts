@@ -16,6 +16,7 @@ import type {
   SystemTaskTrigger,
   SystemTaskAction,
 } from "@/types/scheduler/system-scheduler"
+import { validateCronExpression } from "./cron-parser"
 
 /** Task types that can be promoted to system services */
 const PROMOTABLE_TYPES = new Set(["script", "workflow", "backup", "sync"])
@@ -52,6 +53,19 @@ export function promoteToSystemTask(task: ScheduledTask): PromoteResult {
     }
   }
 
+  // Guard cron grammar: OS schedulers (schtasks / launchd / systemd) express
+  // only classic 5-field cron. The app now supports richer OCPS grammar
+  // (seconds, macros, `L` last-day, `#` nth-weekday) that cannot be promoted
+  // without silently losing semantics — reject explicitly with a clear reason
+  // rather than letting the Rust backend fail with an opaque "exactly 5 fields"
+  // message.
+  if (task.trigger.type === "cron" && task.trigger.cronExpression) {
+    const guard = checkOsCronCompatibility(task.trigger.cronExpression)
+    if (!guard.ok) {
+      return { promotable: false, reason: guard.reason }
+    }
+  }
+
   // Map trigger
   const trigger = mapTrigger(task)
   if (!trigger) {
@@ -81,6 +95,45 @@ export function promoteToSystemTask(task: ScheduledTask): PromoteResult {
       tags: ["cognia-promoted", ...(task.tags || [])],
     },
   }
+}
+
+/**
+ * Verify a cron expression can be expressed by the OS scheduler backends, which
+ * only support classic 5-field cron. Returns a specific reason on rejection.
+ */
+function checkOsCronCompatibility(
+  expression: string
+): { ok: true } | { ok: false; reason: string } {
+  const validation = validateCronExpression(expression)
+  if (!validation.valid) {
+    return {
+      ok: false,
+      reason: `Invalid cron expression: ${validation.error ?? "unparseable"}.`,
+    }
+  }
+
+  const trimmed = expression.trim()
+  if (trimmed.startsWith("@")) {
+    return {
+      ok: false,
+      reason: `Cron macros (e.g. "${trimmed}") cannot be promoted to a system service. Use an explicit 5-field expression.`,
+    }
+  }
+  if (trimmed.split(/\s+/).length > 5) {
+    return {
+      ok: false,
+      reason:
+        "Seconds-level (6-field) cron expressions are not supported by the OS scheduler. Use a 5-field expression (minute hour day month weekday).",
+    }
+  }
+  if (/[L#]/i.test(trimmed)) {
+    return {
+      ok: false,
+      reason:
+        "Advanced cron modifiers (L for last-day, # for nth-weekday) are not supported by the OS scheduler. Use a plain 5-field expression.",
+    }
+  }
+  return { ok: true }
 }
 
 function mapTrigger(task: ScheduledTask): SystemTaskTrigger | null {

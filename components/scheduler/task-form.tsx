@@ -201,6 +201,7 @@ export function TaskForm({
   existingTasks,
 }: TaskFormProps) {
   const t = useTranslations("scheduler")
+  const tCron = useTranslations("scheduler.cronDescribe")
   const locale = useLocale()
   const isZh = locale.startsWith("zh")
   const [f, updateForm] = useReducer(formReducer, initialValues, createInitialState)
@@ -769,7 +770,7 @@ export function TaskForm({
                   ) : (
                     <div className="space-y-1">
                       <p className="rounded-md bg-green-500/10 px-2 py-1 text-xs text-green-600 dark:text-green-400">
-                        {describeCronExpression(f.cronExpression)}
+                        {describeCronExpression(f.cronExpression, tCron)}
                       </p>
                       <button
                         type="button"

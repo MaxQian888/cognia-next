@@ -166,6 +166,97 @@ describe("promoteToSystemTask", () => {
     })
   })
 
+  describe("cron grammar guard", () => {
+    it("promotes a plain 5-field cron", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "0 9 * * 1-5" },
+        payload: { language: "bash", code: "echo hi" },
+      })
+      expect(promoteToSystemTask(task).promotable).toBe(true)
+    })
+
+    it("rejects seconds-level (6-field) cron", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "*/30 0 9 * * *" },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(/6-field|seconds/i)
+    })
+
+    it("rejects the last-day (L) modifier", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "0 0 L * *" },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(/L |modifier/i)
+    })
+
+    it("rejects the nth-weekday (#) modifier", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "0 0 * * 5#2" },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(/#|modifier/i)
+    })
+
+    it("rejects predefined macros", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "@daily" },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(/macro/i)
+    })
+
+    it("rejects an invalid cron expression", () => {
+      const task = createMockTask({
+        trigger: { type: "cron", cronExpression: "99 99 * * *" },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(/invalid/i)
+    })
+  })
+
+  describe("action payload mapping", () => {
+    it("maps explicit script payload fields", () => {
+      const task = createMockTask({
+        type: "script",
+        payload: {
+          language: "bash",
+          code: "echo hi",
+          workingDir: "/tmp",
+          timeout: 60000,
+          useSandbox: false,
+        },
+      })
+      const result = promoteToSystemTask(task)
+      expect(result.promotable).toBe(true)
+      if (result.input?.action.type === "execute_script") {
+        expect(result.input.action.working_dir).toBe("/tmp")
+        expect(result.input.action.timeout_secs).toBe(60)
+        expect(result.input.action.use_sandbox).toBe(false)
+        expect(result.input.action.language).toBe("bash")
+      }
+    })
+
+    it("falls back to defaults when workflow/backup/sync payloads are empty", () => {
+      for (const type of ["workflow", "backup", "sync"] as const) {
+        const task = createMockTask({
+          type,
+          trigger: { type: "interval", intervalMs: 3600000 },
+          payload: undefined,
+        })
+        const result = promoteToSystemTask(task)
+        expect(result.promotable).toBe(true)
+        expect(result.input?.action.type).toBe("run_command")
+      }
+    })
+  })
+
   describe("edge cases", () => {
     it("should handle missing payload", () => {
       const task = createMockTask({ payload: undefined })

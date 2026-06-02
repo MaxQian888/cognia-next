@@ -8,6 +8,25 @@ use std::collections::HashMap;
 /// Unique identifier for system tasks
 pub type SystemTaskId = String;
 
+/// Input for arming a task in the in-process alarm daemon (`daemon.rs`). The
+/// TS scheduler computes the next fire instant and pushes a single absolute
+/// timestamp; the daemon sleeps to it and emits `scheduler:task-due`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArmTaskInput {
+    pub task_id: String,
+    pub fire_at_ms: i64,
+}
+
+/// Payload emitted over the `scheduler:task-due` event when an armed task's
+/// instant elapses. Mirrors `DaemonTaskDueEvent` in `types/scheduler/daemon.ts`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDueEvent {
+    pub task_id: String,
+    pub fired_at_ms: i64,
+}
+
 /// Run level for task execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

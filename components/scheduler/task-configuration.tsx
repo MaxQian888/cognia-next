@@ -12,11 +12,11 @@ interface TaskConfigurationProps {
   className?: string
 }
 
-function getScheduleText(task: ScheduledTask): string {
+function getScheduleText(task: ScheduledTask, describeCron: (expr: string) => string): string {
   const { trigger } = task
   switch (trigger.type) {
     case "cron":
-      return trigger.cronExpression ? describeCronExpression(trigger.cronExpression) : "—"
+      return trigger.cronExpression ? describeCron(trigger.cronExpression) : "—"
     case "interval":
       return trigger.intervalMs !== undefined
         ? `${Math.round(trigger.intervalMs / 60000)} min`
@@ -32,6 +32,7 @@ function getScheduleText(task: ScheduledTask): string {
 
 export function TaskConfiguration({ task, className }: TaskConfigurationProps) {
   const t = useTranslations("scheduler")
+  const tCron = useTranslations("scheduler.cronDescribe")
 
   const timeoutSeconds = `${Math.round(task.config.timeout / 1000)}s`
 
@@ -42,7 +43,7 @@ export function TaskConfiguration({ task, className }: TaskConfigurationProps) {
     },
     {
       label: t("schedule") || "Schedule",
-      value: getScheduleText(task),
+      value: getScheduleText(task, (expr) => describeCronExpression(expr, tCron)),
     },
     {
       label: t("timezone") || "Timezone",

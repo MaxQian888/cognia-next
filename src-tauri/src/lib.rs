@@ -476,6 +476,8 @@ pub fn run() {
             scheduler::commands::scheduler_cancel_confirmation,
             scheduler::commands::scheduler_request_elevation,
             scheduler::commands::scheduler_get_pending_confirmations,
+            scheduler::commands::scheduler_arm_task,
+            scheduler::commands::scheduler_disarm_task,
             vector::commands::vector_create_collection,
             vector::commands::vector_delete_collection,
             vector::commands::vector_list_collections,
@@ -895,6 +897,20 @@ pub fn run() {
                 None => {
                     log::warn!("dirs::data_dir() unavailable — workflow mirror not initialized");
                 }
+            }
+
+            // App-scheduler alarm daemon (headless timing) — build + spawn it
+            // now that an AppHandle exists for the `scheduler:task-due` emitter.
+            // The SchedulerState was `.manage()`-d earlier (cheap, lazy); we
+            // only attach the daemon here. Mirrors the workflow cron daemon so
+            // chat/agent/skill tasks fire while minimized to the tray.
+            {
+                let scheduler_state = app.state::<scheduler::SchedulerState>();
+                scheduler_state.install_alarm(std::sync::Arc::new(
+                    scheduler::AppHandleTaskDueEmitter {
+                        handle: app.handle().clone(),
+                    },
+                ));
             }
 
             // Seed the unified shortcut registry with the three built-in

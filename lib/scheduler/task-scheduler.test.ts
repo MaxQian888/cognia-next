@@ -8,9 +8,15 @@ import {
   stopTaskScheduler,
   registerTaskExecutor,
   unregisterTaskExecutor,
+  createTaskScheduler,
   TaskSchedulerImpl,
 } from "./task-scheduler"
-import type { ScheduledTask, CreateScheduledTaskInput } from "@/types/scheduler"
+import type {
+  ScheduledTask,
+  CreateScheduledTaskInput,
+  SchedulerTimingDriver,
+  TaskDueCallback,
+} from "@/types/scheduler"
 
 // Mock plugin lifecycle hooks
 const mockDispatchOnScheduledTaskStart = jest.fn()
@@ -1247,6 +1253,109 @@ describe("TaskScheduler", () => {
 
         jest.useRealTimers()
       })
+    })
+  })
+
+  describe("timing driver injection (Rust-daemon mode)", () => {
+    function makeMockDriver() {
+      let dueCb: TaskDueCallback | null = null
+      const driver: SchedulerTimingDriver & { fire: TaskDueCallback } = {
+        supportsLeaderElection: false,
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+        onDue: jest.fn((cb: TaskDueCallback) => {
+          dueCb = cb
+        }),
+        arm: jest.fn(),
+        disarm: jest.fn(),
+        fire: (taskId, firedAtMs) => dueCb?.(taskId, firedAtMs),
+      }
+      return driver
+    }
+
+    it("starts the injected driver and skips leader election", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      expect(driver.start).toHaveBeenCalled()
+      expect(driver.onDue).toHaveBeenCalled()
+      // No leader election → active tasks are armed directly on init.
+      expect(mockSchedulerDb.getTasksByStatus).toHaveBeenCalledWith("active")
+      sched.stop()
+      expect(driver.stop).toHaveBeenCalled()
+    })
+
+    it("arms newly-created tasks through the driver", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      const task = await sched.createTask({
+        name: "Armed Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60000 },
+      })
+
+      expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+      sched.stop()
+    })
+
+    it("executes a task when the driver reports it due, using the armed slot", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      const task: ScheduledTask = {
+        id: "due-task-1",
+        name: "Due Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1000,
+          timeout: 30000,
+          allowConcurrent: true,
+          runMissedOnStartup: true,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      const slot = Date.now()
+      driver.fire("due-task-1", slot)
+      await jest.advanceTimersByTimeAsync(10)
+
+      expect(executor).toHaveBeenCalled()
+      expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+        expect.objectContaining({ triggerSource: "schedule", scheduledFor: new Date(slot) })
+      )
+      sched.stop()
+    })
+
+    it("ignores due events for missing or non-active tasks", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      mockSchedulerDb.getTask.mockResolvedValueOnce(null)
+      driver.fire("ghost", Date.now())
+      await jest.advanceTimersByTimeAsync(10)
+
+      expect(executor).not.toHaveBeenCalled()
+      sched.stop()
     })
   })
 })

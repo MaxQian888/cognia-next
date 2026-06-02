@@ -13,6 +13,7 @@
 //! - Admin elevation handling
 
 pub mod commands;
+pub mod daemon;
 pub mod error;
 pub mod metadata_store;
 pub mod service;
@@ -39,6 +40,24 @@ pub use error::{Result, SchedulerError};
 use metadata_store::SchedulerMetadataStore;
 pub use service::SystemScheduler;
 pub use types::*;
+
+pub use daemon::{AlarmDaemon, TaskDueEmitter};
+
+/// AppHandle-bound `TaskDueEmitter` — wraps `tauri::Emitter::emit` so the alarm
+/// daemon can fire `scheduler:task-due` events without holding a `&AppHandle`
+/// (which doesn't satisfy the daemon's `'static` bound). Mirrors
+/// `crate::workflow::AppHandleEmitter`.
+pub struct AppHandleTaskDueEmitter {
+    pub handle: tauri::AppHandle,
+}
+
+impl TaskDueEmitter for AppHandleTaskDueEmitter {
+    fn emit(&self, event: TaskDueEvent) {
+        if let Err(err) = tauri::Emitter::emit(&self.handle, "scheduler:task-due", event) {
+            warn!("scheduler:task-due emit failed: {err}");
+        }
+    }
+}
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -84,6 +103,10 @@ pub struct SchedulerState {
     metadata_store: OnceCell<Option<SchedulerMetadataStore>>,
     /// Pending confirmations keyed by confirmation_id
     pending_confirmations: RwLock<HashMap<String, PendingConfirmationRecord>>,
+    /// In-process alarm daemon driving headless timing for the app scheduler.
+    /// Installed (built + spawned) in the Tauri `setup` closure once an
+    /// AppHandle exists; `None` in web mode or before install.
+    alarm: OnceCell<AlarmDaemon>,
 }
 
 impl SchedulerState {
@@ -95,7 +118,33 @@ impl SchedulerState {
             metadata_db_path,
             metadata_store: OnceCell::new(),
             pending_confirmations: RwLock::new(HashMap::new()),
+            alarm: OnceCell::new(),
         }
+    }
+
+    /// Build + spawn the in-process alarm daemon with the given emitter and
+    /// store it for `arm`/`disarm` access. Idempotent — a second call is
+    /// ignored. Called from the Tauri `setup` closure (see `lib.rs`).
+    pub fn install_alarm(&self, emitter: Arc<dyn TaskDueEmitter>) {
+        let daemon = AlarmDaemon::new(emitter);
+        if self.alarm.set(daemon.clone()).is_ok() {
+            daemon.spawn();
+        }
+    }
+
+    /// The installed alarm daemon, if any. `None` in web mode / before install.
+    pub fn alarm(&self) -> Option<&AlarmDaemon> {
+        self.alarm.get()
+    }
+
+    /// Test-only: install the alarm daemon WITHOUT spawning its run loop. The
+    /// production `install_alarm` spawns an infinite loop on Tauri's global
+    /// runtime, which would keep the test binary alive at exit. The loop itself
+    /// is covered by `daemon::tests` via `tokio::spawn`; here we only need the
+    /// cell wiring so `arm`/`disarm` are observable.
+    #[cfg(test)]
+    pub fn install_alarm_no_spawn(&self, emitter: Arc<dyn TaskDueEmitter>) {
+        let _ = self.alarm.set(AlarmDaemon::new(emitter));
     }
 
     /// Lazily build the platform scheduler on first access. The availability /
@@ -957,6 +1006,7 @@ mod tests {
             metadata_db_path: None,
             metadata_store: OnceCell::new(),
             pending_confirmations: RwLock::new(HashMap::new()),
+            alarm: OnceCell::new(),
         }
     }
 
@@ -968,6 +1018,7 @@ mod tests {
             metadata_db_path: Some(path),
             metadata_store: OnceCell::new(),
             pending_confirmations: RwLock::new(HashMap::new()),
+            alarm: OnceCell::new(),
         }
     }
 
@@ -1021,6 +1072,28 @@ mod tests {
     }
 
     #[test]
+    fn fresh_state_has_no_alarm_until_installed() {
+        let state = SchedulerState::new(None);
+        assert!(state.alarm().is_none());
+    }
+
+    #[test]
+    fn install_alarm_exposes_daemon_and_is_idempotent() {
+        use super::daemon::RecordingEmitter;
+        let state = SchedulerState::new(None);
+        state.install_alarm_no_spawn(Arc::new(RecordingEmitter::default()));
+        assert!(state.alarm().is_some());
+        assert_eq!(state.alarm().map(|d| d.entry_count()), Some(0));
+        // Arming through the installed daemon works.
+        let future = (Utc::now() + ChronoDuration::hours(1)).timestamp_millis();
+        state.alarm().expect("alarm").arm("task_1".into(), future);
+        assert_eq!(state.alarm().map(|d| d.entry_count()), Some(1));
+        // Second install is ignored — the already-armed entry survives.
+        state.install_alarm_no_spawn(Arc::new(RecordingEmitter::default()));
+        assert_eq!(state.alarm().map(|d| d.entry_count()), Some(1));
+    }
+
+    #[test]
     fn test_task_id_generation() {
         let id1 = SystemTask::generate_id();
         let id2 = SystemTask::generate_id();
@@ -1037,7 +1110,10 @@ mod tests {
             description: None,
             trigger: SystemTaskTrigger::Interval { seconds: 60 },
             action: SystemTaskAction::RunCommand {
-                command: "/usr/bin/echo".to_string(),
+                // A bare command (not under a privileged system dir like /usr,
+                // /etc, C:\Windows) — `is_privileged_path` returns false, so a
+                // plain interval RunCommand is Low risk.
+                command: "echo".to_string(),
                 args: vec!["hello".to_string()],
                 working_dir: None,
                 env: std::collections::HashMap::new(),

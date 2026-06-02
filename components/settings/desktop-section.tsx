@@ -192,6 +192,7 @@ export function DesktopSection() {
               {t("launchAtLogin")}
             </Label>
             <p className="text-xs text-muted-foreground">{t("launchAtLoginHint")}</p>
+            <p className="text-xs text-muted-foreground">{t("schedulerBackgroundHint")}</p>
           </div>
           <Switch
             checked={autostart}

@@ -41,6 +41,7 @@ const DEFAULTS: TwinCronSettings = {
 
 export function TwinCronCard({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.cron")
+  const tCron = useTranslations("scheduler.cronDescribe")
   const live = useLiveQuery(() => getTwin(twinId), [twinId], undefined)
   const liveCron = live?.cron ?? DEFAULTS
   const [draft, setDraft] = useState<TwinCronSettings>(liveCron)
@@ -63,12 +64,12 @@ export function TwinCronCard({ twinId }: { twinId: string }) {
   }
 
   const ingestPreview = useMemo(
-    () => describeOrFallback(draft.ingestSchedule),
-    [draft.ingestSchedule]
+    () => describeOrFallback(draft.ingestSchedule, tCron),
+    [draft.ingestSchedule, tCron]
   )
   const distillPreview = useMemo(
-    () => describeOrFallback(draft.distillSchedule),
-    [draft.distillSchedule]
+    () => describeOrFallback(draft.distillSchedule, tCron),
+    [draft.distillSchedule, tCron]
   )
 
   const handleSave = async () => {
@@ -203,11 +204,14 @@ function CronField({ label, value, onChange, preview, disabled, testid }: CronFi
  * Best-effort human description. Empty / invalid expressions land on
  * obvious placeholder text so the user sees feedback as they type.
  */
-function describeOrFallback(expression: string): string {
+function describeOrFallback(
+  expression: string,
+  describe: Parameters<typeof describeCronExpression>[1]
+): string {
   const trimmed = expression.trim()
   if (!trimmed) return "(disabled)"
   if (!validateCronExpression(trimmed).valid) return `⚠ ${trimmed} — invalid`
-  return describeCronExpression(trimmed)
+  return describeCronExpression(trimmed, describe)
 }
 
 interface CronTriggerInfoProps {

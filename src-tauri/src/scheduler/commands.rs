@@ -6,8 +6,8 @@ use log::{debug, error, info};
 use tauri::State;
 
 use crate::scheduler::{
-    CreateSystemTaskInput, SchedulerCapabilities, SchedulerState, SystemTask, SystemTaskId,
-    TaskConfirmationRequest, TaskRunResult,
+    ArmTaskInput, CreateSystemTaskInput, SchedulerCapabilities, SchedulerState, SystemTask,
+    SystemTaskId, TaskConfirmationRequest, TaskRunResult,
 };
 
 /// Response type for operations that may require confirmation
@@ -409,6 +409,44 @@ pub fn scheduler_validate_task(
     Ok(scheduler_validate_task_impl(&state, input))
 }
 
+fn scheduler_arm_task_impl(state: &SchedulerState, input: ArmTaskInput) {
+    match state.alarm() {
+        Some(daemon) => daemon.arm(input.task_id, input.fire_at_ms),
+        None => debug!("scheduler_arm_task: alarm daemon not installed; ignoring"),
+    }
+}
+
+fn scheduler_disarm_task_impl(state: &SchedulerState, task_id: &str) {
+    if let Some(daemon) = state.alarm() {
+        daemon.disarm(task_id);
+    }
+}
+
+/// Arm a task in the in-process alarm daemon to fire at an absolute instant.
+/// The TS scheduler (`lib/scheduler/timing/rust-daemon-driver.ts`) calls this
+/// whenever it (re)schedules a task; the daemon emits `scheduler:task-due` when
+/// the instant elapses. No-op when the alarm daemon is not installed (e.g. the
+/// data dir was unavailable at boot) so the renderer never hard-fails.
+#[tauri::command]
+pub fn scheduler_arm_task(
+    state: State<'_, SchedulerState>,
+    input: ArmTaskInput,
+) -> Result<(), String> {
+    scheduler_arm_task_impl(&state, input);
+    Ok(())
+}
+
+/// Cancel a previously-armed task in the alarm daemon. No-op for unknown ids
+/// or when the daemon is not installed.
+#[tauri::command]
+pub fn scheduler_disarm_task(
+    state: State<'_, SchedulerState>,
+    task_id: String,
+) -> Result<(), String> {
+    scheduler_disarm_task_impl(&state, &task_id);
+    Ok(())
+}
+
 /// Translation validation result (part of ValidationResult)
 #[derive(serde::Serialize)]
 pub struct TranslationValidationResult {
@@ -453,6 +491,43 @@ mod tests {
             run_level: RunLevel::User,
             tags: vec!["test".to_string()],
         }
+    }
+
+    #[test]
+    fn arm_and_disarm_drive_the_installed_daemon() {
+        use crate::scheduler::daemon::RecordingEmitter;
+        use chrono::{Duration, Utc};
+
+        let state = SchedulerState::default();
+        state.install_alarm_no_spawn(std::sync::Arc::new(RecordingEmitter::default()));
+
+        let fire_at = (Utc::now() + Duration::hours(1)).timestamp_millis();
+        scheduler_arm_task_impl(
+            &state,
+            ArmTaskInput {
+                task_id: "task_1".to_string(),
+                fire_at_ms: fire_at,
+            },
+        );
+        assert_eq!(state.alarm().map(|d| d.entry_count()), Some(1));
+
+        scheduler_disarm_task_impl(&state, "task_1");
+        assert_eq!(state.alarm().map(|d| d.entry_count()), Some(0));
+    }
+
+    #[test]
+    fn arm_is_a_no_op_without_an_installed_daemon() {
+        let state = SchedulerState::default();
+        // No panic / error when the daemon was never installed (web mode).
+        scheduler_arm_task_impl(
+            &state,
+            ArmTaskInput {
+                task_id: "task_1".to_string(),
+                fire_at_ms: 0,
+            },
+        );
+        scheduler_disarm_task_impl(&state, "task_1");
+        assert!(state.alarm().is_none());
     }
 
     #[test]
