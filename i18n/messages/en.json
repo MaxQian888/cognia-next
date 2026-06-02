@@ -11102,6 +11102,7 @@
         "settings": "Settings",
         "newChat": "New chat with character",
         "switchTeam": "Switch to team",
+        "workspaces": "Switch workspace",
         "sessions": "Sessions"
       },
       "actions": {
@@ -11110,6 +11111,7 @@
         "exportMd": "Export current chat as Markdown",
         "clearChat": "Clear current conversation",
         "toggleTheme": "Toggle theme",
+        "openFolder": "Open folder as workspace…",
         "openSettings": "Open settings",
         "manageApiKey": "Manage API key",
         "manageCharacters": "Manage characters",
@@ -11122,6 +11124,7 @@
         "nothingToExport": "Nothing to export — start a conversation first.",
         "conversationCleared": "Conversation cleared.",
         "updatesDesktopOnly": "Updates are only available in the desktop build.",
+        "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
         "upToDate": "You're on the latest version.",
         "updateAvailable": "Update available: {version}",
         "updateFailed": "Update check failed: {message}"
@@ -13725,6 +13728,9 @@
     }
   },
   "mobile": {
+    "workspace": {
+      "activeLabel": "Workspace: {name}"
+    },
     "splash": {
       "label": "Starting cognia"
     },

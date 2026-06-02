@@ -12,6 +12,8 @@ import {
 import {
   CheckIcon,
   DownloadIcon,
+  FolderIcon,
+  FolderOpenIcon,
   KeyRoundIcon,
   MessageSquareIcon,
   MoonIcon,
@@ -32,6 +34,9 @@ import { useSessions } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
+import { useProjectStore } from "@/stores/project/project-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
@@ -59,6 +64,9 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+  const workspaces = useProjectStore((s) => s.projects)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const setActiveProject = useProjectStore((s) => s.setActiveProject)
   const { theme, setTheme } = useTheme()
 
   // Global Cmd/Ctrl+K trigger.
@@ -188,6 +196,22 @@ export function CommandPalette({ onOpenSettings }: Props) {
     setSelectedGuild({ kind: "team", teamId: team.id })
   }
 
+  const handleSwitchWorkspace = (id: string) => {
+    log.info("command-palette switch-workspace", { projectId: id })
+    close()
+    setActiveProject(id)
+  }
+
+  const handleOpenFolder = async () => {
+    log.info("command-palette open-folder")
+    close()
+    if (!isTauri()) {
+      toast.info(t("toasts.openFolderDesktopOnly"))
+      return
+    }
+    await openFolderAsWorkspace()
+  }
+
   return (
     <CommandDialog
       open={open}
@@ -218,6 +242,10 @@ export function CommandPalette({ onOpenSettings }: Props) {
           <CommandItem onSelect={toggleTheme}>
             {theme === "dark" ? <SunIcon className="size-4" /> : <MoonIcon className="size-4" />}
             <span>{t("actions.toggleTheme")}</span>
+          </CommandItem>
+          <CommandItem onSelect={() => void handleOpenFolder()}>
+            <FolderOpenIcon className="size-4" />
+            <span>{t("actions.openFolder")}</span>
           </CommandItem>
         </CommandGroup>
 
@@ -287,6 +315,29 @@ export function CommandPalette({ onOpenSettings }: Props) {
                   <span className="truncate">{team.name}</span>
                 </CommandItem>
               ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {workspaces.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t("groups.workspaces")}>
+              {workspaces
+                .filter((p) => !p.isArchived)
+                .map((p) => (
+                  <CommandItem
+                    key={p.id}
+                    value={`workspace ${p.name} ${primaryRootOf(p)?.path ?? ""}`}
+                    onSelect={() => handleSwitchWorkspace(p.id)}
+                  >
+                    <FolderIcon className="size-4" />
+                    <span className="truncate">{p.name}</span>
+                    {activeProjectId === p.id && (
+                      <CheckIcon className="ml-auto size-3.5 text-muted-foreground" />
+                    )}
+                  </CommandItem>
+                ))}
             </CommandGroup>
           </>
         )}

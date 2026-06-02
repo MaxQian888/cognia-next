@@ -47,6 +47,7 @@ import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
+import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
@@ -313,6 +314,8 @@ export function AppShellMobile() {
           fallbackTitle={headerTitle}
           streaming={chatStatus === "streaming"}
         />
+
+        <MobileWorkspaceChip className="ml-2 shrink-0" />
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <Button

@@ -229,6 +229,36 @@ test("Check updates outside Tauri toasts a desktop-only info", async () => {
   await waitFor(() => expect(toastInfo).toHaveBeenCalledWith("toasts.updatesDesktopOnly"))
 })
 
+test("Switch workspace activates that project", async () => {
+  queueChars([], [])
+  const { useProjectStore } = await import("@/stores/project/project-store")
+  act(() => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "ws-1",
+          name: "Backend",
+          roots: [{ id: "r", path: "/srv", isPrimary: true }],
+        } as never,
+      ],
+      activeProjectId: null,
+      loaded: false,
+    })
+  })
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  const user = await openWithShortcut()
+  await user.click(screen.getByText("Backend"))
+  expect(useProjectStore.getState().activeProjectId).toBe("ws-1")
+})
+
+test("Open folder outside Tauri toasts a desktop-only info", async () => {
+  queueChars([], [])
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  const user = await openWithShortcut()
+  await user.click(screen.getByText("actions.openFolder"))
+  await waitFor(() => expect(toastInfo).toHaveBeenCalledWith("toasts.openFolderDesktopOnly"))
+})
+
 test("Cleanup removes the keydown listener on unmount", () => {
   const removeSpy = jest.spyOn(window, "removeEventListener")
   queueChars([], [])

@@ -50,7 +50,13 @@ describe("useGitBranchIndicator", () => {
     act(() => {
       useProjectStore.setState({
         activeProjectId: "p1",
-        projects: [{ id: "p1", rootDir: "/proj" } as never],
+        projects: [
+          {
+            id: "p1",
+            roots: [{ id: "r1", path: "/proj", isPrimary: true }],
+            rootDir: "/proj",
+          } as never,
+        ],
       })
     })
     renderHook(() => useGitBranchIndicator())
@@ -61,7 +67,13 @@ describe("useGitBranchIndicator", () => {
     act(() => {
       useProjectStore.setState({
         activeProjectId: "p1",
-        projects: [{ id: "p1", rootDir: "/proj" } as never],
+        projects: [
+          {
+            id: "p1",
+            roots: [{ id: "r1", path: "/proj", isPrimary: true }],
+            rootDir: "/proj",
+          } as never,
+        ],
       })
     })
     renderHook(() => useGitBranchIndicator())
@@ -70,17 +82,42 @@ describe("useGitBranchIndicator", () => {
     act(() => {
       useProjectStore.setState({
         activeProjectId: "p2",
-        projects: [{ id: "p2", rootDir: "/proj2" } as never],
+        projects: [{ id: "p2", roots: [{ id: "r2", path: "/proj2", isPrimary: true }] } as never],
       })
     })
     await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/proj2"))
+  })
+
+  it("binds to the primary root even when the rootDir mirror is absent", async () => {
+    act(() => {
+      useProjectStore.setState({
+        activeProjectId: "p3",
+        projects: [
+          {
+            id: "p3",
+            roots: [
+              { id: "r1", path: "/secondary" },
+              { id: "r2", path: "/primary", isPrimary: true },
+            ],
+          } as never,
+        ],
+      })
+    })
+    renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBe("/primary"))
   })
 
   it("does not snap back to the workspace root after a manual git-panel rebind", async () => {
     act(() => {
       useProjectStore.setState({
         activeProjectId: "p1",
-        projects: [{ id: "p1", rootDir: "/proj" } as never],
+        projects: [
+          {
+            id: "p1",
+            roots: [{ id: "r1", path: "/proj", isPrimary: true }],
+            rootDir: "/proj",
+          } as never,
+        ],
       })
     })
     renderHook(() => useGitBranchIndicator())
@@ -97,7 +134,13 @@ describe("useGitBranchIndicator", () => {
     act(() => {
       useProjectStore.setState({
         activeProjectId: "p1",
-        projects: [{ id: "p1", rootDir: "/proj" } as never],
+        projects: [
+          {
+            id: "p1",
+            roots: [{ id: "r1", path: "/proj", isPrimary: true }],
+            rootDir: "/proj",
+          } as never,
+        ],
       })
     })
     const first = renderHook(() => useGitBranchIndicator())

@@ -11102,6 +11102,7 @@
         "settings": "设置",
         "newChat": "与角色开始新聊天",
         "switchTeam": "切换团队",
+        "workspaces": "切换工作区",
         "sessions": "会话"
       },
       "actions": {
@@ -11110,6 +11111,7 @@
         "exportMd": "将当前聊天导出为 Markdown",
         "clearChat": "清空当前会话",
         "toggleTheme": "切换主题",
+        "openFolder": "打开文件夹为工作区…",
         "openSettings": "打开设置",
         "manageApiKey": "管理 API 密钥",
         "manageCharacters": "管理角色",
@@ -11122,6 +11124,7 @@
         "nothingToExport": "没有可导出的内容 — 先开始一次对话吧。",
         "conversationCleared": "会话已清空。",
         "updatesDesktopOnly": "仅桌面端支持检查更新。",
+        "openFolderDesktopOnly": "仅桌面端支持将文件夹打开为工作区。",
         "upToDate": "已是最新版本。",
         "updateAvailable": "有可用更新：{version}",
         "updateFailed": "检查更新失败：{message}"
@@ -13725,6 +13728,9 @@
     }
   },
   "mobile": {
+    "workspace": {
+      "activeLabel": "工作区：{name}"
+    },
     "splash": {
       "label": "正在启动 cognia"
     },

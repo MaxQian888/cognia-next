@@ -14,6 +14,7 @@ import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
 import { useProjectStore } from "@/stores/project/project-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
 import { useGitBranchInfo, useGitBusy, useGitStore } from "@/stores/git/git-store"
 
 export interface BranchIndicator {
@@ -43,11 +44,11 @@ export function useGitBranchIndicator(): BranchIndicator {
   const branchInfo = useGitBranchInfo()
   const busy = useGitBusy()
 
-  // Active project's on-disk root (the natural repo source).
+  // Active project's primary on-disk root (the natural repo source).
   const activeProjectRoot = useProjectStore((s) => {
     const id = s.activeProjectId
     const project = id ? s.projects.find((p) => p.id === id) : undefined
-    return project?.rootDir ?? null
+    return project ? (primaryRootOf(project)?.path ?? null) : null
   })
 
   // Follow the active workspace: bind the repo to its `rootDir` on first sight
