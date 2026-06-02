@@ -9488,8 +9488,9 @@
     "title": "Agent 评估",
     "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",
     "tabs": {
-      "datasets": "评测集与运行",
-      "annotate": "轨迹分析"
+      "datasets": "数据集",
+      "annotate": "轨迹分析",
+      "compare": "运行与对比"
     },
     "datasets": {
       "heading": "评测集",
@@ -9541,6 +9542,111 @@
       "response-quality": "回答质量",
       "rag": "RAG",
       "cost": "成本"
+    },
+    "case": {
+      "heading": "用例（{count}）",
+      "add": "新增用例",
+      "empty": "暂无用例。新增一条，或导入已有测试集。",
+      "edit": "编辑用例",
+      "delete": "删除用例",
+      "input": "输入提示",
+      "capability": "能力",
+      "split": "子集",
+      "tags": "标签（逗号分隔）",
+      "notes": "备注",
+      "reference": "参考（期望）",
+      "expectedOutput": "期望输出",
+      "expectedTools": "期望工具（逗号分隔）",
+      "expectedContains": "必须包含（每行一条）",
+      "expectedContext": "期望上下文（每行一条）",
+      "expectedToolArgs": "期望工具参数（JSON）",
+      "invalidJson": "JSON 无效：{error}",
+      "save": "保存用例",
+      "cancel": "取消"
+    },
+    "versions": {
+      "empty": "暂无版本快照。每次运行会冻结一个快照。",
+      "version": "v{version}",
+      "cases": "{count} 条用例",
+      "tag": "打标签",
+      "tagPlaceholder": "标签（如 prod）",
+      "applyTag": "应用"
+    },
+    "compare": {
+      "title": "运行与对比",
+      "subtitle": "选择两个或更多运行，逐用例对比。",
+      "selectRun": "选择运行 {label}",
+      "pickTwo": "至少选择两个运行进行对比。",
+      "noCases": "所选运行没有记录逐用例结果。",
+      "case": "用例",
+      "pass": "通过",
+      "fail": "失败"
+    },
+    "import": {
+      "heading": "导入测试集",
+      "close": "关闭",
+      "preview": "已解析 {count} 条用例",
+      "action": "导入 {count} 条用例",
+      "failed": "导入失败：{error}",
+      "done": "已导入 {count} 条用例。",
+      "tabs": {
+        "file": "文件",
+        "huggingface": "HuggingFace",
+        "history": "从历史",
+        "foreign": "外部格式"
+      },
+      "file": {
+        "pick": "选择 CSV / JSON / JSONL / YAML 文件",
+        "inputColumn": "输入列",
+        "expectedColumn": "期望列",
+        "none": "（无）"
+      },
+      "hf": {
+        "offline": "离线——HuggingFace 导入需要联网。",
+        "uri": "数据集 URI",
+        "fetch": "拉取并导入"
+      },
+      "history": {
+        "empty": "没有可导入的近期轨迹。",
+        "pick": "选择会话 {id} 的轨迹"
+      },
+      "foreign": {
+        "format": "来源格式",
+        "pick": "选择导出文件"
+      }
+    },
+    "runConfig": {
+      "heading": "配置运行",
+      "close": "关闭",
+      "targets": "被测目标",
+      "targetKind": "目标类型",
+      "targetRef": "模型 / 团队 / 工作流 ID",
+      "targetLabel": "标签",
+      "character": "角色",
+      "defaultCharacter": "默认 Agent",
+      "removeTarget": "移除目标",
+      "addTarget": "添加目标",
+      "kind": {
+        "chat": "聊天",
+        "team": "Agent 团队",
+        "workflow": "工作流"
+      },
+      "k": "重复次数（k）",
+      "split": "子集筛选",
+      "capabilities": "能力（逗号分隔）",
+      "scorers": "评分器（{count}）",
+      "deterministicOnly": "未配置评审 provider——仅运行确定性评分器。",
+      "failed": "运行失败：{error}",
+      "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
+      "run": "运行评估",
+      "running": "运行中…"
+    },
+    "detail": {
+      "import": "导入",
+      "exportJsonl": "导出 JSONL",
+      "exportCsv": "导出 CSV",
+      "versions": "版本",
+      "run": "运行"
     }
   },
   "memory": {

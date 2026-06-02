@@ -9488,8 +9488,9 @@
     "title": "Agent Evaluation",
     "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",
     "tabs": {
-      "datasets": "Datasets & runs",
-      "annotate": "Trace analysis"
+      "datasets": "Datasets",
+      "annotate": "Trace analysis",
+      "compare": "Runs & compare"
     },
     "datasets": {
       "heading": "Datasets",
@@ -9541,6 +9542,111 @@
       "response-quality": "Response quality",
       "rag": "RAG",
       "cost": "Cost"
+    },
+    "case": {
+      "heading": "Cases ({count})",
+      "add": "Add case",
+      "empty": "No cases yet. Add one or import a test set.",
+      "edit": "Edit case",
+      "delete": "Delete case",
+      "input": "Input prompt",
+      "capability": "Capability",
+      "split": "Split",
+      "tags": "Tags (comma-separated)",
+      "notes": "Notes",
+      "reference": "Reference (expected)",
+      "expectedOutput": "Expected output",
+      "expectedTools": "Expected tools (comma-separated)",
+      "expectedContains": "Must contain (one per line)",
+      "expectedContext": "Expected context (one per line)",
+      "expectedToolArgs": "Expected tool args (JSON)",
+      "invalidJson": "Invalid JSON: {error}",
+      "save": "Save case",
+      "cancel": "Cancel"
+    },
+    "versions": {
+      "empty": "No version snapshots yet. A snapshot is frozen each time you run.",
+      "version": "v{version}",
+      "cases": "{count, plural, =1 {# case} other {# cases}}",
+      "tag": "Tag",
+      "tagPlaceholder": "Tag (e.g. prod)",
+      "applyTag": "Apply"
+    },
+    "compare": {
+      "title": "Runs & comparison",
+      "subtitle": "Pick two or more runs to compare case-by-case.",
+      "selectRun": "Select run {label}",
+      "pickTwo": "Pick at least two runs to compare.",
+      "noCases": "No per-case results recorded for the selected runs.",
+      "case": "Case",
+      "pass": "pass",
+      "fail": "fail"
+    },
+    "import": {
+      "heading": "Import test set",
+      "close": "Close",
+      "preview": "{count, plural, =1 {# case} other {# cases}} parsed",
+      "action": "Import {count, plural, =1 {# case} other {# cases}}",
+      "failed": "Import failed: {error}",
+      "done": "Imported {count, plural, =1 {# case} other {# cases}}.",
+      "tabs": {
+        "file": "File",
+        "huggingface": "HuggingFace",
+        "history": "From history",
+        "foreign": "Foreign format"
+      },
+      "file": {
+        "pick": "Choose a CSV / JSON / JSONL / YAML file",
+        "inputColumn": "Input column",
+        "expectedColumn": "Expected column",
+        "none": "(none)"
+      },
+      "hf": {
+        "offline": "Offline — HuggingFace import needs a network connection.",
+        "uri": "Dataset URI",
+        "fetch": "Fetch & import"
+      },
+      "history": {
+        "empty": "No recent traces to import.",
+        "pick": "Pick trace for session {id}"
+      },
+      "foreign": {
+        "format": "Source format",
+        "pick": "Choose an export file"
+      }
+    },
+    "runConfig": {
+      "heading": "Configure run",
+      "close": "Close",
+      "targets": "Targets",
+      "targetKind": "Target kind",
+      "targetRef": "Model / team / workflow id",
+      "targetLabel": "Label",
+      "character": "Character",
+      "defaultCharacter": "Default agent",
+      "removeTarget": "Remove target",
+      "addTarget": "Add target",
+      "kind": {
+        "chat": "Chat",
+        "team": "Agent Team",
+        "workflow": "Workflow"
+      },
+      "k": "Repetitions (k)",
+      "split": "Split filter",
+      "capabilities": "Capabilities (comma-separated)",
+      "scorers": "Scorers ({count})",
+      "deterministicOnly": "No judge provider configured — running deterministic scorers only.",
+      "failed": "Run failed: {error}",
+      "noTargets": "Add at least one target with a model / team / workflow id.",
+      "run": "Run evaluation",
+      "running": "Running…"
+    },
+    "detail": {
+      "import": "Import",
+      "exportJsonl": "Export JSONL",
+      "exportCsv": "Export CSV",
+      "versions": "Versions",
+      "run": "Run"
     }
   },
   "memory": {
