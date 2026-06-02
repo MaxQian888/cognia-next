@@ -218,6 +218,9 @@ const AiPromptParams = z.object({
   systemPrompt: optionalString,
   userPrompt: requiredString("required"),
   temperature: numberRange(0, 2).optional(),
+  // Structured output (B1): "json" parses the completion into output.structured.
+  responseFormat: z.enum(["text", "json"]).optional(),
+  jsonSchema: optionalString,
 })
 
 const AiClassifyParams = z.object({
@@ -239,12 +242,19 @@ const AiExtractParams = z.object({
   input: requiredString("required"),
   schemaJson: optionalString,
   schema: z.record(z.string(), z.unknown()).optional(),
+  // Parameter Extractor (B4): names that must be present for output.valid.
+  required: z.array(z.string()).optional(),
   hint: optionalString,
 })
 
 const AiEmbedParams = z.object({
   input: requiredString("required"),
   dimension: numberRange(32, 4096).optional(),
+  // Real semantic embedding (B3): when provider+model set, use the real
+  // embedder; otherwise fall back to the deterministic hash.
+  provider: optionalString,
+  model: optionalString,
+  apiKey: optionalString,
 })
 
 // ── Flow ────────────────────────────────────────────────────────────────────

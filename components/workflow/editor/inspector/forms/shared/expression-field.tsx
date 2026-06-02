@@ -19,7 +19,6 @@
 
 import { useEffect, useMemo, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
-import { useGatedLiveQuery } from "@/hooks/workflow/use-gated-live-query"
 import {
   flagsForTier,
   resolveEffectiveTier,
@@ -43,9 +42,10 @@ import {
 } from "@codemirror/autocomplete"
 import { workflowExpressionLanguage } from "@/lib/workflow/editor/expression-language"
 import { buildExpressionSuggestions } from "@/lib/workflow/editor/expression-suggestions"
+import { buildNodeRef, EXPR_DRAG_MIME, parseExprDrag } from "@/lib/workflow/editor/expr-ref"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
+import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
 import type { EditorStore, EditorState as WfEditorState } from "@/lib/workflow/editor/store"
-import { getDb } from "@/lib/db/index"
 import { cn } from "@/lib/utils"
 import { useInspectorExpressionCtx } from "./inspector-context"
 
@@ -65,50 +65,6 @@ interface ExpressionFieldProps {
   currentNodeId?: string
   /** Aria-label for headless tests. */
   "aria-label"?: string
-}
-
-/**
- * Read the most recent successful run's per-step output map for this workflow.
- *
- * `enabled` gates the Dexie liveQuery — when false (e.g. a node is being
- * dragged on the canvas, or the resolved performance tier is `reduced`), we
- * short-circuit to the previously resolved value instead of re-evaluating
- * the query on every `workflowRunEvents` write.
- */
-function useLatestRunOutputs(
-  workflowId: string | undefined,
-  enabled: boolean
-): Record<string, unknown> {
-  return useGatedLiveQuery<Record<string, unknown>>(
-    async () => {
-      if (!workflowId) return {}
-      const rows = await getDb()
-        .workflowRuns.where("[workflowId+startedAt]")
-        .between([workflowId, 0], [workflowId, Number.POSITIVE_INFINITY])
-        .reverse()
-        .limit(5)
-        .toArray()
-      const success = rows.find((r) => r.status === "succeeded")
-      if (!success) return {}
-      // Pull every step_completed event's payload — payload contains the
-      // step's output snapshot.
-      const events = await getDb()
-        .workflowRunEvents.where("[runId+ts]")
-        .between([success.id, 0], [success.id, Number.POSITIVE_INFINITY])
-        .toArray()
-      const out: Record<string, unknown> = {}
-      for (const ev of events) {
-        if (ev.type === "step_completed" && ev.stepId) {
-          const payload = ev.payload as { output?: unknown } | undefined
-          if (payload && "output" in payload) out[ev.stepId] = payload.output
-        }
-      }
-      return out
-    },
-    [workflowId],
-    {} as Record<string, unknown>,
-    enabled
-  )
 }
 
 export function ExpressionField({
@@ -143,6 +99,7 @@ export function ExpressionField({
     nodes: s.nodes,
     workflowId: s.baseWorkflow.id,
     variables: s.baseWorkflow.variables,
+    pinData: s.baseWorkflow.pinData,
     isDraggingAny: s.isDraggingAny,
     performanceTier: s.performanceTier as PerformanceTier,
   }))
@@ -150,6 +107,7 @@ export function ExpressionField({
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const workflowId = editorState?.workflowId
   const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
+  const pinData = editorState?.pinData
   const isDraggingAny = editorState?.isDraggingAny ?? false
   // Gate the live-query on the resolved tier's `liveQueryWhileDragging` flag.
   // Tests / headless renders without a store fall back to "always enabled"
@@ -174,7 +132,13 @@ export function ExpressionField({
     return true
   }, [store, userChoice, nodes.length, isDraggingAny])
 
-  const upstreamOutputs = useLatestRunOutputs(workflowId, liveQueryEnabled)
+  // Pin data overlays the latest run's outputs (pin wins) so the preview +
+  // autocomplete reflect frozen test fixtures while they're set.
+  const runOutputs = useLatestRunOutputs(workflowId, liveQueryEnabled)
+  const upstreamOutputs = useMemo(
+    () => (pinData ? { ...runOutputs, ...pinData } : runOutputs),
+    [runOutputs, pinData]
+  )
 
   // Build a stable compartment so completions can be reconfigured live.
   const completionCompartment = useMemo(() => new Compartment(), [])
@@ -246,6 +210,32 @@ export function ExpressionField({
         multiline ? highlightActiveLine() : EditorView.theme({}),
         multiline ? lineNumbers() : EditorView.theme({}),
         EditorView.lineWrapping,
+        // Drag-to-map: dropping a field chip from the NDV data view inserts its
+        // `{{ $node['id'].path }}` reference at the drop position.
+        EditorView.domEventHandlers({
+          dragover(event) {
+            if (event.dataTransfer?.types.includes(EXPR_DRAG_MIME)) {
+              event.preventDefault()
+              return true
+            }
+            return false
+          },
+          drop(event, view) {
+            const payload = parseExprDrag(event.dataTransfer?.getData(EXPR_DRAG_MIME))
+            if (!payload) return false
+            event.preventDefault()
+            const ref = buildNodeRef(payload.nodeId, payload.segments)
+            const pos =
+              view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+              view.state.selection.main.head
+            view.dispatch({
+              changes: { from: pos, to: pos, insert: ref },
+              selection: { anchor: pos + ref.length },
+            })
+            view.focus()
+            return true
+          },
+        }),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {
             const next = u.state.doc.toString()

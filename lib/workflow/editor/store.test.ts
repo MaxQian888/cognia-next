@@ -882,3 +882,45 @@ describe("editor store — applyProposalOps", () => {
     expect(useStore.getState().edges).toHaveLength(0)
   })
 })
+
+describe("editor store — pin data", () => {
+  it("pins a node's output onto baseWorkflow.pinData and marks dirty", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().pinNodeData("n_a", { value: 1 })
+    expect(useStore.getState().baseWorkflow.pinData).toEqual({ n_a: { value: 1 } })
+    expect(useStore.getState().dirty).toBe(true)
+  })
+
+  it("merges multiple pins and the converter round-trips them via toWorkflow", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().pinNodeData("n_a", { a: 1 })
+    useStore.getState().pinNodeData("n_b", { b: 2 })
+    expect(useStore.getState().toWorkflow().pinData).toEqual({ n_a: { a: 1 }, n_b: { b: 2 } })
+  })
+
+  it("unpins a node, and is a no-op (no dirty) when the pin is absent", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().pinNodeData("n_a", { a: 1 })
+    useStore.getState().markSaved()
+    useStore.getState().unpinNodeData("n_a")
+    expect(useStore.getState().baseWorkflow.pinData).toEqual({})
+    expect(useStore.getState().dirty).toBe(true)
+
+    useStore.getState().markSaved()
+    useStore.getState().unpinNodeData("n_missing")
+    expect(useStore.getState().dirty).toBe(false)
+  })
+})
+
+describe("editor store — run-single-step signal", () => {
+  it("sets and clears requestedRunSingleStepId without polluting undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    expect(useStore.getState().requestedRunSingleStepId).toBeNull()
+    useStore.getState().requestRunSingleStep("n_c")
+    expect(useStore.getState().requestedRunSingleStepId).toBe("n_c")
+    useStore.getState().clearRequestedRunSingleStep()
+    expect(useStore.getState().requestedRunSingleStepId).toBeNull()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})

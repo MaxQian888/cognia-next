@@ -200,6 +200,15 @@ export interface EditorState extends EditorStateSnapshot {
   requestedRunFromStepId: string | null
   requestRunFromStep: (stepId: string) => void
   clearRequestedRunFromStep: () => void
+  /**
+   * Signal → canvas to "Run this step": execute ONLY this node (plus any
+   * ancestors lacking data), reusing pinned / last-run upstream. Mirrors the
+   * `requestedRunFromStep` trio. The canvas subscribes, calls `runSingleNode`,
+   * and clears the field once the run starts.
+   */
+  requestedRunSingleStepId: string | null
+  requestRunSingleStep: (stepId: string) => void
+  clearRequestedRunSingleStep: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -259,6 +268,14 @@ export interface EditorState extends EditorStateSnapshot {
   setVariables: (next: Record<string, string>) => void
   /** Replace the workflow's credential refs map (refs only — never values). */
   setCredentials: (next: Record<string, WorkflowCredentialRef>) => void
+  /**
+   * Pin a node's output as a test fixture. Honored by editor manual runs
+   * ("Run" / "Run this step") so downstream work doesn't re-hit external APIs.
+   * Persisted on the `workflows` row via the existing save path (`pinData`).
+   */
+  pinNodeData: (nodeId: string, value: unknown) => void
+  /** Remove a node's pinned fixture. */
+  unpinNodeData: (nodeId: string) => void
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
   /** Replace entire state with a fresh workflow (e.g., on route change). */
@@ -400,6 +417,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         connectionState: null,
         requestedContextMenu: null,
         requestedRunFromStepId: null,
+        requestedRunSingleStepId: null,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -463,6 +481,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedContextMenu: () => set({ requestedContextMenu: null }),
         requestRunFromStep: (stepId) => set({ requestedRunFromStepId: stepId }),
         clearRequestedRunFromStep: () => set({ requestedRunFromStepId: null }),
+        requestRunSingleStep: (stepId) => set({ requestedRunSingleStepId: stepId }),
+        clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -627,6 +647,22 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             baseWorkflow: { ...s.baseWorkflow, credentials: next },
             dirty: true,
           })),
+        pinNodeData: (nodeId, value) =>
+          set((s) => ({
+            baseWorkflow: {
+              ...s.baseWorkflow,
+              pinData: { ...s.baseWorkflow.pinData, [nodeId]: value },
+            },
+            dirty: true,
+          })),
+        unpinNodeData: (nodeId) =>
+          set((s) => {
+            const pin = s.baseWorkflow.pinData
+            if (!pin || !(nodeId in pin)) return {}
+            const nextPin = { ...pin }
+            delete nextPin[nodeId]
+            return { baseWorkflow: { ...s.baseWorkflow, pinData: nextPin }, dirty: true }
+          }),
 
         loadWorkflow: (wf) => {
           const c = workflowToReactFlow(wf)

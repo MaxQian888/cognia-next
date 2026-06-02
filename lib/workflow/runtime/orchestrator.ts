@@ -81,6 +81,25 @@ export interface RunWorkflowInput {
    * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
+  /**
+   * Honor `workflow.pinData` — pinned nodes return their frozen value instead
+   * of executing. Set ONLY for editor manual runs ("Run" / "Run this step");
+   * never for production triggers. Threaded into every `runStep`.
+   */
+  honorPinData?: boolean
+  /**
+   * Pre-seed the idempotency cache with these node outputs (keyed by node id)
+   * before scheduling. Seeded nodes are treated as already-computed (no
+   * executor call) and their value flows to downstream consumers. Used by
+   * `runSingleNode` to reuse pinned / last-run upstream data.
+   */
+  seedOutputs?: Record<string, unknown>
+  /**
+   * Bound the run to exactly these step ids — every other node is marked
+   * skipped before the loop. Used by `runSingleNode` to execute one node plus
+   * its (unseeded) ancestors without touching descendants or siblings.
+   */
+  restrictToStepIds?: ReadonlyArray<string>
 }
 
 export interface RunWorkflowResult {
@@ -163,6 +182,13 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     }, wallClockTimeoutMs)
   }
   const cache = await IdempotencyCache.hydrate(runId)
+  // Pre-seed reused upstream outputs (runSingleNode) so seeded nodes cache-hit
+  // instead of re-executing.
+  if (input.seedOutputs) {
+    for (const [id, value] of Object.entries(input.seedOutputs)) {
+      if (!cache.has(id)) cache.set(id, value)
+    }
+  }
   const secretResolver = input.secretResolver ?? NoopSecretResolver
 
   // Dynamic concurrency cap (ADR-0022 §3.7). Defaults to settings.maxConcurrency
@@ -241,6 +267,15 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     }
   }
 
+  // "Run this step" — bound the run to an explicit allow-list (target node +
+  // its ancestors). Everything else is skipped before stepping.
+  if (input.restrictToStepIds) {
+    const keep = new Set(input.restrictToStepIds)
+    for (const stepId of order) {
+      if (!keep.has(stepId)) skipped.add(stepId)
+    }
+  }
+
   // Eagerly log pre-skipped steps so the event log mirrors today's behavior.
   // We also track which steps we've already logged-as-skipped so we don't
   // double-emit when branch routing / disabled propagation grows the set.
@@ -314,6 +349,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           retryPolicy,
           secretResolver,
           logger,
+          honorPinData: input.honorPinData,
         })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)

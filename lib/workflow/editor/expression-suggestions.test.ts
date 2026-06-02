@@ -46,8 +46,8 @@ describe("buildExpressionSuggestions", () => {
   it("excludes the current node from per-node entries", () => {
     const nodes = [n("a", "ai.prompt"), n("b", "data.transform")]
     const out = buildExpressionSuggestions({ nodes, currentNodeId: "a" })
-    expect(out.some((e) => e.label === "$node['a'].out")).toBe(false)
-    expect(out.some((e) => e.label === "$node['b'].out")).toBe(true)
+    expect(out.some((e) => e.label === "$node['a']")).toBe(false)
+    expect(out.some((e) => e.label === "$node['b']")).toBe(true)
   })
 
   it("skips annotation nodes entirely", () => {
@@ -59,32 +59,34 @@ describe("buildExpressionSuggestions", () => {
     const out = buildExpressionSuggestions({ nodes })
     expect(out.some((e) => e.label.includes("'note'"))).toBe(false)
     expect(out.some((e) => e.label.includes("'group'"))).toBe(false)
-    expect(out.some((e) => e.label === "$node['p'].out")).toBe(true)
+    expect(out.some((e) => e.label === "$node['p']")).toBe(true)
   })
 
-  it("expands per-node fields when outputSchemas is supplied", () => {
+  it("expands per-node fields (no .out wrapper) when outputSchemas is supplied", () => {
     const nodes = [n("p", "ai.prompt", "Prompt")]
     const out = buildExpressionSuggestions({
       nodes,
       outputSchemas: { p: ["completion", "model"] },
     })
-    const fields = out.filter((e) => e.label.startsWith("$node['p'].out.")).map((e) => e.label)
-    expect(fields).toContain("$node['p'].out.completion")
-    expect(fields).toContain("$node['p'].out.model")
+    const fields = out
+      .filter((e) => e.label.startsWith("$node['p'].") && e.label !== "$node['p']")
+      .map((e) => e.label)
+    expect(fields).toContain("$node['p'].completion")
+    expect(fields).toContain("$node['p'].model")
     // Generic fallback should NOT appear when real schema is provided.
-    expect(fields).not.toContain("$node['p'].out.<field>")
+    expect(fields).not.toContain("$node['p'].<field>")
   })
 
   it("falls back to a generic <field> placeholder when no schema is known", () => {
     const nodes = [n("x", "ai.prompt")]
     const out = buildExpressionSuggestions({ nodes })
-    expect(out.some((e) => e.label === "$node['x'].out.<field>")).toBe(true)
+    expect(out.some((e) => e.label === "$node['x'].<field>")).toBe(true)
   })
 
   it("uses node label + kind in the detail string when label is present", () => {
     const nodes = [n("greet", "ai.prompt", "Greeting prompt")]
     const out = buildExpressionSuggestions({ nodes })
-    const baseRow = out.find((e) => e.label === "$node['greet'].out")
+    const baseRow = out.find((e) => e.label === "$node['greet']")
     expect(baseRow?.detail).toBe("Greeting prompt (ai.prompt)")
   })
 })

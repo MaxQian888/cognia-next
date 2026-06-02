@@ -51,6 +51,7 @@ function renderMenu(
     onResetView: noop,
     onConfigureNode: noop,
     onRunFromNode: noop,
+    onRunSingleNode: noop,
     onCopyNode: noop,
     onEditEdgeLabel: noop,
     onPaste: noop,
@@ -207,6 +208,7 @@ describe("CanvasContextMenu — rendering gates", () => {
           onResetView={noop}
           onConfigureNode={noop}
           onRunFromNode={noop}
+          onRunSingleNode={noop}
           onCopyNode={noop}
           onEditEdgeLabel={noop}
           onPaste={noop}

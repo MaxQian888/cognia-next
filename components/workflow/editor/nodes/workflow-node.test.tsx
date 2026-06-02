@@ -107,6 +107,35 @@ describe("WorkflowNodeComponent", () => {
     expect(screen.queryByTestId("wf-node-toolbar-n_a")).toBeNull()
   })
 
+  it("shows the pin badge only when the node has pinned data", () => {
+    const { store } = withStore()
+    const { rerender } = renderNode({ store, id: "n_a" })
+    expect(screen.queryByTestId("wf-node-pin-badge")).toBeNull()
+
+    store.getState().pinNodeData("n_a", { value: 1 })
+    rerender(
+      <EditorStoreProvider store={store}>
+        <TooltipProvider>
+          <WorkflowNodeComponent
+            id="n_a"
+            type="workflowNode"
+            selected={false}
+            data={{ label: "Prompt", params: {}, kind: "ai.prompt", typeVersion: 1 }}
+            positionAbsoluteX={0}
+            positionAbsoluteY={0}
+            dragging={false}
+            zIndex={0}
+            isConnectable={true}
+            deletable={true}
+            selectable={true}
+            draggable={true}
+          />
+        </TooltipProvider>
+      </EditorStoreProvider>
+    )
+    expect(screen.getByTestId("wf-node-pin-badge")).toBeInTheDocument()
+  })
+
   it("renders the floating toolbar when wrapped in a store provider", () => {
     const { store } = withStore()
     renderNode({ store })

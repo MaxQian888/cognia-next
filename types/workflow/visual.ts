@@ -637,3 +637,64 @@ export const DEFAULT_RETRY_POLICY: WorkflowRetryPolicy = {
   baseMs: 1000,
   maxMs: 30_000,
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Editor-only NDV (node data view) shapes. These are NOT persisted and NOT part
+// of the wire format — they are derived at render time by
+// `lib/workflow/editor/node-io-data.ts` from the latest run's `step_completed`
+// payloads overlaid with `VisualWorkflow.pinData`. Kept here so the resolver and
+// its UI consumers share one definition (project rule: types live in `types/`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Where a piece of NDV data came from. `pin` wins over `run`; `none` = absent. */
+export type NodeIoSource = "pin" | "run" | "none"
+
+/** The selected node's resolved output for the Output tab. */
+export interface NodeIoOutput {
+  value: unknown
+  /** True when the value came from `pinData` rather than a real run. */
+  pinned: boolean
+  source: NodeIoSource
+}
+
+/** One upstream node's contribution to the selected node's Input tab. */
+export interface NodeIoInputEntry {
+  upstreamNodeId: string
+  upstreamLabel: string
+  value: unknown
+  source: NodeIoSource
+}
+
+/** Resolved input + output data for a single node, for the inspector NDV tabs. */
+export interface NodeIoData {
+  output: NodeIoOutput
+  inputs: NodeIoInputEntry[]
+}
+
+/** Primitive/structural type tag used by the Schema view + drag-to-map rows. */
+export type SchemaRowType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "object"
+  | "array"
+  | "null"
+  | "undefined"
+
+/**
+ * One row of the Schema view — a flattened path into a node's output object.
+ * `segments` is the structured accessor (e.g. `["items", 0, "id"]`) used to
+ * build a node reference expression; `path` is its human display form
+ * (e.g. `items[0].id`); `sample` is a short string preview of the value at
+ * that path. Produced by `flattenSchema`.
+ *
+ * NOTE: there is intentionally NO `.out` wrapper — paths address the node's
+ * raw output object exactly as the runtime stores it (`upstream[id]`), so a
+ * dragged reference resolves correctly. See `lib/workflow/editor/expr-ref.ts`.
+ */
+export interface SchemaRow {
+  segments: Array<string | number>
+  path: string
+  type: SchemaRowType
+  sample: string
+}

@@ -43,6 +43,7 @@ export interface CanvasContextMenuProps {
   onResetView: () => void
   onConfigureNode: (nodeId: string) => void
   onRunFromNode: (nodeId: string) => void
+  onRunSingleNode: (nodeId: string) => void
   onCopyNode: (nodeId: string) => void
   onEditEdgeLabel: (edgeId: string) => void
   onPaste: () => void
@@ -58,6 +59,7 @@ export function CanvasContextMenu({
   onResetView,
   onConfigureNode,
   onRunFromNode,
+  onRunSingleNode,
   onCopyNode,
   onEditEdgeLabel,
   onPaste,
@@ -197,6 +199,13 @@ export function CanvasContextMenu({
               const disabled = activeNode.data.disabled === true
               return (
                 <>
+                  <DropdownMenuItem
+                    disabled={!runnable}
+                    onSelect={fire(() => onRunSingleNode(activeNode.id))}
+                    data-testid="ctx-node-run-step"
+                  >
+                    {t("node.runStep")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={!runnable}
                     onSelect={fire(() => onRunFromNode(activeNode.id))}

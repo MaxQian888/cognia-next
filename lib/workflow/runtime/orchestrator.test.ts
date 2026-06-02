@@ -891,3 +891,77 @@ describe("runWorkflow — errorPolicy", () => {
     expect(events.find((e) => e.type === "step_skipped" && e.stepId === "n_success")).toBeDefined()
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Editor debugging options: seedOutputs / restrictToStepIds / honorPinData.
+// ───────────────────────────────────────────────────────────────────────────
+
+function setNode(id: string, value: unknown): VisualWorkflow["nodes"][number] {
+  return {
+    id,
+    type: "flow.set",
+    typeVersion: 1,
+    position: { x: 0, y: 0 },
+    data: { label: id, params: { variable: id, value } },
+  }
+}
+
+describe("runWorkflow — debugging options", () => {
+  it("seedOutputs makes a seeded node cache-hit (no execution) and feeds downstream", async () => {
+    const wf = buildWorkflow(
+      [setNode("n_a", "ORIGINAL"), setNode("n_b", "{{ $node['n_a'].value }}")],
+      [{ id: "e1", source: "n_a", target: "n_b" }]
+    )
+    const r = await runWorkflow({
+      workflow: wf,
+      trigger,
+      seedOutputs: { n_a: { variable: "n_a", value: "SEEDED" } },
+    })
+    expect(r.status).toBe("succeeded")
+    // n_b saw the seeded value, not n_a's would-be "ORIGINAL".
+    expect((r.output as { value?: string }).value).toBe("SEEDED")
+    // The seeded node did not execute → no step_completed event for it.
+    const events = await listRunEvents(r.runId)
+    expect(events.some((e) => e.type === "step_completed" && e.stepId === "n_a")).toBe(false)
+    expect(events.some((e) => e.type === "step_completed" && e.stepId === "n_b")).toBe(true)
+  })
+
+  it("restrictToStepIds skips every node not in the allow-list", async () => {
+    const wf = buildWorkflow(
+      [setNode("n_a", "a"), setNode("n_b", "b"), setNode("n_c", "c")],
+      [
+        { id: "e1", source: "n_a", target: "n_b" },
+        { id: "e2", source: "n_b", target: "n_c" },
+      ]
+    )
+    const r = await runWorkflow({ workflow: wf, trigger, restrictToStepIds: ["n_a", "n_b"] })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    expect(events.some((e) => e.type === "step_completed" && e.stepId === "n_b")).toBe(true)
+    expect(events.some((e) => e.type === "step_skipped" && e.stepId === "n_c")).toBe(true)
+  })
+
+  it("honorPinData returns the pinned value for a pinned node", async () => {
+    const wf: VisualWorkflow = {
+      ...buildWorkflow([setNode("n_a", "ORIGINAL")]),
+      pinData: { n_a: { variable: "n_a", value: "PINNED" } },
+    }
+    const r = await runWorkflow({ workflow: wf, trigger, honorPinData: true })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    const completed = events.find((e) => e.type === "step_completed" && e.stepId === "n_a")
+    expect((completed?.payload as { output?: { value?: string } })?.output?.value).toBe("PINNED")
+  })
+
+  it("ignores pinData when honorPinData is not set", async () => {
+    const wf: VisualWorkflow = {
+      ...buildWorkflow([setNode("n_a", "ORIGINAL")]),
+      pinData: { n_a: { variable: "n_a", value: "PINNED" } },
+    }
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    const completed = events.find((e) => e.type === "step_completed" && e.stepId === "n_a")
+    expect((completed?.payload as { output?: { value?: string } })?.output?.value).toBe("ORIGINAL")
+  })
+})

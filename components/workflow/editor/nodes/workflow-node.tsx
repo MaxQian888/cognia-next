@@ -9,6 +9,7 @@ import {
   CircleDashed as SkippedIcon,
   AlertTriangle as WarnIcon,
   Timer as TimerIcon,
+  Pin as PinIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
 import { useFormatter, useTranslations } from "next-intl"
@@ -170,6 +171,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // back to the legacy `data.*` fields when a store provider isn't
   // mounted (test renders, storybook).
   const decoration = useNodeDecoration(id)
+  const tNode = useTranslations("workflows.node")
   const status: NodeRunStatus = decoration.runStatus ?? data.runStatus ?? "idle"
   const validationFields = decoration.validation?.fields
   const validationSummary = decoration.validation?.summary
@@ -365,6 +367,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
+            {decoration.pinned ? (
+              <span
+                title={tNode("pinnedTitle")}
+                className="inline-flex items-center rounded-full bg-amber-500/15 px-1 py-px text-amber-600 dark:text-amber-400"
+                data-testid="wf-node-pin-badge"
+              >
+                <PinIcon className="size-3" aria-hidden="true" />
+              </span>
+            ) : null}
             {hasErrors ? (
               <span
                 title={errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`}

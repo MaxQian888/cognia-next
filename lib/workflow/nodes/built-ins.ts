@@ -30,6 +30,7 @@ import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
 import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
+import { extractJson } from "@/lib/twin/distill/llm"
 // Side-effect import — registers the 12 desktop UI-automation executors at
 // module load time. Keeps the catalog and the registry in sync without any
 // cross-module wiring.
@@ -38,6 +39,47 @@ import "./desktop"
 // Wave 3 — registers the `action.system.terminal` executor that drives
 // the integrated terminal dock from a workflow step.
 import "./terminal"
+
+// ── AI structured-output helpers (shared by ai.prompt / ai.extract) ─────────
+
+/**
+ * Non-throwing JSON extraction from an LLM completion. Reuses the robust
+ * `extractJson` (handles fenced blocks + leading/trailing prose) and converts
+ * its throw into a `{ value, error }` result so node executors can surface a
+ * `parseError` downstream instead of failing the whole run.
+ */
+function parseStructured(completion: string): { value: unknown; error?: string } {
+  try {
+    return { value: extractJson<unknown>(completion) }
+  } catch (err) {
+    return { value: null, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** Build the JSON-only system instruction appended in `responseFormat: "json"`. */
+function buildJsonInstruction(schema?: string): string {
+  const base = "Respond with ONLY a single valid JSON value — no prose, no markdown code fences."
+  return schema && schema.trim() ? `${base}\nMatch this shape:\n${schema.trim()}` : base
+}
+
+/** Coerce an extracted value to a declared type hint (best-effort). */
+function coerceToType(value: unknown, typeHint: string): unknown {
+  const hint = typeHint.toLowerCase()
+  if (value === null || value === undefined) return value
+  if (hint.includes("number")) {
+    const n = typeof value === "number" ? value : Number(value)
+    return Number.isNaN(n) ? value : n
+  }
+  if (hint.includes("bool")) {
+    if (typeof value === "boolean") return value
+    if (typeof value === "string") return value.trim().toLowerCase() === "true"
+    return Boolean(value)
+  }
+  if (hint.includes("string")) {
+    return typeof value === "string" ? value : String(value)
+  }
+  return value
+}
 
 // ── trigger.manual ────────────────────────────────────────────────────────
 registerNodeExecutor({
@@ -195,6 +237,11 @@ registerNodeExecutor({
       systemPrompt?: string
       userPrompt?: string
       temperature?: number
+      /** "json" enables structured output — the completion is parsed into
+       *  `output.structured` (with `output.parseError` on failure). */
+      responseFormat?: "text" | "json"
+      /** Optional shape hint injected into the JSON-mode system prompt. */
+      jsonSchema?: string
     }
     const apiKey =
       params.apiKey ??
@@ -204,21 +251,47 @@ registerNodeExecutor({
           : ""
       ))
     const userPrompt = params.userPrompt ?? ""
+    const jsonMode = params.responseFormat === "json"
+    // In JSON mode, append an instruction (and optional shape) so the model
+    // returns parseable JSON regardless of the authored system prompt.
+    const systemPrompt = jsonMode
+      ? [params.systemPrompt, buildJsonInstruction(params.jsonSchema)].filter(Boolean).join("\n\n")
+      : params.systemPrompt
+
+    // Shared tail: attach `structured` / `parseError` when JSON mode is on.
+    const finalize = (out: {
+      provider?: string
+      model?: string
+      completion: string
+      usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+      stub: boolean
+    }) => {
+      if (!jsonMode) return { output: out }
+      const parsed = parseStructured(out.completion)
+      return {
+        output: {
+          ...out,
+          structured: parsed.value,
+          ...(parsed.error ? { parseError: parsed.error } : {}),
+        },
+      }
+    }
+
     if (!params.provider || !params.model || !apiKey) {
       ctx.log(
         "warn",
         "ai.prompt: provider / model / apiKey missing — using stub echo. " +
           "Configure them on the node (or via credential refs) for a real LLM call."
       )
-      return {
-        output: {
-          provider: params.provider,
-          model: params.model,
-          completion: `[ai.prompt stub] ${userPrompt}`,
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-          stub: true,
-        },
-      }
+      // JSON mode returns a parseable empty object so downstream structured
+      // consumers get an object (not a parse error) before keys are configured.
+      return finalize({
+        provider: params.provider,
+        model: params.model,
+        completion: jsonMode ? "{}" : `[ai.prompt stub] ${userPrompt}`,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        stub: true,
+      })
     }
     const { createLlmClient } = await import("@/lib/twin/distill/llm")
     const client = createLlmClient({
@@ -229,7 +302,7 @@ registerNodeExecutor({
       defaultTemperature: params.temperature,
     })
     const completion = await client.complete(userPrompt, {
-      system: params.systemPrompt,
+      system: systemPrompt,
       temperature: params.temperature,
     })
     const usage = client.getUsageSnapshot?.() ?? {
@@ -237,15 +310,13 @@ registerNodeExecutor({
       outputTokens: 0,
       totalTokens: 0,
     }
-    return {
-      output: {
-        provider: params.provider,
-        model: params.model,
-        completion,
-        usage,
-        stub: false,
-      },
-    }
+    return finalize({
+      provider: params.provider,
+      model: params.model,
+      completion,
+      usage,
+      stub: false,
+    })
   },
 })
 
@@ -932,6 +1003,11 @@ registerNodeExecutor({
         completion,
         confident: matched.toLowerCase() === lower,
       },
+      // Route like a Question Classifier: the orchestrator follows only the
+      // outgoing edge whose label / sourceHandle matches the chosen category;
+      // other category branches are skipped. Edges are labeled with the
+      // category names in the editor.
+      decision: matched,
     }
   },
 })
@@ -950,6 +1026,8 @@ registerNodeExecutor({
       baseURL?: string
       input?: string
       schema?: Record<string, string>
+      /** Field names that must be present + non-null for `valid` to be true. */
+      required?: string[]
       hint?: string
     }
     const input = params.input ?? ""
@@ -979,23 +1057,35 @@ registerNodeExecutor({
     const completion = String(
       (inner.output as { completion?: string } | undefined)?.completion ?? ""
     )
-    let extracted: unknown = null
-    let parseError: string | undefined
-    // Try to extract a JSON object from the completion — LLMs sometimes
-    // wrap it in markdown code fences.
-    const jsonMatch = completion.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
-        extracted = JSON.parse(jsonMatch[0])
-      } catch (err) {
-        parseError = err instanceof Error ? err.message : String(err)
+    // Robust parse (handles fenced blocks + surrounding prose) into a typed
+    // parameter struct — this is the "Parameter Extractor" behavior.
+    const parsed = parseStructured(completion)
+    let extracted: unknown = parsed.value
+    const parseError = parsed.error
+
+    // Coerce declared fields to their type hints (best-effort) so downstream
+    // nodes get numbers/booleans rather than stringified values.
+    if (extracted && typeof extracted === "object" && !Array.isArray(extracted)) {
+      const obj = extracted as Record<string, unknown>
+      for (const [key, typeHint] of Object.entries(schema)) {
+        if (key in obj) obj[key] = coerceToType(obj[key], String(typeHint))
       }
-    } else {
-      parseError = "no JSON object found in completion"
+      extracted = obj
     }
+
+    const required = Array.isArray(params.required) ? params.required : []
+    const present =
+      extracted && typeof extracted === "object" && !Array.isArray(extracted)
+        ? (extracted as Record<string, unknown>)
+        : {}
+    const missing = required.filter((k) => present[k] === undefined || present[k] === null)
+    const valid = !parseError && missing.length === 0
+
     return {
       output: {
         extracted,
+        missing,
+        valid,
         parseError,
         completion,
       },
@@ -1014,13 +1104,60 @@ registerNodeExecutor({
   kind: "ai.embed",
   typeVersion: 1,
   execute: async (ctx) => {
-    const params = ctx.params as { input?: string; dimension?: number }
+    const params = ctx.params as {
+      input?: string
+      dimension?: number
+      provider?: string
+      model?: string
+      apiKey?: string
+    }
     const text = params.input ?? ""
     if (!text) throw nonRetryable("ai.embed requires non-empty 'input'")
     const dimension =
       typeof params.dimension === "number" && params.dimension > 0
         ? Math.floor(params.dimension)
         : 384
+
+    const apiKey =
+      params.apiKey ??
+      (await ctx.resolveSecret(
+        ctx.params.credentialRefs && typeof ctx.params.credentialRefs === "object"
+          ? ((ctx.params.credentialRefs as Record<string, string>).apiKey ?? "")
+          : ""
+      ))
+
+    // Real semantic embedding when a provider + model (+ key if required) are
+    // configured; otherwise fall back to the deterministic hash so workflows
+    // authored before credentials still run end-to-end.
+    if (params.provider && params.model) {
+      try {
+        const { generateEmbedding } = await import("@/lib/vector/embedding")
+        const result = await generateEmbedding(
+          text,
+          {
+            provider: params.provider,
+            model: params.model,
+            dimensions: dimension,
+          } as Parameters<typeof generateEmbedding>[1],
+          apiKey ?? ""
+        )
+        return {
+          output: {
+            vector: result.embedding,
+            dimension: result.embedding.length,
+            provider: result.provider,
+            model: result.model,
+            kind: "semantic",
+          },
+        }
+      } catch (err) {
+        ctx.log(
+          "warn",
+          `ai.embed: semantic embedding failed (${err instanceof Error ? err.message : String(err)}) — falling back to deterministic hash.`
+        )
+      }
+    }
+
     const vector = generateTextEmbedding(text, { dimension })
     return {
       output: {

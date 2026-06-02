@@ -33,12 +33,15 @@ export interface NodeDecoration {
   runStatus: NodeRunStatus | undefined
   validation: NodeValidationResult | undefined
   lastRun: LastRunSummary | undefined
+  /** True when this node has pinned test data (editor runs use it). */
+  pinned: boolean
 }
 
 const EMPTY_DECORATION: NodeDecoration = Object.freeze({
   runStatus: undefined,
   validation: undefined,
   lastRun: undefined,
+  pinned: false,
 })
 
 export function useNodeDecoration(nodeId: string): NodeDecoration {
@@ -51,6 +54,7 @@ export function useNodeDecoration(nodeId: string): NodeDecoration {
       runStatus: s.runStatusByStepId[nodeId],
       validation: s.validationByStepId[nodeId],
       lastRun: s.lastRunByStepId[nodeId],
+      pinned: s.baseWorkflow.pinData?.[nodeId] !== undefined,
     })
   )
   // `store` is itself a hook (Zustand `useBoundStore`), so we either call

@@ -24,6 +24,7 @@ import { createEditorStore, type EditorStore, type EditorState } from "@/lib/wor
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
 import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { runSingleNode } from "@/lib/workflow/runtime/run-single-node"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
 import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
 import {
@@ -253,6 +254,14 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const ctxRunFromNode = useCallback((nodeId: string) => {
     void handleRunRef.current?.({ startStepId: nodeId })
   }, [])
+  // "Run this step" routes through the store signal so the canvas effect runs
+  // it (keeps the single source of truth for run gating).
+  const ctxRunSingleNode = useCallback(
+    (nodeId: string) => {
+      useStore.getState().requestRunSingleStep(nodeId)
+    },
+    [useStore]
+  )
   const ctxCopyNode = useCallback(
     async (nodeId: string) => {
       const state = useStore.getState()
@@ -336,6 +345,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           workflow: wf,
           trigger,
           startStepId: options?.startStepId,
+          // Editor manual runs honor pinned node data (test fixtures); never
+          // production triggers.
+          honorPinData: true,
         })
         if (result.status === "succeeded") {
           toast.success(t("completed"), { id: toastId })
@@ -382,6 +394,55 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- handleRun sets state internally; this is the intentional bridge from Zustand requestedRunFromStep into the local runner.
     void handleRun({ startStepId: stepId })
   }, [requestedRunFromStepId, useStore, handleRun])
+
+  // "Run this step" — execute ONLY the target node (reusing pinned / last-run
+  // upstream). Distinct from "Run from here" (target + downstream). Saves dirty
+  // changes first, like handleRun.
+  const handleRunSingleStep = useCallback(
+    async (nodeId: string) => {
+      if (running) return
+      const issues = revalidateAll()
+      if (Object.keys(issues).length > 0) {
+        toast.error(tValidation("blockedRunTitle"), {
+          description: tValidation("summary", { count: Object.keys(issues).length }),
+        })
+        return
+      }
+      setRunning(true)
+      let toastId: string | number | undefined
+      try {
+        if (dirty) {
+          await replaceWorkflow(toWorkflow())
+          markSaved()
+        }
+        const wf = toWorkflow()
+        toastId = toast.loading(`${t("running")} ${wf.name}`)
+        const result = await runSingleNode({ workflow: wf, nodeId })
+        if (result.status === "succeeded") {
+          toast.success(t("completed"), { id: toastId })
+        } else {
+          toast.error(`${t("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
+            id: toastId,
+          })
+        }
+        onRequestRun()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("startFailed"), { id: toastId })
+      } finally {
+        setRunning(false)
+      }
+    },
+    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+  )
+
+  const requestedRunSingleStepId = useStore((s) => s.requestedRunSingleStepId)
+  useEffect(() => {
+    if (!requestedRunSingleStepId) return
+    const stepId = requestedRunSingleStepId
+    useStore.getState().clearRequestedRunSingleStep()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- handleRunSingleStep sets state internally; intentional bridge from Zustand into the local runner.
+    void handleRunSingleStep(stepId)
+  }, [requestedRunSingleStepId, useStore, handleRunSingleStep])
 
   const handleAutoLayout = useCallback(async () => {
     const s = useStore.getState()
@@ -816,6 +877,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onResetView={ctxResetView}
         onConfigureNode={ctxConfigureNode}
         onRunFromNode={ctxRunFromNode}
+        onRunSingleNode={ctxRunSingleNode}
         onCopyNode={ctxCopyNode}
         onEditEdgeLabel={ctxEditEdgeLabel}
         onPaste={ctxPaste}

@@ -397,6 +397,8 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
   const systemPrompt = readString(params, "systemPrompt")
   const userPrompt = readString(params, "userPrompt")
   const temperature = readNumber(params, "temperature", 0.7)
+  const responseFormat = readString(params, "responseFormat") || "text"
+  const jsonSchema = readString(params, "jsonSchema")
   return (
     <FieldGroup>
       <div className="grid grid-cols-2 gap-3">
@@ -476,6 +478,42 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "temperature", Number(e.target.value) || 0))}
         />
       </Field>
+      <Field
+        label={t("responseFormat.label")}
+        htmlFor="ai-format"
+        hint={t("responseFormat.hint")}
+        name="responseFormat"
+      >
+        <Select
+          value={responseFormat}
+          onValueChange={(v) => onChange(patchParam(params, "responseFormat", v))}
+        >
+          <SelectTrigger id="ai-format">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="text">{t("responseFormat.text")}</SelectItem>
+            <SelectItem value="json">{t("responseFormat.json")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {responseFormat === "json" ? (
+        <Field
+          label={t("jsonSchema.label")}
+          htmlFor="ai-schema"
+          hint={t("jsonSchema.hint")}
+          name="jsonSchema"
+        >
+          <Textarea
+            id="ai-schema"
+            value={jsonSchema}
+            onChange={(e) => onChange(patchParam(params, "jsonSchema", e.target.value))}
+            rows={4}
+            className="font-mono text-xs"
+            placeholder={t("jsonSchema.placeholder")}
+          />
+        </Field>
+      ) : null}
     </FieldGroup>
   )
 }
@@ -1630,6 +1668,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
   const input = readString(params, "input")
   const schemaJson = readString(params, "schemaJson", "{}")
   const hint = readString(params, "hint")
+  const requiredStr = Array.isArray(params.required) ? (params.required as string[]).join(", ") : ""
   return (
     <FieldGroup>
       <div className="grid grid-cols-2 gap-3">
@@ -1706,6 +1745,30 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
           rows={4}
         />
       </Field>
+      <Field
+        label={t("required.label")}
+        htmlFor="ae-required"
+        hint={t("required.hint")}
+        name="required"
+      >
+        <Input
+          id="ae-required"
+          value={requiredStr}
+          placeholder={t("required.placeholder")}
+          onChange={(e) =>
+            onChange(
+              patchParam(
+                params,
+                "required",
+                e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              )
+            )
+          }
+        />
+      </Field>
       <Field label={t("hint.label")} htmlFor="ae-hint" name="hint">
         <Input
           id="ae-hint"
@@ -1722,8 +1785,46 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiEmbed")
   const input = readString(params, "input")
   const dimension = readNumber(params, "dimension", 384)
+  const provider = readString(params, "provider")
+  const model = readString(params, "model")
+  const apiKey = readString(params, "apiKey")
   return (
     <FieldGroup>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("provider.label")} htmlFor="aem-provider" name="provider">
+          <Select
+            value={provider || undefined}
+            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
+          >
+            <SelectTrigger id="aem-provider">
+              <SelectValue placeholder={t("provider.placeholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="openai">OpenAI</SelectItem>
+              <SelectItem value="google">Google</SelectItem>
+              <SelectItem value="cohere">Cohere</SelectItem>
+              <SelectItem value="mistral">Mistral</SelectItem>
+              <SelectItem value="transformersjs">Transformers.js (local)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t("model.label")} htmlFor="aem-model" hint={t("model.hint")} name="model">
+          <Input
+            id="aem-model"
+            value={model}
+            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+            placeholder={t("model.placeholder")}
+          />
+        </Field>
+      </div>
+      <Field label={t("apiKey.label")} htmlFor="aem-key" hint={t("apiKey.hint")} name="apiKey">
+        <Input
+          id="aem-key"
+          type="password"
+          value={apiKey}
+          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+        />
+      </Field>
       <Field
         label={t("input.label")}
         htmlFor="aem-input"

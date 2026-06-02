@@ -30,6 +30,7 @@ import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
+import { DataTabs } from "./inspector/data/data-tabs"
 import { BulkNodeInspector } from "./bulk-node-inspector"
 import {
   getNodeConfigComponentForEntry,
@@ -272,51 +273,55 @@ function InspectorPanelInner({
         )}
       </header>
       <ScrollArea className="flex-1">
-        <div className="space-y-4 px-4 py-4" ref={formScrollRef}>
-          <Field label={t("label")} htmlFor="ins-label" required>
-            <Input
-              id="ins-label"
-              value={node.data.label}
-              onChange={(e) => updateNodeData(node.id, { label: e.target.value })}
-              maxLength={120}
-            />
-          </Field>
-          <Field label={t("notes")} htmlFor="ins-notes" hint={t("notesHint")}>
-            <Textarea
-              id="ins-notes"
-              value={node.data.notes ?? ""}
-              onChange={(e) => updateNodeData(node.id, { notes: e.target.value || undefined })}
-              rows={2}
-            />
-          </Field>
-          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
-            <div>
-              <p className="text-sm font-medium">{t("disabled")}</p>
-              <p className="text-[11px] text-muted-foreground">{t("disabledHint")}</p>
+        <div className="px-4 py-4">
+          <DataTabs useStore={useStore} nodeId={node.id}>
+            <div className="space-y-4" ref={formScrollRef}>
+              <Field label={t("label")} htmlFor="ins-label" required>
+                <Input
+                  id="ins-label"
+                  value={node.data.label}
+                  onChange={(e) => updateNodeData(node.id, { label: e.target.value })}
+                  maxLength={120}
+                />
+              </Field>
+              <Field label={t("notes")} htmlFor="ins-notes" hint={t("notesHint")}>
+                <Textarea
+                  id="ins-notes"
+                  value={node.data.notes ?? ""}
+                  onChange={(e) => updateNodeData(node.id, { notes: e.target.value || undefined })}
+                  rows={2}
+                />
+              </Field>
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">{t("disabled")}</p>
+                  <p className="text-[11px] text-muted-foreground">{t("disabledHint")}</p>
+                </div>
+                <Switch
+                  checked={node.data.disabled ?? false}
+                  onCheckedChange={(v) => updateNodeData(node.id, { disabled: v })}
+                  aria-label={t("disabled")}
+                />
+              </div>
+              <Separator />
+              <FieldErrorProvider errors={validation?.fields ?? null}>
+                <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
+                  <NodeConfigFormSection
+                    kind={node.data.kind as WorkflowNodeKind}
+                    paramsSchema={entry.paramsSchema}
+                    params={configFormParams}
+                    onChange={handleParamsChange}
+                  />
+                </InspectorExpressionProvider>
+              </FieldErrorProvider>
+              {!hasDedicatedConfigForEntry({
+                kind: node.data.kind as WorkflowNodeKind,
+                paramsSchema: entry.paramsSchema,
+              }) ? (
+                <p className="text-[11px] text-muted-foreground">{t("noConfigYet")}</p>
+              ) : null}
             </div>
-            <Switch
-              checked={node.data.disabled ?? false}
-              onCheckedChange={(v) => updateNodeData(node.id, { disabled: v })}
-              aria-label={t("disabled")}
-            />
-          </div>
-          <Separator />
-          <FieldErrorProvider errors={validation?.fields ?? null}>
-            <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
-              <NodeConfigFormSection
-                kind={node.data.kind as WorkflowNodeKind}
-                paramsSchema={entry.paramsSchema}
-                params={configFormParams}
-                onChange={handleParamsChange}
-              />
-            </InspectorExpressionProvider>
-          </FieldErrorProvider>
-          {!hasDedicatedConfigForEntry({
-            kind: node.data.kind as WorkflowNodeKind,
-            paramsSchema: entry.paramsSchema,
-          }) ? (
-            <p className="text-[11px] text-muted-foreground">{t("noConfigYet")}</p>
-          ) : null}
+          </DataTabs>
         </div>
       </ScrollArea>
       <footer className="border-t px-4 py-3">

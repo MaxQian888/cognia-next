@@ -112,12 +112,15 @@ export function buildExpressionSuggestions(opts: {
     })
   }
 
-  // Per-node outputs.
+  // Per-node outputs. The accessor addresses the node's raw output object
+  // directly (`upstream[id]`); there is NO `.out` wrapper — a historical
+  // `.out.` convention resolves to `undefined` at run time. See
+  // `lib/workflow/editor/expr-ref.ts`.
   for (const node of opts.nodes) {
     if (opts.currentNodeId && node.id === opts.currentNodeId) continue
     if (node.type.startsWith("annotation.")) continue
     const fields = opts.outputSchemas?.[node.id]
-    const baseInsert = `$node['${node.id}'].out`
+    const baseInsert = `$node['${node.id}']`
     out.push({
       insert: baseInsert,
       label: baseInsert,

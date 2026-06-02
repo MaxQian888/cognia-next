@@ -28,6 +28,13 @@ export interface RunStepInput {
   retryPolicy: WorkflowRetryPolicy
   secretResolver: SecretResolver
   logger: RunLogger
+  /**
+   * When true AND the workflow has `pinData` for this node, the executor is
+   * NOT invoked — the pinned value is returned as the step output (and recorded
+   * in the event log like a real step). Set only for editor manual runs; never
+   * for production triggers. Mirrors n8n's pin-data semantics.
+   */
+  honorPinData?: boolean
 }
 
 export interface StepExecution {
@@ -49,6 +56,21 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
 
   if (cache.has(node.id)) {
     return { output: cache.get(node.id), fromCache: true }
+  }
+
+  // Pin-data short-circuit (editor manual runs only). The pinned value stands
+  // in for the executor's output so downstream nodes + the data view see it,
+  // and the run timeline records a normal started/completed pair.
+  if (
+    input.honorPinData &&
+    input.workflow.pinData &&
+    Object.prototype.hasOwnProperty.call(input.workflow.pinData, node.id)
+  ) {
+    const pinned = input.workflow.pinData[node.id]
+    await logger.stepStarted(node.id, { pinned: true })
+    cache.set(node.id, pinned)
+    await logger.stepCompleted(node.id, pinned)
+    return { output: pinned, fromCache: false }
   }
 
   const reg = getExecutor(node.type, node.typeVersion)
