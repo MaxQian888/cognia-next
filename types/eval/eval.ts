@@ -109,6 +109,17 @@ export interface EvalCase {
   /** When sourced from a real trace, the originating trace id. */
   sourceTraceId?: string
   notes?: string
+  /** Free-form labels for filtering / grouping. */
+  tags?: string[]
+  /** Subset selector, e.g. "train" | "test" | a custom split name. */
+  split?: string
+  /** Arbitrary structured metadata carried from import. */
+  metadata?: Record<string, unknown>
+  /**
+   * Structured trigger inputs for workflow / team targets. Chat ignores this
+   * and drives from {@link EvalCase.input}.
+   */
+  inputVars?: Record<string, unknown>
   createdAt: number
   updatedAt: number
 }
@@ -201,4 +212,8 @@ export interface EvalReport {
   totalCostUsd: number
   avgLatencyMs: number
   createdAt: number
+  /** Immutable dataset version snapshot this run executed against. */
+  datasetVersionId?: string
+  /** Compact echo of the run configuration that produced this report. */
+  config?: import("./run-config").EvalRunConfigSummary
 }

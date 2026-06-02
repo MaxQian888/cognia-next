@@ -24,6 +24,7 @@ import type {
 import type { Project } from "@/types"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type { BackupHistoryRow } from "./backup-history"
+import type { NotificationRecord } from "@/types/notifications"
 import type { SandboxConnectionRow } from "./sandbox-connections"
 import type {
   CanvasDocumentRow,
@@ -93,6 +94,8 @@ import type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
 import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
+import type { EvalDatasetVersion } from "@/types/eval/version"
+import type { EvalRunCaseRow } from "./eval-run-cases"
 import type { Memory } from "@/types/memory/memory"
 import type {
   PetProfile,
@@ -125,6 +128,7 @@ export class CogniaDB extends Dexie {
   teams!: Table<Team, string>
   trustedWorkspaces!: Table<TrustedWorkspace, string>
   backupHistory!: Table<BackupHistoryRow, string>
+  notifications!: Table<NotificationRecord, string>
   canvasDocuments!: Table<CanvasDocumentRow, string>
   canvasVersions!: Table<CanvasVersionRow, string>
   canvasComments!: Table<CanvasCommentRow, string>
@@ -301,6 +305,10 @@ export class CogniaDB extends Dexie {
   evalCases!: Table<EvalCase, string>
   evalRuns!: Table<EvalRunRow, string>
   traceAnnotations!: Table<TraceAnnotationRow, string>
+  // v69 — Eval dataset version snapshots + per-case run results. See
+  // `./eval-dataset-versions.ts` and `./eval-run-cases.ts`.
+  evalDatasetVersions!: Table<EvalDatasetVersion, string>
+  evalRunCaseResults!: Table<EvalRunCaseRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1738,6 +1746,33 @@ export class CogniaDB extends Dexie {
       petCharacterBindings: "&characterId, updatedAt",
       petActivityLog: "++id, kind, ts, [kind+ts]",
       petAchievements: "&id, unlockedAt",
+    })
+
+    // v68 — Unified Notification Center (ADR-0042). Additive only; no upgrade
+    // hook. The durable in-app "center" record for every notification, fed by
+    // the single `lib/notifications/notify()` pipe (scheduler, agent-team,
+    // plugin, connector, session, push all funnel here). Preferences ride on
+    // the AppSettings singleton (`notificationPreferences`), NOT this table.
+    //   • dedupeKey  — coalescing key (bump existing `count` within window).
+    //   • groupKey   — feed grouping (e.g. conversationKey, runId).
+    //   • [readState+createdAt] — newest-unread feed queries + badge counts.
+    //   • [source+createdAt]    — per-source filtering, newest-first.
+    // See `lib/db/notifications.ts` and `@/types/notifications`.
+    this.version(68).stores({
+      notifications:
+        "&id, createdAt, updatedAt, source, level, readState, dedupeKey, groupKey, snoozedUntil, expiresAt, [readState+createdAt], [source+createdAt]",
+    })
+
+    // v69 — Eval datasets/runs/compare extension. Additive; no upgrade hook.
+    //   • evalDatasetVersions — immutable snapshot per dataset version
+    //     (Approach A). `[datasetId+version]` for "latest snapshot for version"
+    //     lookup, `tag` for tagged-version lookup.
+    //   • evalRunCaseResults  — compact per-case verdict per run, feeding the
+    //     A-vs-B comparison grid. `[runId+caseId]` is the natural unique read.
+    // See `./eval-dataset-versions.ts` and `./eval-run-cases.ts`.
+    this.version(69).stores({
+      evalDatasetVersions: "&id, datasetId, [datasetId+version], tag, createdAt",
+      evalRunCaseResults: "&id, runId, [runId+caseId], caseId",
     })
   }
 
