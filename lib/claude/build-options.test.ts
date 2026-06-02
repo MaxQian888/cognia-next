@@ -111,6 +111,21 @@ function makeSession(p: Partial<ChatSession>): ChatSession {
   } as ChatSession
 }
 
+function makeProject(roots: { id?: string; path: string; isPrimary?: boolean }[]): Project {
+  return {
+    id: "ws1",
+    name: "WS",
+    roots: roots.map((r, i) => ({ id: r.id ?? `root-${i}`, path: r.path, isPrimary: r.isPrimary })),
+    knowledgeBase: [],
+    sessionIds: [],
+    sessionCount: 0,
+    messageCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastAccessedAt: new Date(),
+  } as Project
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   // Sane defaults so the function doesn't error when a test forgets to set
@@ -657,36 +672,47 @@ describe("resolveSendOptions — cwd / permissionMode", () => {
 })
 
 describe("resolveSendOptions — activeProject (workspace)", () => {
-  it("activeProject.rootDir sits between session override and character default", async () => {
+  it("primary root sits between session override and character default", async () => {
     // session override wins over workspace
     const opts1 = await resolveSendOptions({
       session: makeSession({ id: "s1", workingDir: "/sess-dir" }),
-      activeProject: { rootDir: "/ws-dir" } as Project,
+      activeProject: makeProject([{ path: "/ws-dir", isPrimary: true }]),
       character: makeChar({ workingDir: "/char-dir" }),
     })
     expect(opts1.cwd).toBe("/sess-dir")
 
     // workspace wins over character + app when no session override
     const opts2 = await resolveSendOptions({
-      activeProject: { rootDir: "/ws-dir" } as Project,
+      activeProject: makeProject([{ path: "/ws-dir", isPrimary: true }]),
       character: makeChar({ workingDir: "/char-dir" }),
       appSettings: { defaultWorkingDir: "/app-dir" } as AppSettings,
     })
     expect(opts2.cwd).toBe("/ws-dir")
 
-    // falls through to character when the workspace has no rootDir
+    // falls through to character when the workspace has no roots
     const opts3 = await resolveSendOptions({
-      activeProject: { additionalDirs: ["/extra"] } as Project,
+      activeProject: makeProject([]),
       character: makeChar({ workingDir: "/char-dir" }),
     })
     expect(opts3.cwd).toBe("/char-dir")
   })
 
-  it("unions activeProject.additionalDirs with referencedPaths and dedupes", async () => {
+  it("uses the flagged primary root (not just the first) as cwd", async () => {
     const opts = await resolveSendOptions({
-      activeProject: { rootDir: "/ws", additionalDirs: ["/extra/a", "/extra/b"] } as Project,
+      activeProject: makeProject([{ path: "/first" }, { path: "/primary", isPrimary: true }]),
+    })
+    expect(opts.cwd).toBe("/primary")
+  })
+
+  it("unions non-primary roots with referencedPaths and dedupes", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([
+        { path: "/ws", isPrimary: true },
+        { path: "/extra/a" },
+        { path: "/extra/b" },
+      ]),
       referencedPaths: [
-        { absolute: "/extra/a", isDir: true }, // dup of an additionalDir
+        { absolute: "/extra/a", isDir: true }, // dup of an additional root
         { absolute: "/Users/me/folder/file.ts", isDir: false },
       ],
     })
@@ -695,18 +721,42 @@ describe("resolveSendOptions — activeProject (workspace)", () => {
     )
   })
 
-  it("adds additionalDirs even when there are no referencedPaths", async () => {
+  it("adds non-primary roots even when there are no referencedPaths", async () => {
     const opts = await resolveSendOptions({
-      activeProject: { additionalDirs: ["/only/extra"] } as Project,
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }, { path: "/only/extra" }]),
     })
     expect(opts.additionalDirectories).toEqual(["/only/extra"])
   })
+})
 
-  it("ignores empty/nullish additionalDirs entries", async () => {
+describe("resolveSendOptions — workspace Restricted Mode", () => {
+  it("unions RESTRICTED_MODE_DENIED_TOOLS into disallowedTools when restricted", async () => {
     const opts = await resolveSendOptions({
-      activeProject: { additionalDirs: ["", "/good"] } as Project,
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: true,
     })
-    expect(opts.additionalDirectories).toEqual(["/good"])
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Edit", "Write"]))
+  })
+
+  it("does not deny side-effecting tools when not restricted", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: false,
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+
+  it("strips computer-use plugin tools from the allow list when restricted", async () => {
+    const ch = makeChar({ allowedTools: ["mcp__cognia-plugin-tools__computer_use", "Read"] })
+    const opts = await resolveSendOptions({
+      character: ch,
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: true,
+    })
+    expect(opts.allowedTools ?? []).not.toContain("mcp__cognia-plugin-tools__computer_use")
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["mcp__cognia-plugin-tools__computer_use"])
+    )
   })
 })
 

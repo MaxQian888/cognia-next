@@ -7,6 +7,8 @@
 // Lives in its own module so it can be imported from both the direct-chat
 // hook and the team-chat hook, and unit-tested in Phase 6 without React.
 
+import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
+import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
@@ -718,7 +720,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // a stronger signal than a character's standing preference.
   const cwd =
     session?.workingDir ??
-    ctx.activeProject?.rootDir ??
+    (ctx.activeProject ? primaryRootOf(ctx.activeProject)?.path : undefined) ??
     character?.workingDir ??
     appSettings?.defaultWorkingDir
   if (cwd) opts.cwd = cwd
@@ -729,7 +731,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // we add their parent dir. Deduplicate, drop empty/nullish entries.
   {
     const dirs = new Set<string>()
-    for (const dir of ctx.activeProject?.additionalDirs ?? []) {
+    for (const dir of ctx.activeProject ? additionalDirsOf(ctx.activeProject) : []) {
       if (dir) dirs.add(dir)
     }
     for (const ref of ctx.referencedPaths ?? []) {
@@ -1161,6 +1163,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // Sandbox disabled — make sure stale tier state from a previous send
     // on the same session id doesn't leak into the next call.
     setActiveSandboxTier(session?.id, "os")
+  }
+
+  // --- Workspace Restricted Mode -------------------------------------------
+  // An untrusted active workspace denies every disk/host-mutating tool. Mirrors
+  // the sandbox deny above; read-only tools stay allowed. Computer-use plugin
+  // tools (if present in the allow list) are stripped too.
+  if (ctx.workspaceRestricted) {
+    const denied = new Set(opts.disallowedTools ?? [])
+    for (const t of RESTRICTED_MODE_DENIED_TOOLS) denied.add(t)
+    for (const t of opts.allowedTools ?? []) {
+      if (t.startsWith("mcp__cognia-plugin-tools__")) denied.add(t)
+    }
+    opts.disallowedTools = [...denied]
+    if (opts.allowedTools) opts.allowedTools = opts.allowedTools.filter((t) => !denied.has(t))
   }
 
   // --- Per-session account / proxy env (ADR-0028) --------------------------
