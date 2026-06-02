@@ -13,6 +13,15 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 const openDialogMock = jest.fn()
 jest.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialogMock(...a) }))
 
+const isTrustedMock = jest.fn(async () => false)
+const trustMock = jest.fn(async () => undefined)
+const revokeMock = jest.fn(async () => undefined)
+jest.mock("@/lib/db/trusted-workspaces", () => ({
+  isWorkspaceTrusted: (...a: unknown[]) => isTrustedMock(...(a as [])),
+  trustWorkspace: (...a: unknown[]) => trustMock(...(a as [])),
+  revokeWorkspaceTrust: (...a: unknown[]) => revokeMock(...(a as [])),
+}))
+
 const toastSuccess = jest.fn()
 jest.mock("sonner", () => ({
   toast: { success: (...a: unknown[]) => toastSuccess(...a), error: jest.fn() },
@@ -75,17 +84,19 @@ describe("WorkspaceManageDialog", () => {
     expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
   })
 
-  it("renames + sets rootDir/additionalDirs and persists via updateProject on save", () => {
+  it("renames + adds roots and persists via updateProject on save", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
 
     fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Backend" } })
-    fireEvent.change(screen.getByLabelText("rootDirLabel"), { target: { value: "/srv/api" } })
 
-    // Add an additional dir via the manual input.
-    const manual = screen.getByPlaceholderText("addDirManual")
+    // Add two roots via the manual input — the first becomes primary.
+    const manual = screen.getByPlaceholderText("addRootManual")
+    fireEvent.change(manual, { target: { value: "/srv/api" } })
+    fireEvent.keyDown(manual, { key: "Enter" })
     fireEvent.change(manual, { target: { value: "/srv/shared" } })
     fireEvent.keyDown(manual, { key: "Enter" })
+    expect(screen.getByText("/srv/api")).toBeInTheDocument()
     expect(screen.getByText("/srv/shared")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("workspace-save"))
@@ -94,18 +105,20 @@ describe("WorkspaceManageDialog", () => {
     expect(p.name).toBe("Backend")
     expect(p.rootDir).toBe("/srv/api")
     expect(p.additionalDirs).toEqual(["/srv/shared"])
+    expect(p.roots.map((r) => r.path)).toEqual(["/srv/api", "/srv/shared"])
     expect(toastSuccess).toHaveBeenCalled()
   })
 
-  it("picks the primary directory via the native dialog on desktop", async () => {
-    openDialogMock.mockResolvedValue("/picked/dir")
+  it("picks roots via the native multi-select dialog on desktop", async () => {
+    openDialogMock.mockResolvedValue(["/picked/a", "/picked/b"])
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
 
     await act(async () => {
       fireEvent.click(screen.getByLabelText("pickDir"))
     })
-    expect((screen.getByLabelText("rootDirLabel") as HTMLInputElement).value).toBe("/picked/dir")
+    expect(screen.getByText("/picked/a")).toBeInTheDocument()
+    expect(screen.getByText("/picked/b")).toBeInTheDocument()
   })
 
   it("hides the native picker on web (manual path entry still works)", () => {
@@ -114,21 +127,52 @@ describe("WorkspaceManageDialog", () => {
     fireEvent.click(screen.getByTestId("workspace-new"))
     expect(screen.queryByLabelText("pickDir")).not.toBeInTheDocument()
     // Manual add still functions.
-    const manual = screen.getByPlaceholderText("addDirManual")
+    const manual = screen.getByPlaceholderText("addRootManual")
     fireEvent.change(manual, { target: { value: "/web/dir" } })
-    fireEvent.click(screen.getByText("addDir"))
+    fireEvent.click(screen.getByText("addRoot"))
     expect(screen.getByText("/web/dir")).toBeInTheDocument()
   })
 
-  it("removes an additional directory", () => {
+  it("switches the primary root", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
-    const manual = screen.getByPlaceholderText("addDirManual")
+    const manual = screen.getByPlaceholderText("addRootManual")
+    fireEvent.change(manual, { target: { value: "/a" } })
+    fireEvent.keyDown(manual, { key: "Enter" })
+    fireEvent.change(manual, { target: { value: "/b" } })
+    fireEvent.keyDown(manual, { key: "Enter" })
+
+    // Make the second root primary, then save.
+    const primaryButtons = screen.getAllByLabelText("setPrimary")
+    fireEvent.click(primaryButtons[1])
+    fireEvent.click(screen.getByTestId("workspace-save"))
+
+    const p = useProjectStore.getState().projects[0]
+    expect(p.rootDir).toBe("/b")
+    expect(p.additionalDirs).toEqual(["/a"])
+  })
+
+  it("removes a root", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const manual = screen.getByPlaceholderText("addRootManual")
     fireEvent.change(manual, { target: { value: "/to/remove" } })
     fireEvent.keyDown(manual, { key: "Enter" })
     expect(screen.getByText("/to/remove")).toBeInTheDocument()
-    fireEvent.click(screen.getByLabelText("removeDir"))
+    fireEvent.click(screen.getByLabelText("removeRoot"))
     expect(screen.queryByText("/to/remove")).not.toBeInTheDocument()
+  })
+
+  it("trusts a root via the per-folder button", async () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const manual = screen.getByPlaceholderText("addRootManual")
+    fireEvent.change(manual, { target: { value: "/trust/me" } })
+    fireEvent.keyDown(manual, { key: "Enter" })
+    await act(async () => {
+      fireEvent.click(screen.getByText("trustRoot"))
+    })
+    expect(trustMock).toHaveBeenCalledWith("/trust/me")
   })
 
   it("deletes a workspace after a confirm click", () => {

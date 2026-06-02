@@ -4,7 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { toast } from "sonner"
-import { FolderIcon, FolderPlusIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  CheckIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  PlusIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { nanoid } from "nanoid"
 
 import {
   Dialog,
@@ -22,6 +31,13 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@/lib/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+import { normalizeRoots } from "@/lib/workspace/roots"
+import {
+  isWorkspaceTrusted,
+  trustWorkspace,
+  revokeWorkspaceTrust,
+} from "@/lib/db/trusted-workspaces"
+import type { WorkspaceRoot } from "@/types/workspace"
 
 const log = loggers.shell
 
@@ -36,11 +52,17 @@ interface Props {
   autoCreateOnOpen?: boolean
 }
 
+/** Last path segment, for the default per-root label. */
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
 /**
  * Create / edit / delete workspaces (the `Project` model). Master-detail: the
- * left column lists every workspace (with a "set active" affordance); the right
- * column edits the selected one — name, primary `rootDir`, and the extra
- * `additionalDirs` mounted into the SDK's `additionalDirectories`.
+ * left column lists every workspace; the right column edits the selected one —
+ * its name and its multi-root folder set. Each root carries an optional label,
+ * a primary flag (the cwd), and a per-folder trust toggle (VS Code-style).
  *
  * The on-disk directory pickers use the Tauri native dialog and are hidden
  * outside the desktop shell; a manual path input is always available so the
@@ -57,10 +79,11 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState("")
-  const [rootDir, setRootDir] = useState("")
-  const [additionalDirs, setAdditionalDirs] = useState<string[]>([])
+  const [roots, setRoots] = useState<WorkspaceRoot[]>([])
   const [manualDir, setManualDir] = useState("")
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // path → trusted? (only meaningful on desktop). Undefined while loading.
+  const [trustMap, setTrustMap] = useState<Record<string, boolean>>({})
 
   const sorted = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
@@ -75,12 +98,29 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setName(editing?.name ?? "")
-    setRootDir(editing?.rootDir ?? "")
-    setAdditionalDirs(editing?.additionalDirs ? [...editing.additionalDirs] : [])
+    setRoots(editing?.roots ? editing.roots.map((r) => ({ ...r })) : [])
     setManualDir("")
     setConfirmingDelete(false)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [editing])
+
+  // Load per-root trust state for the edited workspace (desktop only).
+  useEffect(() => {
+    if (!isTauri() || roots.length === 0) {
+      return
+    }
+    let cancelled = false
+    void Promise.all(
+      roots.map(async (r) => [r.path, await isWorkspaceTrusted(r.path)] as const)
+    ).then((entries) => {
+      if (cancelled) return
+
+      setTrustMap(Object.fromEntries(entries))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [roots])
 
   const handleNew = () => {
     const created = createProject({ name: t("defaultName") })
@@ -98,51 +138,64 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
     wasOpen.current = open
   }, [open, autoCreateOnOpen, createProject, t])
 
-  const pickSingleDir = async (): Promise<string | null> => {
-    if (!isTauri()) return null
+  const addRoot = (path: string) => {
+    const trimmed = path.trim()
+    if (!trimmed) return
+    setRoots((prev) =>
+      normalizeRoots([...prev, { id: `root-${nanoid()}`, path: trimmed, label: basename(trimmed) }])
+    )
+  }
+
+  const handlePickRoots = async () => {
+    if (!isTauri()) return
     try {
       const picked = await openDialog({
         directory: true,
-        multiple: false,
+        multiple: true,
         title: t("pickDirTitle"),
       })
-      return typeof picked === "string" ? picked : null
+      const paths = Array.isArray(picked) ? picked : picked ? [picked] : []
+      if (paths.length === 0) return
+      setRoots((prev) =>
+        normalizeRoots([
+          ...prev,
+          ...paths.map((p) => ({ id: `root-${nanoid()}`, path: p, label: basename(p) })),
+        ])
+      )
     } catch (err) {
       log.error("workspace.pickDirFailed", err)
-      return null
     }
   }
 
-  const handlePickRoot = async () => {
-    const picked = await pickSingleDir()
-    if (picked) setRootDir(picked)
+  const handleAddManual = () => {
+    addRoot(manualDir)
+    setManualDir("")
   }
 
-  const handlePickAdditional = async () => {
-    const picked = await pickSingleDir()
-    if (picked && !additionalDirs.includes(picked)) {
-      setAdditionalDirs((prev) => [...prev, picked])
-    }
+  const setPrimary = (id: string) => {
+    setRoots((prev) => prev.map((r) => ({ ...r, isPrimary: r.id === id })))
+  }
+  const setLabel = (id: string, label: string) => {
+    setRoots((prev) => prev.map((r) => (r.id === id ? { ...r, label } : r)))
+  }
+  const removeRoot = (id: string) => {
+    setRoots((prev) => normalizeRoots(prev.filter((r) => r.id !== id)))
   }
 
-  const handleAddManualDir = () => {
-    const trimmed = manualDir.trim()
-    if (trimmed && !additionalDirs.includes(trimmed)) {
-      setAdditionalDirs((prev) => [...prev, trimmed])
-      setManualDir("")
-    }
+  const handleTrust = async (path: string) => {
+    await trustWorkspace(path)
+    setTrustMap((prev) => ({ ...prev, [path]: true }))
   }
-
-  const removeAdditional = (dir: string) => {
-    setAdditionalDirs((prev) => prev.filter((d) => d !== dir))
+  const handleRevoke = async (path: string) => {
+    await revokeWorkspaceTrust(path)
+    setTrustMap((prev) => ({ ...prev, [path]: false }))
   }
 
   const handleSave = () => {
     if (!editing) return
     updateProject(editing.id, {
       name: name.trim() || t("defaultName"),
-      rootDir: rootDir.trim() || undefined,
-      additionalDirs: additionalDirs.length > 0 ? additionalDirs : undefined,
+      roots: normalizeRoots(roots),
     })
     toast.success(t("saved"))
   }
@@ -181,7 +234,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
               {t("newWorkspace")}
             </Button>
             <Separator />
-            <ScrollArea className="h-64">
+            <ScrollArea className="h-72">
               <ul className="flex flex-col gap-1 pr-2" aria-label={t("listLabel")}>
                 {sorted.length === 0 && (
                   <li className="px-2 py-1.5 text-xs text-muted-foreground">{t("empty")}</li>
@@ -230,61 +283,98 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="workspace-rootdir">{t("rootDirLabel")}</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="workspace-rootdir"
-                      value={rootDir}
-                      placeholder={t("rootDirPlaceholder")}
-                      onChange={(e) => setRootDir(e.target.value)}
-                    />
-                    {isTauri() && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        aria-label={t("pickDir")}
-                        onClick={handlePickRoot}
-                      >
-                        <FolderPlusIcon className="size-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                  <Label>{t("rootsLabel")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("rootsHint")}</p>
 
-                <div className="space-y-2">
-                  <Label>{t("additionalDirsLabel")}</Label>
-                  <p className="text-xs text-muted-foreground">{t("additionalDirsHint")}</p>
-                  {additionalDirs.length > 0 && (
-                    <ul className="flex flex-col gap-1">
-                      {additionalDirs.map((dir) => (
-                        <li
-                          key={dir}
-                          className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-xs"
-                        >
-                          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="flex-1 truncate font-mono">{dir}</span>
-                          <button
-                            type="button"
-                            aria-label={t("removeDir")}
-                            onClick={() => removeAdditional(dir)}
-                            className="text-muted-foreground hover:text-foreground"
+                  {roots.length > 0 && (
+                    <ul className="flex flex-col gap-2">
+                      {roots.map((r) => {
+                        const trusted = trustMap[r.path]
+                        return (
+                          <li
+                            key={r.id}
+                            className="flex flex-col gap-1 rounded-md border bg-muted/30 p-2"
                           >
-                            <XIcon className="size-3.5" />
-                          </button>
-                        </li>
-                      ))}
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                aria-label={t("setPrimary")}
+                                aria-pressed={r.isPrimary ?? false}
+                                onClick={() => setPrimary(r.id)}
+                                className={cn(
+                                  "flex size-5 shrink-0 items-center justify-center rounded-full border",
+                                  r.isPrimary
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-muted-foreground/40 text-transparent"
+                                )}
+                              >
+                                <CheckIcon className="size-3" />
+                              </button>
+                              <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                                {r.path}
+                              </span>
+                              {r.isPrimary && (
+                                <span className="rounded bg-primary/15 px-1 text-[10px] font-medium uppercase text-primary">
+                                  {t("primaryBadge")}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                aria-label={t("removeRoot")}
+                                onClick={() => removeRoot(r.id)}
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <Trash2Icon className="size-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2 pl-7">
+                              <Input
+                                value={r.label ?? ""}
+                                placeholder={t("rootLabelPlaceholder")}
+                                aria-label={t("rootLabelPlaceholder")}
+                                onChange={(e) => setLabel(r.id, e.target.value)}
+                                className="h-7 text-xs"
+                              />
+                              {isTauri() &&
+                                (trusted ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 shrink-0 gap-1 text-emerald-600"
+                                    onClick={() => void handleRevoke(r.path)}
+                                  >
+                                    <ShieldCheckIcon className="size-3.5" />
+                                    {t("trustedBadge")}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 shrink-0 gap-1"
+                                    onClick={() => void handleTrust(r.path)}
+                                  >
+                                    <ShieldAlertIcon className="size-3.5 text-amber-500" />
+                                    {t("trustRoot")}
+                                  </Button>
+                                ))}
+                            </div>
+                          </li>
+                        )
+                      })}
                     </ul>
                   )}
+
                   <div className="flex gap-2">
                     <Input
                       value={manualDir}
-                      placeholder={t("addDirManual")}
+                      placeholder={t("addRootManual")}
                       onChange={(e) => setManualDir(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault()
-                          handleAddManualDir()
+                          handleAddManual()
                         }
                       }}
                     />
@@ -293,21 +383,22 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={handlePickAdditional}
+                        onClick={handlePickRoots}
                         className="shrink-0 gap-1"
+                        aria-label={t("pickDir")}
                       >
                         <FolderPlusIcon className="size-4" />
-                        {t("addDir")}
+                        {t("addRoot")}
                       </Button>
                     ) : (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={handleAddManualDir}
+                        onClick={handleAddManual}
                         className="shrink-0"
                       >
-                        {t("addDir")}
+                        {t("addRoot")}
                       </Button>
                     )}
                   </div>
