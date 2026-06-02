@@ -128,6 +128,18 @@ describe("read-state actions", () => {
     expect(useNotificationStore.getState().items[0].readState).toBe("read")
   })
 
+  it("markRead is a no-op for unknown id and for already-read rows", async () => {
+    await useNotificationStore.getState().markRead("ghost")
+    useNotificationStore.setState({ items: [rec({ id: "a", readState: "read" })] })
+    await useNotificationStore.getState().markRead("a")
+    expect(db.patchNotification).not.toHaveBeenCalled()
+  })
+
+  it("markDone is a no-op for unknown id", async () => {
+    await useNotificationStore.getState().markDone("ghost")
+    expect(db.patchNotification).not.toHaveBeenCalled()
+  })
+
   it("markDone removes the row from the active feed", async () => {
     useNotificationStore.setState({ items: [rec({ id: "a" }), rec({ id: "b" })] })
     await useNotificationStore.getState().markDone("a")
@@ -171,6 +183,13 @@ describe("snooze", () => {
   it("unsnooze does not re-insert a done record", async () => {
     db.getNotification.mockResolvedValueOnce(rec({ id: "a", readState: "done" }))
     await useNotificationStore.getState().unsnooze("a")
+    expect(useNotificationStore.getState().items).toHaveLength(0)
+  })
+
+  it("unsnooze tolerates a record that no longer exists", async () => {
+    db.getNotification.mockResolvedValueOnce(undefined)
+    await useNotificationStore.getState().unsnooze("gone")
+    expect(db.patchNotification).toHaveBeenCalledWith("gone", { snoozedUntil: undefined })
     expect(useNotificationStore.getState().items).toHaveLength(0)
   })
 })

@@ -117,8 +117,8 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
   markDone: async (id) => {
     const rec = get().items.find((r) => r.id === id)
     if (!rec) return
-    const patch = cascadeReadState(rec, "done", now())
-    await patchNotification(id, patch.readState ? patch : { readState: "done", doneAt: now() })
+    // Active-feed rows are never already done, so cascade always yields a patch.
+    await patchNotification(id, cascadeReadState(rec, "done", now()))
     // Done leaves the active feed.
     recount(
       set,
