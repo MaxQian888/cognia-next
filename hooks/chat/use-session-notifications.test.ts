@@ -3,21 +3,19 @@
  */
 import { renderHook } from "@testing-library/react"
 
-const isTauriMock = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+const notifyMock = jest.fn()
+jest.mock("@/lib/notifications/runtime", () => ({
+  notify: (args: unknown) => notifyMock(args),
 }))
 
-const notifyMock = jest.fn()
-jest.mock("@/lib/tauri/notification", () => ({
-  notify: (args: unknown) => notifyMock(args),
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
 }))
 
 interface ChatState {
   status: string
   errorMessage?: string
 }
-let _chatState: ChatState = { status: "idle" }
 const subscribers: Array<(s: ChatState, prev?: ChatState) => void> = []
 
 jest.mock("@/stores/chat", () => ({
@@ -35,10 +33,8 @@ jest.mock("@/stores/chat", () => ({
 import { useSessionNotifications } from "./use-session-notifications"
 
 beforeEach(() => {
-  isTauriMock.mockReset().mockReturnValue(true)
   notifyMock.mockClear()
   subscribers.length = 0
-  _chatState = { status: "idle" }
   Object.defineProperty(document, "hasFocus", {
     configurable: true,
     writable: true,
@@ -47,34 +43,29 @@ beforeEach(() => {
 })
 
 describe("useSessionNotifications", () => {
-  it("non-Tauri: doesn't subscribe", () => {
-    isTauriMock.mockReturnValue(false)
+  it("subscribes on mount (records to the center on any platform)", () => {
     renderHook(() => useSessionNotifications())
-    expect(subscribers.length).toBe(0)
+    expect(subscribers.length).toBe(1)
   })
 
-  it("streaming → idle while window unfocused fires success notify", () => {
+  it("streaming → idle while unfocused fires a success notification via the center", () => {
     renderHook(() => useSessionNotifications())
-    const next: ChatState = { status: "idle" }
-    const prev: ChatState = { status: "streaming" }
-    subscribers[0]?.(next, prev)
+    subscribers[0]?.({ status: "idle" }, { status: "streaming" })
     expect(notifyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: expect.stringContaining("response ready"),
+        source: "session",
+        level: "success",
+        title: "readyTitle",
+        channels: ["center", "os"],
       })
     )
   })
 
-  it("streaming → error fires error notify", () => {
+  it("streaming → error fires an error notification with the error body", () => {
     renderHook(() => useSessionNotifications())
-    const next: ChatState = { status: "error", errorMessage: "kaboom" }
-    const prev: ChatState = { status: "streaming" }
-    subscribers[0]?.(next, prev)
+    subscribers[0]?.({ status: "error", errorMessage: "kaboom" }, { status: "streaming" })
     expect(notifyMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: expect.stringContaining("session error"),
-        body: "kaboom",
-      })
+      expect.objectContaining({ level: "error", title: "errorTitle", body: "kaboom" })
     )
   })
 
@@ -84,7 +75,7 @@ describe("useSessionNotifications", () => {
     expect(notifyMock).not.toHaveBeenCalled()
   })
 
-  it("suppresses notify when window is focused", () => {
+  it("suppresses the notification when the window is focused", () => {
     Object.defineProperty(document, "hasFocus", {
       configurable: true,
       writable: true,

@@ -21,6 +21,7 @@ import { ConversationActivityLog } from "@/components/inbox/conversation-activit
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connector-mode"
+import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
@@ -72,6 +73,14 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
       select(session.id)
     }
   }, [session?.id, select])
+
+  // Expose the viewed conversation so the connector inbound bridge can suppress
+  // an OS notification for the conversation already on screen (focus-aware).
+  useEffect(() => {
+    const store = useActiveConversationStore.getState()
+    store.setActiveConversation(conversationKey)
+    return () => store.clearIf(conversationKey)
+  }, [conversationKey])
 
   // session === undefined means the query is still loading.
   if (session === undefined) {

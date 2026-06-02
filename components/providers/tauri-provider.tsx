@@ -21,6 +21,7 @@ import { useSyncTrayToRust } from "@/lib/tray/sync"
 import { useSyncShortcutsToRust } from "@/lib/shortcuts/sync"
 import { rasterizeAndRegisterTrayIcons } from "@/lib/tray/icon-builder"
 import { pushCrashContext } from "@/lib/native/crash-context"
+import { installNotificationBridges } from "@/lib/notifications/install"
 
 /**
  * Single mount point for desktop-runtime concerns:
@@ -35,6 +36,11 @@ import { pushCrashContext } from "@/lib/native/crash-context"
 export function TauriProvider({ children }: { children: React.ReactNode }) {
   useTauriEvents()
   useSessionNotifications()
+  // Wire the Notification Center inbound bridges (plugin / connector / push)
+  // once. Platform-aware + idempotent; safe on web, desktop, and mobile.
+  useEffect(() => {
+    installNotificationBridges()
+  }, [])
   // System-tray + global-shortcut sync hooks. Each mounts a single
   // subscription and pushes via the debounced IPC bridge once the user's
   // persisted layout / bindings have hydrated.

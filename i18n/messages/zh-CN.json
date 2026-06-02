@@ -9630,6 +9630,59 @@
       "cost": "成本 {value}"
     }
   },
+  "notificationCenter": {
+    "session": {
+      "readyTitle": "Cognia · 回复就绪",
+      "readyBody": "Claude 已生成完成。",
+      "errorTitle": "Cognia · 会话出错",
+      "errorBody": "会话以错误结束。"
+    },
+    "bell": {
+      "label": "通知",
+      "unreadAria": "{count} 条未读通知",
+      "hasActivity": "有新动态"
+    },
+    "center": {
+      "title": "通知",
+      "empty": "已全部处理完毕。",
+      "markAllRead": "全部标为已读",
+      "archiveAll": "全部归档",
+      "showDone": "显示已归档",
+      "hideDone": "隐藏已归档",
+      "filterAll": "全部来源",
+      "open": "打开",
+      "markRead": "标为已读",
+      "markDone": "归档",
+      "snooze": "暂停提醒",
+      "unsnooze": "取消暂停",
+      "remove": "移除",
+      "clearAll": "清空",
+      "groupCount": "另有 {count} 条更新",
+      "settings": "通知设置"
+    },
+    "snoozePresets": {
+      "15m": "15 分钟",
+      "1h": "1 小时",
+      "3h": "3 小时",
+      "1d": "1 天"
+    },
+    "sources": {
+      "scheduler": "计划任务",
+      "agent-team": "智能体团队",
+      "plugin": "插件",
+      "connector": "消息",
+      "session": "会话",
+      "workflow": "工作流",
+      "system": "系统"
+    },
+    "levels": {
+      "info": "信息",
+      "success": "成功",
+      "warning": "警告",
+      "error": "错误",
+      "critical": "严重"
+    }
+  },
   "performance": {
     "title": "性能",
     "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",

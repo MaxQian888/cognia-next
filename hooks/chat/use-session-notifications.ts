@@ -1,22 +1,25 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import { useChatStore, type ChatStatus } from "@/stores/chat"
-import { isTauri } from "@/lib/tauri"
-import { notify } from "@/lib/tauri/notification"
+// Fire a notification when a Claude session stops streaming while the window is
+// unfocused — no point pinging a user already watching the stream. Routes
+// through the Unified Notification Center (ADR-0042): a durable center record
+// plus an OS notification (the core gates OS by permission / DND). Mounted once
+// near the root via `tauri-provider.tsx`.
 
-/**
- * Fire a native notification when a Claude session stops streaming, but
- * only while the window is unfocused — there's no point pinging a user
- * who's already watching the output stream.
- *
- * Mounted once near the root via `tauri-provider.tsx`.
- */
+import { useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
+import { useChatStore, type ChatStatus } from "@/stores/chat"
+import { notify } from "@/lib/notifications/runtime"
+
 export function useSessionNotifications(): void {
+  const t = useTranslations("notificationCenter.session")
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const prevStatus = useRef<ChatStatus>("idle")
 
   useEffect(() => {
-    if (!isTauri()) return
     const unsub = useChatStore.subscribe((state, prev) => {
       const next = state.status
       const before = prev?.status ?? prevStatus.current
@@ -31,10 +34,12 @@ export function useSessionNotifications(): void {
 
       const errored = next === "error"
       void notify({
-        title: errored ? "Cognia · session error" : "Cognia · response ready",
-        body: errored
-          ? state.errorMessage || "The session ended with an error."
-          : "Claude finished generating.",
+        source: "session",
+        level: errored ? "error" : "success",
+        title: errored ? tRef.current("errorTitle") : tRef.current("readyTitle"),
+        body: errored ? state.errorMessage || tRef.current("errorBody") : tRef.current("readyBody"),
+        channels: ["center", "os"],
+        groupKey: "session",
       })
     })
     return () => {

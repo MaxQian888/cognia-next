@@ -9630,6 +9630,59 @@
       "cost": "Cost {value}"
     }
   },
+  "notificationCenter": {
+    "session": {
+      "readyTitle": "Cognia · response ready",
+      "readyBody": "Claude finished generating.",
+      "errorTitle": "Cognia · session error",
+      "errorBody": "The session ended with an error."
+    },
+    "bell": {
+      "label": "Notifications",
+      "unreadAria": "{count} unread notifications",
+      "hasActivity": "New activity"
+    },
+    "center": {
+      "title": "Notifications",
+      "empty": "You're all caught up.",
+      "markAllRead": "Mark all as read",
+      "archiveAll": "Archive all",
+      "showDone": "Show archived",
+      "hideDone": "Hide archived",
+      "filterAll": "All sources",
+      "open": "Open",
+      "markRead": "Mark as read",
+      "markDone": "Archive",
+      "snooze": "Snooze",
+      "unsnooze": "Unsnooze",
+      "remove": "Remove",
+      "clearAll": "Clear all",
+      "groupCount": "+{count} more updates",
+      "settings": "Notification settings"
+    },
+    "snoozePresets": {
+      "15m": "15 minutes",
+      "1h": "1 hour",
+      "3h": "3 hours",
+      "1d": "1 day"
+    },
+    "sources": {
+      "scheduler": "Scheduler",
+      "agent-team": "Agent team",
+      "plugin": "Plugins",
+      "connector": "Messages",
+      "session": "Sessions",
+      "workflow": "Workflows",
+      "system": "System"
+    },
+    "levels": {
+      "info": "Info",
+      "success": "Success",
+      "warning": "Warning",
+      "error": "Error",
+      "critical": "Critical"
+    }
+  },
   "performance": {
     "title": "Performance",
     "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
