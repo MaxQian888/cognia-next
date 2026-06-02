@@ -31,6 +31,7 @@ import { CustomThemeTab } from "./tabs/custom-theme-tab"
 import { VscodeImportTab } from "./tabs/vscode-import-tab"
 import { AdvancedTab } from "./tabs/advanced-tab"
 import { A11yTab } from "./tabs/a11y-tab"
+import { ComponentsTab } from "./tabs/components-tab"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const APPEARANCE_TAB_PARAM = "appearanceTab"
@@ -42,6 +43,7 @@ export type AppearanceTabId =
   | "custom"
   | "import"
   | "typography"
+  | "components"
   | "a11y"
   | "advanced"
 
@@ -52,6 +54,7 @@ const TAB_IDS: AppearanceTabId[] = [
   "custom",
   "import",
   "typography",
+  "components",
   "a11y",
   "advanced",
 ]
@@ -88,6 +91,7 @@ export function AppearanceSection() {
       customCss: "",
       customCssEnabled: false,
       background: { ...DEFAULT_BACKGROUND_SETTINGS },
+      componentStyles: {},
     })
     setShowReset(false)
   }
@@ -112,6 +116,7 @@ export function AppearanceSection() {
               <TabsTrigger value="custom">{t("tabs.custom")}</TabsTrigger>
               <TabsTrigger value="import">{t("tabs.import")}</TabsTrigger>
               <TabsTrigger value="typography">{t("tabs.typography")}</TabsTrigger>
+              <TabsTrigger value="components">{t("tabs.components")}</TabsTrigger>
               <TabsTrigger value="a11y">{t("tabs.a11y")}</TabsTrigger>
               <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
             </TabsList>
@@ -137,6 +142,9 @@ export function AppearanceSection() {
         </TabsContent>
         <TabsContent value="typography" className="mt-4">
           <TypographyTab />
+        </TabsContent>
+        <TabsContent value="components" className="mt-4">
+          <ComponentsTab />
         </TabsContent>
         <TabsContent value="a11y" className="mt-4">
           <A11yTab />

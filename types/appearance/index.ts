@@ -140,7 +140,76 @@ export interface AppearanceSettingsSlice {
   activeThemePackId?: string | null
   /** Whether `customCss` is wrapped in `@scope (#app) { ... }` (default) or applied globally. */
   customCssScope?: "app" | "global"
+  /** Per-component surface customization (tonality / elevation / radius). */
+  componentStyles?: ComponentStyles
 }
+
+// ----------------------------------------------------------------------------
+// Per-component surface customization
+//
+// Lets the user tune individual shadcn surface components (Card, Dialog,
+// Popover, Sidebar, …) on three axes:
+//   - tonality   — how opaque the surface is over an active wallpaper. Reuses
+//                  the `--surface-tonality-*` / `--surface-blur-*` token tiers
+//                  the wallpaper-aware layer in globals.css already defines.
+//                  Only has a visible effect while a wallpaper is enabled.
+//   - elevation  — drop-shadow depth. Mirrors the `[data-elevation]` scale.
+//                  Applies regardless of wallpaper.
+//   - radiusScale — multiplier on the base `--radius`. Applies regardless of
+//                  wallpaper.
+//
+// The `ComponentStyleApplier` projects these into a single injected
+// `<style id="cognia-component-styles">`, keyed off each component's
+// `data-slot` attribute, so re-installing a primitive from the shadcn
+// registry never breaks the integration.
+// ----------------------------------------------------------------------------
+
+/** `"default"` means "no override — inherit the built-in behaviour". */
+export type ComponentTonality = "default" | "solid" | "translucent" | "glass" | "frosted"
+
+/** `"default"` means "no override". `"0"`..`"3"` mirror the `[data-elevation]` scale. */
+export type ComponentElevation = "default" | "0" | "1" | "2" | "3"
+
+/** Stable keys for the curated set of customizable surface components. */
+export type ComponentStyleKey =
+  | "card"
+  | "alert"
+  | "tabs"
+  | "menubar"
+  | "sidebar"
+  | "table"
+  | "popover"
+  | "dropdownMenu"
+  | "contextMenu"
+  | "select"
+  | "combobox"
+  | "hoverCard"
+  | "command"
+  | "navigationMenu"
+  | "tooltip"
+  | "dialog"
+  | "alertDialog"
+  | "sheet"
+  | "drawer"
+  // ── ai-elements chat surfaces ─────────────────────────────────────────────
+  | "aiMessage"
+  | "aiTool"
+  | "aiArtifact"
+  | "aiCodeBlock"
+  | "aiContext"
+  | "aiTask"
+  | "aiErrorTrace"
+  | "aiConversation"
+  | "aiTerminal"
+
+export interface ComponentStyleOverride {
+  tonality?: ComponentTonality
+  elevation?: ComponentElevation
+  /** Multiplier on `--radius`, clamped to 0.5..2. `undefined`/`1` = inherit. */
+  radiusScale?: number
+}
+
+export type ComponentStyles = Partial<Record<ComponentStyleKey, ComponentStyleOverride>>
 
 // ----------------------------------------------------------------------------
 // v47 — Density / Radius / Motion / Typography / A11y / AutoMode / MonacoLink
@@ -265,4 +334,5 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   monacoLink: DEFAULT_MONACO_LINK,
   activeThemePackId: null,
   customCssScope: "app",
+  componentStyles: {},
 }

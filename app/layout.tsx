@@ -50,6 +50,7 @@ import { CliBridgeEventsBridge } from "@/components/plugins/cli-bridge-events"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import {
   BackgroundApplier,
+  ComponentStyleApplier,
   DensityApplier,
   MotionApplier,
   RadiusApplier,
@@ -150,6 +151,7 @@ export default async function RootLayout({
                                   {/* Keeps body[data-bg-*] + the cognia user-css */}
                                   {/* style tag in sync with the appearance store. */}
                                   <BackgroundApplier />
+                                  <ComponentStyleApplier />
                                   <CustomThemeApplier />
                                   <ConnectorBusProvider>
                                     <ConnectorDeepLinkRouter>

@@ -98,6 +98,7 @@ describe("AppearanceSection", () => {
       customCss: "",
       customCssEnabled: false,
       background: { ...DEFAULT_BACKGROUND_SETTINGS },
+      componentStyles: {},
     })
     // Wallpapers (user-uploaded image library) must NOT be in the payload —
     // resetting "appearance" preserves the user's binary content.

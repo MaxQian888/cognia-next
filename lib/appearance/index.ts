@@ -2,6 +2,22 @@
 // `@/lib/appearance` rather than reaching into individual files.
 
 export { BackgroundApplier } from "./background-applier"
+export {
+  ComponentStyleApplier,
+  applyComponentStyleCss,
+  clampRadiusScale,
+  resolveComponentStyleCss,
+} from "./component-style-applier"
+export {
+  COMPONENT_STYLE_REGISTRY,
+  COMPONENT_STYLE_BY_KEY,
+  COMPONENT_STYLE_GROUPS,
+} from "./component-style-registry"
+export type {
+  ComponentPlacement,
+  ComponentStyleEntry,
+  ComponentStyleGroup,
+} from "./component-style-registry"
 export { TypographyApplier, resolveTypographyVars } from "./typography-applier"
 export { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./density-applier"
 export { RadiusApplier, resolveRadiusVar } from "./radius-applier"

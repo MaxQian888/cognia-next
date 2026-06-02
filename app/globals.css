@@ -30,6 +30,8 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   /* Workflow category & status semantic tokens. Each is referenced by the
      `--wf-*` variables in `:root` / `.dark` so dark-mode tracking is automatic
      once a component switches from `bg-emerald-500/15` to `bg-wf-trigger/15`. */
@@ -100,6 +102,10 @@
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.75 0.17 80);
   --warning-foreground: oklch(0.205 0 0);
+  /* Informational accent (blue). Pairs with success/warning/destructive; used
+     by ThinkingIndicator's "agent" variant and other info-level chrome. */
+  --info: oklch(0.6 0.13 220);
+  --info-foreground: oklch(0.985 0 0);
   /* Workflow editor: per-category accent colors and runtime status hues.
      Light-mode values stay within the 0.55–0.7 lightness band so they
      read against the white card background. The .dark block below shifts
@@ -155,6 +161,8 @@
   --success-foreground: oklch(0.145 0 0);
   --warning: oklch(0.82 0.18 85);
   --warning-foreground: oklch(0.145 0 0);
+  --info: oklch(0.7 0.15 220);
+  --info-foreground: oklch(0.145 0 0);
   /* Workflow tokens — dark-mode equivalents (kept in the same hue family as
      :root, only lightness/chroma re-tuned so they pop on the dark surface). */
   --wf-trigger: oklch(0.72 0.18 150);
@@ -495,6 +503,15 @@ html[data-bg-preview="all"] [data-bg-target] {
   --surface-blur-regular: 10px;
   --surface-blur-strong: 14px;
   --surface-overlay-opacity: 30%;
+
+  /* Terminal surface — intentionally mode-fixed (defined only here, NOT in
+   * .dark) so the ai-elements terminal keeps its dark-console identity in
+   * both light and dark themes. It is still a CSS var so the wallpaper layer
+   * (§4c, ai-terminal) can color-mix it to translucent over a wallpaper. ANSI
+   * stream colours and status pills stay literal in terminal.tsx (signal). */
+  --terminal-surface: oklch(0.18 0.01 260); /* ≈ zinc-950 */
+  --terminal-foreground: oklch(0.96 0 0); /* ≈ zinc-100 */
+  --terminal-border: oklch(0.3 0.01 260); /* ≈ zinc-800 */
 }
 .dark {
   /* Dark mode loses contrast over wallpapers faster — bump opacity ~5pp. */
@@ -900,6 +917,255 @@ body[data-bg-enabled="true"][data-bg-scope="global"]
   background-color: color-mix(in oklch, var(--muted) 65%, transparent);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+/* Section 4b — Additional neutral surfaces.
+ *
+ * Decorative `bg-muted` boxes (avatar fallback / badge / group-count, item
+ * media icon, empty-state icon, alert-dialog media) and the standalone
+ * Calendar (`bg-background`) painted fully opaque over a wallpaper. Soften them
+ * with the same scope-aware compound as Section 2 so the wallpaper bleeds
+ * through consistently. Calendar self-neutralizes inside Card/Popover already
+ * (calendar.tsx:28), so this only changes the bare/standalone usage. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is(
+    [data-slot="avatar-fallback"],
+    [data-slot="avatar-badge"],
+    [data-slot="avatar-group-count"],
+    [data-slot="item-media"],
+    [data-slot="empty-icon"],
+    [data-slot="alert-dialog-media"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is(
+    [data-slot="avatar-fallback"],
+    [data-slot="avatar-badge"],
+    [data-slot="avatar-group-count"],
+    [data-slot="item-media"],
+    [data-slot="empty-icon"],
+    [data-slot="alert-dialog-media"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is(
+    [data-slot="avatar-fallback"],
+    [data-slot="avatar-badge"],
+    [data-slot="avatar-group-count"],
+    [data-slot="item-media"],
+    [data-slot="empty-icon"],
+    [data-slot="alert-dialog-media"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is(
+    [data-slot="avatar-fallback"],
+    [data-slot="avatar-badge"],
+    [data-slot="avatar-group-count"],
+    [data-slot="item-media"],
+    [data-slot="empty-icon"],
+    [data-slot="alert-dialog-media"]
+  ),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is(
+    [data-slot="avatar-fallback"],
+    [data-slot="avatar-badge"],
+    [data-slot="avatar-group-count"],
+    [data-slot="item-media"],
+    [data-slot="empty-icon"],
+    [data-slot="alert-dialog-media"]
+  ) {
+  background-color: color-mix(
+    in oklch,
+    var(--muted) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* Standalone Calendar surface — mixes into --background (its base). */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="calendar"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="calendar"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="calendar"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="calendar"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="calendar"] {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Section 4c — ai-elements chat surfaces.
+ *
+ * Same scope-aware compound as Section 2, applied to the opaque surfaces that
+ * the ai-elements components paint (data-slot added in components/ai-elements/).
+ * Default tonality only; users can override per-component in Settings →
+ * Appearance → Components (the "chat" group) via the injected component-style
+ * sheet, which is appended after this block and wins on source order.
+ * ──────────────────────────────────────────────────────────────────────────*/
+
+/* --background surfaces (artifact, code block, scroll-to-bottom button) —
+ * translucent, subtle blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]),
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  :is([data-slot="ai-artifact"], [data-slot="ai-code-block"], [data-slot="ai-conversation"]) {
+  background-color: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* --secondary surfaces (task file badge) — translucent, subtle blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="ai-task"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="ai-task"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="ai-task"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="ai-task"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="ai-task"] {
+  background-color: color-mix(
+    in oklch,
+    var(--secondary) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* User message bubble — --secondary, gated to `.is-user` so the transparent
+ * assistant bubble is never painted. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  .is-user
+  [data-slot="ai-message-content"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .is-user
+  [data-slot="ai-message-content"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  .is-user
+  [data-slot="ai-message-content"],
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .is-user
+  [data-slot="ai-message-content"],
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .is-user
+  [data-slot="ai-message-content"] {
+  background-color: color-mix(
+    in oklch,
+    var(--secondary) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* Error trace (Alert) — --card, translucent, subtle blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="ai-error-trace"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="ai-error-trace"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="ai-error-trace"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="ai-error-trace"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="ai-error-trace"] {
+  background-color: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* Tool call card — --card, translucent but NO backdrop-filter on purpose: a
+ * tool-dense reply stacks dozens of these and each blur layer is re-sampled
+ * every scroll frame (see the comment in tool.tsx). Alpha compositing is cheap;
+ * blur is not. A user who opts into glass/frosted in the customizer accepts the
+ * cost explicitly. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"] [data-slot="ai-tool"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="ai-tool"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="ai-tool"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="ai-tool"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="ai-tool"] {
+  background-color: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
+    transparent
+  );
+}
+
+/* Terminal — mixes into the mode-fixed --terminal-surface so it stays a dark
+ * console while letting the wallpaper bleed through. Glass tier + regular blur. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="ai-terminal"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="ai-terminal"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="ai-terminal"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="ai-terminal"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="ai-terminal"] {
+  background-color: color-mix(
+    in oklch,
+    var(--terminal-surface) var(--surface-tonality-glass),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-regular));
+  -webkit-backdrop-filter: blur(var(--surface-blur-regular));
+}
+
+/* Context cost footer — inside a HoverCard that Radix portals to body, so it is
+ * portaled like the other overlays: only over the wallpaper at scope all/global. */
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-slot="ai-context"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="ai-context"] {
+  background-color: color-mix(
+    in oklch,
+    var(--secondary) var(--surface-tonality-translucent),
+    transparent
+  );
+  backdrop-filter: blur(var(--surface-blur-subtle));
+  -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
 }
 
 /* Section 5 — data-tonality / data-elevation semantic opt-in/opt-out.
