@@ -12,7 +12,7 @@ import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { getDataset, listCases } from "@/lib/db/eval-datasets"
 import { saveRun } from "@/lib/db/eval-runs"
 import { deterministicScorers, llmScorers } from "./scorers"
-import { createChatTarget, defaultChatTargetDeps } from "./target"
+import { createChatTarget, defaultChatTargetDeps } from "./targets/chat"
 import type { RunControllerDeps } from "./run-controller"
 
 export interface BrowserRunDepsArgs {

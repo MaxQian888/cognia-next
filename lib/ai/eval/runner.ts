@@ -9,7 +9,7 @@
  *
  * The runner is pure orchestration over an injected target, so it is fully
  * unit-testable with a mock target — the real sidecar bridge lives in
- * `lib/ai/eval/target.ts`.
+ * `lib/ai/eval/targets/chat.ts`.
  */
 
 import type { EvalCase, EvalCaseResult, EvalSample, Score, Scorer } from "@/types/eval/eval"

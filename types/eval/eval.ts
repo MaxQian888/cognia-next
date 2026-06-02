@@ -47,7 +47,7 @@ export interface EvalUsage {
 /**
  * The captured trajectory of one agent run against one {@link EvalCase}. This
  * is the unit every {@link Scorer} consumes — assembled from `AgentTraceSpan`s
- * by `lib/ai/eval/target.ts:assembleSampleFromSpans`.
+ * by `lib/ai/eval/targets/chat.ts:assembleSampleFromSpans`.
  */
 export interface EvalSample {
   /** Final assistant reply text. */

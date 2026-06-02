@@ -3,7 +3,7 @@ jest.mock("@/lib/ai/renderer-llm-client", () => ({
 }))
 jest.mock("@/lib/db/eval-datasets", () => ({ getDataset: jest.fn(), listCases: jest.fn() }))
 jest.mock("@/lib/db/eval-runs", () => ({ saveRun: jest.fn() }))
-jest.mock("./target", () => ({
+jest.mock("./targets/chat", () => ({
   createChatTarget: jest.fn(() => ({ label: "t", run: jest.fn() })),
   defaultChatTargetDeps: jest.fn(() => ({})),
 }))

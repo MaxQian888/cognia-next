@@ -18,7 +18,7 @@ export {
   defaultChatTargetDeps,
   type ChatTargetConfig,
   type ChatTargetDeps,
-} from "./target"
+} from "./targets/chat"
 export * from "./scorers"
 
 export interface RunDatasetEvalInput {

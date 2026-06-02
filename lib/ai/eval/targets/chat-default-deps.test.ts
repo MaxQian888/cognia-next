@@ -26,7 +26,7 @@ jest.mock("@/lib/db/agent-traces", () => ({
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
-import { defaultChatTargetDeps } from "./target"
+import { defaultChatTargetDeps } from "./chat"
 
 describe("defaultChatTargetDeps", () => {
   it("synthesizes a character and runs a turn when no characterId is given", async () => {

@@ -12,7 +12,7 @@
 
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase, EvalSample, EvalToolCall, EvalRetrievedChunk } from "@/types/eval/eval"
-import type { EvalTarget } from "./runner"
+import type { EvalTarget } from "../runner"
 
 function parseArgs(span: AgentTraceSpan): Record<string, unknown> {
   // Prefer structured metadata, fall back to the (PII-gated) inputPreview JSON.

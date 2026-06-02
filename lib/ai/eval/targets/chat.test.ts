@@ -1,6 +1,6 @@
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase } from "@/types/eval/eval"
-import { assembleSampleFromSpans, createChatTarget } from "./target"
+import { assembleSampleFromSpans, createChatTarget } from "./chat"
 
 function span(overrides: Partial<AgentTraceSpan>): AgentTraceSpan {
   return {
