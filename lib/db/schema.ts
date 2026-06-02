@@ -94,6 +94,18 @@ import type { EvalCase, EvalDataset } from "@/types/eval/eval"
 import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
 import type { Memory } from "@/types/memory/memory"
+import { rootsFromLegacy } from "@/lib/workspace/roots"
+
+/**
+ * Idempotently backfill `roots` on a project row from the legacy
+ * rootDir/additionalDirs mirrors. Used by the v66 upgrade and unit-tested
+ * directly (the upgrade only fires on a live version transition).
+ */
+export function backfillRootsForRow(row: Project): Project {
+  if (row.roots) return row
+  row.roots = rootsFromLegacy(row.rootDir, row.additionalDirs)
+  return row
+}
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -1693,6 +1705,20 @@ export class CogniaDB extends Dexie {
       memories:
         "&id, scope, type, characterId, status, lastAccessedAt, vectorDocId, sourceSessionId, pinned, [scope+type], [scope+status], [type+status]",
     })
+
+    // v66 — Multi-root workspaces. `Project.roots` becomes the source of truth;
+    // backfill it from the legacy rootDir/additionalDirs mirrors. Store string
+    // unchanged (`roots` lives in the row, not indexed).
+    this.version(66)
+      .stores({ projects: "&id, lastAccessedAt" })
+      .upgrade(async (tx) => {
+        await tx
+          .table("projects")
+          .toCollection()
+          .modify((p) => {
+            backfillRootsForRow(p as Project)
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto"
 import type { Project } from "@/types"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { __resetDbForTesting, getDb, whenSeeded, backfillRootsForRow } from "./schema"
 import {
   getAllProjects,
   putProject,
@@ -87,5 +87,37 @@ describe("active-workspace pointer (settings singleton)", () => {
     await persistActiveProjectId("alpha")
     await persistActiveProjectId(null)
     expect(await loadActiveProjectId()).toBeNull()
+  })
+})
+
+describe("v66 migration backfill", () => {
+  it("backfillRootsForRow builds roots from rootDir + additionalDirs", () => {
+    const row = {
+      id: "legacy-1",
+      name: "Legacy",
+      rootDir: "/a",
+      additionalDirs: ["/b", "/c"],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    } as unknown as Project
+    const migrated = backfillRootsForRow(row)
+    expect(migrated.roots?.[0]).toMatchObject({ path: "/a", isPrimary: true })
+    expect(migrated.roots?.map((r) => r.path)).toEqual(["/a", "/b", "/c"])
+  })
+
+  it("backfillRootsForRow is idempotent when roots already present", () => {
+    const existing = [{ id: "r", path: "/x", isPrimary: true }]
+    const row = { id: "x", roots: existing } as unknown as Project
+    expect(backfillRootsForRow(row).roots).toBe(existing)
+  })
+
+  it("backfillRootsForRow yields [] for a row with no dirs", () => {
+    const row = { id: "y" } as unknown as Project
+    expect(backfillRootsForRow(row).roots).toEqual([])
   })
 })
