@@ -18,7 +18,7 @@ import {
   setProviderPreset,
   subscriptionInit,
 } from "./transport"
-import type { Account, AnthropicCredentialData } from "./types"
+import type { Account, AnthropicCredentialData } from "@/types/subscription"
 
 jest.mock("@/lib/tauri", () => {
   return {

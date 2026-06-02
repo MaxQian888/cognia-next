@@ -26,7 +26,7 @@ import { isTauri } from "@/lib/tauri"
 
 import { writeClaudeSettingsEnv, writeCodexAuthEnv } from "./client"
 import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
-import type { CcswitchProvider, SwitchScope } from "./types"
+import type { CcswitchProvider, SwitchScope } from "@/types/ccswitch"
 
 const mIsTauri = isTauri as jest.Mock
 const mSetProviderEnv = setProviderEnv as jest.Mock

@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 import { saveOpencodeZenKey } from "@/lib/subscription/opencode/discovery"
-import type { Account } from "@/lib/subscription/core/types"
+import type { Account } from "@/types/subscription"
 
 export interface OpencodeAddAccountDialogProps {
   open: boolean

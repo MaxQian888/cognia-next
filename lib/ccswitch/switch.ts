@@ -35,7 +35,7 @@ import type {
   CcswitchProvider,
   SwitchPlan,
   SwitchScope,
-} from "./types"
+} from "@/types/ccswitch"
 
 /** Stable id used to mark cognia-next's active CCSwitch provider. */
 export function ccswitchProviderRefId(provider: CcswitchProvider): string {

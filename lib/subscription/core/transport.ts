@@ -18,7 +18,7 @@ import type {
   MigrationOutcome,
   ProviderId,
   ProviderPreset,
-} from "./types"
+} from "@/types/subscription"
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -107,6 +107,50 @@ export async function setProviderPreset(
   preset: ProviderPreset | null
 ): Promise<void> {
   await transport.call("subscription_set_preset", { provider, preset })
+}
+
+// ---------------------------------------------------------------------------
+// Preset library (v3 — multiple presets per provider, per-account binding)
+// ---------------------------------------------------------------------------
+
+/** Enumerate every preset in the provider's vault. */
+export async function listPresets(provider: ProviderId): Promise<ProviderPreset[]> {
+  return await transport.call<ProviderPreset[]>("subscription_list_presets", { provider })
+}
+
+/** Upsert a preset by id into the provider's library. */
+export async function saveProviderPreset(
+  provider: ProviderId,
+  preset: ProviderPreset
+): Promise<void> {
+  await transport.call("subscription_save_preset", { provider, preset })
+}
+
+/** Remove a preset by id; also clears the default + any account bindings to it. */
+export async function deleteProviderPreset(provider: ProviderId, presetId: string): Promise<void> {
+  await transport.call("subscription_delete_preset", { provider, presetId })
+}
+
+/** Set or clear the provider-level default preset id. */
+export async function setDefaultPreset(
+  provider: ProviderId,
+  presetId: string | null
+): Promise<void> {
+  await transport.call("subscription_set_default_preset", { provider, presetId })
+}
+
+// ---------------------------------------------------------------------------
+// Authed HTTP passthrough (CORS-free; used by balance-query adapters in
+// Phase 3). The Rust side performs the GET with reqwest and returns the raw
+// response body as text; the renderer's adapter parses it.
+// ---------------------------------------------------------------------------
+
+export async function authedGet(
+  url: string,
+  headers: Record<string, string> = {}
+): Promise<string> {
+  const pairs = Object.entries(headers)
+  return await transport.call<string>("subscription_authed_get", { url, headers: pairs })
 }
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ pub async fn opencode_save_zen_key(
         credential,
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
+        preset_id: None,
     };
 
     let mut vault = vault::load(ProviderId::Opencode)?.unwrap_or_else(ProviderVault::empty);

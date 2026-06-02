@@ -33,7 +33,7 @@ import {
   type OAuthFlowState,
 } from "@/lib/subscription/anthropic/oauth"
 import { anthropicOauthSavePkceResult } from "@/lib/subscription/core/transport"
-import type { Account, AnthropicAuthMode } from "@/lib/subscription/core/types"
+import type { Account, AnthropicAuthMode } from "@/types/subscription"
 import { openUrl } from "@/lib/native/opener"
 
 export interface AnthropicAddAccountDialogProps {

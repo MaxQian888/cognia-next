@@ -15,7 +15,7 @@
 
 import { generateCodeChallenge, generateCodeVerifier } from "@/lib/ai/providers/oauth"
 
-import type { AnthropicAuthMode, AnthropicCredentialData } from "../core/types"
+import type { AnthropicAuthMode, AnthropicCredentialData } from "@/types/subscription"
 import { CLAUDE_OAUTH_CLIENT_ID, CLAUDE_OAUTH_TOKEN_URL, OAUTH_ENDPOINTS } from "./constants"
 
 export interface OAuthFlowState {

@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
+import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.

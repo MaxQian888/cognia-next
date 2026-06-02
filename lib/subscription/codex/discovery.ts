@@ -8,7 +8,7 @@ import {
   type DiscoveredCodexAuth,
   type DiscoveredCodexTokens,
 } from "../core/transport"
-import type { CodexCredentialData, ProviderCredential } from "../core/types"
+import type { CodexCredentialData, ProviderCredential } from "@/types/subscription"
 
 export type { DiscoveredCodexAuth, DiscoveredCodexTokens }
 

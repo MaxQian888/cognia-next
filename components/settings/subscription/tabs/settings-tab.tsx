@@ -16,7 +16,7 @@ import { SettingsAlert, SettingsCard } from "@/components/settings/common/settin
 import {
   DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS as DEFAULT_SUBSCRIPTION_SETTINGS,
   type AnthropicSubscriptionSettings as SubscriptionSettings,
-} from "@/lib/subscription/core/types"
+} from "@/types/subscription"
 import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthropic/scheduler"
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings/settings-store"

@@ -25,6 +25,18 @@ pub struct ProviderPreset {
     /// deterministic serialization (relevant for tests + diff readability).
     #[serde(rename = "extraHeaders", default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra_headers: BTreeMap<String, String>,
+    /// Optional reference to a well-known template this preset was derived
+    /// from (e.g. `"aws-bedrock"`, `"azure-openai"`). Informational only —
+    /// the renderer uses it for icon / help-link selection.
+    #[serde(rename = "templateId", default, skip_serializing_if = "Option::is_none")]
+    pub template_id: Option<String>,
+    /// Logical model aliases to physical model IDs for this relay endpoint.
+    /// Keys are logical names (`"default"`, `"fast"`) and values are the
+    /// endpoint-specific model identifiers. Used by `env_for_sidecar` to
+    /// emit `ANTHROPIC_MODEL` / `OPENAI_MODEL` env vars when set.
+    /// BTreeMap for deterministic serialization.
+    #[serde(rename = "modelMapping", default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_mapping: BTreeMap<String, String>,
 }
 
 impl ProviderPreset {
@@ -50,6 +62,17 @@ impl ProviderPreset {
                 return Err("preset.extraHeaders must not contain empty keys".into());
             }
         }
+        // model_mapping must not contain empty keys or empty values — an
+        // empty value would cause the env var to be emitted as an empty
+        // string, which is worse than omitting it entirely.
+        for (k, v) in &self.model_mapping {
+            if k.trim().is_empty() {
+                return Err("preset.modelMapping must not contain empty keys".into());
+            }
+            if v.trim().is_empty() {
+                return Err("preset.modelMapping must not contain empty values".into());
+            }
+        }
         Ok(())
     }
 }
@@ -66,6 +89,8 @@ mod tests {
             label: "AWS Bedrock".into(),
             base_url: "https://bedrock-runtime.us-west-2.amazonaws.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         }
     }
 
@@ -134,10 +159,64 @@ mod tests {
             label: "l".into(),
             base_url: "https://example.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         let blob = serde_json::to_string(&p).unwrap();
         let a = blob.find("a-first").unwrap();
         let z = blob.find("z-last").unwrap();
         assert!(a < z, "BTreeMap should produce sorted header order");
+    }
+
+    #[test]
+    fn validate_rejects_blank_model_mapping_value() {
+        let mut p = sample();
+        p.model_mapping.insert("default".into(), "   ".into());
+        assert!(
+            p.validate().is_err(),
+            "blank model_mapping value must be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_blank_model_mapping_key() {
+        let mut p = sample();
+        p.model_mapping.insert("".into(), "claude-3-5-sonnet".into());
+        assert!(
+            p.validate().is_err(),
+            "empty model_mapping key must be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_well_formed_model_mapping() {
+        let mut p = sample();
+        p.model_mapping
+            .insert("default".into(), "claude-3-5-sonnet-20241022".into());
+        p.model_mapping
+            .insert("fast".into(), "claude-3-5-haiku-20241022".into());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn model_mapping_serializes_camel_case_and_is_skipped_when_empty() {
+        // Non-empty mapping → field present with camelCase name.
+        let mut p = sample();
+        p.model_mapping
+            .insert("default".into(), "claude-3-5-sonnet".into());
+        let blob = serde_json::to_string(&p).unwrap();
+        assert!(
+            blob.contains("\"modelMapping\""),
+            "non-empty modelMapping must appear in JSON"
+        );
+
+        // Empty mapping → field omitted entirely.
+        let mut p2 = sample();
+        p2.model_mapping.clear();
+        let blob2 = serde_json::to_string(&p2).unwrap();
+        assert!(
+            !blob2.contains("modelMapping"),
+            "empty modelMapping must be skipped"
+        );
     }
 }

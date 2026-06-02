@@ -23,7 +23,7 @@ import type {
   ProviderId,
   SubscriptionUsageRow,
   UsageSnapshot,
-} from "@/lib/subscription/core/types"
+} from "@/types/subscription"
 
 /** Usage snapshot with sensitive raw headers + internal key stripped. */
 export type PluginUsageSnapshot = Omit<UsageSnapshot, "rawHeaders">

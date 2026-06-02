@@ -1,14 +1,38 @@
 jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: jest.fn(),
+  getAccount: jest.fn(),
+  saveAccount: jest.fn(),
+  setActiveAccount: jest.fn(),
+  codexOauthDiscover: jest.fn(),
+  codexOauthRefresh: jest.fn(),
 }))
 
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: jest.fn(),
+}))
+
+import { getSettings } from "@/lib/db/settings"
 import * as transportMod from "@/lib/subscription/core/transport"
-import type { ActiveSnapshot } from "@/lib/subscription/core/types"
+import type { Account, ActiveSnapshot } from "@/types/subscription"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 import { buildAgentEnv } from "./env-builder"
 
 const mGetActive = transportMod.getActiveAccount as jest.Mock
+const mGetAccount = transportMod.getAccount as jest.Mock
+const mSaveAccount = transportMod.saveAccount as jest.Mock
+const mSetActive = transportMod.setActiveAccount as jest.Mock
+const mDiscover = transportMod.codexOauthDiscover as jest.Mock
+const mRefresh = transportMod.codexOauthRefresh as jest.Mock
+const mGetSettings = getSettings as jest.Mock
+
+// Default: no codex settings persisted → env-builder uses the type defaults
+// (preferDiscovered + autoRefreshNearExpiry both true).
+beforeEach(() => {
+  mGetSettings.mockResolvedValue({})
+  mGetAccount.mockResolvedValue(undefined)
+  mDiscover.mockResolvedValue(null)
+})
 
 function codexConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgentConfig {
   return {
@@ -110,6 +134,127 @@ describe("buildAgentEnv — codex preset", () => {
     )
     const env = await buildAgentEnv(codexConfig())
     expect(Object.keys(env)).toEqual(["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"])
+  })
+})
+
+describe("buildAgentEnv — codex preferDiscovered fallback", () => {
+  function settings(preferDiscovered: boolean, autoRefreshNearExpiry = false) {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered, autoRefreshNearExpiry },
+    })
+  }
+
+  it("does not probe discovery when preferDiscovered is off", async () => {
+    settings(false)
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+    const env = await buildAgentEnv(codexConfig(), { K: "v" })
+    expect(env).toEqual({ K: "v" })
+    expect(mDiscover).not.toHaveBeenCalled()
+  })
+
+  it("falls back to discovered api-key when no active account and preferDiscovered is on", async () => {
+    settings(true)
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+    mDiscover.mockResolvedValueOnce({ source: "file", openaiApiKey: "sk-disc-1" })
+    const env = await buildAgentEnv(codexConfig())
+    expect(env).toEqual({ OPENAI_API_KEY: "sk-disc-1", CODEX_API_KEY: "sk-disc-1" })
+  })
+
+  it("falls back to discovered chatgpt bearer", async () => {
+    settings(true)
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+    mDiscover.mockResolvedValueOnce({
+      source: "file",
+      tokens: { accessToken: "oat-disc", refreshToken: "r", idTokenRaw: "" },
+    })
+    const env = await buildAgentEnv(codexConfig())
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "oat-disc" })
+  })
+
+  it("returns base env when discovery finds nothing", async () => {
+    settings(true)
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+    mDiscover.mockResolvedValueOnce(null)
+    const env = await buildAgentEnv(codexConfig(), { K: "v" })
+    expect(env).toEqual({ K: "v" })
+  })
+})
+
+describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
+  function codexAccount(expiresAtMs: number, refreshToken = "r1"): Account {
+    return {
+      id: "a1",
+      credential: {
+        provider: "codex",
+        accessToken: "stale",
+        refreshToken,
+        idTokenRaw: "",
+        expiresAtMs,
+        authMode: "chatgpt",
+        storedAtMs: 0,
+      },
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+    }
+  }
+
+  it("refreshes a near-expiry chatgpt credential before spawn", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+    })
+    mGetActive
+      .mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]], "a1"))
+      .mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "new"]], "a1"))
+    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() - 1000, "r1"))
+    mRefresh.mockResolvedValueOnce({ access_token: "new", refresh_token: "r2", expires_in: 3600 })
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(mRefresh).toHaveBeenCalledWith("r1")
+    expect(mSaveAccount).toHaveBeenCalledTimes(1)
+    expect(mSetActive).toHaveBeenCalledWith("codex", "a1")
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "new" })
+  })
+
+  it("does not refresh a still-fresh credential", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+    })
+    mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "fresh"]], "a1"))
+    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() + 3_600_000, "r1"))
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(mRefresh).not.toHaveBeenCalled()
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "fresh" })
+  })
+
+  it("skips refresh entirely when autoRefreshNearExpiry is off", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: false },
+    })
+    mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]], "a1"))
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(mGetAccount).not.toHaveBeenCalled()
+    expect(mRefresh).not.toHaveBeenCalled()
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "stale" })
+  })
+
+  it("keeps the stale env when the refresh call fails", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+    })
+    mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]], "a1"))
+    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() - 1000, "r1"))
+    mRefresh.mockRejectedValueOnce(new Error("refresh 401"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "stale" })
+    warn.mockRestore()
   })
 })
 

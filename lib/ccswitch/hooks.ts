@@ -23,7 +23,7 @@ import type {
   CcswitchProvider,
   CcswitchSkill,
   CcswitchStatus,
-} from "./types"
+} from "@/types/ccswitch"
 
 export interface AsyncState<T> {
   data: T | undefined

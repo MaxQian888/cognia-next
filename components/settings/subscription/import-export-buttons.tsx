@@ -42,9 +42,12 @@ import {
   saveAccount,
   setActiveAccount,
   setProviderPreset,
+  listPresets,
+  saveProviderPreset,
+  setDefaultPreset,
 } from "@/lib/subscription/core/transport"
-import type { Account, ProviderId, ProviderVault } from "@/lib/subscription/core/types"
-import { ALL_PROVIDER_IDS } from "@/lib/subscription/core/types"
+import type { Account, ProviderId, ProviderVault } from "@/types/subscription"
+import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
 type ExportMode = "idle" | "exporting"
 type ImportMode = "idle" | "decrypting" | "preview" | "applying"
@@ -80,18 +83,22 @@ async function snapshotVaults(): Promise<Partial<Record<ProviderId, ProviderVaul
   const result: Partial<Record<ProviderId, ProviderVault>> = {}
   for (const provider of ALL_PROVIDER_IDS) {
     const summaries = await listAccounts(provider)
+    // `getProviderPreset` returns the resolved default preset, so its id is the
+    // vault's `defaultPresetId`.
+    const [activeSnapshot, presets, defaultPreset] = await Promise.all([
+      getActiveAccount(provider),
+      listPresets(provider),
+      getProviderPreset(provider),
+    ])
     if (summaries.length === 0) {
-      // Still record the empty vault when there's an active pointer / preset.
-      const [activeSnapshot, preset] = await Promise.all([
-        getActiveAccount(provider),
-        getProviderPreset(provider),
-      ])
-      if (activeSnapshot.activeAccountId || preset) {
+      // Still record the empty vault when there's an active pointer / presets.
+      if (activeSnapshot.activeAccountId || presets.length > 0) {
         result[provider] = {
-          schemaVersion: 2,
+          schemaVersion: 3,
           accounts: [],
           activeAccountId: activeSnapshot.activeAccountId,
-          preset: preset ?? undefined,
+          presets,
+          defaultPresetId: defaultPreset?.id,
         }
       }
       continue
@@ -101,15 +108,12 @@ async function snapshotVaults(): Promise<Partial<Record<ProviderId, ProviderVaul
       const account = await getAccount(provider, summary.id)
       if (account) fullAccounts.push(account)
     }
-    const [activeSnapshot, preset] = await Promise.all([
-      getActiveAccount(provider),
-      getProviderPreset(provider),
-    ])
     result[provider] = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       accounts: fullAccounts,
       activeAccountId: activeSnapshot.activeAccountId,
-      preset: preset ?? undefined,
+      presets,
+      defaultPresetId: defaultPreset?.id,
     }
   }
   return result
@@ -126,7 +130,16 @@ async function applyVaults(
       await saveAccount(provider, account)
       accountCount += 1
     }
-    if (vault.preset !== undefined) {
+    // v3 preset library + default pointer.
+    for (const preset of vault.presets ?? []) {
+      await saveProviderPreset(provider, preset)
+    }
+    if (vault.defaultPresetId !== undefined) {
+      await setDefaultPreset(provider, vault.defaultPresetId ?? null)
+    }
+    // Legacy v2 backups carried a single `preset`; fold it in via the shim so
+    // older exports still restore.
+    if ((vault.presets === undefined || vault.presets.length === 0) && vault.preset !== undefined) {
       await setProviderPreset(provider, vault.preset ?? null)
     }
     if (vault.activeAccountId !== undefined) {

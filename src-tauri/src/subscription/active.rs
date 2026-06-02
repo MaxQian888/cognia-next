@@ -167,7 +167,7 @@ pub fn env_for_account_with_vault(
     vault: &ProviderVault,
     account: &Account,
 ) -> Result<Vec<(String, String)>, String> {
-    let mut env = dispatch_env_for_sidecar(provider, account, vault.preset.as_ref());
+    let mut env = dispatch_env_for_sidecar(provider, account, vault.resolve_preset(account));
     let config_dir = per_account_config_dir(app_data_dir, &account.id);
     std::fs::create_dir_all(&config_dir).map_err(|e| {
         format!(
@@ -272,6 +272,7 @@ mod tests {
             }),
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
+            preset_id: None,
         }
     }
 
@@ -345,10 +346,14 @@ mod tests {
             label: "Bedrock".into(),
             base_url: "https://bedrock.example.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         let account = sample_anthropic_account("01abc");
         let mut vault = vault_with(vec![account.clone()]);
-        vault.preset = Some(preset);
+        // Use v3 preset mechanism: add preset to library and set as default.
+        vault.upsert_preset(preset);
+        vault.default_preset_id = Some("p1".into());
 
         let env =
             env_for_account_with_vault(tmp.path(), ProviderId::Anthropic, &vault, &account).unwrap();

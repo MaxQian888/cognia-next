@@ -22,7 +22,7 @@ import { PresetPicker } from "./preset-picker"
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
   type CodexSubscriptionSettings,
-} from "@/lib/subscription/core/types"
+} from "@/types/subscription"
 
 function getCodexSettings(
   appSettings: { codexSubscriptionSettings?: CodexSubscriptionSettings } | null | undefined

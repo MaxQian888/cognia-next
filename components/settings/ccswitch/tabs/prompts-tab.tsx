@@ -17,7 +17,7 @@ import {
 
 import { useCcswitchPrompts, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { importCcswitchPrompts } from "@/lib/ccswitch/import"
-import type { CcswitchPrompt } from "@/lib/ccswitch/types"
+import type { CcswitchPrompt } from "@/types/ccswitch"
 import { isTauri } from "@/lib/tauri"
 
 export function CcswitchPromptsTab() {

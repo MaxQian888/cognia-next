@@ -23,7 +23,7 @@ import {
 import { useCcswitchMcpServers, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { importCcswitchMcp } from "@/lib/ccswitch/import"
 import type { McpImportStrategy } from "@/lib/db/mcp-servers"
-import type { CcswitchMcpServer } from "@/lib/ccswitch/types"
+import type { CcswitchMcpServer } from "@/types/ccswitch"
 import { isTauri } from "@/lib/tauri"
 
 export function CcswitchMcpTab() {

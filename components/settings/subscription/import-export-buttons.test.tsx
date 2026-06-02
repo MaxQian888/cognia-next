@@ -53,7 +53,7 @@ jest.mock("@/lib/subscription/core/transport", () => ({
   setProviderPreset: (...args: unknown[]) => applyMocks.setProviderPreset(...args),
 }))
 
-jest.mock("@/lib/subscription/core/types", () => ({
+jest.mock("@/types/subscription", () => ({
   ALL_PROVIDER_IDS: ["anthropic", "codex", "opencode"],
 }))
 

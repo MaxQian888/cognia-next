@@ -17,7 +17,7 @@ use crate::subscription::preset::ProviderPreset;
 use crate::subscription::provider::ProviderId;
 
 pub const SERVICE: &str = "com.cognia.subscription/v2";
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Credential variants — provider-specific shapes. Fields mirror today's v1
@@ -173,6 +173,11 @@ pub struct Account {
     pub created_at_ms: i64,
     #[serde(rename = "lastUsedAtMs", default)]
     pub last_used_at_ms: i64,
+    /// Per-account preset binding (v3). When `Some`, the resolved env uses this
+    /// preset; when `None`, the provider-level `default_preset_id` applies.
+    /// Points at a `ProviderPreset.id` in the same vault's `presets` list.
+    #[serde(rename = "presetId", default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
 }
 
 /// Renderer-safe projection of `Account` — strips the secret bearer. Used by
@@ -245,6 +250,16 @@ pub struct ProviderVault {
     pub accounts: Vec<Account>,
     #[serde(rename = "activeAccountId", default, skip_serializing_if = "Option::is_none")]
     pub active_account_id: Option<String>,
+    /// Preset library (v3). Multiple endpoint presets per provider; accounts
+    /// bind to one by id, with `default_preset_id` as the provider-wide fallback.
+    #[serde(default)]
+    pub presets: Vec<ProviderPreset>,
+    /// Provider-level default preset id (v3). Applied when an account has no
+    /// `preset_id`. Points at a `ProviderPreset.id` in `presets`.
+    #[serde(rename = "defaultPresetId", default, skip_serializing_if = "Option::is_none")]
+    pub default_preset_id: Option<String>,
+    /// Legacy single preset (v2). Read at load time and folded into `presets`
+    /// by the v2→v3 migration, then never written again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<ProviderPreset>,
 }
@@ -255,8 +270,68 @@ impl ProviderVault {
             schema_version: SCHEMA_VERSION,
             accounts: Vec::new(),
             active_account_id: None,
+            presets: Vec::new(),
+            default_preset_id: None,
             preset: None,
         }
+    }
+
+    /// In-place v2→v3 upgrade. Idempotent: when `schema_version` is already 3
+    /// (or higher) it only normalizes a stray legacy `preset`. Returns `true`
+    /// when anything changed (so callers can persist the upgraded blob).
+    pub fn migrate_to_v3(&mut self) -> bool {
+        let mut changed = false;
+        // Fold a legacy v2 single preset into the v3 library + default pointer.
+        if let Some(legacy) = self.preset.take() {
+            if !self.presets.iter().any(|p| p.id == legacy.id) {
+                if self.default_preset_id.is_none() {
+                    self.default_preset_id = Some(legacy.id.clone());
+                }
+                self.presets.push(legacy);
+            }
+            changed = true;
+        }
+        if self.schema_version < SCHEMA_VERSION {
+            self.schema_version = SCHEMA_VERSION;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Resolve the effective preset for an account: its own `preset_id`, else
+    /// the provider `default_preset_id`, else `None`. Dangling ids resolve to
+    /// `None` rather than erroring (the account simply runs preset-less).
+    pub fn resolve_preset(&self, account: &Account) -> Option<&ProviderPreset> {
+        let id = account.preset_id.as_ref().or(self.default_preset_id.as_ref())?;
+        self.presets.iter().find(|p| &p.id == id)
+    }
+
+    /// Upsert a preset by id (replace existing, append if new).
+    pub fn upsert_preset(&mut self, preset: ProviderPreset) {
+        if let Some(existing) = self.presets.iter_mut().find(|p| p.id == preset.id) {
+            *existing = preset;
+        } else {
+            self.presets.push(preset);
+        }
+    }
+
+    /// Remove a preset by id. Clears `default_preset_id` and any account
+    /// binding pointing at it. Returns `true` if a preset was removed.
+    pub fn remove_preset(&mut self, preset_id: &str) -> bool {
+        let before = self.presets.len();
+        self.presets.retain(|p| p.id != preset_id);
+        let removed = self.presets.len() != before;
+        if removed {
+            if self.default_preset_id.as_deref() == Some(preset_id) {
+                self.default_preset_id = None;
+            }
+            for a in &mut self.accounts {
+                if a.preset_id.as_deref() == Some(preset_id) {
+                    a.preset_id = None;
+                }
+            }
+        }
+        removed
     }
 
     /// Upsert an account by id (replace existing, append if new). Returns the
@@ -321,6 +396,11 @@ pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
     if vault.has_orphan_active() {
         return Err("vault.activeAccountId does not match any account in vault.accounts".into());
     }
+    if let Some(id) = &vault.default_preset_id {
+        if !vault.presets.iter().any(|p| &p.id == id) {
+            return Err("vault.defaultPresetId does not match any preset in vault.presets".into());
+        }
+    }
     let blob = serde_json::to_string(vault)
         .map_err(|e| format!("vault serialize failed: {e}"))?;
     entry_for(provider)?
@@ -334,8 +414,11 @@ pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
 pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
     match entry_for(provider)?.get_password() {
         Ok(blob) => {
-            let parsed: ProviderVault = serde_json::from_str(&blob)
+            let mut parsed: ProviderVault = serde_json::from_str(&blob)
                 .map_err(|e| format!("vault parse failed: {e}"))?;
+            // Upgrade v2 blobs in place so every reader sees the v3 shape; the
+            // upgraded vault is persisted on the next `save`.
+            parsed.migrate_to_v3();
             Ok(Some(parsed))
         }
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -383,6 +466,7 @@ mod tests {
             }),
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
+            preset_id: None,
         }
     }
 
@@ -405,6 +489,7 @@ mod tests {
             }),
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
+            preset_id: None,
         }
     }
 
@@ -463,6 +548,7 @@ mod tests {
             }),
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
+            preset_id: None,
         };
         let blob = serde_json::to_string(&zen).unwrap();
         let parsed: Account = serde_json::from_str(&blob).unwrap();
@@ -593,6 +679,7 @@ mod tests {
             credential: ProviderCredential::OpencodeDiscovered(OpencodeDiscoveredData::default()),
             created_at_ms: 0,
             last_used_at_ms: 0,
+            preset_id: None,
         };
         let zen = Account {
             id: "y".into(),
@@ -600,6 +687,7 @@ mod tests {
             credential: ProviderCredential::OpencodeZen(OpencodeZenData::default()),
             created_at_ms: 0,
             last_used_at_ms: 0,
+            preset_id: None,
         };
         assert_eq!(
             AccountSummary::from_account(&discovered).variant,

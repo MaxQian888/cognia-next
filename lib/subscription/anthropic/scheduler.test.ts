@@ -13,7 +13,7 @@ jest.mock("./oauth", () => ({
 }))
 
 import { clampCadence, PROBE_CADENCE_FLOOR_MS, startUsageScheduler } from "./scheduler"
-import type { AnthropicCredentialData, UsageSnapshot } from "../core/types"
+import type { AnthropicCredentialData, UsageSnapshot } from "@/types/subscription"
 
 const credential: AnthropicCredentialData = {
   accessToken: "oat-1",

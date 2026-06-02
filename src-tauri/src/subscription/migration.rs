@@ -99,6 +99,7 @@ fn migrate_anthropic() -> Result<MigrationOutcome, String> {
         credential: ProviderCredential::Anthropic(parsed),
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
+        preset_id: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);
@@ -143,6 +144,7 @@ fn migrate_codex() -> Result<MigrationOutcome, String> {
         credential: ProviderCredential::Codex(parsed),
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
+        preset_id: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);

@@ -6,7 +6,12 @@
 // Field-level reference: anthropics/claude-code#12829 (verbatim header dump
 // from a real /v1/messages 200 response).
 
-import type { RepresentativeClaim, UsageSnapshot, UsageStatus, UsageWindow } from "../core/types"
+import type {
+  RepresentativeClaim,
+  UsageSnapshot,
+  UsageStatus,
+  UsageWindow,
+} from "@/types/subscription"
 
 export type HeaderInput = Headers | Record<string, string>
 

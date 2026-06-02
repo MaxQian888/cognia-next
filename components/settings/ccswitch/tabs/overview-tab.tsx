@@ -25,7 +25,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { detectActive } from "@/lib/ccswitch/switch"
-import type { ActiveProviderState, CcswitchProvider } from "@/lib/ccswitch/types"
+import type { ActiveProviderState, CcswitchProvider } from "@/types/ccswitch"
 import type { ClaudeSettings } from "@/lib/claude/settings"
 import { getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"

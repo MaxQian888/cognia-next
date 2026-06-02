@@ -23,7 +23,13 @@ import {
   setActiveAccount,
   setProviderPreset,
 } from "./transport"
-import type { Account, AccountSummary, ActiveSnapshot, ProviderId, ProviderPreset } from "./types"
+import type {
+  Account,
+  AccountSummary,
+  ActiveSnapshot,
+  ProviderId,
+  ProviderPreset,
+} from "@/types/subscription"
 
 // ---------------------------------------------------------------------------
 // useAccounts(provider)

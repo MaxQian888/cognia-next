@@ -43,6 +43,7 @@ pub async fn anthropic_oauth_save_pkce_result(
         credential,
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
+        preset_id: None,
     };
 
     let mut vault = vault::load(ProviderId::Anthropic)?.unwrap_or_else(ProviderVault::empty);

@@ -1,5 +1,5 @@
 import type { AppSettings } from "@/lib/claude/types"
-import { ALL_PROVIDER_IDS } from "@/lib/subscription/core/types"
+import { ALL_PROVIDER_IDS } from "@/types/subscription"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { loggers } from "@/lib/logging"
 

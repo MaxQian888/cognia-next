@@ -18,7 +18,7 @@
 
 import { toast } from "sonner"
 
-import type { MigrationOutcome } from "./types"
+import type { MigrationOutcome } from "@/types/subscription"
 import { subscriptionInit } from "./transport"
 
 const TOAST_FLAG_KEY = "subscription.migrationToastShown"

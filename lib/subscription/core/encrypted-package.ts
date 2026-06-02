@@ -5,7 +5,7 @@
 // just the three provider vaults. The smaller payload keeps backup files
 // human-readable in tooling and makes it obvious which vaults are inside.
 
-import type { Account, ProviderId, ProviderPreset, ProviderVault } from "./types"
+import type { Account, ProviderId, ProviderPreset, ProviderVault } from "@/types/subscription"
 
 const PBKDF2_ITERATIONS = 600_000
 const PBKDF2_HASH = "SHA-256"

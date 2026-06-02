@@ -2,7 +2,7 @@ import {
   OPENCODE_WHITELIST,
   isWhitelistedOpencodeSubProvider,
   toOpencodeZenProviderCredential,
-} from "./types"
+} from "./opencode"
 
 describe("OPENCODE_WHITELIST", () => {
   it("contains exactly the three known sub-providers", () => {

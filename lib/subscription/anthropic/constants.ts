@@ -15,7 +15,7 @@
 // not an Anthropic-sanctioned third-party OAuth client; if the upstream flow
 // changes, update this file + ADR-0025.
 
-import type { AnthropicAuthMode } from "../core/types"
+import type { AnthropicAuthMode } from "@/types/subscription"
 
 /**
  * Public client_id used by the Claude Code CLI. The same UUID is sent for

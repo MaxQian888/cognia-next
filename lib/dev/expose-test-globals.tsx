@@ -248,7 +248,7 @@ export function ExposeTestGlobals(): null {
       window.__cogniaResetSubscriptionState = async () => {
         const { listAccounts, deleteAccount, setActiveAccount } =
           await import("@/lib/subscription/core/transport")
-        const { ALL_PROVIDER_IDS } = await import("@/lib/subscription/core/types")
+        const { ALL_PROVIDER_IDS } = await import("@/types/subscription")
         for (const provider of ALL_PROVIDER_IDS) {
           try {
             await setActiveAccount(provider, null)

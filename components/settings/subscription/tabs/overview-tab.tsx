@@ -26,7 +26,7 @@ import {
   DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS,
   type AnthropicSubscriptionSettings,
   type UsageWindow,
-} from "@/lib/subscription/core/types"
+} from "@/types/subscription"
 
 function getSubscriptionSettings(
   appSettings: { subscriptionSettings?: AnthropicSubscriptionSettings } | null | undefined

@@ -24,7 +24,7 @@ import { Separator } from "@/components/ui/separator"
 
 import { applySwitch, planSwitch } from "@/lib/ccswitch/switch"
 import type { ApplyResult } from "@/lib/ccswitch/switch"
-import type { CcswitchProvider, SwitchPlan } from "@/lib/ccswitch/types"
+import type { CcswitchProvider, SwitchPlan } from "@/types/ccswitch"
 import type { AgentId } from "@/lib/claude/types"
 import { getSettings } from "@/lib/db/settings"
 

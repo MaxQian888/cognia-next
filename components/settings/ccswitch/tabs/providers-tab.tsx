@@ -24,7 +24,7 @@ import {
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { detectActive } from "@/lib/ccswitch/switch"
-import type { ActiveProviderState, CcswitchProvider } from "@/lib/ccswitch/types"
+import type { ActiveProviderState, CcswitchProvider } from "@/types/ccswitch"
 import { getSettings } from "@/lib/db/settings"
 import type { AgentId } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"

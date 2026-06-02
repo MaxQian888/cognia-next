@@ -60,7 +60,6 @@ const config: Config = {
     "!lib/wiki/types.ts",
     "!lib/tauri/transport-types.ts",
     "!hooks/a2ui/app-builder/types.ts",
-    "!lib/ccswitch/types.ts",
     "!lib/data-hooks/types.ts",
     "!lib/db/a2ui-types.ts",
     "!lib/db/plugin-types.ts",

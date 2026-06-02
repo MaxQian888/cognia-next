@@ -18,7 +18,7 @@ import type {
   AnthropicCredentialData,
   ProviderCredential,
   SubscriptionUsageRow,
-} from "../core/types"
+} from "@/types/subscription"
 import { useAccounts } from "../core/hooks"
 
 export interface UseAnthropicUsageResult {

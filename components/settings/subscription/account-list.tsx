@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { useAccounts } from "@/lib/subscription/core/hooks"
-import type { AccountSummary, ProviderId } from "@/lib/subscription/core/types"
+import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 import { AccountUsageChips } from "./account-usage-chips"
 

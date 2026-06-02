@@ -14,8 +14,8 @@ import {
   type DiscoveredOpencodeAuth,
   type DiscoveredOpencodeEntry,
 } from "../core/transport"
-import type { Account } from "../core/types"
-import { isWhitelistedOpencodeSubProvider } from "./types"
+import type { Account } from "@/types/subscription"
+import { isWhitelistedOpencodeSubProvider } from "@/types/subscription"
 
 export type { DiscoveredOpencodeAuth, DiscoveredOpencodeEntry }
 

@@ -1,5 +1,5 @@
 import { probeOnce } from "./usage-probe"
-import type { AnthropicCredentialData } from "../core/types"
+import type { AnthropicCredentialData } from "@/types/subscription"
 
 const credential: AnthropicCredentialData = {
   accessToken: "oat01-test",

@@ -20,7 +20,7 @@ import {
 
 import { useCcswitchSkills, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { importCcswitchSkills } from "@/lib/ccswitch/import"
-import type { CcswitchSkill } from "@/lib/ccswitch/types"
+import type { CcswitchSkill } from "@/types/ccswitch"
 import { isTauri } from "@/lib/tauri"
 
 export function CcswitchSkillsTab() {

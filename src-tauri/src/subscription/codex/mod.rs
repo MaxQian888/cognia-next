@@ -90,6 +90,12 @@ impl SubscriptionProvider for CodexProvider {
             for (k, v) in &p.extra_headers {
                 env.push((format!("OPENAI_CUSTOM_HEADER_{}", k), v.clone()));
             }
+            // Emit model override from model_mapping when present and non-empty.
+            if let Some(model) = p.model_mapping.get("default") {
+                if !model.trim().is_empty() {
+                    env.push(("OPENAI_MODEL".into(), model.clone()));
+                }
+            }
         }
         env
     }
@@ -140,6 +146,7 @@ mod tests {
             credential: ProviderCredential::Codex(c),
             created_at_ms: 0,
             last_used_at_ms: 0,
+            preset_id: None,
         }
     }
 
@@ -236,6 +243,8 @@ mod tests {
             label: "Azure".into(),
             base_url: "https://my-azure.openai.com/v1".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         let env = CodexProvider.env_for_sidecar(&account_from(api_key_cred()), Some(&preset));
         assert!(env
@@ -250,5 +259,37 @@ mod tests {
     fn codex_does_not_require_sidecar_restart() {
         assert!(!CodexProvider.requires_sidecar_restart_on_active_switch());
         assert!(CodexProvider.supports_preset());
+    }
+
+    #[test]
+    fn env_emits_openai_model_from_model_mapping() {
+        let mut mapping = BTreeMap::new();
+        mapping.insert("default".into(), "gpt-4o".into());
+        let preset = ProviderPreset {
+            id: "p-azure".into(),
+            label: "Azure GPT-4o".into(),
+            base_url: "https://my-azure.openai.com/v1".into(),
+            extra_headers: BTreeMap::new(),
+            template_id: None,
+            model_mapping: mapping,
+        };
+        let env = CodexProvider.env_for_sidecar(&account_from(api_key_cred()), Some(&preset));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "OPENAI_MODEL" && v == "gpt-4o"));
+    }
+
+    #[test]
+    fn env_skips_openai_model_when_mapping_empty() {
+        let preset = ProviderPreset {
+            id: "p-empty".into(),
+            label: "No model map".into(),
+            base_url: "https://my-azure.openai.com/v1".into(),
+            extra_headers: BTreeMap::new(),
+            template_id: None,
+            model_mapping: BTreeMap::new(),
+        };
+        let env = CodexProvider.env_for_sidecar(&account_from(api_key_cred()), Some(&preset));
+        assert!(!env.iter().any(|(k, _)| k == "OPENAI_MODEL"));
     }
 }

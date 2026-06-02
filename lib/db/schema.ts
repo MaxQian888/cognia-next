@@ -46,7 +46,7 @@ import type {
   PluginDexieMeta,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
-import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
+import type { SubscriptionUsageRow } from "@/types/subscription"
 import type {
   AdapterInstanceRow,
   PlatformIdentityRow,

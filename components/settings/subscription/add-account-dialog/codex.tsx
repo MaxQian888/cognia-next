@@ -59,7 +59,7 @@ import { saveAccount } from "@/lib/subscription/core/transport"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import { useCodexDiscovery } from "@/lib/subscription/codex/hooks"
 import type { DiscoveredCodexAuth } from "@/lib/subscription/codex/discovery"
-import type { Account, CodexCredentialData } from "@/lib/subscription/core/types"
+import type { Account, CodexCredentialData } from "@/types/subscription"
 import { openUrl } from "@/lib/native/opener"
 
 export type CodexLoginMode = "reuse" | "oauth"

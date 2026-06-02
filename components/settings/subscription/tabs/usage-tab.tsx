@@ -87,7 +87,7 @@ import {
   toUsageJson,
 } from "@/lib/usage/session-analytics"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
-import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
+import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { ChatSession } from "@/lib/claude/types"
 import { useChatStore } from "@/stores/chat"
 

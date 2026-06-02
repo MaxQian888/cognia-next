@@ -38,7 +38,7 @@ import { Card, CardContent } from "@/components/ui/card"
 
 import { useProviderPreset } from "@/lib/subscription/core/hooks"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
-import type { ProviderId, ProviderPreset } from "@/lib/subscription/core/types"
+import type { ProviderId, ProviderPreset } from "@/types/subscription"
 import { SelectablePresetCard } from "@/components/settings/presets/selectable-preset-card"
 
 interface PresetPickerProps {

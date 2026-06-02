@@ -11,7 +11,7 @@
 // `refreshAccessToken` + `subscription_save_account` + `subscription_set_active`)
 // and retry once. After a successful probe we persist via `recordUsageSnapshot`.
 
-import type { AnthropicCredentialData, AnthropicSubscriptionSettings } from "../core/types"
+import type { AnthropicCredentialData, AnthropicSubscriptionSettings } from "@/types/subscription"
 import { isAnthropicCredentialFresh } from "./oauth"
 import { probeOnce } from "./usage-probe"
 import { recordUsageSnapshot } from "./usage-collector"

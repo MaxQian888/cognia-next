@@ -14,7 +14,7 @@ import type {
   CcswitchProvider,
   CcswitchSkill,
   CcswitchStatus,
-} from "./types"
+} from "@/types/ccswitch"
 
 function ensureTauri() {
   if (!isTauri()) {

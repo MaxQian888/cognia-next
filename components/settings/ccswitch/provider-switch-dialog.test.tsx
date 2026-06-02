@@ -22,7 +22,7 @@ jest.mock("@/lib/db/settings", () => ({
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ProviderSwitchDialog } from "./provider-switch-dialog"
-import type { CcswitchProvider } from "@/lib/ccswitch/types"
+import type { CcswitchProvider } from "@/types/ccswitch"
 
 const provider: CcswitchProvider = {
   id: "p1",

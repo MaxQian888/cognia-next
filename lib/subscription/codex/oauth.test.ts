@@ -15,7 +15,7 @@ import {
   toProviderCredential,
 } from "./oauth"
 import type { DeviceCodeResponse, PollOutcome, TokenResponse } from "../core/transport"
-import type { CodexCredentialData } from "../core/types"
+import type { CodexCredentialData } from "@/types/subscription"
 
 const deviceCode: DeviceCodeResponse = {
   device_code: "dc-test",

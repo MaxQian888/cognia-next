@@ -13,7 +13,7 @@
 import { onClaudeMessage } from "@/lib/claude/ipc"
 import { getDb } from "@/lib/db/schema"
 
-import type { SubscriptionUsageRow, UsageSnapshot, UsageSource } from "../core/types"
+import type { SubscriptionUsageRow, UsageSnapshot, UsageSource } from "@/types/subscription"
 import { hasUsageHeaders, parseUsageHeaders } from "./parser"
 
 const CAP = 1000

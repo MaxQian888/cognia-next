@@ -10,12 +10,13 @@ import {
   SubscriptionPassphraseError,
   summariseSubscriptionPackage,
 } from "./encrypted-package"
-import type { ProviderVault } from "./types"
+import type { ProviderVault } from "@/types/subscription"
 
 function vault(overrides: Partial<ProviderVault> = {}): ProviderVault {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     accounts: [],
+    presets: [],
     ...overrides,
   }
 }

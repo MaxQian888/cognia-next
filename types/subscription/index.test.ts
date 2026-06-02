@@ -6,7 +6,7 @@ import {
   ALL_PROVIDER_IDS,
   DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS,
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
-} from "./types"
+} from "."
 
 describe("providerIdForCredential", () => {
   it("dispatches each variant to its parent provider", () => {

@@ -18,7 +18,7 @@ import { AccountList } from "./account-list"
 import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
-import { OPENCODE_WHITELIST } from "@/lib/subscription/opencode/types"
+import { OPENCODE_WHITELIST } from "@/types/subscription"
 
 export function ProviderTabOpencode() {
   const t = useTranslations("subscription.opencode")

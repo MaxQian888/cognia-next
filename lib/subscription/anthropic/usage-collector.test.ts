@@ -9,7 +9,7 @@ import {
   recordUsageSnapshot,
   subscribeToUsageHeaders,
 } from "./usage-collector"
-import type { UsageSnapshot } from "../core/types"
+import type { UsageSnapshot } from "@/types/subscription"
 
 const onClaudeMessageMock = jest.fn()
 jest.mock("@/lib/claude/ipc", () => ({

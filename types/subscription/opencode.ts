@@ -1,12 +1,16 @@
-// OpenCode-specific TS-only types. The underlying credential shapes
-// (`OpencodeDiscoveredData`, `OpencodeZenData`) live in `core/types.ts`
-// because they're referenced from the `ProviderCredential` discriminated
-// union.
+// OpenCode-specific types + guards. The underlying credential shapes
+// (`OpencodeDiscoveredData`, `OpencodeZenData`) live in `./credential`
+// because they're referenced from the `ProviderCredential` union.
 
-import type { ProviderCredential, OpencodeZenData } from "../core/types"
+import type { OpencodeZenData, ProviderCredential } from "./credential"
 
-export type { OpencodeZenData }
-export type { DiscoveredOpencodeAuth, DiscoveredOpencodeEntry } from "../core/transport"
+// IPC response shapes for OpenCode discovery live with the transport layer
+// (they are tied to the Tauri command surface); re-exported here so callers
+// can reach the whole OpenCode type surface from one place.
+export type {
+  DiscoveredOpencodeAuth,
+  DiscoveredOpencodeEntry,
+} from "@/lib/subscription/core/transport"
 
 /**
  * Whitelisted OpenCode sub-providers. Only these are surfaced from

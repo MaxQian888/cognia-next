@@ -80,6 +80,17 @@ impl SubscriptionProvider for AnthropicProvider {
                 // the env shape predictable across platforms.
                 env.push((format!("ANTHROPIC_CUSTOM_HEADER_{}", k), v.clone()));
             }
+            // Emit model overrides from model_mapping when present and non-empty.
+            if let Some(model) = p.model_mapping.get("default") {
+                if !model.trim().is_empty() {
+                    env.push(("ANTHROPIC_MODEL".to_string(), model.clone()));
+                }
+            }
+            if let Some(model) = p.model_mapping.get("fast") {
+                if !model.trim().is_empty() {
+                    env.push(("ANTHROPIC_SMALL_FAST_MODEL".to_string(), model.clone()));
+                }
+            }
         }
         env
     }
@@ -118,6 +129,7 @@ mod tests {
             credential: ProviderCredential::Anthropic(c),
             created_at_ms: 0,
             last_used_at_ms: 0,
+            preset_id: None,
         }
     }
 
@@ -198,6 +210,8 @@ mod tests {
             label: "Bedrock".into(),
             base_url: "https://example.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         let env = AnthropicProvider.env_for_sidecar(&account_from(cred()), Some(&preset));
         assert!(env
@@ -217,6 +231,7 @@ mod tests {
             credential: ProviderCredential::Codex(CodexCredentialData::default()),
             created_at_ms: 0,
             last_used_at_ms: 0,
+            preset_id: None,
         };
         assert!(AnthropicProvider.env_for_sidecar(&wrong, None).is_empty());
     }
@@ -225,5 +240,42 @@ mod tests {
     fn anthropic_requires_sidecar_restart() {
         assert!(AnthropicProvider.requires_sidecar_restart_on_active_switch());
         assert!(AnthropicProvider.supports_preset());
+    }
+
+    #[test]
+    fn env_for_sidecar_emits_model_mapping_vars() {
+        let mut mapping = BTreeMap::new();
+        mapping.insert("default".into(), "claude-3-5-sonnet-20241022".into());
+        mapping.insert("fast".into(), "claude-3-5-haiku-20241022".into());
+        let preset = ProviderPreset {
+            id: "p2".into(),
+            label: "Bedrock with model map".into(),
+            base_url: "https://bedrock.example.com".into(),
+            extra_headers: BTreeMap::new(),
+            template_id: None,
+            model_mapping: mapping,
+        };
+        let env = AnthropicProvider.env_for_sidecar(&account_from(cred()), Some(&preset));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "ANTHROPIC_MODEL" && v == "claude-3-5-sonnet-20241022"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "ANTHROPIC_SMALL_FAST_MODEL" && v == "claude-3-5-haiku-20241022"));
+    }
+
+    #[test]
+    fn env_for_sidecar_skips_absent_model_mapping() {
+        let preset = ProviderPreset {
+            id: "p3".into(),
+            label: "No model map".into(),
+            base_url: "https://bedrock.example.com".into(),
+            extra_headers: BTreeMap::new(),
+            template_id: None,
+            model_mapping: BTreeMap::new(),
+        };
+        let env = AnthropicProvider.env_for_sidecar(&account_from(cred()), Some(&preset));
+        assert!(!env.iter().any(|(k, _)| k == "ANTHROPIC_MODEL"));
+        assert!(!env.iter().any(|(k, _)| k == "ANTHROPIC_SMALL_FAST_MODEL"));
     }
 }

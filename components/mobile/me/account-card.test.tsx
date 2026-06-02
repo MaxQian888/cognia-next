@@ -3,7 +3,7 @@
  */
 import { render, screen } from "@testing-library/react"
 
-import type { AnthropicCredentialData, SubscriptionUsageRow } from "@/lib/subscription/core/types"
+import type { AnthropicCredentialData, SubscriptionUsageRow } from "@/types/subscription"
 
 // ---------------------------------------------------------------------------
 // Mocks

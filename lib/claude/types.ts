@@ -20,6 +20,7 @@ import type {
 import type { PetSettings } from "@/types/pet"
 import type { ModelMapping, ModelMappingEntry, RoutingConfig } from "@/types/provider/model-mapping"
 import type { RoutingStrategy } from "@/types/provider/auto-router"
+import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/config"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -115,6 +116,15 @@ export interface SendOptions {
    * the SDK. See {@link BuiltinToolsConfig}.
    */
   builtinTools?: BuiltinToolsConfig
+
+  /**
+   * Resolved LSP server list + master toggle for the agent runtime LSP.
+   * Sidecar-protocol field: the renderer resolves builtin ← user ← project
+   * layers (`lib/lsp/resolve-config.ts`) and serialises the result here so
+   * the sidecar — a separate Node project that cannot import `lib/` — never
+   * hard-codes its server registry. See {@link LspSendOptions}.
+   */
+  lsp?: LspSendOptions
 
   /**
    * Plugin tool manifest for the SDK sidecar runtime — bridges plugin
@@ -305,6 +315,14 @@ export interface SendOptions {
      */
     protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
   }
+
+  /**
+   * Sampling/generation parameters (AI SDK v6 call-option names) assembled
+   * from the resolved provider's configured inference defaults. The ai-sdk
+   * dispatcher spreads these into `streamText`; the legacy Anthropic path
+   * ignores them. Absent when the provider has no inference config.
+   */
+  modelParams?: import("@/types/provider/provider").ModelInferenceParams
 
   /**
    * When the caller passed a model alias (e.g., `"fast"`), the routing
@@ -1002,14 +1020,14 @@ export interface AppSettings {
    * stored here. See ADR-0025 and
    * `lib/subscription/core/types.ts:AnthropicSubscriptionSettings`.
    */
-  subscriptionSettings?: import("@/lib/subscription/core/types").AnthropicSubscriptionSettings
+  subscriptionSettings?: import("@/types/subscription").AnthropicSubscriptionSettings
   /**
    * Codex (OpenAI) subscription preferences — discovery fallback + refresh
    * cadence. Credentials live in the OS keyring; only renderer-side toggles
    * are stored here. See ADR-0025 and
    * `lib/subscription/core/types.ts:CodexSubscriptionSettings`.
    */
-  codexSubscriptionSettings?: import("@/lib/subscription/core/types").CodexSubscriptionSettings
+  codexSubscriptionSettings?: import("@/types/subscription").CodexSubscriptionSettings
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */
@@ -1718,6 +1736,21 @@ export interface AppSettings {
   automationPolicy?: AutomationPolicy
 
   /**
+   * Unified Language Server configuration (ADR — unified LSP). Single
+   * source of truth feeding BOTH the agent runtime LSP (via
+   * `sendOptions.lsp`, resolved in `lib/claude/build-options.ts`) and the
+   * editor LSP registry (`lib/plugin/lsp/*`). Builtin defaults
+   * (`lib/lsp/builtin-defaults.ts`) are layered under `servers` here and
+   * under any project-local `.cognia/lsp.json` by
+   * `lib/lsp/resolve-config.ts`.
+   *
+   * Stored in the settings singleton (no dedicated Dexie table). Migrated
+   * from the former `developer.userLspServers` /
+   * `developer.unsignedLspAllowed` fields.
+   */
+  lsp?: LspSettings
+
+  /**
    * Developer-only knobs. Surfaced under Settings → Developer in dev
    * builds; hidden in production builds (gate via `NODE_ENV`). Each
    * toggle relaxes a safety check that exists for a reason — never
@@ -1766,52 +1799,28 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
 export interface DeveloperSettings {
   /**
    * When `true`, the VS Code LSP binary policy
-   * (`lib/plugin/vscode-shim/lsp-binary-policy.ts`) allows unsigned LSP
-   * binaries to spawn after a single in-session consent prompt instead
-   * of refusing them outright. Every spawn is still audit-logged with
-   * `decision: "dev-allow"`.
-   *
-   * **Safety note:** intended for plugin authors testing their own
-   * extensions before signing. Never enable on a machine where you
-   * install third-party `.vsix` files you haven't audited.
+   * @deprecated Migrated to `AppSettings.lsp.unsignedAllowed` by
+   * `lib/lsp/migrate-settings.ts`. Read only during the one-time
+   * migration; cleared afterwards. Kept on the type so the migration can
+   * still see legacy values.
    */
   unsignedLspAllowed?: boolean
 
   /**
-   * User-managed Language Server entries — Phase B of the LSP reuse
-   * work. Each entry is a `PluginLspServerDef` owned by `"user"` (vs.
-   * plugin-contributed servers owned by a plugin id). The bootstrap at
-   * `lib/plugin/lsp/lsp-user-servers.ts` registers them with the
-   * `lsp-registry` on app start and re-registers when this list
-   * changes.
-   *
-   * Stored in the settings singleton (rather than a dedicated Dexie
-   * table) because the typical user has at most a handful of entries
-   * and the existing settings store already gives us atomic save +
-   * cross-tab sync for free.
+   * @deprecated Migrated to `AppSettings.lsp.servers` by
+   * `lib/lsp/migrate-settings.ts`. Read only during the one-time
+   * migration; cleared afterwards.
    */
   userLspServers?: UserLspServerEntry[]
 }
 
 /**
- * One entry in `DeveloperSettings.userLspServers`. Shape mirrors
- * `PluginLspServerDef` from `@/types/plugin` — kept inline so the
- * types module avoids a circular dependency on the plugin barrel.
+ * One user-authored Language Server entry. Now an alias of the unified
+ * {@link LspServerConfig} (`@/types/lsp/config`) so the shape lives in one
+ * place — the former inline copy diverged from the editor's
+ * `PluginLspServerDef` and the agent's hard-coded registry.
  */
-export interface UserLspServerEntry {
-  id: string
-  name: string
-  languages: string[]
-  command: string
-  args?: string[]
-  env?: Record<string, string>
-  transport?: "stdio"
-  initializationOptions?: Record<string, unknown>
-  settings?: Record<string, unknown>
-  workspaceFolderRequired?: boolean
-  /** When `false`, the registry skips this entry on bootstrap. Default true. */
-  enabled?: boolean
-}
+export type UserLspServerEntry = LspServerConfig
 
 export interface BiometricGuardPolicy {
   /** Sign-out / pair-revocation already wires this up; here for parity. */

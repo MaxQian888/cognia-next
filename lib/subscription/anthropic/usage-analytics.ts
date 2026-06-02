@@ -13,7 +13,7 @@ import type {
   SubscriptionUsageRow,
   UsageStatus,
   UsageWindow,
-} from "../core/types"
+} from "@/types/subscription"
 
 /** Three-step severity for a utilization gauge. */
 export type UsageLevel = "ok" | "warn" | "crit"

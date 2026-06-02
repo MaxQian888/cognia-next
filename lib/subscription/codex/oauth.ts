@@ -8,7 +8,7 @@
 //   4. On `Granted` → call `tokenResponseToCredential` and persist via
 //      `subscription_save_account` → `subscription_set_active`.
 
-import type { CodexCredentialData, ProviderCredential } from "../core/types"
+import type { CodexCredentialData, ProviderCredential } from "@/types/subscription"
 import {
   codexOauthPollDeviceCode,
   codexOauthRefresh,

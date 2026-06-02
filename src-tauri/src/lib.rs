@@ -327,6 +327,11 @@ pub fn run() {
             subscription::commands::subscription_get_active,
             subscription::commands::subscription_get_preset,
             subscription::commands::subscription_set_preset,
+            subscription::commands::subscription_list_presets,
+            subscription::commands::subscription_save_preset,
+            subscription::commands::subscription_delete_preset,
+            subscription::commands::subscription_set_default_preset,
+            subscription::commands::subscription_authed_get,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
             subscription::commands::claude_proxy_env_for_session,

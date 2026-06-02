@@ -10,7 +10,7 @@ import { createSkill } from "@/lib/db/skills"
 import { listSkills } from "@/lib/db/skills"
 import type { McpTransport } from "@/lib/claude/types"
 
-import type { CcswitchMcpServer, CcswitchPrompt, CcswitchSkill } from "./types"
+import type { CcswitchMcpServer, CcswitchPrompt, CcswitchSkill } from "@/types/ccswitch"
 
 /* ---- MCP servers ------------------------------------------------------- */
 

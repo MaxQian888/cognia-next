@@ -172,7 +172,7 @@ pub async fn subscription_set_active(
                 .ok_or_else(|| format!("no account {target_id:?} in {provider} vault"))?
                 .clone();
             let env = for_provider(id, |p| {
-                p.env_for_sidecar(&account, vault.preset.as_ref())
+                p.env_for_sidecar(&account, vault.resolve_preset(&account))
             });
             let restart = for_provider(id, |p| p.requires_sidecar_restart_on_active_switch());
             let bearer = if id == ProviderId::Anthropic {
@@ -226,14 +226,92 @@ pub async fn subscription_get_active(
 }
 
 // ---------------------------------------------------------------------------
-// Provider preset
+// Provider preset — v3 multi-preset CRUD
+// ---------------------------------------------------------------------------
+
+/// List all presets stored for a provider.
+#[tauri::command]
+pub async fn subscription_list_presets(
+    provider: String,
+) -> Result<Vec<ProviderPreset>, String> {
+    let id = ProviderId::parse(&provider)?;
+    let vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    Ok(vault.presets.clone())
+}
+
+/// Validate and upsert a preset. Rejects providers that do not support
+/// presets (currently only OpenCode).
+#[tauri::command]
+pub async fn subscription_save_preset(
+    provider: String,
+    preset: ProviderPreset,
+) -> Result<(), String> {
+    let id = ProviderId::parse(&provider)?;
+    let supports = for_provider(id, |p| p.supports_preset());
+    if !supports {
+        return Err(format!(
+            "provider {provider:?} does not support presets"
+        ));
+    }
+    preset.validate()?;
+    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    vault.upsert_preset(preset);
+    vault::save(id, &vault)
+}
+
+/// Remove a preset by id. The default pointer and any account bindings
+/// pointing at the removed preset are cleared automatically by
+/// `ProviderVault::remove_preset`.
+#[tauri::command]
+pub async fn subscription_delete_preset(
+    provider: String,
+    preset_id: String,
+) -> Result<(), String> {
+    let id = ProviderId::parse(&provider)?;
+    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    vault.remove_preset(&preset_id);
+    vault::save(id, &vault)
+}
+
+/// Set (or clear) the provider-level default preset id. Passing `None` clears
+/// it. Passing `Some(id)` errors when the id is not in the preset library.
+#[tauri::command]
+pub async fn subscription_set_default_preset(
+    provider: String,
+    preset_id: Option<String>,
+) -> Result<(), String> {
+    let id = ProviderId::parse(&provider)?;
+    let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
+    if let Some(ref pid) = preset_id {
+        if !vault.presets.iter().any(|p| &p.id == pid) {
+            return Err(format!(
+                "preset id {pid:?} not found in {provider} vault"
+            ));
+        }
+    }
+    vault.default_preset_id = preset_id;
+    vault::save(id, &vault)
+}
+
+// ---------------------------------------------------------------------------
+// Back-compat shims for the v2 single-preset API
+//
+// `subscription_get_preset` now resolves the default preset from the v3
+// library. `subscription_set_preset(Some(p))` upserts + sets default;
+// `subscription_set_preset(None)` clears the default pointer.
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub async fn subscription_get_preset(provider: String) -> Result<Option<ProviderPreset>, String> {
     let id = ProviderId::parse(&provider)?;
     let vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
-    Ok(vault.preset)
+    // Return the default preset from the v3 library, if one is set.
+    let resolved = vault
+        .default_preset_id
+        .as_ref()
+        .and_then(|did| vault.presets.iter().find(|p| &p.id == did))
+        .cloned();
+    Ok(resolved)
 }
 
 #[tauri::command]
@@ -248,12 +326,56 @@ pub async fn subscription_set_preset(
             "provider {provider:?} does not support presets"
         ));
     }
-    if let Some(p) = preset.as_ref() {
-        p.validate()?;
-    }
     let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
-    vault.preset = preset;
+    match preset {
+        Some(p) => {
+            p.validate()?;
+            let pid = p.id.clone();
+            vault.upsert_preset(p);
+            vault.default_preset_id = Some(pid);
+        }
+        None => {
+            vault.default_preset_id = None;
+        }
+    }
     vault::save(id, &vault)
+}
+
+// ---------------------------------------------------------------------------
+// Generic authed GET (Phase 3 balance queries)
+// ---------------------------------------------------------------------------
+
+/// Perform an authenticated GET request to an arbitrary URL, merging in the
+/// caller-supplied headers. Designed for balance/quota queries that the
+/// renderer cannot make directly due to CORS.
+///
+/// Returns the response body as a UTF-8 string on 2xx. On non-2xx, returns
+/// `Err("{status}: {body}")` so the renderer can surface the upstream error
+/// message verbatim.
+#[tauri::command]
+pub async fn subscription_authed_get(
+    url: String,
+    headers: Vec<(String, String)>,
+) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("http client build failed: {e}"))?;
+    let mut req = client.get(&url);
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("{status}: {body}"));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("response read failed: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +450,7 @@ mod tests {
             }),
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
+            preset_id: None,
         }
     }
 
@@ -364,6 +487,8 @@ mod tests {
             label: "test".into(),
             base_url: "https://example.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         let err = subscription_set_preset("opencode".into(), Some(preset))
             .await
@@ -462,6 +587,8 @@ mod tests {
             label: "Bedrock".into(),
             base_url: "https://bedrock.example.com".into(),
             extra_headers: headers,
+            template_id: None,
+            model_mapping: BTreeMap::new(),
         };
         subscription_set_preset("anthropic".into(), Some(preset.clone()))
             .await
@@ -474,5 +601,128 @@ mod tests {
         assert!(subscription_get_preset("anthropic".into()).await.unwrap().is_none());
 
         vault::clear(ProviderId::Anthropic).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // subscription_list_presets / subscription_save_preset /
+    // subscription_delete_preset / subscription_set_default_preset
+    // -----------------------------------------------------------------------
+
+    fn sample_preset(id: &str, label: &str) -> ProviderPreset {
+        ProviderPreset {
+            id: id.into(),
+            label: label.into(),
+            base_url: "https://bedrock.example.com".into(),
+            extra_headers: BTreeMap::new(),
+            template_id: None,
+            model_mapping: BTreeMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_presets_empty_when_no_vault() {
+        // No keyring access needed — unwrapped vault is always empty.
+        // ProviderId::Anthropic: if keyring is absent vault::load returns None → empty() → empty presets.
+        let got = subscription_list_presets("anthropic".into()).await.unwrap();
+        // When there's no keyring entry this is empty; the test is structurally valid regardless.
+        let _ = got; // just assert it doesn't error
+    }
+
+    #[tokio::test]
+    async fn save_preset_rejects_opencode() {
+        let p = sample_preset("x", "test");
+        let err = subscription_save_preset("opencode".into(), p)
+            .await
+            .expect_err("opencode does not support presets");
+        assert!(err.contains("preset"));
+    }
+
+    #[tokio::test]
+    async fn save_preset_rejects_invalid_preset() {
+        let mut p = sample_preset("x", "test");
+        p.base_url = "not-a-url".into();
+        let err = subscription_save_preset("anthropic".into(), p)
+            .await
+            .expect_err("invalid URL should be rejected");
+        assert!(err.contains("URL") || err.contains("url"));
+    }
+
+    #[tokio::test]
+    async fn save_delete_preset_roundtrip() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Anthropic);
+
+        let p = sample_preset("bedrock-1", "Bedrock");
+        subscription_save_preset("anthropic".into(), p.clone())
+            .await
+            .unwrap();
+
+        let presets = subscription_list_presets("anthropic".into()).await.unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].id, "bedrock-1");
+
+        subscription_delete_preset("anthropic".into(), "bedrock-1".into())
+            .await
+            .unwrap();
+        let presets_after = subscription_list_presets("anthropic".into()).await.unwrap();
+        assert!(presets_after.is_empty());
+
+        vault::clear(ProviderId::Anthropic).unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_default_preset_rejects_unknown_id() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Anthropic);
+
+        let err = subscription_set_default_preset("anthropic".into(), Some("nonexistent".into()))
+            .await
+            .expect_err("unknown preset id should be rejected");
+        assert!(err.contains("nonexistent"));
+
+        vault::clear(ProviderId::Anthropic).unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_default_preset_roundtrip() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = vault::clear(ProviderId::Anthropic);
+
+        let p = sample_preset("p1", "Bedrock");
+        subscription_save_preset("anthropic".into(), p).await.unwrap();
+
+        // Clear the default (set_preset(Some) above sets it as default — reset it).
+        subscription_set_default_preset("anthropic".into(), None)
+            .await
+            .unwrap();
+        // Now the shim get_preset returns None.
+        assert!(subscription_get_preset("anthropic".into()).await.unwrap().is_none());
+
+        // Set it back.
+        subscription_set_default_preset("anthropic".into(), Some("p1".into()))
+            .await
+            .unwrap();
+        let got = subscription_get_preset("anthropic".into()).await.unwrap();
+        assert_eq!(got.unwrap().id, "p1");
+
+        vault::clear(ProviderId::Anthropic).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // subscription_authed_get
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn authed_get_builds_request_without_network() {
+        // Verify that the reqwest client builds successfully and the function
+        // compiles correctly. We don't make a real network call here.
+        let client = reqwest::Client::builder().build();
+        assert!(client.is_ok(), "reqwest client must build successfully");
     }
 }

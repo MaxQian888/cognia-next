@@ -1,4 +1,4 @@
-import type { SubscriptionUsageRow } from "../core/types"
+import type { SubscriptionUsageRow } from "@/types/subscription"
 import {
   buildUtilizationSeries,
   levelForUtilizationPct,
