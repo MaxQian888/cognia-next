@@ -35,6 +35,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
+import { NotificationBell } from "@/components/notifications/notification-bell"
 
 const log = loggers.ui
 
@@ -201,6 +202,8 @@ export function StatusBar() {
         className="flex h-6 items-center gap-1 empty:hidden"
         fallback={<span className="flex-1 min-w-0" />}
       />
+
+      <NotificationBell />
 
       <StatusItem testId="status-status" aria-label={statusLabel}>
         <span

@@ -35,6 +35,12 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
 
+// The notification bell pulls the Dexie-backed store on mount; it's covered by
+// its own suite, so stub it here to keep the status-bar test isolated.
+jest.mock("@/components/notifications/notification-bell", () => ({
+  NotificationBell: () => null,
+}))
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ.
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
