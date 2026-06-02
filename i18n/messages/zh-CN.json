@@ -17897,7 +17897,11 @@
       "none": "无活动工作区",
       "empty": "暂无工作区",
       "newWorkspace": "新建工作区",
-      "manage": "管理工作区"
+      "manage": "管理工作区",
+      "recentHeading": "最近",
+      "folderCount": "{count, plural, other {# 个文件夹}}",
+      "untrustedHint": "未受信任的工作区",
+      "openFolder": "打开文件夹…"
     },
     "manage": {
       "title": "工作区",

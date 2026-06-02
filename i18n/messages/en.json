@@ -17897,7 +17897,11 @@
       "none": "No active workspace",
       "empty": "No workspaces yet",
       "newWorkspace": "New workspace",
-      "manage": "Manage workspaces"
+      "manage": "Manage workspaces",
+      "recentHeading": "Recent",
+      "folderCount": "{count, plural, one {# folder} other {# folders}}",
+      "untrustedHint": "Untrusted workspace",
+      "openFolder": "Open folder…"
     },
     "manage": {
       "title": "Workspaces",

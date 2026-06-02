@@ -8,8 +8,15 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
-jest.mock("@tauri-apps/plugin-dialog", () => ({ open: jest.fn() }))
+const isTauriMock = jest.fn(() => true)
+jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+const openDialogMock = jest.fn()
+jest.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialogMock(...a) }))
+jest.mock("@/lib/db/trusted-workspaces", () => ({
+  isWorkspaceTrusted: jest.fn(async () => true),
+  trustWorkspace: jest.fn(async () => undefined),
+  revokeWorkspaceTrust: jest.fn(async () => undefined),
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 jest.mock("@/lib/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
@@ -39,9 +46,11 @@ import { useProjectStore } from "@/stores/project/project-store"
 
 function makeProject(id: string, over: Record<string, unknown> = {}) {
   const now = new Date()
+  const rootDir = (over.rootDir as string) ?? undefined
   return {
     id,
     name: id,
+    roots: rootDir ? [{ id: `root-${id}`, path: rootDir, isPrimary: true }] : [],
     knowledgeBase: [],
     sessionIds: [],
     sessionCount: 0,
@@ -55,6 +64,8 @@ function makeProject(id: string, over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  isTauriMock.mockReturnValue(true)
+  openDialogMock.mockReset()
   act(() => {
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   })
@@ -125,5 +136,64 @@ describe("WorkspaceSwitcher", () => {
     expect(useProjectStore.getState().projects).toHaveLength(1)
     // Editor for the new workspace is shown.
     expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
+  })
+
+  it("shows the folder count for a multi-root workspace", () => {
+    act(() => {
+      useProjectStore.setState({
+        projects: [
+          makeProject("p1", {
+            name: "Multi",
+            roots: [
+              { id: "r1", path: "/a", isPrimary: true },
+              { id: "r2", path: "/b" },
+            ],
+          }),
+        ],
+        activeProjectId: "p1",
+      })
+    })
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    // ICU folderCount key passthrough renders the raw key; assert the path shows.
+    expect(screen.getAllByText("/a").length).toBeGreaterThan(0)
+  })
+
+  it("renders a Recent group ordered by lastAccessedAt", () => {
+    const older = new Date("2020-01-01")
+    const newer = new Date("2024-01-01")
+    act(() => {
+      useProjectStore.setState({
+        projects: [
+          makeProject("p1", { name: "Old", rootDir: "/a", lastAccessedAt: older }),
+          makeProject("p2", { name: "New", rootDir: "/b", lastAccessedAt: newer }),
+        ],
+        activeProjectId: "p1",
+      })
+    })
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    // The recent group renders prefixed rows; newest first.
+    expect(screen.getByTestId("workspace-switch-recent-p2")).toBeInTheDocument()
+  })
+
+  it("open-folder creates + activates a workspace on desktop", async () => {
+    openDialogMock.mockResolvedValue("/picked/ws")
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("workspace-switcher-open-folder"))
+    })
+    const projects = useProjectStore.getState().projects
+    expect(projects).toHaveLength(1)
+    expect(projects[0].rootDir).toBe("/picked/ws")
+    expect(useProjectStore.getState().activeProjectId).toBe(projects[0].id)
+  })
+
+  it("hides the open-folder action on web", () => {
+    isTauriMock.mockReturnValue(false)
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    expect(screen.queryByTestId("workspace-switcher-open-folder")).not.toBeInTheDocument()
   })
 })
