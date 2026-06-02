@@ -1,87 +1,33 @@
 "use client"
 
 /**
- * Agent evaluation dashboard. Lists datasets, lets the user create one, run an
- * evaluation against the chat target, and review per-run pass@1 / pass^k / cost
- * trends. The run wiring (scorers + sidecar target + judge client) is assembled
- * by `buildBrowserRunDeps`; runs persist as `EvalReport` rows.
+ * Datasets pane: a dataset list + create form on the left, and the selected
+ * dataset's {@link DatasetDetail} (cases CRUD + import + versions + run) on the
+ * right. Runs + comparison live in the separate "Runs & Compare" tab.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ClipboardCheckIcon, PlayIcon, PlusIcon, Trash2Icon, Loader2Icon } from "lucide-react"
+import { ClipboardCheckIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { createDataset, deleteDataset } from "@/lib/db/eval-datasets"
-import { buildBrowserRunDeps } from "@/lib/ai/eval/browser-deps"
-import { runDatasetById } from "@/lib/ai/eval/run-controller"
-import type { EvalReport } from "@/types/eval/eval"
-import { useEvalDatasets, useEvalRuns } from "@/hooks/eval/use-eval-data"
-
-function pct(value: number): string {
-  return `${Math.round(value * 100)}%`
-}
-
-function RunCard({ run }: { run: EvalReport }) {
-  const t = useTranslations("eval")
-  return (
-    <Card className="flex flex-col gap-2 p-3" data-testid="eval-run-card">
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium">{run.targetLabel}</span>
-        <span className="text-muted-foreground">
-          {t("datasets.version", { version: run.datasetVersion })} · k={run.k}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-        <div>
-          <div className="text-muted-foreground text-xs">{t("runs.passAt1")}</div>
-          <div className="font-semibold">{pct(run.passAt1)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-xs">{t("runs.passHatK")}</div>
-          <div className="font-semibold">{pct(run.passHatK)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-xs">{t("runs.cost")}</div>
-          <div className="font-semibold">${run.totalCostUsd.toFixed(4)}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-xs">{t("runs.latency")}</div>
-          <div className="font-semibold">{Math.round(run.avgLatencyMs)}ms</div>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {Object.values(run.scorers).map((s) => (
-          <Badge key={s.scorerId} variant="secondary" className="text-xs">
-            {s.scorerId} {pct(s.passRate)}
-          </Badge>
-        ))}
-      </div>
-    </Card>
-  )
-}
+import { createDataset } from "@/lib/db/eval-datasets"
+import { useEvalDatasets } from "@/hooks/eval/use-eval-data"
+import { DatasetDetail } from "./dataset-detail"
 
 export function EvalDashboard() {
   const t = useTranslations("eval")
   const datasets = useEvalDatasets()
   const settings = useSettingsStore((s) => s.settings)
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
-  const runs = useEvalRuns(selectedId)
 
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")
   const [capability, setCapability] = useState("")
-  const [running, setRunning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const effectiveSelected = selectedId ?? datasets[0]?.id
-  const { deterministicOnly } = useMemo(
-    () => buildBrowserRunDeps({ appSettings: settings }),
-    [settings]
-  )
+  const selectedDataset = datasets.find((d) => d.id === effectiveSelected)
 
   const handleCreate = useCallback(async () => {
     if (!name.trim() || !capability.trim()) return
@@ -91,20 +37,6 @@ export function EvalDashboard() {
     setCapability("")
     setCreating(false)
   }, [name, capability])
-
-  const handleRun = useCallback(async () => {
-    if (!effectiveSelected) return
-    setRunning(true)
-    setError(null)
-    try {
-      const { deps } = buildBrowserRunDeps({ appSettings: settings })
-      await runDatasetById(effectiveSelected, deps)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRunning(false)
-    }
-  }, [effectiveSelected, settings])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -179,51 +111,12 @@ export function EvalDashboard() {
           )}
         </div>
 
-        {/* Runs */}
-        <div className="flex min-h-0 flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium">{t("runs.heading")}</h2>
-            <div className="flex items-center gap-2">
-              {effectiveSelected && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => effectiveSelected && void deleteDataset(effectiveSelected)}
-                  aria-label={t("datasets.delete")}
-                >
-                  <Trash2Icon className="size-4" />
-                </Button>
-              )}
-              <Button size="sm" disabled={!effectiveSelected || running} onClick={handleRun}>
-                {running ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : (
-                  <PlayIcon className="size-4" />
-                )}
-                {running ? t("runs.running") : t("runs.run")}
-              </Button>
-            </div>
-          </div>
-
-          {deterministicOnly && (
-            <p className="text-muted-foreground text-xs">{t("runs.deterministicOnly")}</p>
-          )}
-          {error && (
-            <p className="text-destructive text-sm" role="alert">
-              {t("runs.failed", { error })}
-            </p>
-          )}
-
-          {!effectiveSelected ? (
-            <p className="text-muted-foreground text-sm">{t("datasets.select")}</p>
-          ) : runs.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t("runs.empty")}</p>
+        {/* Detail */}
+        <div className="min-h-0 overflow-y-auto">
+          {selectedDataset ? (
+            <DatasetDetail dataset={selectedDataset} appSettings={settings} />
           ) : (
-            <div className="flex flex-col gap-2 overflow-y-auto">
-              {runs.map((run) => (
-                <RunCard key={run.runId} run={run} />
-              ))}
-            </div>
+            <p className="text-muted-foreground text-sm">{t("datasets.select")}</p>
           )}
         </div>
       </div>

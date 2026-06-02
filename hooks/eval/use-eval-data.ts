@@ -8,12 +8,16 @@
 
 import { useLiveQuery } from "dexie-react-hooks"
 import { listDatasets, listCases } from "@/lib/db/eval-datasets"
-import { listRunsByDataset } from "@/lib/db/eval-runs"
+import { listRunsByDataset, listRecentRuns } from "@/lib/db/eval-runs"
+import { listVersions } from "@/lib/db/eval-dataset-versions"
+import { listCaseResults } from "@/lib/db/eval-run-cases"
 import { listAnnotations } from "@/lib/db/trace-annotations"
 import { queryRecent } from "@/lib/db/agent-traces"
 import { summarizeTraces, type TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
+import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
+import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 import type { TraceAnnotationRow } from "@/lib/db/trace-annotations"
 
 export function useEvalDatasets(): EvalDataset[] {
@@ -42,4 +46,20 @@ export function useTraceAnnotations(): TraceAnnotationRow[] {
 
 export function useRecentTraces(limit = 50): TraceSummary[] {
   return useLiveQuery(async () => summarizeTraces(await queryRecent(limit)), [limit], [])
+}
+
+export function useEvalDatasetVersions(datasetId?: string): EvalDatasetVersion[] {
+  return useLiveQuery(
+    () => (datasetId ? listVersions(datasetId) : Promise.resolve([])),
+    [datasetId],
+    []
+  )
+}
+
+export function useEvalRunCaseResults(runId?: string): EvalRunCaseRow[] {
+  return useLiveQuery(() => (runId ? listCaseResults(runId) : Promise.resolve([])), [runId], [])
+}
+
+export function useRecentRuns(limit = 50): EvalRunRow[] {
+  return useLiveQuery(() => listRecentRuns(limit), [limit], [])
 }

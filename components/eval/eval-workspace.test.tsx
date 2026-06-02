@@ -7,6 +7,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 jest.mock("./eval-dashboard", () => ({ EvalDashboard: () => <div>DASHBOARD</div> }))
+jest.mock("./runs-compare-panel", () => ({ RunsComparePanel: () => <div>COMPARE</div> }))
 jest.mock("./trace-annotation-panel", () => ({ TraceAnnotationPanel: () => <div>ANNOTATE</div> }))
 
 import { EvalWorkspace } from "./eval-workspace"
@@ -16,6 +17,13 @@ describe("EvalWorkspace", () => {
     render(<EvalWorkspace />)
     expect(screen.getByText("DASHBOARD")).toBeInTheDocument()
     expect(screen.queryByText("ANNOTATE")).not.toBeInTheDocument()
+  })
+
+  it("switches to the runs & compare panel", () => {
+    render(<EvalWorkspace />)
+    fireEvent.click(screen.getByText("tabs.compare"))
+    expect(screen.getByText("COMPARE")).toBeInTheDocument()
+    expect(screen.queryByText("DASHBOARD")).not.toBeInTheDocument()
   })
 
   it("switches to the trace-analysis panel", () => {

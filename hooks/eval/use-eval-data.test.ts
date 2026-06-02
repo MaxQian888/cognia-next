@@ -14,6 +14,13 @@ jest.mock("@/lib/db/eval-datasets", () => ({
 }))
 jest.mock("@/lib/db/eval-runs", () => ({
   listRunsByDataset: jest.fn((id: string) => [`run-${id}`]),
+  listRecentRuns: jest.fn((limit: number) => [`recent-${limit}`]),
+}))
+jest.mock("@/lib/db/eval-dataset-versions", () => ({
+  listVersions: jest.fn((id: string) => [`ver-${id}`]),
+}))
+jest.mock("@/lib/db/eval-run-cases", () => ({
+  listCaseResults: jest.fn((id: string) => [`caseres-${id}`]),
 }))
 jest.mock("@/lib/db/trace-annotations", () => ({
   listAnnotations: jest.fn(() => ["ann"]),
@@ -30,9 +37,14 @@ import {
   useEvalCases,
   useTraceAnnotations,
   useRecentTraces,
+  useEvalDatasetVersions,
+  useEvalRunCaseResults,
+  useRecentRuns,
 } from "./use-eval-data"
 import { listRunsByDataset } from "@/lib/db/eval-runs"
 import { listCases } from "@/lib/db/eval-datasets"
+import { listVersions } from "@/lib/db/eval-dataset-versions"
+import { listCaseResults } from "@/lib/db/eval-run-cases"
 
 describe("use-eval-data hooks", () => {
   it("useEvalDatasets reads the dataset list", () => {
@@ -71,5 +83,32 @@ describe("use-eval-data hooks", () => {
     const { result } = renderHook(() => useRecentTraces(10))
     const summaries = (await result.current) as unknown as { traceId: string }[]
     expect(summaries[0].traceId).toBe("t")
+  })
+
+  it("useEvalDatasetVersions queries by dataset id when given", () => {
+    const { result } = renderHook(() => useEvalDatasetVersions("d3"))
+    expect(result.current).toEqual(["ver-d3"])
+    expect(listVersions).toHaveBeenCalledWith("d3")
+  })
+
+  it("useEvalDatasetVersions returns empty without an id", async () => {
+    const { result } = renderHook(() => useEvalDatasetVersions())
+    await expect(result.current as unknown as Promise<unknown[]>).resolves.toEqual([])
+  })
+
+  it("useEvalRunCaseResults queries by run id when given", () => {
+    const { result } = renderHook(() => useEvalRunCaseResults("run-7"))
+    expect(result.current).toEqual(["caseres-run-7"])
+    expect(listCaseResults).toHaveBeenCalledWith("run-7")
+  })
+
+  it("useEvalRunCaseResults returns empty without an id", async () => {
+    const { result } = renderHook(() => useEvalRunCaseResults())
+    await expect(result.current as unknown as Promise<unknown[]>).resolves.toEqual([])
+  })
+
+  it("useRecentRuns reads the recent runs list", () => {
+    const { result } = renderHook(() => useRecentRuns(20))
+    expect(result.current).toEqual(["recent-20"])
   })
 })
