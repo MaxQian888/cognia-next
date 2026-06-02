@@ -877,6 +877,17 @@ export interface AppSettings {
    * store's `load()`. `null`/undefined means no workspace is active.
    */
   activeProjectId?: string | null
+  /**
+   * Workspace Trust configuration (VS Code-style). When `enabled`, an active
+   * workspace whose roots aren't all trusted runs in Restricted Mode (disk/host
+   * tools denied). `promptOnSwitch` opts into an eager trust dialog on switch;
+   * the default is lazy (prompt on first side-effecting send). Bypassed on Web
+   * (no real local FS). Default: `{ enabled: true, promptOnSwitch: false }`.
+   */
+  workspaceTrust?: {
+    enabled: boolean
+    promptOnSwitch: boolean
+  }
   permissionMode?: SendOptions["permissionMode"]
   /**
    * App-wide default for the SDK's extended-thinking budget. `undefined` or
@@ -1567,6 +1578,8 @@ export interface AppSettings {
   activeThemePackId?: string | null
   /** Wraps user CSS in `@scope (#app) { ... }` when "app" (default), or applies globally. */
   customCssScope?: "app" | "global"
+  /** Per-component surface customization (tonality / elevation / radius). */
+  componentStyles?: import("@/types/appearance").ComponentStyles
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**

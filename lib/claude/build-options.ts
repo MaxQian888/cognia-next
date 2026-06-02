@@ -116,6 +116,13 @@ export interface BuildOptionsContext {
    */
   activeProject?: Project | null
   /**
+   * True when the active workspace has any untrusted root. Restricted Mode then
+   * unions `RESTRICTED_MODE_DENIED_TOOLS` into `disallowedTools` (and strips
+   * computer-use from the allow list). Only direct chat sets this; team/
+   * connector paths leave it undefined (no restriction).
+   */
+  workspaceRestricted?: boolean
+  /**
    * Per-team-slot override applied on top of the character defaults. Only set
    * by the team chat hook; ignored when undefined. Override fields that are
    * left undefined fall through to the character's value as usual.
