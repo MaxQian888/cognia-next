@@ -1241,6 +1241,16 @@ export interface AppSettings {
    */
   goalConsoleView?: "grid" | "list"
   /**
+   * Unified Notification Center preferences (ADR-0042): global default
+   * channels, per-source overrides, OS/push level gates, DND/quiet-hours,
+   * retention, snooze, and connector focus-awareness. Lives in settings JSON
+   * (same pattern as `goalConsoleView`) so it syncs cross-device without a
+   * Dexie migration. The notification *records* live in the `notifications`
+   * table (v68); only these preferences ride on the settings singleton.
+   * See `@/types/notifications` for the model + `DEFAULT_NOTIFICATION_PREFERENCES`.
+   */
+  notificationPreferences?: import("@/types/notifications").NotificationPreferences
+  /**
    * Chat welcome page (`EmptyChatState`) personalization. All three live in
    * settings JSON (same pattern as `goalConsoleView`) so they persist without a
    * Dexie migration.

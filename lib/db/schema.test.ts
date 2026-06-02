@@ -49,6 +49,7 @@ describe("getDb", () => {
     expect(db.teams).toBeDefined()
     expect(db.trustedWorkspaces).toBeDefined()
     expect(db.backupHistory).toBeDefined()
+    expect(db.notifications).toBeDefined()
     expect(db.canvasDocuments).toBeDefined()
     expect(db.canvasVersions).toBeDefined()
     expect(db.canvasComments).toBeDefined()
@@ -1545,5 +1546,53 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(p?.isFavorite).toBe(false)
     expect(p?.usageCount).toBe(0)
     expect(p?.sortOrder).toBe(0)
+  })
+
+  it("v68 notifications table exposes the dedupeKey/groupKey + compound indexes", async () => {
+    const db = getDb()
+    await db.open()
+    const base = {
+      title: "t",
+      createdAt: 1,
+      updatedAt: 1,
+      count: 1,
+      directed: false,
+      deliveredVia: ["center"] as const,
+    }
+    await db.notifications.bulkPut([
+      {
+        id: "x",
+        source: "connector",
+        level: "info",
+        readState: "unseen",
+        dedupeKey: "k",
+        groupKey: "g",
+        ...base,
+      },
+      {
+        id: "y",
+        source: "scheduler",
+        level: "error",
+        readState: "read",
+        ...base,
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ] as never)
+    // Single-property indexes are queryable.
+    expect((await db.notifications.where("dedupeKey").equals("k").toArray())[0]?.id).toBe("x")
+    expect((await db.notifications.where("groupKey").equals("g").toArray())[0]?.id).toBe("x")
+    // Compound [readState+createdAt] index is usable (newest-unread feed).
+    const unseen = await db.notifications
+      .where("[readState+createdAt]")
+      .between(["unseen", -Infinity], ["unseen", Infinity])
+      .toArray()
+    expect(unseen.map((r) => r.id)).toEqual(["x"])
+    // Compound [source+createdAt] index is usable (per-source feed).
+    const sched = await db.notifications
+      .where("[source+createdAt]")
+      .between(["scheduler", -Infinity], ["scheduler", Infinity])
+      .toArray()
+    expect(sched.map((r) => r.id)).toEqual(["y"])
   })
 })

@@ -42,6 +42,14 @@ export interface TeamNotifier {
 }
 
 export interface TeamNotifierDeps {
+  /**
+   * Unified delivery sink (ADR-0042). When provided, the notifier emits ONE
+   * call per event and lets the Notification Center core route it to the
+   * center/toast/OS channels by level — replacing the separate `toast` /
+   * `osNotify` fan-out (which remain as a fallback for tests). The event-log,
+   * dedupe, suspend, and `openGate` semantics are unchanged.
+   */
+  deliver?: (payload: TeamNotifyPayload) => void
   toast?: (msg: string, opts?: { description?: string }) => void
   osNotify?: (opts: { title: string; body?: string }) => Promise<void>
   log?: (level: "info" | "warn" | "error", message: string, payload?: unknown) => Promise<void>
@@ -116,32 +124,38 @@ export function createTeamNotifier(
 
       if (suspended) return
 
-      if (p.level === "warn" || p.level === "critical") {
-        if (deps.toast) {
-          callSafely(
-            () => deps.toast!(p.title, p.body ? { description: p.body } : undefined),
-            "toast"
-          )
+      // Unified delivery (ADR-0042): one emit per event, the core routes by
+      // level. Falls back to the legacy per-channel deps when no `deliver` is
+      // wired (tests). `openGate` (HITL modal) fires independently of channel.
+      if (deps.deliver) {
+        callSafely(() => deps.deliver!(p), "deliver")
+      } else {
+        if (p.level === "warn" || p.level === "critical") {
+          if (deps.toast) {
+            callSafely(
+              () => deps.toast!(p.title, p.body ? { description: p.body } : undefined),
+              "toast"
+            )
+          }
         }
-      }
-      if (p.level === "critical") {
-        if (deps.osNotify) {
+        if (p.level === "critical" && deps.osNotify) {
           callSafely(() => deps.osNotify!({ title: p.title, body: p.body }), "osNotify")
         }
-        if (p.openApproval && deps.openGate) {
-          callSafely(
-            () =>
-              deps.openGate!({
-                key: p.openApproval!,
-                title: p.title,
-                body: p.body,
-                runId: p.runId,
-                teamId: p.teamId,
-                taskId: p.taskId,
-              }),
-            "openGate"
-          )
-        }
+      }
+
+      if (p.level === "critical" && p.openApproval && deps.openGate) {
+        callSafely(
+          () =>
+            deps.openGate!({
+              key: p.openApproval!,
+              title: p.title,
+              body: p.body,
+              runId: p.runId,
+              teamId: p.teamId,
+              taskId: p.taskId,
+            }),
+          "openGate"
+        )
       }
     },
     suspend: () => {

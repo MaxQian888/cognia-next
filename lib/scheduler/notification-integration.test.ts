@@ -19,6 +19,11 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Desktop + toast now funnel through the Notification Center core (ADR-0042).
+jest.mock("@/lib/notifications/runtime", () => ({
+  notify: jest.fn().mockResolvedValue("center-id"),
+}))
+
 jest.mock("@/lib/logging", () => ({
   loggers: {
     app: {
@@ -37,9 +42,11 @@ jest.mock("@/lib/logging", () => ({
 }))
 
 import { notify } from "@/lib/tauri/notification"
+import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
 
 const mockSendNotification = notify as jest.MockedFunction<typeof notify>
+const mockCenterNotify = centerNotify as jest.MockedFunction<typeof centerNotify>
 
 describe("notification-integration", () => {
   const mockTask = {
@@ -83,8 +90,7 @@ describe("notification-integration", () => {
 
       await notifyTaskEvent(taskWithNone, mockExecution, "start")
 
-      expect(mockSendNotification).not.toHaveBeenCalled()
-      expect(toast.info).not.toHaveBeenCalled()
+      expect(mockCenterNotify).not.toHaveBeenCalled()
     })
 
     it("should skip notification if channels is empty", async () => {
@@ -95,10 +101,10 @@ describe("notification-integration", () => {
 
       await notifyTaskEvent(taskWithEmptyChannels, mockExecution, "start")
 
-      expect(mockSendNotification).not.toHaveBeenCalled()
+      expect(mockCenterNotify).not.toHaveBeenCalled()
     })
 
-    it("should send desktop notification for start event", async () => {
+    it("routes a desktop start event to the center as an os channel", async () => {
       const desktopOnlyTask = {
         ...mockTask,
         notification: { ...mockTask.notification, channels: ["desktop"] as const },
@@ -106,13 +112,19 @@ describe("notification-integration", () => {
 
       await notifyTaskEvent(desktopOnlyTask, mockExecution, "start")
 
-      expect(mockSendNotification).toHaveBeenCalledWith({
-        title: "Task Started: Test Task",
-        body: expect.stringContaining("has started execution"),
-      })
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "scheduler",
+          level: "info",
+          title: "Task Started: Test Task",
+          channels: ["center", "os"],
+          dedupeKey: "task:task-1:start",
+          groupKey: "task:task-1",
+        })
+      )
     })
 
-    it("should send toast notification for complete event", async () => {
+    it("routes a toast complete event to the center with success level", async () => {
       const toastOnlyTask = {
         ...mockTask,
         notification: { ...mockTask.notification, channels: ["toast"] as const },
@@ -120,13 +132,16 @@ describe("notification-integration", () => {
 
       await notifyTaskEvent(toastOnlyTask, mockExecution, "complete")
 
-      expect(toast.success).toHaveBeenCalledWith(
-        "Task Completed: Test Task",
-        expect.objectContaining({ description: expect.stringContaining("has completed") })
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "success",
+          channels: ["center", "toast"],
+          title: "Task Completed: Test Task",
+        })
       )
     })
 
-    it("should send error toast for error event", async () => {
+    it("routes an error event with error level + message body", async () => {
       const toastOnlyTask = {
         ...mockTask,
         notification: { ...mockTask.notification, channels: ["toast"] as const },
@@ -136,17 +151,21 @@ describe("notification-integration", () => {
 
       await notifyTaskEvent(toastOnlyTask, errorExecution, "error")
 
-      expect(toast.error).toHaveBeenCalledWith(
-        "Task Failed: Test Task",
-        expect.objectContaining({ description: expect.stringContaining("Test error") })
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "error",
+          body: expect.stringContaining("Test error"),
+        })
       )
     })
 
-    it("should send to multiple channels", async () => {
+    it("routes desktop + toast as a single emit with both channels", async () => {
       await notifyTaskEvent(mockTask, mockExecution, "complete")
 
-      expect(mockSendNotification).toHaveBeenCalled()
-      expect(toast.success).toHaveBeenCalled()
+      expect(mockCenterNotify).toHaveBeenCalledTimes(1)
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ channels: ["center", "toast", "os"] })
+      )
     })
 
     it("should send webhook notification", async () => {
@@ -173,10 +192,9 @@ describe("notification-integration", () => {
     })
 
     it("should handle notification errors gracefully", async () => {
-      mockSendNotification.mockRejectedValueOnce(new Error("Notification failed"))
+      mockCenterNotify.mockRejectedValueOnce(new Error("Notification failed"))
 
-      await notifyTaskEvent(mockTask, mockExecution, "start")
-
+      await expect(notifyTaskEvent(mockTask, mockExecution, "start")).resolves.toBeUndefined()
       // Should not throw, just log error
     })
   })

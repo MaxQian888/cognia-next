@@ -4,7 +4,9 @@
  */
 
 import type { ScheduledTask, TaskExecution, NotificationChannel } from "@/types/scheduler"
+import type { NotificationChannel as CenterChannel, NotificationLevel } from "@/types/notifications"
 import { notify } from "@/lib/tauri/notification"
+import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
 import { loggers } from "@/lib/logging"
 import { SchedulerError } from "./errors"
@@ -25,8 +27,19 @@ export const WEBHOOK_DELIVERY_LIMITS = {
 
 type TaskEventType = "start" | "progress" | "complete" | "error"
 
+function centerLevelFor(eventType: TaskEventType): NotificationLevel {
+  if (eventType === "error") return "error"
+  if (eventType === "complete") return "success"
+  return "info"
+}
+
 /**
- * Notify about a task event
+ * Notify about a task event.
+ *
+ * Desktop + toast channels funnel through the Unified Notification Center
+ * (ADR-0042): one durable record + preference-governed fan-out. The webhook
+ * channel stays a scheduler-owned outbound HTTP integration (not a user-facing
+ * notification), so it is dispatched directly here.
  */
 export async function notifyTaskEvent(
   task: ScheduledTask,
@@ -39,14 +52,47 @@ export async function notifyTaskEvent(
     return
   }
 
-  const { title, body, icon } = getNotificationContent(task, execution, eventType)
+  const { title, body } = getNotificationContent(task, execution, eventType)
 
-  // Send to each configured channel
-  for (const channel of channels) {
+  // Desktop ("desktop" → os) + toast → one Notification Center emit.
+  const wantsToast = channels.includes("toast")
+  const wantsDesktop = channels.includes("desktop")
+  if (wantsToast || wantsDesktop) {
+    const coreChannels: CenterChannel[] = ["center"]
+    if (wantsToast) coreChannels.push("toast")
+    if (wantsDesktop) coreChannels.push("os")
     try {
-      await sendToChannel(channel, title, body, icon, task, execution, eventType)
+      await centerNotify({
+        source: "scheduler",
+        level: centerLevelFor(eventType),
+        title,
+        body,
+        channels: coreChannels,
+        dedupeKey: `task:${task.id}:${eventType}`,
+        groupKey: `task:${task.id}`,
+        sourceRef: { kind: "task", id: task.id },
+      })
     } catch (error) {
-      log.error(`Failed to send notification to ${channel}:`, error)
+      log.error("Failed to dispatch scheduler notification to the center:", error)
+    }
+  }
+
+  // Webhook — scheduler-owned outbound integration, retained verbatim.
+  if (channels.includes("webhook") && task.notification.webhookUrl) {
+    try {
+      await sendWebhookNotification(task.notification.webhookUrl, {
+        task: { id: task.id, name: task.name, type: task.type },
+        execution: {
+          id: execution.id,
+          status: execution.status,
+          duration: execution.duration,
+          error: execution.error,
+        },
+        eventType,
+        timestamp: new Date().toISOString(),
+      })
+    } catch (error) {
+      log.error("Failed to send webhook notification:", error)
     }
   }
 }
@@ -97,53 +143,6 @@ function getNotificationContent(
         body: `Event occurred for task "${task.name}".`,
         icon: "ℹ️",
       }
-  }
-}
-
-/**
- * Send notification to a specific channel
- */
-async function sendToChannel(
-  channel: NotificationChannel,
-  title: string,
-  body: string,
-  _icon: string,
-  task: ScheduledTask,
-  execution: TaskExecution,
-  eventType: TaskEventType
-): Promise<void> {
-  switch (channel) {
-    case "desktop":
-      await sendDesktopNotification(title, body)
-      break
-
-    case "toast":
-      sendToastNotification(title, body, eventType)
-      break
-
-    case "webhook":
-      if (task.notification.webhookUrl) {
-        await sendWebhookNotification(task.notification.webhookUrl, {
-          task: {
-            id: task.id,
-            name: task.name,
-            type: task.type,
-          },
-          execution: {
-            id: execution.id,
-            status: execution.status,
-            duration: execution.duration,
-            error: execution.error,
-          },
-          eventType,
-          timestamp: new Date().toISOString(),
-        })
-      }
-      break
-
-    case "none":
-      // Do nothing
-      break
   }
 }
 

@@ -16,8 +16,12 @@ import { createPluginSystemLogger } from "../core/logger"
 const notifications = new Map<string, Notification>()
 const actionHandlers = new Map<string, (id: string, action: string) => void>()
 
-// Toast dispatcher — injected by the host app to decouple from UI imports
+// Toast dispatcher — injected by the host app (the Notification Center bridge)
+// to decouple from UI imports. `id`/`pluginId` let the bridge attribute the
+// center record and register the action's closure as a serializable command.
 type ToastDispatcher = (options: {
+  id: string
+  pluginId: string
   title: string
   message: string
   type: "info" | "success" | "warning" | "error"
@@ -68,6 +72,8 @@ export function createNotificationCenterAPI(pluginId: string): PluginNotificatio
       // Dispatch to toast UI if available
       if (toastDispatcher) {
         toastDispatcher({
+          id,
+          pluginId,
           title: options.title,
           message: options.message,
           type: options.type || "info",

@@ -124,18 +124,27 @@ export function buildAgentTeamRuntimeDeps(
     return { planText: result.text ?? "" }
   }
 
-  // Default notifierDeps wires the UI channels: sonner toast (lazy-loaded so
-  // the dep isn't required in node test environments), Tauri OS notify, and
-  // the PendingGatesStore for HITL modals. Callers can override entirely via
-  // `opts.notifierDeps` for tests.
+  // Default notifierDeps route delivery through the Unified Notification Center
+  // (ADR-0042): one `deliver` emit per event, lazy-loaded so the core (sonner /
+  // Tauri / store) stays out of the SSR / node-test path unless used. The core
+  // routes to center/toast/OS by level + user preferences. `log` (event-log)
+  // and `openGate` (HITL modal) are unchanged. Tests override via
+  // `opts.notifierDeps`.
   const defaultNotifierDeps: TeamNotifierDeps = {
-    toast: (msg, options) => {
-      // Lazy import keeps sonner out of the SSR / test path unless used.
-      void import("sonner").then(({ toast }) => toast(msg, options))
-    },
-    osNotify: async (options) => {
-      const { notify } = await import("@/lib/tauri/notification")
-      await notify(options)
+    deliver: (p) => {
+      void import("@/lib/notifications/runtime").then(({ notify }) =>
+        notify({
+          source: "agent-team",
+          level: p.level === "warn" ? "warning" : p.level === "critical" ? "critical" : "info",
+          title: p.title,
+          body: p.body,
+          href: p.detailHref,
+          dedupeKey: p.dedupeKey,
+          groupKey: p.runId,
+          sourceRef: { kind: "team-run", id: p.runId },
+          directed: p.level === "critical",
+        })
+      )
     },
     log: async (level, message, payload) => {
       if (level === "error") console.error("team:", message, payload)
