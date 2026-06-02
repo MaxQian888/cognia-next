@@ -21,6 +21,7 @@ function makeProject(id: string, over: Partial<Project> = {}): Project {
   return {
     id,
     name: id,
+    roots: [{ id: `root-${id}`, path: `/tmp/${id}`, isPrimary: true }],
     rootDir: `/tmp/${id}`,
     knowledgeBase: [],
     sessionIds: [],

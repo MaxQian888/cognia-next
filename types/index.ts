@@ -7,6 +7,7 @@
 export * from "./agent"
 export * from "./mcp"
 export * from "./artifact"
+export * from "./workspace"
 
 // Plugin-facing chat session/message aliases. Plugin code imports these
 // from `@/types` (the upstream Cognia surface) — they delegate to cognia-

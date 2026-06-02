@@ -12,6 +12,11 @@
 // change — the plugin types stay frozen.
 
 import type { ChatSession, StoredMessage, Skill } from "@/lib/claude/types"
+import type { WorkspaceRoot } from "@/types/workspace"
+
+// Workspace roots are owned by `types/workspace`; re-export so the plugin
+// Project surface resolves `WorkspaceRoot` from this single _compat module.
+export type { WorkspaceRoot }
 
 // =============================================================================
 // Session — cognia-next ships `ChatSession`; map it for plugin consumers
@@ -162,12 +167,19 @@ export interface Project {
   id: string
   name: string
   description?: string
+  /**
+   * Mounted directories of this workspace. Single source of truth for the cwd
+   * (primary root) and additionalDirectories (the rest). `rootDir` /
+   * `additionalDirs` below are derived mirrors kept in sync on every mutation
+   * for the plugin API contract — never write them directly; read via the
+   * `lib/workspace/roots` helpers.
+   */
+  roots: WorkspaceRoot[]
+  /** @deprecated derived mirror of the primary root's path. Read via `primaryRootOf(project)`. */
   rootDir?: string
   /**
-   * Extra absolute directories mounted into this workspace alongside `rootDir`.
-   * Forwarded to the SDK as `additionalDirectories` so Read/Glob/Edit can reach
-   * them without an @-reference. Plain absolute paths — same shape the SDK's
-   * `SendOptions.additionalDirectories` expects.
+   * @deprecated derived mirror of the non-primary root paths. Read via
+   * `additionalDirsOf(project)`. Forwarded to the SDK as `additionalDirectories`.
    */
   additionalDirs?: string[]
   customInstructions?: string
