@@ -1,0 +1,15 @@
+{
+  "title": "外部 Agent",
+  "pages": [
+    "index",
+    "type-contract",
+    "manager",
+    "acp-client",
+    "opencode-adapter",
+    "canonical-readiness",
+    "ecosystem-presets",
+    "translation",
+    "observability-hooks",
+    "integration"
+  ]
+}

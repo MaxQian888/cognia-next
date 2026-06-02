@@ -1,0 +1,12 @@
+{
+  "title": "External API",
+  "pages": [
+    "index",
+    "server-and-auth",
+    "rpc-manifest",
+    "data-plane-bridges",
+    "events-ws-push",
+    "signaling-webrtc",
+    "discovery-tunnel"
+  ]
+}

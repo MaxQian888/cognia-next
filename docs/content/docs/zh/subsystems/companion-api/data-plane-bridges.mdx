@@ -1,0 +1,124 @@
+---
+title: 数据平面与 WebView Bridge
+description: axum handler 如何读写存储在 WebView Dexie 中的数据——三条 oneshot 请求/响应 bridge、sync 表 allowlist、TS bridge 源文件，以及在无 WebView 时切换为 SQLite store 的无头 DataPlane。
+---
+
+# 数据平面与 WebView Bridge
+
+<Status variant="beta" />
+
+<TLDR>
+  Companion API handler 运行在 Rust 中，但手机所需的数据——角色、消息、会话、设置——存储在
+  **WebView** 的 IndexedDB（Dexie）中，Rust 无法直接读取。三条 bridge 以相同的模式弥合这一差距：
+  Rust 发出携带 `request_id` 的 `companion://<kind>-request` Tauri 事件，以该 id 为键注册
+  `oneshot::Sender`，并等待最多 **30 秒**；TS 监听器处理请求后通过 `companion_*_response`
+  Tauri 命令将结果回传；Rust 解析 oneshot 并将结果写入 HTTP 响应。对于无头的 `cognia-server`
+  （无 WebView），`DataPlane` 抽象层会将 bridge 替换为直连的 SQLite `AppStore`。
+</TLDR>
+
+<StatGrid>
+  <Stat label="Bridge 数量" value="3" hint="sync · messages · writes" />
+  <Stat label="Bridge 超时" value="30 s" hint="足以唤醒休眠中的桌面端" />
+  <Stat label="Sync 表数量" value="10" hint="sync_registry allowlist" />
+  <Stat label="写入命令数" value="~40" hint="统一走一条 writes bridge" />
+</StatGrid>
+
+## Bridge 模式
+
+三条 bridge 共用同一套请求/响应流程。尽管数据存在于 TS 侧，Rust 仍是发起方——因为调用来自
+Rust 持有的 HTTP 请求。
+
+```mermaid
+sequenceDiagram
+  participant H as axum handler (dispatch)
+  participant B as Rust bridge
+  participant W as WebView (TS source)
+  participant DX as Dexie
+
+  H->>B: pull/dispatch(args)
+  B->>B: register(request_id → oneshot::Sender)
+  B-->>W: emit companion://<kind>-request { request_id, … }
+  W->>DX: read / write
+  DX-->>W: rows / ack
+  W->>B: companion_*_response Tauri cmd { request_id, result }
+  B->>B: resolve(request_id) → oneshot
+  Note over B: or tokio::time::timeout(30s) → error
+  B-->>H: result
+  H-->>H: write into HTTP response
+```
+
+### 三条 bridge
+
+| Bridge | 请求事件 | 响应命令 | 超时 | 使用方 |
+| --- | --- | --- | --- | --- |
+| `sync_bridge.rs` | `companion://sync-pull-request` (`:34`) | `companion_sync_pull_response` (`commands.rs:164`) | 30 s (`:35`) | `sync_pull` |
+| `desktop_messages_bridge.rs` | 5 个事件 (`:41-45`) | `companion_message_response` (`commands.rs:200`) | 30 s (`:46`) | `message_update` / `message_delete` / `session_list` / `message_get_by_session` / `message_send` |
+| `desktop_writes_bridge.rs` | 统一的 `companion://desktop-write-request` `{ request_id, command, payload }` (`:35`) | `companion_desktop_write_response` (`commands.rs:231`) | 30 s (`:36`) | 全部约 40 条 Wave-2/4 变更命令 |
+
+messages bridge 扇出五个不同的事件名，但共用同一个 `register()` (`:253`) +
+`await_response()` (`:266`) + `resolve()` (`:285`)。writes bridge 则采取相反策略：通过
+`dispatch()` (`:68`) 发送**单一**事件，并在其 payload 中携带命令名——这正是 RPC manifest
+能将 40 条写入命令折叠为一条 OR 模式匹配分支的原因（`rpc.rs:1072`）。
+
+## TS bridge 源文件
+
+WebView 侧的实现位于 `lib/companion/`。每个 `install*` 函数在启动时订阅并响应对应事件：
+
+| 文件 | 职责 | 入口 |
+| --- | --- | --- |
+| `desktop-message-source.ts` | 通过 `messageRepository` 从 Dexie 响应 5 条消息/会话事件 | `installDesktopMessageSource()` (`:91`)；`readSessionPage` (`:234`)，`readMessagesPage` (`:277`)，`persistIncomingMessage` (`:307`) |
+| `desktop-write-source.ts` | `switch (command)` 覆盖约 40 条写入命令，通过 writes 响应命令回传结果 | `installDesktopWriteSource()` (`:88`)；内部 `dispatchCommand()` (`:129`) |
+| `event-bridge.ts` | 订阅 `device-paired` / `device-seen` 并写入 `pairedDevices` Dexie 行 | `installCompanionEventBridge()` (`:59`) |
+| `remote-attach-registry.ts` | 已附加远程 watcher 的内存映射 + 每会话审批兜底 | `attachSession` (`:37`)，`armApprovalBackstop` (`:82`)；`DEFAULT_APPROVAL_BACKSTOP_MS = 120_000` (`:34`) |
+| `needs-input-notifier.ts` | 发出 `companion://needs-input`，由 Rust 扇出推送通知 | `notifyRemoteNeedsInput()` (`:28`) |
+
+## Sync 表 allowlist
+
+`sync_pull` 是批量读取路径——手机在启动时及收到失效通知时拉取表增量。允许拉取哪些表本身由
+allowlist `SyncTableRegistry`（`sync_registry.rs:34`）控制，初始值由 `with_defaults()`
+(`:45`) 填充。**10** 张允许的表（`sync_registry.rs:69-122`）：
+
+```text
+characters · skills · sessions · messages · workflows
+twinProfile · plugins · adapterInstances · settings · conversationOverrides
+```
+
+`contains()`（`sync_registry.rs:58`）在 `rpc.rs:993` 处对 `sync_pull` 进行门控；不在
+allowlist 中的表名会被拒绝，而非静默返回空结果。客户端的 sync handler（[同步与离线](../../ui/mobile-architecture/sync-offline)）
+与之镜像——每张允许的表对应一个 handler。
+
+## 无头 DataPlane
+
+Companion API 代码被无头的 `cognia-server` 二进制复用，后者**没有 WebView**——因此
+message/session bridge 没有 TS 侧来响应请求。`DataPlane`（`data_plane.rs:54`）对这一差异
+进行抽象：
+
+```rust title="src-tauri/src/companion_api/data_plane.rs"
+enum DataPlane {
+    TauriBridge { bridge, app },        // desktop: route through the WebView
+    Direct(Arc<dyn AppStore>),          // headless: a SQLite store
+}                                       // data_plane.rs:54
+```
+
+进程全局的 `HEADLESS_STORE`（`data_plane.rs:41`）通过 `install_headless_store()`
+(`:45`) 安装；`pick()`（`:64`）优先选用 headless store，其次是 Tauri bridge，否则返回
+`None`。五个 message/session 方法（`list_sessions` `:77`、`get_messages_by_session`
+`:99`、`send_message` `:121`、`update_message` `:145`、`delete_message` `:175`）各自
+根据当前变体分支执行；`rpc.rs` 通过 `pick_data_plane()`（`rpc.rs:647`）选择对应实现。
+在桌面产品中，`Direct` 从未被安装，因此始终使用 WebView bridge——`store.rs` 中的
+`AppStore` / `SqliteAppStore` 仅为无头路径而存在。
+
+## 为何是 30 秒
+
+bridge 超时（`tokio::time::timeout`，例如 `sync_bridge.rs:98`）故意设置得较为宽裕。当手机
+请求到达时，桌面 WebView 可能处于后台或机器已休眠；30 秒足以让操作系统唤醒进程并完成一次
+Dexie 扫描，同时也为卡住的请求设定了上限，使 HTTP handler 不会永久挂起。超时会以
+`service_unavailable` 类错误返回给手机端，手机随后重试。
+
+## 相关页面
+
+<Cards>
+  <Card title="RPC 命令 manifest" href="./rpc-manifest" description="驱动这些 bridge 的命令，以及将所有写入路由到同一条 bridge 的 OR 模式匹配分支。" />
+  <Card title="移动端：同步与离线" href="../../ui/mobile-architecture/sync-offline" description="消费 sync_pull 的客户端每表 sync handler 与 cursor store。" />
+  <Card title="事件、WebSocket 与推送" href="./events-ws-push" description="needs-input-notifier 触发的推送路径。" />
+</Cards>

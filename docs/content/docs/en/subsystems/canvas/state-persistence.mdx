@@ -1,0 +1,183 @@
+---
+title: State & Persistence
+description: The single source of truth (useArtifactStore.canvasDocuments), the five canvas-specific Zustand stores, the localStorage persist keys, and the Dexie write-through bridge that mirrors documents/versions/comments into four tables — hydrate-first, memory-wins, graceful-degradation.
+---
+
+# State & Persistence
+
+<Status variant="stable" />
+
+<TLDR>
+  Canvas documents and their nested versions live in **`useArtifactStore`**
+  (`stores/artifact/artifact-store.ts:501`), persisted to `localStorage["cognia-artifacts"]` (v3).
+  There is **no** `useCanvasStore`. Five smaller stores own layout, settings, runtime chunks,
+  comments, and keybindings. `startCanvasDexieBridge` (`lib/canvas/dexie-bridge.ts:267`) mirrors
+  documents + flattened versions + comments into four Dexie tables (introduced at v11; schema now
+  v65) — **hydrate first, then subscribe**, memory always wins on conflict, and any Dexie write
+  failure only warns.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Source of truth" value="useArtifactStore" hint="canvasDocuments (artifact-store.ts:361)" />
+  <Stat label="Persist keys" value="4" hint="cognia-artifacts · -canvas-layout · -canvas-settings · -canvas-keybindings" />
+  <Stat label="Dexie tables" value="4" hint="documents · versions · comments · sessions" />
+  <Stat label="Runtime-only stores" value="2" hint="chunked-document-store · comment-store (mirror)" />
+</StatGrid>
+
+## The Single Source of Truth
+
+`useArtifactStore` holds the canvas document map; versions are nested inside each document (there is
+no separate version map for canvas docs):
+
+| Field / action | Line | Notes |
+| --- | --- | --- |
+| `canvasDocuments: Record<string, CanvasDocument>` | `artifact-store.ts:361` | the document map |
+| `activeCanvasId` / `canvasOpen` | `:362` / `:363` | active selection + panel open |
+| `createCanvasDocument` | `:879` | returns new id, opens panel, fires plugin create/switch |
+| `updateCanvasDocument` | `:922` | merges content/editor context, marks `saveState:"dirty"` |
+| `deleteCanvasDocument` | `:1002` | — |
+| `saveCanvasVersion` | `:1125` | snapshots a version; applies auto-save retention |
+| `restoreCanvasVersion` | `:1159` | auto-saves current first, then restores |
+| `addSuggestion` / `applySuggestion` / `updateSuggestionStatus` | `:1038` / `:1079` / `:1060` | AI suggestion lifecycle |
+
+Persistence: name `"cognia-artifacts"`, version 3 (`:1455-1456`); `partialize` persists
+`canvasDocuments` **whole** with no LRU/truncation (`:1511`) — the content-truncation + LRU eviction
+applies only to one-shot artifacts, not canvas docs. Auto-save version retention keeps at most
+`MAX_CANVAS_AUTOSAVE_VERSIONS = 30` (`:51`), pruning oldest auto-saves while keeping manual ones
+(`applyCanvasVersionRetention`, `:254`).
+
+The read hook `useCanvasDocuments` (`hooks/canvas/use-canvas-documents.ts:34`) is a thin facade over
+this store (sorted list, create/open/rename/duplicate/search) — confirming documents come exclusively
+from the artifact store.
+
+## The Five Canvas Stores
+
+```mermaid
+flowchart LR
+  subgraph SOT["Source of truth"]
+    ART["useArtifactStore<br/>artifact-store.ts:501<br/>persist: cognia-artifacts v3"]
+  end
+  subgraph CANVAS["stores/canvas (5)"]
+    L["useCanvasLayoutStore<br/>canvas-layout-store.ts:81<br/>persist: cognia-canvas-layout v5"]
+    S["useCanvasSettingsStore<br/>canvas-settings-store.ts:30<br/>persist: cognia-canvas-settings"]
+    K["useKeybindingStore<br/>keybinding-store.ts:73<br/>persist: cognia-canvas-keybindings"]
+    C["useCommentStore<br/>comment-store.ts:59<br/>runtime mirror of Dexie"]
+    CH["useChunkedDocumentStore<br/>chunked-document-store.ts:46<br/>runtime-only (no persist)"]
+  end
+  ART -.-> CH
+  classDef sot fill:#0f172a,stroke:#34d399,color:#d1fae5
+  classDef st fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  class ART sot
+  class L,S,K,C,CH st
+```
+
+- **`useCanvasLayoutStore`** (`canvas-layout-store.ts:81`) — pane sizes, collapse flags, active right
+  tab, `pinnedDocIds: Set` (serialized to an array via `partialize`/`merge`, `:150-167`). `setSizes`
+  (`:88`) clamps and debounces (`CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS = 150`, `:65`).
+- **`useCanvasSettingsStore`** (`canvas-settings-store.ts:30`) — the editor/AI/version/collaboration/
+  execution/accessibility settings tree. `updateSettings` (`:62`) validates via `validateSettings`
+  before applying; `getEditorOptions` (`:84`) maps settings → Monaco options.
+- **`useKeybindingStore`** (`keybinding-store.ts:73`) — `DEFAULT_KEYBINDINGS` is a 40-action map
+  (`:15`); conflict detection via `checkConflicts` (`:151`).
+- **`useCommentStore`** (`comment-store.ts:59`) — in-memory mirror of the `canvasComments` table; every
+  mutation writes memory synchronously then fire-and-forgets a Dexie write through `safeDexieCall`
+  (`:53`). Covered in [Execution & comments](./execution-comments#comments).
+- **`useChunkedDocumentStore`** (`chunked-document-store.ts:46`) — runtime-only; chunks are re-derived
+  from `CanvasDocument.content` on session start, so adding persistence here would fight the
+  artifact-store contract (`:1-11`).
+
+## The Dexie Write-Through Bridge
+
+`startCanvasDexieBridge` runs once at app startup and returns a disposer. The ordering is the whole
+point: **hydrate before subscribing**, so a backup-restore's Dexie rows are not clobbered by an empty
+in-memory store.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Boot as startCanvasDexieBridge<br/>dexie-bridge.ts:267
+  participant Hyd as hydrateFromDexie<br/>:187
+  participant Art as useArtifactStore
+  participant Cmt as useCommentStore
+  participant Dex as Dexie (4 tables)
+
+  Boot->>Boot: guard idempotency + SSR (:268)
+  Boot->>Hyd: void hydrateFromDexie() FIRST (:274)
+  Hyd->>Dex: toArray() documents/versions/comments (:189-193)
+  Hyd->>Art: setState — Dexie rows absent from memory (memory wins) (:232-234)
+  Hyd->>Cmt: setState comments (memory wins) (:251-253)
+  Boot->>Boot: snapshot mirroredDocs (:277-278)
+  Boot->>Art: subscribe → syncDocumentsAndVersions (:290)
+  Boot->>Cmt: subscribe → syncComments (:301)
+  Note over Art,Dex: on every memory change
+  Art->>Dex: rw txn: bulkPut docs + flattened versions, cascade-delete removed (:125-142)
+  Cmt->>Dex: rw txn: bulkDelete + bulkPut comments (:168-171)
+```
+
+The write-through path in detail:
+
+1. A UI edit calls `useArtifactStore.updateCanvasDocument` (`artifact-store.ts:922`) — the in-memory
+   map mutates and Zustand persists it to `localStorage["cognia-artifacts"]` (the authoritative copy).
+2. The bridge's `subscribe` callback fires (`dexie-bridge.ts:290`) → `syncDocumentsAndVersions(docs)`
+   (`:87`).
+3. That diffs against the `mirroredDocs` snapshot, flattens each document's `versions[]`, and runs a
+   single `rw` transaction over all four tables: cascade-delete removed docs' versions/comments/
+   sessions, then `bulkPut` document + version upserts and `bulkDelete` removed versions (`:125-142`).
+4. The mirror sets (`mirroredDocs`, `mirroredVersionIds`) are updated so the next diff is minimal
+   (`:294`, `:144`).
+
+Comments take two write paths into the same `canvasComments` table — the store's own `safeDexieCall`
+and the bridge's `syncComments` — both keyed by comment `id`, so the `bulkPut`s are idempotent.
+Graceful degradation: every Dexie write is wrapped so a failure only logs; local editing continues
+through Zustand.
+
+## The Four Dexie Tables
+
+Introduced at `this.version(11)` (`schema.ts:487`) and re-declared verbatim through v18; the schema
+is now at `this.version(65)` (`schema.ts:1692`) with the canvas indexes unchanged:
+
+```ts title="lib/db/schema.ts:501-504 (v11, unchanged through v65)"
+canvasDocuments: "id, title, language, type, updatedAt, createdAt"
+canvasVersions:  "id, documentId, [documentId+createdAt], isAutoSave"
+canvasComments:  "id, documentId, [documentId+createdAt], parentId, resolvedAt"
+canvasSessions:  "id, documentId, ownerId, createdAt"
+```
+
+CRUD ownership:
+
+- **`canvasDocuments` / `canvasVersions`** — no dedicated CRUD module; the bridge owns these writes
+  directly. Row types are in `lib/db/canvas-types.ts` (`CanvasDocumentRow:16`, `CanvasVersionRow:30`).
+- **`canvasComments`** — `lib/db/canvas-comments.ts` exposes the full CRUD (`listForDocument:44`,
+  `addComment:64`, `replyToComment:133`, `resolveComment:93`, `addReaction:109`, `bulkImport:162`, …).
+- **`canvasSessions`** — `lib/db/canvas-sessions.ts` persists collaboration session **metadata only**
+  (`upsertSession:74`, `getActiveSessionForDocument:90`, `closeSession:102`, `listRecent:111`); per-op
+  CRDT streams are deliberately not persisted.
+
+## Feature Flags
+
+`lib/canvas/feature-flags.ts` resolves two flags, **last source wins**: defaults → env → localStorage
+(`getCanvasFeatureFlags`, `:55-60`).
+
+| Flag | Default | Env var | Controls |
+| --- | --- | --- | --- |
+| `canvas.aiWorkbench.v1` | `true` (`:6`) | `NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1` (`:37`) | AI toolbar + suggestions |
+| `canvas.collaboration.v1` | `true` (`:7`) | `NEXT_PUBLIC_CANVAS_COLLABORATION_V1` (`:38`) | collaboration panel + WS client |
+
+localStorage key `"cognia-canvas-feature-flags-v1"` (`:3`); env strings `"0"`/`"false"` → off,
+`"1"`/`"true"` → on (`:40-50`). Because localStorage is last, a Settings-UI override beats both the env
+and the default.
+
+## Auto-Save
+
+`useCanvasAutoSave` (`use-canvas-auto-save.ts:28`) tracks local content vs last-saved content and
+schedules a save after `autoSaveDelay` (default `30000` ms, `:34`) of inactivity, calling the injected
+`onSave(documentId, undefined, true)` (the `true` flags an auto-save). The consuming `CanvasPanel`
+wires `onSave` to `saveCanvasVersion` and `onContentUpdate` to `updateCanvasDocument`. The panel also
+runs a coarser interval auto-save floored at 10 s (`canvas-panel.tsx:156-168`).
+
+## Next
+
+<Cards>
+  <Card title="Editor core" href="./editor-core" description="What writes into this state" />
+  <Card title="Execution & comments" href="./execution-comments" description="The comment store + version timeline in depth" />
+</Cards>

@@ -1,0 +1,160 @@
+---
+title: Capacitor Shell & Native Bridges
+description: The withPlugin degradation template, the 20 native plugin wrappers, runtime plugin registration, the six-route deep-link parser and router, capacitor.config.ts, and the AppShellMobile drawer/tab/sheet structure.
+---
+
+# Capacitor Shell & Native Bridges
+
+<Status variant="beta" />
+
+<TLDR>
+  Native capabilities reach the shared bundle through `lib/capacitor/*.ts` wrappers, each built on one
+  `withPlugin` template (`_shared.ts:56`) that returns a **discriminated union** —
+  `ok` / `unsupported` / `error` — so callers never see a thrown exception and the UI hides features
+  the platform lacks. Because the shared `out/` build doesn't import any `@capacitor/*` package,
+  `registerNativePlugins` (`register-plugins.ts:86`) registers proxies at boot from whatever the native
+  runtime advertises in `PluginHeaders`. Deep links (`cognia://…`) parse into a 6-variant
+  `DeeplinkRoute` (`deeplink.ts:16`) and route through `dispatchRoute` (`deeplink-router.ts:33`). The
+  mobile UI itself is `AppShellMobile` (`app-shell-mobile.tsx:81`) — a top bar with left/right sheets,
+  a single-column chat pane, and a tab bar — mounted only when `usePlatform() === "mobile"`.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Native wrappers" value="20" hint="lib/capacitor/*.ts" />
+  <Stat label="Outcome union" value="ok / unsupported / error" hint="_shared.ts:40" />
+  <Stat label="Deep-link routes" value="6" hint="deeplink.ts:16" />
+  <Stat label="App ID" value="com.cognia.mobile" hint="capacitor.config.ts:15" />
+</StatGrid>
+
+## The withPlugin template
+
+Every native call funnels through `withPlugin` (`_shared.ts:56`):
+
+```ts title="lib/capacitor/_shared.ts:56"
+withPlugin<P, R>(
+  loader: () => Promise<P>,
+  action: (plugin: P) => Promise<R>,
+): Promise<R | { kind: "unsupported" } | { kind: "error"; message: string }>
+```
+
+The contract: a `loader()` rejection → `{ kind: "unsupported" }` (`:64`) — no native module, or we're
+on web/Tauri; an `action()` throw → `{ kind: "error", message }` (`:69`); otherwise the action's own
+value (`:67`). The shared outcome types are `SimpleOutcome` (`_shared.ts:40`) and `ValueOutcome<T>`
+(`:45`).
+
+The loader factory `makeDefaultLoader` (`_shared.ts:89`) is the subtle part. It first checks
+`window.Capacitor.Plugins[exportName]` (`:98-103`) so test-injected globals resolve regardless of
+platform, then **throws unless** `detectNativePlatform() === "mobile"` (`:110-112`) — deliberately
+collapsing web/Tauri to `unsupported` rather than awaiting Capacitor's web-shim Proxy (whose `.then`
+getter throws). On mobile it does a `webpackIgnore` dynamic `import(moduleId)` (`:113`) and validates
+the named export (`:115-117`). A few wrappers that need richer unions bypass `withPlugin` and call the
+loader directly in try/catch: `camera.pickPhoto` (`:85`), `geolocation.getCurrentPosition` (`:70`),
+`barcode.scan` (`:53`), `biometric.verify` (`:88`), `share.share` (`:45`).
+
+## The wrapper matrix
+
+| File | Export(s) | Package | Purpose |
+| --- | --- | --- | --- |
+| `haptics.ts` | `impact` / `notify` / `vibrate` / `selection` (`:45-89`) | `@capacitor/haptics` | tactile feedback |
+| `toast.ts` | `showToast` (`:29`) | `@capacitor/toast` | system toast (web → sonner) |
+| `dialog.ts` | `alert` / `confirm` / `prompt` (`:75-98`) | `@capacitor/dialog` | native dialogs |
+| `status-bar.ts` | `syncWithTheme` (`:90`) … | `@capacitor/status-bar` | iOS/Android status bar |
+| `navigation-bar.ts` | `syncWithTheme` (`:78`) … | `@capgo/capacitor-navigation-bar` | Android nav bar |
+| `splash-screen.ts` | `show` / `hide` (`:30/:38`) | `@capacitor/splash-screen` | splash control |
+| `network.ts` | `getStatus` / `subscribe` (`:40/:64`) | `@capacitor/network` | connectivity status |
+| `screen-orientation.ts` | `lock` / `unlock` (`:49/:59`) | `@capacitor/screen-orientation` | orientation lock |
+| `filesystem.ts` | `writeFile` / `readFile` … (`:113`) | `@capacitor/filesystem` | backup file IO |
+| `camera.ts` | `pickPhoto` / `pickMultiplePhotos` (`:72/:147`) | `@capacitor/camera` | photo capture/pick |
+| `share.ts` | `share` (`:41`) | `@capacitor/share` | system share sheet |
+| `browser.ts` | `open` / `close` / `onClose` (`:39-57`) | `@capacitor/browser` | in-app OAuth browser |
+| `local-notifications.ts` | `schedule` / `ensureChannel` … (`:100/:132`) | `@capacitor/local-notifications` | offline reminders + perms |
+| `geolocation.ts` | `getCurrentPosition` (`:54`) | `@capacitor/geolocation` | one-shot position |
+| `biometric.ts` | `isAvailable` / `verify` (`:50/:85`) | `@capgo/capacitor-native-biometric` | Face/Touch ID gate |
+| `barcode.ts` | `scan` (`:49`) | `@capacitor-mlkit/barcode-scanning` | pairing QR scan |
+| `app.ts` | `subscribeResume` (`:37`) | `@capacitor/app` | foreground-resume signal |
+| `app-settings.ts` | `openAppSettings` (`:47`) | `capacitor-native-settings` | deep-link to OS settings |
+
+Every wrapper returns the same union, so a caller writes one `switch (outcome.kind)` and the web/Tauri
+build silently degrades.
+
+## Runtime plugin registration
+
+Capacitor injects `native-bridge.js` and `window.Capacitor.PluginHeaders`, but it does **not** build
+`window.Capacitor.Plugins.*` proxies — because the app never statically imports `@capacitor/*` (those
+are mobile-workspace deps, absent from the shared root build). `registerNativePlugins`
+(`register-plugins.ts:86`) closes that gap at boot:
+
+- off mobile → `{ kind: "skipped" }` (`:93`);
+- reads `cap.PluginHeaders` (`:99`); empty → `{ kind: "unavailable" }` (`:102`);
+- loads `@capacitor/core` `registerPlugin` via an injectable loader (`:71`);
+- loops the headers calling `registerFn(header.name)` (`:123-133`), logs a startup self-check, and
+  returns `{ kind: "registered", registered, available }` (`:143`).
+
+It registers **whatever the native runtime advertises** — not a hard-coded list.
+
+## Deep links
+
+`parseDeeplink(rawUrl)` (`deeplink.ts:49`) maps a `cognia://` URL (`SCHEME`, `:47`) to a 6-variant
+`DeeplinkRoute` (`deeplink.ts:16`):
+
+| Variant | Host | Routes to |
+| --- | --- | --- |
+| `oauth_callback` (`:66`) | `oauth` | resolved by `lib/oauth/mobile-flow.ts` (router no-op) |
+| `pair_qr` (`:76`) | `pair` | `/pair?payload=` |
+| `open_session` (`:80`) | `session` | `/inbox/c/<id>` |
+| `share_target` (`:84`) | `share` | `/share-target?text&url` |
+| `open_workflow_run` (`:97`) | `workflow-run` | `/workflows/<wfId>/runs/<runId>` |
+| `unknown` (`:103`) | — | warn |
+
+`subscribe(handler)` (`:109`) listens for `appUrlOpen`; `getLaunchRoute()` (`:126`) parses the
+cold-start launch URL. `deeplink-router.ts` then maps a parsed route to navigation:
+`DeeplinkNavigators` (`:22`) is the contract, `dispatchRoute` (`:33`) the switch, and
+`makeRouterNavigators(router)` (`:70`) the Next `useRouter` adapter.
+
+## Capacitor config
+
+`mobile/capacitor.config.ts` — `appId: "com.cognia.mobile"` (`:15`), `webDir: "../out"` (`:17`),
+`androidScheme: "https"` with a dev-only `localhost:3000` server gated on `COGNIA_MOBILE_DEV`
+(`:30-35`). Plugin blocks (`:37`): SplashScreen (`backgroundColor: "#01061e"`, `:38`), StatusBar,
+Keyboard (`resize: "body"`), LocalNotifications (`smallIcon: "ic_stat_icon"`), PushNotifications, and
+crucially **CapacitorHttp `enabled: true`** (`:94`) — the native HTTP path that performs the
+self-signed-trust + pinning the WebView's `fetch` cannot.
+
+## The mobile shell
+
+`AppShellMobile` (`app-shell-mobile.tsx:81`) replaces the desktop shell when `usePlatform() === "mobile"`:
+
+```text
+┌──────────── Top bar (header :261) ─────────────┐
+│ ☰   CharacterHeader            🔍  👥  ⋯       │   left Sheet :265 → GuildRail + MobileChannelList
+├─────────────────────────────────────────────────┤   right Sheet :425 → MemberList (team only)
+│                                                 │
+│         ChatPane (single column) :396           │   welcomeExtras: ActiveRuns + QuickActions
+│                                                 │
+└─────────────────────────────────────────────────┘   + MobileTabBar, CommandPalette :486
+```
+
+Key state: `navOpen` / `memberSheetOpen` / `searchOpen` / `characterPickerOpen` (`:100-106`);
+`send`/`stop` switch on team vs direct chat (`:205`). Cross-cutting dialogs mount at `:448`:
+`CharacterPicker`, `OnboardingDialog`, `ToolApprovalDialog`, `MobileCommandPalette`.
+
+`components/mobile/**` holds 100+ components grouped by area — `pair/` (the wizard), `shell/` (header,
+channel list, tab bar, customizer), `home/` (active-runs, quick-actions, command palette), `me/`
+(account, device-info, sync-status, biometric row, transport-tier indicator), `remote-sessions/`,
+`workflow/` (incl. an `editor/` subtree with touch canvas + node palette), `connection-state-sheets/`,
+`notifications/`, `discover/`, and more.
+
+## Biometric guard
+
+Sensitive actions (unpair, export backup, decrypt) pass through `useBiometricGuard()`
+(`use-biometric-guard.ts:51`). It reads `lib/capacitor/biometric.isAvailable()` (`:55`); with no
+enrollment it **falls through by default** (`fallthroughWhenUnavailable ?? true`, `:53`) so devices
+without biometrics aren't locked out; otherwise it runs `verify(...)` (`:66`) and returns a
+`GuardOutcome` of `ok` or `{ blocked, reason }` (`:42`).
+
+## Related pages
+
+<Cards>
+  <Card title="Transport layer" href="./transport-layer" description="How the shared bundle's transport.call resolves on mobile — and the SecureStorage that holds the device JWT." />
+  <Card title="Discovery & pairing" href="./discovery-pairing" description="The pair/ wizard components and the barcode scan that feed the shell." />
+</Cards>

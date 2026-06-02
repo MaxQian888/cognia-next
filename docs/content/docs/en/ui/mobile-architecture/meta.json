@@ -1,0 +1,11 @@
+{
+  "title": "Mobile Architecture",
+  "pages": [
+    "index",
+    "capacitor-shell",
+    "transport-layer",
+    "discovery-pairing",
+    "sync-offline",
+    "webrtc-transport"
+  ]
+}

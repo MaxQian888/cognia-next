@@ -5,6 +5,7 @@
     "built-in-agent",
     "skills-system",
     "agent-teams",
+    "external-agents",
     "slash-commands",
     "goal-command",
     "provider-system",

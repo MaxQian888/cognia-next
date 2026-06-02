@@ -1,0 +1,11 @@
+{
+  "title": "Canvas",
+  "pages": [
+    "index",
+    "editor-core",
+    "state-persistence",
+    "ai-actions",
+    "collaboration",
+    "execution-comments"
+  ]
+}
