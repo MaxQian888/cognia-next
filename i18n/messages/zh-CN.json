@@ -2458,7 +2458,8 @@
       "goals": "目标",
       "conversation": "会话",
       "memory": "记忆",
-      "discover": "发现"
+      "discover": "发现",
+      "pet": "宠物"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -2507,7 +2508,8 @@
       "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
       "conversation": "自动标题与对话时间线缩略图",
       "memory": "自治长期记忆——助手跨会话记住关于你的事，含抽取、召回与隐私控制。",
-      "discover": "置顶、排序或隐藏发现页的分类。"
+      "discover": "置顶、排序或隐藏发现页的分类。",
+      "pet": "你的桌面动画伙伴。"
     },
     "externalBridge": {
       "wikiIndex": {
@@ -6349,8 +6351,12 @@
         "description": "允许记忆文本由云端服务做向量化。关闭则仅在本机（关键词检索）。",
         "label": "允许云端向量化"
       },
-      "topK": { "label": "每轮注入的记忆数" },
-      "cap": { "label": "每个作用域的最大活跃记忆数" },
+      "topK": {
+        "label": "每轮注入的记忆数"
+      },
+      "cap": {
+        "label": "每个作用域的最大活跃记忆数"
+      },
       "manage": "管理记忆",
       "clearAll": {
         "button": "全部清除",
@@ -6389,6 +6395,43 @@
       "provider": "服务商",
       "model": "模型",
       "useDefault": "使用对话默认"
+    },
+    "pet": {
+      "title": "宠物",
+      "description": "你的桌面动画伙伴。",
+      "enabled": {
+        "label": "启用宠物",
+        "description": "显示浮动宠物挂件。"
+      },
+      "anchor": {
+        "label": "位置",
+        "options": {
+          "bottom-right": "右下",
+          "bottom-left": "左下",
+          "top-right": "右上",
+          "top-left": "左上"
+        }
+      },
+      "motion": {
+        "label": "动效",
+        "options": {
+          "auto": "跟随系统",
+          "full": "完整",
+          "reduced": "减弱"
+        }
+      },
+      "mutedBubbles": {
+        "label": "静音气泡",
+        "description": "让宠物保持安静（仍会动画）。"
+      },
+      "size": {
+        "label": "大小（{size}px）"
+      },
+      "reset": {
+        "label": "重置宠物",
+        "description": "删除所有宠物数据并重新开始。",
+        "action": "重置"
+      }
     }
   },
   "presets": {
@@ -9471,7 +9514,9 @@
     "panel": {
       "title": "记忆",
       "subtitle": "助手记住的关于你的内容。",
-      "stats": { "active": "活跃" },
+      "stats": {
+        "active": "活跃"
+      },
       "searchLabel": "搜索记忆",
       "searchPlaceholder": "搜索记忆…",
       "sortLabel": "排序",
@@ -11175,7 +11220,8 @@
         "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
         "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
         "hiddenEmpty": "暂无隐藏项。"
-      }
+      },
+      "pet": "宠物"
     },
     "memberList": {
       "show": "显示成员列表",
@@ -17984,6 +18030,153 @@
       "delete": "删除",
       "confirmDelete": "确认删除",
       "deleted": "工作区已删除"
+    }
+  },
+  "pet": {
+    "statCard": {
+      "unhatched": "未孵化",
+      "shiny": "闪光"
+    },
+    "rarity": {
+      "common": "普通",
+      "uncommon": "罕见",
+      "rare": "稀有",
+      "epic": "史诗",
+      "legendary": "传说"
+    },
+    "stat": {
+      "debugging": "调试",
+      "patience": "耐心",
+      "chaos": "混乱",
+      "wisdom": "智慧",
+      "snark": "毒舌"
+    },
+    "species": {
+      "duck": "鸭子",
+      "cat": "猫",
+      "rabbit": "兔子",
+      "owl": "猫头鹰",
+      "penguin": "企鹅",
+      "turtle": "乌龟",
+      "fox": "狐狸",
+      "dragon": "龙",
+      "axolotl": "六角恐龙",
+      "blob": "史莱姆",
+      "cactus": "仙人掌",
+      "mushroom": "蘑菇",
+      "capybara": "水豚",
+      "robot": "机器人",
+      "ghost": "幽灵",
+      "octopus": "章鱼",
+      "snail": "蜗牛",
+      "chonk": "胖墩"
+    },
+    "needs": {
+      "energy": "精力",
+      "mood": "心情",
+      "bond": "亲密"
+    },
+    "actions": {
+      "feed": "喂食",
+      "play": "玩耍",
+      "pet": "抚摸",
+      "talk": "聊天"
+    },
+    "panel": {
+      "level": "等级 {level}"
+    },
+    "widget": {
+      "toggle": "打开宠物",
+      "minimize": "最小化宠物",
+      "restore": "显示宠物"
+    },
+    "console": {
+      "loading": "正在唤醒你的宠物…",
+      "title": "你的宠物",
+      "subtitle": "养育它、装扮它，一起成长。",
+      "hatchPrompt": "你的蛋可以孵化了。",
+      "hatch": "孵化",
+      "tabs": {
+        "nurture": "养育",
+        "dex": "图鉴",
+        "achievements": "成就",
+        "binding": "角色"
+      }
+    },
+    "achievements": {
+      "hatched": {
+        "title": "破壳而出",
+        "description": "你的宠物诞生了。"
+      },
+      "firstXp": {
+        "title": "初次成长",
+        "description": "获得了第一点经验。"
+      },
+      "juvenile": {
+        "title": "幼年期",
+        "description": "达到 5 级。"
+      },
+      "adult": {
+        "title": "成年",
+        "description": "达到 10 级。"
+      },
+      "elder": {
+        "title": "长老",
+        "description": "达到 20 级。"
+      },
+      "wellFed": {
+        "title": "吃得好",
+        "description": "喂食 50 次。"
+      },
+      "playful": {
+        "title": "爱玩耍",
+        "description": "玩耍 50 次。"
+      },
+      "bestFriends": {
+        "title": "挚友",
+        "description": "亲密度拉满。"
+      },
+      "goalGetter": {
+        "title": "目标达人",
+        "description": "完成 10 个目标。"
+      },
+      "shinyOwner": {
+        "title": "闪光！",
+        "description": "你拥有一只闪光宠物。"
+      },
+      "legendary": {
+        "title": "传说",
+        "description": "你拥有一只传说宠物。"
+      }
+    },
+    "binding": {
+      "empty": "还没有角色。",
+      "useGlobal": "使用全局宠物",
+      "clear": "清除",
+      "speciesFor": "{name} 的物种"
+    },
+    "bubbles": {
+      "thinking": ["唔，处理中…", "让我想想…", "计算中…"],
+      "waiting": ["看你的了！", "等你一下…"],
+      "review": ["来看看？", "可以检查啦。"],
+      "success": ["搞定！", "完成啦。", "耶！"],
+      "error": ["糟糕…", "好痛。", "再试一次吧。"],
+      "goalComplete": ["目标达成！", "我们做到了！", "胜利！"],
+      "levelUp": ["升级啦！", "变强了！"],
+      "evolved": ["我进化了！", "全新的我！"],
+      "fed": ["好吃！", "美味！", "吧唧吧唧。"],
+      "played": ["真好玩！", "再来！", "哇哦！"],
+      "petted": ["呼噜…", "真舒服。", "♥"],
+      "hatched": ["你好，世界！", "我来啦！"],
+      "greeting": ["嗨！", "欢迎回来！", "嘿！"],
+      "inboundMessage": ["来消息了！", "叮！"],
+      "idle": {
+        "content": ["…", "随便晃晃。", "一切都好。"],
+        "happy": ["今天真棒！", "好开心！", "☀"],
+        "tired": ["好困…", "哈欠…"],
+        "lonely": ["想你了…", "有人吗？"],
+        "grumpy": ["哼。", "现在不行。"]
+      }
     }
   }
 }

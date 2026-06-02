@@ -41,6 +41,7 @@ import {
   SmartphoneIcon,
   MousePointerClickIcon,
   TargetIcon,
+  PawPrintIcon,
   MessagesSquareIcon,
   PanelLeftIcon,
   CompassIcon,
@@ -88,6 +89,7 @@ export type SettingsSectionId =
   | "workflows"
   | "scheduled-tasks"
   | "goals"
+  | "pet"
   | "remote-control"
   | "external-bridge"
   | "companion"
@@ -392,6 +394,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "goals",
     group: "data",
     icon: TargetIcon,
+  },
+  {
+    id: "pet",
+    labelKey: "pet",
+    descriptionKey: "pet",
+    group: "data",
+    icon: PawPrintIcon,
   },
 
   // === Observability ===
@@ -887,6 +896,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "持续",
     "判官",
   ],
+  pet: ["pet", "mascot", "companion", "buddy", "宠物", "桌宠", "伙伴"],
   logs: [
     "log",
     "logs",

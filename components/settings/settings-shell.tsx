@@ -204,6 +204,10 @@ const GoalsSection = dynamic(() => import("./goals/goals-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const PetSection = dynamic(() => import("./pet/pet-section").then((m) => m.PetSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 const ConversationSection = dynamic(
   () => import("./conversation/conversation-section").then((m) => m.ConversationSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -396,6 +400,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ScheduledTasksSection />
     case "goals":
       return <GoalsSection />
+    case "pet":
+      return <PetSection />
     case "remote-control":
       return <RemoteControlSection />
     case "external-bridge":

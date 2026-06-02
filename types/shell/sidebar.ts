@@ -41,6 +41,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "agent-teams", route: "/agent-teams", i18nKey: "agentTeams", group: "feature" },
   { id: "scheduler", route: "/scheduler", i18nKey: "scheduler", group: "feature" },
   { id: "goals", route: "/goals", i18nKey: "goals", group: "feature" },
+  { id: "pet", route: "/pet", i18nKey: "pet", group: "feature" },
   // === Auxiliary (overflow → "More" by default) ===
   {
     id: "source-control",

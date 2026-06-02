@@ -1,0 +1,52 @@
+import { applyDecay, applyInteraction, INTERACTION_EFFECTS } from "./decay"
+import type { PetNeeds } from "@/types/pet"
+
+const HOUR = 3_600_000
+
+function needs(partial: Partial<PetNeeds> = {}): PetNeeds {
+  return { energy: 100, mood: 100, bond: 100, lastTickAt: new Date(0).toISOString(), ...partial }
+}
+
+describe("applyDecay", () => {
+  it("decays each need by its hourly rate and advances the tick", () => {
+    const out = applyDecay(needs(), HOUR)
+    expect(out.energy).toBeCloseTo(96) // 4/hr
+    expect(out.mood).toBeCloseTo(97.5) // 2.5/hr
+    expect(out.bond).toBeCloseTo(99.5) // 0.5/hr
+    expect(out.lastTickAt).toBe(new Date(HOUR).toISOString())
+  })
+
+  it("never falls below the floor and never goes negative", () => {
+    const out = applyDecay(needs({ energy: 10 }), HOUR * 1000)
+    expect(out.energy).toBe(0)
+    expect(out.mood).toBe(0)
+  })
+
+  it("does not change values when no time has passed", () => {
+    const out = applyDecay(needs(), 0)
+    expect(out.energy).toBe(100)
+  })
+})
+
+describe("applyInteraction", () => {
+  it("settles decay then restores energy on feed", () => {
+    const out = applyInteraction(needs({ energy: 50 }), "fed", HOUR)
+    // 50 - 4 (decay) + 25 (feed) = 71
+    expect(out.energy).toBeCloseTo(71)
+  })
+
+  it("clamps restored values at 100", () => {
+    const out = applyInteraction(needs({ energy: 99 }), "fed", 0)
+    expect(out.energy).toBe(100)
+  })
+
+  it("play costs a little energy but lifts mood", () => {
+    const out = applyInteraction(needs({ mood: 40, energy: 80 }), "played", 0)
+    expect(out.mood).toBe(65)
+    expect(out.energy).toBe(74)
+  })
+
+  it("exposes the effect table", () => {
+    expect(INTERACTION_EFFECTS.petted.bond).toBeGreaterThan(0)
+  })
+})

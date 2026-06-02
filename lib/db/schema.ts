@@ -94,6 +94,12 @@ import type { EvalCase, EvalDataset } from "@/types/eval/eval"
 import type { EvalRunRow } from "./eval-runs"
 import type { TraceAnnotationRow } from "./trace-annotations"
 import type { Memory } from "@/types/memory/memory"
+import type {
+  PetProfile,
+  PetActivityRow,
+  PetCharacterBinding,
+  PetAchievementRecord,
+} from "@/types/pet"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 
 /**
@@ -1719,6 +1725,20 @@ export class CogniaDB extends Dexie {
             backfillRootsForRow(p as Project)
           })
       })
+
+    // v67 — Pet subsystem (virtual companion). Additive only; no upgrade hook.
+    //   • petProfile           — singleton (id="global"); identity Soul + nurture state.
+    //   • petCharacterBindings — per-Character appearance override, keyed by characterId.
+    //   • petActivityLog       — append-only XP/interaction ledger (auto-id), pruned by
+    //                            `lib/db/pet.ts`. `[kind+ts]` powers achievement counters.
+    //   • petAchievements      — unlock records keyed by achievement id.
+    // See `lib/db/pet.ts` and `@/types/pet`.
+    this.version(67).stores({
+      petProfile: "&id",
+      petCharacterBindings: "&characterId, updatedAt",
+      petActivityLog: "++id, kind, ts, [kind+ts]",
+      petAchievements: "&id, unlockedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1741,6 +1761,11 @@ export class CogniaDB extends Dexie {
   pluginMarketplaceSources!: Table<PluginMarketplaceSourceRow, string>
   // v60 — models.dev catalog cache (singleton). See `lib/db/models-dev-catalog.ts`.
   modelsDevCatalog!: Table<ModelsDevCatalogRow, string>
+  // v67 — Pet subsystem. See `lib/db/pet.ts` and `@/types/pet`.
+  petProfile!: Table<PetProfile, "global">
+  petCharacterBindings!: Table<PetCharacterBinding, string>
+  petActivityLog!: Table<PetActivityRow, number>
+  petAchievements!: Table<PetAchievementRecord, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

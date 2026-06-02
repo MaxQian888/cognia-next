@@ -17,6 +17,7 @@ import type {
   SearchUsageEntry,
   CustomSearchSource,
 } from "@/lib/search/types"
+import type { PetSettings } from "@/types/pet"
 import type { ModelMapping, ModelMappingEntry, RoutingConfig } from "@/types/provider/model-mapping"
 import type { RoutingStrategy } from "@/types/provider/auto-router"
 
@@ -1484,6 +1485,17 @@ export interface AppSettings {
    * (`ActiveAccountState`) remains the source of truth.
    */
   defaultAccountId?: string
+  /**
+   * Pet subsystem preferences (v67). Undefined ⇒ defaults from
+   * `DEFAULT_PET_SETTINGS`. See `components/settings/pet/pet-section.tsx`.
+   */
+  petSettings?: PetSettings
+  /**
+   * Stable, locally-generated install identifier. Used as the fallback seed for
+   * the pet's deterministic appearance when no provider account id is available
+   * (no PII; one random UUID written once). See `lib/pet/bones/account-id.ts`.
+   */
+  installUuid?: string
   /**
    * App-wide default for the ADR-0028 sandbox layer. When undefined or false,
    * sessions / characters that don't opt in see today's behaviour (SDK builtin

@@ -2458,7 +2458,8 @@
       "goals": "Goals",
       "conversation": "Conversation",
       "memory": "Memory",
-      "discover": "Discover"
+      "discover": "Discover",
+      "pet": "Pet"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -2507,7 +2508,8 @@
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "conversation": "Auto titles and the conversation timeline minimap",
       "memory": "Autonomous long-term memory — what the assistant remembers about you across sessions, plus extraction, recall, and privacy controls.",
-      "discover": "Pin, reorder, or hide the Discover categories."
+      "discover": "Pin, reorder, or hide the Discover categories.",
+      "pet": "Your animated desktop companion."
     },
     "externalBridge": {
       "wikiIndex": {
@@ -6349,8 +6351,12 @@
         "description": "Let memory text be embedded by a cloud provider. Off keeps it on-device (keyword-only).",
         "label": "Allow cloud embeddings"
       },
-      "topK": { "label": "Memories injected per turn" },
-      "cap": { "label": "Max active memories per scope" },
+      "topK": {
+        "label": "Memories injected per turn"
+      },
+      "cap": {
+        "label": "Max active memories per scope"
+      },
       "manage": "Manage memories",
       "clearAll": {
         "button": "Clear all",
@@ -6389,6 +6395,43 @@
       "provider": "Provider",
       "model": "Model",
       "useDefault": "Use chat default"
+    },
+    "pet": {
+      "title": "Pet",
+      "description": "Your animated desktop companion.",
+      "enabled": {
+        "label": "Enable pet",
+        "description": "Show the floating pet widget."
+      },
+      "anchor": {
+        "label": "Position",
+        "options": {
+          "bottom-right": "Bottom right",
+          "bottom-left": "Bottom left",
+          "top-right": "Top right",
+          "top-left": "Top left"
+        }
+      },
+      "motion": {
+        "label": "Motion",
+        "options": {
+          "auto": "Follow system",
+          "full": "Full",
+          "reduced": "Reduced"
+        }
+      },
+      "mutedBubbles": {
+        "label": "Mute bubbles",
+        "description": "Keep the pet quiet (it still animates)."
+      },
+      "size": {
+        "label": "Size ({size}px)"
+      },
+      "reset": {
+        "label": "Reset pet",
+        "description": "Delete all pet data and start over.",
+        "action": "Reset"
+      }
     }
   },
   "presets": {
@@ -9471,7 +9514,9 @@
     "panel": {
       "title": "Memory",
       "subtitle": "What the assistant remembers about you.",
-      "stats": { "active": "Active" },
+      "stats": {
+        "active": "Active"
+      },
       "searchLabel": "Search memories",
       "searchPlaceholder": "Search memories…",
       "sortLabel": "Sort",
@@ -11175,7 +11220,8 @@
         "pinnedEmpty": "No pinned items — everything is in the More menu.",
         "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
         "hiddenEmpty": "Nothing hidden."
-      }
+      },
+      "pet": "Pet"
     },
     "memberList": {
       "show": "Show member list",
@@ -17984,6 +18030,153 @@
       "delete": "Delete",
       "confirmDelete": "Confirm delete",
       "deleted": "Workspace deleted"
+    }
+  },
+  "pet": {
+    "statCard": {
+      "unhatched": "Unhatched",
+      "shiny": "Shiny"
+    },
+    "rarity": {
+      "common": "Common",
+      "uncommon": "Uncommon",
+      "rare": "Rare",
+      "epic": "Epic",
+      "legendary": "Legendary"
+    },
+    "stat": {
+      "debugging": "Debugging",
+      "patience": "Patience",
+      "chaos": "Chaos",
+      "wisdom": "Wisdom",
+      "snark": "Snark"
+    },
+    "species": {
+      "duck": "Duck",
+      "cat": "Cat",
+      "rabbit": "Rabbit",
+      "owl": "Owl",
+      "penguin": "Penguin",
+      "turtle": "Turtle",
+      "fox": "Fox",
+      "dragon": "Dragon",
+      "axolotl": "Axolotl",
+      "blob": "Blob",
+      "cactus": "Cactus",
+      "mushroom": "Mushroom",
+      "capybara": "Capybara",
+      "robot": "Robot",
+      "ghost": "Ghost",
+      "octopus": "Octopus",
+      "snail": "Snail",
+      "chonk": "Chonk"
+    },
+    "needs": {
+      "energy": "Energy",
+      "mood": "Mood",
+      "bond": "Bond"
+    },
+    "actions": {
+      "feed": "Feed",
+      "play": "Play",
+      "pet": "Pet",
+      "talk": "Talk"
+    },
+    "panel": {
+      "level": "Level {level}"
+    },
+    "widget": {
+      "toggle": "Open pet",
+      "minimize": "Minimize pet",
+      "restore": "Show pet"
+    },
+    "console": {
+      "loading": "Waking up your pet…",
+      "title": "Your Pet",
+      "subtitle": "Raise it, dress it, grow together.",
+      "hatchPrompt": "Your egg is ready to hatch.",
+      "hatch": "Hatch",
+      "tabs": {
+        "nurture": "Nurture",
+        "dex": "Dex",
+        "achievements": "Achievements",
+        "binding": "Characters"
+      }
+    },
+    "achievements": {
+      "hatched": {
+        "title": "Hatched",
+        "description": "Your pet was born."
+      },
+      "firstXp": {
+        "title": "First Steps",
+        "description": "Earned your first XP."
+      },
+      "juvenile": {
+        "title": "Juvenile",
+        "description": "Reached level 5."
+      },
+      "adult": {
+        "title": "All Grown Up",
+        "description": "Reached level 10."
+      },
+      "elder": {
+        "title": "Elder",
+        "description": "Reached level 20."
+      },
+      "wellFed": {
+        "title": "Well Fed",
+        "description": "Fed your pet 50 times."
+      },
+      "playful": {
+        "title": "Playful",
+        "description": "Played 50 times."
+      },
+      "bestFriends": {
+        "title": "Best Friends",
+        "description": "Maxed your bond."
+      },
+      "goalGetter": {
+        "title": "Goal Getter",
+        "description": "Completed 10 goals."
+      },
+      "shinyOwner": {
+        "title": "Shiny!",
+        "description": "You own a shiny pet."
+      },
+      "legendary": {
+        "title": "Legendary",
+        "description": "You own a legendary pet."
+      }
+    },
+    "binding": {
+      "empty": "No characters yet.",
+      "useGlobal": "Use global pet",
+      "clear": "Clear",
+      "speciesFor": "Species for {name}"
+    },
+    "bubbles": {
+      "thinking": ["Hmm, working on it…", "Let me think…", "Crunching…"],
+      "waiting": ["Your call!", "Waiting on you…"],
+      "review": ["Take a look?", "Ready for review."],
+      "success": ["Nailed it!", "Done and done.", "Yay!"],
+      "error": ["Uh oh…", "That hurt.", "Let's retry."],
+      "goalComplete": ["Goal smashed!", "We did it!", "Victory!"],
+      "levelUp": ["Level up!", "Getting stronger!"],
+      "evolved": ["I evolved!", "New me!"],
+      "fed": ["Yum!", "Tasty!", "Nom nom."],
+      "played": ["So fun!", "Again!", "Wheee!"],
+      "petted": ["Purr…", "That's nice.", "♥"],
+      "hatched": ["Hello world!", "I'm here!"],
+      "greeting": ["Hi there!", "Welcome back!", "Hey!"],
+      "inboundMessage": ["You've got mail!", "Ping!"],
+      "idle": {
+        "content": ["…", "Just vibing.", "All good."],
+        "happy": ["Best day!", "So happy!", "☀"],
+        "tired": ["So sleepy…", "Yawn…"],
+        "lonely": ["Miss you…", "Hello?"],
+        "grumpy": ["Hmph.", "Not now."]
+      }
     }
   }
 }

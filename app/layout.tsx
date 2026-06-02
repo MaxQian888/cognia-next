@@ -61,6 +61,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
+import { PetMount } from "@/components/pet/pet-mount"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -211,6 +212,9 @@ export default async function RootLayout({
                     {/* Dev-only perf HUD. In production it returns null
                      * unless `localStorage.cogniaPerfHud === "1"`. */}
                     <PerfHud />
+                    {/* Floating virtual-pet widget — gates itself on the pet
+                     * setting and degrades on mobile / reduced motion. */}
+                    <PetMount />
                     <Toaster />
                     {/* Branded boot splash on the Capacitor shell — takes over
                      * from the static Android 12 system splash with an animated
