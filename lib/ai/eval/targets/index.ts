@@ -17,3 +17,4 @@ export {
 } from "./workflow"
 export { defaultWorkflowTargetDeps } from "./workflow-default-deps"
 export { newEvalTraceId } from "./span-scope"
+export { createTargetFromSpec, type TargetDepsBundle } from "./create-from-spec"

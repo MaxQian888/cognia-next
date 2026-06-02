@@ -9,7 +9,7 @@ jest.mock("./targets/chat", () => ({
 }))
 
 import type { AppSettings } from "@/lib/claude/types"
-import { buildBrowserRunDeps } from "./browser-deps"
+import { buildBrowserRunDeps, buildConfiguredRunDeps } from "./browser-deps"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 
 const settings = { defaultModel: "claude-sonnet-4-6" } as unknown as AppSettings
@@ -48,5 +48,25 @@ describe("buildBrowserRunDeps", () => {
     })
     // null appSettings → hardcoded default, no throw
     expect(() => buildBrowserRunDeps({ appSettings: null })).not.toThrow()
+  })
+})
+
+describe("buildConfiguredRunDeps", () => {
+  it("uses only deterministic scorers when no judge client resolves", () => {
+    ;(buildRendererLlmClient as jest.Mock).mockReturnValue(null)
+    const { deps, deterministicOnly } = buildConfiguredRunDeps({ appSettings: settings })
+    expect(deterministicOnly).toBe(true)
+    expect(deps.allScorers.length).toBeGreaterThan(0)
+    expect(deps.allScorers.every((s) => s.requiresLlm === false)).toBe(true)
+  })
+
+  it("adds LLM scorers when a judge client resolves and builds a chat target from a spec", () => {
+    ;(buildRendererLlmClient as jest.Mock).mockReturnValue({ complete: jest.fn() })
+    const { deps, deterministicOnly } = buildConfiguredRunDeps({ appSettings: settings })
+    expect(deterministicOnly).toBe(false)
+    expect(deps.allScorers.some((s) => s.requiresLlm === true)).toBe(true)
+    const target = deps.buildTarget({ kind: "chat", label: "A", model: "m1" })
+    expect(target.label).toBe("t") // from the mocked createChatTarget
+    expect(deps.newRunId()).toMatch(/^evrun_/)
   })
 })
