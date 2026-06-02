@@ -84,4 +84,40 @@ describe("RunConfigDialog", () => {
     expect(config.scorerIds).not.toContain("cost")
     expect(config.scorerIds.length).toBeGreaterThan(0)
   })
+
+  it("renders option selects (model + character) and applies subset + k", async () => {
+    render(
+      <RunConfigDialog
+        datasetId="d"
+        appSettings={{ defaultModel: "m1" } as never}
+        options={{
+          models: ["m1", "m2"],
+          characters: [{ id: "char-1", name: "Ada" }],
+          teams: [{ id: "tm", name: "Team" }],
+          workflows: [{ id: "wf", name: "Flow" }],
+        }}
+        onClose={jest.fn()}
+      />
+    )
+    // RefField renders a <select> when options.models is provided
+    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m2" } })
+    fireEvent.change(screen.getByLabelText("runConfig.character"), { target: { value: "char-1" } })
+    fireEvent.change(screen.getByLabelText("runConfig.k"), { target: { value: "3" } })
+    fireEvent.change(screen.getByLabelText("runConfig.split"), { target: { value: "test" } })
+    fireEvent.change(screen.getByLabelText("runConfig.capabilities"), { target: { value: "a, b" } })
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(runConfiguredEval).toHaveBeenCalled())
+    const config = runConfiguredEval.mock.calls[0][1]
+    expect(config.targets[0]).toMatchObject({ kind: "chat", model: "m2", characterId: "char-1" })
+    expect(config.k).toBe(3)
+    expect(config.subset).toEqual({ split: "test", capabilities: ["a", "b"] })
+  })
+
+  it("removes an added target row", () => {
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.click(screen.getByText("runConfig.addTarget"))
+    expect(screen.getAllByLabelText("runConfig.targetRef")).toHaveLength(2)
+    fireEvent.click(screen.getAllByLabelText("runConfig.removeTarget")[0])
+    expect(screen.getAllByLabelText("runConfig.targetRef")).toHaveLength(1)
+  })
 })

@@ -30,6 +30,35 @@ describe("CaseEditor", () => {
     )
   })
 
+  it("parses multi-line contains/context and valid expectedToolArgs JSON", () => {
+    const onSave = jest.fn()
+    render(<CaseEditor onSave={onSave} onCancel={jest.fn()} />)
+    fireEvent.change(screen.getByLabelText("case.input"), { target: { value: "x" } })
+    fireEvent.change(screen.getByLabelText("case.expectedContains"), {
+      target: { value: "alpha\n\nbeta" },
+    })
+    fireEvent.change(screen.getByLabelText("case.expectedContext"), {
+      target: { value: "ctx1\nctx2" },
+    })
+    fireEvent.change(screen.getByLabelText("case.split"), { target: { value: "test" } })
+    fireEvent.change(screen.getByLabelText("case.notes"), { target: { value: "a note" } })
+    fireEvent.change(screen.getByLabelText("case.expectedToolArgs"), {
+      target: { value: '{"Read":{"path":"x"}}' },
+    })
+    fireEvent.click(screen.getByText("case.save"))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        split: "test",
+        notes: "a note",
+        reference: expect.objectContaining({
+          expectedContains: ["alpha", "beta"],
+          expectedContext: ["ctx1", "ctx2"],
+          expectedToolArgs: { Read: { path: "x" } },
+        }),
+      })
+    )
+  })
+
   it("blocks save and shows an error on invalid expectedToolArgs JSON", () => {
     const onSave = jest.fn()
     render(<CaseEditor onSave={onSave} onCancel={jest.fn()} />)

@@ -80,6 +80,28 @@ describe("fromLangSmith", () => {
     expect(JSON.parse(out.cases[0].input)).toEqual({ a: "1", b: "2" })
     expect(out.cases[0].reference).toBeUndefined()
   })
+
+  it("uses a single non-named input value + a named output key", () => {
+    const out = fromLangSmith([{ inputs: { foo: "bar" }, outputs: { response: "r" } }], deps)
+    expect(out.cases[0].input).toBe("bar")
+    expect(out.cases[0].reference?.expectedOutput).toBe("r")
+  })
+
+  it("stringifies multi-key outputs and skips rows with no inputs", () => {
+    const out = fromLangSmith(
+      [
+        { inputs: { question: "q" }, outputs: { a: "1", b: "2" } },
+        { inputs: {}, outputs: { answer: "x" } },
+        42,
+      ],
+      deps
+    )
+    expect(out.cases).toHaveLength(1)
+    expect(JSON.parse(out.cases[0].reference!.expectedOutput!)).toEqual({ a: "1", b: "2" })
+    expect(out.skipped.map((s) => s.reason)).toEqual(
+      expect.arrayContaining(["no inputs", "not an object"])
+    )
+  })
 })
 
 describe("importForeign dispatch", () => {

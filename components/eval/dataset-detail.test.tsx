@@ -73,6 +73,20 @@ describe("DatasetDetail", () => {
     expect(screen.getByTestId("version-history")).toBeInTheDocument()
   })
 
+  it("toggles a panel off on second click and accepts runOptions", () => {
+    render(
+      <DatasetDetail
+        dataset={dataset}
+        appSettings={null}
+        runOptions={{ models: ["m1"], teams: [{ id: "t", name: "T" }] }}
+      />
+    )
+    fireEvent.click(screen.getByText("detail.import"))
+    expect(screen.getByTestId("import-dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("detail.import"))
+    expect(screen.queryByTestId("import-dialog")).not.toBeInTheDocument()
+  })
+
   it("exports JSONL + CSV via a blob download", () => {
     const createObjectURL = jest.fn(() => "blob:x")
     const revokeObjectURL = jest.fn()
