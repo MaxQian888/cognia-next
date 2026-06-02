@@ -68,4 +68,32 @@ describe("createTargetFromSpec", () => {
     const target = createTargetFromSpec({ kind: "workflow", label: "w", workflowId: "wf" }, deps)
     expect((await target.run(evalCase)).output).toBe("wf-out")
   })
+
+  it("threads the chat optional fields (characterId / cwd / timeoutMs)", async () => {
+    const target = createTargetFromSpec(
+      { kind: "chat", label: "c", model: "m", characterId: "char-1", cwd: "/tmp", timeoutMs: 5000 },
+      deps
+    )
+    await target.run(evalCase)
+    expect((deps.chat.runTurn as jest.Mock).mock.calls[0][0]).toMatchObject({
+      characterId: "char-1",
+      cwd: "/tmp",
+      timeoutMs: 5000,
+    })
+  })
+
+  it("threads team / workflow timeoutMs", async () => {
+    const team = createTargetFromSpec(
+      { kind: "team", label: "t", teamId: "tm", timeoutMs: 9000 },
+      deps
+    )
+    await team.run(evalCase)
+    expect((deps.team.runTeam as jest.Mock).mock.calls[0][0].timeoutMs).toBe(9000)
+    const wf = createTargetFromSpec(
+      { kind: "workflow", label: "w", workflowId: "wf", timeoutMs: 7000 },
+      deps
+    )
+    await wf.run(evalCase)
+    expect((deps.workflow.runWorkflow as jest.Mock).mock.calls[0][0].timeoutMs).toBe(7000)
+  })
 })

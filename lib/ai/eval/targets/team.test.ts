@@ -43,7 +43,9 @@ describe("createTeamTarget", () => {
       { label: "team-x", teamId: "tm1" },
       { runTeam, fetchSpansByTrace, isToolCapable: () => true }
     )
-    const sample = await target.run(evalCase)
+    const ac = new AbortController()
+    const sample = await target.run(evalCase, ac.signal)
+    expect(runTeam.mock.calls[0][0].signal).toBe(ac.signal)
     expect(sample.output).toBe("done")
     expect(sample.usage.inputTokens).toBe(5)
     expect(sample.costUsd).toBeCloseTo(0.01)

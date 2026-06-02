@@ -65,4 +65,30 @@ describe("createWorkflowTarget", () => {
     expect(runWorkflow.mock.calls[0][0].payload).toEqual({ input: "hello" })
     expect(sample.output).toBe("plain text")
   })
+
+  it("threads timeoutMs + abort signal and treats undefined output as empty", async () => {
+    const runWorkflow = jest.fn(
+      async (input: {
+        workflowId: string
+        payload: Record<string, unknown>
+        traceId: string
+        timeoutMs?: number
+        signal?: AbortSignal
+      }) => ({
+        runId: "r",
+        status: "succeeded",
+        output: undefined as unknown,
+        traceId: input.traceId,
+      })
+    )
+    const target = createWorkflowTarget(
+      { label: "wf", workflowId: "wf1", timeoutMs: 4000 },
+      { runWorkflow, fetchSpansByTrace: async () => [] }
+    )
+    const ac = new AbortController()
+    const sample = await target.run(caseRow({ input: "hello" }), ac.signal)
+    expect(runWorkflow.mock.calls[0][0].timeoutMs).toBe(4000)
+    expect(runWorkflow.mock.calls[0][0].signal).toBe(ac.signal)
+    expect(sample.output).toBe("")
+  })
 })

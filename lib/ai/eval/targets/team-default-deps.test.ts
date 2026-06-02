@@ -1,6 +1,9 @@
 const getTeam = jest.fn((id: string) => ({ id, task: "original objective", config: {} }))
 const getTeammates = jest.fn(() => [])
 const getTeamTasks = jest.fn(() => [])
+const addMessage = jest.fn()
+const setTaskStatus = jest.fn()
+const updateTeammate = jest.fn()
 const runTeamLifecycle = jest.fn(
   async (_teamId: string, _deps: unknown, _signal?: AbortSignal) => ({
     runId: "run_1",
@@ -16,9 +19,9 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
       getTeam,
       getTeammates,
       getTeamTasks,
-      addMessage: jest.fn(),
-      setTaskStatus: jest.fn(),
-      updateTeammate: jest.fn(),
+      addMessage,
+      setTaskStatus,
+      updateTeammate,
       setFinalResult: jest.fn(),
     }),
   },
@@ -58,5 +61,28 @@ describe("defaultTeamTargetDeps.runTeam", () => {
 
   it("reports tool capability via isTauri", () => {
     expect(defaultTeamTargetDeps().isToolCapable()).toBe(true)
+  })
+
+  it("wires storeReader + storeWriter closures through to the live store", async () => {
+    const deps = defaultTeamTargetDeps()
+    await deps.runTeam({ teamId: "tm1", prompt: "p", traceId: "tr" })
+    const passed = runTeamLifecycle.mock.calls[0][1] as {
+      storeReader: { getTeammates: (id: string) => unknown; getTeamTasks: (id: string) => unknown }
+      storeWriter: {
+        addMessage: (i: unknown) => void
+        setTaskStatus: (a: string, b: string, c?: string, d?: string) => void
+        updateTeammate: (a: string, b: unknown) => void
+      }
+    }
+    passed.storeReader.getTeammates("tm1")
+    passed.storeReader.getTeamTasks("tm1")
+    passed.storeWriter.addMessage({ teamId: "tm1" })
+    passed.storeWriter.setTaskStatus("task", "completed", "res")
+    passed.storeWriter.updateTeammate("mate", { name: "x" })
+    expect(getTeammates).toHaveBeenCalledWith("tm1")
+    expect(getTeamTasks).toHaveBeenCalledWith("tm1")
+    expect(addMessage).toHaveBeenCalledWith({ teamId: "tm1" })
+    expect(setTaskStatus).toHaveBeenCalledWith("task", "completed", "res", undefined)
+    expect(updateTeammate).toHaveBeenCalledWith("mate", { name: "x" })
   })
 })
