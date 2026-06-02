@@ -1463,7 +1463,17 @@
       "revokeHint": "You can revoke this trust later from Settings → Hooks.",
       "dontRun": "Don't run",
       "trust": "Trust workspace",
-      "saving": "Saving…"
+      "saving": "Saving…",
+      "actions": {
+        "tools": "Bash, Edit, Write and Computer-Use tools",
+        "hooks": "Workspace .claude/settings.json hooks and commands"
+      }
+    },
+    "workspaceRestricted": {
+      "title": "Restricted Mode",
+      "body": "This workspace isn't trusted yet. Agents run read-only — Bash, Edit, Write and Computer-Use are disabled.",
+      "trust": "Trust workspace",
+      "rootsLabel": "Untrusted folders"
     },
     "characterPicker": {
       "title": "Pick a character",
@@ -2881,8 +2891,71 @@
         "custom": "Custom theme",
         "import": "Import",
         "typography": "Typography",
+        "components": "Components",
         "a11y": "Accessibility",
         "advanced": "Advanced"
+      },
+      "componentCustomize": {
+        "description": "Customize individual surface components. Tonality controls how the surface looks over a wallpaper; elevation and radius always apply.",
+        "resetAll": "Reset all",
+        "tonalityHint": "Tonality only takes effect while a wallpaper is enabled.",
+        "groups": {
+          "surfaces": "Surfaces",
+          "overlays": "Overlays",
+          "modals": "Modals & sheets",
+          "chat": "Chat surfaces"
+        },
+        "axis": {
+          "tonality": "Tonality",
+          "elevation": "Elevation",
+          "radius": "Radius",
+          "tonalityFor": "Tonality for {name}",
+          "elevationFor": "Elevation for {name}",
+          "radiusFor": "Radius for {name}"
+        },
+        "tonality": {
+          "default": "Default",
+          "solid": "Solid",
+          "translucent": "Translucent",
+          "glass": "Glass",
+          "frosted": "Frosted"
+        },
+        "elevation": {
+          "default": "Default"
+        },
+        "radius": {
+          "inherit": "Default"
+        },
+        "items": {
+          "card": "Card",
+          "alert": "Alert",
+          "tabs": "Tabs",
+          "menubar": "Menubar",
+          "sidebar": "Sidebar",
+          "table": "Table",
+          "popover": "Popover",
+          "dropdownMenu": "Dropdown menu",
+          "contextMenu": "Context menu",
+          "select": "Select",
+          "combobox": "Combobox",
+          "hoverCard": "Hover card",
+          "command": "Command palette",
+          "navigationMenu": "Navigation menu",
+          "tooltip": "Tooltip",
+          "dialog": "Dialog",
+          "alertDialog": "Alert dialog",
+          "sheet": "Sheet",
+          "drawer": "Drawer",
+          "aiMessage": "Message bubble",
+          "aiTool": "Tool call",
+          "aiArtifact": "Artifact panel",
+          "aiCodeBlock": "Code block",
+          "aiContext": "Context usage",
+          "aiTask": "Task file",
+          "aiErrorTrace": "Error trace",
+          "aiConversation": "Scroll button",
+          "aiTerminal": "Terminal"
+        }
       },
       "themePack": {
         "title": "Theme packs",
@@ -15067,6 +15140,7 @@
           "toggleSnap": "Toggle grid snap"
         },
         "node": {
+          "runStep": "Run this step",
           "runFrom": "Run from here",
           "configure": "Configure",
           "rename": "Rename",
@@ -15237,12 +15311,43 @@
       "deleteAll": "Delete connections"
     },
     "node": {
+      "pinnedTitle": "Pinned test data",
       "lastRun": {
         "succeeded": "Ran {ago} · {duration}",
         "succeededNoDuration": "Ran {ago}",
         "failed": "Failed {ago}",
         "skipped": "Skipped {ago}"
       }
+    },
+    "dataView": {
+      "tabsAria": "Node panel",
+      "tabConfig": "Config",
+      "tabInput": "Input",
+      "tabOutput": "Output",
+      "viewToggleAria": "Data view",
+      "viewTable": "Table",
+      "viewJson": "JSON",
+      "viewSchema": "Schema",
+      "itemNav": "Item {current} / {total}",
+      "prevItem": "Previous item",
+      "nextItem": "Next item",
+      "emptyTitle": "No data yet",
+      "emptyHint": "Run this node to see its input and output data here.",
+      "runStepCta": "Run this step",
+      "pinnedBadge": "Pinned",
+      "pin": "Pin output",
+      "unpin": "Unpin",
+      "editPinned": "Edit fixture",
+      "editPinnedHint": "Enter JSON to use as this node's frozen output during editor runs.",
+      "savePinned": "Save fixture",
+      "cancelEdit": "Cancel",
+      "pinParseError": "Invalid JSON — fixture not saved.",
+      "noInputs": "This node has no upstream connections.",
+      "inputFrom": "From {label}",
+      "dragHint": "Drag into an expression field to insert a reference",
+      "valueLabel": "value",
+      "emptyObject": "Empty object",
+      "schemaEmpty": "No fields to map."
     },
     "shortcuts": {
       "title": "Keyboard shortcuts",
@@ -16231,6 +16336,17 @@
         "temperature": {
           "label": "Temperature",
           "hint": "0 = deterministic. Higher values = more variety."
+        },
+        "responseFormat": {
+          "label": "Response format",
+          "hint": "JSON parses the reply into structured output for downstream nodes.",
+          "text": "Text",
+          "json": "JSON (structured)"
+        },
+        "jsonSchema": {
+          "label": "JSON shape (optional)",
+          "hint": "A sample shape the model should match. Injected into the prompt.",
+          "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
         }
       },
       "branch": {
@@ -16591,18 +16707,36 @@
         "input": {
           "label": "Input"
         },
+        "required": {
+          "label": "Required fields (optional)",
+          "hint": "Comma-separated. output.valid is false if any are missing.",
+          "placeholder": "name, amount"
+        },
         "hint": {
           "label": "Guidance (optional)"
         }
       },
       "aiEmbed": {
+        "provider": {
+          "label": "Provider (optional)",
+          "placeholder": "Hash fallback"
+        },
+        "model": {
+          "label": "Model (optional)",
+          "hint": "Required for real semantic embeddings.",
+          "placeholder": "text-embedding-3-small"
+        },
+        "apiKey": {
+          "label": "API key (optional)",
+          "hint": "Needed for hosted embedding providers. Leave empty for the local / hash fallback."
+        },
         "input": {
           "label": "Input",
           "hint": "Supports '{{ }}' expressions."
         },
         "dimension": {
           "label": "Dimension",
-          "hint": "Phase 4 ships a deterministic hash-based embedder; real semantic embeddings land later."
+          "hint": "Vector size. Used by the hash fallback and passed to providers that support it."
         }
       },
       "switch": {

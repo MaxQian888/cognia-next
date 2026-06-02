@@ -1463,7 +1463,17 @@
       "revokeHint": "可在「设置 → Hooks」中随时撤销该信任。",
       "dontRun": "不运行",
       "trust": "信任工作区",
-      "saving": "保存中…"
+      "saving": "保存中…",
+      "actions": {
+        "tools": "Bash、编辑、写入与计算机操作工具",
+        "hooks": "工作区 .claude/settings.json 的 hooks 与命令"
+      }
+    },
+    "workspaceRestricted": {
+      "title": "受限模式",
+      "body": "此工作区尚未受信任。智能体以只读方式运行——Bash、编辑、写入与计算机操作已禁用。",
+      "trust": "信任此工作区",
+      "rootsLabel": "未受信任的文件夹"
     },
     "characterPicker": {
       "title": "选择一个角色",
@@ -2860,8 +2870,71 @@
         "custom": "自定义主题",
         "import": "导入",
         "typography": "字体",
+        "components": "组件",
         "a11y": "无障碍",
         "advanced": "高级"
+      },
+      "componentCustomize": {
+        "description": "逐个自定义面板类组件。透明度控制组件在壁纸之上的呈现；阴影与圆角始终生效。",
+        "resetAll": "全部重置",
+        "tonalityHint": "透明度仅在启用壁纸时生效。",
+        "groups": {
+          "surfaces": "面板",
+          "overlays": "浮层",
+          "modals": "弹窗与抽屉",
+          "chat": "对话界面"
+        },
+        "axis": {
+          "tonality": "透明度",
+          "elevation": "阴影",
+          "radius": "圆角",
+          "tonalityFor": "{name} 的透明度",
+          "elevationFor": "{name} 的阴影",
+          "radiusFor": "{name} 的圆角"
+        },
+        "tonality": {
+          "default": "默认",
+          "solid": "实心",
+          "translucent": "半透明",
+          "glass": "玻璃",
+          "frosted": "毛玻璃"
+        },
+        "elevation": {
+          "default": "默认"
+        },
+        "radius": {
+          "inherit": "默认"
+        },
+        "items": {
+          "card": "卡片 Card",
+          "alert": "提示 Alert",
+          "tabs": "标签页 Tabs",
+          "menubar": "菜单栏 Menubar",
+          "sidebar": "侧边栏 Sidebar",
+          "table": "表格 Table",
+          "popover": "气泡 Popover",
+          "dropdownMenu": "下拉菜单 Dropdown",
+          "contextMenu": "右键菜单 Context menu",
+          "select": "选择器 Select",
+          "combobox": "组合框 Combobox",
+          "hoverCard": "悬浮卡片 Hover card",
+          "command": "命令面板 Command",
+          "navigationMenu": "导航菜单 Navigation",
+          "tooltip": "工具提示 Tooltip",
+          "dialog": "对话框 Dialog",
+          "alertDialog": "警告对话框 Alert dialog",
+          "sheet": "侧拉面板 Sheet",
+          "drawer": "抽屉 Drawer",
+          "aiMessage": "消息气泡 Message",
+          "aiTool": "工具调用 Tool",
+          "aiArtifact": "工件面板 Artifact",
+          "aiCodeBlock": "代码块 Code block",
+          "aiContext": "上下文用量 Context",
+          "aiTask": "任务文件 Task",
+          "aiErrorTrace": "错误堆栈 Error trace",
+          "aiConversation": "滚动按钮 Scroll button",
+          "aiTerminal": "终端 Terminal"
+        }
       },
       "themePack": {
         "title": "主题包",
@@ -15067,6 +15140,7 @@
           "toggleSnap": "切换网格对齐"
         },
         "node": {
+          "runStep": "仅运行此节点",
           "runFrom": "从此节点开始运行",
           "configure": "配置",
           "rename": "重命名",
@@ -15237,12 +15311,43 @@
       "deleteAll": "删除连线"
     },
     "node": {
+      "pinnedTitle": "已固定测试数据",
       "lastRun": {
         "succeeded": "{ago} 运行 · 用时 {duration}",
         "succeededNoDuration": "{ago} 运行",
         "failed": "{ago} 失败",
         "skipped": "{ago} 跳过"
       }
+    },
+    "dataView": {
+      "tabsAria": "节点面板",
+      "tabConfig": "配置",
+      "tabInput": "输入",
+      "tabOutput": "输出",
+      "viewToggleAria": "数据视图",
+      "viewTable": "表格",
+      "viewJson": "JSON",
+      "viewSchema": "结构",
+      "itemNav": "第 {current} / {total} 项",
+      "prevItem": "上一项",
+      "nextItem": "下一项",
+      "emptyTitle": "暂无数据",
+      "emptyHint": "运行此节点后，这里会显示它的输入与输出数据。",
+      "runStepCta": "仅运行此节点",
+      "pinnedBadge": "已固定",
+      "pin": "固定输出",
+      "unpin": "取消固定",
+      "editPinned": "编辑固定值",
+      "editPinnedHint": "输入 JSON，作为编辑器运行时此节点的固定输出。",
+      "savePinned": "保存固定值",
+      "cancelEdit": "取消",
+      "pinParseError": "JSON 格式无效——未保存固定值。",
+      "noInputs": "此节点没有上游连接。",
+      "inputFrom": "来自 {label}",
+      "dragHint": "拖拽到表达式输入框以插入引用",
+      "valueLabel": "值",
+      "emptyObject": "空对象",
+      "schemaEmpty": "没有可映射的字段。"
     },
     "shortcuts": {
       "title": "键盘快捷键",
@@ -16231,6 +16336,17 @@
         "temperature": {
           "label": "Temperature",
           "hint": "0 = 确定性。值越大输出越多样。"
+        },
+        "responseFormat": {
+          "label": "响应格式",
+          "hint": "选 JSON 会把回复解析为结构化输出，供下游节点引用。",
+          "text": "文本",
+          "json": "JSON（结构化）"
+        },
+        "jsonSchema": {
+          "label": "JSON 形状（可选）",
+          "hint": "希望模型匹配的示例形状，会注入到提示词中。",
+          "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
         }
       },
       "branch": {
@@ -16591,18 +16707,36 @@
         "input": {
           "label": "输入"
         },
+        "required": {
+          "label": "必填字段（可选）",
+          "hint": "逗号分隔。任一缺失则 output.valid 为 false。",
+          "placeholder": "name, amount"
+        },
         "hint": {
           "label": "辅助说明（可选）"
         }
       },
       "aiEmbed": {
+        "provider": {
+          "label": "提供方（可选）",
+          "placeholder": "哈希回退"
+        },
+        "model": {
+          "label": "模型（可选）",
+          "hint": "真实语义嵌入时必填。",
+          "placeholder": "text-embedding-3-small"
+        },
+        "apiKey": {
+          "label": "API Key（可选）",
+          "hint": "托管嵌入提供方需要。留空则使用本地 / 哈希回退。"
+        },
         "input": {
           "label": "输入",
           "hint": "支持 '{{ }}' 表达式。"
         },
         "dimension": {
           "label": "维度",
-          "hint": "Phase 4 内置基于哈希的确定性 embedder；真正的语义嵌入晚些上线。"
+          "hint": "向量长度。用于哈希回退，并传给支持该参数的提供方。"
         }
       },
       "switch": {
