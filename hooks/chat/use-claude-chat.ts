@@ -79,6 +79,7 @@ import {
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
+import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
@@ -1121,6 +1122,14 @@ async function buildSendOptions(
     ? (projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? null)
     : null
 
+  // Workspace Trust gate: an untrusted active workspace runs in Restricted Mode
+  // (disk/host tools denied by `resolveSendOptions`). Authoritative at send time
+  // — independent of the React banner state. Web + disabled setting bypass.
+  const workspaceRestricted = await isWorkspaceRestricted(activeProject, {
+    enabled: appSettings?.workspaceTrust?.enabled !== false,
+    onWeb: !isTauri(),
+  })
+
   // Twin runtime injection: when the user has populated the runtime config
   // (vector store + embedding API key) and the message is a plain string,
   // hand resolveSendOptions the deps so it can call applyTwinContext for
@@ -1152,6 +1161,7 @@ async function buildSendOptions(
     session,
     appSettings,
     activeProject,
+    workspaceRestricted,
     referencedPaths,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,

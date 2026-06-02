@@ -30,8 +30,9 @@ import { CanvasShell } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
+import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
-import type { ApprovalDecision, Character } from "@/lib/claude/types"
+import type { ApprovalDecision, Character, SendContent } from "@/lib/claude/types"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
@@ -216,6 +217,18 @@ export function DesktopChatWorkspace() {
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
 
+  // Workspace Trust: bump a nonce on each send so the trust gate can lazily
+  // prompt (once per session) when the active workspace is restricted. Trust
+  // applies to direct chat — team sessions resolve cwd per-member elsewhere.
+  const [trustPromptNonce, setTrustPromptNonce] = useState(0)
+  const sendWithTrustPrompt = useCallback(
+    (content: SendContent) => {
+      if (!isTeamSession) setTrustPromptNonce((n) => n + 1)
+      return send(content)
+    },
+    [send, isTeamSession]
+  )
+
   const handleChannelNewDirect = useCallback(() => {
     void handleNewDirect()
   }, [handleNewDirect])
@@ -366,20 +379,28 @@ export function DesktopChatWorkspace() {
             {!mounted ? null : platform !== "tauri" ? (
               <DesktopOnlyBanner />
             ) : (
-              <ChatPane
-                activeSession={activeSession}
-                onSend={send}
-                onStop={stop}
-                onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-                onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-                onCreate={handleNewDirect}
-                onUseSample={handleUseSample}
-                onOpenSettings={openSettings}
-                onNavigate={(href) => router.push(href)}
-                recentSessions={recentSessions}
-                onResumeSession={handleSwitchToSession}
-                composerRef={composerRef}
-              />
+              <>
+                {!isTeamSession && (
+                  <WorkspaceTrustGate
+                    sessionId={activeSession?.id ?? null}
+                    promptNonce={trustPromptNonce}
+                  />
+                )}
+                <ChatPane
+                  activeSession={activeSession}
+                  onSend={sendWithTrustPrompt}
+                  onStop={stop}
+                  onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+                  onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+                  onCreate={handleNewDirect}
+                  onUseSample={handleUseSample}
+                  onOpenSettings={openSettings}
+                  onNavigate={(href) => router.push(href)}
+                  recentSessions={recentSessions}
+                  onResumeSession={handleSwitchToSession}
+                  composerRef={composerRef}
+                />
+              </>
             )}
           </main>
 

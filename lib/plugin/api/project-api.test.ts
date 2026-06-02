@@ -433,6 +433,7 @@ describe("Project API", () => {
       mockProjects.push({
         id: "kb-proj",
         name: "KB Project",
+        roots: [],
         createdAt: new Date(),
         updatedAt: new Date(),
         lastAccessedAt: new Date(),
