@@ -66,6 +66,8 @@ export interface NotificationItemProps {
   onSnooze: (id: string, durationMs: number) => void
   onRemove: (id: string) => void
   onAction: (record: NotificationRecord, command: string, args?: Record<string, unknown>) => void
+  /** Keep the row menu always visible (touch surfaces have no hover). */
+  menuAlwaysVisible?: boolean
 }
 
 export function NotificationItem({
@@ -76,6 +78,7 @@ export function NotificationItem({
   onSnooze,
   onRemove,
   onAction,
+  menuAlwaysVisible = false,
 }: NotificationItemProps) {
   const t = useTranslations("notificationCenter")
   const format = useFormatter()
@@ -148,7 +151,10 @@ export function NotificationItem({
             <Button
               size="icon"
               variant="ghost"
-              className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+              className={cn(
+                "size-6 data-[state=open]:opacity-100",
+                menuAlwaysVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
               aria-label={t("center.settings")}
             >
               <MoreVerticalIcon className="size-3.5" />

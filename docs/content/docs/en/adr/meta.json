@@ -33,6 +33,7 @@
     "0035-rust-performance-dashboard",
     "0036-wechat-wecom-connectors",
     "0037-public-share-links",
-    "0041-agent-command-auto-mode"
+    "0041-agent-command-auto-mode",
+    "0042-unified-notification-center"
   ]
 }
