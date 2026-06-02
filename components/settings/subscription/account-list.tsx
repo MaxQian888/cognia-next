@@ -32,6 +32,7 @@ import { useAccounts } from "@/lib/subscription/core/hooks"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 import { AccountUsageChips } from "./account-usage-chips"
+import { AccountPresetSelector, providerSupportsPresets } from "./account-preset-selector"
 
 interface AccountListProps {
   provider: ProviderId
@@ -99,6 +100,9 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                     {[account.email, account.plan].filter(Boolean).join(" · ")}
                   </div>
                   <AccountUsageChips accountId={account.id} />
+                  {providerSupportsPresets(provider) && (
+                    <AccountPresetSelector provider={provider} accountId={account.id} />
+                  )}
                 </div>
                 {account.id === activeAccountId && (
                   <Badge variant="default" className="text-[10px]">

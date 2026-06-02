@@ -8278,7 +8278,20 @@
         "presetActive": "Preset active",
         "presetInactive": "Direct endpoint",
         "removeConfirmTitle": "Remove this preset?",
-        "removeConfirmDescription": "\"{label}\" will be cleared and the provider will use its built-in endpoint. You can re-add it any time."
+        "removeConfirmDescription": "\"{label}\" will be cleared and the provider will use its built-in endpoint. You can re-add it any time.",
+        "defaultBadge": "Default",
+        "setDefault": "Set default",
+        "newFromTemplate": "New from template",
+        "customTemplate": "Custom endpoint",
+        "defaultModelField": "Default model (optional)",
+        "defaultModelPlaceholder": "e.g. claude-sonnet-4-5",
+        "fastModelField": "Fast model (optional)",
+        "fastModelPlaceholder": "e.g. claude-haiku-4-5",
+        "modelMappingHint": "Remaps the model env vars passed to the provider. Leave blank to keep the upstream default."
+      },
+      "accountPreset": {
+        "ariaLabel": "Endpoint preset for this account",
+        "useDefault": "Use default"
       },
       "importExport": {
         "title": "Backup",

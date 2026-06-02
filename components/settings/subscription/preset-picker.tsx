@@ -1,16 +1,18 @@
 "use client"
 
-// Third-party endpoint preset editor. Supported on Anthropic + Codex only —
-// the OpenCode provider tab doesn't render this component.
+// Third-party endpoint preset *library* (Anthropic + Codex only — the OpenCode
+// provider tab doesn't render this component).
 //
-// Storage: `ProviderVault.preset` (one preset per provider). Set/clear via
-// `subscription_set_preset`. Whatever the user saves overrides
-// `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at sidecar spawn time and adds
-// every `extraHeaders` row to the request.
+// Storage: `ProviderVault.presets` (a library of named presets per provider)
+// plus `defaultPresetId`. Accounts bind to a preset by id; the default applies
+// when an account has no explicit binding. A preset overrides
+// `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at sidecar spawn time, adds every
+// `extraHeaders` row, and (via `modelMapping`) can remap the default / fast
+// model env vars.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
+import { Loader2Icon, PlusIcon, ChevronDownIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -31,58 +33,64 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 
-import { useProviderPreset } from "@/lib/subscription/core/hooks"
+import { useProviderPresets } from "@/lib/subscription/core/hooks"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import type { ProviderId, ProviderPreset } from "@/types/subscription"
+import { buildPresetTemplates, type PresetTemplate } from "@/types/subscription/preset-templates"
 import { SelectablePresetCard } from "@/components/settings/presets/selectable-preset-card"
 
+type PresetProvider = Extract<ProviderId, "anthropic" | "codex">
+
 interface PresetPickerProps {
-  provider: Extract<ProviderId, "anthropic" | "codex">
+  provider: PresetProvider
 }
+
+/** Seed for the editor — either an existing preset to edit or a template-prefilled blank. */
+type EditorSeed = { kind: "edit"; preset: ProviderPreset } | { kind: "new"; draft: ProviderPreset }
 
 export function PresetPicker({ provider }: PresetPickerProps) {
   const t = useTranslations("subscription.common.preset")
-  const { preset, loading, save } = useProviderPreset(provider)
-  const [open, setOpen] = useState(false)
-  const [removeOpen, setRemoveOpen] = useState(false)
+  const { presets, defaultPresetId, loading, save, remove, setDefault } =
+    useProviderPresets(provider)
+
+  const [editorSeed, setEditorSeed] = useState<EditorSeed | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<ProviderPreset | null>(null)
   const [removeBusy, setRemoveBusy] = useState(false)
 
+  const supportsFast = provider === "anthropic"
+  const templates = buildPresetTemplates(provider)
+
+  const openNewFromTemplate = (template: PresetTemplate) => {
+    const draft: ProviderPreset = {
+      id: uuidv7(),
+      label: template.templateId === "custom" ? "" : template.label,
+      baseUrl: template.baseUrl,
+    }
+    if (template.templateId !== "custom") draft.templateId = template.templateId
+    setEditorSeed({ kind: "new", draft })
+  }
+
   const handleConfirmRemove = async () => {
+    if (!removeTarget) return
     setRemoveBusy(true)
     try {
-      await save(null)
-      setRemoveOpen(false)
+      await remove(removeTarget.id)
+      setRemoveTarget(null)
     } finally {
       setRemoveBusy(false)
     }
   }
-
-  const details =
-    preset !== null && preset !== undefined ? (
-      <div className="space-y-1.5">
-        <div>
-          <span className="text-muted-foreground">{t("baseUrlField")}: </span>
-          <span className="font-mono break-all">{preset.baseUrl}</span>
-        </div>
-        {preset.extraHeaders && Object.keys(preset.extraHeaders).length > 0 && (
-          <div>
-            <span className="text-muted-foreground">{t("headersField")}: </span>
-            <ul className="mt-1 space-y-0.5">
-              {Object.entries(preset.extraHeaders).map(([k, v]) => (
-                <li key={k} className="font-mono break-all">
-                  {k}: {v}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    ) : null
 
   return (
     <Card>
@@ -94,62 +102,109 @@ export function PresetPicker({ provider }: PresetPickerProps) {
 
         {loading ? (
           <p className="text-xs text-muted-foreground">…</p>
-        ) : preset ? (
-          <SelectablePresetCard
-            title={preset.label}
-            badge="active"
-            badgeLabel={t("presetActive")}
-            details={details}
-          />
-        ) : (
+        ) : presets.length === 0 ? (
           <SelectablePresetCard
             title={t("noPreset")}
             badge="inactive"
             badgeLabel={t("presetInactive")}
           />
+        ) : (
+          <ul className="space-y-1.5">
+            {presets.map((preset) => {
+              const isDefault = preset.id === defaultPresetId
+              return (
+                <li key={preset.id}>
+                  <SelectablePresetCard
+                    title={preset.label || preset.baseUrl}
+                    badge={isDefault ? "default" : undefined}
+                    badgeLabel={isDefault ? t("defaultBadge") : undefined}
+                    details={<PresetDetails preset={preset} supportsFast={supportsFast} />}
+                    actions={
+                      <>
+                        {!isDefault && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void setDefault(preset.id)}
+                          >
+                            {t("setDefault")}
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditorSeed({ kind: "edit", preset })}
+                        >
+                          {t("editPreset")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={() => setRemoveTarget(preset)}
+                        >
+                          {t("removePreset")}
+                        </Button>
+                      </>
+                    }
+                  />
+                </li>
+              )
+            })}
+          </ul>
         )}
 
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-            {preset ? t("editPreset") : t("addPreset")}
+          <Button size="sm" variant="outline" onClick={() => openNewFromTemplate(templates[0])}>
+            <PlusIcon className="mr-1 size-4" />
+            {t("addPreset")}
           </Button>
-          {preset && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setRemoveOpen(true)}
-              className="text-destructive"
-            >
-              {t("removePreset")}
-            </Button>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline">
+                {t("newFromTemplate")}
+                <ChevronDownIcon className="ml-1 size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {templates.map((template) => (
+                <DropdownMenuItem
+                  key={template.templateId}
+                  onSelect={() => openNewFromTemplate(template)}
+                >
+                  {template.templateId === "custom" ? t("customTemplate") : template.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </CardContent>
 
-      {open && (
+      {editorSeed && (
         <PresetEditor
-          current={preset}
-          onClose={() => setOpen(false)}
+          seed={editorSeed}
+          supportsFast={supportsFast}
+          onClose={() => setEditorSeed(null)}
           onSubmit={async (next) => {
             await save(next)
-            setOpen(false)
+            setEditorSeed(null)
           }}
         />
       )}
 
-      <AlertDialog open={removeOpen} onOpenChange={(o) => !o && setRemoveOpen(false)}>
+      <AlertDialog open={removeTarget !== null} onOpenChange={(o) => !o && setRemoveTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("removeConfirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("removeConfirmDescription", { label: preset?.label ?? "" })}
+              {t("removeConfirmDescription", { label: removeTarget?.label ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={removeBusy}>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
-                // Manually intercept so we can await save before closing.
+                // Manually intercept so we can await remove before closing.
                 e.preventDefault()
                 void handleConfirmRemove()
               }}
@@ -165,19 +220,68 @@ export function PresetPicker({ provider }: PresetPickerProps) {
   )
 }
 
+function PresetDetails({
+  preset,
+  supportsFast,
+}: {
+  preset: ProviderPreset
+  supportsFast: boolean
+}) {
+  const t = useTranslations("subscription.common.preset")
+  return (
+    <div className="space-y-1.5">
+      <div>
+        <span className="text-muted-foreground">{t("baseUrlField")}: </span>
+        <span className="font-mono break-all">{preset.baseUrl}</span>
+      </div>
+      {preset.extraHeaders && Object.keys(preset.extraHeaders).length > 0 && (
+        <div>
+          <span className="text-muted-foreground">{t("headersField")}: </span>
+          <ul className="mt-1 space-y-0.5">
+            {Object.entries(preset.extraHeaders).map(([k, v]) => (
+              <li key={k} className="font-mono break-all">
+                {k}: {v}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {preset.modelMapping?.default && (
+        <div>
+          <span className="text-muted-foreground">{t("defaultModelField")}: </span>
+          <span className="font-mono break-all">{preset.modelMapping.default}</span>
+        </div>
+      )}
+      {supportsFast && preset.modelMapping?.fast && (
+        <div>
+          <span className="text-muted-foreground">{t("fastModelField")}: </span>
+          <span className="font-mono break-all">{preset.modelMapping.fast}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PresetEditor({
-  current,
+  seed,
+  supportsFast,
   onClose,
   onSubmit,
 }: {
-  current: ProviderPreset | null
+  seed: EditorSeed
+  supportsFast: boolean
   onClose: () => void
   onSubmit: (next: ProviderPreset) => Promise<void>
 }) {
   const t = useTranslations("subscription.common.preset")
-  const [label, setLabel] = useState(current?.label ?? "")
-  const [baseUrl, setBaseUrl] = useState(current?.baseUrl ?? "")
-  const [headersText, setHeadersText] = useState(() => serializeHeaders(current?.extraHeaders))
+  const base = seed.kind === "edit" ? seed.preset : seed.draft
+  const isEdit = seed.kind === "edit"
+
+  const [label, setLabel] = useState(base.label ?? "")
+  const [baseUrl, setBaseUrl] = useState(base.baseUrl ?? "")
+  const [headersText, setHeadersText] = useState(() => serializeHeaders(base.extraHeaders))
+  const [defaultModel, setDefaultModel] = useState(base.modelMapping?.default ?? "")
+  const [fastModel, setFastModel] = useState(base.modelMapping?.fast ?? "")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -203,15 +307,25 @@ function PresetEditor({
       return
     }
 
+    const modelMapping: Record<string, string> = {}
+    const trimmedDefault = defaultModel.trim()
+    if (trimmedDefault) modelMapping.default = trimmedDefault
+    const trimmedFast = fastModel.trim()
+    if (supportsFast && trimmedFast) modelMapping.fast = trimmedFast
+
     setBusy(true)
     setError(null)
     try {
-      await onSubmit({
-        id: current?.id ?? uuidv7(),
+      const next: ProviderPreset = {
+        id: base.id,
         label: label.trim() || trimmedBase,
         baseUrl: trimmedBase,
         extraHeaders: Object.keys(parsedHeaders).length > 0 ? parsedHeaders : undefined,
-      })
+      }
+      // Preserve provenance through edits / template instantiation.
+      if (base.templateId) next.templateId = base.templateId
+      if (Object.keys(modelMapping).length > 0) next.modelMapping = modelMapping
+      await onSubmit(next)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -223,7 +337,7 @@ function PresetEditor({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{current ? t("editPreset") : t("addPreset")}</DialogTitle>
+          <DialogTitle>{isEdit ? t("editPreset") : t("addPreset")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
@@ -261,6 +375,29 @@ function PresetEditor({
             />
             <p className="text-[11px] text-muted-foreground">{t("headersHint")}</p>
           </div>
+          <div className="space-y-1">
+            <Label htmlFor="preset-default-model">{t("defaultModelField")}</Label>
+            <Input
+              id="preset-default-model"
+              value={defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+              placeholder={t("defaultModelPlaceholder")}
+              spellCheck={false}
+            />
+            <p className="text-[11px] text-muted-foreground">{t("modelMappingHint")}</p>
+          </div>
+          {supportsFast && (
+            <div className="space-y-1">
+              <Label htmlFor="preset-fast-model">{t("fastModelField")}</Label>
+              <Input
+                id="preset-fast-model"
+                value={fastModel}
+                onChange={(e) => setFastModel(e.target.value)}
+                placeholder={t("fastModelPlaceholder")}
+                spellCheck={false}
+              />
+            </div>
+          )}
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 

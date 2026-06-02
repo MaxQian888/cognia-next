@@ -8278,7 +8278,20 @@
         "presetActive": "预设已生效",
         "presetInactive": "使用默认端点",
         "removeConfirmTitle": "删除该预设？",
-        "removeConfirmDescription": "“{label}”将被清除，服务商会回到内置端点。你可以随时重新添加。"
+        "removeConfirmDescription": "“{label}”将被清除，服务商会回到内置端点。你可以随时重新添加。",
+        "defaultBadge": "默认",
+        "setDefault": "设为默认",
+        "newFromTemplate": "从模板新建",
+        "customTemplate": "自定义端点",
+        "defaultModelField": "默认模型（可选）",
+        "defaultModelPlaceholder": "例如：claude-sonnet-4-5",
+        "fastModelField": "快速模型（可选）",
+        "fastModelPlaceholder": "例如：claude-haiku-4-5",
+        "modelMappingHint": "重写传给服务商的模型环境变量。留空则沿用上游默认值。"
+      },
+      "accountPreset": {
+        "ariaLabel": "该账户的端点预设",
+        "useDefault": "使用默认"
       },
       "importExport": {
         "title": "备份与还原",

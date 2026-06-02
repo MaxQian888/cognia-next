@@ -15,12 +15,16 @@ import { isTauri } from "@/lib/tauri"
 
 import {
   deleteAccount,
+  deleteProviderPreset,
   getAccount,
   getActiveAccount,
   getProviderPreset,
   listAccounts,
+  listPresets,
   renameAccount,
+  saveProviderPreset,
   setActiveAccount,
+  setDefaultPreset,
   setProviderPreset,
 } from "./transport"
 import type {
@@ -267,4 +271,112 @@ export function useProviderPreset(provider: ProviderId): UseProviderPresetResult
   )
 
   return { preset, loading, reload, save }
+}
+
+// ---------------------------------------------------------------------------
+// useProviderPresets(provider) — the v3 preset library
+// ---------------------------------------------------------------------------
+
+export interface UseProviderPresetsResult {
+  /** Every preset in the provider's vault. Empty until the first load resolves. */
+  presets: ProviderPreset[]
+  /** Provider-level default preset id, or `null` when none is marked default. */
+  defaultPresetId: string | null
+  loading: boolean
+  /** Re-read the library from the keyring. */
+  reload: () => Promise<void>
+  /** Upsert a preset by id, then refresh the list. */
+  save: (preset: ProviderPreset) => Promise<void>
+  /** Remove a preset by id (also clears default + bindings server-side). */
+  remove: (presetId: string) => Promise<void>
+  /** Set or clear the provider-level default preset id. */
+  setDefault: (presetId: string | null) => Promise<void>
+}
+
+export function useProviderPresets(provider: ProviderId): UseProviderPresetsResult {
+  const [presets, setPresets] = useState<ProviderPreset[]>([])
+  const [defaultPresetId, setDefaultPresetId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const reload = useCallback(async () => {
+    if (!isTauri()) {
+      setPresets([])
+      setDefaultPresetId(null)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const [list, resolved] = await Promise.all([
+        listPresets(provider),
+        getProviderPreset(provider),
+      ])
+      setPresets(list)
+      setDefaultPresetId(resolved?.id ?? null)
+    } finally {
+      setLoading(false)
+    }
+  }, [provider])
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      if (!isTauri()) {
+        if (alive) {
+          setPresets([])
+          setDefaultPresetId(null)
+          setLoading(false)
+        }
+        return
+      }
+      try {
+        const [list, resolved] = await Promise.all([
+          listPresets(provider),
+          getProviderPreset(provider),
+        ])
+        if (alive) {
+          setPresets(list)
+          setDefaultPresetId(resolved?.id ?? null)
+        }
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [provider])
+
+  const save = useCallback(
+    async (preset: ProviderPreset) => {
+      await saveProviderPreset(provider, preset)
+      setPresets((prev) => {
+        const idx = prev.findIndex((p) => p.id === preset.id)
+        if (idx < 0) return [...prev, preset]
+        const next = prev.slice()
+        next[idx] = preset
+        return next
+      })
+    },
+    [provider]
+  )
+
+  const remove = useCallback(
+    async (presetId: string) => {
+      await deleteProviderPreset(provider, presetId)
+      setPresets((prev) => prev.filter((p) => p.id !== presetId))
+      setDefaultPresetId((prev) => (prev === presetId ? null : prev))
+    },
+    [provider]
+  )
+
+  const setDefault = useCallback(
+    async (presetId: string | null) => {
+      await setDefaultPreset(provider, presetId)
+      setDefaultPresetId(presetId)
+    },
+    [provider]
+  )
+
+  return { presets, defaultPresetId, loading, reload, save, remove, setDefault }
 }
