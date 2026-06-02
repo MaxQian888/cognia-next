@@ -17,6 +17,11 @@ describe("ErrorTraceDetails", () => {
     expect(screen.getByText("Widget failed")).toBeInTheDocument()
   })
 
+  it("tags the Alert root with the ai-error-trace data-slot for theme/wallpaper hooks", () => {
+    const { container } = render(<ErrorTraceDetails error={new Error("boom")} />)
+    expect(container.querySelector('[data-slot="ai-error-trace"]')).toBeInTheDocument()
+  })
+
   it("appends the plugin name to the title when pluginId is set", () => {
     render(
       <ErrorTraceDetails

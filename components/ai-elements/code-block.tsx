@@ -294,6 +294,7 @@ export const CodeBlockContainer = ({
   ...props
 }: HTMLAttributes<HTMLDivElement> & { language: string }) => (
   <div
+    data-slot="ai-code-block"
     className={cn(
       "group relative w-full overflow-hidden rounded-md border bg-background text-foreground",
       className

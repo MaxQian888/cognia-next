@@ -17,6 +17,7 @@ export type ArtifactProps = HTMLAttributes<HTMLDivElement>
 
 export const Artifact = ({ className, ...props }: ArtifactProps) => (
   <div
+    data-slot="ai-artifact"
     className={cn(
       "flex flex-col overflow-hidden rounded-lg border bg-background shadow-sm",
       className

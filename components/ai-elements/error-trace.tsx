@@ -58,7 +58,7 @@ export function ErrorTraceDetails({
   const headline = pluginId ? `${title} — ${pluginName ?? pluginId}` : title
 
   return (
-    <Alert variant="destructive" className={cn("space-y-2", className)}>
+    <Alert data-slot="ai-error-trace" variant="destructive" className={cn("space-y-2", className)}>
       <AlertCircle className="h-4 w-4" />
       <AlertTitle>{headline}</AlertTitle>
       <AlertDescription className="min-w-0 space-y-2">

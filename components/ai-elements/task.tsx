@@ -9,6 +9,7 @@ export type TaskItemFileProps = ComponentProps<"div">
 
 export const TaskItemFile = ({ children, className, ...props }: TaskItemFileProps) => (
   <div
+    data-slot="ai-task"
     className={cn(
       "inline-flex items-center gap-1 rounded-md border bg-secondary px-1.5 py-0.5 text-foreground text-xs",
       className

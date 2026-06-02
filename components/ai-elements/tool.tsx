@@ -26,6 +26,7 @@ export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
+    data-slot="ai-tool"
     className={cn(
       // No backdrop-filter: a tool-call-dense reply stacks dozens of these
       // cards in the scroll list, and each backdrop-filter layer is re-sampled

@@ -191,6 +191,7 @@ export const ContextContentFooter = ({
 
   return (
     <div
+      data-slot="ai-context"
       className={cn(
         "flex w-full items-center justify-between gap-3 bg-secondary p-3 text-xs",
         className

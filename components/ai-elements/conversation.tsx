@@ -74,6 +74,7 @@ export const ConversationScrollButton = ({
   return (
     !isAtBottom && (
       <Button
+        data-slot="ai-conversation"
         className={cn(
           "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
           className

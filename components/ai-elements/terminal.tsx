@@ -21,8 +21,9 @@ export interface TerminalProps {
 export function Terminal({ className, children, output, isStreaming }: TerminalProps) {
   return (
     <ScrollArea
+      data-slot="ai-terminal"
       className={cn(
-        "h-full w-full rounded border bg-zinc-950 font-mono text-xs text-zinc-100",
+        "h-full w-full rounded border bg-[var(--terminal-surface)] font-mono text-xs text-[var(--terminal-foreground)]",
         className
       )}
     >
@@ -66,7 +67,7 @@ export function TerminalHeader({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-2 border-b border-zinc-800 px-2 py-1 text-[11px] text-zinc-300",
+        "flex items-center justify-between gap-2 border-b border-[var(--terminal-border)] px-2 py-1 text-[11px] text-zinc-300",
         className
       )}
     >
