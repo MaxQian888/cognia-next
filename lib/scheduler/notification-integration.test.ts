@@ -184,11 +184,12 @@ describe("notification-integration", () => {
 
       expect(fetch).toHaveBeenCalledWith(
         "https://example.com/webhook",
-        expect.objectContaining({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        })
+        expect.objectContaining({ method: "POST" })
       )
+      // The delivery now carries a Standard-Webhooks-shaped body.
+      const [, init] = (fetch as jest.Mock).mock.calls[0]
+      const body = JSON.parse(init.body as string)
+      expect(body).toMatchObject({ source: "scheduler", eventType: "complete" })
     })
 
     it("should handle notification errors gracefully", async () => {

@@ -5,6 +5,7 @@
 
 import type { ScheduledTask, TaskExecution, NotificationChannel } from "@/types/scheduler"
 import type { NotificationChannel as CenterChannel, NotificationLevel } from "@/types/notifications"
+import type { OutboundWebhookEvent, RemoteControlOutboundHeader } from "@/types/remote-control"
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
@@ -179,59 +180,64 @@ function sendToastNotification(title: string, body: string, eventType: TaskEvent
   log.debug(`Toast notification sent: ${title}`)
 }
 
+function toHeaderList(headers?: Record<string, string>): RemoteControlOutboundHeader[] {
+  if (!headers) return []
+  return Object.entries(headers).map(([name, value]) => ({ name, value }))
+}
+
 /**
- * Send webhook notification with retry and timeout
+ * Send a webhook notification through the remote-control outbound egress
+ * pipeline: signed (Standard Webhooks) when a secret is configured, with the
+ * user's custom default headers, exponential-backoff retry, and a body
+ * serialized exactly once. Also fans the same event out to any configured
+ * egress endpoints.
  */
 async function sendWebhookNotification(
   url: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  const MAX_RETRIES = 3
-  const BASE_DELAY = 1000 // 1s
-  const TIMEOUT_MS = 10000 // 10s
+  const [{ getWebhookOutboundConfig }, { deliverWebhook }, { publishOutboundEvent }] =
+    await Promise.all([
+      import("./webhook-outbound-config"),
+      import("@/lib/remote-control/outbound/delivery"),
+      import("@/lib/remote-control/outbound/egress-registry"),
+    ])
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      })
-
-      clearTimeout(timer)
-
-      if (!response.ok) {
-        throw SchedulerError.webhookFailed(url, response.status)
-      }
-
-      log.debug(`Webhook notification sent to: ${url}`)
-      return
-    } catch (error) {
-      clearTimeout(timer)
-
-      if (attempt === MAX_RETRIES) {
-        log.error(
-          `Failed to send webhook notification to ${url} after ${MAX_RETRIES + 1} attempts:`,
-          error
-        )
-        throw SchedulerError.webhookFailed(
-          url,
-          undefined,
-          error instanceof Error ? error : undefined
-        )
-      }
-
-      const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500
-      log.warn(
-        `Webhook attempt ${attempt + 1} failed for ${url}, retrying in ${Math.round(delay)}ms`
-      )
-      await new Promise((resolve) => setTimeout(resolve, delay))
-    }
+  const cfg = await getWebhookOutboundConfig()
+  const event: OutboundWebhookEvent = {
+    id: "msg_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+    eventType: String(payload.eventType ?? "task"),
+    source: "scheduler",
+    payload,
+    occurredAt: new Date().toISOString(),
   }
+
+  // Deliver to the task's own webhook URL (per-task), signed + with the user's
+  // custom default headers.
+  const result = await deliverWebhook({
+    endpoint: {
+      id: "task-webhook",
+      name: "task",
+      url,
+      headers: toHeaderList(cfg.headers),
+      enabled: true,
+    },
+    event,
+    signingSecret: cfg.signingSecret,
+  })
+
+  // Also fan the same event out to any standalone egress endpoints.
+  void publishOutboundEvent(event)
+
+  if (!result.ok) {
+    log.error(`Failed to send webhook notification to ${url}: ${result.error ?? result.httpStatus}`)
+    throw SchedulerError.webhookFailed(
+      url,
+      result.httpStatus,
+      result.error ? new Error(result.error) : undefined
+    )
+  }
+  log.debug(`Webhook notification sent to: ${url}`)
 }
 
 /**
