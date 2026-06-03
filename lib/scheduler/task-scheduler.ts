@@ -672,14 +672,17 @@ class TaskSchedulerImpl {
   /**
    * Run a task immediately
    */
-  async runTaskNow(taskId: string): Promise<TaskExecution | null> {
+  async runTaskNow(
+    taskId: string,
+    opts: { triggerSource?: TaskExecutionTriggerSource } = {}
+  ): Promise<TaskExecution | null> {
     const task = await schedulerDb.getTask(taskId)
     if (!task) {
       log.warn(`Task not found for immediate run: ${taskId}`)
       return null
     }
 
-    return this.executeTask(task, 0, { triggerSource: "run-now" })
+    return this.executeTask(task, 0, { triggerSource: opts.triggerSource ?? "run-now" })
   }
 
   /**

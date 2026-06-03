@@ -15,6 +15,7 @@ import type {
   SchedulerPermissionPolicy,
   TaskCreationSource,
   ScheduledTaskType,
+  TaskExecutionTriggerSource,
 } from "@/types/scheduler"
 import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
@@ -78,7 +79,10 @@ interface SchedulerActions {
   // Task Actions
   pauseTask: (taskId: string) => Promise<boolean>
   resumeTask: (taskId: string) => Promise<boolean>
-  runTaskNow: (taskId: string) => Promise<TaskExecution | null>
+  runTaskNow: (
+    taskId: string,
+    opts?: { triggerSource?: TaskExecutionTriggerSource }
+  ) => Promise<TaskExecution | null>
 
   // Data Loading
   loadTasks: () => Promise<void>
@@ -288,11 +292,11 @@ export const useSchedulerStore = create<SchedulerStore>()(
         }
       },
 
-      runTaskNow: async (taskId) => {
+      runTaskNow: async (taskId, opts) => {
         set({ isLoading: true, error: null })
         try {
           const scheduler = getTaskScheduler()
-          const execution = await scheduler.runTaskNow(taskId)
+          const execution = await scheduler.runTaskNow(taskId, opts)
 
           if (execution) {
             await get().refreshAll()

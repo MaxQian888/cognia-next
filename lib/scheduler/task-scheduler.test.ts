@@ -452,6 +452,39 @@ describe("TaskScheduler", () => {
         expect(result).toBeDefined()
         expect(executor).toHaveBeenCalled()
       })
+
+      it("tags the execution with a caller-supplied triggerSource", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const task: ScheduledTask = {
+          id: "task-remote",
+          name: "Remote",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+          config: {
+            maxRetries: 3,
+            retryDelay: 1000,
+            timeout: 30000,
+            allowConcurrent: true,
+            runMissedOnStartup: true,
+          },
+          notification: { onStart: false, onComplete: false, onError: true },
+          status: "active",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        mockSchedulerDb.getTask.mockResolvedValueOnce(task)
+
+        await scheduler.runTaskNow("task-remote", { triggerSource: "remote" })
+
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ triggerSource: "remote" })
+        )
+      })
     })
 
     describe("lifecycle integration flow", () => {

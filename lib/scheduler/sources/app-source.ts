@@ -16,6 +16,7 @@ import type {
   CreateScheduledTaskInput,
   ScheduledTask,
   ScheduledTaskStatus,
+  TaskExecutionTriggerSource,
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
 import {
@@ -50,7 +51,10 @@ export interface AppSourceScheduler {
   deleteTask(taskId: string): Promise<boolean>
   pauseTask(taskId: string): Promise<boolean>
   resumeTask(taskId: string): Promise<boolean>
-  runTaskNow(taskId: string): Promise<unknown>
+  runTaskNow(
+    taskId: string,
+    opts?: { triggerSource?: TaskExecutionTriggerSource }
+  ): Promise<unknown>
 }
 
 export interface AppSourceDb {
