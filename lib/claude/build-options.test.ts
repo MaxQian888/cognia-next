@@ -67,6 +67,7 @@ import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@
 import { getTeam } from "@/lib/db/teams"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@/lib/logging"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -245,6 +246,29 @@ describe("resolveSendOptions — agent-mode prompt template variables", () => {
     expect(opts.systemPrompt).not.toContain("{{date}}")
     expect(opts.systemPrompt).not.toContain("{{tools_list}}")
     expect(opts.systemPrompt).toContain("calculator")
+  })
+})
+
+describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
+  it("exposes the user's non-built-in subagent templates to direct chat", async () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-direct-1",
+      name: "BO Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help.", tools: ["t"] },
+      isBuiltIn: false,
+    })
+    try {
+      const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+      expect(opts.agents?.["template:bo-helper"]).toMatchObject({
+        description: "helps",
+        prompt: "You help.",
+      })
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-direct-1")
+    }
   })
 })
 

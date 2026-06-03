@@ -1464,6 +1464,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("team session subagent registration failed:", err)
     }
+  } else {
+    // Direct chat: expose the user's OWN subagents (plugin-registered +
+    // imported/authored templates) so the model can delegate to them via the
+    // Task tool — previously subagents were dormant outside workflow-editor /
+    // team sessions. Empty-guarded: an empty map would otherwise advertise a
+    // no-op agent surface on every turn.
+    try {
+      const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
+      const direct = resolveAllSubagents({ context: "direct" })
+      if (Object.keys(direct).length > 0) {
+        opts.agents = { ...(opts.agents ?? {}), ...direct }
+      }
+    } catch (err) {
+      console.warn("direct-chat subagent registration failed:", err)
+    }
   }
 
   // --- Resume / fork continuity --------------------------------------------

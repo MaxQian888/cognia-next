@@ -24,6 +24,8 @@ import { workflowRefactorerAgent } from "./workflow-refactorer"
 import { workflowDocWriterAgent } from "./workflow-doc-writer"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 
 /**
  * Single map keyed by the dispatcher-agent name (lowercase-with-dashes)
@@ -68,6 +70,35 @@ function projectPluginSubagent(entry: {
   return { id, def }
 }
 
+function slugifySubagentName(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "subagent"
+  )
+}
+
+/**
+ * Project a user `SubAgentTemplate` (imported via the subagent-importers or
+ * authored in Settings) into the Claude SDK `AgentDefinition` shape. The
+ * dispatcher id is namespaced under `template:` so it cannot collide with the
+ * bare built-in dispatcher names (workflow-*) or plugin ids (`<pluginId>:<id>`).
+ */
+function projectSubagentTemplate(tpl: SubAgentTemplate): {
+  id: string
+  def: Record<string, unknown>
+} {
+  const def: Record<string, unknown> = {
+    description: tpl.description,
+    prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
+  }
+  if (tpl.config.tools) def.tools = tpl.config.tools
+  if (tpl.config.model) def.model = tpl.config.model
+  if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
+  return { id: `template:${slugifySubagentName(tpl.name)}`, def }
+}
+
 /**
  * Surface every subagent visible to a given session context.
  *
@@ -78,10 +109,28 @@ function projectPluginSubagent(entry: {
  * - `"team"`: 4 built-in workflow-* subagents UNIONED with every plugin-
  *   registered subagent. Plugin ids are namespaced as `<pluginId>:<id>`
  *   to avoid clashing with built-in dispatcher names.
+ * - `"direct"`: the user's OWN subagents — every plugin-registered subagent
+ *   UNIONED with user-authored / imported templates (`isBuiltIn !== true`).
+ *   The workflow-* built-ins (editor-specific) and the seeded built-in
+ *   templates (Settings starting points) are deliberately NOT auto-injected
+ *   into every direct-chat turn.
  */
 export function resolveAllSubagents(opts: {
-  context: "workflow-editor" | "team"
+  context: "workflow-editor" | "team" | "direct"
 }): Record<string, Record<string, unknown>> {
+  if (opts.context === "direct") {
+    const result: Record<string, Record<string, unknown>> = {}
+    for (const entry of listSubagentEntries()) {
+      const { id, def } = projectPluginSubagent(entry)
+      result[id] = def
+    }
+    for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
+      if (tpl.isBuiltIn) continue
+      const { id, def } = projectSubagentTemplate(tpl)
+      result[id] = def
+    }
+    return result
+  }
   const builtIn = workflowEditorSubagents()
   if (opts.context === "workflow-editor") {
     return builtIn

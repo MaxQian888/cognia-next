@@ -4,7 +4,10 @@ import {
   workflowRefactorerAgent,
   workflowDocWriterAgent,
   workflowEditorSubagents,
+  resolveAllSubagents,
 } from "./index"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 
 describe("workflow subagent definitions", () => {
   it("every subagent exposes a description, prompt, and tools list", () => {
@@ -72,5 +75,37 @@ describe("workflow subagent definitions", () => {
       "workflow-doc-writer",
       "workflow-refactorer",
     ])
+  })
+})
+
+describe("resolveAllSubagents — direct context", () => {
+  it("includes user (non-built-in) templates; excludes seeded built-ins + workflow-* agents", () => {
+    const userTpl: SubAgentTemplate = {
+      id: "user-direct-1",
+      name: "My Reviewer",
+      description: "reviews my code",
+      category: "coding",
+      taskTemplate: "Review {{code}}",
+      config: { systemPrompt: "You review code.", tools: ["x"], model: "sonnet", maxSteps: 5 },
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate(userTpl)
+    try {
+      const direct = resolveAllSubagents({ context: "direct" })
+      expect(direct["template:my-reviewer"]).toEqual({
+        description: "reviews my code",
+        prompt: "You review code.",
+        tools: ["x"],
+        model: "sonnet",
+        maxTurns: 5,
+      })
+      // The workflow-* editor built-ins are NOT injected into direct chat.
+      expect(direct["workflow-designer"]).toBeUndefined()
+      // Seeded built-in templates (isBuiltIn) are excluded (Settings starting
+      // points, not auto-injected every turn).
+      expect(direct["template:web-research"]).toBeUndefined()
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-direct-1")
+    }
   })
 })
