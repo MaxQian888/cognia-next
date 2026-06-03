@@ -48,6 +48,71 @@ test("resolveProtocol returns null for unknown provider with no protocol hint", 
   assert.equal(resolveProtocol("acme-corp", undefined), null)
 })
 
+test("resolveProtocol maps built-in local engines to the openai protocol (ADR-0043)", () => {
+  const { resolveProtocol } = __testing__
+  for (const p of [
+    "ollama",
+    "lmstudio",
+    "llamacpp",
+    "llamafile",
+    "vllm",
+    "localai",
+    "jan",
+    "textgenwebui",
+    "koboldcpp",
+    "tabbyapi",
+  ]) {
+    assert.equal(resolveProtocol(p, undefined), "openai")
+  }
+})
+
+test("session exposes pendingApprovals AND pendingPluginToolCalls (gate-first contract)", () => {
+  const { emit } = captureEmit()
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: {},
+      pluginTools: [],
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([]),
+  })
+  assert.ok(session.pendingApprovals instanceof Map)
+  assert.ok(session.pendingPluginToolCalls instanceof Map)
+})
+
+test("v6 text-delta (field `text`) produces non-empty assistant text end-to-end", async () => {
+  const { events, emit } = captureEmit()
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "text-delta", id: "1", text: "Hello" },
+      { type: "text-delta", id: "1", text: " v6" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const snapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
+  assert.ok(snapshots.length >= 1)
+  assert.equal(snapshots[snapshots.length - 1].event.message.content[0].text, "Hello v6")
+})
+
 test("dispatchAiSdk emits session_ended error when provider has no resolvable protocol", () => {
   const { events, emit } = captureEmit()
   const result = dispatchAiSdk({

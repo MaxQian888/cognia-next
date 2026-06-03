@@ -66,8 +66,19 @@ export const SERVER_VERSION = data.serverVersion
  *        search is active, this server's tools defer until discovered.
  * @returns {ReturnType<typeof createSdkMcpServer> | null}
  */
-export function buildCogniaToolsServer({ enabled, alwaysLoad, lspResolver }) {
-  if (!enabled || typeof enabled !== "object") return null
+/**
+ * Collect the raw `SdkMcpToolDefinition`s for the enabled categories (+ the
+ * resolver-bound LSP tools). These are the same defs `buildCogniaToolsServer`
+ * wraps into an in-process MCP server for the Anthropic path; exported so the
+ * non-Anthropic AI-SDK bridge (`dispatch/ai-sdk-tools.mjs`) can convert them
+ * into native AI SDK `tool()` objects (ADR-0043). Each def is
+ * `{ name, description, inputSchema: <zod raw shape>, handler }`.
+ *
+ * @param {{ enabled?: Record<string, boolean>, lspResolver?: unknown }} [options]
+ * @returns {Array<{ name: string, description?: string, inputSchema?: unknown, handler: Function }>}
+ */
+export function collectCogniaToolDefs({ enabled, lspResolver } = {}) {
+  if (!enabled || typeof enabled !== "object") return []
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
     if (enabled[category]) {
@@ -80,6 +91,12 @@ export function buildCogniaToolsServer({ enabled, alwaysLoad, lspResolver }) {
   if (enabled.lsp && lspResolver) {
     tools.push(...createLspTools(lspResolver))
   }
+  return tools
+}
+
+export function buildCogniaToolsServer({ enabled, alwaysLoad, lspResolver }) {
+  if (!enabled || typeof enabled !== "object") return null
+  const tools = collectCogniaToolDefs({ enabled, lspResolver })
   if (tools.length === 0) return null
   return createSdkMcpServer({
     name: SERVER_NAME,

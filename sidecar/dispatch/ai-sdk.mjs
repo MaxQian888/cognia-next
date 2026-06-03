@@ -4,9 +4,12 @@
 // Lazy-imports the per-provider SDKs so the sidecar's cold start doesn't pay
 // for OpenAI when the user is on Anthropic, etc.
 //
-// Tools / MCP / A2UI are NOT wired here in P2 — that's a documented gap.
-// Any chat that has `allowedTools` set but picks a non-Anthropic provider
-// will be disabled in the composer (P3).
+// Tool-calling IS wired (ADR-0043 Phase 2): built-in tools + renderer-proxied
+// plugin tools are converted to native AI SDK tools by `ai-sdk-tools.mjs` and
+// driven through `streamText`'s multi-step loop. Tool execution is gated by the
+// same `permission_request` round-trip as the Anthropic path (resolved via
+// `pendingApprovals`), so a local model can't silently run shell/process tools.
+// A2UI remains Anthropic-only by design.
 
 import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
@@ -23,6 +26,20 @@ function resolveProtocol(provider, credentials) {
     case "deepseek":
     case "groq":
     case "mistral-openai-compat":
+    // Local inference engines all expose an OpenAI-compatible /v1 surface, so
+    // they dispatch through the openai client with a custom baseURL. Built-in
+    // ids must be recognised here because they reach the sidecar without an
+    // explicit `providerCredentials.protocol` (only custom ids carry one).
+    case "ollama":
+    case "lmstudio":
+    case "llamacpp":
+    case "llamafile":
+    case "vllm":
+    case "localai":
+    case "jan":
+    case "textgenwebui":
+    case "koboldcpp":
+    case "tabbyapi":
       return "openai"
     case "google":
     case "gemini":
@@ -132,6 +149,20 @@ export function dispatchAiSdk({
   let active = false
   let cancelled = false
 
+  // Plugin tools round-trip through the renderer; claude-host resolves
+  // `plugin_tool_response` against this Map (same contract as the Anthropic
+  // path). Exposed on the returned session so the host can reach it.
+  const pendingPluginToolCalls = new Map()
+  // Tool-permission approvals round-trip the same way (`permission_request` →
+  // `permission_response`), resolved by claude-host against this Map.
+  const pendingApprovals = new Map()
+  // Tools are stable for the session — build once, reuse across turns.
+  /** @type {Record<string, unknown> | undefined} */
+  let toolsCache
+  // Cap agentic steps within a single turn so a tool loop can't run away.
+  const maxSteps =
+    typeof sendOptions.maxTurns === "number" && sendOptions.maxTurns > 0 ? sendOptions.maxTurns : 16
+
   function flushAdapter(events) {
     for (const e of events) {
       emit({ type: "event", sessionId, event: e })
@@ -169,12 +200,39 @@ export function dispatchAiSdk({
         baseURL: creds.baseURL,
       })
       const streamTextFn = streamTextOverride ?? (await import("ai")).streamText
-      const result = streamTextFn({
+      // `modelParams` carries the provider's configured sampling settings
+      // (temperature, maxOutputTokens, topP, topK, penalties, stopSequences,
+      // seed, maxRetries) in AI SDK v6 call-option naming. Spread them so the
+      // turn honours the user's provider config instead of silently dropping
+      // every knob. Undefined keys are omitted by the builder upstream.
+      const modelParams = sendOptions.modelParams ?? {}
+
+      // Build native AI SDK tools (built-in + plugin) once. Lazy-imported so
+      // the bridge (and its `ai` dependency) doesn't load for tool-less turns.
+      if (toolsCache === undefined) {
+        const { buildAiSdkTools } = await import("./ai-sdk-tools.mjs")
+        toolsCache = buildAiSdkTools({
+          sendOptions,
+          emit,
+          sessionId,
+          pendingApprovals,
+          pendingPluginToolCalls,
+        })
+      }
+      const hasTools = Object.keys(toolsCache).length > 0
+
+      const streamArgs = {
         model: modelInstance,
         messages: conversation,
-        maxTokens: undefined,
-        temperature: undefined,
-      })
+        ...modelParams,
+      }
+      if (hasTools) {
+        streamArgs.tools = toolsCache
+        // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds
+        // the result back to the model until it stops or we hit the step cap.
+        streamArgs.stopWhen = ({ steps }) => (steps?.length ?? 0) >= maxSteps
+      }
+      const result = streamTextFn(streamArgs)
 
       let assistantText = ""
       for await (const evt of result.fullStream) {
@@ -182,10 +240,23 @@ export function dispatchAiSdk({
         const out = adapter.handle(evt)
         flushAdapter(out)
         if (evt?.type === "text-delta") {
-          assistantText += evt.textDelta ?? evt.delta ?? ""
+          assistantText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
         }
       }
-      if (assistantText) {
+      // Persist the turn into conversation history. When the SDK exposes the
+      // full model message list (assistant text + tool calls + tool results),
+      // prefer it so multi-turn context keeps tool history; otherwise fall back
+      // to the accumulated assistant text.
+      let respMessages = null
+      try {
+        const resp = result.response ? await result.response : null
+        if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
+      } catch {
+        respMessages = null
+      }
+      if (respMessages && respMessages.length > 0) {
+        conversation.push(...respMessages)
+      } else if (assistantText) {
         conversation.push({ role: "assistant", content: assistantText })
       }
       const usage = await result.usage.catch(() => null)
@@ -227,7 +298,8 @@ export function dispatchAiSdk({
       cancelled = true
       inputStream.close()
     },
-    pendingApprovals: new Map(),
+    pendingApprovals,
+    pendingPluginToolCalls,
     sendOptions,
   }
 }
