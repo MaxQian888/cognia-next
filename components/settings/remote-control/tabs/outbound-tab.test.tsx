@@ -34,7 +34,7 @@ describe("OutboundTab", () => {
     useRemoteControlStore.setState({
       config: {
         ...useRemoteControlStore.getState().config,
-        outbound: { hasSigningSecret: true, defaultHeaders: [] },
+        outbound: { hasSigningSecret: true, defaultHeaders: [], endpoints: [] },
       },
     })
     render(<OutboundTab />)

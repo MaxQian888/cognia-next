@@ -39,6 +39,8 @@ export interface RemoteControlOutboundConfig {
   hasSigningSecret: boolean
   /** Custom headers added to every outbound webhook delivery. */
   defaultHeaders: RemoteControlOutboundHeader[]
+  /** Egress endpoints any subsystem can publish events to (Standard Webhooks). */
+  endpoints: WebhookEgressEndpoint[]
 }
 
 export interface RemoteControlConfig {
@@ -98,6 +100,121 @@ export interface EmitEventRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Inbound command model (generic dispatch — see the ADR-0005 activation spec).
+// Rust authenticates + emits one generic `remote-control://command` event; the
+// renderer's dispatch registry routes by `target` into each subsystem's
+// existing headless run entry.
+// ---------------------------------------------------------------------------
+
+export type RemoteCommandTarget =
+  | "scheduler.task.run"
+  | "scheduler.event"
+  | "workflow.run"
+  | "goal.create"
+  | "goal.continue"
+  | "team.dispatch"
+  | "plan.run"
+
+export const REMOTE_COMMAND_TARGETS: readonly RemoteCommandTarget[] = [
+  "scheduler.task.run",
+  "scheduler.event",
+  "workflow.run",
+  "goal.create",
+  "goal.continue",
+  "team.dispatch",
+  "plan.run",
+]
+
+export function isRemoteCommandTarget(value: string): value is RemoteCommandTarget {
+  return (REMOTE_COMMAND_TARGETS as readonly string[]).includes(value)
+}
+
+/** Wire shape emitted by the Rust `/api/v1/commands/:target` route. */
+export interface RemoteCommand {
+  target: RemoteCommandTarget
+  /** Free-form args; each handler validates its own required shape. */
+  args: Record<string, unknown>
+  /** Server-generated correlation id, echoed in the 202 body. */
+  runId: string
+  /** Optional caller-supplied dedupe key (Idempotency-Key header). */
+  idempotencyKey?: string
+}
+
+export type RemoteCommandResultStatus = "accepted" | "rejected" | "replayed"
+
+export interface RemoteCommandResult {
+  runId: string
+  status: RemoteCommandResultStatus
+  detail?: string
+}
+
+// ---------------------------------------------------------------------------
+// Token capability (Tailscale-style read/write split; single token in v1).
+// ---------------------------------------------------------------------------
+
+export type TokenCapability = "read" | "write"
+
+export const DEFAULT_TOKEN_CAPABILITY: TokenCapability = "write"
+
+// ---------------------------------------------------------------------------
+// Outbound egress (Standard Webhooks).
+// ---------------------------------------------------------------------------
+
+export interface WebhookEgressEndpoint {
+  id: string
+  name: string
+  url: string
+  /** Extra headers merged onto every delivery to this endpoint. */
+  headers: RemoteControlOutboundHeader[]
+  enabled: boolean
+}
+
+export type WebhookSignatureScheme = "standard-webhooks"
+
+export interface OutboundWebhookEvent {
+  /** Stable id; becomes the `webhook-id` header (held constant across retries). */
+  id: string
+  eventType: string
+  /** Originating subsystem: "scheduler" | "goal" | "workflow" | "team" | "plan". */
+  source: string
+  payload: Record<string, unknown>
+  /** ISO-8601. */
+  occurredAt: string
+}
+
+// ---------------------------------------------------------------------------
+// Durable audit (privileged-control-plane requirement). Backed by the Dexie
+// `remoteControlAudit` table (schema v72).
+// ---------------------------------------------------------------------------
+
+export type RemoteControlAuditDirection = "inbound" | "outbound"
+
+export type RemoteControlAuditKind =
+  | "inbound.command"
+  | "inbound.rejected"
+  | "inbound.replayed"
+  | "outbound.delivered"
+  | "outbound.failed"
+
+export interface RemoteControlAuditEntry {
+  id: string
+  /** epoch ms. */
+  at: number
+  direction: RemoteControlAuditDirection
+  kind: RemoteControlAuditKind
+  target?: RemoteCommandTarget
+  runId?: string
+  result?: RemoteCommandResultStatus | "delivered" | "failed"
+  remoteIp?: string
+  idempotencyKey?: string
+  capability?: TokenCapability
+  endpointId?: string
+  httpStatus?: number
+  /** Redaction-aware structured payload (PII-gated before write). */
+  fields?: Record<string, unknown>
+}
+
+// ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
 
@@ -118,6 +235,7 @@ export const DEFAULT_REMOTE_CONTROL_CONFIG: RemoteControlConfig = {
   outbound: {
     hasSigningSecret: false,
     defaultHeaders: [],
+    endpoints: [],
   },
 }
 

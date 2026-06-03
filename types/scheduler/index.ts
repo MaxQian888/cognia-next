@@ -60,6 +60,7 @@ export type TaskExecutionTriggerSource =
   | "event"
   | "dependency"
   | "catch-up"
+  | "remote"
 
 export type TaskExecutionTerminalReason =
   | "completed"

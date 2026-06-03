@@ -102,6 +102,10 @@ function cloneConfig(c: RemoteControlConfig): RemoteControlConfig {
     outbound: {
       hasSigningSecret: c.outbound.hasSigningSecret,
       defaultHeaders: c.outbound.defaultHeaders.map((h) => ({ ...h })),
+      endpoints: (c.outbound.endpoints ?? []).map((e) => ({
+        ...e,
+        headers: e.headers.map((h) => ({ ...h })),
+      })),
     },
   }
 }

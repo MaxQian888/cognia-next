@@ -3,8 +3,11 @@ import {
   DEFAULT_REMOTE_CONTROL_CONFIG,
   DEFAULT_REMOTE_CONTROL_PORT,
   DEFAULT_REMOTE_CONTROL_RATE_LIMIT_PER_MIN,
+  DEFAULT_TOKEN_CAPABILITY,
+  REMOTE_COMMAND_TARGETS,
   REMOTE_CONTROL_RECENT_CALLS_LIMIT,
   isLoopbackAllowlistEntry,
+  isRemoteCommandTarget,
   validateCidrOrIp,
 } from "./index"
 
@@ -21,6 +24,7 @@ describe("remote-control type defaults", () => {
     expect(DEFAULT_REMOTE_CONTROL_CONFIG.outbound).toEqual({
       hasSigningSecret: false,
       defaultHeaders: [],
+      endpoints: [],
     })
   })
 
@@ -34,6 +38,22 @@ describe("remote-control type defaults", () => {
     expect(Number.isInteger(REMOTE_CONTROL_RECENT_CALLS_LIMIT)).toBe(true)
     expect(REMOTE_CONTROL_RECENT_CALLS_LIMIT).toBeGreaterThan(0)
     expect(REMOTE_CONTROL_RECENT_CALLS_LIMIT).toBeLessThanOrEqual(100)
+  })
+})
+
+describe("remote command targets", () => {
+  it("recognises every known target", () => {
+    expect(REMOTE_COMMAND_TARGETS).toContain("workflow.run")
+    expect(REMOTE_COMMAND_TARGETS).toContain("goal.create")
+    expect(REMOTE_COMMAND_TARGETS).toContain("goal.continue")
+    expect(REMOTE_COMMAND_TARGETS).toHaveLength(7)
+    expect(isRemoteCommandTarget("plan.run")).toBe(true)
+    expect(isRemoteCommandTarget("team.dispatch")).toBe(true)
+    expect(isRemoteCommandTarget("nope")).toBe(false)
+  })
+
+  it("defaults a fresh token to write capability", () => {
+    expect(DEFAULT_TOKEN_CAPABILITY).toBe("write")
   })
 })
 
