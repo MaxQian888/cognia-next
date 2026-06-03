@@ -1,12 +1,12 @@
 // Dispatch entry point — picks the right runner based on the provider id.
 //
 // Returns the same `Session` shape regardless of provider:
-//   { q, pushUserMessage, closeInput, pendingApprovals }
+//   { q, pushUserMessage, closeInput, pendingApprovals, pendingPluginToolCalls }
 //
-// `pendingApprovals` is empty for non-Anthropic providers in P2 because tool-
-// calling parity hasn't shipped yet. The composer disables non-Anthropic
-// selection when the active character has `allowedTools` set so users never
-// hit a silent capability mismatch.
+// Both runners support tool-calling (ADR-0043): the non-Anthropic path bridges
+// built-in + plugin tools to native AI SDK tools and gates execution through the
+// same `permission_request` round-trip (`pendingApprovals`). Plugin tools
+// round-trip through `pendingPluginToolCalls`. A2UI remains Anthropic-only.
 
 import { dispatchAnthropic } from "./anthropic.mjs"
 import { dispatchAiSdk } from "./ai-sdk.mjs"
