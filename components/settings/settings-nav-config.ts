@@ -47,6 +47,7 @@ import {
   PanelLeftIcon,
   CompassIcon,
   BrainIcon,
+  GitBranchIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -71,6 +72,7 @@ export type SettingsSectionId =
   | "sidebar"
   | "discover"
   | "terminal"
+  | "source-control"
   | "speech"
   | "characters"
   | "skills"
@@ -352,6 +354,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "canvas",
     group: "interface",
     icon: PencilRulerIcon,
+  },
+  {
+    id: "source-control",
+    labelKey: "sourceControl",
+    descriptionKey: "sourceControl",
+    group: "interface",
+    icon: GitBranchIcon,
+    desktopOnly: true,
   },
   {
     id: "conversation",
@@ -1148,6 +1158,20 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
   ],
   desktop: ["tauri", "tray", "autostart", "window"],
   about: ["version", "build", "credits"],
+  "source-control": [
+    "git",
+    "source control",
+    "commit",
+    "commit message",
+    "ai commit",
+    "conventional commits",
+    "diff",
+    "branch",
+    "源代码管理",
+    "提交",
+    "提交信息",
+    "分支",
+  ],
 }
 
 export function isSearchMatch(item: NavItem, query: string, t: (key: string) => string) {

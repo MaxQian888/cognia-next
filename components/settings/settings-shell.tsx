@@ -220,6 +220,10 @@ const MemorySection = dynamic(
   () => import("./sections/memory-section").then((m) => m.MemorySection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const GitSection = dynamic(() => import("./source-control/git-section").then((m) => m.GitSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -366,6 +370,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <DiscoverSection />
     case "terminal":
       return <TerminalSection />
+    case "source-control":
+      return <GitSection />
     case "speech":
       return <SpeechSection />
     case "characters":

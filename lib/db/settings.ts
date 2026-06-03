@@ -9,6 +9,7 @@ import {
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
+import { DEFAULT_GIT_SETTINGS } from "@/types/git"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
 import { getDb } from "./schema"
 
@@ -123,6 +124,9 @@ const DEFAULTS: AppSettings = {
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
   ocrSettings: { ...DEFAULT_OCR_SETTINGS },
 
+  // Source Control preferences (AI commit message generation, …).
+  gitSettings: { ...DEFAULT_GIT_SETTINGS },
+
   // Conversation title auto-generation — on by default (the instant
   // first-message truncation always runs; this gates the LLM upgrade).
   conversationTitle: { enabled: true },
@@ -154,6 +158,14 @@ export async function getSettings(): Promise<AppSettings> {
       ...(row.biometricRequiredFor ?? {}),
     },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
+    gitSettings: {
+      ...DEFAULT_GIT_SETTINGS,
+      ...(row.gitSettings ?? {}),
+      commitMessageAI: {
+        ...DEFAULT_GIT_SETTINGS.commitMessageAI,
+        ...(row.gitSettings?.commitMessageAI ?? {}),
+      },
+    },
     // Forward-compat: a row saved before sidebar customization existed has no
     // `sidebarLayout` — fall back to the default so the rail renders pinned
     // features + "More". Arrays replace wholesale (an explicit empty `pinned`

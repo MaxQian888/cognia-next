@@ -907,6 +907,13 @@ export interface AppSettings {
    * from `lib/ocr/types.ts`.
    */
   ocrSettings?: import("@/types/ocr").UserOcrSettings
+  /**
+   * Source Control feature preferences (AI commit-message generation, …).
+   * Merged forward by `lib/db/settings.ts:getSettings()` from
+   * `DEFAULT_GIT_SETTINGS` in `types/git`, so older installs pick up new
+   * defaults without a schema migration.
+   */
+  gitSettings?: import("@/types/git").GitUiSettings
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
