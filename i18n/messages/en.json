@@ -5362,7 +5362,20 @@
         "testSucceeded": "Inbound listener responded with 200.",
         "testFailed": "Inbound test failed: {error}",
         "startError": "Failed to start listener: {error}",
-        "stopError": "Failed to stop listener: {error}"
+        "stopError": "Failed to stop listener: {error}",
+        "capabilityHeading": "Token capability",
+        "capabilityHelp": "Read tokens may only hit the health route; write tokens may run triggers. Applied on the next listener start.",
+        "capability_read": "Read only",
+        "capability_write": "Read + write",
+        "capabilityRestartNote": "Changing capability takes effect after you toggle the listener off and on.",
+        "commandTargetsHeading": "Command targets",
+        "commandTargetsHelp": "Authenticated POSTs to these routes dispatch into the matching subsystem.",
+        "hardeningHeading": "Loopback hardening",
+        "hardeningHelp": "Always-on protections beyond the bearer token and IP allowlist.",
+        "hardeningHost": "Host-header allowlist (blocks DNS rebinding / 0.0.0.0-day)",
+        "hardeningOrigin": "Cross-origin rejection (blocks browser-originated calls)",
+        "hardeningIdempotency": "Idempotency-Key replay cache (5-minute window)",
+        "hardeningCsp": "Content-Security-Policy: default-src 'none' on every response"
       },
       "outbound": {
         "heading": "Outbound webhook signing",

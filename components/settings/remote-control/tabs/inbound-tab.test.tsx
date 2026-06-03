@@ -116,6 +116,39 @@ describe("InboundTab — desktop", () => {
     expect(screen.getByText(/non-loopback/i)).toBeInTheDocument()
   })
 
+  it("switches the token capability to read", async () => {
+    useRemoteControlStore.setState({
+      status: {
+        inboundRunning: false,
+        boundPort: null,
+        lastCallAt: null,
+        inboundCallsTotal: 0,
+        hasInboundToken: true,
+      },
+    })
+    render(<InboundTab />)
+    expect(useRemoteControlStore.getState().config.inbound.capability).toBe("write")
+    fireEvent.click(screen.getByRole("button", { name: /read only/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.capability).toBe("read")
+    )
+  })
+
+  it("lists every command target route", () => {
+    useRemoteControlStore.setState({
+      status: {
+        inboundRunning: false,
+        boundPort: null,
+        lastCallAt: null,
+        inboundCallsTotal: 0,
+        hasInboundToken: true,
+      },
+    })
+    render(<InboundTab />)
+    expect(screen.getByText(/commands\/workflow\.run/)).toBeInTheDocument()
+    expect(screen.getByText(/commands\/plan\.run/)).toBeInTheDocument()
+  })
+
   it("calls fetch with bearer header when testing the listener", async () => {
     ;(remoteControlGetToken as jest.Mock).mockResolvedValue("the-token")
     global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 })

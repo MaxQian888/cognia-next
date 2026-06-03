@@ -21,7 +21,11 @@ import { DomainListInput } from "@/components/settings/search/_shared/domain-lis
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetToken, remoteControlRotateToken } from "@/lib/tauri/remote-control"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
-import { isLoopbackAllowlistEntry, validateCidrOrIp } from "@/types/remote-control"
+import {
+  isLoopbackAllowlistEntry,
+  REMOTE_COMMAND_TARGETS,
+  validateCidrOrIp,
+} from "@/types/remote-control"
 
 export function InboundTab() {
   const t = useTranslations("settings.remoteControl.inbound")
@@ -296,6 +300,61 @@ export function InboundTab() {
             <SendIcon className="mr-2 h-3.5 w-3.5" />
             {t("testInbound")}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("capabilityHeading")}</CardTitle>
+          <CardDescription>{t("capabilityHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            {(["read", "write"] as const).map((cap) => (
+              <Button
+                key={cap}
+                size="sm"
+                variant={inbound.capability === cap ? "default" : "outline"}
+                onClick={() => void updateInbound({ capability: cap })}
+              >
+                {t(`capability_${cap}` as never)}
+              </Button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{t("capabilityRestartNote")}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("commandTargetsHeading")}</CardTitle>
+          <CardDescription>{t("commandTargetsHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-1">
+            {REMOTE_COMMAND_TARGETS.map((target) => (
+              <li key={target} className="flex items-center gap-2">
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+                  POST /api/v1/commands/{target}
+                </code>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("hardeningHeading")}</CardTitle>
+          <CardDescription>{t("hardeningHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            <li>• {t("hardeningHost")}</li>
+            <li>• {t("hardeningOrigin")}</li>
+            <li>• {t("hardeningIdempotency")}</li>
+            <li>• {t("hardeningCsp")}</li>
+          </ul>
         </CardContent>
       </Card>
     </div>

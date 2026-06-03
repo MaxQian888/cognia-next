@@ -5362,7 +5362,20 @@
         "testSucceeded": "入站监听器返回 200。",
         "testFailed": "入站测试失败：{error}",
         "startError": "启动监听器失败：{error}",
-        "stopError": "停止监听器失败：{error}"
+        "stopError": "停止监听器失败：{error}",
+        "capabilityHeading": "令牌能力",
+        "capabilityHelp": "只读令牌只能访问 health 路由；读写令牌可以触发命令。在下次启动监听器时生效。",
+        "capability_read": "仅只读",
+        "capability_write": "读 + 写",
+        "capabilityRestartNote": "修改能力后，需要把监听器关闭再开启才会生效。",
+        "commandTargetsHeading": "命令目标",
+        "commandTargetsHelp": "对这些路由发起带鉴权的 POST，会分发到对应子系统。",
+        "hardeningHeading": "Loopback 加固",
+        "hardeningHelp": "在 bearer 令牌和 IP 白名单之外，始终开启的防护。",
+        "hardeningHost": "Host 头白名单（阻断 DNS rebinding / 0.0.0.0-day）",
+        "hardeningOrigin": "拒绝跨源请求（阻断浏览器发起的调用）",
+        "hardeningIdempotency": "Idempotency-Key 重放缓存（5 分钟窗口）",
+        "hardeningCsp": "每个响应都带 Content-Security-Policy: default-src 'none'"
       },
       "outbound": {
         "heading": "出站 webhook 签名",
