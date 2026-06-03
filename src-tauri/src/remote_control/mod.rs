@@ -17,6 +17,7 @@
 
 pub mod allowlist;
 pub mod commands;
+pub mod idempotency;
 pub mod keyring;
 pub mod rate_limit;
 pub mod server;

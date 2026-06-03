@@ -35,6 +35,7 @@ use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::allowlist::ParsedAllowlist;
+use super::idempotency::IdempotencyCache;
 use super::rate_limit::FixedWindowRateLimiter;
 use super::types::{
     CommandEvent, CommandRequestBody, EmitEvent, EmitEventRequestBody, RemoteControlError,
@@ -73,6 +74,7 @@ struct AppState {
     allowlist: Arc<ParsedAllowlist>,
     rate_limiter: Arc<FixedWindowRateLimiter>,
     on_request: Arc<dyn RequestObserver>,
+    idempotency: Arc<IdempotencyCache>,
 }
 
 /// Hook fired on every successful (post-auth, post-allowlist, post-rate-limit)
@@ -110,6 +112,7 @@ pub async fn spawn_server(
         allowlist: Arc::new(parsed_allowlist),
         rate_limiter: Arc::new(FixedWindowRateLimiter::new(rate_limit_per_min)),
         on_request,
+        idempotency: Arc::new(IdempotencyCache::new()),
     };
 
     let app = Router::new()
@@ -118,6 +121,7 @@ pub async fn spawn_server(
         .route("/api/v1/events", post(emit_event))
         .route("/api/v1/commands/:target", post(run_command))
         .layer(from_fn_with_state(state.clone(), middleware))
+        .layer(axum::middleware::map_response(add_csp_header))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state);
 
@@ -207,21 +211,41 @@ async fn run_command(
         return error_body(StatusCode::NOT_FOUND, "unknown command target");
     }
     let body = payload.map(|Json(b)| b).unwrap_or_default();
-    let run_id = format!("run_{}", uuid::Uuid::new_v4());
     let idempotency_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // Idempotency: a replay within the TTL returns the original runId without
+    // re-emitting, so a cron/CI double-fire doesn't double-execute.
+    if let Some(key) = &idempotency_key {
+        if let Some(prev) = state.idempotency.get(key) {
+            let mut resp = (
+                StatusCode::ACCEPTED,
+                Json(json!({ "accepted": true, "runId": prev })),
+            )
+                .into_response();
+            resp.headers_mut().insert(
+                "idempotent-replayed",
+                axum::http::HeaderValue::from_static("true"),
+            );
+            return resp;
+        }
+    }
+
+    let run_id = format!("run_{}", uuid::Uuid::new_v4());
     let event = CommandEvent {
         target,
         args: body.args,
         run_id: run_id.clone(),
-        idempotency_key,
+        idempotency_key: idempotency_key.clone(),
     };
     if let Err(error) = state.app_handle.emit(COMMAND_EVENT, event) {
         log::warn!("remote-control failed to emit command event: {error}");
         return error_body(StatusCode::INTERNAL_SERVER_ERROR, "emit failed");
+    }
+    if let Some(key) = idempotency_key {
+        state.idempotency.put(key, run_id.clone());
     }
     (
         StatusCode::ACCEPTED,
@@ -238,6 +262,33 @@ fn error_body(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
+/// Accept only loopback Host headers (DNS-rebinding / `0.0.0.0-day`
+/// mitigation). A rebound request carries `Host: evil.com` and is rejected.
+/// The port suffix is ignored — any canonical loopback host spelling passes.
+fn host_is_local(host: &str) -> bool {
+    let host = host.trim();
+    if host == "[::1]" || host == "::1" {
+        return true;
+    }
+    let without_port = match host.strip_prefix('[') {
+        // bracketed IPv6 literal, e.g. "[::1]:8080"
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host),
+    };
+    matches!(without_port, "127.0.0.1" | "localhost" | "::1")
+}
+
+/// Attach `Content-Security-Policy: default-src 'none'` to every response so a
+/// reflected-content abuse vector is neutered. Applied as an outer
+/// `map_response` layer so it covers auth-middleware rejections too.
+async fn add_csp_header(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_SECURITY_POLICY,
+        axum::http::HeaderValue::from_static("default-src 'none'"),
+    );
+    response
+}
+
 async fn middleware(
     State(state): State<AppState>,
     ConnectInfo(connect_info): ConnectInfo<SocketAddr>,
@@ -247,6 +298,31 @@ async fn middleware(
 ) -> Response {
     let route = request.uri().path().to_string();
     let remote_ip = connect_info.ip();
+
+    // 0. Host-header allowlist + cross-origin rejection (DNS-rebinding /
+    // `0.0.0.0-day` mitigation). A loopback bind does NOT make us
+    // browser-unreachable, so a rebound request (`Host: evil.com`) or any
+    // browser-originated call (which carries `Origin`/`Referer`; a real CLI
+    // client never sets them) is rejected before auth.
+    let host_ok = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(host_is_local)
+        .unwrap_or(false);
+    if !host_ok {
+        state
+            .on_request
+            .on_call(&route, StatusCode::FORBIDDEN, remote_ip);
+        return error_body(StatusCode::FORBIDDEN, "invalid host");
+    }
+    if headers.contains_key(axum::http::header::ORIGIN)
+        || headers.contains_key(axum::http::header::REFERER)
+    {
+        state
+            .on_request
+            .on_call(&route, StatusCode::FORBIDDEN, remote_ip);
+        return error_body(StatusCode::FORBIDDEN, "cross-origin not allowed");
+    }
 
     // 1. Allowlist — only IPv4 entries are supported. IPv6 callers (which
     // can include ::1 from a client that opened an AF_INET6 socket against
@@ -324,6 +400,26 @@ mod tests {
         assert_eq!(RUN_TASK_EVENT, "remote-control://run-task");
         assert_eq!(EMIT_EVENT_EVENT, "remote-control://emit-event");
         assert_eq!(COMMAND_EVENT, "remote-control://command");
+    }
+
+    #[test]
+    fn host_allowlist_accepts_loopback() {
+        assert!(host_is_local("127.0.0.1:47821"));
+        assert!(host_is_local("127.0.0.1"));
+        assert!(host_is_local("localhost"));
+        assert!(host_is_local("localhost:47821"));
+        assert!(host_is_local("[::1]:8080"));
+        assert!(host_is_local("[::1]"));
+        assert!(host_is_local("::1"));
+    }
+
+    #[test]
+    fn host_allowlist_rejects_remote() {
+        assert!(!host_is_local("evil.com"));
+        assert!(!host_is_local("evil.com:47821"));
+        assert!(!host_is_local("169.254.1.1"));
+        assert!(!host_is_local("0.0.0.0"));
+        assert!(!host_is_local(""));
     }
 
     #[test]
