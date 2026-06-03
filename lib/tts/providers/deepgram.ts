@@ -9,7 +9,7 @@ import {
   TTS_PROVIDERS,
   type DeepgramTTSVoice,
   type TTSResponse,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 const DEEPGRAM_API_BASE = "https://api.deepgram.com/v1/speak"
 

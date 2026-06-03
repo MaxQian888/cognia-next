@@ -7,7 +7,7 @@ import {
   getEdgeVoicesByLanguage,
   getTTSError,
   providerRequiresApiKey,
-} from "./types"
+} from "./tts"
 
 describe("TTS types & helpers", () => {
   it("ships exactly the 10 documented providers in TTS_PROVIDERS", () => {

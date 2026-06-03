@@ -54,7 +54,7 @@ jest.mock("@/lib/tts/keyring", () => ({
   providerKeyMapToSettingsMap: (k: unknown) => ({ openai: { apiKey: "k", value: k } }),
 }))
 
-jest.mock("@/lib/tts/types", () => ({
+jest.mock("@/types/media/tts", () => ({
   DEFAULT_SPEECH_SETTINGS: { ttsProvider: "system" },
 }))
 

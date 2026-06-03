@@ -84,7 +84,7 @@ import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { ModelsDevCatalogRow } from "./models-dev-catalog"
 import type { SessionStateRow } from "./session-state"
 import type { TrustedPublisherRow } from "./trusted-publishers"
-import type { TtsProviderKeyRow } from "@/lib/tts/types"
+import type { TtsProviderKeyRow } from "@/types/media/tts"
 import type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,
@@ -1821,7 +1821,7 @@ export class CogniaDB extends Dexie {
 export type { ModelsDevCatalogRow } from "./models-dev-catalog"
 export type { SessionStateRow } from "./session-state"
 export type { TrustedPublisherRow } from "./trusted-publishers"
-export type { TtsProviderKeyRow } from "@/lib/tts/types"
+export type { TtsProviderKeyRow } from "@/types/media/tts"
 export type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,

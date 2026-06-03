@@ -4,7 +4,7 @@
  */
 
 import { proxyFetch } from "@/lib/tts/proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type LMNTTTSVoice, type TTSResponse } from "@/lib/tts/types"
+import { getTTSError, TTS_PROVIDERS, type LMNTTTSVoice, type TTSResponse } from "@/types/media/tts"
 
 export interface LMNTTTSOptions {
   apiKey: string

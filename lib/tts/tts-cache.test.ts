@@ -6,7 +6,7 @@
 
 import "fake-indexeddb/auto"
 import { generateCacheKey, getCachedOrGenerate, ttsCache } from "./tts-cache"
-import type { TTSSettings } from "@/lib/tts/types"
+import type { TTSSettings } from "@/types/media/tts"
 
 beforeEach(async () => {
   // Close any existing connection then clear via the cache manager (which

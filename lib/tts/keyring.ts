@@ -8,7 +8,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
-import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@/lib/tts/types"
+import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@/types/media/tts"
 
 /** Stable provider keys understood by the keyring backend. */
 export type KeyringProviderId =

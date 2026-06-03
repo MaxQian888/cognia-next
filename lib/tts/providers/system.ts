@@ -7,8 +7,8 @@
  * the settings UI.
  */
 
-import type { TTSError, TTSResponse } from "@/lib/tts/types"
-import { getTTSError } from "@/lib/tts/types"
+import type { TTSError, TTSResponse } from "@/types/media/tts"
+import { getTTSError } from "@/types/media/tts"
 
 export interface SystemTTSOptions {
   voice?: string

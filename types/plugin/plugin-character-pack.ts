@@ -25,7 +25,7 @@
 
 import type { Character, SendOptions } from "@/lib/claude/types"
 import type { CharacterPlatformDefaults } from "@/types/connectors/binding"
-import type { TTSProvider } from "@/lib/tts/types"
+import type { TTSProvider } from "@/types/media/tts"
 import type { PluginRuntimeProfile } from "./plugin"
 
 /**

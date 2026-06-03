@@ -39,7 +39,7 @@ import {
   XIAOMI_TTS_VOICES,
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 import { ApiKeyInput } from "./api-key-input"
 
 // -- Generic helper for a labelled slider value ------------------------------
@@ -646,7 +646,7 @@ export function XiaomiConfig() {
 
 // -- Mapping -----------------------------------------------------------------
 
-import type { TTSProvider } from "@/lib/tts/types"
+import type { TTSProvider } from "@/types/media/tts"
 
 export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
   system: SystemConfig,

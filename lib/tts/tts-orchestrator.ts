@@ -25,7 +25,7 @@ import {
   type TTSPlaybackState,
   type TTSProvider,
   type TTSResponse,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 import { generateOpenAITTS } from "@/lib/tts/providers/openai"
 import { generateGeminiTTS } from "@/lib/tts/providers/gemini"

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useTTS } from "@/hooks/media"
 import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@/lib/logging"
-import type { SpeechSettings } from "@/lib/tts/types"
+import type { SpeechSettings } from "@/types/media/tts"
 
 interface TestTtsButtonProps {
   /**

@@ -15,7 +15,7 @@ import {
   type XiaomiTTSModel,
   type XiaomiTTSStyle,
   type XiaomiTTSVoice,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 const XIAOMI_TTS_URL = "https://api.xiaomimimo.com/v1/chat/completions"
 

@@ -84,7 +84,7 @@ import {
   CARTESIA_TTS_VOICES,
   DEEPGRAM_TTS_VOICES,
   XIAOMI_TTS_VOICES,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 import {
   Accordion,
   AccordionContent,

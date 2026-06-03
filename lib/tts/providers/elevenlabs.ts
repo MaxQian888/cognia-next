@@ -11,7 +11,7 @@ import {
   type ElevenLabsTTSModel,
   type ElevenLabsTTSVoice,
   type TTSResponse,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 export interface ElevenLabsTTSOptions {
   apiKey: string

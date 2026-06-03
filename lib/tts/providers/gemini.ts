@@ -5,7 +5,12 @@
  */
 
 import { proxyFetch } from "@/lib/tts/proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type GeminiTTSVoice, type TTSResponse } from "@/lib/tts/types"
+import {
+  getTTSError,
+  TTS_PROVIDERS,
+  type GeminiTTSVoice,
+  type TTSResponse,
+} from "@/types/media/tts"
 
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"

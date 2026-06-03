@@ -44,7 +44,7 @@ jest.mock("@/lib/tts/providers/deepgram", () => ({
 }))
 
 import { TTSOrchestrator, ttsOrchestrator } from "./tts-orchestrator"
-import { DEFAULT_SPEECH_SETTINGS, type SpeechSettings } from "@/lib/tts/types"
+import { DEFAULT_SPEECH_SETTINGS, type SpeechSettings } from "@/types/media/tts"
 import { getCachedOrGenerate } from "@/lib/tts/tts-cache"
 import { generateOpenAITTS } from "@/lib/tts/providers/openai"
 import { generateGeminiTTS } from "@/lib/tts/providers/gemini"

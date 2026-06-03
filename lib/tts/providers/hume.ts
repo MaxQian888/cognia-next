@@ -5,7 +5,7 @@
  */
 
 import { proxyFetch } from "@/lib/tts/proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type HumeTTSVoice, type TTSResponse } from "@/lib/tts/types"
+import { getTTSError, TTS_PROVIDERS, type HumeTTSVoice, type TTSResponse } from "@/types/media/tts"
 
 export interface HumeTTSOptions {
   apiKey: string

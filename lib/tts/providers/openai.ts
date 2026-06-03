@@ -10,7 +10,7 @@ import {
   type OpenAITTSModel,
   type OpenAITTSVoice,
   type TTSResponse,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 const OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech"
 

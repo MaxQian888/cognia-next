@@ -1,5 +1,5 @@
 import { getProviderRuntimeOptions, selectSpeechSettings, toTTSSettings } from "./speech-settings"
-import { DEFAULT_SPEECH_SETTINGS } from "./types"
+import { DEFAULT_SPEECH_SETTINGS } from "@/types/media/tts"
 
 describe("selectSpeechSettings", () => {
   it("returns full defaults for null input", () => {

@@ -10,7 +10,7 @@ import {
   type CartesiaTTSModel,
   type CartesiaTTSVoice,
   type TTSResponse,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 const CARTESIA_API_BASE = "https://api.cartesia.ai"
 const CARTESIA_API_VERSION = "2025-04-16"

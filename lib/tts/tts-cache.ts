@@ -7,7 +7,7 @@
  * first, then oldest by createdAt until under the cap.
  */
 
-import type { TTSProvider, TTSSettings } from "@/lib/tts/types"
+import type { TTSProvider, TTSSettings } from "@/types/media/tts"
 
 const DB_NAME = "cognia-next-tts-cache"
 const DB_VERSION = 1

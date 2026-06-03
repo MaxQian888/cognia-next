@@ -25,7 +25,7 @@
  */
 
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-import { TTS_PROVIDERS } from "@/lib/tts/types"
+import { TTS_PROVIDERS } from "@/types/media/tts"
 
 /**
  * Soft upper bound on characters per pack — keeps the in-memory overlay

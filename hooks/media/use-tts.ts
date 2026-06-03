@@ -9,7 +9,7 @@
  * external API is identical.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { selectSpeechSettings } from "@/lib/tts/speech-settings"
@@ -24,7 +24,7 @@ import {
   type SpeechSettings,
   type TTSPlaybackState,
   type TTSProvider,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 export interface UseTTSOptions {
   /** Use settings from store (default: true). False uses defaults only. */
@@ -78,11 +78,15 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
 
   const settings = useSettingsStore((s) => s.settings)
 
-  const baseSpeech = useSettings ? selectSpeechSettings(settings) : DEFAULT_SPEECH_SETTINGS
+  const baseSpeech = useMemo(
+    () => (useSettings ? selectSpeechSettings(settings) : DEFAULT_SPEECH_SETTINGS),
+    [useSettings, settings]
+  )
   // Spread the per-character overlay (if any) on top of the global base.
-  const speechSettings: SpeechSettings = voiceOverlay
-    ? { ...baseSpeech, ...voiceOverlay }
-    : baseSpeech
+  const speechSettings: SpeechSettings = useMemo(
+    () => (voiceOverlay ? { ...baseSpeech, ...voiceOverlay } : baseSpeech),
+    [voiceOverlay, baseSpeech]
+  )
 
   const currentProvider: TTSProvider =
     provider ?? (useSettings ? speechSettings.ttsProvider : (voiceOverlay?.ttsProvider ?? "system"))

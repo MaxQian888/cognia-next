@@ -1,6 +1,6 @@
 import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BIOMETRIC_GUARD, DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
-import { DEFAULT_TTS_SETTINGS } from "@/lib/tts/types"
+import { DEFAULT_TTS_SETTINGS } from "@/types/media/tts"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
@@ -46,7 +46,7 @@ const DEFAULTS: AppSettings = {
   pinnedMeRowIds: [],
   sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
   lastInboxViewedAt: 0,
-  // TTS defaults (mirror lib/tts/types.ts → DEFAULT_TTS_SETTINGS).
+  // TTS defaults (mirror types/media/tts.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,
   systemVoice: DEFAULT_TTS_SETTINGS.systemVoice,
   openaiVoice: DEFAULT_TTS_SETTINGS.openaiVoice,

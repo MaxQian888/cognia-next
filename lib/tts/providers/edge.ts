@@ -8,7 +8,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
-import { getTTSError, TTS_PROVIDERS, type EdgeTTSVoice, type TTSResponse } from "@/lib/tts/types"
+import { getTTSError, TTS_PROVIDERS, type EdgeTTSVoice, type TTSResponse } from "@/types/media/tts"
 
 export interface EdgeTTSOptions {
   voice?: EdgeTTSVoice

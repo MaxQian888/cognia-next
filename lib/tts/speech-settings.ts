@@ -28,7 +28,7 @@ import {
   type XiaomiTTSModel,
   type XiaomiTTSVoice,
   type XiaomiTTSStyle,
-} from "@/lib/tts/types"
+} from "@/types/media/tts"
 
 export function selectSpeechSettings(settings: AppSettings | null | undefined): SpeechSettings {
   if (!settings) return DEFAULT_SPEECH_SETTINGS

@@ -4,8 +4,8 @@
  * `D:\Project\Cognia\lib\ai\tts\tts-text-utils.ts`.
  */
 
-import type { TTSProvider } from "@/lib/tts/types"
-import { TTS_PROVIDERS } from "@/lib/tts/types"
+import type { TTSProvider } from "@/types/media/tts"
+import { TTS_PROVIDERS } from "@/types/media/tts"
 
 export function splitTextForTTS(
   text: string,
