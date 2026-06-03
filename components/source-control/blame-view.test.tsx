@@ -2,9 +2,9 @@ import { render, screen, waitFor } from "@testing-library/react"
 import { BlameView } from "./blame-view"
 import type { GitBlameLine } from "@/types/git"
 
-const gitBlame = jest.fn<Promise<GitBlameLine[]>, [string, string]>()
+const gitBlame = jest.fn<Promise<GitBlameLine[]>, [string, string, string?]>()
 jest.mock("@/lib/git/commands", () => ({
-  gitBlame: (rp: string, p: string) => gitBlame(rp, p),
+  gitBlame: (rp: string, p: string, rev?: string) => gitBlame(rp, p, rev),
 }))
 // Keep content as plain text nodes (shiki doesn't run in jsdom); the view's
 // fallback renders the raw line so authorship + content stay assertable.
@@ -41,7 +41,14 @@ describe("BlameView", () => {
     expect(screen.getByTestId("blame-line-3")).toBeInTheDocument()
     expect(screen.getByText("line one")).toBeInTheDocument()
     expect(screen.getByText("line three")).toBeInTheDocument()
-    expect(gitBlame).toHaveBeenCalledWith("/repo", "a.ts")
+    expect(gitBlame).toHaveBeenCalledWith("/repo", "a.ts", undefined)
+  })
+
+  it("blames a pinned revision when rev is given", async () => {
+    gitBlame.mockResolvedValue([bl(1, "a".repeat(40), "Alice", "x")])
+    render(<BlameView rootDir="/repo" path="a.ts" rev="abc123" />)
+    await screen.findByTestId("blame-line-1")
+    expect(gitBlame).toHaveBeenCalledWith("/repo", "a.ts", "abc123")
   })
 
   it("collapses the annotation for consecutive lines of the same commit", async () => {

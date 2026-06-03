@@ -11,13 +11,16 @@ use super::error::Result;
 use super::exec;
 use super::types::GitBlameLine;
 
-/// Blame the working-tree version of `path`.
-pub async fn blame(repo_path: &str, path: &str) -> Result<Vec<GitBlameLine>> {
-    let out = exec::capture(
-        &std::path::PathBuf::from(repo_path),
-        ["blame", "--porcelain", "--", path],
-    )
-    .await?;
+/// Blame `path`. With `rev = None` blames the working tree; with a rev (commit,
+/// branch, or tag) blames the file as of that revision (commit-pinned blame).
+pub async fn blame(repo_path: &str, path: &str, rev: Option<&str>) -> Result<Vec<GitBlameLine>> {
+    let mut args: Vec<&str> = vec!["blame", "--porcelain"];
+    if let Some(r) = rev {
+        args.push(r);
+    }
+    args.push("--");
+    args.push(path);
+    let out = exec::capture(&std::path::PathBuf::from(repo_path), args).await?;
     Ok(parse_porcelain(&out))
 }
 

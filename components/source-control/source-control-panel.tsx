@@ -52,7 +52,7 @@ export function SourceControlPanel() {
   const [stashOpen, setStashOpen] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
-  const [blamePath, setBlamePath] = useState<string | null>(null)
+  const [blameTarget, setBlameTarget] = useState<{ path: string; rev?: string } | null>(null)
   const [restorePath, setRestorePath] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
@@ -154,7 +154,7 @@ export function SourceControlPanel() {
               selectedPath={selectedPath}
               onSelectFile={(path, staged) => selectFile(path, staged)}
               onViewHistory={(path) => openTimelineFor(path)}
-              onViewBlame={(path) => setBlamePath(path)}
+              onViewBlame={(path) => setBlameTarget({ path })}
               onRestore={(path) => setRestorePath(path)}
             />
           ) : null}
@@ -166,6 +166,7 @@ export function SourceControlPanel() {
               rootDir={rootDir}
               commit={syntheticCommit(selectedCommit)}
               actions={actions}
+              onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
             />
           ) : conflict ? (
             <ConflictResolver
@@ -207,15 +208,22 @@ export function SourceControlPanel() {
         onOpenChange={(open) => !open && setRestorePath(null)}
         actions={actions}
       />
-      <Sheet open={blamePath !== null} onOpenChange={(open) => !open && setBlamePath(null)}>
+      <Sheet open={blameTarget !== null} onOpenChange={(open) => !open && setBlameTarget(null)}>
         <SheetContent side="right" className="flex w-[40rem] flex-col" data-testid="blame-sheet">
           <SheetHeader>
             <SheetTitle className="truncate">
-              {t("blame.title", { path: blamePath ?? "" })}
+              {t("blame.title", { path: blameTarget?.path ?? "" })}
             </SheetTitle>
           </SheetHeader>
           <div className="min-h-0 flex-1">
-            {blamePath && <BlameView key={blamePath} rootDir={rootDir} path={blamePath} />}
+            {blameTarget && (
+              <BlameView
+                key={`${blameTarget.path}@${blameTarget.rev ?? "wt"}`}
+                rootDir={rootDir}
+                path={blameTarget.path}
+                rev={blameTarget.rev}
+              />
+            )}
           </div>
         </SheetContent>
       </Sheet>

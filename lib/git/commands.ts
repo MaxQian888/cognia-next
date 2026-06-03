@@ -98,9 +98,13 @@ export async function gitRefs(repoPath: string): Promise<GitRef[]> {
   return transport.call<GitRef[]>("git_refs", { repoPath })
 }
 
-export async function gitBlame(repoPath: string, path: string): Promise<GitBlameLine[]> {
+export async function gitBlame(
+  repoPath: string,
+  path: string,
+  rev?: string
+): Promise<GitBlameLine[]> {
   if (!isTauri()) return []
-  return transport.call<GitBlameLine[]>("git_blame", { repoPath, path })
+  return transport.call<GitBlameLine[]>("git_blame", { repoPath, path, rev: rev ?? null })
 }
 
 export async function gitBranches(repoPath: string): Promise<GitBranch[]> {

@@ -27,6 +27,8 @@ import type { GitBlameLine } from "@/types/git"
 interface BlameViewProps {
   rootDir: string
   path: string
+  /** Blame as of this revision (commit/branch/tag). Omitted = working tree. */
+  rev?: string
 }
 
 function isUncommitted(hash: string): boolean {
@@ -51,7 +53,7 @@ function HighlightedLine({ tokens }: { tokens: ThemedToken[] }) {
   )
 }
 
-export function BlameView({ rootDir, path }: BlameViewProps) {
+export function BlameView({ rootDir, path, rev }: BlameViewProps) {
   const t = useTranslations("sourceControl")
   const colors = useThemeColors()
   const [lines, setLines] = useState<GitBlameLine[] | null>(null)
@@ -59,17 +61,17 @@ export function BlameView({ rootDir, path }: BlameViewProps) {
   // the view always renders plain content as a fallback.
   const [tokenLines, setTokenLines] = useState<ThemedToken[][] | null>(null)
 
-  // The panel re-keys this component by path, so it mounts fresh per file —
+  // The panel re-keys this component by path+rev, so it mounts fresh per file —
   // no in-effect state reset is needed (which would trip set-state-in-effect).
   useEffect(() => {
     let alive = true
-    void gitBlame(rootDir, path).then((l) => {
+    void gitBlame(rootDir, path, rev).then((l) => {
       if (alive) setLines(l)
     })
     return () => {
       alive = false
     }
-  }, [rootDir, path])
+  }, [rootDir, path, rev])
 
   const shikiLang = useMemo(() => getShikiLanguage(languageFromPath(path) ?? undefined), [path])
 

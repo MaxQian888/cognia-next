@@ -68,6 +68,14 @@ describe("CommitDetail", () => {
     expect(screen.queryByTestId("commit-reset")).not.toBeInTheDocument()
   })
 
+  it("opens commit-pinned blame for a file", async () => {
+    const onViewBlame = jest.fn()
+    render(<CommitDetail rootDir="/r" commit={commit} onViewBlame={onViewBlame} />)
+    const blameBtn = await screen.findByTestId("commit-blame-a.ts")
+    fireEvent.click(blameBtn)
+    expect(onViewBlame).toHaveBeenCalledWith("a.ts", commit.hash)
+  })
+
   it("performs a soft reset to the commit", async () => {
     const user = userEvent.setup()
     const reset = jest.fn().mockResolvedValue(undefined)

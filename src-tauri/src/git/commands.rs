@@ -121,8 +121,12 @@ pub async fn git_refs(repo_path: String) -> Result<Vec<GitRef>, GitError> {
 /// Per-line blame (`git blame --porcelain`) for the working-tree file. Async
 /// (shells out via `exec`), so not wrapped in `blocking`.
 #[tauri::command]
-pub async fn git_blame(repo_path: String, path: String) -> Result<Vec<GitBlameLine>, GitError> {
-    blame::blame(&repo_path, &path).await
+pub async fn git_blame(
+    repo_path: String,
+    path: String,
+    rev: Option<String>,
+) -> Result<Vec<GitBlameLine>, GitError> {
+    blame::blame(&repo_path, &path, rev.as_deref()).await
 }
 
 #[tauri::command]

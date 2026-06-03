@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { HistoryIcon } from "lucide-react"
+import { HistoryIcon, ScanLineIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import {
@@ -44,9 +44,11 @@ interface CommitDetailProps {
   rootDir: string
   commit: GitCommit
   actions?: Pick<UseGitActionsResult, "reset">
+  /** Open blame for a file pinned to this commit. */
+  onViewBlame?: (path: string, rev: string) => void
 }
 
-export function CommitDetail({ rootDir, commit, actions }: CommitDetailProps) {
+export function CommitDetail({ rootDir, commit, actions, onViewBlame }: CommitDetailProps) {
   const t = useTranslations("sourceControl")
   const [confirmHardReset, setConfirmHardReset] = useState(false)
   const [files, setFiles] = useState<GitFileChange[]>([])
@@ -174,14 +176,17 @@ export function CommitDetail({ rootDir, commit, actions }: CommitDetailProps) {
               const deco = statusDecoration(f.status)
               const { name, dir } = splitPath(f.path)
               return (
-                <li key={f.path}>
+                <li
+                  key={f.path}
+                  className={cn(
+                    "group flex items-center gap-1 rounded pr-1 hover:bg-accent",
+                    selected === f.path && "bg-accent"
+                  )}
+                >
                   <button
                     type="button"
                     onClick={() => setSelected(f.path)}
-                    className={cn(
-                      "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent",
-                      selected === f.path && "bg-accent"
-                    )}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-left text-xs"
                     data-testid={`commit-file-${f.path}`}
                   >
                     <span className="min-w-0 flex-1 truncate">
@@ -190,6 +195,18 @@ export function CommitDetail({ rootDir, commit, actions }: CommitDetailProps) {
                     </span>
                     <span className={cn("font-mono", deco.colorClass)}>{deco.letter}</span>
                   </button>
+                  {onViewBlame && (
+                    <button
+                      type="button"
+                      onClick={() => onViewBlame(f.path, commit.hash)}
+                      className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                      aria-label={t("actions.viewBlame")}
+                      title={t("actions.viewBlame")}
+                      data-testid={`commit-blame-${f.path}`}
+                    >
+                      <ScanLineIcon className="size-3" />
+                    </button>
+                  )}
                 </li>
               )
             })}
