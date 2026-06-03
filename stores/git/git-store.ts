@@ -20,7 +20,7 @@ import type {
   GitStashEntry,
   GitStatus,
   GitStatusGroup,
-} from "@/lib/git/types"
+} from "@/types/git"
 
 /** In-flight operation keys (drive spinners + disable buttons). */
 export type GitOp =
@@ -36,6 +36,9 @@ export type GitOp =
   | "discard"
   | "resolve"
   | "branch"
+  | "remote"
+  | "tag"
+  | "reset"
 
 export type TimelineScope = "repo" | "file"
 
@@ -68,6 +71,9 @@ function emptyOps(): Record<GitOp, boolean> {
     discard: false,
     resolve: false,
     branch: false,
+    remote: false,
+    tag: false,
+    reset: false,
   }
 }
 

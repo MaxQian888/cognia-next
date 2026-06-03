@@ -9,7 +9,7 @@ import {
   useGitStatus,
   useGitStore,
 } from "./git-store"
-import type { GitConflict, GitDiff, GitStatus } from "@/lib/git/types"
+import type { GitConflict, GitDiff, GitStatus } from "@/types/git"
 
 function mkDiff(path: string): GitDiff {
   return { path, oldContent: "", newContent: "", hunks: [], isBinary: false }

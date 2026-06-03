@@ -16,15 +16,22 @@ import {
   gitCheckoutBranch,
   gitCommit,
   gitCreateBranch,
+  gitCreateTag,
   gitDeleteBranch,
+  gitDeleteTag,
+  gitPushTag,
   gitDiscard,
   gitDiscardAll,
   gitFetch,
   gitMergeAbort,
   gitPull,
   gitPush,
+  gitRemoteAdd,
+  gitRemoteRemove,
   gitRenameBranch,
+  gitReset,
   gitResolveConflict,
+  gitRestore,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -33,7 +40,7 @@ import {
   gitSync,
   gitUnstage,
 } from "@/lib/git/commands"
-import { asGitError, type ConflictSide } from "@/lib/git/types"
+import { asGitError, type ConflictSide, type GitResetMode } from "@/types/git"
 import { useGitStore, type GitOp } from "@/stores/git/git-store"
 
 const OP_ERROR_KEY: Partial<Record<GitOp, string>> = {
@@ -70,6 +77,13 @@ export interface UseGitActionsResult {
     resolution: { mergedContent?: string; side?: ConflictSide }
   ) => Promise<void>
   mergeAbort: () => Promise<void>
+  remoteAdd: (name: string, url: string) => Promise<void>
+  remoteRemove: (name: string) => Promise<void>
+  createTag: (name: string, message?: string, target?: string) => Promise<void>
+  deleteTag: (name: string) => Promise<void>
+  pushTag: (name: string, remote?: string) => Promise<void>
+  reset: (mode: GitResetMode, target: string) => Promise<void>
+  restore: (paths: string[], staged?: boolean, source?: string) => Promise<void>
 }
 
 export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult {
@@ -134,6 +148,15 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       resolveConflict: (path, resolution) =>
         run("resolve", (rp) => gitResolveConflict(rp, path, resolution)),
       mergeAbort: () => run("resolve", (rp) => gitMergeAbort(rp)),
+      remoteAdd: (name, url) => run("remote", (rp) => gitRemoteAdd(rp, name, url)),
+      remoteRemove: (name) => run("remote", (rp) => gitRemoteRemove(rp, name)),
+      createTag: (name, message, target) =>
+        run("tag", (rp) => gitCreateTag(rp, name, message, target)),
+      deleteTag: (name) => run("tag", (rp) => gitDeleteTag(rp, name)),
+      pushTag: (name, remote) => run("tag", (rp) => gitPushTag(rp, name, remote)),
+      reset: (mode, target) => run("reset", (rp) => gitReset(rp, mode, target)),
+      restore: (paths, staged, source) =>
+        run("discard", (rp) => gitRestore(rp, paths, staged, source)),
     }),
     [run, currentBranch]
   )
