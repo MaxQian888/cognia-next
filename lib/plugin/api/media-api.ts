@@ -13,7 +13,12 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
-import { DEFAULT_IMAGE_MODELS } from "@/lib/ai/media/image-generation-sdk"
+import {
+  IMAGE_EDIT_PROVIDER_IDS,
+  isImageEditProvider,
+  resolveImageModel,
+  type ImageEditProviderId,
+} from "@/lib/ai/media/image-generation-sdk"
 import {
   registerPluginMediaAsset,
   type MediaCatalogWriter,
@@ -672,8 +677,6 @@ interface LocalVideoClipEntry {
   clip: VideoClip
 }
 
-type SupportedImageProviderId = "openai" | "xai" | "togetherai" | "fireworks" | "deepinfra"
-
 type MediaAIError = Error & {
   code: "NO_IMAGE_PROVIDER" | "TIMEOUT" | "PROVIDER_ERROR" | "NO_IMAGE_RESULT"
   suggestion?: string
@@ -681,29 +684,10 @@ type MediaAIError = Error & {
 }
 
 interface ResolvedImageProviderConfig {
-  providerId: SupportedImageProviderId
+  providerId: ImageEditProviderId
   apiKey: string | undefined
   baseURL: string | undefined
   model: string
-}
-
-const IMAGE_PROVIDER_ID_TO_MODEL_KEY: Record<
-  SupportedImageProviderId,
-  keyof typeof DEFAULT_IMAGE_MODELS
-> = {
-  openai: "openai",
-  xai: "xai",
-  togetherai: "together",
-  fireworks: "fireworks",
-  deepinfra: "deepinfra",
-}
-
-const DEFAULT_MEDIA_AI_MODELS: Record<SupportedImageProviderId, string> = {
-  openai: "gpt-image-1",
-  xai: DEFAULT_IMAGE_MODELS.xai,
-  togetherai: DEFAULT_IMAGE_MODELS.together,
-  fireworks: DEFAULT_IMAGE_MODELS.fireworks,
-  deepinfra: DEFAULT_IMAGE_MODELS.deepinfra,
 }
 
 const MEDIA_AI_TIMEOUT_MS = 30_000
@@ -783,10 +767,6 @@ function toBlobPart(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer
 }
 
-function isSupportedImageProviderId(value: string): value is SupportedImageProviderId {
-  return value in IMAGE_PROVIDER_ID_TO_MODEL_KEY
-}
-
 function uniqueStrings(values: Array<string | undefined | null>): string[] {
   return Array.from(
     new Set(
@@ -795,7 +775,7 @@ function uniqueStrings(values: Array<string | undefined | null>): string[] {
   )
 }
 
-function normalizeProviderBaseUrl(baseURL?: string, providerId?: SupportedImageProviderId): string {
+function normalizeProviderBaseUrl(baseURL?: string, providerId?: ImageEditProviderId): string {
   if (baseURL) return baseURL.replace(/\/$/, "")
   // Per-provider defaults — without these, every provider that omits baseURL
   // gets routed to the OpenAI host, which silently breaks xAI / Together AI /
@@ -832,41 +812,6 @@ function getMediaAIProviderSuggestion(): string {
   return "在 Settings -> Providers 中配置并启用支持图像的 provider（OpenAI、xAI、Together AI、Fireworks 或 DeepInfra）。"
 }
 
-function isImageCapableModel(
-  providerId: SupportedImageProviderId,
-  model: string | undefined
-): boolean {
-  if (!model) {
-    return false
-  }
-
-  const normalized = model.toLowerCase()
-  switch (providerId) {
-    case "openai":
-      return normalized.includes("image") || normalized.includes("dall-e")
-    case "xai":
-      return normalized.includes("image")
-    case "togetherai":
-    case "fireworks":
-    case "deepinfra":
-      return (
-        normalized.includes("flux") || normalized.includes("diffusion") || normalized.includes("sd")
-      )
-    default:
-      return false
-  }
-}
-
-function resolveImageProviderModel(
-  providerId: SupportedImageProviderId,
-  configuredModel?: string
-): string {
-  if (isImageCapableModel(providerId, configuredModel)) {
-    return configuredModel as string
-  }
-  return DEFAULT_MEDIA_AI_MODELS[providerId]
-}
-
 function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
   const settings = useSettingsStore.getState()
   const snapshot = createProviderSettingsSnapshot({
@@ -876,15 +821,9 @@ function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
   })
 
   const candidateProviderIds = uniqueStrings([
-    isSupportedImageProviderId(settings.defaultProvider || "")
-      ? settings.defaultProvider
-      : undefined,
-    "openai",
-    "xai",
-    "togetherai",
-    "fireworks",
-    "deepinfra",
-  ]) as SupportedImageProviderId[]
+    isImageEditProvider(settings.defaultProvider || "") ? settings.defaultProvider : undefined,
+    ...IMAGE_EDIT_PROVIDER_IDS,
+  ]) as ImageEditProviderId[]
 
   let blockedReason: string | undefined
   let blockedDetails: unknown
@@ -907,7 +846,7 @@ function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
         providerId,
         apiKey: resolution.apiKey,
         baseURL: normalizeProviderBaseUrl(resolution.baseURL, providerId),
-        model: resolveImageProviderModel(providerId, resolution.model),
+        model: resolveImageModel(providerId, resolution.model),
       }
     }
 

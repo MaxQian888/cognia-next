@@ -553,7 +553,7 @@ describe("Media Registry", () => {
       )
 
       const request = (proxyFetch as jest.Mock).mock.calls[0][1] as { body: FormData }
-      expect(request.body.get("model")).toBe("gpt-image-1")
+      expect(request.body.get("model")).toBe("gpt-image-2")
       expect(request.body.get("prompt")).toContain("4x")
     })
 
