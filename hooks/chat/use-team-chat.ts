@@ -15,6 +15,7 @@ import {
 import { detectPlatform } from "@/hooks/use-platform"
 import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
 import { generateEmbedding } from "@/lib/ai/embedding/embedding"
 import {
@@ -266,6 +267,20 @@ export function useTeamChat() {
           turnUserMessage: userText,
         })
       }
+
+      // Long-term memory write parity with direct chat (team↔direct): the team
+      // runtime previously only *read* memory (via resolveSendOptions per member)
+      // and never wrote it back. Extract from the completed team turn — the user
+      // prompt plus the final team reply (last assistant message; for supervisor
+      // mode that is the synthesis). Only runs on clean completion: interrupt and
+      // error throw past this point, and the manual no-target case returns above.
+      const finalMessages = useChatStore.getState().messages
+      const lastAssistant = [...finalMessages].reverse().find((m) => m.role === "assistant")
+      void runTurnMemory(sessionId, {
+        userText,
+        assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
+        transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
+      })
     } finally {
       useChatStore.getState().setStatus("idle")
       useUIStore.getState().clearMemberStatusFor(sessionId)

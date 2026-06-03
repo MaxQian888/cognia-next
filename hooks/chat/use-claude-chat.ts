@@ -88,6 +88,7 @@ import {
 } from "@/lib/claude/adapter-hooks"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import type {
   ApprovalDecision,
@@ -270,60 +271,17 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
  * `runMemoryExtraction`). `messages` is the just-sealed turn snapshot.
  */
 function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
-  void (async () => {
-    try {
-      const settings = useSettingsStore.getState().settings
-      if (!settings) return
-      const config = resolveMemoryConfig(settings.memory)
-      if (!config.enabled || !config.autoExtract || config.temporary) return
-      const sessionRow = await getSession(sessionId).catch(() => undefined)
-      if (!sessionRow) return
-
-      const lastUser = [...messages].reverse().find((m) => m.role === "user")
-      const userText = extractPlainText(lastUser)
-      if (!userText.trim()) return
-      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
-      const assistantText = extractAssistantText(lastAssistant)
-
-      const { buildAutoExtractionDeps, runMemoryExtraction, sessionProvenance } =
-        await import("@/lib/memory/write/run-memory-extraction")
-      const provenance = sessionProvenance(sessionRow)
-      const deps = await buildAutoExtractionDeps(
-        { session: sessionRow, appSettings: settings },
-        config
-      )
-      if (deps) {
-        const recentMessages = messages
-          .slice(-10)
-          .map((m) => ({ role: m.role, text: extractPlainText(m) }))
-        await runMemoryExtraction(
-          {
-            newPair: { userText, assistantText },
-            recentMessages,
-            scope: config.scopeDefault,
-            characterId: sessionRow.characterId,
-            provenance,
-            source: { sessionId },
-            config,
-          },
-          deps
-        )
-      }
-
-      // Schedule idle episodic distillation + capacity eviction (once/session).
-      const { scheduleMemoryMaintenance } = await import("@/lib/memory/lifecycle/maintenance")
-      scheduleMemoryMaintenance({
-        sessionId,
-        session: sessionRow,
-        appSettings: settings,
-        transcript: messages.map((m) => ({ role: m.role, text: extractPlainText(m) })),
-        provenance,
-        config,
-      })
-    } catch (err) {
-      console.warn("memory extraction failed", err)
-    }
-  })()
+  // Direct-chat extraction keeps its own text nuance (assistant reply via
+  // `extractAssistantText`, rolling transcript via `extractPlainText`); the gate,
+  // dep wiring, and maintenance scheduling live in the shared `runTurnMemory` so
+  // the team hook drives the exact same write path. Fire-and-forget (never throws).
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
+  void runTurnMemory(sessionId, {
+    userText: extractPlainText(lastUser),
+    assistantText: extractAssistantText(lastAssistant),
+    transcript: messages.map((m) => ({ role: m.role, text: extractPlainText(m) })),
+  })
 }
 
 /** Signature of the hook's `send`, threaded into `handleEvent` via a ref. */
