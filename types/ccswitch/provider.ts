@@ -34,10 +34,11 @@ export interface CcswitchCounts {
 
 /**
  * Where the dbPath was resolved from. `"env"` = `CC_SWITCH_HOME` test
- * override; `"redirect"` = cc-switch's own `app_paths.json` re-pointed the
- * data directory (cloud-sync setups); `"default"` = `~/.cc-switch/`.
+ * override; `"manual"` = cognia's `ccswitchSync.manualDataDir`; `"redirect"`
+ * = cc-switch's own `app_paths.json` re-pointed the data directory
+ * (cloud-sync setups); `"default"` = `~/.cc-switch/`.
  */
-export type CcswitchResolutionSource = "env" | "redirect" | "default"
+export type CcswitchResolutionSource = "env" | "manual" | "redirect" | "default"
 
 export interface CcswitchStatus {
   /** Resolved DB path on this OS, or null when home dir can't be found. */

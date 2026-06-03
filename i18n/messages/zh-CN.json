@@ -8488,7 +8488,8 @@
       "claude-code": "Claude Code（~/.claude/settings.json）",
       "claude-desktop": "Claude Desktop",
       "codex": "Codex",
-      "gemini": "Gemini CLI"
+      "gemini": "Gemini CLI",
+      "opencode": "OpenCode（~/.local/share/opencode/auth.json）"
     },
     "overview": {
       "webModeTitle": "仅桌面端可用",
@@ -8505,7 +8506,12 @@
       "noActive": "没有 CCSwitch 服务商匹配",
       "noActiveBody": "cognia-next 当前使用的是手动输入的 API 密钥，或服务商记录与 CCSwitch 中均不一致。",
       "driftTitle": "检测到不一致",
-      "driftBody": "cognia-next 与至少一个外部代理的激活服务商不一致。请在「服务商」分页中选择一个进行同步。"
+      "driftBody": "cognia-next 与至少一个外部代理的激活服务商不一致。请在「服务商」分页中选择一个进行同步。",
+      "resolutionSource": {
+        "env": "来自 CC_SWITCH_HOME",
+        "manual": "手动指定",
+        "redirect": "来自 CCSwitch 重定向"
+      }
     },
     "providers": {
       "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
@@ -8569,6 +8575,12 @@
       "watchDbBody": "cognia-next 窗口重新获得焦点时重新读取 cc-switch.db，使「已激活」徽标保持最新。",
       "propagationTitle": "默认同步范围",
       "propagationBody": "在「在此并同步至…」对话框中预先勾选的代理。每次切换仍以本次勾选为准。",
+      "manualDirTitle": "手动数据目录",
+      "manualDirBody": "覆盖 cognia 查找 cc-switch.db 的位置。当你的 CCSwitch 数据目录位于无法自动检测的位置（例如同步盘）时使用。",
+      "manualDirLabel": "包含 cc-switch.db 的文件夹",
+      "manualDirPlaceholder": "例如 ~/Dropbox/cc-switch",
+      "manualDirClear": "清除",
+      "manualDirHint": "优先级高于 CCSwitch 自身的重定向，但低于 CC_SWITCH_HOME 环境变量。留空则自动检测。",
       "save": "保存",
       "saving": "保存中…"
     },

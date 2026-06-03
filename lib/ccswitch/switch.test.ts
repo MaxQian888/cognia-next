@@ -18,13 +18,20 @@ jest.mock("@/lib/db/settings", () => ({
 jest.mock("./client", () => ({
   writeClaudeSettingsEnv: jest.fn(),
   writeCodexAuthEnv: jest.fn(),
+  writeGeminiSettingsEnv: jest.fn(),
+  writeOpencodeAuthEnv: jest.fn(),
 }))
 
 import { restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 
-import { writeClaudeSettingsEnv, writeCodexAuthEnv } from "./client"
+import {
+  writeClaudeSettingsEnv,
+  writeCodexAuthEnv,
+  writeGeminiSettingsEnv,
+  writeOpencodeAuthEnv,
+} from "./client"
 import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
 import type { CcswitchProvider, SwitchScope } from "@/types/ccswitch"
 
@@ -35,6 +42,8 @@ const mSave = saveSettings as jest.Mock
 const mGet = getSettings as jest.Mock
 const mWriteClaude = writeClaudeSettingsEnv as jest.Mock
 const mWriteCodex = writeCodexAuthEnv as jest.Mock
+const mWriteGemini = writeGeminiSettingsEnv as jest.Mock
+const mWriteOpencode = writeOpencodeAuthEnv as jest.Mock
 
 function provider(overrides: Partial<CcswitchProvider>): CcswitchProvider {
   return {
@@ -82,10 +91,42 @@ describe("planSwitch", () => {
     ])
   })
 
-  it("marks unsupported agents (gemini)", () => {
-    const plan = planSwitch(provider({}), { cognia: true, agents: ["gemini"] }, {})
+  it("marks unsupported agents (claude-desktop)", () => {
+    const plan = planSwitch(provider({}), { cognia: true, agents: ["claude-desktop"] }, {})
     expect(plan.agentChanges[0].unsupported).toBe(true)
     expect(plan.agentChanges[0].envUpdates).toEqual([])
+  })
+
+  it("emits gemini-specific env updates for the gemini agent", () => {
+    const p = provider({ apiKey: "g-key", baseUrl: "https://proxy" })
+    const plan = planSwitch(p, { cognia: true, agents: ["gemini"] }, {})
+    const ac = plan.agentChanges[0]
+    expect(ac.agentId).toBe("gemini")
+    expect(ac.unsupported).toBe(false)
+    expect(ac.targetPath).toBe("~/.gemini/settings.json")
+    expect(ac.envUpdates).toEqual([
+      { key: "GEMINI_API_KEY", value: "g-key" },
+      { key: "GOOGLE_GEMINI_BASE_URL", value: "https://proxy" },
+    ])
+  })
+
+  it("emits opencode env updates with a derived __provider for the opencode agent", () => {
+    const p = provider({ apiKey: "sk-ant-x", kind: "claude" })
+    const plan = planSwitch(p, { cognia: true, agents: ["opencode"] }, {})
+    const ac = plan.agentChanges[0]
+    expect(ac.agentId).toBe("opencode")
+    expect(ac.unsupported).toBe(false)
+    expect(ac.targetPath).toBe("~/.local/share/opencode/auth.json")
+    expect(ac.envUpdates).toEqual([
+      { key: "OPENCODE_API_KEY", value: "sk-ant-x" },
+      { key: "__provider", value: "anthropic" },
+    ])
+  })
+
+  it("maps codex-kind providers to the openai opencode entry", () => {
+    const p = provider({ apiKey: "sk-oa", kind: "codex" })
+    const plan = planSwitch(p, { cognia: true, agents: ["opencode"] }, {})
+    expect(plan.agentChanges[0].envUpdates).toContainEqual({ key: "__provider", value: "openai" })
   })
 
   it("emits codex-specific env updates for the codex agent", () => {
@@ -206,14 +247,62 @@ describe("applySwitch", () => {
   })
 
   it("records unsupported agents as not-ok rather than failing", async () => {
+    const plan = planSwitch(provider({}), { cognia: true, agents: ["claude-desktop"] }, {})
+    const result = await applySwitch(plan)
+    expect(result.agentResults[0]).toMatchObject({
+      agentId: "claude-desktop",
+      ok: false,
+    })
+    expect(mWriteClaude).not.toHaveBeenCalled()
+    expect(mWriteCodex).not.toHaveBeenCalled()
+  })
+
+  it("commits to ~/.gemini/settings.json when gemini is selected", async () => {
+    mWriteGemini.mockResolvedValue({
+      path: "/u/.gemini/settings.json",
+      backupPath: "/u/.gemini/settings.json.bak.1",
+    })
+    const p = provider({ apiKey: "g-key", baseUrl: "https://proxy" })
+    const plan = planSwitch(p, { cognia: true, agents: ["gemini"] }, {})
+    const result = await applySwitch(plan)
+
+    expect(mWriteGemini).toHaveBeenCalledWith({
+      GEMINI_API_KEY: "g-key",
+      GOOGLE_GEMINI_BASE_URL: "https://proxy",
+    })
+    expect(mWriteClaude).not.toHaveBeenCalled()
+    expect(result.agentResults[0]).toEqual({
+      agentId: "gemini",
+      ok: true,
+      path: "/u/.gemini/settings.json",
+      backupPath: "/u/.gemini/settings.json.bak.1",
+    })
+  })
+
+  it("commits to opencode auth.json with the derived provider", async () => {
+    mWriteOpencode.mockResolvedValue({
+      path: "/u/.local/share/opencode/auth.json",
+    })
+    const p = provider({ apiKey: "sk-ant-x", kind: "claude" })
+    const plan = planSwitch(p, { cognia: true, agents: ["opencode"] }, {})
+    const result = await applySwitch(plan)
+
+    expect(mWriteOpencode).toHaveBeenCalledWith({
+      OPENCODE_API_KEY: "sk-ant-x",
+      __provider: "anthropic",
+    })
+    expect(result.agentResults[0]).toMatchObject({ agentId: "opencode", ok: true })
+  })
+
+  it("surfaces drift_detected from the gemini write as an error", async () => {
+    mWriteGemini.mockRejectedValue(new Error("drift_detected"))
     const plan = planSwitch(provider({}), { cognia: true, agents: ["gemini"] }, {})
     const result = await applySwitch(plan)
     expect(result.agentResults[0]).toMatchObject({
       agentId: "gemini",
       ok: false,
+      error: "drift_detected",
     })
-    expect(mWriteClaude).not.toHaveBeenCalled()
-    expect(mWriteCodex).not.toHaveBeenCalled()
   })
 
   it("commits to ~/.codex/auth.json when codex is selected", async () => {
@@ -348,9 +437,22 @@ describe("internals", () => {
     expect(updates).toEqual([{ key: "OPENAI_API_KEY", value: "sk-openai" }])
   })
 
-  it("SUPPORTED_AGENTS contains claude-code and codex in v2", () => {
+  it("envUpdatesForProvider emits opencode key + derived provider", () => {
+    const updates = _internals.envUpdatesForProvider(
+      "opencode",
+      provider({ apiKey: "sk-x", kind: "gemini" })
+    )
+    expect(updates).toEqual([
+      { key: "OPENCODE_API_KEY", value: "sk-x" },
+      { key: "__provider", value: "google" },
+    ])
+  })
+
+  it("SUPPORTED_AGENTS contains claude-code, codex, gemini, opencode in v3", () => {
     expect(_internals.SUPPORTED_AGENTS.has("claude-code")).toBe(true)
     expect(_internals.SUPPORTED_AGENTS.has("codex")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("gemini")).toBe(false)
+    expect(_internals.SUPPORTED_AGENTS.has("gemini")).toBe(true)
+    expect(_internals.SUPPORTED_AGENTS.has("opencode")).toBe(true)
+    expect(_internals.SUPPORTED_AGENTS.has("claude-desktop")).toBe(false)
   })
 })

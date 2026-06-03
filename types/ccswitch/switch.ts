@@ -5,6 +5,14 @@ import type { AgentId } from "@/lib/claude/types"
 import type { CcswitchProvider } from "./provider"
 
 /**
+ * Targets a CCSwitch provider switch can propagate into. A superset of the
+ * modeled `AgentId` union plus `"opencode"` — OpenCode is a propagation
+ * target (we write its `auth.json`) but is not one of cognia's modeled
+ * agents, so it is added here rather than to the global `AgentId`.
+ */
+export type CcswitchAgentId = AgentId | "opencode"
+
+/**
  * Where a provider switch lands. Cognia-next is always included (the user
  * is initiating the switch from cognia-next's UI). `agents` lists the
  * external CLIs the user opted to mirror the switch into via the
@@ -14,7 +22,7 @@ export interface SwitchScope {
   /** Always true — left explicit so the dialog can render it as a row. */
   cognia: true
   /** Per-switch user selection. Empty = cognia-next only. */
-  agents: AgentId[]
+  agents: CcswitchAgentId[]
 }
 
 /**
@@ -46,7 +54,7 @@ export interface SwitchPlan {
 }
 
 export interface AgentEnvPatch {
-  agentId: AgentId
+  agentId: CcswitchAgentId
   /** "~/.claude/settings.json" etc. — null when the path can't be resolved. */
   targetPath: string | null
   /** True when we don't yet support writing to this agent. */
@@ -69,7 +77,7 @@ export interface ActiveProviderState {
   /** Active provider id in cognia-next's own SDK (`AppSettings.activeProviderId`). */
   cognia: string | undefined
   /** Per-agent active CCSwitch provider id (or `undefined` if no match). */
-  agents: Partial<Record<AgentId, string | undefined>>
+  agents: Partial<Record<CcswitchAgentId, string | undefined>>
   /** True when cognia-next and any tracked agent disagree. */
   drift: boolean
 }

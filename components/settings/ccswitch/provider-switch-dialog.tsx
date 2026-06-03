@@ -24,26 +24,26 @@ import { Separator } from "@/components/ui/separator"
 
 import { applySwitch, planSwitch } from "@/lib/ccswitch/switch"
 import type { ApplyResult } from "@/lib/ccswitch/switch"
-import type { CcswitchProvider, SwitchPlan } from "@/types/ccswitch"
-import type { AgentId } from "@/lib/claude/types"
+import type { CcswitchAgentId, CcswitchProvider, SwitchPlan } from "@/types/ccswitch"
 import { getSettings } from "@/lib/db/settings"
 
 const PROPAGATABLE_AGENTS: ReadonlyArray<{
-  id: AgentId
+  id: CcswitchAgentId
   labelKey: string
 }> = [
   { id: "claude-code", labelKey: "claude-code" },
-  // Other agents are listed in the UI but flagged unsupported in the plan;
-  // adding them here lets the user see the option.
   { id: "codex", labelKey: "codex" },
-  { id: "claude-desktop", labelKey: "claude-desktop" },
   { id: "gemini", labelKey: "gemini" },
+  { id: "opencode", labelKey: "opencode" },
+  // Listed so the user sees the option, but flagged unsupported in the plan
+  // (no verified config path to write safely).
+  { id: "claude-desktop", labelKey: "claude-desktop" },
 ]
 
 export interface ProviderSwitchDialogProps {
   provider: CcswitchProvider | null
   /** Initial agent selection (e.g., from `ccswitchSync.defaultPropagation`). */
-  initialAgents?: AgentId[]
+  initialAgents?: CcswitchAgentId[]
   open: boolean
   onOpenChange: (next: boolean) => void
   onApplied?: (result: ApplyResult) => void
@@ -58,7 +58,7 @@ export function ProviderSwitchDialog({
 }: ProviderSwitchDialogProps) {
   const t = useTranslations("ccswitch")
 
-  const [selectedAgents, setSelectedAgents] = useState<AgentId[]>([])
+  const [selectedAgents, setSelectedAgents] = useState<CcswitchAgentId[]>([])
   const [plan, setPlan] = useState<SwitchPlan | null>(null)
   const [applying, setApplying] = useState(false)
   const [result, setResult] = useState<ApplyResult | null>(null)
@@ -111,7 +111,7 @@ export function ProviderSwitchDialog({
     [plan]
   )
 
-  const toggleAgent = (id: AgentId, checked: boolean) => {
+  const toggleAgent = (id: CcswitchAgentId, checked: boolean) => {
     setSelectedAgents((prev) => (checked ? [...prev, id] : prev.filter((a) => a !== id)))
   }
 

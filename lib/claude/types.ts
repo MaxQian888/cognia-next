@@ -1011,7 +1011,19 @@ export interface AppSettings {
   ccswitchSync?: {
     enabled: boolean
     watchDb: boolean
-    defaultPropagation: AgentId[]
+    /**
+     * Pre-selected propagation targets. `CcswitchAgentId` is the modeled
+     * `AgentId` union plus `"opencode"` (an OpenCode-CLI write target that
+     * isn't one of cognia's modeled agents). See `types/ccswitch/switch.ts`.
+     */
+    defaultPropagation: import("@/types/ccswitch").CcswitchAgentId[]
+    /**
+     * Optional manual cc-switch data-dir override (a directory containing
+     * `cc-switch.db`). When set, it takes priority over cc-switch's own
+     * redirect store (but below the `CC_SWITCH_HOME` env var). Blank/undefined
+     * falls through to the normal resolution chain.
+     */
+    manualDataDir?: string
   }
   /**
    * Claude subscription settings — drives the Settings → Subscription →

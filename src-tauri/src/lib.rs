@@ -281,6 +281,10 @@ pub fn run() {
         // Source Control panel (ADR-0038) — the watcher map per active repo.
         // Stateless commands aside, this is the subsystem's only managed state.
         .manage(git::GitWatcherState::new())
+        // CCSwitch live db watch (Phase 4.2) — single owner over cc-switch.db,
+        // emits `ccswitch://db-changed` so the CCSwitch section refreshes when
+        // the user switches providers in cc-switch itself.
+        .manage(ccswitch::watcher::CcswitchWatcherState::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("vscode-extensions"))
@@ -315,6 +319,10 @@ pub fn run() {
             ccswitch::commands::ccswitch_list_prompts,
             ccswitch::commands::ccswitch_list_skills,
             ccswitch::commands::write_codex_auth_env,
+            ccswitch::commands::write_gemini_settings_env,
+            ccswitch::commands::write_opencode_auth_env,
+            ccswitch::watcher::ccswitch_watch_start,
+            ccswitch::watcher::ccswitch_watch_stop,
             // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
             // active-pointer management, and provider preset persistence.
             subscription::commands::subscription_init,

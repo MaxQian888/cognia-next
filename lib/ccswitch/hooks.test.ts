@@ -7,6 +7,16 @@ jest.mock("./client", () => ({
   ccswitchListMcpServers: jest.fn(),
   ccswitchListPrompts: jest.fn(),
   ccswitchListSkills: jest.fn(),
+  ccswitchWatchStart: jest.fn(),
+  ccswitchWatchStop: jest.fn(),
+}))
+
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(() => false),
+}))
+
+jest.mock("@/lib/tauri/events", () => ({
+  onTauriEvent: jest.fn(),
 }))
 
 import { renderHook, act, waitFor } from "@testing-library/react"
@@ -17,7 +27,11 @@ import {
   ccswitchListProviders,
   ccswitchListSkills,
   ccswitchStatus,
+  ccswitchWatchStart,
+  ccswitchWatchStop,
 } from "./client"
+import { isTauri } from "@/lib/tauri"
+import { onTauriEvent } from "@/lib/tauri/events"
 
 import {
   useCcswitchMcpServers,
@@ -32,9 +46,17 @@ const mProviders = ccswitchListProviders as jest.Mock
 const mMcp = ccswitchListMcpServers as jest.Mock
 const mPrompts = ccswitchListPrompts as jest.Mock
 const mSkills = ccswitchListSkills as jest.Mock
+const mWatchStart = ccswitchWatchStart as jest.Mock
+const mWatchStop = ccswitchWatchStop as jest.Mock
+const mIsTauri = isTauri as jest.Mock
+const mOnEvent = onTauriEvent as jest.Mock
 
 beforeEach(() => {
   jest.resetAllMocks()
+  mIsTauri.mockReturnValue(false)
+  mWatchStart.mockResolvedValue(true)
+  mWatchStop.mockResolvedValue(undefined)
+  mOnEvent.mockResolvedValue(() => {})
 })
 
 describe("useCcswitchStatus", () => {
@@ -106,6 +128,69 @@ describe("useCcswitchStatus", () => {
     // Give any focus listeners a tick to (not) run.
     await new Promise((r) => setTimeout(r, 10))
     expect(mStatus).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("live db watch (ccswitch://db-changed)", () => {
+  beforeEach(() => {
+    mStatus.mockResolvedValue({
+      dbPath: "/x",
+      exists: true,
+      counts: { providers: 1, mcpServers: 0, prompts: 0, skills: 0 },
+    })
+  })
+
+  it("starts the watcher and refreshes when a db-changed event fires", async () => {
+    mIsTauri.mockReturnValue(true)
+    let emit: (() => void) | undefined
+    const unlisten = jest.fn()
+    mOnEvent.mockImplementation((_event: string, handler: () => void) => {
+      emit = handler
+      return Promise.resolve(unlisten)
+    })
+
+    renderHook(() => useCcswitchStatus(true, true))
+    await waitFor(() => expect(mWatchStart).toHaveBeenCalled())
+    await waitFor(() => expect(mStatus).toHaveBeenCalledTimes(1))
+    expect(mOnEvent).toHaveBeenCalledWith("ccswitch://db-changed", expect.any(Function))
+
+    await act(async () => {
+      emit?.()
+    })
+    await waitFor(() => expect(mStatus).toHaveBeenCalledTimes(2))
+  })
+
+  it("does not start the watcher when watchDb is off", async () => {
+    mIsTauri.mockReturnValue(true)
+    renderHook(() => useCcswitchStatus(true, false))
+    await waitFor(() => expect(mStatus).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(mWatchStart).not.toHaveBeenCalled()
+    expect(mOnEvent).not.toHaveBeenCalled()
+  })
+
+  it("does not start the watcher outside Tauri", async () => {
+    mIsTauri.mockReturnValue(false)
+    renderHook(() => useCcswitchStatus(true, true))
+    await waitFor(() => expect(mStatus).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(mWatchStart).not.toHaveBeenCalled()
+  })
+
+  it("stops the watcher and unsubscribes on unmount", async () => {
+    mIsTauri.mockReturnValue(true)
+    const unlisten = jest.fn()
+    mOnEvent.mockResolvedValue(unlisten)
+
+    const { unmount } = renderHook(() => useCcswitchStatus(true, true))
+    await waitFor(() => expect(mOnEvent).toHaveBeenCalled())
+    // Let the onTauriEvent promise resolve so unlisten is captured.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    unmount()
+    await waitFor(() => expect(mWatchStop).toHaveBeenCalled())
+    expect(unlisten).toHaveBeenCalled()
   })
 })
 

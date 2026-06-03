@@ -8488,7 +8488,8 @@
       "claude-code": "Claude Code (~/.claude/settings.json)",
       "claude-desktop": "Claude Desktop",
       "codex": "Codex",
-      "gemini": "Gemini CLI"
+      "gemini": "Gemini CLI",
+      "opencode": "OpenCode (~/.local/share/opencode/auth.json)"
     },
     "overview": {
       "webModeTitle": "Desktop only",
@@ -8505,7 +8506,12 @@
       "noActive": "No CCSwitch provider matches",
       "noActiveBody": "cognia-next is using a manually-entered API key, or a provider whose key/URL don't match any CCSwitch record.",
       "driftTitle": "Drift detected",
-      "driftBody": "cognia-next and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile."
+      "driftBody": "cognia-next and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile.",
+      "resolutionSource": {
+        "env": "From CC_SWITCH_HOME",
+        "manual": "Manual override",
+        "redirect": "From CCSwitch redirect"
+      }
     },
     "providers": {
       "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
@@ -8569,6 +8575,12 @@
       "watchDbBody": "Re-poll cc-switch.db whenever the cognia-next window regains focus, so the active provider badge stays fresh.",
       "propagationTitle": "Default propagation",
       "propagationBody": "These agents are pre-checked when you open the 'Use here & in…' dialog. Per-switch selection still wins.",
+      "manualDirTitle": "Manual data directory",
+      "manualDirBody": "Override where cognia looks for cc-switch.db. Use this when your CCSwitch data folder lives somewhere we can't auto-detect (e.g. a synced drive).",
+      "manualDirLabel": "Folder containing cc-switch.db",
+      "manualDirPlaceholder": "e.g. ~/Dropbox/cc-switch",
+      "manualDirClear": "Clear",
+      "manualDirHint": "Takes priority over CCSwitch's own redirect, but below the CC_SWITCH_HOME environment variable. Leave blank to auto-detect.",
       "save": "Save",
       "saving": "Saving…"
     },

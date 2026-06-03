@@ -24,29 +24,57 @@ function ensureTauri() {
   }
 }
 
-export async function ccswitchStatus(): Promise<CcswitchStatus> {
-  ensureTauri()
-  return invoke<CcswitchStatus>("ccswitch_status")
+/**
+ * Optional manual data-dir override (`AppSettings.ccswitchSync.manualDataDir`).
+ * Threaded into the read commands so a user who keeps cc-switch.db in a
+ * non-standard folder can point cognia at it. Blank values are dropped so the
+ * Rust side falls through to its normal resolution chain.
+ */
+function manualArg(manualDataDir?: string): { manualDataDir?: string } {
+  const trimmed = manualDataDir?.trim()
+  return trimmed ? { manualDataDir: trimmed } : {}
 }
 
-export async function ccswitchListProviders(): Promise<CcswitchProvider[]> {
+export async function ccswitchStatus(manualDataDir?: string): Promise<CcswitchStatus> {
   ensureTauri()
-  return invoke<CcswitchProvider[]>("ccswitch_list_providers")
+  return invoke<CcswitchStatus>("ccswitch_status", manualArg(manualDataDir))
 }
 
-export async function ccswitchListMcpServers(): Promise<CcswitchMcpServer[]> {
+export async function ccswitchListProviders(manualDataDir?: string): Promise<CcswitchProvider[]> {
   ensureTauri()
-  return invoke<CcswitchMcpServer[]>("ccswitch_list_mcp_servers")
+  return invoke<CcswitchProvider[]>("ccswitch_list_providers", manualArg(manualDataDir))
 }
 
-export async function ccswitchListPrompts(): Promise<CcswitchPrompt[]> {
+export async function ccswitchListMcpServers(manualDataDir?: string): Promise<CcswitchMcpServer[]> {
   ensureTauri()
-  return invoke<CcswitchPrompt[]>("ccswitch_list_prompts")
+  return invoke<CcswitchMcpServer[]>("ccswitch_list_mcp_servers", manualArg(manualDataDir))
 }
 
-export async function ccswitchListSkills(): Promise<CcswitchSkill[]> {
+export async function ccswitchListPrompts(manualDataDir?: string): Promise<CcswitchPrompt[]> {
   ensureTauri()
-  return invoke<CcswitchSkill[]>("ccswitch_list_skills")
+  return invoke<CcswitchPrompt[]>("ccswitch_list_prompts", manualArg(manualDataDir))
+}
+
+export async function ccswitchListSkills(manualDataDir?: string): Promise<CcswitchSkill[]> {
+  ensureTauri()
+  return invoke<CcswitchSkill[]>("ccswitch_list_skills", manualArg(manualDataDir))
+}
+
+/**
+ * Start the live cc-switch.db watcher (Phase 4.2). The backend emits
+ * `ccswitch://db-changed` on debounced db mutations so the hook layer can
+ * `refresh()`. Returns whether a watch is now active. No-op-safe to call
+ * repeatedly — the Rust side replaces any prior watcher.
+ */
+export async function ccswitchWatchStart(manualDataDir?: string): Promise<boolean> {
+  ensureTauri()
+  return invoke<boolean>("ccswitch_watch_start", manualArg(manualDataDir))
+}
+
+/** Stop the live cc-switch.db watcher. */
+export async function ccswitchWatchStop(): Promise<void> {
+  ensureTauri()
+  await invoke("ccswitch_watch_stop")
 }
 
 /**
@@ -90,6 +118,47 @@ export async function writeCodexAuthEnv(
 ): Promise<{ path: string; backupPath?: string }> {
   ensureTauri()
   return invoke<{ path: string; backupPath?: string }>("write_codex_auth_env", {
+    envUpdates,
+  })
+}
+
+/**
+ * Patch the `env` block of Gemini CLI's `~/.gemini/settings.json`. Used by
+ * `applySwitch` to propagate a CCSwitch provider switch into gemini-cli.
+ *
+ * Recognised keys (verified against google-gemini/gemini-cli docs):
+ *   - `GEMINI_API_KEY` → the api key for gemini-api-key auth.
+ *   - `GOOGLE_GEMINI_BASE_URL` → overrides the default Gemini API base URL.
+ *
+ * `null` / empty removes the key. Atomic write + mtime drift detection +
+ * bounded backup rotation apply on the Rust side.
+ */
+export async function writeGeminiSettingsEnv(
+  envUpdates: Record<string, string | null>
+): Promise<{ path: string; backupPath?: string }> {
+  ensureTauri()
+  return invoke<{ path: string; backupPath?: string }>("write_gemini_settings_env", {
+    envUpdates,
+  })
+}
+
+/**
+ * Patch a provider entry in OpenCode CLI's `auth.json` (the same file cognia
+ * reads in discovery). The Rust side writes `{ "type": "api", "key": <value> }`
+ * for the target provider.
+ *
+ * Keys:
+ *   - `OPENCODE_API_KEY` → the api key to write (null/empty removes the entry).
+ *   - `__provider` → the provider id to target (default "anthropic"); consumed
+ *     by the writer, never persisted into auth.json.
+ *
+ * Atomic write + mtime drift detection + bounded backup rotation apply.
+ */
+export async function writeOpencodeAuthEnv(
+  envUpdates: Record<string, string | null>
+): Promise<{ path: string; backupPath?: string }> {
+  ensureTauri()
+  return invoke<{ path: string; backupPath?: string }>("write_opencode_auth_env", {
     envUpdates,
   })
 }

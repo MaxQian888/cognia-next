@@ -24,9 +24,8 @@ import {
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { detectActive } from "@/lib/ccswitch/switch"
-import type { ActiveProviderState, CcswitchProvider } from "@/types/ccswitch"
+import type { ActiveProviderState, CcswitchAgentId, CcswitchProvider } from "@/types/ccswitch"
 import { getSettings } from "@/lib/db/settings"
-import type { AgentId } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"
 
 import { ProviderSwitchDialog } from "../provider-switch-dialog"
@@ -36,26 +35,28 @@ export function CcswitchProvidersTab() {
   const tabReady = isTauri()
 
   const [watchDb, setWatchDb] = useState(false)
-  const [defaultPropagation, setDefaultPropagation] = useState<AgentId[]>([])
+  const [manualDataDir, setManualDataDir] = useState<string | undefined>(undefined)
+  const [defaultPropagation, setDefaultPropagation] = useState<CcswitchAgentId[]>([])
   useEffect(() => {
     if (!tabReady) return
     void getSettings().then((s) => {
       setWatchDb(s.ccswitchSync?.watchDb ?? true)
+      setManualDataDir(s.ccswitchSync?.manualDataDir)
       setDefaultPropagation(s.ccswitchSync?.defaultPropagation ?? [])
     })
   }, [tabReady])
 
-  const { data: status } = useCcswitchStatus(tabReady, watchDb)
+  const { data: status } = useCcswitchStatus(tabReady, watchDb, manualDataDir)
   const {
     data: providers,
     loading,
     error,
     refresh,
-  } = useCcswitchProviders(tabReady && status?.exists === true, watchDb)
+  } = useCcswitchProviders(tabReady && status?.exists === true, watchDb, manualDataDir)
 
   const [active, setActive] = useState<ActiveProviderState | null>(null)
   const [dialogProvider, setDialogProvider] = useState<CcswitchProvider | null>(null)
-  const [dialogPrefill, setDialogPrefill] = useState<AgentId[]>([])
+  const [dialogPrefill, setDialogPrefill] = useState<CcswitchAgentId[]>([])
 
   useEffect(() => {
     if (!providers) return

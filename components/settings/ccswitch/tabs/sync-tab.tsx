@@ -10,6 +10,8 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   SettingsAlert,
@@ -18,17 +20,19 @@ import {
 } from "@/components/settings/common/settings-section"
 
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import type { AgentId } from "@/lib/claude/types"
+import type { CcswitchAgentId } from "@/types/ccswitch"
 import { isTauri } from "@/lib/tauri"
 
-const PROPAGATABLE_AGENTS: AgentId[] = ["claude-code"]
+/** Agents we can actually write a provider env into (mirrors switch.ts). */
+const PROPAGATABLE_AGENTS: CcswitchAgentId[] = ["claude-code", "codex", "gemini", "opencode"]
 
 export function CcswitchSyncTab() {
   const t = useTranslations("ccswitch")
   const tabReady = isTauri()
   const [enabled, setEnabled] = useState(true)
   const [watchDb, setWatchDb] = useState(true)
-  const [propagation, setPropagation] = useState<AgentId[]>([])
+  const [propagation, setPropagation] = useState<CcswitchAgentId[]>([])
+  const [manualDataDir, setManualDataDir] = useState("")
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -40,11 +44,12 @@ export function CcswitchSyncTab() {
       setEnabled(cfg?.enabled ?? true)
       setWatchDb(cfg?.watchDb ?? true)
       setPropagation(cfg?.defaultPropagation ?? [])
+      setManualDataDir(cfg?.manualDataDir ?? "")
       setLoaded(true)
     })
   }, [tabReady])
 
-  const togglePropagation = (id: AgentId, checked: boolean) => {
+  const togglePropagation = (id: CcswitchAgentId, checked: boolean) => {
     setPropagation((prev) =>
       checked ? Array.from(new Set([...prev, id])) : prev.filter((a) => a !== id)
     )
@@ -53,11 +58,13 @@ export function CcswitchSyncTab() {
   const onSave = async () => {
     setSaving(true)
     try {
+      const trimmedDir = manualDataDir.trim()
       await saveSettings({
         ccswitchSync: {
           enabled,
           watchDb,
           defaultPropagation: propagation,
+          manualDataDir: trimmedDir ? trimmedDir : undefined,
         },
       })
     } finally {
@@ -107,6 +114,33 @@ export function CcswitchSyncTab() {
               <span className="text-sm">{t(`agents.${a}`)}</span>
             </label>
           ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title={t("sync.manualDirTitle")} description={t("sync.manualDirBody")}>
+        <div className="space-y-2">
+          <Label htmlFor="ccswitch-manual-dir" className="text-xs text-muted-foreground">
+            {t("sync.manualDirLabel")}
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="ccswitch-manual-dir"
+              value={manualDataDir}
+              onChange={(e) => setManualDataDir(e.target.value)}
+              placeholder={t("sync.manualDirPlaceholder")}
+              className="font-mono text-xs"
+              disabled={!enabled}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setManualDataDir("")}
+              disabled={!enabled || manualDataDir.trim() === ""}
+            >
+              {t("sync.manualDirClear")}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">{t("sync.manualDirHint")}</p>
         </div>
       </SettingsCard>
 

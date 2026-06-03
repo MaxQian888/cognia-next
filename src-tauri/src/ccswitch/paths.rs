@@ -30,6 +30,11 @@ use std::path::PathBuf;
 pub enum CcswitchResolutionSource {
     /// `CC_SWITCH_HOME` env var.
     Env,
+    /// User-supplied manual data-dir override from cognia's own settings
+    /// (`AppSettings.ccswitchSync.manualDataDir`). Checked below the env var
+    /// but above cc-switch's own redirect store, so a user who knows where
+    /// their db lives can pin it without editing cc-switch's config.
+    Manual,
     /// `app_paths.json::app_config_dir_override` from cc-switch's own store.
     Redirect,
     /// Default `~/.cc-switch/`.
@@ -44,17 +49,30 @@ pub struct ResolvedCcswitchDb {
 
 /// Legacy convenience wrapper for callers that just need the path. Prefer
 /// `resolve_ccswitch_db()` so the source label flows to the renderer.
-pub fn ccswitch_db_path() -> Option<PathBuf> {
-    resolve_ccswitch_db().map(|r| r.path)
+pub fn ccswitch_db_path(manual_override: Option<&str>) -> Option<PathBuf> {
+    resolve_ccswitch_db(manual_override).map(|r| r.path)
 }
 
-/// Full resolution including the source label. Honours the priority chain
-/// described in the module comment.
-pub fn resolve_ccswitch_db() -> Option<ResolvedCcswitchDb> {
+/// Full resolution including the source label. Honours the priority chain:
+///   1. `CC_SWITCH_HOME` env var.
+///   2. `manual_override` (cognia's `ccswitchSync.manualDataDir`).
+///   3. cc-switch's own `app_paths.json` redirect.
+///   4. Default `~/.cc-switch/`.
+///
+/// `manual_override` is a directory containing `cc-switch.db` (the same shape
+/// as `CC_SWITCH_HOME` and the redirect store). Blank / unresolvable values
+/// fall through to the next source.
+pub fn resolve_ccswitch_db(manual_override: Option<&str>) -> Option<ResolvedCcswitchDb> {
     if let Some(p) = override_from_env() {
         return Some(ResolvedCcswitchDb {
             path: p.join("cc-switch.db"),
             source: CcswitchResolutionSource::Env,
+        });
+    }
+    if let Some(p) = override_from_manual(manual_override) {
+        return Some(ResolvedCcswitchDb {
+            path: p.join("cc-switch.db"),
+            source: CcswitchResolutionSource::Manual,
         });
     }
     if let Some(p) = override_from_ccswitch_store() {
@@ -67,6 +85,20 @@ pub fn resolve_ccswitch_db() -> Option<ResolvedCcswitchDb> {
         path: h.join(".cc-switch").join("cc-switch.db"),
         source: CcswitchResolutionSource::Default,
     })
+}
+
+/// Resolve a user-supplied manual data-dir override. Trims, expands `~`, and
+/// returns `None` for blank input so callers fall through to the next source.
+/// Unlike the redirect store we do NOT require the directory to exist — the
+/// status command reports `exists: false` for a not-yet-created db so the
+/// user gets actionable "we looked here" feedback after typing a path.
+fn override_from_manual(manual_override: Option<&str>) -> Option<PathBuf> {
+    let raw = manual_override?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(expand_tilde(trimmed))
 }
 
 fn override_from_env() -> Option<PathBuf> {
@@ -182,7 +214,7 @@ mod tests {
     #[test]
     fn default_resolution_lives_under_home() {
         let _g = scoped_env("CC_SWITCH_HOME", None);
-        let resolved = resolve_ccswitch_db().expect("home dir resolvable on test host");
+        let resolved = resolve_ccswitch_db(None).expect("home dir resolvable on test host");
         let home = dirs::home_dir().unwrap();
         // We can't fully isolate the default branch on a CI host that may
         // have cc-switch installed with a redirect set — tolerate that
@@ -199,15 +231,44 @@ mod tests {
     fn env_override_takes_priority() {
         let tmp = tempfile::tempdir().unwrap();
         let _g = scoped_env("CC_SWITCH_HOME", Some(tmp.path().to_str().unwrap()));
-        let resolved = resolve_ccswitch_db().unwrap();
+        // Env wins even when a manual override is also supplied.
+        let resolved = resolve_ccswitch_db(Some("/some/manual/dir")).unwrap();
         assert_eq!(resolved.source, CcswitchResolutionSource::Env);
         assert_eq!(resolved.path, tmp.path().join("cc-switch.db"));
     }
 
     #[test]
+    fn manual_override_used_below_env() {
+        let _g = scoped_env("CC_SWITCH_HOME", None);
+        let tmp = tempfile::tempdir().unwrap();
+        let resolved = resolve_ccswitch_db(Some(tmp.path().to_str().unwrap())).unwrap();
+        assert_eq!(resolved.source, CcswitchResolutionSource::Manual);
+        assert_eq!(resolved.path, tmp.path().join("cc-switch.db"));
+    }
+
+    #[test]
+    fn blank_manual_override_falls_through() {
+        let _g = scoped_env("CC_SWITCH_HOME", None);
+        // Empty / whitespace manual override must not be treated as Manual.
+        let resolved = resolve_ccswitch_db(Some("   ")).unwrap();
+        assert_ne!(resolved.source, CcswitchResolutionSource::Manual);
+    }
+
+    #[test]
+    fn manual_override_expands_tilde() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(
+            override_from_manual(Some("~/cc-data")),
+            Some(home.join("cc-data"))
+        );
+        assert_eq!(override_from_manual(Some("")), None);
+        assert_eq!(override_from_manual(None), None);
+    }
+
+    #[test]
     fn ccswitch_db_path_returns_just_the_path() {
         let _g = scoped_env("CC_SWITCH_HOME", None);
-        let path = ccswitch_db_path().expect("home dir resolvable on test host");
+        let path = ccswitch_db_path(None).expect("home dir resolvable on test host");
         assert!(path.ends_with("cc-switch.db"));
     }
 

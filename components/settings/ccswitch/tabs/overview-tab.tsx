@@ -53,10 +53,12 @@ export function CcswitchOverviewTab() {
   const tabReady = isTauri()
 
   const [watchDb, setWatchDb] = useState(false)
+  const [manualDataDir, setManualDataDir] = useState<string | undefined>(undefined)
   useEffect(() => {
     if (!tabReady) return
     void getSettings().then((s) => {
       setWatchDb(s.ccswitchSync?.watchDb ?? true)
+      setManualDataDir(s.ccswitchSync?.manualDataDir)
     })
   }, [tabReady])
 
@@ -65,8 +67,12 @@ export function CcswitchOverviewTab() {
     loading: statusLoading,
     error: statusError,
     refresh: refreshStatus,
-  } = useCcswitchStatus(tabReady, watchDb)
-  const { data: providers } = useCcswitchProviders(tabReady && status?.exists === true, watchDb)
+  } = useCcswitchStatus(tabReady, watchDb, manualDataDir)
+  const { data: providers } = useCcswitchProviders(
+    tabReady && status?.exists === true,
+    watchDb,
+    manualDataDir
+  )
 
   const [active, setActive] = useState<ActiveProviderState | null>(null)
   const [activeLoading, setActiveLoading] = useState(false)

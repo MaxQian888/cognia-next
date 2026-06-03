@@ -77,6 +77,49 @@ describe("CcswitchSyncTab", () => {
     expect(saveSettingsMock.mock.calls[0][0].ccswitchSync.watchDb).toBe(false)
   })
 
+  it("loads and persists a manual data dir (trimmed)", async () => {
+    saveSettingsMock.mockResolvedValue({})
+    getSettingsMock.mockResolvedValue({
+      id: "singleton",
+      ccswitchSync: {
+        enabled: true,
+        watchDb: true,
+        defaultPropagation: [],
+        manualDataDir: "~/cc-data",
+      },
+      alwaysAllowTools: [],
+      builtinTools: {},
+    })
+    render(<CcswitchSyncTab />)
+    const input = (await screen.findByLabelText("sync.manualDirLabel")) as HTMLInputElement
+    expect(input.value).toBe("~/cc-data")
+    fireEvent.change(input, { target: { value: "  ~/elsewhere  " } })
+    fireEvent.click(screen.getByRole("button", { name: "sync.save" }))
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalled())
+    expect(saveSettingsMock.mock.calls[0][0].ccswitchSync.manualDataDir).toBe("~/elsewhere")
+  })
+
+  it("clearing the manual data dir persists undefined", async () => {
+    saveSettingsMock.mockResolvedValue({})
+    getSettingsMock.mockResolvedValue({
+      id: "singleton",
+      ccswitchSync: {
+        enabled: true,
+        watchDb: true,
+        defaultPropagation: [],
+        manualDataDir: "~/cc-data",
+      },
+      alwaysAllowTools: [],
+      builtinTools: {},
+    })
+    render(<CcswitchSyncTab />)
+    await screen.findByLabelText("sync.manualDirLabel")
+    fireEvent.click(screen.getByRole("button", { name: "sync.manualDirClear" }))
+    fireEvent.click(screen.getByRole("button", { name: "sync.save" }))
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalled())
+    expect(saveSettingsMock.mock.calls[0][0].ccswitchSync.manualDataDir).toBeUndefined()
+  })
+
   it("renders a web-mode banner when not in Tauri and skips the settings read", async () => {
     mIsTauri.mockReturnValue(false)
     render(<CcswitchSyncTab />)

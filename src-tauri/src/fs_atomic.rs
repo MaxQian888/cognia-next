@@ -174,6 +174,71 @@ pub fn atomic_write_with_mtime_check(
     })
 }
 
+/// Prune `<file>.<ext>.bak.<epoch_secs>` backups left by
+/// `atomic_write_with_mtime_check`, keeping the `keep` most-recent ones and
+/// deleting the rest (oldest-first). The active file at `path` is never
+/// touched. `keep == 0` removes every backup.
+///
+/// Matching is intentionally narrow: only sibling files whose name is
+/// `<path file_name>.bak.<digits>` are considered backups. This is the exact
+/// shape the atomic writer produces (`with_extension("<ext>.bak.<ts>")`),
+/// so unrelated files in the directory are never deleted.
+///
+/// Best-effort: I/O errors enumerating or removing individual entries are
+/// swallowed so a failed rotation never aborts the surrounding write. Returns
+/// the list of paths that were removed (useful for tests / logging).
+pub fn rotate_backups(path: &Path, keep: usize) -> Vec<PathBuf> {
+    let dir = match path.parent() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    let file_name = match path.file_name().and_then(|s| s.to_str()) {
+        Some(n) => n,
+        None => return Vec::new(),
+    };
+    // Backups are "<file_name>.bak.<epoch_secs>". We capture the trailing
+    // timestamp to sort by; the suffix after the last '.' must be all-digits.
+    let prefix = format!("{file_name}.bak.");
+
+    let mut backups: Vec<(u64, PathBuf)> = Vec::new();
+    let read_dir = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
+    };
+    for entry in read_dir.flatten() {
+        let name_os = entry.file_name();
+        let name = match name_os.to_str() {
+            Some(n) => n,
+            None => continue,
+        };
+        let Some(ts_str) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        // Guard against matching e.g. "<file>.bak.5.tmp" — require a pure
+        // numeric tail so only canonical backups are candidates for deletion.
+        let Ok(ts) = ts_str.parse::<u64>() else {
+            continue;
+        };
+        backups.push((ts, entry.path()));
+    }
+
+    if backups.len() <= keep {
+        return Vec::new();
+    }
+
+    // Sort newest-first by timestamp; tie-break on path for determinism on
+    // filesystems that collapse multiple writes into the same second.
+    backups.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+    let mut removed = Vec::new();
+    for (_, p) in backups.into_iter().skip(keep) {
+        if fs::remove_file(&p).is_ok() {
+            removed.push(p);
+        }
+    }
+    removed
+}
+
 /// Read a file and return its raw bytes + the mtime observed at read time.
 /// Returns `Ok((bytes, mtime))` if the file exists, `Ok((vec![], None))` if
 /// it doesn't (callers building from scratch).
@@ -342,6 +407,74 @@ mod tests {
             bp_name.starts_with("settings.json.bak."),
             "unexpected backup name: {bp_name}"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotate_backups_keeps_newest_and_removes_oldest() {
+        let dir = tmpdir();
+        let path = dir.join("auth.json");
+        fs::write(&path, "active").unwrap();
+        // Create 5 backups with ascending timestamps.
+        for ts in [100u64, 200, 300, 400, 500] {
+            fs::write(dir.join(format!("auth.json.bak.{ts}")), "b").unwrap();
+        }
+        let removed = rotate_backups(&path, 2);
+        assert_eq!(removed.len(), 3);
+        // The two newest (400, 500) survive; 100/200/300 are gone.
+        assert!(dir.join("auth.json.bak.500").exists());
+        assert!(dir.join("auth.json.bak.400").exists());
+        assert!(!dir.join("auth.json.bak.300").exists());
+        assert!(!dir.join("auth.json.bak.200").exists());
+        assert!(!dir.join("auth.json.bak.100").exists());
+        // Active file is never touched.
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotate_backups_noop_when_under_keep() {
+        let dir = tmpdir();
+        let path = dir.join("settings.json");
+        fs::write(&path, "x").unwrap();
+        fs::write(dir.join("settings.json.bak.1"), "b").unwrap();
+        let removed = rotate_backups(&path, 10);
+        assert!(removed.is_empty());
+        assert!(dir.join("settings.json.bak.1").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotate_backups_ignores_non_backup_siblings() {
+        let dir = tmpdir();
+        let path = dir.join("auth.json");
+        fs::write(&path, "x").unwrap();
+        // These must never be deleted: a tmp file, an unrelated file, and a
+        // backup with a non-numeric tail.
+        fs::write(dir.join("auth.json.tmp"), "t").unwrap();
+        fs::write(dir.join("auth.json.bak.notanumber"), "n").unwrap();
+        fs::write(dir.join("other.json.bak.999"), "o").unwrap();
+        fs::write(dir.join("auth.json.bak.1"), "b").unwrap();
+        fs::write(dir.join("auth.json.bak.2"), "b").unwrap();
+        let removed = rotate_backups(&path, 1);
+        assert_eq!(removed.len(), 1);
+        assert!(dir.join("auth.json.tmp").exists());
+        assert!(dir.join("auth.json.bak.notanumber").exists());
+        assert!(dir.join("other.json.bak.999").exists());
+        assert!(dir.join("auth.json.bak.2").exists());
+        assert!(!dir.join("auth.json.bak.1").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotate_backups_keep_zero_removes_all() {
+        let dir = tmpdir();
+        let path = dir.join("auth.json");
+        fs::write(&path, "x").unwrap();
+        fs::write(dir.join("auth.json.bak.1"), "b").unwrap();
+        fs::write(dir.join("auth.json.bak.2"), "b").unwrap();
+        let removed = rotate_backups(&path, 0);
+        assert_eq!(removed.len(), 2);
         let _ = fs::remove_dir_all(&dir);
     }
 
