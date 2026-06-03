@@ -771,6 +771,11 @@ export function useClaudeChat() {
           const baseList = useChatStore.getState().messages
 
           const writeAssistant = () => {
+            // Guard against a mid-run session switch: writing the in-flight
+            // external turn into the visible store would clobber whatever
+            // session is now active (the SDK path guards every write the same
+            // way via `activeRef`).
+            if (activeRef.current !== sessionId) return
             const assistantMsg: UIMessage = {
               id: assistantId,
               role: "assistant",
@@ -820,7 +825,19 @@ export function useClaudeChat() {
             writeAssistant()
           }
 
-          const finalMessages = useChatStore.getState().messages
+          // Persist always targets this session's Dexie rows, but only read the
+          // live store when this session is still active — otherwise build the
+          // final list locally so a session switch mid-run can't persist the
+          // now-active session's messages under this session id.
+          const finalAssistant: UIMessage = {
+            id: assistantId,
+            role: "assistant",
+            parts: assistantParts,
+          }
+          const finalMessages =
+            activeRef.current === sessionId
+              ? useChatStore.getState().messages
+              : [...baseList, finalAssistant]
           await persistMessages(sessionId, finalMessages)
           store.getState().setStatus("idle")
         } catch (err) {

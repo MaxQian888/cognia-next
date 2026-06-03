@@ -7,6 +7,8 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
+import { useAgentRuntimeStore } from "@/stores/agent"
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ that closures over an outer
 // const would otherwise hit during ES import hoisting.
@@ -97,6 +99,20 @@ const dispatchChatErrorMock = jest.fn()
 jest.mock("@/lib/claude/adapter-hooks", () => ({
   dispatchUserPromptSubmit: (...a: unknown[]) => dispatchUserPromptSubmitMock(...(a as [])),
   dispatchChatError: (...a: unknown[]) => dispatchChatErrorMock(...(a as [])),
+}))
+
+// External-agent branch (D1): dynamically imported by `send` when the agent
+// runtime is "external". Mock both so the branch is drivable from a test.
+const externalEventState = { callsAtSwitch: -1 }
+const executeOnExternalAgentMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
+}))
+jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
+  applyExternalAgentEventToParts: (parts: unknown) => [
+    ...((parts as unknown[]) ?? []),
+    { type: "text", text: "x", state: "streaming" },
+  ],
 }))
 
 interface ChatStateLike {
@@ -252,6 +268,12 @@ async function flush() {
   })
 }
 
+afterEach(() => {
+  // The external-branch test flips the (real) agent-runtime store; reset it so
+  // subsequent tests keep taking the default claude-sdk path.
+  useAgentRuntimeStore.setState({ runtime: "claude-sdk", externalAgentId: null })
+})
+
 describe("useClaudeChat — actions", () => {
   it("send() guards against empty string content", async () => {
     const { result } = renderHook(() => useClaudeChat())
@@ -280,6 +302,37 @@ describe("useClaudeChat — actions", () => {
     expect(persistMessagesMock).toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalled()
     expect(touchSessionMock).toHaveBeenCalledWith("sess-1")
+  })
+
+  it("guards external-agent writes against a mid-run session switch (D1)", async () => {
+    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    chatState.activeSessionId = "sess-1"
+    executeOnExternalAgentMock.mockImplementation(
+      async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+        // First delta arrives while sess-1 is active → writeAssistant fires.
+        opts.onEvent({ type: "text", text: "a" })
+        externalEventState.callsAtSwitch = chatState.replaceMessages.mock.calls.length
+        // User switches away mid-run; push it through the subscriber so the
+        // hook's `activeRef` reflects the new active session.
+        chatState.activeSessionId = "sess-other"
+        subscribers.forEach((sub) => sub(chatState))
+        // Second delta after the switch → writeAssistant must be a no-op.
+        opts.onEvent({ type: "text", text: "b" })
+        return { success: true, finalResponse: "done" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    // No replaceMessages call happened after the switch (otherwise the
+    // now-active "sess-other" would be clobbered with sess-1's baseList).
+    expect(externalEventState.callsAtSwitch).toBeGreaterThanOrEqual(1)
+    expect(chatState.replaceMessages.mock.calls.length).toBe(externalEventState.callsAtSwitch)
+    // Persist still targets THIS session id, built locally (not the live store).
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
   })
 
   it("send() updates the title for a new session", async () => {
