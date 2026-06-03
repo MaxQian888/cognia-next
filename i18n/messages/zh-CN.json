@@ -5414,6 +5414,13 @@
         "endpointsSchemeNote": "签名方案：Standard Webhooks（standardwebhooks.com）。"
       },
       "events": {
+        "auditHeading": "审计日志",
+        "auditHelp": "对每次入站命令派发与出站投递的持久记录（重启后仍保留）。",
+        "auditRefresh": "刷新",
+        "auditEmpty": "暂无审计记录。",
+        "auditFilter_all": "全部",
+        "auditFilter_inbound": "入站",
+        "auditFilter_outbound": "出站",
         "heading": "调度器事件类型",
         "description": "可被「事件触发」类型任务订阅的内置事件。点击「发送测试事件」可走与 POST /events 相同的链路派发一条合成事件。",
         "emitTest": "发送测试",

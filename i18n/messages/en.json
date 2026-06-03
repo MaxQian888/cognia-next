@@ -5414,6 +5414,13 @@
         "endpointsSchemeNote": "Signature scheme: Standard Webhooks (standardwebhooks.com)."
       },
       "events": {
+        "auditHeading": "Audit log",
+        "auditHelp": "Durable record of every inbound command dispatch and outbound delivery (survives restart).",
+        "auditRefresh": "Refresh",
+        "auditEmpty": "No audit entries yet.",
+        "auditFilter_all": "All",
+        "auditFilter_inbound": "Inbound",
+        "auditFilter_outbound": "Outbound",
         "heading": "Scheduler event types",
         "description": "Built-in event types you can subscribe to with an event-triggered task. The ‘Emit test’ buttons fire a synthetic payload through the same path an inbound POST /events would take.",
         "emitTest": "Emit test",

@@ -11,8 +11,14 @@ jest.mock("@/lib/scheduler/event-integration", () => {
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+const listRemoteControlAudit = jest.fn()
+jest.mock("@/lib/db/remote-control-audit", () => ({
+  listRemoteControlAudit: (...a: unknown[]) => listRemoteControlAudit(...a),
+}))
+
 beforeEach(() => {
   jest.clearAllMocks()
+  listRemoteControlAudit.mockResolvedValue([])
 })
 
 describe("EventsTab", () => {
@@ -34,6 +40,29 @@ describe("EventsTab", () => {
     for (const name of expected) {
       expect(screen.getByText(name)).toBeInTheDocument()
     }
+  })
+
+  it("renders durable audit rows and filters by direction", async () => {
+    listRemoteControlAudit.mockResolvedValueOnce([
+      {
+        id: "a1",
+        at: 1748908800000,
+        direction: "inbound",
+        kind: "inbound.command",
+        target: "workflow.run",
+        result: "accepted",
+      },
+    ])
+    render(<EventsTab />)
+    await waitFor(() => expect(screen.getByText("workflow.run")).toBeInTheDocument())
+
+    // Switching to the Outbound filter re-queries with direction: "outbound".
+    fireEvent.click(screen.getByRole("button", { name: /^outbound$/i }))
+    await waitFor(() =>
+      expect(listRemoteControlAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ direction: "outbound" })
+      )
+    )
   })
 
   it("dispatches the corresponding event when the test button is clicked", async () => {
