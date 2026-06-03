@@ -12,6 +12,11 @@ jest.mock("@/lib/tauri/remote-control", () => ({
   remoteControlGetSigningSecret: () => remoteControlGetSigningSecret(),
 }))
 
+const appendRemoteControlAudit = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/remote-control-audit", () => ({
+  appendRemoteControlAudit: (...a: unknown[]) => appendRemoteControlAudit(...a),
+}))
+
 let endpoints: WebhookEgressEndpoint[] = []
 jest.mock("@/stores/remote-control/store", () => ({
   useRemoteControlStore: {
@@ -57,6 +62,20 @@ describe("publishOutboundEvent", () => {
     const out = await publishOutboundEvent(event())
     expect(deliverWebhook).toHaveBeenCalledTimes(2)
     expect(out.map((o) => o.endpointId)).toEqual(["ep_1", "ep_2"])
+  })
+
+  it("writes a durable audit row per delivery", async () => {
+    endpoints = [ep({ id: "ep_1" })]
+    deliverWebhook.mockResolvedValueOnce({ ok: false, httpStatus: 500, error: "http 500" })
+    await publishOutboundEvent(event())
+    expect(appendRemoteControlAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        direction: "outbound",
+        kind: "outbound.failed",
+        endpointId: "ep_1",
+        httpStatus: 500,
+      })
+    )
   })
 
   it("resolves the signing secret from the keyring on desktop", async () => {

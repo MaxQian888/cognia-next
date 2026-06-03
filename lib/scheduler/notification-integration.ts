@@ -196,12 +196,17 @@ async function sendWebhookNotification(
   url: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  const [{ getWebhookOutboundConfig }, { deliverWebhook }, { publishOutboundEvent }] =
-    await Promise.all([
-      import("./webhook-outbound-config"),
-      import("@/lib/remote-control/outbound/delivery"),
-      import("@/lib/remote-control/outbound/egress-registry"),
-    ])
+  const [
+    { getWebhookOutboundConfig },
+    { deliverWebhook },
+    { publishOutboundEvent },
+    { appendRemoteControlAudit },
+  ] = await Promise.all([
+    import("./webhook-outbound-config"),
+    import("@/lib/remote-control/outbound/delivery"),
+    import("@/lib/remote-control/outbound/egress-registry"),
+    import("@/lib/db/remote-control-audit"),
+  ])
 
   const cfg = await getWebhookOutboundConfig()
   const event: OutboundWebhookEvent = {
@@ -228,6 +233,15 @@ async function sendWebhookNotification(
 
   // Also fan the same event out to any standalone egress endpoints.
   void publishOutboundEvent(event)
+
+  void appendRemoteControlAudit({
+    direction: "outbound",
+    kind: result.ok ? "outbound.delivered" : "outbound.failed",
+    result: result.ok ? "delivered" : "failed",
+    endpointId: "task-webhook",
+    httpStatus: result.httpStatus,
+    fields: { eventType: event.eventType, source: event.source },
+  }).catch(() => {})
 
   if (!result.ok) {
     log.error(`Failed to send webhook notification to ${url}: ${result.error ?? result.httpStatus}`)

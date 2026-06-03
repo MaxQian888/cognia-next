@@ -12,6 +12,7 @@ import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetSigningSecret } from "@/lib/tauri/remote-control"
 import { deliverWebhook, type DeliverResult } from "./delivery"
+import { appendRemoteControlAudit } from "@/lib/db/remote-control-audit"
 
 export interface PublishResult {
   endpointId: string
@@ -32,7 +33,14 @@ export async function publishOutboundEvent(event: OutboundWebhookEvent): Promise
   for (const endpoint of endpoints) {
     const result = await deliverWebhook({ endpoint, event, signingSecret })
     out.push({ endpointId: endpoint.id, result })
-    // Durable outbound audit row is written here in a later phase (Task 5.3).
+    void appendRemoteControlAudit({
+      direction: "outbound",
+      kind: result.ok ? "outbound.delivered" : "outbound.failed",
+      result: result.ok ? "delivered" : "failed",
+      endpointId: endpoint.id,
+      httpStatus: result.httpStatus,
+      fields: { eventType: event.eventType, source: event.source },
+    }).catch(() => {})
   }
   return out
 }

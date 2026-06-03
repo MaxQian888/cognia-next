@@ -77,7 +77,12 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         }
       )
 
-      const { dispatchRemoteCommand } = await import("@/lib/remote-control/dispatch")
+      const [{ dispatchRemoteCommand }, { appendRemoteControlAudit }, { hasNoLeakingPii }] =
+        await Promise.all([
+          import("@/lib/remote-control/dispatch"),
+          import("@/lib/db/remote-control-audit"),
+          import("@/lib/twin/ingest/redact"),
+        ])
       const off4 = await listen<RemoteCommand>("remote-control://command", (event) => {
         const command = event.payload
         if (!command?.target) {
@@ -86,8 +91,24 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         }
         log.info("remote-control: command", { target: command.target, runId: command.runId })
         void dispatchRemoteCommand(command).then((result) => {
-          // Durable audit row is written here in a later phase (Task 5.2).
-          void result
+          // Durable audit: args are PII-gated before persistence; a leak stores
+          // a redacted marker instead of the raw args.
+          const safe = hasNoLeakingPii(JSON.stringify(command.args ?? {}))
+          const kind =
+            result.status === "accepted"
+              ? "inbound.command"
+              : result.status === "replayed"
+                ? "inbound.replayed"
+                : "inbound.rejected"
+          void appendRemoteControlAudit({
+            direction: "inbound",
+            kind,
+            target: command.target,
+            runId: result.runId,
+            result: result.status,
+            idempotencyKey: command.idempotencyKey,
+            fields: safe ? { args: command.args } : { redacted: true },
+          }).catch((error) => log.warn("remote-control: audit write failed", { error }))
         })
       })
 

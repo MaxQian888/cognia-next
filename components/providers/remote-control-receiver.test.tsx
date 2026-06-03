@@ -38,6 +38,16 @@ jest.mock("@/lib/remote-control/dispatch", () => ({
   dispatchRemoteCommand: (...args: unknown[]) => dispatchRemoteCommand(...args),
 }))
 
+const appendRemoteControlAudit = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/remote-control-audit", () => ({
+  appendRemoteControlAudit: (...args: unknown[]) => appendRemoteControlAudit(...args),
+}))
+
+const hasNoLeakingPii = jest.fn().mockReturnValue(true)
+jest.mock("@/lib/twin/ingest/redact", () => ({
+  hasNoLeakingPii: (...args: unknown[]) => hasNoLeakingPii(...args),
+}))
+
 beforeEach(() => {
   jest.clearAllMocks()
 })
@@ -99,6 +109,44 @@ describe("RemoteControlReceiver", () => {
     const command = { target: "workflow.run", args: { workflowId: "wf_1" }, runId: "run_1" }
     commandHandler!({ payload: command })
     await waitFor(() => expect(dispatchRemoteCommand).toHaveBeenCalledWith(command))
+    await waitFor(() =>
+      expect(appendRemoteControlAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          direction: "inbound",
+          kind: "inbound.command",
+          target: "workflow.run",
+          runId: "run_1",
+          result: "accepted",
+          fields: { args: { workflowId: "wf_1" } },
+        })
+      )
+    )
+  })
+
+  it("stores a redacted marker when command args leak PII", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    hasNoLeakingPii.mockReturnValueOnce(false)
+    let commandHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://command") commandHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(commandHandler).not.toBeNull())
+    commandHandler!({
+      payload: { target: "goal.create", args: { rawObjective: "ssn 123" }, runId: "run_2" },
+    })
+    await waitFor(() =>
+      expect(appendRemoteControlAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ fields: { redacted: true } })
+      )
+    )
   })
 
   it("ignores command events with no target", async () => {
