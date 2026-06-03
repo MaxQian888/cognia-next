@@ -1,4 +1,4 @@
-import { asGitError, commitDiffKey, EMPTY_REPO_STATE, EMPTY_STATUS, fileDiffKey } from "./types"
+import { asGitError, commitDiffKey, EMPTY_REPO_STATE, EMPTY_STATUS, fileDiffKey } from "./index"
 
 describe("diff cache keys", () => {
   it("distinguishes staged vs working", () => {

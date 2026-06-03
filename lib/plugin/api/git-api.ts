@@ -33,7 +33,7 @@ import type {
   GitRepoState,
   GitStashEntry,
   GitStatus,
-} from "@/lib/git/types"
+} from "@/types/git"
 
 export interface PluginGitCommitOptions {
   amend?: boolean

@@ -102,6 +102,67 @@ export interface GitRemote {
   pushUrl: string
 }
 
+export interface GitTag {
+  name: string
+  targetHash: string
+  message: string | null
+  isAnnotated: boolean
+}
+
+/** Reset modes mirroring `git reset --soft|--mixed|--hard`. */
+export type GitResetMode = "soft" | "mixed" | "hard"
+
+export type GitRefKind = "branch" | "remoteBranch" | "tag" | "head"
+
+export interface GitRef {
+  name: string
+  kind: GitRefKind
+  /** Commit the ref points at (annotated tags / symbolic refs peeled). */
+  targetHash: string
+}
+
+// ---------------------------------------------------------- commit graph
+
+/** A line segment crossing one graph row's vertical band. */
+export interface GraphEdge {
+  /** Lane the segment occupies at the top of the row's cell. */
+  fromLane: number
+  /** Lane the segment occupies at the bottom of the row's cell. */
+  toLane: number
+  /** Palette color index (`lane % paletteLength`). */
+  color: number
+}
+
+/** One rendered row: the commit, its node lane/color, edges, and ref badges. */
+export interface GraphRow {
+  commit: GitCommit
+  /** Lane the commit's node sits in. */
+  lane: number
+  /** Node color = palette index for its lane. */
+  color: number
+  /** Segments passing through this row's cell band (to the next row). */
+  edges: GraphEdge[]
+  /** Refs pointing at this commit. */
+  refs: GitRef[]
+}
+
+export interface CommitGraphLayout {
+  rows: GraphRow[]
+  /** Max simultaneous lanes — drives the SVG cell width. */
+  laneCount: number
+}
+
+/** One blamed line: which commit last touched it, author, time, and content. */
+export interface GitBlameLine {
+  lineNumber: number
+  commitHash: string
+  shortHash: string
+  authorName: string
+  authoredAtMs: number
+  summary: string
+  content: string
+}
+
 export type GitOperationKind = "merge" | "rebase" | "cherryPick" | "revert"
 
 export interface GitRepoState {
@@ -157,6 +218,38 @@ export const EMPTY_REPO_STATE: GitRepoState = Object.freeze({
   detachedHead: false,
   operationInProgress: null,
 }) as GitRepoState
+
+// --------------------------------------------------------------- UI settings
+
+/** AI commit-message generation preferences (under `AppSettings.gitSettings`). */
+export interface GitCommitAiSettings {
+  /** Master toggle — when false the Sparkles button is hidden. */
+  enabled: boolean
+  /** Constrain the generated message to the Conventional Commits format. */
+  conventionalCommits: boolean
+  /** Optional extra steering appended to the system prompt. */
+  customInstructions?: string
+  /**
+   * Provider/model override for generation (mirrors `UtilityModelConfig`).
+   * Empty → falls back to the chat default model. Kept as flat fields so this
+   * type stays free of a `lib/` dependency.
+   */
+  providerOverride?: string
+  model?: string
+}
+
+/** Source Control feature preferences persisted on `AppSettings.gitSettings`. */
+export interface GitUiSettings {
+  commitMessageAI: GitCommitAiSettings
+}
+
+/** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */
+export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
+  commitMessageAI: {
+    enabled: false,
+    conventionalCommits: true,
+  },
+}
 
 /** Cache key for a working-tree / staged file diff. */
 export function fileDiffKey(path: string, staged: boolean): string {

@@ -42,7 +42,7 @@ import {
   gitWatchStart,
   gitWatchStop,
 } from "./commands"
-import { EMPTY_REPO_STATE, EMPTY_STATUS } from "./types"
+import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
 
 beforeEach(() => {
   isTauriMock.mockReset()
