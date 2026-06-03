@@ -277,6 +277,35 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Repeat",
     keywords: ["github", "issue", "pr", "ai", "loop", "claude"],
   },
+  // ── Local Git (Source Control) ────────────────────────────────────────────
+  "action.git.stage": {
+    label: "Git stage",
+    description: "Stage paths in the repo (git add). Defaults to the active workspace root.",
+    iconName: "FilePlus2",
+    keywords: ["git", "stage", "add", "index", "source control"],
+    desktopOnly: true,
+  },
+  "action.git.commit": {
+    label: "Git commit",
+    description: "Commit staged changes with a message (optionally signed off).",
+    iconName: "GitCommitHorizontal",
+    keywords: ["git", "commit", "source control"],
+    desktopOnly: true,
+  },
+  "action.git.push": {
+    label: "Git push",
+    description: "Push commits to a remote (optionally set upstream).",
+    iconName: "ArrowUpFromLine",
+    keywords: ["git", "push", "remote", "upstream", "source control"],
+    desktopOnly: true,
+  },
+  "action.git.branch": {
+    label: "Git branch",
+    description: "Create or switch to a branch.",
+    iconName: "GitBranch",
+    keywords: ["git", "branch", "checkout", "switch", "source control"],
+    desktopOnly: true,
+  },
   // ── Desktop UI automation ─────────────────────────────────────────────────
   "action.desktop.screenshot": {
     label: "Screenshot",

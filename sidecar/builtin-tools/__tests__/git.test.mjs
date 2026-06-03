@@ -17,9 +17,19 @@ const {
   execGitRepoInspect,
   execGitChanges,
   execGitHistory,
+  execGitStage,
+  execGitCommit,
   trimTail,
   assertRepo,
 } = __testExports
+
+function freshRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-git-w-"))
+  git(["init", "-q", "-b", "main"], dir)
+  git(["config", "user.email", "test@example.com"], dir)
+  git(["config", "user.name", "Cognia Test"], dir)
+  return dir
+}
 
 let REPO
 
@@ -156,6 +166,38 @@ test("any tool errors when cwd isn't a repo", async () => {
     assert.equal(r.isError, true)
   }
   fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+test("git_stage stages a path (WRITE)", async () => {
+  const dir = freshRepo()
+  fs.writeFileSync(path.join(dir, "new.txt"), "fresh\n")
+  const r = await execGitStage({ cwd: dir, paths: ["new.txt"] })
+  assert.equal(r.isError, undefined)
+  const data = decodeJSON(r)
+  assert.deepEqual(data.staged, ["new.txt"])
+  // Porcelain shows it added to the index ("A").
+  assert.match(git(["status", "--porcelain"], dir), /A\s+new\.txt/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test("git_commit commits staged changes and returns the hash (WRITE)", async () => {
+  const dir = freshRepo()
+  fs.writeFileSync(path.join(dir, "a.txt"), "one\n")
+  await execGitStage({ cwd: dir, paths: ["a.txt"] })
+  const r = await execGitCommit({ cwd: dir, message: "feat: add a", signoff: false })
+  assert.equal(r.isError, undefined)
+  const data = decodeJSON(r)
+  assert.equal(data.committed, true)
+  assert.match(data.hash, /^[a-f0-9]{40}$/)
+  assert.match(git(["log", "--oneline"], dir), /feat: add a/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test("git_commit errors with nothing staged", async () => {
+  const dir = freshRepo()
+  const r = await execGitCommit({ cwd: dir, message: "empty", signoff: false })
+  assert.equal(r.isError, true)
+  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 test("assertRepo rejects empty cwd", async () => {

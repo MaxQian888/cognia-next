@@ -33,6 +33,9 @@ import {
   Send as SendIcon,
   PencilLine as DraftIcon,
   Target as TargetIcon,
+  GitCommitHorizontal as CommitIcon,
+  ArrowUpFromLine as PushIcon,
+  FilePlus2 as StageIcon,
   type LucideIcon,
 } from "lucide-react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
@@ -58,6 +61,10 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "action.connector.draft": DraftIcon,
   "action.mcp.invokeTool": McpIcon,
   "action.plugin.invoke": PluginIcon,
+  "action.git.stage": StageIcon,
+  "action.git.commit": CommitIcon,
+  "action.git.push": PushIcon,
+  "action.git.branch": BranchIcon,
   "ai.prompt": BotIcon,
   "ai.classify": BotIcon,
   "ai.extract": BotIcon,

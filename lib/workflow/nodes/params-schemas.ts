@@ -492,6 +492,29 @@ export const PARAMS_SCHEMAS = {
     format: z.enum(["markdown", "text", "blocks"]).optional(),
     pageRange: z.string().optional(),
   }),
+  // Local Git (Source Control panel backend — ADR-0038). `repoPath` is
+  // optional; it defaults to the active workspace root at run time.
+  "action.git.stage": z.object({
+    repoPath: z.string().optional(),
+    paths: z.array(z.string()).optional(),
+  }),
+  "action.git.commit": z.object({
+    repoPath: z.string().optional(),
+    message: z.string(),
+    signoff: z.boolean().optional(),
+  }),
+  "action.git.push": z.object({
+    repoPath: z.string().optional(),
+    remote: z.string().optional(),
+    branch: z.string().optional(),
+    setUpstream: z.boolean().optional(),
+  }),
+  "action.git.branch": z.object({
+    repoPath: z.string().optional(),
+    name: z.string(),
+    checkout: z.boolean().optional(),
+    from: z.string().optional(),
+  }),
   // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted only — the
   // params are shaped by `synthesize-ultracode.ts`, validated by the pattern
   // executors at run time, so the definition-level schema stays permissive.

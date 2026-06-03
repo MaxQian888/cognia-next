@@ -69,6 +69,11 @@ export type WorkflowNodeKind =
   | "action.github.generateChangelog"
   | "action.github.pushTag"
   | "action.github.runIssueLoop"
+  // Local Git (Source Control panel backend — ADR-0038)
+  | "action.git.stage"
+  | "action.git.commit"
+  | "action.git.push"
+  | "action.git.branch"
   // Desktop UI automation (provided by the automation subsystem — see
   // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
   | "action.desktop.screenshot"
@@ -190,6 +195,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.github.generateChangelog",
   "action.github.pushTag",
   "action.github.runIssueLoop",
+  "action.git.stage",
+  "action.git.commit",
+  "action.git.push",
+  "action.git.branch",
   "action.desktop.screenshot",
   "action.desktop.findElement",
   "action.desktop.readTree",

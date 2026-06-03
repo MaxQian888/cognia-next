@@ -43,6 +43,10 @@ import "./ocr"
 // the integrated terminal dock from a workflow step.
 import "./terminal"
 
+// Local Git action nodes (ADR-0038) — stage / commit / push / branch against
+// the active workspace repo.
+import "./git"
+
 // ── AI structured-output helpers (shared by ai.prompt / ai.extract) ─────────
 
 /**
