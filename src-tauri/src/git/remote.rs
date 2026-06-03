@@ -40,6 +40,16 @@ fn cwd(repo_path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(repo_path)
 }
 
+/// `git remote add <name> <url>`.
+pub async fn add(repo_path: &str, name: &str, url: &str) -> Result<()> {
+    exec::run(&cwd(repo_path), ["remote", "add", name, url]).await
+}
+
+/// `git remote remove <name>`.
+pub async fn remove(repo_path: &str, name: &str) -> Result<()> {
+    exec::run(&cwd(repo_path), ["remote", "remove", name]).await
+}
+
 /// `git fetch [remote] [--prune]`.
 pub async fn fetch(repo_path: &str, remote: Option<&str>, prune: bool) -> Result<()> {
     let mut args = vec!["fetch".to_string()];
@@ -143,5 +153,32 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = Repository::init(tmp.path()).unwrap();
         assert!(list_for(&repo).unwrap().is_empty());
+    }
+
+    fn git_on_path() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    }
+
+    #[tokio::test]
+    async fn add_then_remove_remote() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        let rp = tmp.path().to_string_lossy().into_owned();
+
+        add(&rp, "upstream", "https://github.com/o/r.git")
+            .await
+            .unwrap();
+        assert!(list_for(&repo).unwrap().iter().any(|r| r.name == "upstream"));
+
+        remove(&rp, "upstream").await.unwrap();
+        assert!(!list_for(&repo).unwrap().iter().any(|r| r.name == "upstream"));
     }
 }

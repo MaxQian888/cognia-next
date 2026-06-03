@@ -5,7 +5,60 @@ use git2::{Commit, DiffOptions, Repository, Sort};
 
 use super::error::Result;
 use super::read::open_repo;
-use super::types::GitCommit;
+use super::types::{GitCommit, GitRef, GitRefKind};
+
+/// List branch / remote-branch / tag refs plus a synthetic `HEAD` ref, each
+/// resolved (peeled) to the commit it points at — decorations for the graph.
+pub fn refs(repo_path: &str) -> Result<Vec<GitRef>> {
+    let repo = open_repo(repo_path)?;
+    refs_for(&repo)
+}
+
+fn refs_for(repo: &Repository) -> Result<Vec<GitRef>> {
+    let mut out: Vec<GitRef> = Vec::new();
+
+    if let Ok(head) = repo.head() {
+        if let Ok(commit) = head.peel_to_commit() {
+            out.push(GitRef {
+                name: "HEAD".to_string(),
+                kind: GitRefKind::Head,
+                target_hash: commit.id().to_string(),
+            });
+        }
+    }
+
+    for reference in repo.references()? {
+        let reference = match reference {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let full = reference.name().unwrap_or("");
+        let kind = if full.starts_with("refs/heads/") {
+            GitRefKind::Branch
+        } else if full.starts_with("refs/remotes/") {
+            GitRefKind::RemoteBranch
+        } else if full.starts_with("refs/tags/") {
+            GitRefKind::Tag
+        } else {
+            continue;
+        };
+        let name = match reference.shorthand() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Peel annotated tags / symbolic refs down to their commit.
+        let target_hash = match reference.peel_to_commit() {
+            Ok(c) => c.id().to_string(),
+            Err(_) => continue,
+        };
+        out.push(GitRef {
+            name,
+            kind,
+            target_hash,
+        });
+    }
+    Ok(out)
+}
 
 /// Walk commits newest-first. When `path` is set, only commits that touched
 /// that path are returned (per-file Timeline). `skip` + `max_count` paginate.
@@ -174,6 +227,28 @@ mod tests {
         commit_all(&repo, "c", 1000);
         let log = log_for(&repo, 1, 0, None).unwrap();
         assert_eq!(log[0].short_hash.len(), 7);
+        let _ = tmp;
+    }
+
+    #[test]
+    fn refs_include_head_branch_and_tag() {
+        use super::super::types::GitRefKind;
+        let (tmp, repo) = init();
+        fs::write(tmp.path().join("a.txt"), "a\n").unwrap();
+        let oid = commit_all(&repo, "c", 1000);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+        let obj = repo.find_object(oid, None).unwrap();
+        repo.tag_lightweight("v1", &obj, false).unwrap();
+
+        let refs = refs_for(&repo).unwrap();
+        assert!(refs.iter().any(|r| r.kind == GitRefKind::Head));
+        assert!(refs
+            .iter()
+            .any(|r| r.kind == GitRefKind::Branch && r.name == "feature"));
+        let tag = refs.iter().find(|r| r.kind == GitRefKind::Tag).unwrap();
+        assert_eq!(tag.name, "v1");
+        assert_eq!(tag.target_hash, oid.to_string());
         let _ = tmp;
     }
 }

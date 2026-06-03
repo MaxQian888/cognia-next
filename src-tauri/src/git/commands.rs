@@ -9,11 +9,14 @@ use tauri::{AppHandle, State};
 
 use super::error::GitError;
 use super::types::{
-    AheadBehind, ConflictSide, GitBranch, GitCommit, GitConflict, GitDiff, GitFileChange,
-    GitRemote, GitRepoState, GitStashEntry, GitStatus,
+    AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
+    GitFileChange, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus, GitTag,
 };
 use super::watcher::GitWatcherState;
-use super::{branch, commit, diff, history, merge, read, remote, stage, stash, status};
+use super::{
+    blame, branch, commit, diff, history, merge, read, remote, reset, restore, stage, stash,
+    status, tag,
+};
 
 /// Run a synchronous git2 read on the blocking pool.
 async fn blocking<T, F>(label: &'static str, f: F) -> Result<T, GitError>
@@ -78,6 +81,14 @@ pub async fn git_commit_files(
     .await
 }
 
+/// Aggregate staged diff text (`git diff --cached`) — the AI commit-message
+/// prompt input. Async (shells out via `exec`), so it is NOT wrapped in
+/// `blocking`.
+#[tauri::command]
+pub async fn git_diff_staged_all(repo_path: String) -> Result<String, GitError> {
+    diff::staged_all_text(&repo_path).await
+}
+
 #[tauri::command]
 pub async fn git_log(
     repo_path: String,
@@ -103,6 +114,18 @@ pub async fn git_file_history(
 }
 
 #[tauri::command]
+pub async fn git_refs(repo_path: String) -> Result<Vec<GitRef>, GitError> {
+    blocking("git_refs", move || history::refs(&repo_path)).await
+}
+
+/// Per-line blame (`git blame --porcelain`) for the working-tree file. Async
+/// (shells out via `exec`), so not wrapped in `blocking`.
+#[tauri::command]
+pub async fn git_blame(repo_path: String, path: String) -> Result<Vec<GitBlameLine>, GitError> {
+    blame::blame(&repo_path, &path).await
+}
+
+#[tauri::command]
 pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError> {
     blocking("git_branches", move || branch::list_branches(&repo_path)).await
 }
@@ -110,6 +133,11 @@ pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError>
 #[tauri::command]
 pub async fn git_remotes(repo_path: String) -> Result<Vec<GitRemote>, GitError> {
     blocking("git_remotes", move || remote::list_remotes(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn git_tags(repo_path: String) -> Result<Vec<GitTag>, GitError> {
+    blocking("git_tags", move || tag::list_tags(&repo_path)).await
 }
 
 #[tauri::command]
@@ -251,6 +279,51 @@ pub async fn git_push(
 #[tauri::command]
 pub async fn git_sync(repo_path: String) -> Result<AheadBehind, GitError> {
     remote::sync(&repo_path).await
+}
+
+#[tauri::command]
+pub async fn git_remote_add(repo_path: String, name: String, url: String) -> Result<(), GitError> {
+    remote::add(&repo_path, &name, &url).await
+}
+
+#[tauri::command]
+pub async fn git_remote_remove(repo_path: String, name: String) -> Result<(), GitError> {
+    remote::remove(&repo_path, &name).await
+}
+
+#[tauri::command]
+pub async fn git_create_tag(
+    repo_path: String,
+    name: String,
+    message: Option<String>,
+    target: Option<String>,
+) -> Result<(), GitError> {
+    tag::create(&repo_path, &name, message.as_deref(), target.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn git_delete_tag(repo_path: String, name: String) -> Result<(), GitError> {
+    tag::delete(&repo_path, &name).await
+}
+
+#[tauri::command]
+pub async fn git_push_tag(repo_path: String, remote: String, name: String) -> Result<(), GitError> {
+    tag::push(&repo_path, &remote, &name).await
+}
+
+#[tauri::command]
+pub async fn git_reset(repo_path: String, mode: String, target: String) -> Result<(), GitError> {
+    reset::reset(&repo_path, &mode, &target).await
+}
+
+#[tauri::command]
+pub async fn git_restore(
+    repo_path: String,
+    paths: Vec<String>,
+    staged: bool,
+    source: Option<String>,
+) -> Result<(), GitError> {
+    restore::restore(&repo_path, &paths, staged, source.as_deref()).await
 }
 
 #[tauri::command]

@@ -9,6 +9,7 @@
 //! Command surface: `commands::git_*` (registered in `lib.rs`). The only
 //! persistent state is [`watcher::GitWatcherState`].
 
+pub mod blame;
 pub mod branch;
 pub mod commands;
 pub mod commit;
@@ -19,9 +20,12 @@ pub mod history;
 pub mod merge;
 pub mod read;
 pub mod remote;
+pub mod reset;
+pub mod restore;
 pub mod stage;
 pub mod stash;
 pub mod status;
+pub mod tag;
 pub mod types;
 pub mod watcher;
 

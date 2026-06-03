@@ -12,16 +12,20 @@ import {
   EMPTY_STATUS,
   type AheadBehind,
   type ConflictSide,
+  type GitBlameLine,
   type GitBranch,
   type GitCommit,
   type GitConflict,
   type GitDiff,
   type GitFileChange,
+  type GitRef,
   type GitRemote,
   type GitRepoState,
+  type GitResetMode,
   type GitStashEntry,
   type GitStatus,
-} from "./types"
+  type GitTag,
+} from "@/types/git"
 
 // ----------------------------------------------------------------- reads
 
@@ -65,6 +69,12 @@ export async function gitCommitFiles(repoPath: string, sha: string): Promise<Git
   return transport.call<GitFileChange[]>("git_commit_files", { repoPath, sha })
 }
 
+/** Aggregate staged diff (`git diff --cached`) — input for AI commit messages. */
+export async function gitDiffStagedAll(repoPath: string): Promise<string> {
+  if (!isTauri()) return ""
+  return transport.call<string>("git_diff_staged_all", { repoPath })
+}
+
 export async function gitLog(
   repoPath: string,
   maxCount: number,
@@ -83,6 +93,16 @@ export async function gitFileHistory(
   return transport.call<GitCommit[]>("git_file_history", { repoPath, path, maxCount })
 }
 
+export async function gitRefs(repoPath: string): Promise<GitRef[]> {
+  if (!isTauri()) return []
+  return transport.call<GitRef[]>("git_refs", { repoPath })
+}
+
+export async function gitBlame(repoPath: string, path: string): Promise<GitBlameLine[]> {
+  if (!isTauri()) return []
+  return transport.call<GitBlameLine[]>("git_blame", { repoPath, path })
+}
+
 export async function gitBranches(repoPath: string): Promise<GitBranch[]> {
   if (!isTauri()) return []
   return transport.call<GitBranch[]>("git_branches", { repoPath })
@@ -91,6 +111,11 @@ export async function gitBranches(repoPath: string): Promise<GitBranch[]> {
 export async function gitRemotes(repoPath: string): Promise<GitRemote[]> {
   if (!isTauri()) return []
   return transport.call<GitRemote[]>("git_remotes", { repoPath })
+}
+
+export async function gitTags(repoPath: string): Promise<GitTag[]> {
+  if (!isTauri()) return []
+  return transport.call<GitTag[]>("git_tags", { repoPath })
 }
 
 export async function gitStashList(repoPath: string): Promise<GitStashEntry[]> {
@@ -220,6 +245,60 @@ export async function gitPush(
 export async function gitSync(repoPath: string): Promise<AheadBehind> {
   if (!isTauri()) return { ahead: 0, behind: 0 }
   return transport.call<AheadBehind>("git_sync", { repoPath })
+}
+
+export async function gitRemoteAdd(repoPath: string, name: string, url: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_remote_add", { repoPath, name, url })
+}
+
+export async function gitRemoteRemove(repoPath: string, name: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_remote_remove", { repoPath, name })
+}
+
+export async function gitCreateTag(
+  repoPath: string,
+  name: string,
+  message?: string,
+  target?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_create_tag", {
+    repoPath,
+    name,
+    message: message ?? null,
+    target: target ?? null,
+  })
+}
+
+export async function gitDeleteTag(repoPath: string, name: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_delete_tag", { repoPath, name })
+}
+
+export async function gitPushTag(repoPath: string, name: string, remote = "origin"): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_push_tag", { repoPath, remote, name })
+}
+
+export async function gitReset(
+  repoPath: string,
+  mode: GitResetMode,
+  target: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_reset", { repoPath, mode, target })
+}
+
+export async function gitRestore(
+  repoPath: string,
+  paths: string[],
+  staged = false,
+  source?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_restore", { repoPath, paths, staged, source: source ?? null })
 }
 
 export async function gitStashPush(

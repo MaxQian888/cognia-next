@@ -246,6 +246,18 @@ fn resolve_commit<'r>(repo: &'r Repository, sha: &str) -> Result<Commit<'r>> {
     repo.find_commit(oid).map_err(GitError::from)
 }
 
+/// Full staged (index ↔ HEAD) unified diff as a single text blob — the prompt
+/// input for AI commit-message generation. Shells out to system `git` (via
+/// `exec`) so the output is exactly what the user would see from
+/// `git diff --cached`, with all files grouped under proper headers.
+pub async fn staged_all_text(repo_path: &str) -> Result<String> {
+    super::exec::capture(
+        std::path::Path::new(repo_path),
+        ["diff", "--cached", "--no-color"],
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,5 +375,41 @@ mod tests {
         let (tmp, _repo) = init_committed();
         let err = commit_files(&tmp.path().to_string_lossy(), "not-a-sha").unwrap_err();
         assert!(matches!(err, GitError::InvalidArgument(_)));
+    }
+
+    fn git_on_path() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    }
+
+    #[tokio::test]
+    async fn staged_all_text_aggregates_staged_changes() {
+        if !git_on_path() {
+            return;
+        }
+        let (tmp, repo) = init_committed();
+        fs::write(tmp.path().join("a.txt"), "line1\nstaged\nline3\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+
+        let text = staged_all_text(&tmp.path().to_string_lossy()).await.unwrap();
+        assert!(text.contains("a.txt"));
+        assert!(text.contains("+staged"));
+        assert!(text.contains("-line2"));
+    }
+
+    #[tokio::test]
+    async fn staged_all_text_empty_when_nothing_staged() {
+        if !git_on_path() {
+            return;
+        }
+        let (tmp, _repo) = init_committed();
+        let text = staged_all_text(&tmp.path().to_string_lossy()).await.unwrap();
+        assert!(text.trim().is_empty());
     }
 }

@@ -1,4 +1,4 @@
-//! Wire DTOs shared with the renderer-side seam (`lib/git/types.ts`).
+//! Wire DTOs shared with the renderer-side seam (`types/git/index.ts`).
 //!
 //! Every struct is `#[serde(rename_all = "camelCase")]` so the TypeScript
 //! types mirror these 1:1. None of these carry logic — they are pure data
@@ -144,6 +144,48 @@ pub struct GitRemote {
     pub name: String,
     pub fetch_url: String,
     pub push_url: String,
+}
+
+/// A tag ref: name, the commit it points at, and (for annotated tags) message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTag {
+    pub name: String,
+    pub target_hash: String,
+    pub message: Option<String>,
+    pub is_annotated: bool,
+}
+
+/// Classification of a ref decoration for the commit graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitRefKind {
+    Branch,
+    RemoteBranch,
+    Tag,
+    Head,
+}
+
+/// A ref pointing at a commit, used to decorate the commit graph rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRef {
+    pub name: String,
+    pub kind: GitRefKind,
+    pub target_hash: String,
+}
+
+/// One blamed line: which commit last touched it, author, time, and content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBlameLine {
+    pub line_number: u32,
+    pub commit_hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub authored_at_ms: i64,
+    pub summary: String,
+    pub content: String,
 }
 
 /// Which operation, if any, the repo is in the middle of.
