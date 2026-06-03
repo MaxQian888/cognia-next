@@ -5,10 +5,35 @@ description: Complete the half-finished webhook + event-trigger story with a loc
 
 # Remote Control Subsystem
 
-| Status   | Accepted                                                                                                               |
+| Status   | Accepted · **Activated 2026-06-03**                                                                                    |
 | -------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Date     | 2026-05-03                                                                                                             |
 | Replaces | The half-finished webhook channel + free-text event-trigger UI in `components/scheduler/task-form.tsx` (pre-this-ADR). |
+
+## Activation update (2026-06-03)
+
+The original implementation left three value paths inert. They are now closed, and
+the inbound surface was generalized beyond the scheduler:
+
+- **Inbound dispatch is live.** `RemoteControlReceiver` is mounted in `app/layout.tsx`.
+  A new generic `POST /api/v1/commands/:target` route emits `remote-control://command`;
+  the renderer's `lib/remote-control/dispatch.ts` registry routes by target into each
+  subsystem's existing headless run entry — **scheduler** (`runTaskNow` / `emitSchedulerEvent`),
+  **goals** (`createGoal` / `requestManualContinue`), **workflows** (`startWorkflowFromRemote`
+  → `runWorkflow`), **agent team** (`agentTeamManager.start`), and the **plan hub**
+  (`runPlan`). The original `/tasks/:id/run` + `/events` routes are retained.
+- **Loopback hardening** (Tailscale LocalAPI model): Host-header allowlist + Origin/Referer
+  rejection (DNS-rebinding / `0.0.0.0-day`), an `Idempotency-Key` replay cache (5-minute
+  window), a read/write token capability gate, and `Content-Security-Policy: default-src 'none'`
+  on every response.
+- **Outbound signing is wired** onto the [Standard Webhooks](https://www.standardwebhooks.com/)
+  scheme (`{id}.{timestamp}.{body}` HMAC, `webhook-id` / `webhook-timestamp` / `webhook-signature`
+  headers), fed by a standalone egress registry (`lib/remote-control/outbound/`) that any subsystem
+  can publish to. The legacy `X-Cognia-Signature` hex helper was retired.
+- **Durable audit**: a Dexie `remoteControlAudit` table (schema v72) records every inbound
+  dispatch and outbound delivery; a `"remote"` `TaskExecutionTriggerSource` tags remote runs.
+
+See the [Remote Control subsystem docs](../subsystems/remote-control) for the wired detail.
 
 ## Context
 

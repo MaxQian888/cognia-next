@@ -5,10 +5,33 @@ description: 用本地 127.0.0.1 axum HTTP 监听器、HMAC 签名的出站投�
 
 # 远程控制子系统
 
-| 状态 | 已接受                                                                                                                  |
+| 状态 | 已接受 · **已于 2026-06-03 激活**                                                                                       |
 | ---- | --------------------------------------------------------------------------------------------------------------------- |
 | 日期 | 2026-05-03                                                                                                            |
 | 取代 | `components/scheduler/task-form.tsx` 中半成品的 webhook 通道 + 自由文本事件触发 UI（本 ADR 之前）。                     |
+
+## 激活更新（2026-06-03）
+
+最初实现留下三条惰性价值链路，现已全部接通，且入站面已从「仅调度器」泛化：
+
+- **入站分发已上线。** `RemoteControlReceiver` 已挂载到 `app/layout.tsx`。新增通用的
+  `POST /api/v1/commands/:target` 路由发出 `remote-control://command`；渲染端的
+  `lib/remote-control/dispatch.ts` 路由表按 target 分发到各子系统已有的无头运行入口 ——
+  **调度器**（`runTaskNow` / `emitSchedulerEvent`）、**目标**（`createGoal` /
+  `requestManualContinue`）、**工作流**（`startWorkflowFromRemote` → `runWorkflow`）、
+  **Agent 团队**（`agentTeamManager.start`）、**计划中枢**（`runPlan`）。原有的
+  `/tasks/:id/run` + `/events` 路由保留。
+- **Loopback 加固**（Tailscale LocalAPI 模型）：Host 头白名单 + 拒绝 Origin/Referer（DNS
+  rebinding / `0.0.0.0-day`）、`Idempotency-Key` 重放缓存（5 分钟窗口）、读/写令牌能力闸门，
+  以及每个响应上的 `Content-Security-Policy: default-src 'none'`。
+- **出站签名已接入** [Standard Webhooks](https://www.standardwebhooks.com/) 方案
+  （`{id}.{timestamp}.{body}` HMAC，`webhook-id` / `webhook-timestamp` / `webhook-signature`
+  请求头），由独立的出站端点注册表（`lib/remote-control/outbound/`）驱动，任意子系统都可向其推送。
+  旧的 `X-Cognia-Signature` 十六进制辅助函数已退役。
+- **持久审计**：Dexie `remoteControlAudit` 表（schema v72）记录每次入站分发与出站投递；
+  新增 `"remote"` `TaskExecutionTriggerSource` 标记远程运行。
+
+接通后的细节见[远程控制子系统文档](../subsystems/remote-control)。
 
 ## 背景
 
