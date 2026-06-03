@@ -352,6 +352,31 @@ export async function gitMergeAbort(repoPath: string): Promise<void> {
   await transport.call("git_merge_abort", { repoPath })
 }
 
+export async function gitRebase(repoPath: string, onto: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_rebase", { repoPath, onto })
+}
+
+export async function gitCherryPick(repoPath: string, sha: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_cherry_pick", { repoPath, sha })
+}
+
+export async function gitRevert(repoPath: string, sha: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_revert", { repoPath, sha })
+}
+
+export async function gitSequencerContinue(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_sequencer_continue", { repoPath })
+}
+
+export async function gitSequencerAbort(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_sequencer_abort", { repoPath })
+}
+
 export async function gitWatchStart(repoPath: string): Promise<void> {
   if (!isTauri()) return
   await transport.call("git_watch_start", { repoPath })

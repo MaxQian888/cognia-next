@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   gitCheckoutBranch,
+  gitCherryPick,
   gitCommit,
   gitCreateBranch,
   gitCreateTag,
@@ -26,12 +27,16 @@ import {
   gitMergeAbort,
   gitPull,
   gitPush,
+  gitRebase,
   gitRemoteAdd,
   gitRemoteRemove,
   gitRenameBranch,
   gitReset,
   gitResolveConflict,
   gitRestore,
+  gitRevert,
+  gitSequencerAbort,
+  gitSequencerContinue,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -84,6 +89,11 @@ export interface UseGitActionsResult {
   pushTag: (name: string, remote?: string) => Promise<void>
   reset: (mode: GitResetMode, target: string) => Promise<void>
   restore: (paths: string[], staged?: boolean, source?: string) => Promise<void>
+  rebase: (onto: string) => Promise<void>
+  cherryPick: (sha: string) => Promise<void>
+  revert: (sha: string) => Promise<void>
+  sequencerContinue: () => Promise<void>
+  sequencerAbort: () => Promise<void>
 }
 
 export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult {
@@ -157,6 +167,11 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       reset: (mode, target) => run("reset", (rp) => gitReset(rp, mode, target)),
       restore: (paths, staged, source) =>
         run("discard", (rp) => gitRestore(rp, paths, staged, source)),
+      rebase: (onto) => run("sequence", (rp) => gitRebase(rp, onto)),
+      cherryPick: (sha) => run("sequence", (rp) => gitCherryPick(rp, sha)),
+      revert: (sha) => run("sequence", (rp) => gitRevert(rp, sha)),
+      sequencerContinue: () => run("sequence", (rp) => gitSequencerContinue(rp)),
+      sequencerAbort: () => run("sequence", (rp) => gitSequencerAbort(rp)),
     }),
     [run, currentBranch]
   )

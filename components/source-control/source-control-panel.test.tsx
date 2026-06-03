@@ -101,6 +101,26 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("diff-pane-empty")).toBeInTheDocument()
   })
 
+  it("shows the sequencer banner when an operation is in progress", () => {
+    act(() =>
+      useGitStore.getState().setRepoState({
+        isRepo: true,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: "rebase",
+      })
+    )
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sequencer-banner")).toBeInTheDocument()
+    expect(screen.getByTestId("sequencer-continue")).toBeInTheDocument()
+    expect(screen.getByTestId("sequencer-abort")).toBeInTheDocument()
+  })
+
+  it("hides the sequencer banner when idle", () => {
+    render(<SourceControlPanel />)
+    expect(screen.queryByTestId("sequencer-banner")).not.toBeInTheDocument()
+  })
+
   it("routes a selected file to the diff pane", () => {
     act(() => useGitStore.getState().selectFile("a.ts", false))
     render(<SourceControlPanel />)

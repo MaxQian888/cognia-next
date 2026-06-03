@@ -138,6 +138,35 @@ export function SourceControlPanel() {
         />
       </header>
 
+      {repoState?.operationInProgress && (
+        <div
+          className="flex items-center gap-2 border-b bg-amber-500/10 px-3 py-1.5 text-xs"
+          data-testid="sequencer-banner"
+        >
+          <span className="min-w-0 flex-1 truncate text-amber-700 dark:text-amber-400">
+            {t(`sequencer.inProgress.${repoState.operationInProgress}` as never)}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs"
+            onClick={() => void actions.sequencerContinue()}
+            data-testid="sequencer-continue"
+          >
+            {t("sequencer.continue")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs text-destructive"
+            onClick={() => void actions.sequencerAbort()}
+            data-testid="sequencer-abort"
+          >
+            {t("sequencer.abort")}
+          </Button>
+        </div>
+      )}
+
       <ResizablePanelGroup
         orientation="horizontal"
         defaultLayout={layout.defaultLayout}

@@ -68,6 +68,21 @@ describe("CommitDetail", () => {
     expect(screen.queryByTestId("commit-reset")).not.toBeInTheDocument()
   })
 
+  it("cherry-picks and reverts the commit", async () => {
+    const user = userEvent.setup()
+    const cherryPick = jest.fn().mockResolvedValue(undefined)
+    const revert = jest.fn().mockResolvedValue(undefined)
+    const reset = jest.fn().mockResolvedValue(undefined)
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset, cherryPick, revert }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-cherry-pick"))
+    expect(cherryPick).toHaveBeenCalledWith(commit.hash)
+
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-revert"))
+    expect(revert).toHaveBeenCalledWith(commit.hash)
+  })
+
   it("opens commit-pinned blame for a file", async () => {
     const onViewBlame = jest.fn()
     render(<CommitDetail rootDir="/r" commit={commit} onViewBlame={onViewBlame} />)

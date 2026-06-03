@@ -14,6 +14,7 @@ function makeActions() {
     createBranch: jest.fn().mockResolvedValue(undefined),
     deleteBranch: jest.fn().mockResolvedValue(undefined),
     renameBranch: jest.fn().mockResolvedValue(undefined),
+    rebase: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -37,6 +38,13 @@ describe("BranchPicker", () => {
   it("does not offer delete for the current branch", () => {
     render(<BranchPicker branches={branches} actions={makeActions()} />)
     expect(screen.queryByTestId("branch-delete-main")).not.toBeInTheDocument()
+  })
+
+  it("rebases the current branch onto a chosen branch", () => {
+    const actions = makeActions()
+    render(<BranchPicker branches={branches} actions={actions} />)
+    fireEvent.click(screen.getByTestId("branch-rebase-feature"))
+    expect(actions.rebase).toHaveBeenCalledWith("feature")
   })
 
   it("creates a branch from the footer input", () => {

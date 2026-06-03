@@ -84,6 +84,7 @@ import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
+  dispatchTokenUsage as dispatchPluginTokenUsage,
 } from "@/lib/claude/adapter-hooks"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
@@ -1572,6 +1573,18 @@ async function handleEvent(
             ok: true,
             latencyMs: typeof r.duration_ms === "number" ? r.duration_ms : 0,
             estimatedCostUsd: typeof r.total_cost_usd === "number" ? r.total_cost_usd : undefined,
+          })
+        }
+        // Plugin token-usage observability (System-A onTokenUsage) — previously
+        // dormant on the built-in chat path. Fail-open + no-op when no plugin
+        // registered the hook; fires regardless of whether a trace span is open.
+        const turnUsage = extractUsage(sdkResult)
+        if (turnUsage) {
+          dispatchPluginTokenUsage(sessionId, {
+            inputTokens: turnUsage.inputTokens ?? 0,
+            outputTokens: turnUsage.outputTokens ?? 0,
+            cacheCreationTokens: turnUsage.cacheCreationInputTokens,
+            cacheReadTokens: turnUsage.cacheReadInputTokens,
           })
         }
         const turnSpanId = lastSendForSpan?.options.spanId

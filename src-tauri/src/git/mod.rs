@@ -22,6 +22,7 @@ pub mod read;
 pub mod remote;
 pub mod reset;
 pub mod restore;
+pub mod sequencer;
 pub mod stage;
 pub mod stash;
 pub mod status;

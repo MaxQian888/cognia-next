@@ -96,9 +96,11 @@ jest.mock("@/lib/claude/build-options", () => ({
 
 const dispatchUserPromptSubmitMock = jest.fn(async () => ({ action: "proceed" as const }))
 const dispatchChatErrorMock = jest.fn()
+const dispatchTokenUsageMock = jest.fn()
 jest.mock("@/lib/claude/adapter-hooks", () => ({
   dispatchUserPromptSubmit: (...a: unknown[]) => dispatchUserPromptSubmitMock(...(a as [])),
   dispatchChatError: (...a: unknown[]) => dispatchChatErrorMock(...(a as [])),
+  dispatchTokenUsage: (...a: unknown[]) => dispatchTokenUsageMock(...(a as [])),
 }))
 
 // External-agent branch (D1): dynamically imported by `send` when the agent

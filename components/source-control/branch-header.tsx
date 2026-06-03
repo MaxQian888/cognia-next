@@ -16,7 +16,10 @@ interface BranchHeaderProps {
   ahead: number
   behind: number
   branches: GitBranch[]
-  actions: Pick<UseGitActionsResult, "checkout" | "createBranch" | "deleteBranch" | "renameBranch">
+  actions: Pick<
+    UseGitActionsResult,
+    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase"
+  >
 }
 
 export function BranchHeader({ branch, ahead, behind, branches, actions }: BranchHeaderProps) {

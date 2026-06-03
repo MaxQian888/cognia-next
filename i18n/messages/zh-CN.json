@@ -9619,6 +9619,19 @@
       "confirm": "恢复",
       "cancel": "取消"
     },
+    "sequencer": {
+      "cherryPick": "拣选此提交",
+      "revert": "还原此提交",
+      "rebaseOnto": "将当前分支变基到此",
+      "continue": "继续",
+      "abort": "中止",
+      "inProgress": {
+        "merge": "合并进行中——解决冲突后继续。",
+        "rebase": "变基进行中——解决冲突后继续。",
+        "cherryPick": "拣选进行中——解决冲突后继续。",
+        "revert": "还原进行中——解决冲突后继续。"
+      }
+    },
     "blame": {
       "title": "追溯 · {path}",
       "loading": "正在加载追溯…",

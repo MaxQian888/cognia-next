@@ -9619,6 +9619,19 @@
       "confirm": "Restore",
       "cancel": "Cancel"
     },
+    "sequencer": {
+      "cherryPick": "Cherry-pick this commit",
+      "revert": "Revert this commit",
+      "rebaseOnto": "Rebase current branch onto this",
+      "continue": "Continue",
+      "abort": "Abort",
+      "inProgress": {
+        "merge": "Merge in progress — resolve conflicts, then continue.",
+        "rebase": "Rebase in progress — resolve conflicts, then continue.",
+        "cherryPick": "Cherry-pick in progress — resolve conflicts, then continue.",
+        "revert": "Revert in progress — resolve conflicts, then continue."
+      }
+    },
     "conflicts": {
       "acceptOurs": "Accept Current",
       "acceptTheirs": "Accept Incoming",

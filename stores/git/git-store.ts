@@ -39,6 +39,7 @@ export type GitOp =
   | "remote"
   | "tag"
   | "reset"
+  | "sequence"
 
 export type TimelineScope = "repo" | "file"
 
@@ -74,6 +75,7 @@ function emptyOps(): Record<GitOp, boolean> {
     remote: false,
     tag: false,
     reset: false,
+    sequence: false,
   }
 }
 

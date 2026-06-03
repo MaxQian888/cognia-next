@@ -7,7 +7,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { GitBranchIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { GitBranchIcon, GitMergeIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import {
   Command,
   CommandEmpty,
@@ -24,7 +24,10 @@ import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 interface BranchPickerProps {
   branches: GitBranch[]
-  actions: Pick<UseGitActionsResult, "checkout" | "createBranch" | "deleteBranch" | "renameBranch">
+  actions: Pick<
+    UseGitActionsResult,
+    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase"
+  >
   onPicked?: () => void
 }
 
@@ -68,6 +71,23 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                 </span>
                 {branch.isRemote && (
                   <span className="text-[10px] text-muted-foreground">{t("branches.remote")}</span>
+                )}
+                {!branch.isCurrent && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-5 text-muted-foreground"
+                    aria-label={t("sequencer.rebaseOnto")}
+                    title={t("sequencer.rebaseOnto")}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void actions.rebase(branch.name)
+                      onPicked?.()
+                    }}
+                    data-testid={`branch-rebase-${branch.name}`}
+                  >
+                    <GitMergeIcon className="size-3" />
+                  </Button>
                 )}
                 {!branch.isRemote && !branch.isCurrent && (
                   <Button

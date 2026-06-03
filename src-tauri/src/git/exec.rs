@@ -43,6 +43,11 @@ fn base_command(cwd: &Path) -> Command {
         .env("GCM_INTERACTIVE", "never")
         .env("GIT_ASKPASS", "")
         .env("SSH_ASKPASS", "")
+        // Non-interactive editors: accept the default message instead of
+        // spawning vi/notepad (e.g. on `rebase|cherry-pick|revert --continue`).
+        // `true` exits 0, keeping the prepared message.
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
         // Deterministic English stderr so `classify_failure` can match it.
         .env("LC_ALL", "C")
         .env("LANG", "C");

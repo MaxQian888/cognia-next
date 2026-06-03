@@ -14,6 +14,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -43,7 +44,8 @@ import { splitPath, statusDecoration } from "./status-decoration"
 interface CommitDetailProps {
   rootDir: string
   commit: GitCommit
-  actions?: Pick<UseGitActionsResult, "reset">
+  actions?: Pick<UseGitActionsResult, "reset"> &
+    Partial<Pick<UseGitActionsResult, "cherryPick" | "revert">>
   /** Open blame for a file pinned to this commit. */
   onViewBlame?: (path: string, rev: string) => void
 }
@@ -117,6 +119,23 @@ export function CommitDetail({ rootDir, commit, actions, onViewBlame }: CommitDe
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                {actions.cherryPick && (
+                  <DropdownMenuItem
+                    onSelect={() => void actions.cherryPick?.(commit.hash)}
+                    data-testid="commit-cherry-pick"
+                  >
+                    {t("sequencer.cherryPick")}
+                  </DropdownMenuItem>
+                )}
+                {actions.revert && (
+                  <DropdownMenuItem
+                    onSelect={() => void actions.revert?.(commit.hash)}
+                    data-testid="commit-revert"
+                  >
+                    {t("sequencer.revert")}
+                  </DropdownMenuItem>
+                )}
+                {(actions.cherryPick || actions.revert) && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   onSelect={() => void actions.reset("soft", commit.hash)}
                   data-testid="reset-soft"

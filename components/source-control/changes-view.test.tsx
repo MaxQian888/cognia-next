@@ -48,6 +48,11 @@ function makeActions(): UseGitActionsResult {
     pushTag: jest.fn().mockResolvedValue(undefined),
     reset: jest.fn().mockResolvedValue(undefined),
     restore: jest.fn().mockResolvedValue(undefined),
+    rebase: jest.fn().mockResolvedValue(undefined),
+    cherryPick: jest.fn().mockResolvedValue(undefined),
+    revert: jest.fn().mockResolvedValue(undefined),
+    sequencerContinue: jest.fn().mockResolvedValue(undefined),
+    sequencerAbort: jest.fn().mockResolvedValue(undefined),
   }
 }
 

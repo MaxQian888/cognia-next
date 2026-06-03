@@ -14,8 +14,8 @@ use super::types::{
 };
 use super::watcher::GitWatcherState;
 use super::{
-    blame, branch, commit, diff, history, merge, read, remote, reset, restore, stage, stash,
-    status, tag,
+    blame, branch, commit, diff, history, merge, read, remote, reset, restore, sequencer, stage,
+    stash, status, tag,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -328,6 +328,31 @@ pub async fn git_restore(
     source: Option<String>,
 ) -> Result<(), GitError> {
     restore::restore(&repo_path, &paths, staged, source.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn git_rebase(repo_path: String, onto: String) -> Result<(), GitError> {
+    sequencer::rebase(&repo_path, &onto).await
+}
+
+#[tauri::command]
+pub async fn git_cherry_pick(repo_path: String, sha: String) -> Result<(), GitError> {
+    sequencer::cherry_pick(&repo_path, &sha).await
+}
+
+#[tauri::command]
+pub async fn git_revert(repo_path: String, sha: String) -> Result<(), GitError> {
+    sequencer::revert(&repo_path, &sha).await
+}
+
+#[tauri::command]
+pub async fn git_sequencer_continue(repo_path: String) -> Result<(), GitError> {
+    sequencer::sequencer_continue(&repo_path).await
+}
+
+#[tauri::command]
+pub async fn git_sequencer_abort(repo_path: String) -> Result<(), GitError> {
+    sequencer::sequencer_abort(&repo_path).await
 }
 
 #[tauri::command]
