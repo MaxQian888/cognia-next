@@ -227,6 +227,27 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
   })
 })
 
+describe("resolveSendOptions — agent-mode prompt template variables", () => {
+  it("substitutes {{date}} / {{tools_list}} in the active mode's system prompt", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base" }),
+      agentMode: {
+        id: "m1",
+        type: "custom",
+        name: "Tester",
+        description: "",
+        icon: "Bot",
+        systemPrompt: "Mode prompt. Today is {{date}}. Tools: {{tools_list}}.",
+        tools: ["calculator"],
+      } as AgentModeConfig,
+    })
+    expect(opts.systemPrompt).toBeDefined()
+    expect(opts.systemPrompt).not.toContain("{{date}}")
+    expect(opts.systemPrompt).not.toContain("{{tools_list}}")
+    expect(opts.systemPrompt).toContain("calculator")
+  })
+})
+
 describe("resolveSendOptions — character + skills", () => {
   it("loads the character from the session id when not provided directly", async () => {
     mGetCharacter.mockResolvedValueOnce(

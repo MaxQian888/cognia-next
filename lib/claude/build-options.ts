@@ -48,6 +48,7 @@ import {
 } from "@/lib/ai/providers/model-pricing"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
+import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
   createMappingRegistry,
@@ -682,7 +683,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   const skillSection = renderSkillsSection(skills)
-  const modeSection = activeMode?.systemPrompt?.trim() || ""
+  // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
+  // {{mode_name}} / …) the custom-mode editor advertises — without this the
+  // literal `{{…}}` tokens are sent to the model verbatim.
+  const rawModeSection = activeMode?.systemPrompt?.trim() || ""
+  const modeSection = rawModeSection
+    ? processPromptTemplateVariables(rawModeSection, {
+        modeName: activeMode?.name,
+        modeDescription: activeMode?.description,
+        tools: activeMode?.tools,
+      })
+    : ""
 
   // --- Plugin-contributed skills (M4) -------------------------------------
   // Resolve registry-sourced skills (the skill-registry overlay landed in
