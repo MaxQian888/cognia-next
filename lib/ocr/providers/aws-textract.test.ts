@@ -1,5 +1,5 @@
 import { awsTextractExtract, buildAwsTextractProvider } from "./aws-textract"
-import type { OcrProviderContext } from "../types"
+import type { OcrProviderContext } from "@/types/ocr"
 
 function makeFetch(resp: { status: number; body: unknown }) {
   return jest.fn(async () => {

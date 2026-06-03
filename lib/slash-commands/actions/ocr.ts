@@ -13,7 +13,8 @@
  */
 
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
-import { OcrError, type OcrInput, type OcrOutputFormat, type OcrResult } from "@/lib/ocr/types"
+import { OcrError } from "@/lib/ocr/errors"
+import { type OcrInput, type OcrOutputFormat, type OcrResult } from "@/types/ocr"
 
 export interface SlashOcrInput {
   /** Raw argv after the `/ocr ` prefix. */

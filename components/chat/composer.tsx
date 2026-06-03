@@ -90,6 +90,11 @@ import {
   setDraftDebounced as setChatDraftDebounced,
 } from "@/lib/db/chat-drafts"
 import { AttachmentPreview } from "./composer/attachment-preview"
+import { OcrResultBubble } from "./composer/ocr-result-bubble"
+import { applyComposerOcr } from "./composer/ocr-attachment-action"
+import { useOcr } from "@/hooks/use-ocr"
+import { buildOcrDeps } from "@/lib/ocr/deps"
+import type { OcrResult } from "@/types/ocr"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
@@ -239,6 +244,44 @@ function ComposerInner(props: InnerProps) {
   const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
+  const ocr = useOcr(() => buildOcrDeps())
+  const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
+  const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
+  const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
+
+  // Composer attachment OCR: an image/PDF attachment's hover menu offers
+  // "extract text to input" (appends plain text to the draft) or "view result"
+  // (opens the per-page sheet). The attachment already holds a blob URL, so we
+  // resolve it to a Blob and hand a `blob` source straight to `extract()` — no
+  // attachment-id resolver needed.
+  const handleOcrSelect = useCallback(
+    async (action: "extract-to-input" | "view-result", attachmentId: string) => {
+      const file = attachments.files.find((f) => f.id === attachmentId)
+      if (!file?.url) return
+      let blob: Blob
+      try {
+        blob = await (await fetch(file.url)).blob()
+      } catch {
+        return
+      }
+      await applyComposerOcr({
+        action,
+        blob,
+        mimeType: file.mediaType || blob.type,
+        run: ocr.run,
+        getInput: () => controller.textInput.value,
+        setInput: (value) => controller.textInput.setInput(value),
+        showResult: (result) => {
+          setOcrBubbleResult(result)
+          setOcrBubbleImageSrc(
+            (file.mediaType ?? "").startsWith("image/") ? (file.url ?? null) : null
+          )
+          setOcrBubbleOpen(true)
+        },
+      })
+    },
+    [attachments, ocr, controller.textInput]
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
@@ -731,7 +774,15 @@ function ComposerInner(props: InnerProps) {
   return (
     <div ref={setContainerEl}>
       <ReferenceChips />
-      <AttachmentPreview />
+      <AttachmentPreview onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
+      <OcrResultBubble
+        open={ocrBubbleOpen}
+        onOpenChange={setOcrBubbleOpen}
+        result={ocrBubbleResult}
+        imageSrc={ocrBubbleImageSrc ?? undefined}
+        onCopy={(text) => void navigator.clipboard?.writeText(text)}
+        onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
+      />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
       <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
       {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}

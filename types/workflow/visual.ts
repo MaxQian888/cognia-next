@@ -42,6 +42,11 @@ export type WorkflowNodeKind =
   | "action.team.create"
   | "action.team.update"
   | "action.team.task.dispatch"
+  // Unified Plan Execution Hub (ADR-0045). Synthesizer-emitted only: one per
+  // PlanStep. Looks up the per-run PlanRunContext and executes the step by its
+  // `kind` (agent_turn / approval_gate / sub_workflow / tool_call /
+  // teammate_dispatch). Not placed by users in the editor.
+  | "action.plan.step.dispatch"
   | "action.skill.invoke"
   | "action.skill.upsert"
   | "action.twin.rag"
@@ -101,6 +106,7 @@ export type WorkflowNodeKind =
   | "data.transform"
   | "data.code"
   | "data.template"
+  | "ocr.extract"
   // I/O
   | "io.http"
   | "io.webhook.respond"
@@ -135,6 +141,8 @@ export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCatego
   if (head === "flow") return "flow"
   if (head === "data") return "data"
   if (head === "io") return "io"
+  // OCR extraction is a data-producing node (ADR-0024).
+  if (head === "ocr") return "data"
   // Ultracode pattern nodes are a flavour of action.
   if (head === "pattern") return "action"
   return "annotation"
@@ -160,6 +168,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.team.create",
   "action.team.update",
   "action.team.task.dispatch",
+  "action.plan.step.dispatch",
   "action.skill.invoke",
   "action.skill.upsert",
   "action.twin.rag",
@@ -209,6 +218,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "data.transform",
   "data.code",
   "data.template",
+  "ocr.extract",
   "io.http",
   "io.webhook.respond",
   "annotation.note",

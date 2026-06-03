@@ -1,0 +1,14 @@
+{
+  "title": "MCP 系统",
+  "pages": [
+    "index",
+    "server-config",
+    "presets-and-import",
+    "session-resolution",
+    "settings-panel",
+    "agent-sync-and-health",
+    "builtin-tools",
+    "a2ui-bridge",
+    "consumption-surfaces"
+  ]
+}

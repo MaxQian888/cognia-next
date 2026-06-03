@@ -1,6 +1,5 @@
 import { recordSuccess, recordFailure, currentStateValue } from "./circuit-breaker-machine"
 import {
-  DEFAULT_CIRCUIT_BREAKER_CONFIG,
   INITIAL_CIRCUIT_BREAKER_STATE,
   type CircuitBreakerConfig,
   type CircuitBreakerState,

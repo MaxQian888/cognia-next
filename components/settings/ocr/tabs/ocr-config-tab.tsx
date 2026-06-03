@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { ProbeOutcome } from "@/lib/ocr/probe"
-import type { OcrProviderShellSupport } from "@/lib/ocr/types"
+import type { OcrProviderShellSupport } from "@/types/ocr"
 
 interface OcrConfigTabProps {
   providerId: string

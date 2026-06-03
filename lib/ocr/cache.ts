@@ -14,7 +14,7 @@ import {
   putOcrCacheRow,
   type OcrResultRow,
 } from "@/lib/db/ocr-results"
-import type { OcrResult } from "./types"
+import type { OcrPage, OcrResult } from "@/types/ocr"
 
 export interface CacheLookupKey {
   fileSha: string
@@ -49,6 +49,60 @@ export async function writeCachedResult(input: CacheWriteInput): Promise<void> {
     result: encodeOcrResult(input.result),
     createdAt: Date.now(),
     bytesIn: input.bytesIn,
+  }
+  await putOcrCacheRow(row)
+}
+
+// ─── Per-page cache (ADR-0024 Phase 2 / 2e — streaming large PDFs) ───────────
+// Reuses the same `ocrResults` table (no schema bump) with a page-suffixed id,
+// so a large-PDF run resumes from whatever pages already landed.
+
+export interface PageCacheKey extends CacheLookupKey {
+  pageNumber: number
+}
+
+function pageCacheId(key: PageCacheKey): string {
+  return `${buildOcrCacheId(key.fileSha, key.providerId, key.languages)}|p${key.pageNumber}`
+}
+
+function normalizeLangs(languages: readonly string[]): string {
+  return [...languages]
+    .map((l) => l.toLowerCase())
+    .sort()
+    .join(",")
+}
+
+/** Read a single cached page, or null when not yet processed. */
+export async function readCachedPage(key: PageCacheKey): Promise<OcrPage | null> {
+  const row = await getOcrCacheRow(pageCacheId(key))
+  if (!row) return null
+  const decoded = decodeOcrResult(row.result)
+  return decoded?.pages[0] ?? null
+}
+
+/** Persist a single page so a later run can resume past it. */
+export async function writeCachedPage(
+  key: PageCacheKey,
+  page: OcrPage,
+  bytesIn = 0
+): Promise<void> {
+  const wrapped: OcrResult = {
+    providerId: key.providerId,
+    pages: [page],
+    combinedMarkdown: page.markdown,
+    combinedText: page.text,
+    languages: [...key.languages],
+    durationMs: 0,
+    cached: false,
+  }
+  const row: OcrResultRow = {
+    id: pageCacheId(key),
+    fileSha: key.fileSha,
+    providerId: key.providerId,
+    langs: normalizeLangs(key.languages),
+    result: encodeOcrResult(wrapped),
+    createdAt: Date.now(),
+    bytesIn,
   }
   await putOcrCacheRow(row)
 }

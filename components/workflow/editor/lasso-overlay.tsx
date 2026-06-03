@@ -14,7 +14,7 @@
  * `<ViewportPortal>` so the line follows pan/zoom naturally.
  */
 
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ViewportPortal, type ReactFlowInstance } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import type { EditorStore } from "@/lib/workflow/editor/store"
@@ -45,12 +45,15 @@ export const LassoOverlay = memo(function LassoOverlay({
   const [statusPos, setStatusPos] = useState<{ x: number; y: number } | null>(null)
   const activeRef = useRef(false)
 
-  const pushPoint = (clientX: number, clientY: number) => {
-    if (!reactFlowInstance) return
-    const flow = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY })
-    setPolygon((prev) => [...prev, flow])
-    setStatusPos({ x: clientX, y: clientY })
-  }
+  const pushPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!reactFlowInstance) return
+      const flow = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY })
+      setPolygon((prev) => [...prev, flow])
+      setStatusPos({ x: clientX, y: clientY })
+    },
+    [reactFlowInstance]
+  )
   const pushThrottled = useRafThrottle<[number, number]>((x, y) => {
     pushPoint(x, y)
   })
@@ -116,7 +119,7 @@ export const LassoOverlay = memo(function LassoOverlay({
       window.removeEventListener("pointermove", onPointerMove, true)
       window.removeEventListener("pointerup", onPointerUp, true)
     }
-  }, [containerRef, enabled, pushThrottled, reactFlowInstance, store])
+  }, [containerRef, enabled, pushPoint, pushThrottled, reactFlowInstance, store])
 
   // Keep an always-current polygon ref so the pointerup handler doesn't
   // close over stale state inside the effect's identity.

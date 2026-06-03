@@ -7,13 +7,13 @@
  */
 
 import { bytesToDataUrl } from "../image-prep"
+import { OcrError } from "@/lib/ocr/errors"
 import {
-  OcrError,
   type OcrInput,
   type OcrProvider,
   type OcrProviderContext,
   type OcrResult,
-} from "../types"
+} from "@/types/ocr"
 import { cloudFetch, parseJson } from "./_http"
 import {
   DEFAULT_MAX_IMAGE_DIMENSION,

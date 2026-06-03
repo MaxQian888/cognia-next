@@ -13,6 +13,10 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
   unregisterCommandsByPlugin: jest.fn(),
 }))
 
+const extractMock = jest.fn()
+jest.mock("@/lib/ocr", () => ({ extract: (...a: unknown[]) => extractMock(...a) }))
+jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({}) }))
+
 import { captureScreenshot } from "@/lib/ui/screenshot"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 import screenshotPlugin from "./index"
@@ -53,6 +57,43 @@ describe("screenshot (built-in)", () => {
     await screenshotPlugin.activate?.(ctx)
     expect(Object.keys(tools)).toContain("take_screenshot")
     expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ id: "screenshot.capture" }))
+  })
+
+  it("registers extract_screenshot_ocr and OCRs the captured image", async () => {
+    extractMock.mockReset().mockResolvedValue({
+      providerId: "tesseract-wasm",
+      pages: [],
+      combinedMarkdown: "**HI**",
+      combinedText: "HI",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    })
+    const mockFile = {
+      name: "screenshot.png",
+      size: 9,
+      type: "image/png",
+      arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
+    } as unknown as File
+    captureMock.mockResolvedValue(mockFile)
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    expect(Object.keys(tools)).toContain("extract_screenshot_ocr")
+    const result = (await tools.extract_screenshot_ocr({ languages: ["en"] })) as {
+      ok: boolean
+      text?: string
+    }
+    expect(result.ok).toBe(true)
+    expect(result.text).toBe("HI")
+    expect(extractMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("extract_screenshot_ocr returns ok=false when capture is cancelled", async () => {
+    captureMock.mockResolvedValue(null)
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.extract_screenshot_ocr({})) as { ok: boolean }
+    expect(result.ok).toBe(false)
   })
 
   it("returns ok=false when capture is cancelled", async () => {

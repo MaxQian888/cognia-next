@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { readCachedResult, writeCachedResult } from "./cache"
-import type { OcrResult } from "./types"
+import { readCachedPage, readCachedResult, writeCachedPage, writeCachedResult } from "./cache"
+import type { OcrPage, OcrResult } from "@/types/ocr"
 
 const sample: OcrResult = {
   providerId: "mistral-ocr",
@@ -86,5 +86,25 @@ describe("cache read/write", () => {
       languages: ["en"],
     })
     expect(out?.combinedMarkdown).toBe("v2")
+  })
+})
+
+describe("per-page cache (2e)", () => {
+  const page: OcrPage = { pageNumber: 3, markdown: "# p3", text: "page three", fromTextLayer: true }
+  const key = { fileSha: "doc-sha", providerId: "ocrs", languages: ["en"], pageNumber: 3 }
+
+  it("returns null for an unprocessed page", async () => {
+    expect(await readCachedPage(key)).toBeNull()
+  })
+
+  it("round-trips a single page and keeps pages independent of the whole-doc row", async () => {
+    await writeCachedPage(key, page)
+    expect(await readCachedPage(key)).toEqual(page)
+    // a different page number is a separate entry.
+    expect(await readCachedPage({ ...key, pageNumber: 4 })).toBeNull()
+    // the per-page row doesn't satisfy a whole-document lookup.
+    expect(
+      await readCachedResult({ fileSha: "doc-sha", providerId: "ocrs", languages: ["en"] })
+    ).toBeNull()
   })
 })

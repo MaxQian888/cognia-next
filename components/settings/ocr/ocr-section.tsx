@@ -28,7 +28,7 @@ import {
   type OcrProviderCategory,
   type OcrProviderShellSupport,
   type UserOcrSettings,
-} from "@/lib/ocr/types"
+} from "@/types/ocr"
 import { OcrDetailPanel } from "./ocr-detail-panel"
 import {
   OCR_AUTO_ROUTER_ID,

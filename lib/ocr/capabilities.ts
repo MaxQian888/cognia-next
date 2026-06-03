@@ -11,7 +11,7 @@
  * billing contract — actual costs always come from the vendor.
  */
 
-import type { OcrProviderCategory } from "./types"
+import type { OcrProviderCategory } from "@/types/ocr"
 
 export type OcrCostTier = "free" | "$" | "$$" | "$$$"
 export type OcrCapabilityValue = "yes" | "no" | "partial"

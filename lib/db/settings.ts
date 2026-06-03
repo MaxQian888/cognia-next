@@ -8,7 +8,7 @@ import {
 } from "@/lib/search/types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
-import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
 import { getDb } from "./schema"
 

@@ -8,7 +8,7 @@
  */
 
 import { OCR_PROVIDER_CAPABILITIES } from "./capabilities"
-import type { OcrOutputFormat } from "./types"
+import type { OcrOutputFormat } from "@/types/ocr"
 
 export type OcrUseCase =
   | "chineseReceipts"

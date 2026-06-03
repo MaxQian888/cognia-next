@@ -13,14 +13,14 @@
  */
 
 import { normalizeImage } from "../image-prep"
+import { OcrError } from "@/lib/ocr/errors"
 import {
-  OcrError,
   type OcrBlock,
   type OcrInput,
   type OcrProvider,
   type OcrProviderContext,
   type OcrResult,
-} from "../types"
+} from "@/types/ocr"
 import {
   __setNativeOcrInvoker as setShared,
   type NativeOcrInvoker,

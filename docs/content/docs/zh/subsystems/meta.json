@@ -6,9 +6,7 @@
     "visual-workflows",
     "platform-connectors",
     "external-bridge",
-    "mcp-server-tauri",
-    "mcp-server-sidecar",
-    "wiki-generator",
+    "mcp",
     "a2ui",
     "canvas",
     "artifacts-sandbox",
@@ -17,6 +15,7 @@
     "companion-api",
     "observability",
     "misc-subsystems",
-    "employee-twin"
+    "employee-twin",
+    "ocr"
   ]
 }

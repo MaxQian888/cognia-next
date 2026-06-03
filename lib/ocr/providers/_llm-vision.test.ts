@@ -4,7 +4,7 @@ import {
   buildVisionResult,
   preparePromptAndImage,
 } from "./_llm-vision"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const input: OcrInput = {
   source: {

@@ -78,7 +78,7 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
   const scoreResults = await mapSettled(
     jobs,
     fanoutLimit(teamCtx),
-    async (job, idx) => {
+    async (job, _idx) => {
       const r = await dispatchStructured(
         teamCtx,
         {

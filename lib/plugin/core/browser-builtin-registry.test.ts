@@ -18,6 +18,7 @@ describe("browser-builtin-registry", () => {
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
       "cognia-goal-insights",
+      "cognia-ocr",
       "cognia-prompt-templates",
       "cognia-scheduling-demo",
       "cognia-screenshot",

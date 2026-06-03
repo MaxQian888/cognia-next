@@ -1,0 +1,203 @@
+---
+title: Tracing Dashboard
+description: The Grafana/Langfuse-style /observability dashboard — a draggable react-grid-layout panel grid over the Dexie agentTraces table. lib/observability is a real analytics engine — exact percentiles, fixed-boundary time bucketing, span→trace rollup + waterfall, group-by breakdowns, and thresholds — surfaced through a 13-panel registry and a trace waterfall drawer.
+---
+
+# Tracing Dashboard
+
+<Status variant="beta" />
+
+<TLDR>
+  `/observability` (`app/observability/page.tsx`) is a Grafana/Langfuse-style telemetry dashboard: a
+  draggable, resizable `react-grid-layout` panel grid reading the **Dexie `agentTraces` table** (the
+  same spans the [agent-trace](./agent-trace) pipeline persists) — so it works in the browser and on
+  mobile, unlike `/performance`. `lib/observability/` is a genuine analytics engine: exact percentiles
+  (`percentiles.ts`), fixed-boundary time bucketing with null-gapping (`aggregate-series.ts`),
+  spans→trace rollup + parent/child waterfall (`trace-rollup.ts`), group-by breakdowns
+  (`breakdown.ts`), and threshold classification (`thresholds.ts`). A single
+  `useObservabilitySeries` memo computes everything once; 13 panels (5 kinds) render from it; clicking
+  a trace opens a waterfall drawer.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Data source" value="Dexie agentTraces" hint="NOT fixtures — queryByWindow (use-observability-data.ts:35)" />
+  <Stat label="Panels" value="13" hint="panel-registry.ts:39" />
+  <Stat label="Panel kinds" value="5" hint="stat · timeseries · donut · bar · traces" />
+  <Stat label="Time presets" value="7" hint="5m · 15m · 1h · 6h · 24h · 7d · 30d" />
+  <Stat label="Breakdown dims" value="5" hint="model · surface · operation · tool · session" />
+  <Stat label="Grid engine" value="react-grid-layout v2" hint="hooks-based, React-19 safe" />
+</StatGrid>
+
+## Data Source
+
+The dashboard reads the Dexie `agentTraces` table — **not** fixtures (those exist only for tests). The
+proof chain:
+
+```ts title="hooks/observability/use-observability-data.ts:35"
+const spans = useClientLiveQuery(
+  () => queryByWindow({ since: range.since, until: range.until }),
+  [range.since, range.until, tick],
+  EMPTY,
+)
+// queryByWindow → getDb().agentTraces.toArray() filtered to the window (lib/db/agent-traces.ts:53)
+```
+
+So the flow is: spans emitted by the [logging pipeline](./logging-pipeline) → persisted by the
+**agent-trace transport** → read windowed via `useLiveQuery` → bucketed/rolled-up by the pure
+`lib/observability` functions → rendered into the panel grid. `tick` is in the dependency array so
+relative windows re-fetch as the wall clock advances.
+
+```mermaid
+flowchart TB
+  Dexie[("Dexie agentTraces")]
+  Dexie -->|"queryByWindow"| Data["useObservabilityData<br/>windowed + filtered spans"]
+  Data --> Series["useObservabilitySeries<br/>ONE memo: bucket + rollup + KPIs"]
+  Series --> Grid["PanelGrid (react-grid-layout)"]
+  Grid --> P1["stat panels (KPIs)"]
+  Grid --> P2["timeseries (cost/rate/errors/latency/tokens)"]
+  Grid --> P3["donut (by model)"]
+  Grid --> P4["bar (by surface)"]
+  Grid --> P5["recent traces table"]
+  P5 -->|"onSelectTrace"| Drawer["TraceWaterfallDrawer<br/>useTraceDetail → buildWaterfall"]
+  Dexie -.->|"queryByTrace"| Drawer
+
+  classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
+  class Dexie,Data,Series,Grid,P1,P2,P3,P4,P5,Drawer box
+```
+
+## The Analytics Engine
+
+`lib/observability/` is pure, side-effect-free, and unit-tested per module.
+
+### Percentiles
+
+Exact percentiles via sort + nearest-rank with linear interpolation ("type 7" / NumPy / Excel
+`PERCENTILE`):
+
+```ts title="lib/observability/percentiles.ts:14"
+export function percentile(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length
+  if (n === 0) return 0
+  if (n === 1) return sortedAsc[0]
+  const rank = Math.min(1, Math.max(0, p)) * (n - 1)
+  const lo = Math.floor(rank); const hi = Math.ceil(rank)
+  if (lo === hi) return sortedAsc[lo]
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (rank - lo)
+}
+```
+
+`percentilesOf(values, ps)` sorts once and returns one value per requested quantile — used for the
+p50/p95/p99 latency series.
+
+### Time Bucketing
+
+`aggregate-series.ts` buckets spans into **fixed boundaries** from `bucketBoundaries(range)` so empty
+leading/trailing buckets still render (Grafana behaviour). Each span lands in
+`floor((startTime - since) / bucketMs)`. The series builders — `costSeries`, `tokenSeries`,
+`requestRateSeries`, `errorRateSeries`, `latencyPercentileSeries` — emit `null` for empty buckets so
+recharts draws gaps rather than misleading zeros:
+
+```ts title="lib/observability/aggregate-series.ts:131"
+if (durations.length === 0) return { p50: null, p95: null, p99: null }
+const [p50, p95, p99] = percentilesOf(durations, [0.5, 0.95, 0.99])
+```
+
+`windowKpis(spans, range)` rolls the whole window into `{ totalCost, totalSpans, errorRate,
+cacheHitRate, p95LatencyMs, reqPerMin }`.
+
+### Trace Rollup & Waterfall
+
+`trace-rollup.ts` has two outputs. `rollupTraces` produces one `TraceRollupRow` per `traceId` for the
+recent-traces table (root = earliest-start span, duration = `maxEnd - minStart`). `buildWaterfall`
+builds the parent/child tree with offset/width geometry for the drawer, guarding against
+missing/self/cyclic parents (orphans become roots, a `visited` set breaks cycles):
+
+```ts title="lib/observability/trace-rollup.ts:142"
+offsetMs: Math.max(0, span.startTime - traceStart),
+widthMs: Math.max(0, span.durationMs ?? (span.endTime ?? span.startTime) - span.startTime),
+```
+
+`flattenWaterfall` does a pre-order DFS for the row list.
+
+### Breakdowns & Thresholds
+
+`breakdown.ts` groups spans by one of five dimensions (`model | surface | operation | tool | session`)
+into `BreakdownRow`s (span count, cost, tokens, errors, avg latency). `distinctValues` powers the
+filter-bar options.
+
+`thresholds.ts` classifies a metric value into `ok | warn | crit` and maps it to a theme colour. The
+defaults:
+
+```ts title="lib/observability/thresholds.ts:24"
+DEFAULT_THRESHOLDS = {
+  errorRate:    { warn: 0.02, crit: 0.1,   direction: "above" },
+  latencyP95:   { warn: 5000, crit: 15000, direction: "above" },
+  cost:         { warn: 5,    crit: 20,    direction: "above" },
+  cacheHitRate: { warn: 0.5,  crit: 0.2,   direction: "below" },
+}
+```
+
+`time-range.ts` resolves presets (`5m…30d`), snaps `bucketMs` to nice steps (`pickBucketMs`, target 60
+buckets, capped at 1000), and computes the boundaries. `filters.ts` applies `TraceFilters` with
+**AND across dimensions, OR within a dimension** (Grafana template-variable semantics), client-side
+over the already-windowed spans.
+
+## Data Hooks
+
+- `useObservabilityData(range, filters, tick)` — the windowed `useLiveQuery` + client-side filter;
+  returns `{ spans (filtered), windowSpans (pre-filter, for option lists), loading }`.
+- `useObservabilitySeries(spans, range)` — **one** `useMemo` computing `bucketMs`, all 5 series, 4
+  breakdowns, `rollupTraces`, and `windowKpis`, so no panel re-buckets.
+- `useObservabilityControls()` / `useResolvedRange(tick)` — selector layer over the persisted
+  `useObservabilityStore` (zustand `persist`, key `cognia-observability`; `editMode` is transient so
+  the grid always reopens locked).
+- `useTraceDetail(traceId)` — lazily `queryByTrace` only when a trace is selected, then `buildWaterfall`.
+- `useRefreshTick(intervalMs)` — the auto-refresh counter (`0` disables, relying on `useLiveQuery`).
+
+## The Panel Registry
+
+`panel-registry.ts` is pure config (no JSX). A `PanelDef` carries `id`, `kind`, `titleKey`, and
+optional `statMetric` / `seriesKind` / `dimension` / `threshold`. There are **13 registered panels**
+across **5 kinds**:
+
+| Kind | Panels |
+| --- | --- |
+| `stat` | `kpi-cost` · `kpi-spans` · `kpi-errors` · `kpi-cache` · `kpi-latency` |
+| `timeseries` | `ts-cost` · `ts-rate` · `ts-errors` · `ts-latency` · `ts-tokens` |
+| `donut` | `bd-model` (by model) |
+| `bar` | `bd-surface` (by surface) |
+| `traces` | `traces` (recent traces table) |
+
+`defaultLayouts()` provides curated 12-column (`lg`), 8-column (`md`), and derived 2-column (`sm`)
+layouts. Note: `breakdownOperation`/`breakdownTool` are computed but no default panel uses them.
+
+## Components
+
+`ObservabilityDashboard` wires the hooks (`controls → tick → range → data → series`) and renders the
+header (Gauge icon + title) + `ObservabilityToolbar` + `PanelGrid` + `TraceWaterfallDrawer`.
+`ObservabilityPanel` switches on `panel.kind` to dispatch to `StatPanel` / `TimeSeriesPanel` /
+`DonutPanel` / `BreakdownBarPanel` / `RecentTracesPanel`. `PanelGrid` uses **react-grid-layout v2**
+(hooks-based + `ResizeObserver`, React-19 safe — no `findDOMNode`) with `COLS {lg:12, md:8, sm:2}`,
+drag gated on `editMode` via a `.panel-drag-handle`. `PanelFrame` adds the card chrome and a
+threshold status dot.
+
+The chart panels (`TimeSeriesPanel`) build a recharts config per `seriesKind` — cost as a chart-1
+area, error rate as a destructive line, latency as three p50/p95/p99 lines, tokens as four stacked
+areas — with threshold `ReferenceLine`s and colours from `useThemeColors`. `TraceWaterfallDrawer` is a
+shadcn `Sheet` rendering `flattenWaterfall` rows, each a proportional timing bar
+(`offsetPct`/`widthPct`) coloured by operation, expandable to show events/model/tokens/cost.
+
+## i18n
+
+The dashboard uses the `observability` namespace (`observability.panels.*`, `observability.series.*`,
+`observability.toolbar.*`, `observability.range.*`, `observability.filters.*`,
+`observability.waterfall.*`). The guild-rail nav label is `observability`.
+
+## Where to Start
+
+| Goal | File |
+| --- | --- |
+| Add a panel | add a `PanelDef` to `PANELS` in `components/observability/panel-registry.ts` + a `defaultLayouts` slot |
+| Add a metric/series | `lib/observability/aggregate-series.ts` + `TimeSeriesPanel` config |
+| Add a breakdown dimension | `Dimension` union + `dimValue` in `lib/observability/breakdown.ts` + the filter bar |
+| Tune thresholds | `DEFAULT_THRESHOLDS` in `lib/observability/thresholds.ts` |

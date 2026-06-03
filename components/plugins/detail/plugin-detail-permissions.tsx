@@ -15,14 +15,7 @@ import { useTranslations } from "next-intl"
 import { usePluginPermissions, usePluginRow } from "@/hooks/plugins"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PermissionRow } from "../plugin-permission-review"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AuditLogEntry } from "../audit-log-entry"

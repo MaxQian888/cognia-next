@@ -17,7 +17,7 @@
 
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginOcrProviderDef, PluginOcrProviderFactory } from "@/types/plugin/plugin-ocr"
-import type { OcrProvider } from "@/lib/ocr/types"
+import type { OcrProvider } from "@/types/ocr"
 import { loggers } from "@/lib/plugin/core/logger"
 import { clearOcrProvidersForPlugin, createOcrAPI } from "@/lib/plugin/api/ocr-api"
 

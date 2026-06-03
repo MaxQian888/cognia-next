@@ -134,7 +134,7 @@ export function evaluateMessages(
   question: string,
   answer: string,
   evidence: string,
-  locale?: string
+  _locale?: string
 ): AiMessage[] {
   const system =
     "You are a strict answer evaluator. Decide the evaluation criteria " +

@@ -9,6 +9,7 @@ import clipboardToolsManifest from "@/plugins/clipboard-tools/plugin.json"
 import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
 import screenshotManifest from "@/plugins/screenshot/plugin.json"
+import ocrManifest from "@/plugins/ocr/plugin.json"
 import webToolsManifest from "@/plugins/web-tools/plugin.json"
 import workflowAiManifest from "@/plugins/workflow-ai/plugin.json"
 import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
@@ -25,6 +26,7 @@ import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
 import workspaceToolsModule from "@/plugins/workspace-tools/src/index"
 import webToolsModule from "@/plugins/web-tools/src/index"
 import screenshotModule from "@/plugins/screenshot/src/index"
+import ocrModule from "@/plugins/ocr/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
@@ -76,6 +78,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-screenshot",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(screenshotModule),
+  },
+  {
+    manifest: asPluginManifest(ocrManifest),
+    path: "builtin://cognia-ocr",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(ocrModule),
   },
   {
     manifest: asPluginManifest(promptTemplatesManifest),

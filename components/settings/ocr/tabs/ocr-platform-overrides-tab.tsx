@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DEFAULT_LOCAL_PREFERENCE } from "@/lib/ocr/auto-router"
-import type { OcrPlatformOverrideKey, UserOcrSettings } from "@/lib/ocr/types"
+import type { OcrPlatformOverrideKey, UserOcrSettings } from "@/types/ocr"
 import { cn } from "@/lib/utils"
 
 interface OcrPlatformOverridesTabProps {

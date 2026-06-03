@@ -2,7 +2,7 @@ import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { ocrPluginDefinition, runOcrTool, type OcrToolInput } from "./index"
 import { createOcrRegistry } from "@/lib/ocr/registry"
-import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@/types/ocr"
 
 function makeProvider(): OcrProvider {
   return {
@@ -131,7 +131,7 @@ describe("runOcrTool", () => {
       ...makeProvider(),
       id: "boom",
       async extract() {
-        const { OcrError } = await import("@/lib/ocr/types")
+        const { OcrError } = await import("@/lib/ocr/errors")
         throw new OcrError("rate_limited", "boom", "slow")
       },
     })
@@ -154,5 +154,33 @@ describe("runOcrTool", () => {
     const out = await runOcrTool(baseInput, { buildDeps: () => null })
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.error).toMatch(/runtime is not ready/i)
+  })
+
+  it("screen mode captures + OCRs via the injected captureScreen", async () => {
+    const captureScreen = jest.fn(async () => ({
+      providerId: "windows-media-ocr",
+      pages: [{ pageNumber: 1, markdown: "SCREEN", text: "SCREEN" }],
+      combinedMarkdown: "SCREEN",
+      combinedText: "SCREEN",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    }))
+    const out = await runOcrTool(
+      { source: { kind: "screen" }, languages: ["en"] },
+      { captureScreen }
+    )
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.result.combinedText).toBe("SCREEN")
+    expect(captureScreen).toHaveBeenCalledWith(["en"])
+  })
+
+  it("screen mode surfaces a capture failure as ok:false", async () => {
+    const captureScreen = jest.fn(async () => {
+      throw new Error("automation disabled")
+    })
+    const out = await runOcrTool({ source: { kind: "screen" } }, { captureScreen })
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.error).toMatch(/automation disabled/)
   })
 })

@@ -6,7 +6,8 @@
  * spot instead of being copy-pasted across nine provider files.
  */
 
-import { OcrError, type OcrErrorCode } from "../types"
+import { type OcrErrorCode } from "@/types/ocr"
+import { OcrError } from "@/lib/ocr/errors"
 
 export interface CloudFetchOptions {
   url: string

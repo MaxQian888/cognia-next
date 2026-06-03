@@ -42,7 +42,7 @@ import {
   RECOMMENDATION_MAP,
   type OcrUseCase,
 } from "@/lib/ocr/provider-recommendations"
-import type { UserOcrSettings } from "@/lib/ocr/types"
+import type { UserOcrSettings } from "@/types/ocr"
 
 interface OcrSetupWizardProps {
   open: boolean

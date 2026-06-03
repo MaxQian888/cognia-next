@@ -7,7 +7,7 @@ import {
   type ModelStatus,
   type OcrModelBridge,
 } from "./ocr-section"
-import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 
 function renderSection(
   overrides: Partial<UserOcrSettings> = {},

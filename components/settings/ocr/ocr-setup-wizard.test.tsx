@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { OcrSetupWizard, hasNoCloudCredentials } from "./ocr-setup-wizard"
-import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 
 function freshSettings(): UserOcrSettings {
   return { ...DEFAULT_OCR_SETTINGS }

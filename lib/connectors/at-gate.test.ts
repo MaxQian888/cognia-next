@@ -1,11 +1,6 @@
 /** @jest-environment node */
 
-import {
-  shouldRespondToMessage,
-  gateInboundEvent,
-  DEFAULT_AT_RESPONSE_STRATEGY,
-  type AtResponseStrategy,
-} from "./at-gate"
+import { shouldRespondToMessage, gateInboundEvent, DEFAULT_AT_RESPONSE_STRATEGY } from "./at-gate"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 

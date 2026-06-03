@@ -1,0 +1,13 @@
+{
+  "title": "External Bridge",
+  "pages": [
+    "index",
+    "permission-model",
+    "mcp-server",
+    "knowledge-tools",
+    "action-tools",
+    "transports",
+    "wiki-generator",
+    "audit-and-settings"
+  ]
+}

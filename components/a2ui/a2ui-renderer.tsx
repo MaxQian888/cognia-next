@@ -10,7 +10,6 @@ import type { A2UIComponent, A2UIComponentProps } from "@/types/a2ui/schema"
 import type { A2UIRendererProps } from "@/types/a2ui/renderer"
 import { useA2UIContext, useA2UIVisibility, useA2UIDisabled } from "@/hooks/a2ui/use-a2ui-context"
 import { getComponent } from "@/lib/a2ui/catalog"
-import { A2UIChildRenderer } from "./a2ui-child-renderer"
 
 // Import layout components
 import { A2UIRow } from "./layout/a2ui-row"

@@ -141,6 +141,16 @@ const TeamTaskDispatchParams = z.object({
   expectedOutput: optionalString,
 })
 
+// Synthesizer-emitted plan step node (ADR-0045). Not user-editable; params are
+// stamped by `synthesizePlanWorkflow`. `stepKind` is informational for the
+// editor; the executor reads the full step from the PlanRunContext snapshot.
+const PlanStepDispatchParams = z.object({
+  planId: requiredString("required"),
+  stepId: requiredString("required"),
+  title: optionalString,
+  stepKind: optionalString,
+})
+
 const SkillInvokeParams = z.object({
   skillIds: requiredString("required"),
 })
@@ -398,6 +408,7 @@ export const PARAMS_SCHEMAS = {
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
+  "action.plan.step.dispatch": PlanStepDispatchParams,
   "action.team.create": TeamCreateParams,
   "action.team.update": TeamUpdateParams,
   // Actions: skills
@@ -467,6 +478,20 @@ export const PARAMS_SCHEMAS = {
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,
+  // OCR extraction (ADR-0024). One image source per run: a data URL, raw
+  // base64 (+ mime), a fetchable URL, or `screen: true` to capture + OCR the
+  // desktop. All fields optional so the inspector can build incrementally.
+  "ocr.extract": z.object({
+    dataUrl: z.string().optional(),
+    imageBase64: z.string().optional(),
+    mimeType: z.string().optional(),
+    url: z.string().optional(),
+    screen: z.boolean().optional(),
+    languages: z.array(z.string()).optional(),
+    provider: z.string().optional(),
+    format: z.enum(["markdown", "text", "blocks"]).optional(),
+    pageRange: z.string().optional(),
+  }),
   // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted only — the
   // params are shaped by `synthesize-ultracode.ts`, validated by the pattern
   // executors at run time, so the definition-level schema stays permissive.

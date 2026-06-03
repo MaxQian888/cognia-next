@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import type { OcrProviderCategory } from "@/lib/ocr/types"
+import type { OcrProviderCategory } from "@/types/ocr"
 import { ocrProviderInitial, type OcrProviderStatus } from "./ocr-sidebar-item"
 
 export interface OcrDetailPanelProvider {

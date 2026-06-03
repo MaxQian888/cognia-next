@@ -11,14 +11,14 @@
  */
 
 import { normalizeImage } from "../image-prep"
+import { OcrError } from "@/lib/ocr/errors"
 import {
-  OcrError,
   type OcrBlock,
   type OcrInput,
   type OcrProvider,
   type OcrProviderContext,
   type OcrResult,
-} from "../types"
+} from "@/types/ocr"
 
 /**
  * Slim slice of tesseract.js's recognize() return shape. Only the bits we

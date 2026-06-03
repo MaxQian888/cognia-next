@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { OcrAutoRouterPanel, type AutoRouterProviderOption } from "./ocr-auto-router-panel"
-import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 
 const PROVIDERS: AutoRouterProviderOption[] = [
   { id: "mistral-ocr", label: "Mistral OCR", isCloudOrVision: true },

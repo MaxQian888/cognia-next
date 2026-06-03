@@ -29,11 +29,11 @@ type Account = {
   label?: string
 }
 
-const PROVIDERS = ["anthropic", "codex", "opencode"] as const
+type ProviderId = "anthropic" | "codex" | "opencode"
 
 async function loadAccounts(provider: string): Promise<Account[]> {
   try {
-    const list = await listAccounts(provider as (typeof PROVIDERS)[number])
+    const list = await listAccounts(provider as ProviderId)
     return list.map((acc) => ({ id: acc.id, label: acc.label }))
   } catch {
     return []

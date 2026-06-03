@@ -8,13 +8,13 @@
  */
 
 import { bytesToDataUrl, normalizeImage } from "../image-prep"
+import { OcrError } from "@/lib/ocr/errors"
 import {
-  OcrError,
   type OcrInput,
   type OcrProvider,
   type OcrProviderContext,
   type OcrResult,
-} from "../types"
+} from "@/types/ocr"
 import { cloudFetch, parseJson, requireSecret } from "./_http"
 
 const OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image"

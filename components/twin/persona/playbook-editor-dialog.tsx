@@ -54,7 +54,7 @@ function stepsToText(steps: PlaybookStep[]): string {
 function textToSteps(text: string): PlaybookStep[] {
   return text
     .split(/\r?\n/)
-    .map((raw, i) => raw.trim())
+    .map((raw, _i) => raw.trim())
     .filter(Boolean)
     .map((raw, i) => {
       const splitIdx = raw.indexOf(" — ")

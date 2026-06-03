@@ -17,6 +17,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import Image from "next/image"
 import { useState } from "react"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -95,11 +96,13 @@ function NodeRenderer({ node }: { node: InboundA2UINode }) {
     }
     case "image":
       return (
-        <img
+        <Image
           src={node.url}
           alt={node.alt ?? ""}
-          loading="lazy"
-          className="max-h-64 max-w-full rounded border object-contain"
+          width={0}
+          height={0}
+          sizes="100vw"
+          className="h-auto max-h-64 w-auto max-w-full rounded border object-contain"
         />
       )
     case "link":

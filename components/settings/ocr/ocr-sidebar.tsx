@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import type { OcrProviderCategory } from "@/lib/ocr/types"
+import type { OcrProviderCategory } from "@/types/ocr"
 import { OcrSidebarItem, type OcrProviderStatus } from "./ocr-sidebar-item"
 
 export const OCR_AUTO_ROUTER_ID = "__auto__"

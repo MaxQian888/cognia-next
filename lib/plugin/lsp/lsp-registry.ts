@@ -35,10 +35,7 @@ import {
   evaluateLspBinary,
   type LspBinaryEvaluation,
 } from "@/lib/plugin/vscode-shim/lsp-binary-policy"
-import {
-  lspPublishDiagnosticsToBridgePayload,
-  type LspDiagnostic,
-} from "@/lib/plugin/vscode-shim/lsp-protocol-adapter"
+import { lspPublishDiagnosticsToBridgePayload } from "@/lib/plugin/vscode-shim/lsp-protocol-adapter"
 
 const lspRegistryLogger = loggers.plugin.child("lsp-registry")
 

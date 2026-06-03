@@ -13,7 +13,7 @@ import {
   putOcrCacheRow,
   type OcrResultRow,
 } from "./ocr-results"
-import type { OcrResult } from "@/lib/ocr/types"
+import type { OcrResult } from "@/types/ocr"
 
 const sampleResult: OcrResult = {
   providerId: "mistral-ocr",

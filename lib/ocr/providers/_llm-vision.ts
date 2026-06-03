@@ -9,7 +9,7 @@
  */
 
 import { downscaleImage, normalizeImage } from "../image-prep"
-import type { OcrInput, OcrProviderContext, OcrResult } from "../types"
+import type { OcrInput, OcrProviderContext, OcrResult } from "@/types/ocr"
 
 export const DEFAULT_VISION_PROMPT =
   "Extract every word of text from the supplied page image and return it as well-structured Markdown. Preserve tables, lists, and reading order. Do not add commentary."

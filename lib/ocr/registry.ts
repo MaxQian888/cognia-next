@@ -9,7 +9,7 @@
  */
 
 import type { NativePlatform } from "@/lib/capacitor/_shared"
-import type { OcrProvider, OcrProviderCategory } from "./types"
+import type { OcrProvider, OcrProviderCategory } from "@/types/ocr"
 
 export interface OcrRegistry {
   register(provider: OcrProvider): void

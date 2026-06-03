@@ -1,4 +1,4 @@
-import type { Goal, GoalStatus } from "@/types/goal"
+import type { Goal } from "@/types/goal"
 import { computeGoalAnalytics, DEFAULT_ANALYTICS_WINDOW_DAYS } from "./analytics"
 
 const DAY_MS = 24 * 60 * 60_000

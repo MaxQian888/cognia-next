@@ -9,7 +9,7 @@
  */
 
 import { getDb } from "./schema"
-import type { OcrResult } from "@/lib/ocr/types"
+import type { OcrResult } from "@/types/ocr"
 
 export interface OcrResultRow {
   /** `${fileSha}|${providerId}|${langs}`. */

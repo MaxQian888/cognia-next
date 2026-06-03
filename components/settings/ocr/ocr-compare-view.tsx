@@ -39,7 +39,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { estimateOcrCost, OCR_PROVIDER_CAPABILITIES } from "@/lib/ocr/capabilities"
-import type { OcrResult } from "@/lib/ocr/types"
+import type { OcrResult } from "@/types/ocr"
 import { OcrCapabilityCostCell, OcrCapabilityValueCell } from "./ocr-capability-cell"
 import { OcrResultInline } from "./ocr-result-inline"
 

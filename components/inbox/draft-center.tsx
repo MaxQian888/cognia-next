@@ -38,16 +38,16 @@ export function DraftCenter() {
   const reduce = useReducedMotion()
   const drafts = usePendingDrafts()
 
-  const sessions =
-    useLiveQuery<ChatSession[]>(
-      () =>
-        typeof window === "undefined"
-          ? Promise.resolve([])
-          : getDb()
-              .sessions.filter((s) => s.platformBinding != null)
-              .toArray(),
-      []
-    ) ?? []
+  const sessionsResult = useLiveQuery<ChatSession[]>(
+    () =>
+      typeof window === "undefined"
+        ? Promise.resolve([])
+        : getDb()
+            .sessions.filter((s) => s.platformBinding != null)
+            .toArray(),
+    []
+  )
+  const sessions = useMemo(() => sessionsResult ?? [], [sessionsResult])
 
   const titleByKey = useMemo(() => {
     const map = new Map<string, string>()

@@ -172,6 +172,12 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
       } else if (typeof seg.url === "string" && seg.url.length > 0) {
         blocks.push({ type: "text", text: `[image: ${seg.url}]` })
       }
+      // ADR-0024 — when the inbound OCR step extracted text, hand it to the
+      // model as a text block too (alongside the image, so vision-capable
+      // models still see the picture). Lets non-vision models read the words.
+      if (typeof seg.ocrText === "string" && seg.ocrText.length > 0) {
+        blocks.push({ type: "text", text: seg.ocrText })
+      }
       continue
     }
     // file / voice / video / unknown — degrade to a text marker. We use

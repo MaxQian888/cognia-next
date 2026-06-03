@@ -36,6 +36,9 @@ import { extractJson } from "@/lib/twin/distill/llm"
 // cross-module wiring.
 import "./desktop"
 
+// OCR extraction node (ADR-0024) — turns an image/PDF/screen into text.
+import "./ocr"
+
 // Wave 3 — registers the `action.system.terminal` executor that drives
 // the integrated terminal dock from a workflow step.
 import "./terminal"
@@ -1523,6 +1526,36 @@ registerNodeExecutor({
         attempt: 1,
       },
     }
+  },
+})
+
+// ── action.plan.step.dispatch ─────────────────────────────────────────────
+// Per ADR-0045 P2. Synthesizer-emitted node: one per PlanStep. Looks up the
+// per-run PlanRunContext (registered by `runPlan` before runWorkflow) and
+// delegates to `dispatchPlanStepNode`, which marks the step in_progress, runs
+// the kind-specific work (agent_turn / approval_gate / sub_workflow), and
+// writes the terminal status back. Retryable so the orchestrator re-runs
+// transient failures per the plan's error policy.
+registerNodeExecutor({
+  kind: "action.plan.step.dispatch",
+  typeVersion: 1,
+  retryable: true,
+  execute: async (ctx) => {
+    const params = ctx.params as { planId?: string; stepId?: string }
+    if (!params.planId || !params.stepId) {
+      throw nonRetryable("action.plan.step.dispatch requires 'planId' and 'stepId'")
+    }
+    const [{ getPlanRunContext }, { dispatchPlanStepNode }] = await Promise.all([
+      import("@/lib/agent/plan/plan-run-context"),
+      import("@/lib/agent/plan/step-dispatch"),
+    ])
+    const runCtx = getPlanRunContext(ctx.runId)
+    if (!runCtx) {
+      throw nonRetryable(
+        `action.plan.step.dispatch: no PlanRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    return dispatchPlanStepNode(runCtx, params.stepId, ctx.signal)
   },
 })
 

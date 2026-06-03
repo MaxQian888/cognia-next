@@ -23,6 +23,7 @@ import { ComputerUseKillSwitchInitializer } from "@/components/providers/initial
 import { LocalCharacterPackInitializer } from "@/components/providers/initializers/local-character-pack-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { ModelsDevCatalogInitializer } from "@/components/providers/initializers/models-dev-catalog-initializer"
+import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
 import { TerminalBridgeInitializer } from "@/components/providers/initializers/terminal-bridge-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
@@ -133,6 +134,7 @@ export default async function RootLayout({
                     <LocalCharacterPackInitializer />
                     <ProjectStoreInitializer />
                     <ModelsDevCatalogInitializer />
+                    <OcrRuntimeInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>

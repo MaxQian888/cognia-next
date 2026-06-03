@@ -23,6 +23,7 @@ import type { IVectorStore } from "@/lib/vector/store"
 import type { TwinJob, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig, embedRedactedChunks } from "./embed"
 import { parseSource, type RawSource } from "./parse"
+import { runTwinPdfOcr } from "./ocr-fallback"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
 import { redactText, unredactText } from "./redact"
@@ -130,7 +131,15 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
     try {
       // Stage 1+2 — dispatch + parse.
       await progress(job.id, `parsing:${raw.filename}`, (stageBase + 1) / TOTAL_STAGES)
-      const parsed = await parseSource(raw)
+      let parsed = await parseSource(raw)
+
+      // Stage 2.5 — OCR fallback for scanned/image-only PDFs (ADR-0024). When
+      // the text layer came back (near-)empty, re-extract via the OCR PDF
+      // router and use that text for redaction + chunking. Best-effort.
+      const ocrText = await runTwinPdfOcr(raw, parsed).catch(() => null)
+      if (ocrText) {
+        parsed = { ...parsed, embeddableText: ocrText, originalText: ocrText }
+      }
 
       // Stage 3 — redact PII.
       await progress(job.id, `redacting:${raw.filename}`, (stageBase + 2) / TOTAL_STAGES)

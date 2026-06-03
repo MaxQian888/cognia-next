@@ -5,7 +5,7 @@ import {
 import { __resetSharedOcrRegistry, getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { __resetOcrApiForTesting } from "@/lib/plugin/api/ocr-api"
 import type { PluginManifest } from "@/types/plugin/plugin"
-import type { OcrProvider } from "@/lib/ocr/types"
+import type { OcrProvider } from "@/types/ocr"
 
 const minimalManifest = (overrides: Partial<PluginManifest>): PluginManifest =>
   ({

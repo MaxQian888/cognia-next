@@ -452,6 +452,12 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "FileText",
     keywords: ["template", "mustache", "render", "string"],
   },
+  "ocr.extract": {
+    label: "Extract text (OCR)",
+    description: "Run OCR on an image or PDF (URL, base64, or screen) and output its text.",
+    iconName: "ScanText",
+    keywords: ["ocr", "extract", "text", "image", "pdf", "scan", "recognize"],
+  },
   // ── IO ────────────────────────────────────────────────────────────────────
   "io.http": {
     label: "HTTP request",

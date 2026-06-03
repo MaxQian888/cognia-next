@@ -6,8 +6,6 @@
 import { motion } from "motion/react"
 import type { PetOneShot, PetVisualState } from "@/types/pet"
 
-const INK = "var(--pet-ink, #2a2a33)"
-
 function Heart({ x, delay }: { x: number; delay: number }) {
   return (
     <motion.path

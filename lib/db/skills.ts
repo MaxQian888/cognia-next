@@ -1,10 +1,4 @@
-import type {
-  Skill,
-  SkillCategory,
-  SkillSource,
-  SkillStatus,
-  SkillValidationError,
-} from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
 import { getDb } from "./schema"
 import {
   deleteResourcesForSkill,

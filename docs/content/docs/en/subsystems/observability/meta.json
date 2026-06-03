@@ -1,0 +1,16 @@
+{
+  "title": "Observability",
+  "pages": [
+    "index",
+    "logging-pipeline",
+    "transports",
+    "rust-logging",
+    "log-panel",
+    "agent-trace",
+    "tracing-dashboard",
+    "perf-dashboard",
+    "frontend-perf",
+    "crash-reporting",
+    "usage-and-telemetry"
+  ]
+}

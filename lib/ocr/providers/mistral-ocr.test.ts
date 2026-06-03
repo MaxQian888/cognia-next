@@ -1,5 +1,5 @@
 import { mistralExtract, buildMistralOcrProvider } from "./mistral-ocr"
-import type { OcrProviderContext } from "../types"
+import type { OcrProviderContext } from "@/types/ocr"
 
 function makeFetch(resp: { status: number; body: unknown; headers?: Record<string, string> }) {
   return jest.fn(async () => {

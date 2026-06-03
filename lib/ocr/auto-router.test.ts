@@ -1,6 +1,7 @@
 import { DEFAULT_LOCAL_PREFERENCE, pickDefaultProvider, resolveProviderById } from "./auto-router"
 import { createOcrRegistry } from "./registry"
-import { DEFAULT_OCR_SETTINGS, OcrError, type OcrProvider, type UserOcrSettings } from "./types"
+import { DEFAULT_OCR_SETTINGS, type OcrProvider, type UserOcrSettings } from "@/types/ocr"
+import { OcrError } from "@/lib/ocr/errors"
 
 function makeProvider(overrides: Partial<OcrProvider> = {}): OcrProvider {
   return {

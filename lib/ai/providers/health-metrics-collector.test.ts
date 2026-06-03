@@ -1,9 +1,5 @@
 import { recordToBuckets, aggregate } from "./health-metrics-collector"
-import {
-  DEFAULT_HEALTH_METRICS_CONFIG,
-  type HealthMetricsConfig,
-  type SlidingWindowBucket,
-} from "@/types/provider/health-metrics"
+import { type HealthMetricsConfig, type SlidingWindowBucket } from "@/types/provider/health-metrics"
 
 const config: HealthMetricsConfig = {
   bucketDurationMs: 1000,

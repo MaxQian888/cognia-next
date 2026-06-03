@@ -1,5 +1,5 @@
 import { buildGeminiVisionProvider, geminiVisionExtract } from "./gemini-vision"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 function makeFetch(resp: { status: number; body: unknown }) {
   return jest.fn(async () => {

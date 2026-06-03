@@ -20,7 +20,7 @@
 
 import { createPluginSystemLogger } from "../core/logger"
 import { registerOcrProvider, getSharedOcrRegistry } from "@/lib/ocr/registry"
-import type { OcrProvider } from "@/lib/ocr/types"
+import type { OcrProvider } from "@/types/ocr"
 import type { PluginOcrRegistration } from "@/types/plugin/plugin-ocr"
 
 // Track which provider ids each plugin has registered so we can drop them

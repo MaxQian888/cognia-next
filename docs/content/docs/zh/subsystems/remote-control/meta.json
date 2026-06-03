@@ -1,0 +1,11 @@
+{
+  "title": "远程控制",
+  "pages": [
+    "index",
+    "rust-listener",
+    "security",
+    "state-and-commands",
+    "renderer-and-settings",
+    "outbound-webhooks"
+  ]
+}

@@ -8,7 +8,6 @@
  *   4. Coherence— merge section findings into one report (unify terminology,
  *                 transitions) and append a deduplicated Sources list.
  */
-import type { AiBridge } from "../lib/ai"
 import { completeJson, completeText } from "../lib/ai"
 import { extractJson } from "../lib/json"
 import type {

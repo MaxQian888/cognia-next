@@ -1,5 +1,5 @@
 import { buildOpenAiVisionProvider, openAiVisionExtract } from "./openai-vision"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 function makeFetch(resp: { status: number; body: unknown }) {
   return jest.fn(async () => {

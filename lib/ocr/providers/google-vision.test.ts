@@ -1,5 +1,5 @@
 import { buildGoogleVisionProvider, googleVisionExtract } from "./google-vision"
-import type { OcrProviderContext } from "../types"
+import type { OcrProviderContext } from "@/types/ocr"
 
 function makeFetch(resp: { status: number; body: unknown }) {
   return jest.fn(async () => {

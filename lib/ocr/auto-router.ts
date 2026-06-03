@@ -20,7 +20,8 @@
  */
 
 import type { NativePlatform } from "@/lib/capacitor/_shared"
-import { OcrError, type OcrProvider, type UserOcrSettings } from "./types"
+import { OcrError } from "@/lib/ocr/errors"
+import { type OcrProvider, type UserOcrSettings } from "@/types/ocr"
 import type { OcrRegistry } from "./registry"
 import { shellAllows } from "./registry"
 

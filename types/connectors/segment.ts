@@ -9,10 +9,31 @@
 export type MessageSegment =
   | { type: "text"; text: string }
   | { type: "markdown"; md: string }
-  | { type: "image"; url: string; alt?: string; width?: number; height?: number }
+  | {
+      type: "image"
+      url: string
+      alt?: string
+      width?: number
+      height?: number
+      /**
+       * Text extracted from the image by the inbound OCR step (ADR-0024).
+       * Populated best-effort when the image carried inline bytes and OCR is
+       * enabled; lets trigger matching, the stored message, the agent prompt,
+       * and the digest read the image's text. Absent ⇒ not OCR'd.
+       */
+      ocrText?: string
+    }
   | { type: "video"; url: string; thumbnailUrl?: string; durationSec?: number }
   | { type: "voice"; url: string; durationSec?: number; transcript?: string }
-  | { type: "file"; url: string; name: string; mimeType: string; sizeBytes: number }
+  | {
+      type: "file"
+      url: string
+      name: string
+      mimeType: string
+      sizeBytes: number
+      /** OCR text extracted from an image/PDF file attachment (ADR-0024). */
+      ocrText?: string
+    }
   | {
       type: "mention"
       /** The mentioned entity's stable platform id. For role/channel mentions on platforms that distinguish those (Discord), this carries the role or channel id; for user mentions, the user id. */
@@ -119,7 +140,7 @@ export function segmentsToPlainText(segments: MessageSegment[]): string {
         out.push(`@${s.displayName ?? s.userId}`)
         break
       case "image":
-        out.push(" [image] ")
+        out.push(s.ocrText ? ` ${s.ocrText} ` : " [image] ")
         break
       case "video":
         out.push(" [video] ")
@@ -128,7 +149,7 @@ export function segmentsToPlainText(segments: MessageSegment[]): string {
         out.push(s.transcript ? ` ${s.transcript} ` : " [voice] ")
         break
       case "file":
-        out.push(` [file:${s.name}] `)
+        out.push(s.ocrText ? ` [file:${s.name}] ${s.ocrText} ` : ` [file:${s.name}] `)
         break
       case "emoji":
         out.push(`[:${s.code}:]`)

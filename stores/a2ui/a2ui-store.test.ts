@@ -14,7 +14,6 @@ import {
   selectEventHistory,
   selectRecentEvents,
 } from "./a2ui-store"
-import type { A2UIServerMessage } from "@/types/a2ui/schema"
 
 // Mock dependencies
 jest.mock("@/lib/a2ui/parser", () => ({

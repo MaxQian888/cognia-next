@@ -14,6 +14,8 @@
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { captureScreenshot } from "@/lib/ui/screenshot"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { extract } from "@/lib/ocr"
+import { buildOcrDeps } from "@/lib/ocr/deps"
 
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
@@ -68,6 +70,39 @@ async function performCapture(): Promise<{
   }
 }
 
+/**
+ * Capture a screenshot and OCR it (ADR-0024). Reuses the same getDisplayMedia
+ * capture as `take_screenshot`, then runs the PNG through the OCR pipeline so
+ * the agent gets the screen's text instead of (or alongside) raw image bytes.
+ */
+async function performCaptureOcr(
+  languages?: string[]
+): Promise<
+  { ok: true; text: string; markdown: string; providerId: string } | { ok: false; error: string }
+> {
+  try {
+    const file = await captureScreenshot()
+    if (!file) return { ok: false, error: "user-cancelled-or-unsupported" }
+    const base64 = await fileToBase64(file)
+    const mimeType = file.type || "image/png"
+    const result = await extract(
+      {
+        source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${base64}`, mimeType },
+        languages,
+      },
+      buildOcrDeps()
+    )
+    return {
+      ok: true,
+      text: result.combinedText,
+      markdown: result.combinedMarkdown,
+      providerId: result.providerId,
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 const definition: PluginDefinition = {
   manifest: {
     id: "cognia-screenshot",
@@ -94,6 +129,29 @@ const definition: PluginDefinition = {
         },
       } as never,
       execute: () => performCapture(),
+    })
+
+    ctx.agent?.registerTool?.({
+      name: "extract_screenshot_ocr",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "extract_screenshot_ocr",
+        description:
+          "Capture a screen image and extract its text via OCR. Returns the recognized text + markdown.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            languages: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "BCP-47 codes (e.g. en, zh). Defaults to the user's configured languages.",
+            },
+          },
+          additionalProperties: false,
+        },
+      } as never,
+      execute: (args?: { languages?: string[] }) => performCaptureOcr(args?.languages),
     })
 
     registerSlashCommand({

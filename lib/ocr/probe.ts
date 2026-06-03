@@ -11,7 +11,8 @@
  */
 
 import { extract as defaultExtract, type ExtractDeps } from "./index"
-import { OcrError, type OcrErrorCode } from "./types"
+import { OcrError } from "@/lib/ocr/errors"
+import { type OcrErrorCode } from "@/types/ocr"
 
 export interface ProbeOutcome {
   /** True when the provider returned a result. */

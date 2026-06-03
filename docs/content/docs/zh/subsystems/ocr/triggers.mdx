@@ -1,0 +1,136 @@
+---
+title: 触发器
+description: 驱动 extract() 的三个入口 —— /ocr 斜杠命令、ocr.extract 插件工具和编辑器菜单 —— 外加 useOcr React Hook、运行时接线，以及当前让部分入口仍处于休眠状态的接线缺口。
+---
+
+# 触发器
+
+<Status variant="beta">/ocr · ocr.extract · 编辑器菜单 · useOcr</Status>
+
+<TLDR>
+  有三个入口被设计为调用 `extract()`：**`/ocr` 斜杠命令**
+  （`lib/slash-commands/actions/ocr.ts`）、**`ocr.extract` 插件工具**（`plugins/ocr/src/index.ts`），以及
+  **编辑器附件菜单**（`components/chat/composer/ocr-menu.tsx`，经由 `useOcr` Hook）。插件与斜杠命令共享同一个
+  解析器，并最终收敛到 `extract()`。其中两个入口已完整构建并测试过，但**尚未上线**：编辑器菜单没有被传入
+  `composer.tsx`，且不存在生产环境的 `credentialsResolver` —— 因此在 keyring 解析器接好之前，云端 provider
+  无法完成鉴权。
+</TLDR>
+
+## 收敛点
+
+一切都汇聚到 `extract(input, deps)`（`lib/ocr/index.ts:200`）。各入口之间的区别在于它们如何组装
+`ExtractDeps` —— 具体来说就是它们注入的 `credentialsResolver`、`attachmentResolver` 以及 settings/registry。
+
+```mermaid
+flowchart TD
+  subgraph S1["Composer menu (dormant)"]
+    AP[attachment-preview.tsx<br/>onOcrSelect] --> OM[ocr-menu.tsx<br/>extract-to-input | view-result]
+    OM --> HOOK
+    HOOK --> RB[ocr-result-bubble.tsx]
+  end
+  subgraph S2["/ocr command"]
+    SL[actions/ocr.ts<br/>parseOcrArgs + handleOcrSlashCommand]
+  end
+  subgraph S3["Agent tool"]
+    TL[plugins/ocr<br/>ocr.extract → runOcrTool]
+  end
+  subgraph S4["Settings playground"]
+    TRY[Try-It / Compare] --> HOOK[hooks/use-ocr.ts<br/>run() state machine]
+  end
+  TL -. registers .-> SL
+  HOOK --> EX
+  SL --> EX
+  TL --> EX
+  EX[extract input, ExtractDeps] --> REG[getSharedOcrRegistry + credentialsResolver]
+  BOOT[runtime.ts installOcrRuntime<br/>20 providers · NO production caller] -. should populate .-> REG
+```
+
+## `/ocr` 斜杠命令
+
+`lib/slash-commands/actions/ocr.ts`（175 行）解析 argv、运行 `extract()`，并返回一段系统 Markdown
+文本（可选地将结果写回编辑器）。其语法为：
+
+```
+/ocr <file path or attachment id>
+  [--provider auto|<provider-id>] [--lang en,zh] [--pages 1-3]
+  [--format markdown|text|blocks] [--into composer|system]
+```
+
+`parseOcrArgs`（`ocr.ts:54`）在分词时处理引号（`ocr.ts:161`），将 `--format` 校验为三个
+字面量之一（其它一律抛错），并对未知标志抛错。来源解析（`ocr.ts:59`）：第一个以
+`att_` / `attachment:` 开头的 token 会成为 `{ kind: "attachment-id" }`，否则为 `{ kind: "file-path" }`。
+`handleOcrSlashCommand`（`ocr.ts:112`）构建 `OcrInput`，调用可注入的 `extractImpl`，成功时
+返回 `{ system, composerText, result }` —— 只有在 `--into composer`（默认值）时 `composerText` 才是合并后的
+Markdown。渲染出的标题为 `**OCR via <providerId>** (<langs>, <ms>ms[, cached])`。
+
+## `ocr.extract` 插件工具
+
+`plugins/ocr/src/index.ts`（199 行）是第一方插件（ADR-0024）。它是共享 registry 的**消费者**，
+而非 provider 注册者，并做两件事：注册 agent 工具 `ocr.extract`，以及
+注册 `/ocr` 斜杠命令（将 `composerText` 作为 `dispatchPrompt` 转发）。
+
+```ts
+// plugins/ocr/src/index.ts:117 — the tool input schema (underscore source kinds)
+TOOL_PARAMETERS = {
+  source:   { kind: "attachment_id" | "data_url" | "file_path", value },  // required
+  languages: string[],     // BCP-47
+  format:    "markdown" | "text" | "blocks",
+  provider:  "<id>" | "auto",
+  pageRange: "1,3-5",
+}
+```
+
+`runOcrTool`（`index.ts:62`）将下划线形式的 kind 映射为连字符形式的 kind，把 `provider: "auto"` 收敛为
+`undefined`，并调用 `extract()`。`manifest.capabilities = ["tools", "commands"]`（`index.ts:154`）。
+
+<Callout type="warn" title="插件路径不携带任何真实凭据">
+  `defaultDepsBuilder`（`index.ts:51`）返回的 deps 带有 `settings: DEFAULT_OCR_SETTINGS`、`platform: "web"`，以及
+  一个桩实现 `credentialsResolver: async () => ({ secrets: {} })`。当共享 registry 为空时它还会返回
+  `null` —— 而在 `installOcrRuntime()` 运行之前 registry 就是空的。所以一旦 registry 被填充，该工具对本地引擎可端到端
+  工作，但云端 provider 仍需 keyring 解析器。
+</Callout>
+
+## `useOcr` Hook
+
+`hooks/use-ocr.ts`（94 行）将 `extract()` 包装成一个可中止的状态机，供各 UI 入口（编辑器
+菜单、Try-It、Compare）使用。它**接收** `ExtractDeps`（或一个工厂函数）—— 而不是自行构建它们。
+
+```ts
+// use-ocr.ts:12 — the state shape
+status: "idle" | "running" | "success" | "error"
+result?: OcrResult
+error?: { code: OcrErrorCode; message: string }
+// + abort(), run(input), reset()
+```
+
+`run(input)`（`use-ocr.ts:41`）会中止任何进行中的调用，解析 deps 工厂（`null` 工厂会产生
+状态为 `error` 的“runtime not ready”），创建一个 `AbortController`，并调用 `extract({ ...input, signal }, deps)`。
+catch 分支对 `OcrError` 做鸭子类型判定，以便跨模块的错误仍能暴露出带类型的 `code`。
+
+## 编辑器集成与状态
+
+编辑器三件套已构建并测试过：当传入 `onOcrSelect` 时，`attachment-preview.tsx` 会在图片/PDF 附件上长出一个
+`OcrMenu`；`ocr-menu.tsx` 提供 **“extract text to input”** 和 **“view extracted text”**；
+`ocr-result-bubble.tsx` 在侧边 `Sheet` 中渲染逐页结果，并支持逐页 + 合并复制。
+
+<Callout type="warn" title="编辑器菜单尚未接线">
+  `components/chat/composer.tsx:734` 渲染 `<AttachmentPreview />` 时**没有**传入 `onOcrSelect` prop，因此
+  OCR 菜单、结果气泡以及 `useOcr` 在线上编辑器中处于休眠状态。在 `components/chat` 中对 `onOcrSelect` /
+  `OcrResultBubble` / `useOcr` 做 grep，只会命中 composer/* 文件本身。当前*确实*会驱动 `useOcr` 的
+  入口是设置中的 **Try-It** 和 **Compare** 标签页（参见
+  [Settings UI](./settings-ui)）。
+</Callout>
+
+## 运行时接线 —— 生产环境的缺口
+
+`lib/ocr/runtime.ts:installOcrRuntime()` 是预期中的唯一引导入口（注册全部 20 个 provider，接好原生
+invoker + 就绪探针）。有两个缺口让触发入口无法在生产环境中上线：
+
+1. **没有引导调用方。** `installOcrRuntime()` 只被它自己的测试引用；其注释中所提及的
+   `app/(setup)/ocr-bootstrap.tsx` 并不存在。在加上调用方之前，运行中的应用里共享 registry 始终为空。
+2. **没有凭据解析器。** 树中的每个 `credentialsResolver` 都是空 secrets 桩实现。`OcrSection`
+   接受一个 `ocrDepsFactory?` prop，但它默认为 `() => null`，且没有调用方提供真实实现；
+   设置文件明确将 `ocr_keyring_*` 解析器列为超出范围而延后处理。
+
+次要的设置路由 `app/me/ocr/page.tsx`（16 行）只是把 `<OcrSectionPersisted/>` 包进一个
+`SubPageShell` —— 它托管的是设置 UI，而非触发 `extract()`。

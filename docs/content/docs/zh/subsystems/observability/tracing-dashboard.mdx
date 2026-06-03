@@ -1,0 +1,203 @@
+---
+title: 追踪仪表盘
+description: Grafana/Langfuse 风格的 /observability 仪表盘——一个建立在 Dexie agentTraces 表之上的可拖拽 react-grid-layout 面板网格。lib/observability 是一个真正的分析引擎——精确分位、固定边界时间分桶、span→trace 汇总 + 瀑布图、分组拆解以及阈值——通过一个 13 面板注册表和一个追踪瀑布图抽屉对外呈现。
+---
+
+# 追踪仪表盘
+
+<Status variant="beta" />
+
+<TLDR>
+  `/observability`（`app/observability/page.tsx`）是一个 Grafana/Langfuse 风格的遥测仪表盘：一个可
+  拖拽、可缩放的 `react-grid-layout` 面板网格，读取 **Dexie `agentTraces` 表**（与
+  [agent-trace](./agent-trace) 流水线持久化的 span 相同）——因此它可在浏览器和移动端工作，不像
+  `/performance`。`lib/observability/` 是一个真正的分析引擎：精确分位
+  （`percentiles.ts`）、带空缺补 null 的固定边界时间分桶（`aggregate-series.ts`）、
+  spans→trace 汇总 + 父/子瀑布图（`trace-rollup.ts`）、分组拆解
+  （`breakdown.ts`）以及阈值分类（`thresholds.ts`）。单个
+  `useObservabilitySeries` memo 一次性计算所有内容；13 个面板（5 种类型）据此渲染；点击
+  某个追踪会打开一个瀑布图抽屉。
+</TLDR>
+
+<StatGrid>
+  <Stat label="数据源" value="Dexie agentTraces" hint="不是 fixture——queryByWindow (use-observability-data.ts:35)" />
+  <Stat label="面板数" value="13" hint="panel-registry.ts:39" />
+  <Stat label="面板类型" value="5" hint="stat · timeseries · donut · bar · traces" />
+  <Stat label="时间预设" value="7" hint="5m · 15m · 1h · 6h · 24h · 7d · 30d" />
+  <Stat label="拆解维度" value="5" hint="model · surface · operation · tool · session" />
+  <Stat label="网格引擎" value="react-grid-layout v2" hint="基于 hooks，React-19 安全" />
+</StatGrid>
+
+## 数据源
+
+仪表盘读取 Dexie `agentTraces` 表——**而非** fixture（那些只存在于测试中）。
+证据链：
+
+```ts title="hooks/observability/use-observability-data.ts:35"
+const spans = useClientLiveQuery(
+  () => queryByWindow({ since: range.since, until: range.until }),
+  [range.since, range.until, tick],
+  EMPTY,
+)
+// queryByWindow → getDb().agentTraces.toArray() filtered to the window (lib/db/agent-traces.ts:53)
+```
+
+所以流程是：由[日志流水线](./logging-pipeline)发出的 span → 由
+**agent-trace transport** 持久化 → 经 `useLiveQuery` 按窗口读取 → 由纯函数
+`lib/observability` 分桶/汇总 → 渲染进面板网格。`tick` 位于依赖数组中，因此
+相对窗口会随墙上时钟推进而重新拉取。
+
+```mermaid
+flowchart TB
+  Dexie[("Dexie agentTraces")]
+  Dexie -->|"queryByWindow"| Data["useObservabilityData<br/>windowed + filtered spans"]
+  Data --> Series["useObservabilitySeries<br/>ONE memo: bucket + rollup + KPIs"]
+  Series --> Grid["PanelGrid (react-grid-layout)"]
+  Grid --> P1["stat panels (KPIs)"]
+  Grid --> P2["timeseries (cost/rate/errors/latency/tokens)"]
+  Grid --> P3["donut (by model)"]
+  Grid --> P4["bar (by surface)"]
+  Grid --> P5["recent traces table"]
+  P5 -->|"onSelectTrace"| Drawer["TraceWaterfallDrawer<br/>useTraceDetail → buildWaterfall"]
+  Dexie -.->|"queryByTrace"| Drawer
+
+  classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
+  class Dexie,Data,Series,Grid,P1,P2,P3,P4,P5,Drawer box
+```
+
+## 分析引擎
+
+`lib/observability/` 是纯函数、无副作用，且每个模块都有单元测试。
+
+### 分位
+
+通过排序 + 最近秩加线性插值得到精确分位（"type 7" / NumPy / Excel
+`PERCENTILE`）：
+
+```ts title="lib/observability/percentiles.ts:14"
+export function percentile(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length
+  if (n === 0) return 0
+  if (n === 1) return sortedAsc[0]
+  const rank = Math.min(1, Math.max(0, p)) * (n - 1)
+  const lo = Math.floor(rank); const hi = Math.ceil(rank)
+  if (lo === hi) return sortedAsc[lo]
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (rank - lo)
+}
+```
+
+`percentilesOf(values, ps)` 只排序一次，并为每个请求的分位返回一个值——用于
+p50/p95/p99 延迟序列。
+
+### 时间分桶
+
+`aggregate-series.ts` 将 span 按来自 `bucketBoundaries(range)` 的**固定边界**分桶，以便空的
+前导/尾随桶仍能渲染（Grafana 行为）。每个 span 落入
+`floor((startTime - since) / bucketMs)`。各序列构建器——`costSeries`、`tokenSeries`、
+`requestRateSeries`、`errorRateSeries`、`latencyPercentileSeries`——为空桶发出 `null`，让
+recharts 绘制空缺而非误导性的零值：
+
+```ts title="lib/observability/aggregate-series.ts:131"
+if (durations.length === 0) return { p50: null, p95: null, p99: null }
+const [p50, p95, p99] = percentilesOf(durations, [0.5, 0.95, 0.99])
+```
+
+`windowKpis(spans, range)` 将整个窗口汇总为 `{ totalCost, totalSpans, errorRate,
+cacheHitRate, p95LatencyMs, reqPerMin }`。
+
+### 追踪汇总与瀑布图
+
+`trace-rollup.ts` 有两个输出。`rollupTraces` 为每个 `traceId` 产出一个 `TraceRollupRow`，用于
+最近追踪表（根 = 最早开始的 span，时长 = `maxEnd - minStart`）。`buildWaterfall`
+为抽屉构建带 offset/width 几何信息的父/子树，并防范
+缺失/自引用/环状父节点（孤儿成为根，`visited` 集合打破环）：
+
+```ts title="lib/observability/trace-rollup.ts:142"
+offsetMs: Math.max(0, span.startTime - traceStart),
+widthMs: Math.max(0, span.durationMs ?? (span.endTime ?? span.startTime) - span.startTime),
+```
+
+`flattenWaterfall` 通过先序 DFS 得到行列表。
+
+### 拆解与阈值
+
+`breakdown.ts` 将 span 按五个维度之一（`model | surface | operation | tool | session`）
+分组为 `BreakdownRow`（span 数、cost、tokens、错误数、平均延迟）。`distinctValues` 驱动
+过滤栏的选项。
+
+`thresholds.ts` 将一个指标值分类为 `ok | warn | crit` 并映射到主题色。
+默认值：
+
+```ts title="lib/observability/thresholds.ts:24"
+DEFAULT_THRESHOLDS = {
+  errorRate:    { warn: 0.02, crit: 0.1,   direction: "above" },
+  latencyP95:   { warn: 5000, crit: 15000, direction: "above" },
+  cost:         { warn: 5,    crit: 20,    direction: "above" },
+  cacheHitRate: { warn: 0.5,  crit: 0.2,   direction: "below" },
+}
+```
+
+`time-range.ts` 解析预设（`5m…30d`），将 `bucketMs` 对齐到合适步长（`pickBucketMs`，目标 60
+个桶，上限 1000），并计算边界。`filters.ts` 应用 `TraceFilters`，语义为
+**维度之间取 AND、维度之内取 OR**（Grafana 模板变量语义），在已按窗口过滤的 span
+上于客户端执行。
+
+## 数据 Hook
+
+- `useObservabilityData(range, filters, tick)`——带窗口的 `useLiveQuery` + 客户端过滤；
+  返回 `{ spans (filtered), windowSpans (pre-filter, for option lists), loading }`。
+- `useObservabilitySeries(spans, range)`——**单个** `useMemo`，计算 `bucketMs`、全部 5 条序列、4
+  个拆解、`rollupTraces` 以及 `windowKpis`，因此没有面板需要重新分桶。
+- `useObservabilityControls()` / `useResolvedRange(tick)`——位于持久化的
+  `useObservabilityStore`（zustand `persist`，key 为 `cognia-observability`；`editMode` 是瞬态的，因此
+  网格始终以锁定状态重新打开）之上的选择器层。
+- `useTraceDetail(traceId)`——仅在某个追踪被选中时才惰性执行 `queryByTrace`，随后 `buildWaterfall`。
+- `useRefreshTick(intervalMs)`——自动刷新计数器（`0` 禁用，依赖 `useLiveQuery`）。
+
+## 面板注册表
+
+`panel-registry.ts` 是纯配置（无 JSX）。一个 `PanelDef` 携带 `id`、`kind`、`titleKey`，以及
+可选的 `statMetric` / `seriesKind` / `dimension` / `threshold`。共有 **13 个注册面板**，
+分属 **5 种类型**：
+
+| 类型 | 面板 |
+| --- | --- |
+| `stat` | `kpi-cost` · `kpi-spans` · `kpi-errors` · `kpi-cache` · `kpi-latency` |
+| `timeseries` | `ts-cost` · `ts-rate` · `ts-errors` · `ts-latency` · `ts-tokens` |
+| `donut` | `bd-model`（按 model） |
+| `bar` | `bd-surface`（按 surface） |
+| `traces` | `traces`（最近追踪表） |
+
+`defaultLayouts()` 提供精心设计的 12 列（`lg`）、8 列（`md`）以及派生的 2 列（`sm`）
+布局。注意：`breakdownOperation`/`breakdownTool` 已被计算，但没有默认面板使用它们。
+
+## 组件
+
+`ObservabilityDashboard` 串联各 hook（`controls → tick → range → data → series`），并渲染
+头部（Gauge 图标 + 标题）+ `ObservabilityToolbar` + `PanelGrid` + `TraceWaterfallDrawer`。
+`ObservabilityPanel` 依据 `panel.kind` 分派到 `StatPanel` / `TimeSeriesPanel` /
+`DonutPanel` / `BreakdownBarPanel` / `RecentTracesPanel`。`PanelGrid` 使用 **react-grid-layout v2**
+（基于 hooks + `ResizeObserver`，React-19 安全——无 `findDOMNode`），配置 `COLS {lg:12, md:8, sm:2}`，
+拖拽通过 `.panel-drag-handle` 受 `editMode` 控制。`PanelFrame` 添加卡片外观与一个
+阈值状态点。
+
+图表面板（`TimeSeriesPanel`）按 `seriesKind` 构建 recharts 配置——cost 为 chart-1
+区域图，error rate 为 destructive 折线，latency 为三条 p50/p95/p99 折线，tokens 为四条堆叠
+区域图——带阈值 `ReferenceLine` 以及取自 `useThemeColors` 的颜色。`TraceWaterfallDrawer` 是一个
+shadcn `Sheet`，渲染 `flattenWaterfall` 行，每行是一条按比例的计时条
+（`offsetPct`/`widthPct`），按 operation 着色，可展开以显示 events/model/tokens/cost。
+
+## i18n
+
+仪表盘使用 `observability` 命名空间（`observability.panels.*`、`observability.series.*`、
+`observability.toolbar.*`、`observability.range.*`、`observability.filters.*`、
+`observability.waterfall.*`）。guild-rail 导航标签为 `observability`。
+
+## 从哪里入手
+
+| 目标 | 文件 |
+| --- | --- |
+| 添加面板 | 在 `components/observability/panel-registry.ts` 的 `PANELS` 中添加一个 `PanelDef` + 一个 `defaultLayouts` 槽位 |
+| 添加指标/序列 | `lib/observability/aggregate-series.ts` + `TimeSeriesPanel` 配置 |
+| 添加拆解维度 | `Dimension` 联合类型 + `lib/observability/breakdown.ts` 中的 `dimValue` + 过滤栏 |
+| 调整阈值 | `lib/observability/thresholds.ts` 中的 `DEFAULT_THRESHOLDS` |

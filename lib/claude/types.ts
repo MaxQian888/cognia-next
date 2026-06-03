@@ -886,7 +886,7 @@ export interface AppSettings {
    * defaults without a schema migration. Defaults to `DEFAULT_OCR_SETTINGS`
    * from `lib/ocr/types.ts`.
    */
-  ocrSettings?: import("@/lib/ocr/types").UserOcrSettings
+  ocrSettings?: import("@/types/ocr").UserOcrSettings
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
@@ -2151,6 +2151,14 @@ export interface Character {
    */
   enableComputerUse?: boolean
   /**
+   * Gate for the OCR agent tool (`ocr.extract`, ADR-0024). Unlike Computer
+   * Use, OCR is low-risk and defaults to **enabled** — only an explicit
+   * `false` removes the `cognia-ocr` tool from the send (and the IM safeguard
+   * `ConversationOverrideRow.allowOcr` likewise only blocks when explicitly
+   * false). Mirrors the `enableComputerUse` soft-binding convention.
+   */
+  enableOcr?: boolean
+  /**
    * Opt-in flag for the built-in skill tier in desktop sessions
    * (ADR-0026). When true, `build-options.ts:resolveSendOptions`
    * surfaces every registered built-in skill that targets the
@@ -2300,6 +2308,7 @@ export interface PackPristineSnapshot {
   skillIds?: string[]
   pluginSkillIds?: string[]
   enableComputerUse?: boolean
+  enableOcr?: boolean
   computerUseSettings?: Character["computerUseSettings"]
   sandboxTier?: Character["sandboxTier"]
   a2uiEnabled?: boolean

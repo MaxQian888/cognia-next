@@ -1,5 +1,5 @@
 import { abbyyCloudExtract, buildAbbyyCloudProvider } from "./abbyy-cloud"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 function makeFetchSequence(
   responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>

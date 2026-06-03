@@ -1,5 +1,5 @@
 import { __clearLarkTokenCache, buildLarkBasicProvider, larkBasicExtract } from "./lark-basic"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 interface FetchResponseSpec {
   status: number

@@ -27,6 +27,28 @@ describe("MessageSegment", () => {
     expect(segmentsToPlainText(segs)).toBe("hello @Alice, check this: [image] const x = 1")
   })
 
+  it("projects an image's OCR text instead of the [image] placeholder (ADR-0024)", () => {
+    const segs: MessageSegment[] = [
+      { type: "text", text: "see " },
+      { type: "image", url: "http://x/y.png", ocrText: "TOTAL 42" },
+    ]
+    expect(segmentsToPlainText(segs)).toBe("see  TOTAL 42 ")
+  })
+
+  it("appends a file attachment's OCR text after the name marker", () => {
+    const segs: MessageSegment[] = [
+      {
+        type: "file",
+        url: "f://1",
+        name: "scan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1,
+        ocrText: "PAGE ONE",
+      },
+    ]
+    expect(segmentsToPlainText(segs)).toBe(" [file:scan.pdf] PAGE ONE ")
+  })
+
   describe("a2ui segment", () => {
     const sample: A2UIMessageSegment = {
       type: "a2ui",

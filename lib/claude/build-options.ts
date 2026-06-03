@@ -17,6 +17,7 @@ import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
+import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
 import type {
   AppSettings,
   Character,
@@ -201,6 +202,15 @@ export interface BuildOptionsContext {
    * chat passes `null` to opt out.
    */
   activeGoal?: import("@/types/goal").Goal | null
+  /**
+   * Active plan for this session (ADR-0045). When set AND
+   * `activePlan.status === "executing"`, the resolver appends a
+   * `renderPlanSystemSection(activePlan)` block to `opts.appendSystemPrompt`
+   * — the same surgical append convention as `activeGoal`. The plan runtime's
+   * in-session driver pulls this from Dexie via `getExecutingPlanForSession`;
+   * non-plan sends pass `null` / undefined to opt out.
+   */
+  activePlan?: import("@/types/agent/plan").AgentPlan | null
   /**
    * Conversation key for connector-driven sends. Set by the connector
    * runtime when an inbound message kicks off an ai-run. Direct chat sends
@@ -1001,6 +1011,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const computerUseAllowedForChat =
     character?.enableComputerUse === true && (!imSession || allowImComputerUse)
 
+  // OCR tool (`cognia-ocr` / `ocr.extract`, ADR-0024) is low-risk and
+  // default-allowed everywhere (incl. IM); see `isOcrToolAllowed`.
+  const ocrAllowedForChat = isOcrToolAllowed({
+    character,
+    imSession,
+    allowOcrOverride: imOverrideRow?.allowOcr,
+  })
+
   // --- Plugin tools → SDK sidecar (M2) -------------------------------------
   // When the plugin store has enabled `tools` plugins, surface their tool
   // manifest so the sidecar can build a synthetic `cognia-plugin-tools`
@@ -1026,6 +1044,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       let manifest = buildPluginToolsManifest({ exposeDockToAgents })
       if (!computerUseAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
+      }
+      if (!ocrAllowedForChat) {
+        manifest = manifest.filter((entry) => entry.pluginId !== "cognia-ocr")
       }
       // ADR-0026 — fold built-in skill manifest entries into the same
       // pluginTools stream the sidecar consumes. The two streams share
@@ -1241,6 +1262,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = appendGoalContext({
       appendSystemPrompt: opts.appendSystemPrompt,
       activeGoal: ctx.activeGoal,
+    })
+  }
+
+  // --- Active plan context (ADR-0045) --------------------------------------
+  // When the resolving session has an executing plan, append the plan's
+  // system section (current + remaining steps) so the in-session driver's
+  // turns know their place in the plan. Only `executing` plans inject —
+  // draft / awaiting_approval / paused / terminal plans are skipped.
+  if (ctx.activePlan && ctx.activePlan.status === "executing") {
+    const { appendPlanContext } = await import("@/lib/agent/plan/context-injector")
+    opts.appendSystemPrompt = appendPlanContext({
+      appendSystemPrompt: opts.appendSystemPrompt,
+      activePlan: ctx.activePlan,
     })
   }
 

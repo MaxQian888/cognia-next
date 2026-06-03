@@ -15,14 +15,9 @@
  */
 
 import { extract as defaultExtract } from "./index"
+import { OcrError } from "@/lib/ocr/errors"
 import { combinePageMarkdown, combinePageText, parsePageRange } from "./image-prep"
-import {
-  OcrError,
-  type OcrInput,
-  type OcrPage,
-  type OcrResult,
-  type UserOcrSettings,
-} from "./types"
+import { type OcrInput, type OcrPage, type OcrResult, type UserOcrSettings } from "@/types/ocr"
 import type { ExtractDeps } from "./index"
 
 export const MIN_TEXT_LAYER_CHARS = 16
@@ -66,6 +61,18 @@ export interface PdfRouterDeps {
   minTextLayerChars?: number
   /** Provider id passed to the OCR call when a page is empty. */
   ocrProviderId?: string
+  /**
+   * Streaming / resume hooks (ADR-0024 Phase 2 / 2e). All optional — when
+   * absent the router behaves exactly as before (whole-document, no cache).
+   *   - `readPage`  — return a cached page to SKIP processing (resume).
+   *   - `writePage` — persist a freshly-produced page (incremental cache).
+   *   - `onPage`    — fired after each page lands (progress / partial results).
+   *   - `signal`    — abort between pages; throws `OcrError("aborted")`.
+   */
+  readPage?: (pageNumber: number) => Promise<OcrPage | null>
+  writePage?: (pageNumber: number, page: OcrPage) => Promise<void>
+  onPage?: (page: OcrPage, doneCount: number, total: number) => void
+  signal?: AbortSignal
 }
 
 export interface PdfRouterInput {
@@ -99,42 +106,47 @@ export async function extractPdf(input: PdfRouterInput, deps: PdfRouterDeps): Pr
   const pages: OcrPage[] = []
   const start = Date.now()
   for (const pageNumber of pagesToRead) {
+    if (deps.signal?.aborted) {
+      throw new OcrError("aborted", "pdf-router", "PDF OCR cancelled.")
+    }
+    // Resume — a previously-cached page skips both text-layer read and OCR.
+    const cached = deps.readPage ? await deps.readPage(pageNumber) : null
+    if (cached) {
+      pages.push(cached)
+      deps.onPage?.(cached, pages.length, pagesToRead.length)
+      continue
+    }
     const page = await doc.getPage(pageNumber)
     const textContent = await page.getTextContent()
     const text = joinPdfText(textContent)
+    let pageOut: OcrPage
     if (text.replace(/\s+/g, "").length >= threshold) {
-      pages.push({
-        pageNumber,
-        markdown: synthesizeMarkdown(text),
-        text,
-        fromTextLayer: true,
-      })
-      continue
-    }
-    const rasterized = await page.renderToDataUrl({ dpi })
-    const ocrResult = await ocrFn(
-      {
-        source: {
-          kind: "data-url",
-          dataUrl: rasterized.dataUrl,
-          mimeType: "image/png",
+      pageOut = { pageNumber, markdown: synthesizeMarkdown(text), text, fromTextLayer: true }
+    } else {
+      const rasterized = await page.renderToDataUrl({ dpi })
+      const ocrResult = await ocrFn(
+        {
+          source: { kind: "data-url", dataUrl: rasterized.dataUrl, mimeType: "image/png" },
+          providerId: ocrProviderId,
+          languages: input.languages ?? settings.defaultLanguages,
+          useCache: false,
         },
-        providerId: ocrProviderId,
-        languages: input.languages ?? settings.defaultLanguages,
-        useCache: false,
-      },
-      deps.extractDeps
-    )
-    const firstPage = ocrResult.pages[0]
-    pages.push({
-      pageNumber,
-      markdown: firstPage?.markdown ?? "",
-      text: firstPage?.text ?? "",
-      blocks: firstPage?.blocks,
-      width: rasterized.width,
-      height: rasterized.height,
-      fromTextLayer: false,
-    })
+        deps.extractDeps
+      )
+      const firstPage = ocrResult.pages[0]
+      pageOut = {
+        pageNumber,
+        markdown: firstPage?.markdown ?? "",
+        text: firstPage?.text ?? "",
+        blocks: firstPage?.blocks,
+        width: rasterized.width,
+        height: rasterized.height,
+        fromTextLayer: false,
+      }
+    }
+    if (deps.writePage) await deps.writePage(pageNumber, pageOut)
+    pages.push(pageOut)
+    deps.onPage?.(pageOut, pages.length, pagesToRead.length)
   }
 
   return {

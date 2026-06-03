@@ -1,6 +1,6 @@
 import { __resetOcrApiForTesting, clearOcrProvidersForPlugin, createOcrAPI } from "./ocr-api"
 import { __resetSharedOcrRegistry, getSharedOcrRegistry } from "@/lib/ocr/registry"
-import type { OcrProvider, OcrInput, OcrProviderContext, OcrResult } from "@/lib/ocr/types"
+import type { OcrProvider, OcrInput, OcrProviderContext, OcrResult } from "@/types/ocr"
 
 function makeProvider(id: string): OcrProvider {
   return {

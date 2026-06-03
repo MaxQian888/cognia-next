@@ -1,4 +1,3 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
 import { consolidate, type ConsolidateDeps } from "./consolidator"

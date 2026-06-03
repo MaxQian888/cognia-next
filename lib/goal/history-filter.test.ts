@@ -1,4 +1,4 @@
-import type { Goal, GoalStatus } from "@/types/goal"
+import type { Goal } from "@/types/goal"
 import { filterAndSortGoals } from "./history-filter"
 
 function goal(overrides: Partial<Goal> = {}): Goal {

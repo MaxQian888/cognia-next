@@ -20,8 +20,10 @@ import type { NativePlatform } from "@/lib/capacitor/_shared"
 import { sha256Blob, sha256Bytes } from "./hash"
 import { readCachedResult, writeCachedResult } from "./cache"
 import { combinePageMarkdown, combinePageText, normalizeLanguages } from "./image-prep"
+import { buildOcrDocument } from "./document"
+import { maybeEscalateResult } from "./confidence"
+import { OcrError } from "./errors"
 import {
-  OcrError,
   type OcrCredentials,
   type OcrInput,
   type OcrProvider,
@@ -29,7 +31,7 @@ import {
   type OcrResult,
   type OcrSource,
   type UserOcrSettings,
-} from "./types"
+} from "@/types/ocr"
 import type { OcrRegistry } from "./registry"
 import { pickDefaultProvider, resolveProviderById } from "./auto-router"
 
@@ -164,6 +166,9 @@ async function callProvider(
 function rebuildResult(raw: OcrResult, providerId: string, durationMs: number): OcrResult {
   const combinedMarkdown = raw.combinedMarkdown || combinePageMarkdown(raw.pages)
   const combinedText = raw.combinedText || combinePageText(raw.pages)
+  // Phase 2 — synthesize the typed IR from the per-page output when a provider
+  // didn't supply one. Additive: combined fields above are unchanged.
+  const document = raw.document ?? buildOcrDocument(raw.pages, providerId)
   return {
     ...raw,
     providerId,
@@ -171,6 +176,7 @@ function rebuildResult(raw: OcrResult, providerId: string, durationMs: number): 
     combinedText,
     durationMs,
     cached: false,
+    document,
   }
 }
 
@@ -245,18 +251,32 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
 
   const result = await callProvider(provider, providerInput, deps, input.signal)
 
+  // Phase 2 / 2c — confidence-driven escalation. No-op unless the setting is on
+  // and the result's mean confidence is below the threshold (default off).
+  const finalResult = await maybeEscalateResult({
+    result,
+    settings: deps.settings,
+    reextract: (providerId) =>
+      callProvider(
+        resolveProviderById(deps.registry, providerId, deps.platform),
+        providerInput,
+        deps,
+        input.signal
+      ),
+  })
+
   if (useCache) {
     await writeCachedResult({
       fileSha,
-      providerId: provider.id,
+      providerId: finalResult.providerId,
       languages,
-      result,
+      result: finalResult,
       bytesIn: resolved.blob.size,
     })
   }
 
-  deps.onResult?.(result)
-  return result
+  deps.onResult?.(finalResult)
+  return finalResult
 }
 
-export { OcrError } from "./types"
+export { OcrError } from "./errors"

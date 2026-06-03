@@ -10504,6 +10504,42 @@
     "editMode": "Edit {name}",
     "resultsCount": "Showing {shown} of {total}"
   },
+  "plan": {
+    "approval": {
+      "title": "Review plan",
+      "sourceLabel": "Source: {source}",
+      "noSteps": "This plan has no steps.",
+      "feedbackPlaceholder": "Optional feedback for rejection or refinement…",
+      "approve": "Approve & run",
+      "reject": "Reject",
+      "refineOptimize": "Optimize",
+      "refineSimplify": "Simplify",
+      "refineExpand": "Expand",
+      "refineReorder": "Reorder",
+      "refineRepair": "Repair"
+    },
+    "tracker": {
+      "progress": "{completed} of {total} steps",
+      "empty": "No plan is running.",
+      "statusPending": "Pending",
+      "statusReady": "Ready",
+      "statusInProgress": "In progress",
+      "statusCompleted": "Completed",
+      "statusFailed": "Failed",
+      "statusSkipped": "Skipped",
+      "statusBlocked": "Blocked"
+    },
+    "status": {
+      "draft": "Draft",
+      "awaiting_approval": "Awaiting approval",
+      "approved": "Approved",
+      "executing": "Executing",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
+  },
   "planModeTasks": {
     "triggerText": "Plan / tasks ({count})",
     "triggerLabel": "Open plan-mode tasks ({count})",
@@ -13383,6 +13419,10 @@
         "empty": "No text was recognized."
       }
     },
+    "overlay": {
+      "ariaLabel": "Selectable extracted text over the source image",
+      "imageAlt": "OCR source page"
+    },
     "errors": {
       "unsupportedShell": "This OCR provider is not available in the current app shell.",
       "missingCredentials": "Add credentials for this OCR provider in Settings → OCR.",
@@ -13419,6 +13459,10 @@
       "cloudFallbackProvider": "Cloud fallback provider",
       "pdfFastPath": "PDF text-layer fast-path",
       "pdfFastPathHint": "Skip OCR on PDF pages that already have a text layer.",
+      "inboundImages": "OCR inbound images",
+      "inboundImagesHint": "Extract text from images received in connected chats so the assistant can read them even without vision.",
+      "confidenceEscalation": "Escalate low-confidence results",
+      "confidenceEscalationHint": "Re-OCR a low-confidence result with the cloud fallback provider and keep the stronger output.",
       "cacheTtlDays": "Cache TTL (days)",
       "cacheTtlHint": "0 = no expiry. Default 30.",
       "clearAllCache": "Clear all OCR cache",

@@ -154,7 +154,6 @@ describe("startLarkLongConn", () => {
     await session.waitForListeners()
 
     // Malformed frame must not throw or yield.
-    session["push"] // noop ref to keep linter calm
     const handler = (session.listenImpl.mock.calls.find((c: unknown[]) =>
       (c[0] as string).endsWith("/event")
     )?.[1] ?? (() => {})) as (e: { payload: string }) => void

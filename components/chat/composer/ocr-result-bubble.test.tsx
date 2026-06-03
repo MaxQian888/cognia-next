@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { OcrResultBubble } from "./ocr-result-bubble"
-import type { OcrResult } from "@/lib/ocr/types"
+import type { OcrResult } from "@/types/ocr"
 
 const sample: OcrResult = {
   providerId: "mistral-ocr",

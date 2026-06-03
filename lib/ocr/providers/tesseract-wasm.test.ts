@@ -4,7 +4,7 @@ import {
   tesseractWasmExtract,
   type TesseractRecognizer,
 } from "./tesseract-wasm"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 function mockRecognizer(
   data: TesseractRecognizer["recognize"] extends infer T

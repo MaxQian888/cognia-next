@@ -12,8 +12,9 @@ jest.mock("next/dynamic", () => () => {
     options?: { automaticLayout?: boolean }
     onMount?: (editor: unknown, monaco: unknown) => void
   }) => {
+    const onMount = props?.onMount
     React.useEffect(() => {
-      props?.onMount?.(
+      onMount?.(
         {
           getModifiedEditor: () => ({
             revealLineInCenter: mockRevealLineInCenter,
@@ -23,7 +24,7 @@ jest.mock("next/dynamic", () => () => {
         },
         { editor: { defineTheme: () => {}, setTheme: mockSetMonacoTheme } }
       )
-    }, [])
+    }, [onMount])
     return (
       <div
         data-testid="monaco-diff-mock"

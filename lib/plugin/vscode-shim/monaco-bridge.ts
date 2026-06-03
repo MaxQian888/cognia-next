@@ -44,7 +44,6 @@ import {
   vscodeSemanticTokensToMonaco,
   vscodeSignatureHelpToMonaco,
   vscodeTextEditsToMonaco,
-  type AdaptedMonacoCompletionItem,
   type VscodeCodeLens,
   type VscodeColorInformation,
   type VscodeCompletionResult,

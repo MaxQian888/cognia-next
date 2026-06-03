@@ -11,13 +11,13 @@
  */
 
 import { normalizeImage } from "../image-prep"
+import { OcrError } from "@/lib/ocr/errors"
 import {
-  OcrError,
   type OcrInput,
   type OcrProvider,
   type OcrProviderContext,
   type OcrResult,
-} from "../types"
+} from "@/types/ocr"
 import { cloudFetch, requireSecret } from "./_http"
 
 const ABBYY_DEFAULT_ENDPOINT = "https://cloud-eu.ocrsdk.com"

@@ -1,6 +1,7 @@
 import { handleOcrSlashCommand, parseOcrArgs } from "./ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
-import { DEFAULT_OCR_SETTINGS, OcrError, type OcrResult } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type OcrResult } from "@/types/ocr"
+import { OcrError } from "@/lib/ocr/errors"
 import type { ExtractDeps } from "@/lib/ocr/index"
 
 function makeDeps(): ExtractDeps {

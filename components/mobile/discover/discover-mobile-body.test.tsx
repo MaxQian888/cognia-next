@@ -363,7 +363,6 @@ describe("<DiscoverMobileBody />", () => {
     })
 
     it("clicking the 'teams' chip switches the visible content to team cards", async () => {
-      const user = userEvent.setup()
       // Pre-set URL to teams so the component renders that category immediately.
       currentSearch = "?category=teams"
       render(<DiscoverMobileBody />)

@@ -36,6 +36,7 @@ import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
+import { runInboundOcr } from "./inbound-ocr"
 import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
@@ -245,6 +246,12 @@ export class ConnectorBus {
       fields: { platform: event.platform },
       at: now,
     })
+
+    // ── Step 1.5: eager OCR of inbound images (ADR-0024) ─────────────────────
+    // Attaches `ocrText` to image segments that carry inline bytes, so trigger
+    // matching (Step 6), the stored message, the agent prompt, and the digest
+    // all see the image's text. Best-effort — never blocks delivery.
+    await runInboundOcr(event).catch(() => undefined)
 
     // ── Step 2: adapter instance lookup ──────────────────────────────────────
     const adapterRow = await getAdapterInstance(event.adapterId)

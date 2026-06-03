@@ -372,6 +372,13 @@ export interface ConversationOverrideRow {
    */
   allowComputerUse?: boolean
   /**
+   * Per-conversation gate for the OCR agent tool in IM-channel conversations.
+   * Unlike `allowComputerUse` (default-deny), OCR is low-risk and default-allow:
+   * inbound images are routinely worth reading, so the tool stays available
+   * unless an operator sets this `false` to suppress it for a conversation.
+   */
+  allowOcr?: boolean
+  /**
    * Per-conversation opt-in for the self-driving `/goal` command (v49
    * inbox optimization). Mirrors `allowComputerUse` exactly in shape and
    * semantics: when this row is bound to an IM platform (the parent

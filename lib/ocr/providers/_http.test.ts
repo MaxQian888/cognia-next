@@ -1,5 +1,5 @@
 import { cloudFetch, defaultErrorCodeFor, parseJson, requireSecret } from "./_http"
-import { OcrError } from "../types"
+import { OcrError } from "@/lib/ocr/errors"
 
 describe("defaultErrorCodeFor", () => {
   it("maps auth statuses to missing_credentials", () => {

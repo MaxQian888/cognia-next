@@ -5,7 +5,7 @@ import {
   registerOcrProvider,
   shellAllows,
 } from "./registry"
-import type { OcrProvider, OcrResult } from "./types"
+import type { OcrProvider, OcrResult } from "@/types/ocr"
 
 function makeProvider(overrides: Partial<OcrProvider> = {}): OcrProvider {
   return {

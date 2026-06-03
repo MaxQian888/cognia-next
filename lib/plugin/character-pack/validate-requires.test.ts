@@ -8,10 +8,7 @@ import {
   __resetMcpServerPresetsForTesting,
   registerMcpServerPreset,
 } from "@/lib/plugin/registries/mcp-server-preset-registry"
-import {
-  __resetNativeAnthropicToolsForTesting,
-  registerNativeAnthropicTool,
-} from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 
 function makePack(overrides: Partial<PluginCharacterPackDef> = {}): PluginCharacterPackDef {

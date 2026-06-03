@@ -9,7 +9,7 @@
  */
 
 import type { PluginPermission } from "@/types/plugin"
-import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
+import { withTimeout } from "@/lib/utils/with-timeout"
 import { createCircuitBreaker, type CircuitBreaker } from "@/lib/connectors/circuit-breaker"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { loggers } from "../core/logger"

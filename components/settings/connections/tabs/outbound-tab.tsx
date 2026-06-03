@@ -42,7 +42,7 @@ import {
   type DerivedJobBadgeKind,
 } from "@/lib/connectors/derive-job-badge"
 import { buildDlqDownload } from "@/lib/connectors/dlq-export"
-import { DownloadIcon, FileTextIcon, FileJsonIcon, Trash2Icon } from "lucide-react"
+import { FileTextIcon, FileJsonIcon, Trash2Icon } from "lucide-react"
 
 const ALL_STATUSES: OutboundJobStatus[] = ["pending", "sending", "sent", "failed", "deadlettered"]
 

@@ -1,0 +1,184 @@
+---
+title: 日志面板
+description: components/logging + hooks/logging 中的 /logs 查看器 —— 多源组合根、双指针日志归并、@tanstack/react-virtual 列表、密度时间线刷选、追踪视图、Recharts 统计仪表盘、agent-trace 树、过滤状态机、URL 同步、传输健康度，以及四标签页设置。
+---
+
+# 日志面板
+
+<Status variant="stable" />
+
+<TLDR>
+  `/logs`（`app/logs/page.tsx`）渲染 `<LogPanel>`（`components/logging/log-panel.tsx:140`），即
+  聚合五个记录源（frontend / tauri / mcp / plugin / internal）外加 agent-trace span 的
+  组合根。它接入 `useLogStream`（IndexedDB）、`useLogPanelFilters`（那个大型状态
+  机）、`useLogPanelUrlSync`、`useTransportHealth` 和 `useAgentTraceAsLogs`，对两条
+  按时间戳排序的流做线性归并（`log-panel.tsx:214`），一遍过滤、分页，并在三种视图间
+  切换：虚拟化**列表**（`@tanstack/react-virtual`）、Recharts **仪表盘**，以及一个
+  **追踪**视图。一条带点击拖拽刷选的密度**时间线**位于列表上方。一切皆由键盘
+  驱动，并通过 `history.replaceState` 镜像到 URL。整套使用的 i18n 命名空间是 `logging`。
+</TLDR>
+
+<StatGrid>
+  <Stat label="视图模式" value="3" hint="list · dashboard · trace" />
+  <Stat label="记录源" value="5" hint="frontend · tauri · mcp · plugin · internal" />
+  <Stat label="虚拟化" value="@tanstack/react-virtual" hint="不是 react-window（log-virtualized-list.tsx:10）" />
+  <Stat label="过滤维度" value="13" hint="level · module · source · session · time · trace · severity · bookmarks · density · …" />
+  <Stat label="设置标签页" value="4" hint="levels · transports · advanced · retention" />
+  <Stat label="实时更新" value="BroadcastChannel" hint="cognia-logs-updates，并非服务器" />
+</StatGrid>
+
+## 组合
+
+```mermaid
+flowchart TB
+  Page["app/logs/page.tsx<br/>page chrome + count pill"]
+  Page --> Panel["LogPanel (log-panel.tsx:140)"]
+  Panel --> H1["useLogStream → IndexedDB"]
+  Panel --> H2["useAgentTraceAsLogs → Dexie spans"]
+  Panel --> H3["useLogPanelFilters → state machine"]
+  Panel --> H4["useLogPanelUrlSync → query string"]
+  Panel --> H5["useTransportHealth → snapshots"]
+  H1 --> Merge["mergedLogs<br/>two-pointer linear merge (cap 1000)"]
+  H2 --> Merge
+  Merge --> Filter["filteredLogs<br/>single-pass predicates"]
+  Filter --> Page2["paginate + group by traceId"]
+  Page2 --> View{"viewMode"}
+  View -->|"list"| VL["VirtualizedLogList<br/>+ LogTimeline brush"]
+  View -->|"dashboard"| DB["LogStatsDashboard (Recharts)"]
+  View -->|"trace"| TV["LogTraceView"]
+  VL --> Detail["LogDetailPanel<br/>(split / sheet)"]
+
+  classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
+  class Page,Panel,Merge,Filter,Page2,VL,DB,TV,Detail box
+```
+
+`LogsPage`（`app/logs/page.tsx:39`）渲染 `<LogPanel showStats showTimeline
+includeAgentTrace={false} … headerSlot={<LogsPageHeader/>}>`。页头通过
+`useLogPanelHeader()`（面板发布的一个 React context）读取面板 API，使面包屑计数徽标和预设
+下拉菜单存在于 page chrome 中，而状态则存在于面板内。
+
+## 多源归并
+
+面板持有两个已排序（时间戳降序）的数组 —— IndexedDB 日志和 agent-trace span ——
+并以 O(n+m) 复杂度归并而无需重新排序，上限 1000：
+
+```ts title="components/logging/log-panel.tsx:214"
+for (let i = 0; i < limit; i++) {
+  if (ai >= a.length) out[i] = b[bi++]
+  else if (bi >= b.length) out[i] = a[ai++]
+  else if (a[ai].timestamp >= b[bi].timestamp) out[i] = a[ai++]
+  else out[i] = b[bi++]
+}
+```
+
+`filteredLogs`（`:246`）是单次线性遍历，应用每一个谓词：允许的源、
+源过滤、agent-trace 是否纳入、时间范围（预设或自定义）、`highSeverityOnly`、追踪聚焦、
+会话、诊断传输过滤（module 必须为 `logger.internal` 且带 `data.sourceTransport`），
+以及书签过滤。`getLogSource`（`:127`）根据每条记录的 `origin`/`runtime`/`module`
+把它归类到五个源之一。
+
+## IndexedDB 流
+
+`useLogStream`（`hooks/logging/use-log-stream.ts`）是数据引擎 —— 从一个
+模块级共享 `IndexedDBTransport` 增量拉取，并做过滤、分组以及派生 `stats` + `logRate`。在
+`autoRefresh` 下它既轮询又订阅跨标签页广播：
+
+```ts title="hooks/logging/use-log-stream.ts:195"
+const unsubscribe = IndexedDBTransport.onLogsUpdated(() => {
+  void fetchLogs()
+  if (pollingTimerRef.current) clearInterval(pollingTimerRef.current)
+  pollingTimerRef.current = setInterval(() => { void fetchLogs() }, interval)
+})
+```
+
+`onLogsUpdated` 即 `cognia-logs-updates` 这个 `BroadcastChannel`（`indexeddb-transport.ts:448`）——
+**唯一**的推送机制。字符串 `log://log` *不在*面板的数据路径中（它只出现在
+一个运行时测试里）。`useLogModules()` 将已注册的模块名与 IndexedDB 统计的 module
+键合并，使模块过滤器列出所有曾经记录过日志的对象。
+
+## 虚拟化列表
+
+`log-virtualized-list.tsx` 使用 `@tanstack/react-virtual` 的 `useVirtualizer`（不是 react-window）：
+
+```ts title="components/logging/log-virtualized-list.tsx:87"
+const virtualizer = useVirtualizer({
+  count: filteredLogs.length,
+  getScrollElement: () => scrollRef.current,
+  estimateSize: () => rowHeight,
+  overscan: 10,
+})
+```
+
+行通过 `transform: translateY()` 绝对定位，并经由 `virtualizer.measureElement`
+测量。密度决定行高（`compact:28 / comfortable:44 / spacious:60`）。
+当 `groupByTraceId` 开启时，它按每个 trace 渲染 `<TraceGroup>`（不虚拟化）。每一行
+（`log-entry.tsx`）展示图标/时间/模块/trace 徽标/消息，并带悬停操作（书签、聚焦
+trace/会话、复制）、可展开的 `data`/`stack`/`source`，以及一个查询高亮的 `<mark>`。
+
+## 密度时间线
+
+`log-timeline.tsx` 绘制一条按严重程度着色的水平密度条（默认 60 个桶），带
+点击拖拽刷选以过滤时间范围。刷选通过 ref 保持记忆化的瓦片稳定，使拖拽
+不会重新渲染每一个桶：
+
+```ts title="components/logging/log-timeline.tsx:280"
+// mouseUp → onTimeRangeClick(buckets[startIdx].start, buckets[endIdx].end)
+```
+
+每个级别的迷你火花线位于主条之下。分桶在 `bucketCount` 个桶之间跨越
+`max(maxTs - minTs, 1000)` 毫秒，把每条日志归类为 error/warn/info/other 以做不透明度缩放。
+
+## 统计仪表盘
+
+`log-stats-dashboard.tsx` 是 Recharts 分析视图：8 个汇总 `StatCard`，外加一个级别饼图、一个
+堆叠面积量级图、一条错误趋势线、一个模块活动柱状图，以及一个 top-errors 列表。
+`computeVolumeBuckets`（`:62`）以 5 分钟粒度分桶（上限 96 个桶）；
+`computeErrorTrendData` 把窗口拆为当前/上一半以计算趋势箭头；`topErrors`
+按 80 字符消息前缀对错误日志分组。颜色通过 `useThemeColors()` 解析（原始 oklch
+字符串，因为 Recharts 无法在 SVG `fill` 中读取 CSS 变量）。
+
+## 追踪视图与 Agent-Trace 树
+
+`log-trace-view.tsx` 按 `traceId` 把日志分组成行（前缀、时长、级别计数、一个 SVG 事件
+迷你时间线；没有 `traceId` 的日志被排除，`MAX_TRACES = 50`）。当详情面板在一个
+agent-trace 条目上打开时，`agent-trace-tree.tsx` 从 Dexie 实时查询 `queryByTrace(traceId)` 并
+渲染父→子 span 树（`buildTree` 将孤儿提升为根），带每个 span 的时长
+条、模型、token 和成本。`agent-trace-stats-bar.tsx` 在一个 `today/week/month/all` 窗口上
+经由 `aggregateStatsAll` 聚合成本/token/缓存命中/工具调用。它们是通往
+[agent-trace](./agent-trace) 与[追踪仪表盘](./tracing-dashboard)两个平面的桥梁。
+
+## 过滤、URL 同步与健康度
+
+`useLogPanelFilters`（`hooks/logging/use-log-panel-filters.ts`）掌管整个过滤/视图/分页/
+书签/预设/搜索历史/密度状态，由 localStorage 支撑（书签存于
+`cognia-log-bookmarks`，密度存于 `cognia-log-density`，预设经由 `lib/logging/filter-presets.ts`）。
+`useLogPanelUrlSync` 把该状态镜像到查询字符串 —— 挂载时读取一次（ref 保护），
+通过 `window.history.replaceState` 写入（相对 `router.replace` 而言选它是为了静态导出构建）——
+从而使一个过滤后的视图成为一个可分享的 URL。`useTransportHealth` 每 3 秒轮询
+`getTransportHealthSnapshot()` + `getNativeLoggingReadiness()`，为统计条的火花线
+保留一个 30 样本的队列深度历史。
+
+## 设置
+
+`log-settings.tsx` 是完整的配置 UI —— 四个 `forceMount` 标签页（**levels** 与采样、
+**transports**、**advanced** 脱敏/队列/采样、**retention**）—— 读取
+`getLoggingBootstrapState()`，并通过 `applyLoggingSettings({ …, persist: true })` +
+`configureSampling` 写入。全部 8 个面向用户的传输都以折叠面板形式渲染，带每个传输的详情
+表单（native min-level/batch、remote endpoint/retries、langfuse keys/host、OTel endpoint/service、
+agentTrace capture/retention、agentTraceOtlp preset/Grafana-Cloud headers）。
+
+## 键盘与入口
+
+面板绑定了一个窗口级 `keydown` 处理器：`r` 刷新，`Esc` 关闭/清除，`d` 列表↔仪表盘，
+`/` 聚焦搜索，`b` 书签，`g` 预设，`j/k` 或方向键移动焦点，`Enter`/`o` 打开详情，
+`?` 快捷键。进入 `/logs` 的入口：设置链接卡片、托盘 `tray://open-logs` 操作、
+View 菜单，以及全局的 <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>L</Kbd>。
+
+## 从哪里开始
+
+| 目标 | 文件 |
+| --- | --- |
+| 新增一个过滤维度 | `hooks/logging/use-log-panel-filters.ts` + 在 `log-panel-toolbar.tsx` 中呈现 + 在 `use-log-panel-url-sync.ts` 中镜像 |
+| 新增一个仪表盘图表 | `components/logging/log-stats-dashboard.tsx` |
+| 更改行密度 / 高度 | `log-virtualized-list.tsx` 中的 `DENSITY_ROW_HEIGHTS` |
+| 新增一个设置字段 | `components/logging/log-settings.tsx`（+ 为新传输选项改 `bootstrap.ts`） |

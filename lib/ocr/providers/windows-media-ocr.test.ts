@@ -4,7 +4,7 @@ import {
   buildWindowsMediaOcrProvider,
   windowsMediaOcrExtract,
 } from "./windows-media-ocr"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const input: OcrInput = {
   source: { kind: "data-url", dataUrl: "data:image/png;base64,YWJj", mimeType: "image/png" },

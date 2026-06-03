@@ -5,7 +5,7 @@ import {
   paddleOcrExtract,
 } from "./paddle-ocr"
 import { __setNativeOcrInvoker } from "./tesseract-native"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const input: OcrInput = {
   source: { kind: "data-url", dataUrl: "data:image/png;base64,YWJj", mimeType: "image/png" },

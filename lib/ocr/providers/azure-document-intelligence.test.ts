@@ -2,7 +2,7 @@ import {
   azureDocIntelExtract,
   buildAzureDocIntelligenceProvider,
 } from "./azure-document-intelligence"
-import type { OcrProviderContext } from "../types"
+import type { OcrProviderContext } from "@/types/ocr"
 
 function makeFetchSequence(
   responses: Array<{

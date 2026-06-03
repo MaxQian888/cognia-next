@@ -20,7 +20,7 @@
  * See ADR-0026.
  */
 
-import type { OcrProvider } from "@/lib/ocr/types"
+import type { OcrProvider } from "@/types/ocr"
 
 /**
  * One OCR provider contribution in `manifest.ocrProviders[]`.

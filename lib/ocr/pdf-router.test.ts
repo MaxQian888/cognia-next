@@ -1,6 +1,6 @@
 import { MIN_TEXT_LAYER_CHARS, extractPdf, type PdfDocument } from "./pdf-router"
 import { createOcrRegistry } from "./registry"
-import { DEFAULT_OCR_SETTINGS, type OcrResult, type UserOcrSettings } from "./types"
+import { DEFAULT_OCR_SETTINGS, type OcrResult, type UserOcrSettings } from "@/types/ocr"
 import type { ExtractDeps } from "./index"
 
 interface FakePageOptions {
@@ -64,6 +64,74 @@ function makeDeps(): {
 describe("MIN_TEXT_LAYER_CHARS", () => {
   it("defaults to 16", () => {
     expect(MIN_TEXT_LAYER_CHARS).toBe(16)
+  })
+})
+
+describe("extractPdf — streaming / resume hooks (2e)", () => {
+  it("fires onPage for every page with done/total counts", async () => {
+    const { deps, ocrPage } = makeDeps()
+    const doc = makeFakeDoc([
+      { pageNumber: 1, text: "a".repeat(40) },
+      { pageNumber: 2, text: "b".repeat(40) },
+    ])
+    const seen: Array<[number, number]> = []
+    await extractPdf(
+      { bytes: new Uint8Array() },
+      {
+        loadPdf: async () => doc,
+        ocrPage,
+        extractDeps: deps,
+        onPage: (_p, done, total) => seen.push([done, total]),
+      }
+    )
+    expect(seen).toEqual([
+      [1, 2],
+      [2, 2],
+    ])
+  })
+
+  it("resumes from readPage without re-reading or OCRing that page", async () => {
+    const { deps, ocrPage } = makeDeps()
+    const doc = makeFakeDoc([{ pageNumber: 1, emptyTextLayer: true }])
+    const getPageSpy = jest.spyOn(doc, "getPage")
+    const cachedPage = { pageNumber: 1, markdown: "cached", text: "cached", fromTextLayer: false }
+    const out = await extractPdf(
+      { bytes: new Uint8Array() },
+      { loadPdf: async () => doc, ocrPage, extractDeps: deps, readPage: async () => cachedPage }
+    )
+    expect(out.pages[0]).toEqual(cachedPage)
+    expect(getPageSpy).not.toHaveBeenCalled()
+    expect(ocrPage).not.toHaveBeenCalled()
+  })
+
+  it("writes each freshly-produced page via writePage", async () => {
+    const { deps, ocrPage } = makeDeps()
+    const doc = makeFakeDoc([{ pageNumber: 1, text: "x".repeat(40) }])
+    const writePage = jest.fn(async () => undefined)
+    await extractPdf(
+      { bytes: new Uint8Array() },
+      {
+        loadPdf: async () => doc,
+        ocrPage,
+        extractDeps: deps,
+        readPage: async () => null,
+        writePage,
+      }
+    )
+    expect(writePage).toHaveBeenCalledWith(1, expect.objectContaining({ pageNumber: 1 }))
+  })
+
+  it("aborts between pages when the signal is set", async () => {
+    const { deps, ocrPage } = makeDeps()
+    const doc = makeFakeDoc([{ pageNumber: 1, text: "x" }])
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      extractPdf(
+        { bytes: new Uint8Array() },
+        { loadPdf: async () => doc, ocrPage, extractDeps: deps, signal: controller.signal }
+      )
+    ).rejects.toThrow(/cancelled/i)
   })
 })
 

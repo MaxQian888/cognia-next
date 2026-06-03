@@ -1,0 +1,14 @@
+{
+  "title": "OCR 子系统",
+  "pages": [
+    "index",
+    "types-and-dispatch",
+    "providers",
+    "auto-router",
+    "pdf-and-image",
+    "cache",
+    "native-backends",
+    "triggers",
+    "settings-ui"
+  ]
+}

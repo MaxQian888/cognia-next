@@ -25,7 +25,6 @@ import {
   fanoutLimit,
   getTeamCtxOrThrow,
   mapSettled,
-  nonRetryable,
   renderFinding,
 } from "./_shared"
 
@@ -83,7 +82,7 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
   const verdictResults = await mapSettled(
     jobs,
     fanoutLimit(teamCtx),
-    async (job, idx) => {
+    async (job, _idx) => {
       const lens = lenses && lenses.length > 0 ? lenses[job.si % lenses.length] : undefined
       const lensNote = lens ? `\n\nVerification lens — ${lens}: ${LENS_GUIDANCE[lens]}` : ""
       const r = await dispatchStructured(

@@ -68,6 +68,7 @@ export function PluginTriggersTab({ pluginId }: Props) {
   const rev = useSyncExternalStore(subscribeBoth, snapshotKey, () => 0)
 
   const subscriptions = useMemo<Subscription[]>(() => {
+    void rev // recompute when the trigger registry mutates (rev is a change tick)
     const out: Subscription[] = []
     for (const reg of listPluginTriggers()) {
       if (reg.pluginId !== pluginId) continue

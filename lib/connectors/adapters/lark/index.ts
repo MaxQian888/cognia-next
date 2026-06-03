@@ -27,7 +27,6 @@ import type { LarkQuickCommand } from "./quick-commands"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
-  serializeOutbound,
   serializeOutboundAsync,
   serializeEdit,
   serializeDelete,

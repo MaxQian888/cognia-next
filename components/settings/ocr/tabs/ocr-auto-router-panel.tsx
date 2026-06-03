@@ -25,7 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { OcrOutputFormat, UserOcrSettings } from "@/lib/ocr/types"
+import type { OcrOutputFormat, UserOcrSettings } from "@/types/ocr"
 import { OcrPlatformOverridesTab } from "./ocr-platform-overrides-tab"
 import { OcrCacheTab } from "./ocr-cache-tab"
 
@@ -259,6 +259,34 @@ function DefaultsTabContent({
             checked={settings.pdfTextLayerFastPath}
             onCheckedChange={(checked) => onChange({ ...settings, pdfTextLayerFastPath: checked })}
             aria-label={t("ocr.autoRouter.pdfFastPath")}
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm">{t("ocr.autoRouter.inboundImages")}</Label>
+            <p className="text-xs text-muted-foreground">{t("ocr.autoRouter.inboundImagesHint")}</p>
+          </div>
+          <Switch
+            checked={settings.ocrInboundImages !== false}
+            onCheckedChange={(checked) => onChange({ ...settings, ocrInboundImages: checked })}
+            aria-label={t("ocr.autoRouter.inboundImages")}
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm">{t("ocr.autoRouter.confidenceEscalation")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("ocr.autoRouter.confidenceEscalationHint")}
+            </p>
+          </div>
+          <Switch
+            checked={settings.confidenceEscalation === "escalate"}
+            onCheckedChange={(checked) =>
+              onChange({ ...settings, confidenceEscalation: checked ? "escalate" : "off" })
+            }
+            aria-label={t("ocr.autoRouter.confidenceEscalation")}
           />
         </div>
       </div>

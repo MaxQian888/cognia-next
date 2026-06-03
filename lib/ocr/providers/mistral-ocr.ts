@@ -10,7 +10,12 @@
  */
 
 import { bytesToDataUrl, isPdfMimeType, normalizeImage } from "../image-prep"
-import { type OcrInput, type OcrProvider, type OcrProviderContext, type OcrResult } from "../types"
+import {
+  type OcrInput,
+  type OcrProvider,
+  type OcrProviderContext,
+  type OcrResult,
+} from "@/types/ocr"
 import { cloudFetch, parseJson, requireSecret } from "./_http"
 
 interface MistralOcrPage {

@@ -22,7 +22,7 @@ jest.mock("next/link", () => ({
 // `AvatarImage` wiring is observable.
 jest.mock("@/components/ui/avatar", () => ({
   Avatar: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AvatarImage: ({ src }: { src: string }) => <img src={src} alt="" data-testid="avatar-image" />,
+  AvatarImage: ({ src }: { src: string }) => <span data-testid="avatar-image" data-src={src} />,
   AvatarFallback: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }))
 
@@ -50,7 +50,9 @@ describe("CharacterCard", () => {
 
   it("renders the avatar image when avatarImage.webDataUrl is set (ADR-0030 v2)", () => {
     render(<CharacterCard character={mkChar({ avatarImage: { webDataUrl: "data:image/png;base64,AAA" } })} />)
-    expect(screen.getByTestId("avatar-image").getAttribute("src")).toBe("data:image/png;base64,AAA")
+    expect(screen.getByTestId("avatar-image").getAttribute("data-src")).toBe(
+      "data:image/png;base64,AAA"
+    )
   })
 
   it("shows the built-in and plugin badges", () => {

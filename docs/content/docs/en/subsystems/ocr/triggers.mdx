@@ -1,0 +1,137 @@
+---
+title: Triggers
+description: The three surfaces that drive extract() — the /ocr slash command, the ocr.extract plugin tool, and the composer menu — plus the useOcr React hook, the runtime wiring, and the wiring gaps that keep some surfaces dormant today.
+---
+
+# Triggers
+
+<Status variant="beta">/ocr · ocr.extract · composer menu · useOcr</Status>
+
+<TLDR>
+  Three surfaces are designed to call `extract()`: the **`/ocr` slash command**
+  (`lib/slash-commands/actions/ocr.ts`), the **`ocr.extract` plugin tool** (`plugins/ocr/src/index.ts`), and the
+  **composer attachment menu** (`components/chat/composer/ocr-menu.tsx`, via the `useOcr` hook). The plugin and the
+  slash command share a parser and converge on `extract()`. Two surfaces are fully built and tested but **not yet
+  live**: the composer menu isn't passed into `composer.tsx`, and there's no production `credentialsResolver` — so
+  cloud providers can't authenticate until the keyring resolver is wired.
+</TLDR>
+
+## Convergence point
+
+Everything funnels into `extract(input, deps)` (`lib/ocr/index.ts:200`). The differentiator between surfaces is
+how each assembles `ExtractDeps` — specifically the `credentialsResolver`, `attachmentResolver`, and the
+settings/registry it injects.
+
+```mermaid
+flowchart TD
+  subgraph S1["Composer menu (dormant)"]
+    AP[attachment-preview.tsx<br/>onOcrSelect] --> OM[ocr-menu.tsx<br/>extract-to-input | view-result]
+    OM --> HOOK
+    HOOK --> RB[ocr-result-bubble.tsx]
+  end
+  subgraph S2["/ocr command"]
+    SL[actions/ocr.ts<br/>parseOcrArgs + handleOcrSlashCommand]
+  end
+  subgraph S3["Agent tool"]
+    TL[plugins/ocr<br/>ocr.extract → runOcrTool]
+  end
+  subgraph S4["Settings playground"]
+    TRY[Try-It / Compare] --> HOOK[hooks/use-ocr.ts<br/>run() state machine]
+  end
+  TL -. registers .-> SL
+  HOOK --> EX
+  SL --> EX
+  TL --> EX
+  EX[extract input, ExtractDeps] --> REG[getSharedOcrRegistry + credentialsResolver]
+  BOOT[runtime.ts installOcrRuntime<br/>20 providers · NO production caller] -. should populate .-> REG
+```
+
+## The `/ocr` slash command
+
+`lib/slash-commands/actions/ocr.ts` (175 lines) parses argv, runs `extract()`, and returns a system Markdown
+blob (optionally writing the result back into the composer). The grammar:
+
+```
+/ocr <file path or attachment id>
+  [--provider auto|<provider-id>] [--lang en,zh] [--pages 1-3]
+  [--format markdown|text|blocks] [--into composer|system]
+```
+
+`parseOcrArgs` (`ocr.ts:54`) tokenizes with quote handling (`ocr.ts:161`), validates `--format` against the three
+literals (throwing on anything else), and throws on unknown flags. Source resolution (`ocr.ts:59`): a first token
+starting with `att_` / `attachment:` becomes `{ kind: "attachment-id" }`, otherwise `{ kind: "file-path" }`.
+`handleOcrSlashCommand` (`ocr.ts:112`) builds the `OcrInput`, calls the injectable `extractImpl`, and on success
+returns `{ system, composerText, result }` — `composerText` is the combined Markdown only when `--into composer`
+(the default). The rendered header is `**OCR via <providerId>** (<langs>, <ms>ms[, cached])`.
+
+## The `ocr.extract` plugin tool
+
+`plugins/ocr/src/index.ts` (199 lines) is the first-party plugin (ADR-0024). It is a **consumer** of the shared
+registry, not a provider registrant, and it does two things: registers the agent tool `ocr.extract` and
+registers the `/ocr` slash command (forwarding `composerText` as `dispatchPrompt`).
+
+```ts
+// plugins/ocr/src/index.ts:117 — the tool input schema (underscore source kinds)
+TOOL_PARAMETERS = {
+  source:   { kind: "attachment_id" | "data_url" | "file_path", value },  // required
+  languages: string[],     // BCP-47
+  format:    "markdown" | "text" | "blocks",
+  provider:  "<id>" | "auto",
+  pageRange: "1,3-5",
+}
+```
+
+`runOcrTool` (`index.ts:62`) maps the underscore kinds to the hyphen kinds, collapses `provider: "auto"` to
+`undefined`, and calls `extract()`. `manifest.capabilities = ["tools", "commands"]` (`index.ts:154`).
+
+<Callout type="warn" title="The plugin path ships no real credentials">
+  `defaultDepsBuilder` (`index.ts:51`) returns deps with `settings: DEFAULT_OCR_SETTINGS`, `platform: "web"`, and
+  a stub `credentialsResolver: async () => ({ secrets: {} })`. It also returns `null` while the shared registry is
+  empty — which it is until `installOcrRuntime()` runs. So the tool works end-to-end for local engines once the
+  registry is populated, but cloud providers need the keyring resolver.
+</Callout>
+
+## The `useOcr` hook
+
+`hooks/use-ocr.ts` (94 lines) wraps `extract()` in an abortable state machine for the UI surfaces (composer
+menu, Try-It, Compare). It **receives** `ExtractDeps` (or a factory) — it does not build them.
+
+```ts
+// use-ocr.ts:12 — the state shape
+status: "idle" | "running" | "success" | "error"
+result?: OcrResult
+error?: { code: OcrErrorCode; message: string }
+// + abort(), run(input), reset()
+```
+
+`run(input)` (`use-ocr.ts:41`) aborts any in-flight call, resolves the deps factory (a `null` factory yields an
+`error` status "runtime not ready"), creates an `AbortController`, and calls `extract({ ...input, signal }, deps)`.
+The catch branch duck-types `OcrError` so cross-module errors still surface a typed `code`.
+
+## Composer integration & status
+
+The composer trio is built and tested: `attachment-preview.tsx` grows an `OcrMenu` on image/PDF attachments when
+given `onOcrSelect`; `ocr-menu.tsx` offers **"extract text to input"** and **"view extracted text"**;
+`ocr-result-bubble.tsx` renders the per-page result in a side `Sheet` with per-page + combined copy.
+
+<Callout type="warn" title="The composer menu is not wired in yet">
+  `components/chat/composer.tsx:734` renders `<AttachmentPreview />` **without** the `onOcrSelect` prop, so the
+  OCR menu, result bubble, and `useOcr` are dormant in the live composer. A grep for `onOcrSelect` /
+  `OcrResultBubble` / `useOcr` across `components/chat` returns only the composer/* files themselves. The
+  surfaces that *do* exercise `useOcr` today are the settings **Try-It** and **Compare** tabs (see
+  [Settings UI](./settings-ui)).
+</Callout>
+
+## Runtime wiring — the production gap
+
+`lib/ocr/runtime.ts:installOcrRuntime()` is the intended single bootstrap (registers all 20 providers, wires the
+native invoker + readiness probes). Two gaps keep the trigger surfaces from being live in production:
+
+1. **No bootstrap caller.** `installOcrRuntime()` is referenced only by its test; the `app/(setup)/ocr-bootstrap.tsx`
+   its comment names does not exist. Until a caller is added, the shared registry stays empty in the running app.
+2. **No credentials resolver.** Every `credentialsResolver` in the tree is the empty-secrets stub. `OcrSection`
+   accepts an `ocrDepsFactory?` prop but it defaults to `() => null` and no caller supplies a real one; the
+   settings files explicitly defer the `ocr_keyring_*` resolver as out of scope.
+
+The secondary settings route `app/me/ocr/page.tsx` (16 lines) simply wraps `<OcrSectionPersisted/>` in a
+`SubPageShell` — it hosts the settings UI rather than triggering `extract()`.

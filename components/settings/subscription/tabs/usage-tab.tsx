@@ -33,7 +33,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { CoinsIcon, DownloadIcon, GaugeIcon, HashIcon, RepeatIcon } from "lucide-react"
+import { CoinsIcon, DownloadIcon, HashIcon, RepeatIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"

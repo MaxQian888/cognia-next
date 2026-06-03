@@ -36,7 +36,10 @@ export const A2UITable = memo(function A2UITable({
   // RichOutput dispatcher's `data-exploration` profile, which projects its own
   // dataModel through props without a surrounding surface).
   const contextData = useContext(A2UIDataCtx)
-  const dataModel = contextData?.dataModel ?? dataModelProp ?? {}
+  const dataModel = useMemo(
+    () => contextData?.dataModel ?? dataModelProp ?? {},
+    [contextData?.dataModel, dataModelProp]
+  )
   const t = useTranslations("a2ui")
 
   // Resolve data - can be static array or data-bound

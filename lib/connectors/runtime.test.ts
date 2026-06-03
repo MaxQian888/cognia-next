@@ -517,6 +517,15 @@ describe("inboundEventToSendContent", () => {
     expect(inboundEventToSendContent(event)).toBe("[image: https://example.com/p.png]")
   })
 
+  it("emits the inbound OCR text alongside the image marker (ADR-0024)", () => {
+    const event = makeEvent({
+      segments: [{ type: "image", url: "https://example.com/p.png", ocrText: "RECEIPT $9" }],
+      plainText: "",
+    })
+    // url-only image → [image: url] marker, then the OCR text as its own block.
+    expect(inboundEventToSendContent(event)).toBe("[image: https://example.com/p.png]\nRECEIPT $9")
+  })
+
   it("preserves base64 image segments as image blocks (multimodal)", () => {
     const event = makeEvent({
       segments: [

@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import Image from "next/image"
 import { useTranslations, useFormatter, useNow } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
@@ -347,9 +348,11 @@ export function EmptyChatState({
           variants={STAGGER_CHILD}
         >
           <div className={cn("welcome-brand", rich && "welcome-brand--glow")}>
-            <img
+            <Image
               src="/icons/icon-512.png"
               alt={t("brandAlt")}
+              width={80}
+              height={80}
               className={cn(
                 "relative z-10 rounded-2xl ring-1 ring-border/60 shadow-lg",
                 rich ? "size-16 sm:size-20" : "size-11"

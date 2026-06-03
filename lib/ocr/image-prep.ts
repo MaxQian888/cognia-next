@@ -14,7 +14,7 @@
  * input unchanged so tests don't need a polyfill.
  */
 
-import type { OcrInput, OcrSource } from "./types"
+import type { OcrInput, OcrSource } from "@/types/ocr"
 import { readBlobAsArrayBuffer } from "./blob-utils"
 
 // ─── Data-URL decoding ──────────────────────────────────────────────────────

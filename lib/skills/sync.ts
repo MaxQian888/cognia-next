@@ -12,7 +12,6 @@ import {
   skillsInstallNative,
   skillsScanNative,
   type InstallSkillMirroredRequest,
-  type InstallSkillRequest,
   type NativeSkill,
   type NativeSkillResource,
   type SkillsTarget,

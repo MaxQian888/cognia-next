@@ -6,8 +6,9 @@
  */
 
 import { useCallback, useRef, useState } from "react"
+import { OcrError } from "@/lib/ocr/errors"
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
-import { OcrError, type OcrErrorCode, type OcrInput, type OcrResult } from "@/lib/ocr/types"
+import { type OcrErrorCode, type OcrInput, type OcrResult } from "@/types/ocr"
 
 export interface UseOcrState {
   status: "idle" | "running" | "success" | "error"
@@ -62,7 +63,7 @@ export function useOcr(deps: ExtractDeps | (() => ExtractDeps | null)): UseOcrSt
         return out
       } catch (err) {
         // Cross-module `instanceof OcrError` can fail when jest re-resolves
-        // `@/lib/ocr/types` through a different require chain. Duck-type on the
+        // `@/types/ocr` through a different require chain. Duck-type on the
         // `code`+`providerId` shape OcrError stamps onto its instances so the
         // hook surfaces the right discriminant either way.
         const isOcrError =
@@ -73,7 +74,7 @@ export function useOcr(deps: ExtractDeps | (() => ExtractDeps | null)): UseOcrSt
             "providerId" in err &&
             (err as { name?: string }).name === "OcrError")
         if (isOcrError) {
-          const e = err as { code: import("@/lib/ocr/types").OcrErrorCode; message: string }
+          const e = err as { code: import("@/types/ocr").OcrErrorCode; message: string }
           setError({ code: e.code, message: e.message })
         } else {
           setError({

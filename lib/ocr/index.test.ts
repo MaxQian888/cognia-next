@@ -4,12 +4,12 @@ import { extract, type ExtractDeps } from "./index"
 import { createOcrRegistry } from "./registry"
 import {
   DEFAULT_OCR_SETTINGS,
-  OcrError,
   type OcrInput,
   type OcrProvider,
   type OcrResult,
   type UserOcrSettings,
-} from "./types"
+} from "@/types/ocr"
+import { OcrError } from "@/lib/ocr/errors"
 
 function makeProvider(overrides: Partial<OcrProvider> & { onCall?: () => void } = {}): OcrProvider {
   return {

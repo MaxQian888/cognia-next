@@ -48,7 +48,6 @@ import {
   pollOutcomePayload,
   requestCodexDeviceCode,
   tokenResponseToCredential,
-  toProviderCredential,
 } from "@/lib/subscription/codex/oauth"
 import type {
   DeviceCodePendingPayload,

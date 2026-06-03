@@ -3,13 +3,8 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { useOcr } from "./use-ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
-import {
-  DEFAULT_OCR_SETTINGS,
-  OcrError,
-  type OcrInput,
-  type OcrProvider,
-  type OcrResult,
-} from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrProvider, type OcrResult } from "@/types/ocr"
+import { OcrError } from "@/lib/ocr/errors"
 import type { ExtractDeps } from "@/lib/ocr/index"
 
 function makeProvider(

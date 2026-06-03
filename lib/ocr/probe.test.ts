@@ -1,5 +1,6 @@
 import { probeOcrProvider, PROBE_PNG_DATA_URL, type ProbeOutcome } from "./probe"
-import { OcrError, type OcrInput } from "./types"
+import { OcrError } from "@/lib/ocr/errors"
+import { type OcrInput } from "@/types/ocr"
 import type { ExtractDeps } from "./index"
 
 function fakeDeps(): ExtractDeps {
@@ -59,7 +60,7 @@ describe("probeOcrProvider", () => {
   })
 
   it("duck-types cross-realm OcrError instances", async () => {
-    // Jest sometimes re-resolves @/lib/ocr/types through a different require
+    // Jest sometimes re-resolves @/types/ocr through a different require
     // chain, producing an OcrError that's not instanceof the imported class.
     // We accept those via duck-typing too.
     const lookAlike = Object.assign(new Error("rate-limited via duck-type"), {

@@ -4,7 +4,7 @@ import {
   parseResponse,
   serializeRequest,
 } from "./local-http"
-import type { OcrInput, OcrProviderContext } from "../types"
+import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const baseInput: OcrInput = {
   source: { kind: "data-url", dataUrl: "data:image/png;base64,YWJj", mimeType: "image/png" },

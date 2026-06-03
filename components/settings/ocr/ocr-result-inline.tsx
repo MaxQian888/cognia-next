@@ -13,7 +13,7 @@
 import * as React from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
-import type { OcrResult } from "@/lib/ocr/types"
+import type { OcrResult } from "@/types/ocr"
 import { cn } from "@/lib/utils"
 
 interface OcrResultInlineProps {

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { OcrPlatformOverridesTab } from "./ocr-platform-overrides-tab"
-import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 
 function freshSettings(): UserOcrSettings {
   return { ...DEFAULT_OCR_SETTINGS, platformOverrides: {} }
