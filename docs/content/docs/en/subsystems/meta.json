@@ -12,6 +12,7 @@
     "a2ui",
     "canvas",
     "artifacts-sandbox",
+    "sandbox",
     "remote-control",
     "companion-api",
     "observability",

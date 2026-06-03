@@ -10,6 +10,8 @@ import type {
   A2UIUpdateDataModelMessage,
   A2UIDeleteSurfaceMessage,
   A2UISurfaceReadyMessage,
+  A2UIConnectorActionMessage,
+  A2UIDispatchMessage,
   A2UIComponent,
   A2UIMessageContent,
   A2UIWidgetMetadata,
@@ -62,6 +64,17 @@ export function isDeleteSurfaceMessage(msg: A2UIServerMessage): msg is A2UIDelet
 
 export function isSurfaceReadyMessage(msg: A2UIServerMessage): msg is A2UISurfaceReadyMessage {
   return msg.type === "surfaceReady"
+}
+
+/**
+ * Guard for the connector-action injection dispatched by the
+ * `a2ui_handle_connector_action` MCP tool. Operates on the wider
+ * `A2UIDispatchMessage` union since this message is not a server message.
+ */
+export function isConnectorActionMessage(
+  msg: A2UIDispatchMessage
+): msg is A2UIConnectorActionMessage {
+  return msg.type === "connectorAction"
 }
 
 /**

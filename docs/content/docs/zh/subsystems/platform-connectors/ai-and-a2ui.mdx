@@ -1,0 +1,233 @@
+---
+title: 自动模式 AI 循环与 A2UI 桥
+description: 真正落地（非桩）的自动模式回合 —— safeSendPrompt 用聊天输入框无需亲自执行的同一条 PII 红线来门控原始 IM 文本 —— 以及双向 A2UI 桥：将助手回复投影为平台原生富内容、把入站富内容反向提升为 surface、铸造可往返的回调 id，并把工作流进度扇出为原地编辑的状态卡片。
+---
+
+# 自动模式 AI 循环与 A2UI 桥
+
+<Status variant="stable" />
+
+<TLDR>
+当一条入站 IM 消息在没有人在环的情况下驱动一次 Claude 回合时，连接器子系统无法复用经人工审阅的聊天输入框路径 —— 于是 `safeSendPrompt`（`lib/connectors/ai-loop/safe-send-prompt.ts:69`）用 `lib/twin/ingest/` 强制执行的同一条 PII 红线包裹 `runAndCaptureAssistantReply`：遍历 prompt 与 build-options 的 `appendSystemPrompt`，对每段调用 `hasNoLeakingPii`，并在调用模型**之前中止**（写入一条 `pii_blocked` 审计行）而非脱敏 —— 因为没有人来决定要删掉什么。捕获到的回复由 `assistantReplyToSegments`（`a2ui-to-segments.ts:52`）投影为可传输的 segment；入站平台富内容由 `segmentsToA2UI`（`segments-to-a2ui.ts:48`）反向提升为 surface；插件通过 `createA2UIBuilder`（`surface-builder.ts:315`）声明式地编写 surface；build-options 解析器追加一段感知能力的降级说明（`capability-evaluator.ts:106`）；交互组件通过 `buildActionId` / `recordCallbackBinding` / `resolveCallbackBinding`（`_shared/a2ui-mapper.ts`）往返；由 IM 触发的工作流运行经 `startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）把进度扇出为原地编辑的状态卡片。
+</TLDR>
+
+<StatGrid>
+  <Stat label="PII 门" value="中止，不脱敏" hint="无人在环 → 无脱敏决策" />
+  <Stat label="A2UI 组件种类" value="37" hint="A2UI_COMPONENT_KINDS" />
+  <Stat label="回调绑定 TTL" value="30d" hint="DEFAULT_CALLBACK_BINDING_TTL_MS" />
+  <Stat label="附件 LRU" value="500 MB" hint="LRU_TOTAL_CAP_BYTES，默认 7d TTL" />
+</StatGrid>
+
+本页是连接器流水线的**中段**。[ConnectorBus](./connector-bus) 决定*是否*回复；本层决定*说什么*以及*如何为该渠道塑形*；一切都以调用 `enqueueOutbound` 收尾并交接给[出站队列](./outbound-queue)。A2UI 词汇本身见 [A2UI](../a2ui)；由 IM 触发的工作流运行见[可视化工作流](../visual-workflows)。在更大的栈中的位置见[子系统总览](./index)。
+
+## 自动模式循环：safeSendPrompt
+
+渲染端聊天输入框在任何内容离开设备前都经人工审阅，所以它无需亲自执行 PII 红线。IM 驱动的自动模式循环没有这样的审阅者 —— 于是 `safeSendPrompt` 重新施加 `lib/twin/ingest/` 与 `lib/goal/` 强制执行的同一道门：*原始用户提供的文本在离开设备前必须通过 `hasNoLeakingPii`*。它返回与 `runAndCaptureAssistantReply` 相同的形状，因此调用方可透明替换。
+
+门分三步执行。第 1 步遍历入站 prompt；第 2 步遍历 build-options 注入的 `appendSystemPrompt` 尾巴（能力上下文、twin 运行时提示）；第 3 步委派。关键在于：泄漏会**中止**而非脱敏 —— `PiiGateBlocked`（`safe-send-prompt.ts:46`，按 `source: "prompt" | "appendSystemPrompt"` 区分）在写入 `pii_blocked` 审计行后抛出，使运维能看到自动回复为何从未触发。
+
+```ts
+// lib/connectors/ai-loop/safe-send-prompt.ts:75 — Step 1: prompt PII gate
+if (!isPiiSafeSendContent(prompt)) {
+  await appendAudit({
+    adapterId: opts.adapterId,
+    kind: "adapter.error",
+    at: Date.now(),
+    conversationKey: opts.conversationKey,
+    reason: "pii_blocked",
+    message: "auto-mode prompt rejected by PII gate before sendPrompt",
+  })
+  throw new PiiGateBlocked("prompt", opts.adapterId, opts.conversationKey)
+}
+```
+
+`isPiiSafeSendContent`（`safe-send-prompt.ts:123`）通过 `hasNoLeakingPii`（来自 `@/lib/twin/ingest/redact`）遍历 `SendContent` 联合体里的每个 `type: "text"` 块 —— 图片/文件块被跳过，因为该门只针对可泄漏文本；二进制附件改由 `attachments.rs` 在磁盘上加密。收敛路径为：build-options 的 `resolveSendOptions` 组装 prompt 与能力尾巴 → `safeSendPrompt` 门控 → `runAndCaptureAssistantReply` 跑回合 → `assistantReplyToSegments` 投影捕获的回复 → `enqueueOutbound` 交接给队列。
+
+```mermaid
+flowchart TD
+  IN["inbound IM message<br/>(ConnectorBus auto-mode)"] --> RSO["resolveSendOptions<br/>(build-options.ts)"]
+  RSO --> CAP["buildCapabilityPromptSection<br/>appended to appendSystemPrompt"]
+  CAP --> SSP["safeSendPrompt L69"]
+  SSP --> G1{"prompt PII<br/>safe?"}
+  G1 -- "no" --> AUD["appendAudit reason=pii_blocked<br/>throw PiiGateBlocked('prompt')"]
+  G1 -- "yes" --> G2{"appendSystemPrompt<br/>PII safe?"}
+  G2 -- "no" --> AUD2["appendAudit reason=pii_blocked<br/>throw PiiGateBlocked('appendSystemPrompt')"]
+  G2 -- "yes" --> RUN["runAndCaptureAssistantReply"]
+  RUN --> SEG["assistantReplyToSegments L52"]
+  SEG --> ENQ["enqueueOutbound<br/>(Outbound Queue)"]
+```
+
+## 出站投影：assistantReplyToSegments
+
+聊天页把 A2UI 部件作为渲染端 React 状态消费；IM 出站路径需要它们作为可传输的 `MessageSegment`。`assistantReplyToSegments`（`a2ui-to-segments.ts:52`）桥接二者。A2UI surface **优先**，按创建顺序排列（`reply.a2uiSurfaceOrder ?? Object.keys(surfaces)`），每个由 `buildA2UISegment` 包裹。剩余的去空白 markdown 追加为单个 `{ type: "markdown" }` segment（`a2ui-to-segments.ts:67`）；若回复既无文本也无 surface，则发出一个空的 `{ type: "text" }` segment（`a2ui-to-segments.ts:72`），使 runner 始终有内容可派发 —— 空的 `OutboundRequest` 会被当作畸形而拒绝。
+
+`buildA2UISegment`（`a2ui-to-segments.ts:84`）烤制 `plainTextMirror`：模型提供的 `widget.fallbackText` 优先于自动生成的 `generatePlainTextMirror`。同一构造器被 `scheduled-outbound.ts` 以及工作流进度 runner 直接复用，用于正常助手回复路径之外发出的 surface。运行时在 `runtime.ts:437` 调用 `assistantReplyToSegments`。
+
+## 入站投影：segmentsToA2UI
+
+`segmentsToA2UI`（`segments-to-a2ui.ts:48`）是反向操作：它把扁平的入站 `MessageSegment[]`（由 Slack rich_text / 飞书互动卡片 / Telegram 标题 + 内联键盘 / Discord embed + components 构建）提升为**一个** A2UI Surface，使总线与渲染器把入站消息视同助手生成的那样。segment 种类的 switch 将 `text`/`markdown` → `Text`、`image` → `Image`、`card` → `Card`、`video`/`voice`/`file` → `Link`、`location` → `Text`；入站 `a2ui` segment 原样交回（`segments-to-a2ui.ts:138`）。所有子节点挂在一个 `Column` 根下（`segments-to-a2ui.ts:150`），`plainTextMirror` 为各文本部分的拼接。
+
+这与渲染端的 `projectInboundToA2UI`（它构建 `InboundA2UIBlock`）不同：`segmentsToA2UI` 是平台解析器调用的“A2UI 长什么样”的规范投影，使该形状的维护集中在一处。
+
+## 插件 Surface 构造器
+
+希望通过 `ctx.connectors.send` 发送富交互内容的插件，需要一个 `content` 为有效**按 id 索引**组件图的 `A2UIMessageSegment`。手写该图（按 id 索引、连线子引用、铸造镜像）正是 `surface-builder.ts` 要消除的摩擦。构造是**纯且无门控**的 —— 它馈入的有副作用的 `send()` 仍由 `connectors:send` 门控。
+
+`validateA2UISurfaceComponents`（`surface-builder.ts:116`）断言 id 唯一、解析根，并在任何悬空子引用上抛出 `A2UISurfaceBuildError`（`surface-builder.ts:48`）：
+
+```ts
+// lib/connectors/a2ui-bridge/surface-builder.ts:135 — root resolution
+const resolvedRoot = rootId ?? (ids.has("root") ? "root" : components[0].id)
+if (!ids.has(resolvedRoot)) {
+  throw new A2UISurfaceBuildError(`rootId "${resolvedRoot}" is not among the components`)
+}
+```
+
+纯构造器的流水线：`buildA2UISurfaceContent`（`surface-builder.ts:158`）组装按 id 索引的 `A2UISegmentContent` → `buildA2UIMessageSegment`（`surface-builder.ts:182`）将其包裹为可传输 segment → `buildA2UIOutboundRequest`（`surface-builder.ts:195`）铸造 `surfaceId` + 幂等键并追加可选的尾部 markdown，产出可直接交给 `send()` 的 `OutboundRequest`。`a2uiComponent` 工厂集（`surface-builder.ts:218`）提供 13 个有类型构造器 —— `text` / `button` / `card` / `row` / `column` / `alert` / `image` / `link` / `select` / `textField` / `list` / `divider` / `badge` —— 每个返回规范的 `A2UIComponent` 子类型，因此输出对渲染器与映射器即用、无需再塑形。`createA2UIBuilder()`（`surface-builder.ts:315`）将它们打包成 `ctx.connectors.a2ui` 命名空间。
+
+## 感知能力的降级
+
+并非每个平台都渲染每种 A2UI 种类。`evaluateSurfaceAgainstCapability`（`capability-evaluator.ts:55`）经 `walkA2UISurface` 遍历 surface，按各平台在适配器 `A2UICapabilityMatrix` 中的条目把每个存在的种类归入 `native` / `simulated` / `fallback` / `unsupported`，并经一条严格的降级阶梯计算**最坏情况**裁决 —— `unsupported > fallback > simulated > native`：
+
+```ts
+// lib/connectors/a2ui-bridge/capability-evaluator.ts:77 — worst-case ladder
+if (support === "native") {
+  native.push(kind)
+} else if (support === "simulated") {
+  simulated.push(kind)
+  if (worstCase === "native") worstCase = "simulated"
+} else if (support === "fallback") {
+  fallback.push(kind)
+  if (worstCase === "native" || worstCase === "simulated") worstCase = "fallback"
+} else {
+  unsupported.push(kind)
+  worstCase = "unsupported"
+}
+```
+
+未知种类（自定义插件 / 未来新增）被当作 `fallback`，因为渲染器保证尽力的镜像。`buildCapabilityPromptSection`（`capability-evaluator.ts:106`）把矩阵渲染成精简的系统提示段落，由 `build-options.ts:resolveSendOptions` 追加到 `appendSystemPrompt` —— 告知助手哪些种类原生渲染、哪些仅经多步 UX 可用（不要假设同回合同步回复）、哪些降级为纯文本、哪些根本不能发出。一个可选的 `skillCapabilities` 条目声明本渠道可服务的内置技能族，使助手跳过逐工具探测。
+
+## 回调往返
+
+交互组件需要让按钮点击找回其源 surface。每个平台映射器调用 `buildActionId(surfaceId, componentId, action)`（`_shared/a2ui-mapper.ts:119`），返回平台在回调时送回的带命名空间的值（Slack `action_id`、Telegram `callback_data`、Discord `custom_id`、飞书 `value.tag`）：
+
+```ts
+// lib/connectors/adapters/_shared/a2ui-mapper.ts:119
+export function buildActionId(surfaceId: string, componentId: string, action: string): string {
+  return `a2ui:${surfaceId}:${componentId}:${action}`
+}
+```
+
+Telegram 把 `callback_data` 限制为 64 字节，于是 `truncateActionId`（`_shared/a2ui-mapper.ts:129`）对超长 id 做 SHA-1 哈希用于线上，而完整 id 留在绑定行里。`recordCallbackBinding`（`_shared/a2ui-mapper.ts:171`）以 `${adapterId}:${actionId}` 为键 upsert 一条 `connectorCallbackBindings` 行，`kind` 默认 `"callback_query"`，`expiresAt` 默认 `createdAt + DEFAULT_CALLBACK_BINDING_TTL_MS`（30d）。返程时总线（`bus.ts:751`）反查绑定：
+
+```ts
+// lib/connectors/adapters/_shared/a2ui-mapper.ts:216 — reverse lookup
+export async function resolveCallbackBinding(
+  adapterId: string,
+  actionId: string
+): Promise<ConnectorCallbackBindingRow | undefined> {
+  return getDb()
+    .connectorCallbackBindings.where("[adapterId+actionId]")
+    .equals([adapterId, actionId])
+    .first()
+}
+```
+
+`pruneOldCallbackBindings`（`_shared/a2ui-mapper.ts:231`）回收过期行；`generatePlainTextMirror`（`_shared/a2ui-mapper.ts:257`）是各映射器共享的、内容驱动（非布局驱动）的后备。
+
+```mermaid
+sequenceDiagram
+  participant U as User on platform
+  participant P as Platform API
+  participant A as Adapter parse.ts
+  participant B as ConnectorBus L751
+  participant DB as connectorCallbackBindings
+  participant H as kind-specific handler
+  U->>P: tap Button (value = buildActionId result)
+  P->>A: callback (action_id / callback_data / custom_id)
+  A->>B: dispatchConnectorCallback(triggerId)
+  B->>DB: resolveCallbackBinding(adapterId, triggerId) L751
+  DB-->>B: {surfaceId, componentId, kind, conversationKey, payload}
+  B->>H: route by kind (callback_query / skill_invoke / modal_open)
+  H-->>B: assistant next turn scoped to conversationKey
+```
+
+## 工作流进度扇出
+
+当工作流运行由 IM 触发（`triggeredBy.source === "im"`），`startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）用 `liveQuery` 监视 `workflowRuns` 并为每个运行调和一个 watcher（`reconcileWatchers`，`workflow-progress-runner.ts:184`）。每个渠道择一模式：
+
+- **cumulative-card（累积卡片）** —— `adapter.edit` 为函数的适配器（`defaultSupportsEdit`，`workflow-progress-runner.ts:136`）。每个事件经 `buildCumulativeStatusSurface`（`workflow-to-a2ui.ts:259`）**原地编辑**同一张状态 surface。`flushCumulativeOnChannel`（`workflow-progress-runner.ts:477`）从 `outboundQueue.get` 解析入口 job 的 `platformMessageId`，再带 `editTargetMessageId` 重新派发。
+- **append（追加）** —— 不支持 edit 的适配器（WeCom、wechat-personal）。每步一行紧凑 markdown，经 `buildProgressSegment`（`workflow-to-a2ui.ts:126`），由 `emitAppendOnChannel`（`workflow-progress-runner.ts:447`）发出，末尾加一张 `buildFinalSurface` 摘要。
+
+审批握手采用不同的 action-id 命名空间 —— `WF_APPROVE_PREFIX = "wfapp:"` 与 `WF_CANCEL_PREFIX = "wfcan:"`（`workflow-to-a2ui.ts:40`）—— 使总线按前缀路由 `wf_approve` 与 `wf_cancel` 而无需嗅探 payload：
+
+```ts
+// lib/connectors/a2ui-bridge/workflow-to-a2ui.ts:64 — approve/cancel Card
+const approveActionId = WF_APPROVE_PREFIX + input.bindingId
+const cancelActionId = WF_CANCEL_PREFIX + input.bindingId
+const safeSummary = (input.summary ?? "").trim()
+const components: Record<string, unknown> = {
+  root: {
+    component: "Card",
+    title: input.workflowName,
+    children: safeSummary.length > 0 ? ["summary", "actions"] : ["actions"],
+  },
+```
+
+每次派发都汇入 `dispatch`（`workflow-progress-runner.ts:580`），它以 `source: "workflow"` 及 `sourceWorkflow: { workflowId, runId, nodeId }` 溯源标签调用 `enqueueOutbound` —— 且在累积模式下带上解析得到的 `editTargetMessageId`，使平台编辑既有消息而非新发一条：
+
+```ts
+// lib/connectors/a2ui-bridge/workflow-progress-runner.ts:511 — edit-in-place dispatch
+await dispatch(
+  watcher,
+  channel,
+  [segment],
+  `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
+  "",
+  enqueue,
+  channel.entryPlatformMessageId
+)
+```
+
+终态的 `buildFinalSurface` / `buildCumulativeStatusSurface` 都内嵌一个 `buildWorkflowRunDeepLink`（`workflow-to-a2ui.ts:173`）—— `cognia://workflow-run/<workflowId>/<runId>` —— 使点击即在桌面 / 移动壳打开运行详情页。
+
+```mermaid
+flowchart TD
+  RUN["workflowRuns row<br/>triggeredBy.source=im"] --> LQ["startWorkflowProgressRunner L145<br/>liveQuery watch"]
+  LQ --> REC["reconcileWatchers L184<br/>one watcher per run"]
+  REC --> MODE{"adapter.edit<br/>is function?"}
+  MODE -- "yes" --> CUM["cumulative-card mode<br/>flushCumulativeOnChannel L477"]
+  MODE -- "no" --> APP["append mode<br/>emitAppendOnChannel L447"]
+  CUM --> EDIT["buildCumulativeStatusSurface L259<br/>dispatch with editTargetMessageId"]
+  APP --> LINE["buildProgressSegment L126<br/>one markdown line per step"]
+  EDIT --> DISP["dispatch L580<br/>enqueueOutbound source=workflow"]
+  LINE --> DISP
+  DISP --> ENQ["Outbound Queue"]
+```
+
+## 附件缓存
+
+入站媒体只拉取一次并复用。`fetchAttachment`（`attachment-fetcher.ts:65`）是缓存即恢复：它以 `[adapterId+remoteRef]` 为键查 `connectorAttachments` 行，命中未过期时**不触碰** Rust 直接返回：
+
+```ts
+// lib/connectors/attachment-fetcher.ts:73 — cache hit short-circuit
+if (existing && !isExpired(existing, now)) {
+  return {
+    ref: { localUrl: existing.localPath, remoteRef: existing.remoteRef },
+    cached: true,
+  }
+}
+```
+
+未命中（或 TTL 过期）时它调用 Tauri 的 `connectorsAttachmentFetch` 命令，以 `expiresAt = now + ttl`（默认 7 天，传 `0` 退出）upsert 该行，然后尽力运行一次 `runLruEviction(LRU_TOTAL_CAP_BYTES)`（`attachment-fetcher.ts:124`）—— 从最新往旧遍历、累加 `sizeBytes`，在累计超过 500 MB 上限后丢弃最旧的行。`pruneAttachmentsForAdapter`（`attachment-fetcher.ts:109`）在适配器移除时批量清除其行。Rust 侧（`src-tauri/src/connectors/attachments.rs`）掌管 SHA-256 缓存键与 AES-256-GCM 磁盘加密 —— 这正是 PII 门跳过二进制块的原因：它们从不以明文传输。
+
+## 相关
+
+<Cards>
+  <Card title="ConnectorBus" href="./connector-bus" description="决定是否回复并经 dispatchConnectorCallback 路由入站回调的调度器。" />
+  <Card title="出站队列与投递" href="./outbound-queue" description="每个被投影的 segment 的终点 —— 持久队列、重试、限流、原地编辑投递。" />
+  <Card title="A2UI" href="../a2ui" description="本桥往返投影所依据的 A2UI 组件词汇、schema 与渲染器。" />
+  <Card title="可视化工作流" href="../visual-workflows" description="其由 IM 触发的运行经本桥扇出进度的工作流运行时。" />
+  <Card title="内置适配器" href="./built-in-adapters" description="消费 buildActionId / 能力矩阵并发出原生富内容的各平台映射器。" />
+  <Card title="适配器模型" href="./adapter-model" description="这些投影所面向的适配器接口 —— edit()、能力矩阵、parse.ts。" />
+</Cards>

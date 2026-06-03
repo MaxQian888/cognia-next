@@ -1,0 +1,144 @@
+---
+title: 概览
+description: Cognia 如何把一个人的文档、聊天与代码蒸馏成可对话的孪生 —— 多孪生 registry、7 阶段先脱敏 ingest、6 agent 蒸馏，以及发送时的混合 RAG + 风格少样本，全部在渲染端本地运行。
+---
+
+# 员工数字孪生
+
+<Status variant="beta">Beta · schema v70</Status>
+
+<TLDR>
+  员工数字孪生把一个人的文档、聊天导出与代码蒸馏成四类资产 —— **知识索引**（RAG）、**风格画像**（少样本语气）、
+  **Playbook 库**、以及 **角色 / 技能草稿**。发送时 `applyTwinContext`
+  （`lib/twin/runtime/apply-twin-context.ts:170`）只对用户消息嵌入一次，执行混合检索（向量 + BM25/RRF）并可选做词法重排，
+  挑选风格少样本，组装四段式系统提示 —— 现已直接接入 `resolveSendOptions`（`lib/claude/build-options.ts:625`）。
+  PII 在任何嵌入或 LLM 调用 **之前** 就被替换为 `<KIND_NNN>` 占位符；逆向映射以 AES-GCM-256 加密落盘
+  （`lib/twin/ingest/redaction-key.ts:255`）。
+</TLDR>
+
+<StatGrid>
+  <Stat label="源文件" value="80+" hint="lib/twin + lib/db/twin-* + components/twin + types" />
+  <Stat label="Dexie 表" value="6" hint="twins + 5 张 twin* 表（v14 / registry v34）" />
+  <Stat label="Ingest 阶段" value="7" hint="dispatch → parse → redact → chunk → embed → persist → finalize" />
+  <Stat label="Distill agent" value="6" hint="knowledge · entity-merge · style · playbook · synthesizer · evaluator" />
+  <Stat label="工作台 tab" value="5" hint="Sources · Jobs · Drafts · Persona · Settings" />
+  <Stat label="脱敏 PII 种类" value="11" hint="邮箱 · 电话 · 身份证 · 银行卡 · 姓名 · IP · 密钥 · JWT · PEM · 护照 · 驾照" />
+</StatGrid>
+
+**员工数字孪生** 是 Cognia 最深的定制化层。它把用户的文档、聊天导出与代码蒸馏成：
+
+- **知识索引**（RAG）—— 发送时检索最相关的片段。
+- **风格画像** —— 采样用户的文字，让助手用 ta 的语气书写。
+- **Playbook 库** —— 由蒸馏 agent 抽取出的重复工作模式。
+- **角色 + 技能草稿** —— 自动合成，进入人工审核队列，审核通过前绝不进入正式选择器。
+
+完整设计原由见 [ADR-0003](../../adr/0003-employee-digital-twin)。本节逐模块记录 **当前实现**。
+
+## 代码位置
+
+```
+lib/twin/
+  ingest/        # 7 阶段先脱敏 ingest 流水线 + job-runner
+  importers/     # 第三方聊天/代码/邮件导出 → RawSource
+  distill/       # 6 agent 蒸馏流水线 + job-runner + PII 守卫
+  runtime/       # 发送时混合 RAG + 重排 + 风格少样本
+  cron/          # 每孪生 cron ⇄ 调度器对账
+  job-worker.ts  # 消费 twinJobs 队列（并发上限 + 退避）
+  job-retry.ts   # 指数退避 + 死信计算
+
+types/twin/index.ts   # 完整类型模型（Twin, Source, Chunk, Profile, Draft, Job, Settings）
+lib/db/twin-*.ts      # 6 张 Dexie 表 + twin-runtime 设置行
+components/twin/       # 5 tab 工作台 UI + persona 子 tab + 对话框
+app/twin/page.tsx     # 工作台路由
+```
+
+## 全生命周期一览
+
+```mermaid
+flowchart LR
+  subgraph Author["创作期 —— 工作台"]
+    IMP[导入器<br/>聊天 / 代码 / 邮件] --> SRC[(twinSources)]
+    SRC --> ING[Ingest 流水线<br/>脱敏 → 切分 → 嵌入]
+    ING --> CHK[(twinChunks +<br/>向量库)]
+    CHK --> DIS[Distill 流水线<br/>6 个 agent]
+    DIS --> PROF[(twinProfile)]
+    DIS --> DRF[(twinDrafts<br/>待审核)]
+    DRF --> ACC[接受] --> CHAR[(characters /<br/>skills)]
+  end
+
+  subgraph Send["发送期 —— 聊天 / 团队 / 工作流"]
+    MSG[用户消息] --> RT[applyTwinContext]
+    CHK -. RAG .-> RT
+    PROF -. 风格 + 实体 .-> RT
+    RT --> SP[四段式<br/>系统提示]
+  end
+
+  CHAR -. Character.twinId .-> RT
+
+  classDef io fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef out fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  class SRC,CHK,PROF,DRF,CHAR io
+  class IMP,ING,DIS,ACC,RT step
+  class SP,MSG out
+```
+
+每个方框都是本节的一章。请先读 [数据模型](./data-model) —— 其它所有模块都以那些表来描述。
+
+## 多孪生是设计前提
+
+"孪生"是一等的 registry 行（`Twin`，`types/twin/index.ts:480`），但绑定是 **软** 的：角色通过
+`Character.twinId` 启用，并通过 `Character.twinSettings` 调参。
+
+<TypeTable
+  type={{
+    enableRag: { description: "发送时是否从绑定孪生召回 chunk。", type: "boolean", default: "true" },
+    ragTopK: { description: "每次发送保留多少个 chunk（融合 / 重排之后）。", type: "number", default: "6" },
+    enableHybrid: { description: "是否通过 Reciprocal Rank Fusion 将 BM25 关键词检索与向量检索融合。", type: "boolean", default: "false" },
+    hybridKeywordWeight: { description: "RRF 中 BM25 列表的权重（0–1）；向量列表取 1 − 此值。", type: "number", default: "0.5" },
+    enableStyleFewShot: { description: "是否在系统提示中加入风格少样本。", type: "boolean", default: "true" },
+    styleSamplesK: { description: "包含多少个风格样本（按话题相似度排序）。", type: "number", default: "3" },
+  }}
+/>
+
+`DEFAULT_TWIN_SETTINGS` 位于 `types/twin/index.ts:445`。多个角色可共享一个孪生，单个 Dexie 数据库可承载多个孪生
+（自己 / 导师 / 前任）—— 每个孪生作用域的行都带 `twinId`。registry（`lib/db/twins.ts`）负责创建 / 重命名 / 克隆 /
+归档，以及 **级联删除**（`deleteTwin`，`lib/db/twins.ts:110`）：抹除每张孪生作用域表、解绑引用它的角色、删除两个 cron
+任务、并删掉远程向量集合。
+
+## 隐私红线
+
+<Callout type="warn" title="任何数据离开渲染端前先脱敏">
+  ingest 的第 3 阶段（`redact`，`lib/twin/ingest/redact.ts:227`）在 chunk 被嵌入或发给任何 LLM **之前**，
+  就把 11 类 PII 替换为 `<KIND_NNN>` 占位符。只有 `contentRedacted` 会进入嵌入器
+  （`lib/twin/ingest/embed.ts:48`）或远程向量负载（`lib/twin/ingest/persist.ts:137`）。逆向映射以 AES-GCM-256
+  加密落盘，原始文本从不持久化。
+</Callout>
+
+| 关注点 | 缓解位置 |
+| --- | --- |
+| chunk 中的 PII | `redactText` 在嵌入/LLM 前脱敏；只发送 `contentRedacted`（`redact.ts:227`） |
+| 静态逆向映射 | AES-GCM-256，密钥在 OS keyring（Tauri）或 AES 加密存于 Dexie（web）（`redaction-key.ts`） |
+| 草稿中的幻觉 PII | 两层守卫 —— 落库时再脱敏（`distill/job-runner.ts`）+ 编辑时深度扫描（`draft-pii-guard.ts:54`） |
+| 云端外发 | 桌面端向量后端默认 **原生 sqlite-vec**；仅在用户选用时才走云（`twin-runtime-settings.ts:50`） |
+| 丢钥 vs 首次运行 | SHA-256 密钥指纹闩，遇异常抛 `RedactionKeyMismatchError` 而非静默换钥（`redaction-key.ts:177`） |
+
+## 模块导航
+
+<Cards>
+  <Card title="数据模型" href="./data-model" description="7 个类型簇、6 张 Dexie 表 + 索引串、schema 历史与 DB CRUD 层。" />
+  <Card title="Ingest 流水线" href="./ingest-pipeline" description="7 阶段先脱敏流水线：dispatch、parse、redact、chunk、embed、persist、finalize。" />
+  <Card title="导入器" href="./importers" description="聊天（7 平台）、git-repo、邮件导出统一归一为 RawSource markdown。" />
+  <Card title="Distill 流水线" href="./distill-pipeline" description="6 个顺序 agent、LlmClient 抽象缝、pin 保留，以及两层 PII 防线。" />
+  <Card title="运行时" href="./runtime" description="发送时 applyTwinContext：混合 RAG、RRF 融合、词法重排、风格少样本、提示组装。" />
+  <Card title="任务与调度" href="./jobs-and-scheduling" description="任务 worker、基于 lease 的崩溃恢复、指数退避，以及每孪生 cron。" />
+  <Card title="工作台 UI" href="./workbench-ui" description="5 tab 工作台、源上传器、草稿接受流程与 persona 浏览器。" />
+</Cards>
+
+## 相关
+
+<Cards>
+  <Card title="向量库" href="../../data/vector-store" description="RAG 检索的物理执行方式。" />
+  <Card title="存储" href="../../data/storage" description="孪生表所在的完整 Dexie schema。" />
+  <Card title="ADR-0003" href="../../adr/0003-employee-digital-twin" description="最初的设计原由。" />
+</Cards>

@@ -9,7 +9,7 @@ import type {
   A2UISurfaceState,
   A2UISurfaceType,
   A2UIComponent,
-  A2UIServerMessage,
+  A2UIDispatchMessage,
   A2UIUserAction,
   A2UIDataModelChange,
   A2UIWidgetMetadata,
@@ -20,6 +20,7 @@ import {
   isUpdateDataModelMessage,
   isDeleteSurfaceMessage,
   isSurfaceReadyMessage,
+  isConnectorActionMessage,
 } from "@/lib/a2ui/parser"
 import { setValueByPath, getValueByPath, deepMerge, deepClone } from "@/lib/a2ui/data-model"
 import { globalEventEmitter, createUserAction, createDataModelChange } from "@/lib/a2ui/events"
@@ -87,9 +88,9 @@ interface A2UIActions {
   getDataValue: <T = unknown>(surfaceId: string, path: string) => T | undefined
 
   // Message processing
-  processMessage: (message: A2UIServerMessage) => void
-  processMessages: (messages: A2UIServerMessage[]) => void
-  processMessageStream: (messages: A2UIServerMessage[], delayMs?: number) => Promise<void>
+  processMessage: (message: A2UIDispatchMessage) => void
+  processMessages: (messages: A2UIDispatchMessage[]) => void
+  processMessageStream: (messages: A2UIDispatchMessage[], delayMs?: number) => Promise<void>
   setSurfaceStreaming: (surfaceId: string, streaming: boolean) => void
 
   // Event handling
@@ -355,7 +356,29 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             updateDataModel,
             deleteSurface,
             setSurfaceReady,
+            emitAction,
           } = get()
+
+          // Connector-action injection (a2ui_handle_connector_action MCP tool):
+          // surface an IM-side callback as a userAction, exactly like an
+          // in-renderer click. `value` carries the action id for buttons; for
+          // submit/dismiss it is empty, so fall back to the action type.
+          if (isConnectorActionMessage(message)) {
+            const action =
+              message.value && message.value.length > 0 ? message.value : message.actionType
+            const data: Record<string, unknown> = {
+              source: "connector",
+              actionType: message.actionType,
+            }
+            if (message.value !== undefined) data.value = message.value
+            if (message.platform !== undefined) data.platform = message.platform
+            if (message.triggerId !== undefined) data.triggerId = message.triggerId
+            if (message.conversationKey !== undefined)
+              data.conversationKey = message.conversationKey
+            if (message.payload !== undefined) data.payload = message.payload
+            emitAction(message.surfaceId, action, message.componentId ?? "", data)
+            return
+          }
 
           if (isCreateSurfaceMessage(message)) {
             createSurface(message.surfaceId, message.surfaceType, {

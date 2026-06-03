@@ -1,0 +1,196 @@
+---
+title: "microVM & Web"
+description: "The T4 e2b Firecracker microVM tier, the per-session tier router in microvm-bridge, the e2b workspace backend for the GitHub-delivery loop, the web code-execution stub, and the SandboxExecutionResult / consumption-metadata types."
+---
+
+# microVM & Web
+
+<Status variant="beta" />
+
+<TLDR>
+  `lib/sandbox/microvm-bridge.ts` is the two-piece glue between the OS sandbox and the e2b microVM
+  tier (T4): a per-session **active tier** map and a registry holding the **microVM exec
+  implementation**. The `cognia-e2b-sandbox` plugin registers a real exec on activate
+  (`buildMicrovmExec`); the same plugin also provides an `E2BWorkspaceBackend` for the
+  GitHub-delivery Issue→PR loop. `lib/sandbox/web/index.ts` is a deliberate **stub** — the web
+  code-execution runtime is not shipped. `types/system/sandbox.ts` carries the cross-boundary result
+  and consumption-metadata shapes.
+</TLDR>
+
+## The tier router — `microvm-bridge.ts`
+
+Two registries, both keyed by session id. `build-options.ts` writes the active tier before each send;
+the e2b plugin registers/unregisters its exec on activate/deactivate.
+
+```ts title="lib/sandbox/microvm-bridge.ts:61-93 (registry + active tier)"
+let registeredImpl: MicrovmExec | null = null
+
+/** Register the microvm exec adapter (called by the e2b plugin on activate). */
+export function setMicrovmExec(impl: MicrovmExec | null): void {
+  registeredImpl = impl
+}
+export function getMicrovmExec(): MicrovmExec | null {
+  return registeredImpl
+}
+
+/** Active tier per session id. Keyed by session id; default = "os". */
+const activeTier = new Map<string, "os" | "microvm">()
+
+export function setActiveSandboxTier(sessionId: string | null | undefined, tier: "os" | "microvm"): void {
+  if (!sessionId) return
+  activeTier.set(sessionId, tier)
+}
+export function getActiveSandboxTier(sessionId: string | null | undefined): "os" | "microvm" {
+  if (!sessionId) return "os"
+  return activeTier.get(sessionId) ?? "os"
+}
+```
+
+The payload shapes mirror the Rust `SandboxCommand` / `PolicyRequest` so the OS path and the microVM
+path are interchangeable from the plugin's point of view:
+
+```ts title="lib/sandbox/microvm-bridge.ts:24-59 (shapes)"
+export interface MicrovmResult { exit_code: number; stdout: string; stderr: string; duration: number; timed_out: boolean }
+export interface MicrovmCommand { argv: string[]; cwd: string; env: Record<string, string>; stdin: string | null; timeout: number }
+export interface MicrovmRequest { writable: string[]; readable: string[]; targetFiles: string[]; maxCpuSeconds: number; maxMemoryMb: number; network: "off" | "on" | "allowlist"; networkHosts: string[] }
+export interface MicrovmExecPayload { tool: string; command: MicrovmCommand; request: MicrovmRequest }
+export type MicrovmExec = (payload: MicrovmExecPayload) => Promise<MicrovmResult>
+```
+
+## The e2b exec adapter — `microvm-exec.ts`
+
+`buildMicrovmExec` returns a `MicrovmExec` bound to options. Each call provisions a fresh sandbox,
+runs the argv joined through `bash -c` (so quoting matches the OS backend), then closes the sandbox.
+
+```ts title="plugins/e2b-sandbox/src/microvm-exec.ts:44-76 (excerpt)"
+return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
+  const started = now()
+  const sandbox = await factory({ apiKey: opts.apiKey ?? process.env.E2B_API_KEY })
+  try {
+    const cmd = buildBashCommand(payload)
+    const result = await sandbox.exec({
+      cmd,
+      cwd: payload.command.cwd,
+      timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
+    })
+    return { exit_code: result.exitCode, stdout: result.stdout, stderr: result.stderr,
+             duration: Math.max(0, now() - started), timed_out: false }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { exit_code: -1, stdout: "", stderr: message,
+             duration: Math.max(0, now() - started), timed_out: /timed?[ _-]?out/i.test(message) }
+  } finally {
+    await sandbox.close().catch(() => undefined)
+  }
+}
+```
+
+`buildBashCommand` (`microvm-exec.ts:84-92`) exports env vars inline and pipes stdin via `<<<`, with
+both env names and values shell-escaped. The default factory dynamically imports `@e2b/sdk` and calls
+`Sandbox.create`, surfacing a one-line install hint when the SDK is absent — the same strict-mode
+pattern used everywhere in the sandbox layer:
+
+```ts title="plugins/e2b-sandbox/src/microvm-exec.ts:112-123 (excerpt)"
+try {
+  mod = (await (Function("s", "return import(s)") as (s: string) => Promise<unknown>)(
+    "@e2b/sdk"
+  )) as { Sandbox?: unknown }
+} catch {
+  throw new Error(
+    "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w` and set " +
+      "E2B_API_KEY to use the microVM sandbox tier."
+  )
+}
+```
+
+## The e2b workspace backend — `workspace-backend.ts`
+
+The same plugin also implements `E2BWorkspaceBackend` for the GitHub-delivery Issue→PR loop. When a
+workflow sets `worktreeMode: "e2b"`, the AI loop runs inside a fresh Firecracker microVM instead of
+the host filesystem. Each `clone()` provisions a sandbox and clones into `/tmp/cognia/<repo>/<stamp>`;
+`commitAndPush()` runs `git add/commit/push` inside the sandbox.
+
+```ts title="plugins/e2b-sandbox/src/workspace-backend.ts:74-90 (clone)"
+const stamp = this.opts.now().toString(36)
+const safeRepo = opts.repoFullName.replace(/[^a-zA-Z0-9._-]/g, "_")
+const cwd = `/tmp/cognia/${safeRepo}/${stamp}`
+await execChecked(sandbox, { cmd: `mkdir -p ${shellEscape(cwd)}` })
+const remote = `https://x-access-token:${opts.token}@github.com/${opts.repoFullName}.git`
+await execChecked(sandbox, {
+  cmd: `git clone --branch ${shellEscape(opts.branch)} --depth 20 ${shellEscape(remote)} ${shellEscape(cwd)}`,
+})
+```
+
+<Callout type="warn">
+  The workspace backend's **default** `sandboxFactory` is not wired to the SDK — it throws
+  "Default E2B sandboxFactory hasn't been wired to the SDK yet — pass `sandboxFactory` explicitly"
+  (`workspace-backend.ts:187-191`). Callers must inject a factory via plugin settings. The
+  `microvm-exec.ts` factory (used for the T4 tier) **is** wired to `Sandbox.create`; these are two
+  separate factories with different completeness.
+</Callout>
+
+## The web code-execution stub — `lib/sandbox/web`
+
+Distinct from artifact rendering, this is the "run code" surface a plugin reaches through
+`executeCode(language, code)`. It is a stub today: `isAvailable()` returns `false` so the caller gets
+a clear error instead of a `Cannot find module` fault.
+
+```ts title="lib/sandbox/web/index.ts:25-37"
+const stub: WebSandboxService = {
+  isAvailable: () => false,
+  isLanguageSupported: () => false,
+  execute: async (req) => ({
+    ok: false,
+    error: `Web sandbox is not yet available; cannot execute ${req.language}.`,
+    durationMs: 0,
+  }),
+}
+
+export function getWebSandboxService(): WebSandboxService {
+  return stub
+}
+```
+
+To ship a real runtime (Pyodide / WebContainer / Worker), replace this file's body; the
+`WebSandboxService` interface and the `SandboxExecutionResult` shape stay compatible.
+
+## Cross-boundary types — `types/system/sandbox.ts`
+
+The result shape returned by sandboxed plugin script executions, plus the consumption metadata the
+scheduler uses to carry quota bookkeeping across the boundary:
+
+```ts title="types/system/sandbox.ts:6-28 (entrypoints + consumption)"
+export type SandboxEntrypointId =
+  | "chat-code-block"
+  | "ai-code-block"
+  | "workflow-code-step"
+  | "scheduler-script"
+  | "computer-operation"
+  | "designer-preview"
+
+export type SandboxConsumptionMode = "interactive" | "background"
+export type SandboxDegradedBehavior = "disable" | "blocked-result" | "bypass"
+
+export interface SandboxConsumptionMetadata {
+  entrypoint: SandboxEntrypointId
+  mode: SandboxConsumptionMode
+  degraded_behavior: SandboxDegradedBehavior
+  requires_preflight: boolean
+  sandbox_enabled: boolean
+  blocked: boolean
+  bypassed: boolean
+  used_quick_run: boolean
+  policy_profile?: string | null
+}
+```
+
+`SandboxExecutionResult` (`types/system/sandbox.ts:35-47`) — `ok`, `value?`, `logs?`, `error?`,
+`durationMs?`, `consumption?` — never throws across the boundary.
+
+## Next
+
+<Cards>
+  <Card title="Sandboxed tools" href="./sandboxed-tools" description="The plugin that calls getMicrovmExec()" />
+  <Card title="OS backends (T1)" href="./os-backends" description="The other tier the router targets" />
+  <Card title="Plugin isolation" href="./plugin-isolation" description="The other e2b consumer: plugin code" />
+</Cards>

@@ -1,0 +1,15 @@
+{
+  "title": "平台连接器",
+  "pages": [
+    "index",
+    "connector-bus",
+    "adapter-model",
+    "built-in-adapters",
+    "inbound-gating",
+    "outbound-queue",
+    "ai-and-a2ui",
+    "health-audit",
+    "rust-layer",
+    "ui-and-plugins"
+  ]
+}

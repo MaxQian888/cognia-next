@@ -817,6 +817,52 @@ export type A2UIServerMessage =
   | A2UIDeleteSurfaceMessage
   | A2UISurfaceReadyMessage
 
+/**
+ * Action types an IM-side connector callback can carry. Mirrors
+ * `ConnectorCallbackActionType` in `types/connectors/interaction.ts`.
+ */
+export type A2UIConnectorActionType =
+  | "button"
+  | "select"
+  | "checkbox"
+  | "input"
+  | "submit"
+  | "dismiss"
+  | "platform_specific"
+
+/**
+ * IM platforms that can deliver an interactive callback. Mirrors the
+ * `platform` enum in the `a2ui_handle_connector_action` MCP tool.
+ */
+export type A2UIConnectorPlatform = "telegram" | "discord" | "slack" | "lark" | "onebot"
+
+/**
+ * Inject an IM-side user action onto a surface.
+ *
+ * Dispatched by the `a2ui_handle_connector_action` MCP tool (both the
+ * in-process SDK server and the stand-alone stdio server) through the same
+ * `a2ui_dispatch` envelope as the server messages above. The store turns it
+ * into a `userAction` via `emitAction`, so an interaction that arrived over
+ * Slack/Lark/Telegram/Discord is observed identically to an in-renderer click.
+ */
+export interface A2UIConnectorActionMessage {
+  type: "connectorAction"
+  surfaceId: string
+  actionType: A2UIConnectorActionType
+  componentId?: string
+  value?: string
+  payload?: Record<string, unknown>
+  platform?: A2UIConnectorPlatform
+  triggerId?: string
+  conversationKey?: string
+}
+
+/**
+ * Everything the renderer can receive over the `a2ui_dispatch` bridge: the
+ * server messages plus the connector-action injection.
+ */
+export type A2UIDispatchMessage = A2UIServerMessage | A2UIConnectorActionMessage
+
 // =============================================================================
 // Message Types (Client to Server)
 // =============================================================================

@@ -11,11 +11,27 @@
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolText, toolError } from "../builtin-tools/safety.mjs"
+import {
+  SERVER_NAME as DEFS_SERVER_NAME,
+  SERVER_VERSION as DEFS_SERVER_VERSION,
+  SURFACE_TYPES,
+  WIDGET_HOST_STRATEGIES,
+  WIDGET_SIZING,
+  WIDGET_THEMES,
+  CONNECTOR_ACTION_TYPES,
+  CONNECTOR_PLATFORMS,
+  TOOL_NAMES,
+  TOOL_DESCRIPTIONS,
+  buildDispatch,
+} from "./tool-defs.mjs"
 
-export const SERVER_NAME = "a2ui-bridge"
-export const SERVER_VERSION = "0.9.0"
-
-const SURFACE_TYPES = ["inline", "dialog", "panel", "fullscreen"]
+// Names, descriptions, enums, and the args→dispatch mapping come from the
+// shared tool-defs module so this SDK server and the stand-alone stdio server
+// (sidecar/a2ui-mcp.mjs) cannot drift. Only the Zod *shapes* are local —
+// the SDK's tool() requires a ZodRawShape, which can't be shared with the
+// raw-JSON-Schema stdio transport.
+export const SERVER_NAME = DEFS_SERVER_NAME
+export const SERVER_VERSION = DEFS_SERVER_VERSION
 
 const componentSchema = z
   .object({
@@ -27,11 +43,9 @@ const componentSchema = z
 
 const widgetSchema = z
   .object({
-    hostStrategy: z
-      .enum(["native", "artifact-preview", "sandboxed-html", "lazy-runtime"])
-      .optional(),
-    sizing: z.enum(["auto", "content-height", "fixed-height"]).optional(),
-    theme: z.enum(["inherit", "light", "dark"]).optional(),
+    hostStrategy: z.enum(WIDGET_HOST_STRATEGIES).optional(),
+    sizing: z.enum(WIDGET_SIZING).optional(),
+    theme: z.enum(WIDGET_THEMES).optional(),
     showChrome: z.boolean().optional(),
     fallbackText: z.string().optional(),
     minHeight: z.number().optional(),
@@ -59,7 +73,7 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
   const tools = [
     tool(
       "a2ui_create_surface",
-      "Create a new A2UI surface where the agent can render interactive UI. Reuse the same surfaceId on subsequent updates.",
+      TOOL_DESCRIPTIONS.a2ui_create_surface,
       {
         surfaceId: z.string().describe("Unique id for this surface; reuse to update."),
         surfaceType: z
@@ -71,14 +85,7 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
       },
       async (args) => {
         try {
-          dispatch({
-            type: "createSurface",
-            surfaceId: args.surfaceId,
-            surfaceType: args.surfaceType,
-            catalogId: args.catalogId,
-            title: args.title,
-            widget: args.widget,
-          })
+          dispatch(buildDispatch("a2ui_create_surface", args))
           return toolText({
             ok: true,
             surfaceId: args.surfaceId,
@@ -92,18 +99,14 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
 
     tool(
       "a2ui_update_components",
-      "Replace the components tree on an existing A2UI surface. Components must follow the A2UI v0.9 schema (each has `id` and `component`).",
+      TOOL_DESCRIPTIONS.a2ui_update_components,
       {
         surfaceId: z.string(),
         components: z.array(componentSchema).min(1),
       },
       async (args) => {
         try {
-          dispatch({
-            type: "updateComponents",
-            surfaceId: args.surfaceId,
-            components: args.components,
-          })
+          dispatch(buildDispatch("a2ui_update_components", args))
           return toolText({
             ok: true,
             surfaceId: args.surfaceId,
@@ -118,7 +121,7 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
 
     tool(
       "a2ui_data_model_update",
-      "Patch (or replace) the surface's data model — form values, chart data, table rows, etc.",
+      TOOL_DESCRIPTIONS.a2ui_data_model_update,
       {
         surfaceId: z.string(),
         data: z.record(z.unknown()),
@@ -129,12 +132,7 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
       },
       async (args) => {
         try {
-          dispatch({
-            type: "dataModelUpdate",
-            surfaceId: args.surfaceId,
-            data: args.data,
-            merge: args.merge ?? true,
-          })
+          dispatch(buildDispatch("a2ui_data_model_update", args))
           return toolText({
             ok: true,
             surfaceId: args.surfaceId,
@@ -149,16 +147,13 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
 
     tool(
       "a2ui_delete_surface",
-      "Remove an A2UI surface and free its resources.",
+      TOOL_DESCRIPTIONS.a2ui_delete_surface,
       {
         surfaceId: z.string(),
       },
       async (args) => {
         try {
-          dispatch({
-            type: "deleteSurface",
-            surfaceId: args.surfaceId,
-          })
+          dispatch(buildDispatch("a2ui_delete_surface", args))
           return toolText({
             ok: true,
             surfaceId: args.surfaceId,
@@ -166,6 +161,49 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
           })
         } catch (err) {
           return toolError(err, "a2ui_delete_surface")
+        }
+      }
+    ),
+
+    tool(
+      "a2ui_handle_connector_action",
+      TOOL_DESCRIPTIONS.a2ui_handle_connector_action,
+      {
+        surfaceId: z.string().describe("Target A2UI surface."),
+        componentId: z
+          .string()
+          .optional()
+          .describe(
+            "Component id inside the surface that fired the action. Optional when the action is surface-level (dismiss)."
+          ),
+        actionType: z.enum(CONNECTOR_ACTION_TYPES),
+        value: z
+          .string()
+          .optional()
+          .describe(
+            "Primary scalar value: button action id, selected option key, checkbox boolean string, edited text."
+          ),
+        payload: z
+          .record(z.unknown())
+          .optional()
+          .describe(
+            "Structured payload for multi-value actions (form submissions, platform_specific events)."
+          ),
+        platform: z.enum(CONNECTOR_PLATFORMS).optional(),
+        triggerId: z.string().optional(),
+        conversationKey: z.string().optional(),
+      },
+      async (args) => {
+        try {
+          dispatch(buildDispatch("a2ui_handle_connector_action", args))
+          return toolText({
+            ok: true,
+            surfaceId: args.surfaceId,
+            actionType: args.actionType,
+            dispatched: true,
+          })
+        } catch (err) {
+          return toolError(err, "a2ui_handle_connector_action")
         }
       }
     ),
@@ -179,12 +217,7 @@ export function buildA2UIBridgeServer({ sessionId, emit, alwaysLoad = true }) {
   })
 }
 
-export const A2UI_TOOL_NAMES = [
-  "a2ui_create_surface",
-  "a2ui_update_components",
-  "a2ui_data_model_update",
-  "a2ui_delete_surface",
-]
+export const A2UI_TOOL_NAMES = TOOL_NAMES
 
 export function namespacedA2UIToolNames() {
   return A2UI_TOOL_NAMES.map((n) => `mcp__${SERVER_NAME}__${n}`)

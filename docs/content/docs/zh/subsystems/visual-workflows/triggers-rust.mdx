@@ -1,0 +1,187 @@
+---
+title: 触发器与 Rust 后端
+description: 五类工作流触发器的分类、将每一种触发器汇聚到单一 dispatchTrigger 收口的七个 TS 运行时桥，以及负责 cron 触发、本地 axum webhook 接收器与崩溃可恢复的运行镜像的 Tauri/Rust 后端。
+---
+
+# 触发器与 Rust 后端
+
+<Status variant="stable" />
+
+<TLDR>
+Rust 拥有两个问题——"工作流何时启动"（cron 守护进程 + axum webhook 接收器）与"这次运行是否在崩溃中幸存"（SQLite 运行镜像）——而 [runtime-execution](./runtime-execution) 上的 TS 编排器拥有步骤执行。每一类触发器都汇入唯一收口 `dispatchTrigger(event)`（`lib/workflow/runtime/trigger-bridge.ts:43`），它解析 Dexie 工作流、触发插件钩子、调用 `runWorkflow`。跨进程触发依赖单一的 `workflow:trigger` Tauri 事件，由 `src-tauri/src/workflow/mod.rs:40` 发出，由 `tauri-bridge.ts:90` 的 `listenTriggerEvents` 接收。整个 Rust 平面仅限桌面：Web 模式在 `isTauri()` 门后完全空操作（`safeInvoke` 返回 null，`reloadInFlightRuns` 返回 `[]`，监听器空操作）。镜像（`run_mirror.rs`）只是薄影子——Dexie 事件日志仍是权威数据源。
+</TLDR>
+
+## 触发器分类
+
+五类触发器（外加 `trigger.goal.completed`）按"谁来触发"划分。Rust 触发那两个必须在 webview 关闭时仍运行的（cron、webhook）；TS 触发那三个挂在进程内事件总线上的（连接器入站、聊天消息、目标完成）；`trigger.manual` 仅 TS。
+
+| 类别 | 触发方 | 路径与 file:line |
+| --- | --- | --- |
+| `trigger.manual` | 仅 TS | Run 按钮；IM 点击 `start-from-im.ts:53` -> `runWorkflow`；恢复 `resume-controller.ts:62`。Rust 注册为空操作 `commands.rs:83` |
+| `trigger.cron` | Rust 守护进程 | `cron_daemon.rs:229` `fire()` -> `AppHandleEmitter::emit` `mod.rs:40` -> `workflow:trigger` -> `tauri-bridge.ts:90` `listenTriggerEvents` -> `trigger-bridge.ts:43` `dispatchTrigger` -> `runWorkflow`。注册 `commands.rs:27` `state.cron.upsert` |
+| `trigger.webhook`（+`trigger.github.webhook`） | Rust axum | `webhook_router.rs:292` `handle_webhook` -> HMAC `L404` -> `state.emitter.emit`（`kind:"trigger.webhook"`）-> `mod.rs:40` -> `workflow:trigger` -> `trigger-bridge.ts:43`。注册 `commands.rs:47` `state.webhook.upsert` |
+| `trigger.connector.inbound` | TS 钩子 | `ConnectorBus` -> `findMatchingWorkflows("trigger.connector.inbound")` -> `dispatchTrigger`。Rust 空操作 `commands.rs:83` |
+| `trigger.chat.message` | TS 钩子 | `lib/db/messages.ts` `findMatchingWorkflows("trigger.chat.message",{characterId,sessionId})` -> `dispatchTrigger`（懒加载导入以避免内存峰值）。Rust 空操作 |
+
+`trigger.goal.completed` 也被索引（`trigger-subscriptions.ts:32`），由 `lib/goal` 中的目标完成联动触发。
+
+## TS 运行时桥（lib/workflow/runtime/）
+
+| 文件 | Symbol:line | 职责 |
+| --- | --- | --- |
+| `trigger-bridge.ts` | `installTriggerBridge:21` | 启动时挂载一次；包装 `listenTriggerEvents`、校验、调用 `dispatchTrigger` |
+| `trigger-bridge.ts` | `dispatchTrigger:43` | 唯一收口——解析 Dexie 工作流、触发插件钩子、调用编排器；所有触发器类别都路由到这里 |
+| `trigger-bridge.ts` | `isTriggerEvent:61` | 入站 `workflow:trigger` 载荷的形状守卫 |
+| `trigger-subscriptions.ts` | `INDEXED_KINDS:32` | TS 侧触发器节点的内存索引；仅 `connector.inbound` / `chat.message` / `goal.completed`（cron/webhook 被排除——Rust 拥有它们） |
+| `trigger-subscriptions.ts` | `rebuildIndex:45` / `initTriggerSubscriptions:66` | 由对工作流的 Dexie `liveQuery` 重建；幂等、window 守卫 |
+| `trigger-subscriptions.ts` | `findMatchingWorkflows:128` / `matches:137` | 同步缓存读取；必需 vs 可选参数，空参数 = 匹配任意 |
+| `webhook-bridge.ts` | `syncWorkflowTriggers:35` / `syncOneTrigger:40` | 过滤 `n.type.startsWith("trigger.")`，逐个急切注册（Rust 处理器幂等，不计算差异） |
+| `tauri-bridge.ts` | `safeInvoke:34` + 6 个命令 `L46-81` | `persistRunState` / `registerTrigger` / `unregisterTrigger` / `reloadInFlightRuns` / `ackRunCompleted` / `getWebhookUrl` |
+| `tauri-bridge.ts` | `listenTriggerEvents:90` / `listenResumeEvents:101` | 订阅 `workflow:trigger` 与 `workflow:resume`；`!isTauri()` 时全部空操作 |
+| `wake-bus.ts` | `subscribeWake:49` / `emitWake:102` | 供 `flow.wait(event)` 步骤的进程内一次性总线，key 为 `${runId}:${stepId}`；无订阅者时 `emitWake` 返回 false（早到事件被丢弃） |
+| `start-from-im.ts` | `startWorkflowFromIM:47` | 水合行、构造 `trigger.manual` 事件、提前生成 `runId`、即发即弃 `void runWorkflow` |
+| `run-status-bridge.ts` | `deriveRunStatusFromEvents:29` / `startRunStatusBridge:67` | 被动观察者；经 `[workflowId+startedAt]` 跟踪最近运行（须匹配 schema v22） |
+
+```ts
+// lib/workflow/runtime/trigger-bridge.ts:43
+export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
+  const workflow = await getWorkflow(event.workflowId)
+  if (!workflow) { console.warn(...); return }
+  getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
+  await runWorkflow({ workflow, trigger: event })
+}
+```
+
+`webhook-bridge.ts:40` 将节点配置映射到 Rust 注册形状：`cron` -> `{cron}`；`webhook` -> `{path,method,hmacSecret,responseStatus,responseTemplate}`；`connector` / `chat` / `manual` -> 仅基础字段。`wake-bus` 覆盖进程内等待；跨进程的 Rust->TS 唤醒同样依赖 `workflow:trigger` 事件。注意**恢复不经过 `dispatchTrigger`**——被恢复的运行直接使用 `trigger.manual`，因此插件触发钩子不会重新触发。
+
+## Rust 后端（src-tauri/src/workflow/）
+
+| 文件 | Symbol:line | 职责 |
+| --- | --- | --- |
+| `mod.rs` | `AppHandleEmitter:34` / `impl TriggerEmitter:38` | 唯一的 Rust->TS 发射点：`Emitter::emit(&handle, "workflow:trigger", event)` |
+| `state.rs` | `WorkflowState:14` / `open:25` | 持有 `{mirror, cron, webhook}`；`open(mirror_path, emitter)` 接线三者但不启动循环；`impl Drop:51` 调用 `webhook.stop()` |
+| `types.rs` | `TRIGGER_KINDS:14` / `RunStatus:25` / `TriggerEvent:124` | camelCase serde DTO；`RegisterTriggerInput:91`、`PersistRunStateInput:139`（仅首次持久化带快照）、`InFlightRunRow:156`、`WebhookTriggerPayload:172` |
+| `commands.rs` | `workflow_register_trigger:21` | 分派 `L26-85`：cron -> `state.cron.upsert`；webhook/github.webhook -> `WebhookEntry` + `state.webhook.upsert`；connector/chat/manual -> 空操作 Ok `L83`；否则报错 |
+| `commands.rs` | 其余 5 个命令 `L91-134` | `unregister`（按 id 清扫 cron + webhook）、`get_webhook_url`、`persist_run_state`、`reload_in_flight_runs`、`ack_completed` |
+| `run_mirror.rs` | `RunMirror:47` / `persist:134` / `list_in_flight:192` / `ack_completed:231` | SQLite 影子；懒 `open:60`，`conn:96` 首次使用时 mkdir+DDL；`default_mirror_path:269` = `<dir>/cognia/workflow-runs.sqlite` |
+| `triggers/cron_daemon.rs` | `CronDaemon:110` / `upsert:127` / `spawn:177` / `fire:229` | 进程内 cron（`cron::Schedule`，含秒的 6-7 字段），只要 Tauri 进程运行就触发，不论 webview 状态 |
+| `triggers/webhook_router.rs` | `WebhookRouter:120` / `start:210` / `handle_webhook:292` / `verify_hmac_signature:404` | 本地 axum 接收器，仅绑 `127.0.0.1`，1 MiB body 上限，HMAC-SHA256 |
+
+启动接线（`lib.rs:872-903`）：`default_mirror_path` -> `AppHandleEmitter` -> `WorkflowState::open` -> `cron.clone().spawn()` `L884` -> `async_runtime::spawn webhook.start(emitter, 0)` `L894-896`（port 0 = OS 选）-> `app.manage(state)`。Web 模式永不到达此分支。`triggers/mod.rs:1` 只暴露 `cron_daemon` 与 `webhook_router`（连接器入站 + 聊天接入点留在 TS 侧）。
+
+```rust
+// src-tauri/src/workflow/mod.rs:38
+impl TriggerEmitter for AppHandleEmitter {
+    fn emit(&self, event: types::TriggerEvent) {
+        if let Err(err) = tauri::Emitter::emit(&self.handle, "workflow:trigger", event) {
+            log::warn!("workflow:trigger emit failed: {err}");
+        }
+    }
+}
+```
+
+### Cron 守护进程——触发路径
+
+cron 守护进程不同于 `crate::scheduler`（OS 级）：它是进程内的，只要进程运行就触发（托盘 / 最小化）。`CronEntry:34` 缓存 `next_fire_at`；`recompute:46` 用 `schedule.after(&anchor).next()`；`next_fire:66` 是已启用条目的最小值；`due_ids:76` 收集可触发 id。`spawn:177` 必须用 `tauri::async_runtime::spawn`（普通 `tokio::spawn` 在 setup 中会 panic）；`run_loop:186` 睡到下次触发（下限 25ms，空闲上限 1h 由 `Notify` 唤醒）；`fire:229` 发出 `kind:"trigger.cron"`，载荷 `{triggerId, firedAt}`。
+
+```rust
+// src-tauri/src/workflow/triggers/cron_daemon.rs:66
+fn next_fire(&self) -> Option<DateTime<Utc>> { self.entries.values().filter(|e| e.enabled).filter_map(|e| e.next_fire_at).min() }
+// run_loop sleep: Some(t) => from_millis(((t - now).max(0)).max(25)), None => from_secs(3600)
+// tokio::select! { _ = sleep(sleep_dur) => {} _ = self.notify.notified() => {} }
+```
+
+```mermaid
+sequenceDiagram
+  participant Loop as run_loop<br/>cron_daemon.rs:186
+  participant Fire as fire()<br/>:229
+  participant Emit as AppHandleEmitter<br/>mod.rs:40
+  participant Listen as listenTriggerEvents<br/>tauri-bridge.ts:90
+  participant Disp as dispatchTrigger<br/>trigger-bridge.ts:43
+  Loop->>Loop: sleep 到 next_fire_at (下限 25ms)
+  Loop->>Fire: due_ids(now)
+  Fire->>Emit: emit kind trigger.cron
+  Emit->>Listen: Tauri 事件 workflow:trigger
+  Listen->>Disp: 校验后的 TriggerEvent
+  Disp->>Disp: getWorkflow + 插件钩子 + runWorkflow
+```
+
+### Webhook 接收器——POST 路径
+
+`start:210` 绑定 `127.0.0.1`，路由 `/webhook/{*path}`（任意方法）外加 404 的 `/webhook/`，套用 `RequestBodyLimitLayer`，并经 `stop:257` 支持优雅关停。`upsert:153` 以 path 为键并拒绝跨触发器冲突；`bound_url_for_path:197` 返回 `http://{addr}/webhook/{path}`（仅在绑定后经 `workflow_get_webhook_url` 可知）。`handle_webhook:292` 按序把关：404 未知 -> 503 禁用 -> 405 方法 -> 401 HMAC -> 解析 body -> 发出 `kind:"trigger.webhook"` -> 以 `response_status` / `response_body` 响应。`SignatureMode:63` 默认 `Cognia`（头 `x-signature-256`）vs `github`（`x-hub-signature-256`）；注册在 kind 为 github 风味时默认 github，否则 cognia。
+
+```rust
+// src-tauri/src/workflow/triggers/webhook_router.rs:404
+fn verify_hmac_signature(secret, body, headers, mode) -> bool {
+    let Some(raw) = headers.get(mode.header_name()) else { return false };
+    let Ok(value) = raw.to_str() else { return false };
+    let Some(hex_part) = value.strip_prefix("sha256=") else { return false };
+    let Ok(provided) = decode_hex(hex_part) else { return false };
+    let mut mac = match <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()) { Ok(m) => m, Err(_) => return false };
+    mac.update(body);
+    mac.verify_slice(&provided).is_ok()
+}
+```
+
+```mermaid
+sequenceDiagram
+  participant Ext as 外部 POST
+  participant Axum as handle_webhook<br/>webhook_router.rs:292
+  participant Hmac as verify_hmac_signature<br/>:404
+  participant Emit as emitter.emit<br/>mod.rs:40
+  participant Disp as dispatchTrigger<br/>trigger-bridge.ts:43
+  Ext->>Axum: POST /webhook/{path} (<=1 MiB)
+  Axum->>Axum: 404 未知 / 503 禁用 / 405 方法
+  Axum->>Hmac: 按 SignatureMode 取头
+  Hmac-->>Axum: false => 统一 401
+  Axum->>Emit: emit kind trigger.webhook
+  Emit->>Disp: workflow:trigger
+  Axum->>Ext: response_status + response_body
+```
+
+### 崩溃恢复——运行镜像 + 恢复
+
+镜像是薄影子，非权威——Dexie 事件日志才是数据源。`open:60` 是懒的（注册路径，不碰磁盘）；`conn:96` 在首次真正使用时做 `get_or_try_init`（mkdir、打开、DDL）。`persist:134` 保留已有 snapshot/started_at（`INSERT ... ON CONFLICT(run_id) DO UPDATE`），因此快照仅首次持久化时必需。`list_in_flight:192` 选取 `status IN (pending/running/waiting/paused) ORDER BY started_at ASC`；`ack_completed:231` 直接 `DELETE` 该行。启动时 `reloadInFlightRuns`（`tauri-bridge.ts:63`）读取幸存者，恢复控制器以 `trigger.manual` 重跑（不经 `dispatchTrigger`，故钩子不重发）。
+
+```rust
+// src-tauri/src/workflow/run_mirror.rs:111
+CREATE TABLE IF NOT EXISTS workflow_run_mirror (
+    run_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, status TEXT NOT NULL,
+    last_step_id TEXT, snapshot_json TEXT NOT NULL, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_run_mirror_status ON workflow_run_mirror(status);
+CREATE INDEX IF NOT EXISTS idx_run_mirror_workflow ON workflow_run_mirror(workflow_id);
+-- PRAGMA journal_mode=WAL; synchronous=NORMAL (L108-109)
+```
+
+```mermaid
+sequenceDiagram
+  participant Run as runWorkflow<br/>(编排器)
+  participant Persist as RunMirror.persist<br/>run_mirror.rs:134
+  participant Crash as 进程重启
+  participant Reload as reloadInFlightRuns<br/>tauri-bridge.ts:63
+  participant Resume as resume-controller.ts:62
+  Run->>Persist: persist_run_state (快照仅首次)
+  Note over Crash: 进程在运行中途死亡
+  Crash->>Reload: 启动 -> list_in_flight (pending/running/waiting/paused)
+  Reload->>Resume: InFlightRunRow[]
+  Resume->>Run: 以 trigger.manual 重跑 (钩子不重发)
+  Run->>Persist: ack_completed => DELETE 行
+```
+
+## 坑点
+
+- **Web 模式完全空操作**——`isTauri()` 门（`tauri-bridge.ts:21`）：`safeInvoke` 返回 null，`reloadInFlightRuns` 返回 `[]`，监听器空操作。整个 Rust 平面永不启动。
+- **Webhook 仅桌面且端口短暂**——绑 `127.0.0.1:0`，故 URL 仅在绑定后经 `workflow_get_webhook_url` 可知。
+- **HMAC 细节**——`sha256=` 十六进制前缀，按 `SignatureMode` 取头，常数时间 `verify_slice`，任何失败统一 401；github 模式触发器不会校验 cognia 模式签名，反之亦然。
+- **Body 上限 1 MiB**——`RequestBodyLimitLayer` 在处理器运行前以 413 拒绝。
+- **镜像是薄影子**——Dexie 事件日志才权威；快照仅首次持久化必需；open 是懒的；`ack_completed` 删行。
+- **恢复绕过收口**——使用 `trigger.manual` 且不调用 `dispatchTrigger`，故插件触发钩子不重发。
+- **Cron 守护进程 vs OS 调度器**——进程内、`cron` crate 6-7 字段（秒）、`spawn` 必须用 `tauri::async_runtime::spawn`、`next_fire_at` 缓存、sleep 下限 25ms、空闲 1h 由 `Notify` 唤醒。
+- **索引范围**——`trigger-subscriptions` 仅索引 `connector.inbound` / `chat.message` / `goal.completed`；`run-status-bridge` 锁定 `[workflowId+startedAt]` v22 索引。
+
+## 另见
+
+- [index](./index) · [runtime-execution](./runtime-execution) · [data-model](./data-model) · [ui-runs](./ui-runs)
+- [../scheduler](../scheduler)（OS 级闹钟守护进程，区别于进程内 cron 守护进程）· [../platform-connectors](../platform-connectors)（`ConnectorBus` 入站源）
+- [ADR-0011 工作流子系统](../../adr/0011-workflows-subsystem)

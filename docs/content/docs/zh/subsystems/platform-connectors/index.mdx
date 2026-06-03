@@ -1,0 +1,288 @@
+---
+title: 平台连接器
+description: 把 AI 角色变成 11 个 IM 平台上的真实机器人 —— 单例 ConnectorBus 扇入/扇出、三层绑定栈、Dexie 支撑的 FIFO 出站队列（熔断器 + 令牌桶 + 死信）、PII 把关的自动模式 AI 回路，以及双向 A2UI 富内容桥。Webhook 签名校验与长连接套接字位于 Rust 侧。
+---
+
+# 平台连接器
+
+<Status variant="stable" />
+
+<TLDR>
+  11 个内置 IM 适配器（Telegram · Discord · Slack · Lark · OneBot v11/v12 · WeCom · WeChat OA ·
+  个人微信 · QQ 官方 · 钉钉 · Matrix）扇入到单例 **ConnectorBus**（`lib/connectors/bus.ts:78`）。
+  每条入站消息都跑一条 11 步流水线 —— 去重 → 适配器查找 → 三层绑定解析 → `TriggerPolicy` 评估 →
+  模式路由 → 审计 → 帮助/欢迎 → 路由处理器 → 工作流扇出。出站经过一个 Dexie FIFO 队列
+  （`lib/connectors/outbound-runner.ts:284`），外面包裹按会话的串行车道、熔断器、令牌桶、指数退避、
+  幂等 LRU 和死信落库。三种模式 —— `auto`（PII 把关的 AI 回复）、`manual`（人工输入）、
+  `draft`（AI 起草、人工审批）。Webhook 签名校验（HMAC / Ed25519 / AES-CBC）与 OneBot / Discord /
+  Lark 套接字运行在 Rust 侧（`src-tauri/src/connectors/`）。富交互内容经 **A2UI 桥**双向投影，回调绑定
+  持久化在 Dexie 中。
+</TLDR>
+
+<StatGrid>
+  <Stat label="内置适配器" value="11" hint="telegram · discord · slack · lark · onebot · wecom · wechat-oa · wechat-personal · qq-official · dingtalk · matrix" />
+  <Stat label="运行模式" value="3" hint="auto · manual · draft" />
+  <Stat label="Dexie 表" value="10" hint="adapterInstances · platformIdentities · inboundLedger · outboundQueue · conversationOverrides · connectorAudit · connectorDrafts · connectorAttachments · connectorCallbackBindings · connectorHeartbeats" />
+  <Stat label="审计种类" value="48" hint="types/connectors/audit.ts 中的 AuditKind 联合类型" />
+  <Stat label="签名校验算法" value="5" hint="Telegram secret-token · Slack HMAC v0 · Discord Ed25519 · Lark AES-CBC · WeChat SHA-1+AES" />
+  <Stat label="Tauri 命令" value="18" hint="src-tauri/src/connectors/commands.rs" />
+  <Stat label="审计上限" value="5000" hint="connectorAudit FIFO 环（lib/db/connector-audit.ts:13）" />
+</StatGrid>
+
+## 它是什么
+
+平台连接器把任意 Cognia 角色变成真实 IM 平台上的真实机器人。运营者在 **设置 → 连接** 里配置一个适配器、
+绑定到一个角色，机器人就会应答 —— 在 `auto` 模式下，它通过与应用内聊天完全相同的 build-options 流水线
+跑一次完整的 Claude 回合；在 `draft` 模式下，AI 准备好回复，由人在收件箱里审批；在 `manual` 模式下，
+人通过机器人手动输入。
+
+整个子系统是围绕单一单例的清晰扇入/扇出：
+
+- **扇入** —— 每个适配器把平台原始负载归一化为 `NormalizedInboundEvent`，调用
+  `bus.dispatchInboundFull(event)`。总线去重、解析绑定、评估触发策略、按模式路由，再交给运行时。
+- **扇出** —— 出站回复（AI / 人工 / 草稿审批 / 工作流）入到单一 Dexie 队列，由一个泵抽取，统一施加
+  静默时段、静音、熔断、限流、退避和死信 —— 无论来源为何。
+
+本页是**架构中枢**。模块地图里的每个方块都是一篇带行号级内部细节的专门技术页。各平台的配置指南见配套的
+[连接器配置](../../connectors/slack-setup)章节。
+
+## 模块地图
+
+<Cards>
+  <Card title="ConnectorBus 与运行时" href="./connector-bus" description="单例：11 步 dispatchInboundFull 流水线、edit/delete/system 短路、5 分支回调分发器、工作流扇出、运行时 routeHandler、生命周期注册表、凭证热重载" />
+  <Card title="适配器模型与注册表" href="./adapter-model" description="PlatformAdapter 契约、AdapterContext、能力标志 + A2UI 矩阵、buildAdapterFromRow 工厂、OAuth 注册表、共享 mention-extractor" />
+  <Card title="内置适配器" href="./built-in-adapters" description="全部 11 个平台 —— 传输 + 签名矩阵、四个深度适配器（Telegram / Discord / Lark / OneBot）、解析流水线、自身 id whoami 探测" />
+  <Card title="入站把关与策略" href="./inbound-gating" description="去重账本、@-gate、evaluatePolicy 规则/拦截器、三层 resolveBinding 栈、mode-router 决策、NormalizedInboundEvent + MessageSegment 类型" />
+  <Card title="出站队列与投递" href="./outbound-queue" description="FIFO 泵关卡、熔断器状态机、令牌桶、退避公式、幂等 LRU、死信、定时出站、DLQ 导出、任务徽章" />
+  <Card title="自动模式 AI 回路与 A2UI 桥" href="./ai-and-a2ui" description="PII 把关的 safeSendPrompt 回路、segment ⇄ A2UI 投影、surface 构建器、能力感知降级、工作流进度扇出、回调往返、附件缓存" />
+  <Card title="健康、审计与帮助" href="./health-audit" description="主动 + 被动心跳、总线级扫描、健康历史推导、审计环 + 导出、48 种 AuditKind 联合类型、帮助/欢迎卡片、快捷指令" />
+  <Card title="Rust 层" href="./rust-layer" description="axum webhook 接收器、5 个签名校验器、OneBot 反向 WS 桥、Lark protobuf 长连接、AES-256-GCM 附件缓存、OS keyring、18 个 Tauri 命令" />
+  <Card title="收件箱 UI 与插件扩展" href="./ui-and-plugins" description="ConnectorBusProvider 启动序列、三栏收件箱外壳、模式切换器 / 草稿编辑器 / 出站药丸、7 标签连接设置、插件适配器桥" />
+</Cards>
+
+## 分层架构
+
+```mermaid
+flowchart TB
+  subgraph Platform["Messaging Platforms (11)"]
+    direction LR
+    TG[Telegram] & DC[Discord] & SL[Slack] & LK[Lark] & OB[OneBot] & WC[WeCom] & WO[WeChat OA] & WP[WeChat personal] & QQ[QQ official] & DT[DingTalk] & MX[Matrix]
+  end
+
+  subgraph Rust["Rust · src-tauri/src/connectors/"]
+    direction TB
+    Axum["axum_app.rs:103<br/>webhook receiver + verify_webhook"]
+    Sig["sigverify/*<br/>HMAC · Ed25519 · AES-CBC · SHA-1"]
+    WsSrv["ws_server.rs:142<br/>OneBot reverse-WS bridge"]
+    LarkWs["lark_ws.rs:272<br/>Feishu protobuf long-conn"]
+    WsCli["ws_client.rs:47<br/>Discord gateway / Slack socket"]
+    Http["http_client.rs:77<br/>connectors_http_request"]
+    Keyring["keyring.rs:20<br/>OS secret store"]
+    Att["attachments.rs:40<br/>AES-256-GCM cache"]
+  end
+
+  subgraph TS["TS · lib/connectors/"]
+    direction TB
+    Ctx["adapter-context.ts:123<br/>ctx.emit"]
+    Adapters["adapters/&lt;platform&gt;/<br/>parse · serialize · transport · capability"]
+    Gate["at-gate.ts:117<br/>@-gate"]
+    Bus["ConnectorBus<br/>bus.ts:78"]
+    Dedup["dedup.ts:32"]
+    Policy["policy-eval.ts:131<br/>policy-resolve.ts:49"]
+    Router["mode-router.ts:21"]
+    Runtime["runtime.ts:288<br/>routeHandler"]
+    AiLoop["ai-loop/safe-send-prompt.ts:69<br/>PII gate"]
+    A2UI["a2ui-bridge/*<br/>segment ⇄ A2UI"]
+    Outbound["outbound-runner.ts:284<br/>FIFO pump"]
+    Sched["scheduled-outbound.ts:375"]
+    Health["health/heartbeat-sweep.ts:74"]
+  end
+
+  subgraph Storage["Dexie (schema v70)"]
+    direction LR
+    Inst[(adapterInstances)] & Ledger[(inboundLedger)] & Queue[(outboundQueue)] & Over[(conversationOverrides)] & Audit[(connectorAudit)] & Drafts[(connectorDrafts)] & Bindings[(connectorCallbackBindings)] & HB[(connectorHeartbeats)]
+  end
+
+  subgraph UI["UI"]
+    Provider["ConnectorBusProvider<br/>connector-bus-provider.tsx:54"]
+    Inbox["app/inbox/ · components/inbox/"]
+    Settings["settings/connections/"]
+  end
+
+  TG & DC & SL & LK --> Axum
+  Axum --> Sig --> Adapters
+  OB <--> WsSrv --> Adapters
+  LK <--> LarkWs --> Adapters
+  DC <--> WsCli --> Adapters
+  Adapters -- "ctx.emit" --> Ctx --> Bus
+  Adapters -. "before emit" .-> Gate
+  Bus --> Dedup & Policy & Router
+  Router --> Runtime
+  Runtime --> AiLoop
+  AiLoop --> A2UI
+  A2UI --> Outbound
+  Runtime --> Outbound
+  Outbound -- "send" --> Adapters
+  Adapters -- "HTTPS" --> Http
+  Sched --> Outbound
+  Provider -- "boots" --> Bus & Outbound & Health
+  Outbound -. enqueue .-> Queue
+  Bus -. audit .-> Audit
+  Runtime -. draft .-> Drafts
+  Settings <--> Inst
+  Inbox <--> Drafts & Over & Queue
+
+  classDef rust fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  classDef ts fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef storage fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef ui fill:#312e81,stroke:#818cf8,color:#e0e7ff
+  classDef ext fill:#0c4a6e,stroke:#38bdf8,color:#e0f2fe
+  class Axum,Sig,WsSrv,LarkWs,WsCli,Http,Keyring,Att rust
+  class Ctx,Adapters,Gate,Bus,Dedup,Policy,Router,Runtime,AiLoop,A2UI,Outbound,Sched,Health ts
+  class Inst,Ledger,Queue,Over,Audit,Drafts,Bindings,HB storage
+  class Provider,Inbox,Settings ui
+  class TG,DC,SL,LK,OB,WC,WO,WP,QQ,DT,MX ext
+```
+
+## 数据流：入站
+
+```mermaid
+sequenceDiagram
+  participant P as Platform
+  participant R as Rust (axum / WS)
+  participant A as TS Adapter
+  participant G as at-gate
+  participant B as ConnectorBus
+  participant D as Dexie
+  participant Run as runtime.ts
+  participant AI as safeSendPrompt
+
+  P->>R: webhook / WS / longpoll delivery
+  R->>R: verify signature (sigverify/*)
+  R->>A: emit connectors://… (decrypted payload)
+  A->>A: parse → NormalizedInboundEvent
+  A->>G: gateInboundEvent (blocklist / allowlist / @-strategy)
+  G-->>A: allowed?
+  A->>B: bus.dispatchInboundFull(event)
+  B->>D: recordAndCheckInbound (inboundLedger)
+  alt already seen
+    B-->>B: audit inbound.deduped, stop
+  else new
+    B->>D: adapterInstance / override / character
+    B->>B: resolveBinding (3-layer) → evaluatePolicy → routeInbound
+    B->>D: audit inbound.received / policy_blocked
+    B->>Run: routeHandler(event, decision, resolved)
+    alt decision = ai-run
+      Run->>AI: safeSendPrompt (PII gate)
+      AI-->>Run: captured reply + a2uiSurfaces
+      Run->>D: insert StoredMessage + enqueueOutbound
+    else draft-prepare
+      Run->>D: createDraft (human review)
+    else manual-store / store-only
+      Run->>D: StoredMessage only
+    end
+    B->>B: fanOutWorkflowTriggers (trigger.connector.inbound)
+  end
+```
+
+## 数据流：出站
+
+```mermaid
+sequenceDiagram
+  participant C as Caller<br/>(runtime / draft / scheduler / workflow)
+  participant Q as outboundQueue
+  participant R as outbound-runner
+  participant CB as Circuit Breaker
+  participant TB as Token Bucket
+  participant A as Adapter
+  participant P as Platform
+
+  C->>Q: enqueueOutbound(request)
+  Q-->>R: emitOutboundEnqueued (wake)
+  R->>Q: listDueNow → per-conversation lane
+  R->>R: muted? quiet-hours? → markFailed + defer (not a failure)
+  R->>R: idempotency LRU hit? → markSent
+  R->>CB: canPass()?
+  alt breaker open
+    R->>Q: markDeadlettered (circuit_open)
+  end
+  R->>TB: tryAcquire()
+  alt bucket empty
+    R->>Q: markFailed (rate_limited, +1s)
+  end
+  R->>Q: markSending (attempts++)
+  R->>A: send(request) | edit(editTargetMessageId)
+  A->>P: platform SDK / HTTP / WS
+  alt success
+    A-->>R: { ok, platformMessageId }
+    R->>Q: markSent + idempotency LRU(1000)
+  else failure
+    A-->>R: throw / { ok:false }
+    R->>CB: recordFailure
+    alt attempts < 5
+      R->>Q: markFailed + backoff min(60s, 1s·2^n) + jitter
+    else
+      R->>Q: markDeadlettered (max_attempts)
+    end
+  end
+```
+
+## 数据模型（Dexie，schema v70）
+
+| 表 | 主键 / 索引 | 用途 | 引入版本 |
+| --- | --- | --- | --- |
+| `adapterInstances` | `id, type, enabled, [type+enabled]` | 每个已配置机器人一行（type、settings、defaultCharacterId、trigger、quietHours、muted、capabilities） | v18 |
+| `platformIdentities` | `id, [platform+remoteUserId]` | 每个观察到的平台用户一行 | v18 |
+| `inboundLedger` | `&id, [adapterId+platformMessageId]`, `namespace` | 入站 + 回调 + 欢迎去重，1 万行上限 | v18（namespace v38） |
+| `outboundQueue` | `&id, [conversationKey+createdAt], [status+nextAttemptAt]` | 投递任务；`pending → sending → sent \| failed \| deadlettered`，5000 软上限 | v18（复合索引 v51） |
+| `conversationOverrides` | `&id, &conversationKey` | 按会话的模式 / 角色 / 静默时段覆写 | v18 |
+| `connectorAudit` | `&id, [adapterId+at], [adapterId+kind+at]` | 运营审计日志，5000 FIFO 环 | v18（[adapterId+kind+at] v51） |
+| `connectorDrafts` | `&id, [conversationKey+createdAt]` | 待人工审批的草稿 | v18 |
+| `connectorAttachments` | `&id, [adapterId+remoteRef], expiresAt` | 附件元数据镜像（二进制由 Rust 在磁盘上加密） | v18 |
+| `connectorCallbackBindings` | `&id, [adapterId+actionId]`, `kind` | 交互动作 → surface 绑定，TTL 30 天 | v41 |
+| `connectorHeartbeats` | `&id, [adapterId+at]` | 按适配器的存活，48 小时保留 | v51 |
+
+`inboxTelemetryEvents`（v49，3000 上限）是独立的高频面包屑日志，与 `connectorAudit` 解耦，使其轮转
+永不挤占运营可见的审计行。
+
+## 自旧文档以来的变化
+
+本章节替换的单页文档已与实现脱节。具体更正：
+
+| 旧文档的说法 | 实际情况 | 来源 |
+| --- | --- | --- |
+| 「七个内置适配器」 | 实际发布 **11** 个（新增 QQ 官方、WeCom、WeChat OA、个人微信、钉钉、Matrix） | `lib/connectors/adapter-registry.ts:42` |
+| 「Dexie v18」 | 连接器表始于 v18；schema 现已 **v70**（回调绑定 v41、心跳 v51） | `lib/db/schema.ts:163`、`:1535` |
+| 「自动模式 AI 回路是 Phase 1 桩」 | 回路是**真实的** —— `safeSendPrompt` 在 PII 把关后跑完整 Claude 回合 | `lib/connectors/ai-loop/safe-send-prompt.ts:69` |
+| 「`connectorAttachments` 仅有 schema」 | 抓取 + AES-256-GCM 缓存流水线已**上线** | `lib/connectors/attachment-fetcher.ts:65`、`src-tauri/src/connectors/attachments.rs:40` |
+| （缺失）交互内容 | 双向 **A2UI 桥**双方向投影富卡片，并持久化回调绑定 | `lib/connectors/a2ui-bridge/`、`adapters/_shared/a2ui-mapper.ts:171` |
+| （缺失）存活 | 主动 + 被动**心跳**通过单一总线级扫描驱动健康标签 | `lib/connectors/health/heartbeat-sweep.ts:74` |
+
+## 信任边界与 Web 模式降级
+
+- **签名校验在 Rust 侧。** Telegram secret-token、Slack HMAC v0（带 300 秒重放窗口）、Discord Ed25519、
+  Lark AES-CBC 解密 + verification-token、WeChat SHA-1 + AES 全部在 `src-tauri/src/connectors/sigverify/`
+  中运行，任何负载到达 TS 之前都已校验。axum 服务器默认仅绑定回环（`connectors_start_server`，
+  `commands.rs:57`）。
+- **除 keyring 封装外，密钥从不以明文越过 IPC 边界。** App secret 在 Rust 内部读取以建立 Lark 长连接；
+  TS 侧的凭证 getter 是惰性解析器，下一次调用即可取到轮换后的密钥。
+- **自动模式回路有 PII 把关。** 若入站文本或追加的系统提示未通过 `hasNoLeakingPii`，`safeSendPrompt`
+  会中止（不脱敏、不调用模型）—— 这是 Twin、Goal 和 Agent Team 共用的红线。
+- **Web 模式（无 Tauri）没有适配器。** 每种传输都需要 Rust 运行时。连接章节会显示横幅；收件箱的模式
+  切换器与编辑器发送对平台绑定的会话被禁用。
+
+## 相关子系统
+
+<Cards>
+  <Card title="A2UI" href="./a2ui" description="连接器桥投影的目标/源 surface 格式" />
+  <Card title="可视化工作流" href="./visual-workflows" description="trigger.connector.inbound + IM 触发的运行进度扇出" />
+  <Card title="调度器" href="./scheduler" description="connection:outbound:send + connection:scheduled:digest 执行器" />
+  <Card title="插件系统" href="./plugin-system" description="通过 manifest.connectors[] 贡献新平台适配器" />
+  <Card title="连接器配置" href="../../connectors/slack-setup" description="各平台运营者快速上手指南" />
+</Cards>
+
+## 相关 ADR
+
+- [ADR 0009 — Platform Connectors](../../adr/0009-platform-connectors)
+- [ADR 0025 — Unified Subscription](../../adr/0025-unified-subscription)（凭证 / keyring 模型）
+- [ADR 0036 — WeChat / WeCom Connectors](../../adr/0036-wechat-wecom-connectors)

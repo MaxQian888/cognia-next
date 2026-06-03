@@ -1,0 +1,13 @@
+{
+  "title": "Sandbox System",
+  "pages": [
+    "index",
+    "execution-overview",
+    "os-backends",
+    "sandboxed-tools",
+    "microvm-and-web",
+    "plugin-isolation",
+    "cua-remote-sandbox",
+    "observability-and-ui"
+  ]
+}

@@ -1,0 +1,151 @@
+---
+title: Overview
+description: How Cognia distils a person's documents, chats, and code into a chat-ready twin — multi-twin registry, a 7-stage redact-first ingest, a 6-agent distill, and send-time hybrid RAG with style few-shot, all running locally in the renderer.
+---
+
+# Employee Digital Twin
+
+<Status variant="beta">Beta · schema v70</Status>
+
+<TLDR>
+  The Employee Digital Twin distils a person's documents, chat exports, and code into four assets — a
+  **knowledge index** (RAG), a **style profile** (few-shot voice), a **playbook library**, and
+  **Character / Skill drafts**. At send time, `applyTwinContext` (`lib/twin/runtime/apply-twin-context.ts:170`)
+  embeds the user message once, runs hybrid (vector + BM25/RRF) retrieval with an optional lexical rerank,
+  picks style few-shot samples, and assembles a four-segment system prompt — now wired straight into
+  `resolveSendOptions` (`lib/claude/build-options.ts:625`). PII is replaced with `<KIND_NNN>` placeholders
+  **before** any embedding or LLM call; the reverse map is AES-GCM-256 encrypted on disk
+  (`lib/twin/ingest/redaction-key.ts:255`).
+</TLDR>
+
+<StatGrid>
+  <Stat label="Source files" value="80+" hint="lib/twin + lib/db/twin-* + components/twin + types" />
+  <Stat label="Dexie tables" value="6" hint="twins + 5 twin* tables (v14 / registry v34)" />
+  <Stat label="Ingest stages" value="7" hint="dispatch → parse → redact → chunk → embed → persist → finalize" />
+  <Stat label="Distill agents" value="6" hint="knowledge · entity-merge · style · playbook · synthesizer · evaluator" />
+  <Stat label="Workbench tabs" value="5" hint="Sources · Jobs · Drafts · Persona · Settings" />
+  <Stat label="PII kinds redacted" value="11" hint="email · phone · id · card · name · ip · key · jwt · pem · passport · licence" />
+</StatGrid>
+
+The **Employee Digital Twin** is Cognia's deepest customisation surface. It distils a user's documents,
+chat exports, and code into:
+
+- A **knowledge index** (RAG) — retrieve the most relevant chunks at send time.
+- A **style profile** — sample the user's prose so the assistant writes in their voice.
+- A **playbook library** — repeated work patterns extracted by the distill agents.
+- **Character + Skill drafts** — auto-synthesised, queued for human review before they ever touch the live picker.
+
+The full design rationale is in [ADR-0003](../../adr/0003-employee-digital-twin). This section documents the
+**current implementation**, module by module.
+
+## Where it lives
+
+```
+lib/twin/
+  ingest/        # 7-stage redact-first ingest pipeline + job-runner
+  importers/     # third-party chat/code/email export → RawSource
+  distill/       # 6-agent distill pipeline + job-runner + PII guards
+  runtime/       # send-time hybrid RAG + rerank + style few-shot
+  cron/          # per-twin cron ⇄ scheduler reconciliation
+  job-worker.ts  # drains the twinJobs queue (concurrency caps + backoff)
+  job-retry.ts   # exponential backoff + dead-letter math
+
+types/twin/index.ts   # the whole type model (Twin, Source, Chunk, Profile, Draft, Job, Settings)
+lib/db/twin-*.ts      # 6 Dexie tables + the twin-runtime settings row
+components/twin/       # the 5-tab workbench UI + persona sub-tabs + dialogs
+app/twin/page.tsx     # workbench route
+```
+
+## The lifecycle at a glance
+
+```mermaid
+flowchart LR
+  subgraph Author["Author time — workbench"]
+    IMP[Importers<br/>chat / code / email] --> SRC[(twinSources)]
+    SRC --> ING[Ingest pipeline<br/>redact → chunk → embed]
+    ING --> CHK[(twinChunks +<br/>vector store)]
+    CHK --> DIS[Distill pipeline<br/>6 agents]
+    DIS --> PROF[(twinProfile)]
+    DIS --> DRF[(twinDrafts<br/>pending review)]
+    DRF --> ACC[Accept] --> CHAR[(characters /<br/>skills)]
+  end
+
+  subgraph Send["Send time — chat / team / workflow"]
+    MSG[user message] --> RT[applyTwinContext]
+    CHK -. RAG .-> RT
+    PROF -. style + entities .-> RT
+    RT --> SP[four-segment<br/>system prompt]
+  end
+
+  CHAR -. Character.twinId .-> RT
+
+  classDef io fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef out fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  class SRC,CHK,PROF,DRF,CHAR io
+  class IMP,ING,DIS,ACC,RT step
+  class SP,MSG out
+```
+
+Each box is a chapter in this section. Read the [data model](./data-model) first — every other module is
+phrased in terms of those tables.
+
+## Multi-twin by design
+
+A "twin" is a first-class registry row (`Twin`, `types/twin/index.ts:480`), but binding is **soft**: a
+Character opts in via `Character.twinId` and tunes the runtime via `Character.twinSettings`.
+
+<TypeTable
+  type={{
+    enableRag: { description: "Retrieve chunks from the bound twin at send time.", type: "boolean", default: "true" },
+    ragTopK: { description: "How many chunks to keep per send (after fusion / rerank).", type: "number", default: "6" },
+    enableHybrid: { description: "Fuse BM25 keyword retrieval with vector search via Reciprocal Rank Fusion.", type: "boolean", default: "false" },
+    hybridKeywordWeight: { description: "Weight of the BM25 list in RRF (0–1); the vector list takes 1 − this.", type: "number", default: "0.5" },
+    enableStyleFewShot: { description: "Include style few-shot samples in the system prompt.", type: "boolean", default: "true" },
+    styleSamplesK: { description: "How many style samples to include (ranked by topical similarity).", type: "number", default: "3" },
+  }}
+/>
+
+`DEFAULT_TWIN_SETTINGS` lives at `types/twin/index.ts:445`. Multiple characters can share one twin, and a
+single Dexie database hosts many twins (self / mentor / predecessor) — every twin-scoped row carries a
+`twinId`. The registry (`lib/db/twins.ts`) owns create / rename / clone / archive and a **cascading delete**
+(`deleteTwin`, `lib/db/twins.ts:110`) that wipes every twin-scoped table, detaches referencing characters,
+removes both cron tasks, and drops the remote vector collection.
+
+## The privacy red-line
+
+<Callout type="warn" title="Redact before anything leaves the renderer">
+  Stage 3 of ingest (`redact`, `lib/twin/ingest/redact.ts:227`) replaces 11 kinds of PII with
+  `<KIND_NNN>` placeholders **before** the chunk is embedded or sent to any LLM. Only `contentRedacted`
+  ever reaches the embedder (`lib/twin/ingest/embed.ts:48`) or the remote vector payload
+  (`lib/twin/ingest/persist.ts:137`). The reverse map is AES-GCM-256 encrypted on disk and the raw text is
+  never persisted.
+</Callout>
+
+| Concern | Where it is mitigated |
+| --- | --- |
+| PII in chunks | `redactText` scrubs before embed/LLM; only `contentRedacted` is sent (`redact.ts:227`) |
+| Reverse map at rest | AES-GCM-256, key in OS keyring (Tauri) or AES-encrypted in Dexie (web) (`redaction-key.ts`) |
+| Hallucinated PII in drafts | Two-tier guard — persist-time re-redact (`distill/job-runner.ts`) + edit-time deep scan (`draft-pii-guard.ts:54`) |
+| Cloud egress | Vector backend defaults to **native sqlite-vec** on desktop; cloud only on opt-in (`twin-runtime-settings.ts:50`) |
+| Key loss vs first run | SHA-256 key fingerprint latch throws `RedactionKeyMismatchError` instead of silently re-keying (`redaction-key.ts:177`) |
+
+## Module map
+
+<Cards>
+  <Card title="Data model" href="./data-model" description="The 7 type clusters, 6 Dexie tables + index strings, schema history, and the DB CRUD layer." />
+  <Card title="Ingest pipeline" href="./ingest-pipeline" description="The 7-stage redact-first pipeline: dispatch, parse, redact, chunk, embed, persist, finalize." />
+  <Card title="Importers" href="./importers" description="Chat (7 platforms), git-repo, and email exports normalised into RawSource markdown." />
+  <Card title="Distill pipeline" href="./distill-pipeline" description="The 6 sequential agents, the LlmClient seam, pin preservation, and the two-tier PII defense." />
+  <Card title="Runtime" href="./runtime" description="Send-time applyTwinContext: hybrid RAG, RRF fusion, lexical rerank, style few-shot, prompt assembly." />
+  <Card title="Jobs & scheduling" href="./jobs-and-scheduling" description="The job worker, lease-based crash recovery, exponential backoff, and per-twin cron." />
+  <Card title="Workbench UI" href="./workbench-ui" description="The 5-tab workbench, the source uploader, the draft accept flow, and the persona browser." />
+</Cards>
+
+## Related
+
+<Cards>
+  <Card title="Vector store" href="../../data/vector-store" description="How RAG retrieval is physically executed." />
+  <Card title="Storage" href="../../data/storage" description="The full Dexie schema the twin tables live in." />
+  <Card title="ADR-0003" href="../../adr/0003-employee-digital-twin" description="The original design rationale." />
+</Cards>

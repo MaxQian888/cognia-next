@@ -1,0 +1,15 @@
+{
+  "title": "Plugin system",
+  "pages": [
+    "index",
+    "core-runtime",
+    "context-api",
+    "bridges",
+    "contracts-and-registries",
+    "security",
+    "messaging-and-sandbox",
+    "packaging-and-lifecycle",
+    "dexie-and-devtools",
+    "vscode-and-lsp"
+  ]
+}

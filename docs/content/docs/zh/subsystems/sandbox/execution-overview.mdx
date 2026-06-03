@@ -1,0 +1,162 @@
+---
+title: "执行沙盒总览"
+description: "ADR-0028 的五层混合执行沙盒：启用它的 build-options 优先级链、它如何将 SDK 内置工具替换为 sandbox_* 工具、严格模式，以及审计面。"
+---
+
+# 执行沙盒总览
+
+<Status variant="beta" />
+
+<TLDR>
+  当某个 `ChatSession` 启用了沙盒时，`lib/claude/build-options.ts:resolveSendOptions`
+  会**移除 SDK 的 `Bash` / `Edit` / `Write` 内置工具**以及原生 `text_editor`，追加一条
+  系统提示说明，并将当前层级写入 `microvm-bridge`。随后模型会被引导至
+  四个 `sandbox_*` 工具（来自 `cognia-sandboxed-tools` 插件），这些工具会路由到 OS
+  后端（T1）或 e2b microVM（T4）。T2/T3 层负责插件代码；T5 是针对 `computer_use` 的
+  按动作策略门。这里**没有任何旁路**——当某个后端不可用时，调用将被拒绝。
+</TLDR>
+
+## 五个层级
+
+T1–T5 覆盖正交的威胁面。并非每个会话都会触及每个层级。
+
+| 层级   | 保护对象                                   | 机制                                                              | 所在位置                                                       |
+| ------ | ------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------- |
+| **T1** | `Bash` / `Edit` / `Write` / `text_editor`  | OS 原生：`bwrap`（Linux）、`sandbox-exec`（macOS）、runner（Win） | [OS 后端](./os-backends)                                      |
+| **T2** | 插件 JS 执行器                             | 依据清单权限以 Node 24 `--permission` 重执行                       | [插件隔离](./plugin-isolation)                               |
+| **T3** | 插件 WASM 模块                            | Wasmtime + WASI，预打开项来自授权账本                              | [插件隔离](./plugin-isolation)                               |
+| **T4** | 为 T1 工具按需提供更强隔离                 | e2b Firecracker microVM（按角色 / 按应用层级）                     | [microVM 与 Web](./microvm-and-web)                         |
+| **T5** | `computer_use`（无法进行进程级沙盒化）      | 按动作策略门（app / window / url / 屏幕区域）                      | [可观测性与 UI](./observability-and-ui)                     |
+
+## 是什么启用了它——优先级链
+
+整个特性由 `lib/claude/build-options.ts` 中解析出的一个布尔值控制。该链按
+session → character → app-settings 依次走，默认为**关闭**：
+
+```ts title="lib/claude/build-options.ts:1134-1138"
+const sandboxEnabled =
+  session?.sandboxEnabled ??
+  character?.sandboxEnabled ??
+  appSettings?.sandboxDefaultEnabled ??
+  false
+```
+
+层级则单独解析。注意这里**没有 `session.sandboxTier`**——该链从
+character 开始：
+
+```ts title="lib/claude/build-options.ts:1152-1153"
+const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
+setActiveSandboxTier(session?.id, sandboxTier)
+```
+
+`setActiveSandboxTier`（在 `build-options.ts:13` 处从 `@/lib/sandbox/microvm-bridge` 导入）会写入
+该层级，以便 `cognia-sandboxed-tools` 插件能在其 `execute()` 内部读取它——见
+[microVM 与 Web](./microvm-and-web)。
+
+### 配置字段映射
+
+这三个配置字段都位于 `lib/claude/types.ts`（而非 `lib/db/schema.ts`）中的接口上：
+
+| 字段                    | 接口          | 位置                   | 类型                          |
+| ----------------------- | ------------- | ---------------------- | ----------------------------- |
+| `sandboxEnabled`        | `ChatSession` | `lib/claude/types.ts:689`  | `boolean \| undefined`        |
+| `sandboxEnabled`        | `Character`   | `lib/claude/types.ts:2054` | `boolean \| undefined`        |
+| `sandboxDefaultEnabled` | `AppSettings` | `lib/claude/types.ts:1545` | `boolean \| undefined`        |
+| `sandboxTier`           | `Character`   | `lib/claude/types.ts:2062` | `"os" \| "microvm" \| undefined` |
+| `sandboxTier`           | `AppSettings` | `lib/claude/types.ts:1555` | `"os" \| "microvm" \| undefined` |
+
+## 工具替换
+
+当 `sandboxEnabled` 为 true 时，SDK 内置工具会被拒绝，原生编辑器工具会从
+Anthropic 工具投影中剥离——这样模型就**无法**触及任何未沙盒化的路径：
+
+```ts title="lib/claude/build-options.ts:1139-1147"
+if (sandboxEnabled) {
+  const disallowed = new Set(opts.disallowedTools ?? [])
+  for (const t of ["Bash", "Edit", "Write"]) disallowed.add(t)
+  opts.disallowedTools = [...disallowed]
+  if (Array.isArray(opts.anthropicTools)) {
+    opts.anthropicTools = opts.anthropicTools.filter(
+      (t) => t.name !== "text_editor" && t.name !== "str_replace_based_edit_tool"
+    )
+  }
+```
+
+这四个 `sandbox_*` 替代工具**并非**在此处添加——它们已经在 `opts.pluginTools`
+中（由 `buildPluginToolsManifest()` 从 `cognia-sandboxed-tools` 插件在上游构建）。此代码块
+仅移除未沙盒化路径，然后用一条系统提示说明引导模型：
+
+```ts title="lib/claude/build-options.ts:1154-1161"
+const sandboxHint =
+  "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
+  "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
+  "(from cognia-sandboxed-tools) instead of the SDK builtins; they accept the " +
+  "same shape plus an explicit writable/readable scope. The unsandboxed Bash / " +
+  "Edit / Write are not available in this session."
+const existing = opts.appendSystemPrompt?.trim() ?? ""
+opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
+```
+
+当沙盒被**禁用**时，else 分支会重置该层级，以免同一 session id 上一次发送
+留下的过期值泄漏到下一次调用：
+
+```ts title="lib/claude/build-options.ts:1162-1166"
+} else {
+  // Sandbox disabled — make sure stale tier state from a previous send
+  // on the same session id doesn't leak into the next call.
+  setActiveSandboxTier(session?.id, "os")
+}
+```
+
+## 端到端流程
+
+```mermaid
+flowchart TD
+  Start([resolveSendOptions]) --> Resolve["sandboxEnabled =<br/>session ?? character ?? appSettings ?? false<br/>(1134-1138)"]
+  Resolve --> Gate{enabled?}
+
+  Gate -->|true| Deny["disallowedTools += Bash / Edit / Write<br/>(1140-1142)"]
+  Deny --> Filter["strip text_editor &<br/>str_replace_based_edit_tool<br/>from anthropicTools (1143-1147)"]
+  Filter --> Tier["sandboxTier =<br/>character ?? appSettings ?? 'os' (1152)"]
+  Tier --> Stamp["setActiveSandboxTier(session.id, tier) (1153)"]
+  Stamp --> Hint["append sandboxHint (1154-1161)"]
+  Hint --> Done([send])
+
+  Gate -->|false| Reset["setActiveSandboxTier(session.id, 'os') (1165)"]
+  Reset --> Done
+
+  Done -.->|"model calls sandbox_bash"| Plugin["cognia-sandboxed-tools.execute()"]
+  Plugin --> Router{"getActiveSandboxTier(sessionId)"}
+  Router -->|os| OSExec["transport.call('sandbox_exec') → Rust backend"]
+  Router -->|microvm| MV["getMicrovmExec() → e2b (strict: throw if unregistered)"]
+
+  classDef on fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class Deny,Filter,Tier,Stamp,Hint on
+```
+
+## 严格模式——没有旁路
+
+ADR-0028 写得很明确：当某个 T1 后端不可用时（Windows setup 未运行、`bwrap` 缺失、
+runner 以非零退出），工具调用会**严格拒绝**。在策略层既没有用于关闭沙盒的设置开关，
+也没有 `COGNIA_SANDBOX_BYPASS` 环境变量后门。渲染端会改为显示一个
+「Setup required」徽章和一个「Retry setup」按钮。microVM 层同理：如果某个
+会话解析到 `microvm` 但没有注册任何 e2b exec，`cognia-sandboxed-tools` 插件会
+抛出异常，而不是悄悄回退到 OS 层（见 [沙盒化工具](./sandboxed-tools)）。
+
+## 审计面
+
+每一次 OS 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个
+`Sandbox` 变体（`src-tauri/src/automation/permission.rs:53`）；调度器会为每次
+`sandbox_exec` 调用记录一条 allow/deny/error 的 `AuditEntry` 并发出一个 `automation:event`
+（`src-tauri/src/sandbox/mod.rs:99-158`）。由于沙盒拥有自己的严格模式策略，
+共享权限门会对其短路——`Surface::Sandbox => Decision::Allow`
+（`permission.rs:325`）——同时全局 kill-switch 仍会出于纵深防御而拦截。
+诊断标签页通过 `SandboxAuditCard` 渲染这些记录；见 [可观测性与 UI](./observability-and-ui)。
+
+## 下一步
+
+<Cards>
+  <Card title="OS 后端（T1）" href="./os-backends" description="sandbox_exec 背后的 Rust crate" />
+  <Card title="沙盒化工具" href="./sandboxed-tools" description="四个 sandbox_* 工具" />
+  <Card title="microVM 与 Web" href="./microvm-and-web" description="T4 e2b 层级 + 层级路由" />
+</Cards>

@@ -1,0 +1,14 @@
+{
+  "title": "可视化工作流",
+  "pages": [
+    "index",
+    "data-model",
+    "editor-store",
+    "expressions-copilot",
+    "node-system",
+    "ai-pattern-nodes",
+    "runtime-execution",
+    "triggers-rust",
+    "ui-runs"
+  ]
+}

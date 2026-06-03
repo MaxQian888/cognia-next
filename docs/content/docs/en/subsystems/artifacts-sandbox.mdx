@@ -7,6 +7,13 @@ description: "One-shot content artifacts: iframe-isolated HTML / SVG / React pre
 
 <Status variant="stable" />
 
+<Callout type="info">
+  This page covers the **rendering sandbox** — the iframe + CSP + DOMPurify isolation for one-shot
+  model artifacts. It is one of four sandbox families in cognia-next. For the execution sandbox
+  (ADR-0028 OS / microVM tiers), the CUA remote desktop sandbox, and plugin isolation, see the
+  [Sandbox System](./sandbox) section.
+</Callout>
+
 <TLDR>
   When the model generates HTML / SVG / React / Mermaid / Chart / Math / Jupyter, cognia-next wraps
   it into an `Artifact` row written to the Zustand store, then renders it in the UI through one of 9

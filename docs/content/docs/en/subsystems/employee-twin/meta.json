@@ -1,0 +1,13 @@
+{
+  "title": "Employee Digital Twin",
+  "pages": [
+    "index",
+    "data-model",
+    "ingest-pipeline",
+    "importers",
+    "distill-pipeline",
+    "runtime",
+    "jobs-and-scheduling",
+    "workbench-ui"
+  ]
+}

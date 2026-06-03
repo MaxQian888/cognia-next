@@ -12,7 +12,9 @@ import {
   isCreateSurfaceMessage,
   isUpdateComponentsMessage,
   isUpdateDataModelMessage,
+  isConnectorActionMessage,
 } from "./parser"
+import type { A2UIConnectorActionMessage } from "@/types/a2ui/schema"
 
 describe("A2UI Parser", () => {
   describe("parseA2UIMessages", () => {
@@ -178,6 +180,17 @@ describe("A2UI Parser", () => {
     it("should identify dataModelUpdate messages", () => {
       const msg = { type: "dataModelUpdate" as const, surfaceId: "test", data: {} }
       expect(isUpdateDataModelMessage(msg)).toBe(true)
+    })
+
+    it("should identify connectorAction messages and reject server messages", () => {
+      const action: A2UIConnectorActionMessage = {
+        type: "connectorAction",
+        surfaceId: "test",
+        actionType: "button",
+        value: "approve",
+      }
+      expect(isConnectorActionMessage(action)).toBe(true)
+      expect(isConnectorActionMessage({ type: "surfaceReady", surfaceId: "test" })).toBe(false)
     })
   })
 

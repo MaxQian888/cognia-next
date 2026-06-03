@@ -3,9 +3,11 @@
 //
 // Spawned by external agents (Claude Code CLI, Cursor, Codex, Gemini, …)
 // when they're configured with a `cognia-next` MCP entry pointing at this
-// file. The four tools (a2ui_create_surface / a2ui_update_components /
-// a2ui_data_model_update / a2ui_delete_surface) speak the same JSON Schema
-// as the in-process server in `sidecar/a2ui-tools/index.mjs`.
+// file. The five tools (a2ui_create_surface / a2ui_update_components /
+// a2ui_data_model_update / a2ui_delete_surface / a2ui_handle_connector_action)
+// speak the same contract as the in-process server in
+// `sidecar/a2ui-tools/index.mjs` — both import `tool-defs.mjs` so the schemas
+// and the args→dispatch mapping never drift.
 //
 // Transport: JSON-RPC 2.0 over newline-delimited stdin/stdout, per the
 // MCP stdio spec (https://modelcontextprotocol.io/specification/server/stdio).
@@ -26,110 +28,13 @@ import readline from "node:readline"
 import net from "node:net"
 import { randomUUID } from "node:crypto"
 
-const VERSION = "0.9.0"
-const SERVER_NAME = "a2ui-bridge"
+import { SERVER_NAME, SERVER_VERSION, rawTools, buildDispatch } from "./a2ui-tools/tool-defs.mjs"
 
-// ---- Tool schemas (mirror sidecar/a2ui-tools/index.mjs) -------------------
+const VERSION = SERVER_VERSION
 
-const componentSchema = {
-  type: "object",
-  required: ["id", "component"],
-  properties: { id: { type: "string" }, component: { type: "string" } },
-  additionalProperties: true,
-}
-const widgetSchema = {
-  type: "object",
-  additionalProperties: true,
-  properties: {
-    hostStrategy: {
-      type: "string",
-      enum: ["native", "artifact-preview", "sandboxed-html", "lazy-runtime"],
-    },
-    sizing: { type: "string", enum: ["auto", "content-height", "fixed-height"] },
-    theme: { type: "string", enum: ["inherit", "light", "dark"] },
-    showChrome: { type: "boolean" },
-    fallbackText: { type: "string" },
-    minHeight: { type: "number" },
-  },
-}
-
-const TOOLS = [
-  {
-    name: "a2ui_create_surface",
-    description: "Create a new A2UI surface. Reuse the same surfaceId on subsequent updates.",
-    inputSchema: {
-      type: "object",
-      required: ["surfaceId", "surfaceType"],
-      properties: {
-        surfaceId: { type: "string" },
-        surfaceType: { type: "string", enum: ["inline", "dialog", "panel", "fullscreen"] },
-        catalogId: { type: "string" },
-        title: { type: "string" },
-        widget: widgetSchema,
-      },
-    },
-  },
-  {
-    name: "a2ui_update_components",
-    description: "Replace the components tree on an existing surface.",
-    inputSchema: {
-      type: "object",
-      required: ["surfaceId", "components"],
-      properties: {
-        surfaceId: { type: "string" },
-        components: { type: "array", minItems: 1, items: componentSchema },
-      },
-    },
-  },
-  {
-    name: "a2ui_data_model_update",
-    description: "Patch (or replace) the surface's data model.",
-    inputSchema: {
-      type: "object",
-      required: ["surfaceId", "data"],
-      properties: {
-        surfaceId: { type: "string" },
-        data: { type: "object", additionalProperties: true },
-        merge: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "a2ui_delete_surface",
-    description: "Remove an A2UI surface and free its resources.",
-    inputSchema: {
-      type: "object",
-      required: ["surfaceId"],
-      properties: { surfaceId: { type: "string" } },
-    },
-  },
-]
-
-const TOOL_TO_DISPATCH = {
-  a2ui_create_surface: (args) => ({
-    type: "createSurface",
-    surfaceId: args.surfaceId,
-    surfaceType: args.surfaceType,
-    catalogId: args.catalogId,
-    title: args.title,
-    widget: args.widget,
-  }),
-  a2ui_update_components: (args) => ({
-    type: "updateComponents",
-    surfaceId: args.surfaceId,
-    components: args.components,
-  }),
-  a2ui_data_model_update: (args) => ({
-    type: "dataModelUpdate",
-    surfaceId: args.surfaceId,
-    data: args.data,
-    merge: args.merge ?? true,
-  }),
-  a2ui_delete_surface: (args) => ({
-    type: "deleteSurface",
-    surfaceId: args.surfaceId,
-  }),
-}
+// Tool schemas + the args→dispatch mapping live in the shared tool-defs module
+// so this stand-alone server and the in-process SDK server cannot drift.
+const TOOLS = rawTools()
 
 // ---- IPC to cognia-next renderer ------------------------------------------
 
@@ -218,12 +123,11 @@ function handle(req) {
     case "tools/call": {
       const name = params?.name
       const args = params?.arguments ?? {}
-      const builder = TOOL_TO_DISPATCH[name]
-      if (!builder) {
+      const message = buildDispatch(name, args)
+      if (!message) {
         sendError(id, -32601, `unknown tool: ${name}`)
         return
       }
-      const message = builder(args)
       const dispatched = dispatch(message)
       sendResponse(id, {
         content: [

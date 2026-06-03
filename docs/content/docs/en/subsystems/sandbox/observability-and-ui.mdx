@@ -1,0 +1,163 @@
+---
+title: "Observability & UI"
+description: "Every user-facing sandbox surface: the composer shield indicator, the Diagnostics audit + sidecar-restart cards, the CUA Sandboxes tab, the onboarding tour slide, and the built-but-orphaned Settings → Sandbox section."
+---
+
+# Observability & UI
+
+<Status variant="beta" />
+
+<TLDR>
+  Four sandbox surfaces are **shipped and reachable**: the composer **shield** indicator (3 states),
+  the **Diagnostics** audit-log + sidecar-restart cards, the **Automation → Sandboxes** tab (CUA), and
+  the **onboarding** tour slide. One is **built and tested but unreachable**: the dedicated
+  **Settings → Sandbox** section (health/retry + tier picker + T5 policy editor) exists but is not
+  registered in the nav or shell, and the onboarding slide deep-links to it (a dead link). This page
+  maps each surface and how to light up the orphaned one.
+</TLDR>
+
+## Surface map
+
+```mermaid
+flowchart TD
+  subgraph Reachable["Reachable today"]
+    BT["bottom-toolbar.tsx"] --> SS["SandboxShield<br/>filled / dashed / crossed"]
+    AUTO["Settings → Automation"] --> SCT["SandboxConnectionsTab (CUA)"]
+    DIAG["Settings → Diagnostics"] --> SAC["SandboxAuditCard"]
+    DIAG --> SRC["SidecarRestartCard"]
+    OB["Onboarding tour slide"]
+  end
+  subgraph Orphan["Built but UNREACHABLE"]
+    SEC["SandboxSection"] --> TIER["SandboxTierCard (OS / microVM)"]
+    SEC --> POL["AutomationPolicyCard (T5)"]
+  end
+  OB -. "href=?section=sandbox (dead)" .-> SEC
+  NAV["settings-nav-config.ts"] -. "no id:sandbox" .-x SEC
+  SHELL["settings-shell.tsx"] -. "no dynamic import" .-x SEC
+  SAC --> DEXIE[("Dexie automationAuditLog")]
+  RUST["permission.rs Surface::Sandbox"] --> DEXIE
+
+  classDef ok fill:#064e3b,stroke:#34d399,color:#d1fae5
+  classDef bad fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class BT,SS,AUTO,SCT,DIAG,SAC,SRC,OB ok
+  class SEC,TIER,POL bad
+```
+
+## Composer shield — shipped & wired
+
+`components/chat/composer/sandbox-shield.tsx` renders a 3-state indicator with **shape paired to
+colour** for colour-blind safety, mounted in `bottom-toolbar.tsx:101`. State comes from a pure
+precedence resolver (session → character → app settings):
+
+```ts title="components/chat/composer/sandbox-shield.tsx:34-46"
+export function resolveShieldState(args: {
+  session: ChatSession | null | undefined
+  characterSandboxEnabled?: boolean
+  characterSandboxTier?: "os" | "microvm"
+  defaultEnabled?: boolean
+  defaultTier?: "os" | "microvm"
+}): ShieldState {
+  const enabled =
+    args.session?.sandboxEnabled ?? args.characterSandboxEnabled ?? args.defaultEnabled ?? false
+  if (!enabled) return "off"
+  const tier = args.characterSandboxTier ?? args.defaultTier ?? "os"
+  return tier
+}
+```
+
+- filled emerald `Shield` — sandbox on, OS tier
+- dashed sky `Shield` (`[stroke-dasharray:3_2]`) — sandbox on, microVM tier
+- crossed muted `ShieldOff` — sandbox off (today's default)
+
+The health for this badge comes from `hooks/sandbox/use-sandbox-health.ts:useSandboxHealth`, which
+polls the `sandbox_health_probe` Tauri command every 5 s and tolerates both `last_error` (snake) and
+`lastError` (camel) shapes from serde.
+
+## Diagnostics — shipped & wired
+
+`components/settings/sections/diagnostics-section.tsx` mounts two ADR-0028 cards:
+
+- **`SandboxAuditCard`** — reads the Dexie `automationAuditLog`, filters
+  `row.surface === "sandbox"` (`sandbox-audit-card.tsx:39`), and shows the newest 50 rows with
+  allow/deny/error colouring + duration.
+- **`SidecarRestartCard`** — polls the `sidecar_restart_count` IPC every 5 s, showing the count and
+  last-restart stamp.
+
+The audit data originates in Rust: the `Surface` enum carries a `Sandbox` variant
+(`src-tauri/src/automation/permission.rs:53`), and `sandbox_exec` records an `AuditEntry` for every
+call (see [Execution overview](./execution-overview)).
+
+## Automation → Sandboxes tab (CUA) — shipped & wired
+
+`components/settings/automation/sandbox-connections-tab.tsx` is the registry UI for the CUA Docker
+sandboxes (the only sandbox UI a user can currently reach via a dedicated tab). It is mounted in
+`automation-section.tsx` — the `TabId` union includes `"sandboxes"` (line 77), with
+`<TabsContent value="sandboxes"><SandboxConnectionsTab /></TabsContent>` (lines 131-133). Lifecycle
+buttons are disabled in web mode (`isTauri()`). See [CUA remote sandbox](./cua-remote-sandbox).
+
+## Onboarding tour slide — shipped (with a dead link)
+
+`components/shell/onboarding-dialog.tsx` puts sandbox first in the tour slides
+(`TOUR_SLIDES[0]`, lines 61-64). The slide's CTA links to `/settings?section=sandbox`:
+
+```ts title="components/shell/onboarding-dialog.tsx:61-64"
+{ id: "sandbox", icon: ShieldCheckIcon, href: "/settings?section=sandbox" }
+```
+
+<Callout type="warn">
+  That href points at `?section=sandbox`, which renders **nothing** — there is no `sandbox` section
+  registered (see below). It is a broken deep-link until the section is wired.
+</Callout>
+
+## Settings → Sandbox section — built, tested, but ORPHANED
+
+A complete, tested section exists under `components/settings/sandbox/` but is **not reachable**:
+
+- **`sandbox-section.tsx`** — `SandboxSection`: a health card with a tri-state badge driven by
+  `useSandboxHealth()` and a "Retry setup" button (`data-testid="sandbox-retry-button"`), composing
+  the two cards below.
+- **`sandbox-tier-card.tsx`** — the default-tier picker (OS / microVM radio group), writing
+  `AppSettings.sandboxTier`.
+- **`automation-policy-card.tsx`** — the **T5** per-action policy editor: `allowedProcessNames`,
+  `allowedWindowTitlePatterns` (regex), `allowedUrlPatterns` (regex), `forbiddenScreenRegions`
+  (x/y/w/h), debounced-saved via `saveAutomationPolicy`.
+
+Why it is unreachable:
+
+- `settings-shell.tsx` has `dynamic()` imports for ~40 sections but **none for `sandbox-section`**.
+- `settings-nav-config.ts` has no `id: "sandbox"` NavItem — the only `"sandbox"` hit
+  (`settings-nav-config.ts:798`) is a search keyword under the `canvas` entry.
+
+<Callout type="info">
+  To light it up: add an `id: "sandbox"` NavItem to `settings-nav-config.ts`, add a `dynamic()`
+  import + render branch in `settings-shell.tsx`, and the onboarding deep-link starts working. The
+  **per-tool network policy editor** that ADR-0028 proposed is the one piece still absent — the tier
+  picker and the T5 per-action policy editor already exist.
+</Callout>
+
+## i18n namespaces
+
+Sandbox strings (≈45 keys in `i18n/messages/en.json`, mirrored in `zh-CN.json`) span:
+`chat.composer.sandboxShield.*` (shield labels/tooltips), `settings.sandbox.*` (the orphaned section,
+incl. `.tier.*` + `.automationPolicy.*`), `settings.diagnostics.sandboxAudit.*` +
+`settings.diagnostics.sidecarRestart.*`, `characters.…sandbox.*` (per-character enable + tier),
+`onboarding.tour.sandbox.*`, and `automation.sandboxConnections.*` + `automation.tabs.sandboxes`.
+
+## Status summary
+
+| Surface                                            | ADR        | Status                                            |
+| -------------------------------------------------- | ---------- | ------------------------------------------------- |
+| Composer shield (3-state)                          | 0028       | Shipped & wired                                   |
+| Automation → Sandboxes tab (CUA)                   | 0020       | Shipped & wired                                   |
+| Diagnostics: sandbox audit + sidecar restart       | 0028 P14   | Shipped & wired; Rust `Surface::Sandbox` exists   |
+| Onboarding sandbox tour slide                      | 0028       | Shipped; href deep-links to a dead section        |
+| Settings → Sandbox (health/retry, tier, T5 policy) | 0028 P7/P9 | Built + tested but **orphaned** (no nav/shell)    |
+| Per-tool **network** policy editor                 | 0028       | Absent (proposed, not built)                      |
+
+## Next
+
+<Cards>
+  <Card title="Execution overview" href="./execution-overview" description="The audit + strict-mode policy behind these surfaces" />
+  <Card title="CUA remote sandbox" href="./cua-remote-sandbox" description="What the Sandboxes tab manages" />
+  <Card title="OS backends (T1)" href="./os-backends" description="The health string the badge reads" />
+</Cards>

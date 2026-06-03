@@ -1,0 +1,182 @@
+// Tests for the AI SDK tool bridge: converts built-in tool defs + plugin tool
+// manifests into native AI SDK tools for the non-Anthropic dispatch path.
+
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import { buildAiSdkTools, createToolPermissionGate, __testing__ } from "./ai-sdk-tools.mjs"
+
+test("buildAiSdkTools registers built-in tools for enabled categories only", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: { builtinTools: { git: true, process: false } },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  // git category contributes git_status / git_diff / git_log …
+  assert.ok(tools.git_status, "git_status present when git enabled")
+  // process category disabled → its tools absent.
+  assert.equal(tools.process_list ?? tools.list_processes, undefined)
+})
+
+test("buildAiSdkTools returns no built-in tools when builtinTools is absent", () => {
+  const tools = buildAiSdkTools({ sendOptions: {}, emit: () => {}, sessionId: "s1" })
+  assert.equal(Object.keys(tools).length, 0)
+})
+
+test("buildAiSdkTools wires plugin tools that round-trip through the renderer", async () => {
+  const emitted = []
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      pluginTools: [
+        {
+          name: "my_plugin_tool",
+          description: "does a thing",
+          jsonSchema: { type: "object", properties: { q: { type: "string" } } },
+          pluginId: "p1",
+        },
+      ],
+    },
+    emit: (m) => emitted.push(m),
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  assert.ok(tools.my_plugin_tool, "plugin tool registered")
+
+  // Kick off execute; it should emit a plugin_tool_exec and await a response.
+  const execPromise = tools.my_plugin_tool.execute({ q: "hi" })
+  // Let the microtask register the pending call.
+  await Promise.resolve()
+  const event = emitted.find((m) => m.type === "plugin_tool_exec")
+  assert.ok(event, "plugin_tool_exec emitted")
+  assert.equal(event.name, "my_plugin_tool")
+  assert.deepEqual(event.args, { q: "hi" })
+  assert.equal(pendingPluginToolCalls.size, 1)
+
+  // Resolve the round-trip the way claude-host's plugin_tool_response would.
+  const pending = pendingPluginToolCalls.get(event.toolUseId)
+  pending.resolve({ result: "plugin says hi" })
+  const result = await execPromise
+  assert.equal(result, "plugin says hi")
+})
+
+test("plugin tool execute throws on an error response", async () => {
+  const pendingPluginToolCalls = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      pluginTools: [
+        { name: "boom", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const execPromise = tools.boom.execute({})
+  await Promise.resolve()
+  const [, pending] = [...pendingPluginToolCalls.entries()][0]
+  pending.resolve({ error: "plugin failed" })
+  await assert.rejects(execPromise, /plugin failed/)
+})
+
+test("createToolPermissionGate: bypassPermissions allows without prompting", async () => {
+  let emitted = 0
+  const gate = createToolPermissionGate({
+    emit: () => emitted++,
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "bypassPermissions" },
+  })
+  await gate("mcp__cognia-tools__git_status", { a: 1 })
+  assert.equal(emitted, 0)
+})
+
+test("createToolPermissionGate: ruleset allow short-circuits, deny throws", async () => {
+  const gate = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionRuleset: { "*": "deny" },
+    },
+  })
+  await assert.rejects(gate("mcp__cognia-tools__git_status", {}), /denied/)
+})
+
+test("createToolPermissionGate: prompts and resolves via pendingApprovals", async () => {
+  const events = []
+  const pendingApprovals = new Map()
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals,
+    sendOptions: {},
+  })
+  const p = gate("mcp__cognia-tools__git_status", { x: 1 })
+  await Promise.resolve()
+  const req = events.find((e) => e.type === "permission_request")
+  assert.ok(req)
+  assert.equal(req.toolName, "mcp__cognia-tools__git_status")
+  assert.equal(pendingApprovals.size, 1)
+  // Approve with an updated input, the way claude-host's handler would.
+  pendingApprovals.get(req.requestId).resolve({ behavior: "allow", updatedInput: { x: 2 } })
+  assert.deepEqual(await p, { x: 2 })
+})
+
+test("createToolPermissionGate: a denied prompt rejects", async () => {
+  const events = []
+  const pendingApprovals = new Map()
+  const gate = createToolPermissionGate({
+    emit: (m) => events.push(m),
+    sessionId: "s1",
+    pendingApprovals,
+    sendOptions: {},
+  })
+  const p = gate("mcp__cognia-tools__git_status", {})
+  await Promise.resolve()
+  const req = events.find((e) => e.type === "permission_request")
+  pendingApprovals.get(req.requestId).resolve({ behavior: "deny", message: "nope" })
+  await assert.rejects(p, /nope/)
+})
+
+test("buildAiSdkTools gates a built-in tool through the permission gate (deny blocks handler)", async () => {
+  const pendingApprovals = new Map()
+  const tools = buildAiSdkTools({
+    sendOptions: {
+      builtinTools: { git: true },
+      permissionRuleset: { "*": "deny" },
+    },
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals,
+  })
+  // git_status execute should be blocked by the deny ruleset before running.
+  await assert.rejects(tools.git_status.execute({ cwd: "/tmp" }), /denied/)
+})
+
+test("builtinDefToAiSdkTool returns joined text and throws on isError", async () => {
+  const { builtinDefToAiSdkTool, callToolResultToText } = __testing__
+  assert.equal(
+    callToolResultToText({
+      content: [
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+      ],
+    }),
+    "a\nb"
+  )
+  const okTool = builtinDefToAiSdkTool({
+    name: "ok",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({ content: [{ type: "text", text: "done" }] }),
+  })
+  assert.equal(await okTool.execute({}), "done")
+
+  const errTool = builtinDefToAiSdkTool({
+    name: "err",
+    description: "",
+    inputSchema: {},
+    handler: async () => ({ content: [{ type: "text", text: "nope" }], isError: true }),
+  })
+  await assert.rejects(errTool.execute({}), /nope/)
+})

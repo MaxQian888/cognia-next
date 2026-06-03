@@ -17,6 +17,7 @@ import {
   isA2UIBridgeRow,
   namespacedA2UIToolNames,
 } from "./mcp-tool-schemas"
+import * as sidecarDefs from "../../sidecar/a2ui-tools/tool-defs.mjs"
 
 describe("a2ui MCP tool schemas", () => {
   describe("constants", () => {
@@ -136,6 +137,32 @@ describe("a2ui MCP tool schemas", () => {
     it("prefixes every tool with the SDK's mcp__<server>__ namespace", () => {
       const names = namespacedA2UIToolNames()
       expect(names).toEqual(A2UI_BRIDGE_TOOLS.map((t) => `mcp__a2ui-bridge__${t.name}`))
+    })
+  })
+
+  // Drift guard: the sidecar runtime servers build their schemas from
+  // `sidecar/a2ui-tools/tool-defs.mjs`, which cannot import this TS canonical
+  // (the sidecar is a separate Node project). This block is the cross-check
+  // that prevents the two sources from silently diverging.
+  describe("parity with sidecar tool-defs.mjs", () => {
+    it("server identity matches", () => {
+      expect(sidecarDefs.SERVER_NAME).toBe(A2UI_BRIDGE_SERVER_NAME)
+      expect(sidecarDefs.SERVER_VERSION).toBe(A2UI_BRIDGE_VERSION)
+    })
+
+    it("tool names match in order", () => {
+      expect(sidecarDefs.TOOL_NAMES).toEqual(A2UI_BRIDGE_TOOLS.map((t) => t.name))
+    })
+
+    it("descriptions and raw input schemas match the canonical tools", () => {
+      for (const tool of A2UI_BRIDGE_TOOLS) {
+        expect(sidecarDefs.TOOL_DESCRIPTIONS[tool.name]).toBe(tool.description)
+        expect(sidecarDefs.RAW_INPUT_SCHEMAS[tool.name]).toEqual(tool.inputSchema)
+      }
+    })
+
+    it("namespaced names match", () => {
+      expect(sidecarDefs.namespacedA2UIToolNames()).toEqual(namespacedA2UIToolNames())
     })
   })
 })

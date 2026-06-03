@@ -18,11 +18,12 @@ import type { A2UIServerMessage } from "@/types/a2ui/schema"
 
 // Mock dependencies
 jest.mock("@/lib/a2ui/parser", () => ({
-  isCreateSurfaceMessage: (msg: A2UIServerMessage) => msg.type === "createSurface",
-  isUpdateComponentsMessage: (msg: A2UIServerMessage) => msg.type === "updateComponents",
-  isUpdateDataModelMessage: (msg: A2UIServerMessage) => msg.type === "dataModelUpdate",
-  isDeleteSurfaceMessage: (msg: A2UIServerMessage) => msg.type === "deleteSurface",
-  isSurfaceReadyMessage: (msg: A2UIServerMessage) => msg.type === "surfaceReady",
+  isCreateSurfaceMessage: (msg: { type: string }) => msg.type === "createSurface",
+  isUpdateComponentsMessage: (msg: { type: string }) => msg.type === "updateComponents",
+  isUpdateDataModelMessage: (msg: { type: string }) => msg.type === "dataModelUpdate",
+  isDeleteSurfaceMessage: (msg: { type: string }) => msg.type === "deleteSurface",
+  isSurfaceReadyMessage: (msg: { type: string }) => msg.type === "surfaceReady",
+  isConnectorActionMessage: (msg: { type: string }) => msg.type === "connectorAction",
 }))
 
 jest.mock("@/lib/a2ui/data-model", () => ({
@@ -172,6 +173,62 @@ describe("useA2UIStore", () => {
         useA2UIStore.getState().emitAction("surface-1", "click", "button-1")
       })
       expect(useA2UIStore.getState().eventHistory).toHaveLength(1)
+    })
+  })
+
+  describe("processMessage: connectorAction", () => {
+    it("injects an IM callback as a userAction (value carries the action id)", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "dialog")
+        useA2UIStore.getState().processMessage({
+          type: "connectorAction",
+          surfaceId: "surface-1",
+          componentId: "approve-btn",
+          actionType: "button",
+          value: "approve",
+          platform: "slack",
+          triggerId: "t1",
+          conversationKey: "ck",
+          payload: { note: "ok" },
+        })
+      })
+      const history = useA2UIStore.getState().eventHistory
+      expect(history).toHaveLength(1)
+      const event = history[0] as {
+        action: string
+        componentId: string
+        data: Record<string, unknown>
+      }
+      expect(event.action).toBe("approve")
+      expect(event.componentId).toBe("approve-btn")
+      expect(event.data).toMatchObject({
+        source: "connector",
+        actionType: "button",
+        value: "approve",
+        platform: "slack",
+        triggerId: "t1",
+        conversationKey: "ck",
+        payload: { note: "ok" },
+      })
+    })
+
+    it("falls back to actionType when value is empty (submit/dismiss) and tolerates no componentId", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "dialog")
+        useA2UIStore.getState().processMessage({
+          type: "connectorAction",
+          surfaceId: "surface-1",
+          actionType: "dismiss",
+        })
+      })
+      const event = useA2UIStore.getState().eventHistory[0] as {
+        action: string
+        componentId: string
+        data: Record<string, unknown>
+      }
+      expect(event.action).toBe("dismiss")
+      expect(event.componentId).toBe("")
+      expect(event.data).toEqual({ source: "connector", actionType: "dismiss" })
     })
   })
 

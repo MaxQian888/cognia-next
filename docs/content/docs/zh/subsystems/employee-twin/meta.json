@@ -1,0 +1,13 @@
+{
+  "title": "员工数字孪生",
+  "pages": [
+    "index",
+    "data-model",
+    "ingest-pipeline",
+    "importers",
+    "distill-pipeline",
+    "runtime",
+    "jobs-and-scheduling",
+    "workbench-ui"
+  ]
+}

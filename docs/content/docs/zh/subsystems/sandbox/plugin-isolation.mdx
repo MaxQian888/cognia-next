@@ -1,0 +1,189 @@
+---
+title: "插件隔离"
+description: "第三方插件代码如何被约束：渲染端的 PluginSandbox（权限映射的全局对象 + Function/AsyncFunction 执行）、T2 级 Node 24 --permission 重新执行（re-exec）助手，以及由授权账本（grant ledger）限定的 T3 级 Wasmtime/WASI 运行时。"
+---
+
+# 插件隔离
+
+<Status variant="beta" />
+
+<TLDR>
+  三个层级共同约束插件代码。`lib/plugin/core/sandbox.ts:PluginSandbox` 是已发布的渲染端隔离：它把每个
+  `PluginPermission` 映射到一个具体的被允许的全局对象，包装 `console` / `setTimeout` / `fetch` /
+  `localStorage`，并通过带显式参数和超时的 `Function` / `AsyncFunction` 运行插件代码。**T2**
+  （`launchPluginJs.ts`）把 manifest 的权限翻译为 Node 24 的 `--permission` 标志，用于重新执行
+  Node 目标插件。**T3**（`wasm-runtime.ts`）在一个运行时下加载 WASM 插件，其 preopen 来自授权账本。
+  T2/T3 已发布其表面（surface）；随着 Node/WASM 目标落地，插件管理器会逐步接入它们。
+</TLDR>
+
+## 渲染端隔离 —— `PluginSandbox`
+
+`PluginSandbox` 构造时需要插件 id、其 `PluginPermission[]`，以及可选的超时/内存上限。它在构造函数中一次性
+推导出一个 allow-set 和一组沙箱化的全局对象。
+
+### 权限 → API 映射
+
+总是允许一组安全的基础全局对象；权限会扩大该集合：
+
+```ts title="lib/plugin/core/sandbox.ts:75-103 (permission-gated APIs)"
+for (const permission of permissions) {
+  switch (permission) {
+    case "network:fetch":
+      allowed.add("fetch"); allowed.add("Headers"); allowed.add("Request"); allowed.add("Response")
+      break
+    case "network:websocket":
+      allowed.add("WebSocket")
+      break
+    case "clipboard:read":
+    case "clipboard:write":
+      allowed.add("navigator.clipboard")
+      break
+    case "notification":
+      allowed.add("Notification")
+      break
+    case "database:read":
+    case "database:write":
+      allowed.add("indexedDB")
+      break
+  }
+}
+```
+
+这些沙箱化的全局对象是真实的包装器，而非原始的浏览器 API：
+
+- **console** —— 以 `[Plugin:<id>]` 为前缀并路由到插件日志器（`sandbox.ts:137-149`）。
+- **setTimeout** —— 钳制到配置的上限（默认 30 秒）（`sandbox.ts:151-158`）。
+- **setInterval** —— 下限设为 100 ms 以防止 CPU 滥用（`sandbox.ts:160-167`）。
+- **fetch** —— 在每个请求上盖上一个 `X-Plugin-Id` 头（`sandbox.ts:169-185`）。
+- **localStorage** —— 以 `plugin:<id>:` 作命名空间，并按 key 做读/写权限检查
+  （`sandbox.ts:187-214`）。
+
+### 代码执行
+
+插件代码通过一个以显式参数名构建的 `Function`（或 `AsyncFunction`）运行，使插件只能看到被授予的全局对象 ——
+没有环境（ambient）作用域：
+
+```ts title="lib/plugin/core/sandbox.ts:223-241 (sync execute)"
+execute<T>(code: string, context: Record<string, unknown> = {}): T {
+  const safeContext = { ...this.sandboxedGlobals, ...context }
+  const argNames = Object.keys(safeContext)
+  const argValues = Object.values(safeContext)
+  try {
+    const fn = new Function(...argNames, `"use strict"; return (${code})`)
+    return fn(...argValues) as T
+  } catch (error) {
+    throw new Error(`Plugin sandbox execution error: ${error}`)
+  }
+}
+```
+
+`executeAsync`（`sandbox.ts:246-273`）增加了一个针对 "Execution timeout" reject 的 `Promise.race`。
+`executeCode(language, code)`（`sandbox.ts:301-318`）要求 `sandbox:web-execute` 权限，并委托给 Web
+沙箱服务 —— 而后者如今是一个 stub（参见 [microVM 与 Web](./microvm-and-web)）。
+
+<Callout type="info">
+  `PluginSandbox` 是一个 **软（soft）** 隔离层：基于 `Function` 的求值、权限门控的全局对象、命名空间化的
+  存储。它是渲染端内的防线，并与 T1 组合 —— 即便某个插件 spawn 了一个 shell，SDK 内置的 `Bash` 在启用沙箱
+  的会话中也会被拒绝，调用会经由 `sandbox_*` 工具路由。
+</Callout>
+
+## T2 —— Node `--permission` 重新执行（re-exec）
+
+`lib/plugin/launcher/launchPluginJs.ts` 把一个权限范围（scope）翻译为 Node 24 的 `--allow-*` 标志，用于
+重新执行插件的 JS 入口。空列表会 OMIT 该标志（fail-safe 拒绝），绝不使用 `*`。
+
+```ts title="lib/plugin/launcher/launchPluginJs.ts:55-70"
+export function nodePermissionArgs(scope: NodePermissionScope): string[] {
+  const args: string[] = ["--permission"]
+  if (scope.readPaths.length > 0)  args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
+  if (scope.writePaths.length > 0) args.push(`--allow-fs-write=${scope.writePaths.join(",")}`)
+  if (scope.netHosts.length > 0)   args.push(`--allow-net=${scope.netHosts.join(",")}`)
+  if (scope.allowedSubprocesses.length > 0)
+    args.push(`--allow-child-process=${scope.allowedSubprocesses.join(",")}`)
+  return args
+}
+```
+
+`buildLaunchArgv(entryPath, scope, extraArgs)`（`launchPluginJs.ts:107-113`）返回插件管理器传给
+`child_process.spawn("node", argv)` 的完整 argv。`deriveScopeFromManifest`
+（`launchPluginJs.ts:81-97`）很保守：一个声明了但没有具体路径的权限类别会产生空列表，因此该标志会被完全省略。
+
+<Callout type="info">
+  T2 发布了 **纯标志构造的那一半**；插件管理器负责真正的 spawn（用于 disable 时停用的 pid 跟踪、stdio
+  处理器）。在 Node 目标插件落地之前，本模块只被其测试消费 —— 表面（surface）已锁定且可审阅
+  （`launchPluginJs.ts:10-14`）。
+</Callout>
+
+## T3 —— Wasmtime / WASI 运行时
+
+`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` 会 **在** 构建运行时之前从授权账本解析 preopen 集合，因此
+缺失或为空的授权会成为一个硬性的早期失败，随后返回一个可控的 `WasmPluginHandle`。
+
+```ts title="lib/plugin/core/wasm-runtime.ts:79-91 (load)"
+export async function loadWasmPlugin(
+  pluginId: string,
+  source: WasmSource,
+  options: WasmRuntimeOptions = {}
+): Promise<WasmPluginHandle> {
+  if (!pluginId.trim()) throw new Error("loadWasmPlugin: pluginId is required")
+  const preopensResolver = options.preopensResolver ?? getGrantedPreopens
+  const preopens = [...preopensResolver(pluginId)]
+  const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
+  const instance = await factory({ pluginId, source, preopens })
+  // ... returns a handle with call(method, args) + dispose()
+```
+
+由一个 magic-byte 启发式（`looksLikeComponent`，`wasm-runtime.ts:152-161`）决定两条交付路径：
+
+- **核心模块（Core modules）** —— 经由 `WebAssembly.instantiate` 实例化。没有 FS/网络绑定；唯一的宿主
+  导入是一个 `cognia` 命名空间，其 `read_file` 会拒绝任何不在授权集合内的路径：
+
+```ts title="lib/plugin/core/wasm-runtime.ts:176-181 (grant-gated read)"
+read_file: (path: string) => {
+  if (!grantedSet.has(path)) {
+    throw new Error(`wasm-runtime: preopen denied for ${path}`)
+  }
+  return memorySnapshot.get(path) ?? new Uint8Array()
+},
+```
+
+- **WASI Preview-2 组件（components）** —— 动态导入 `@bytecodealliance/jco`。组件路径目前会浮现一个结构化的
+  「not yet wired」错误，而不是固定到一个不断变动的 jco API（`wasm-runtime.ts:230-233`）；调用方可以注入一个
+  `runtimeFactory`，或改为发布一个核心模块。
+
+授权账本（`lib/plugin/security/wasm-grant.ts`）是权威来源 —— 宿主导入是纯的（没有真实的 FS），因此最坏情况下的
+影响半径（blast radius）是「插件读取它自己的授权」。
+
+```mermaid
+flowchart TB
+  subgraph T1soft["Renderer (PluginSandbox)"]
+    PS["permission → globals<br/>Function/AsyncFunction + timeout"]
+  end
+  subgraph T2["Node target (T2)"]
+    L["nodePermissionArgs → --allow-* flags"] --> SP["spawn('node', argv)"]
+  end
+  subgraph T3["WASM target (T3)"]
+    LW["loadWasmPlugin"] --> GR["getGrantedPreopens (ledger)"]
+    LW --> RT{"core vs component"}
+    RT -->|core| WI["WebAssembly.instantiate"]
+    RT -->|component| JCO["@bytecodealliance/jco (opt-in)"]
+  end
+
+  classDef soft fill:#1e3a5f,stroke:#38bdf8,color:#e0f2fe
+  class PS,L,SP,LW,GR,WI,JCO soft
+```
+
+## 测试
+
+`lib/plugin/core/sandbox.test.ts`（权限映射、钳制、命名空间化存储、执行）、
+`lib/plugin/launcher/launchPluginJs.test.ts`（标志构造、空列表省略）、以及
+`lib/plugin/core/wasm-runtime.test.ts` + `wasm-loader.test.ts`（preopen 门控、核心模块实例化、
+组件安装提示）。
+
+## 下一步
+
+<Cards>
+  <Card title="microVM 与 Web" href="./microvm-and-web" description="PluginSandbox.executeCode 触达的 Web 代码执行 stub" />
+  <Card title="执行总览" href="./execution-overview" description="T1–T5 如何组合" />
+  <Card title="插件系统" href="../plugin-system" description="更广义的插件运行时 + 权限" />
+</Cards>
