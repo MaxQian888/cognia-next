@@ -1,4 +1,12 @@
 {
+  "tts": {
+    "nowPlaying": {
+      "title": "Reading aloud",
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop"
+    }
+  },
   "goal": {
     "console": {
       "title": "Goals",
@@ -1386,6 +1394,8 @@
       "editLabel": "Edit and resend",
       "regenerateTooltip": "Regenerate",
       "regenerateLabel": "Regenerate",
+      "readAloud": "Read aloud",
+      "stopReading": "Stop reading",
       "usageInput": "Input: {n}",
       "usageOutput": "Output: {n}",
       "usageCacheHit": "Cache hit: {n}",

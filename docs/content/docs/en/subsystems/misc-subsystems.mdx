@@ -38,7 +38,7 @@ This page collects several relatively small subsystems that would each be a noti
 
 Text-to-speech, 9 providers plus an Edge-TTS WebSocket bridge. Frontend lives in `lib/tts/`, Tauri side in `src-tauri/src/tts/`.
 
-Provider overview (`lib/tts/types.ts:TTS_PROVIDERS`):
+Provider overview (`types/media/tts.ts:TTS_PROVIDERS`):
 
 | Provider   | Entry File                | Notes                                        |
 | ---------- | ------------------------- | -------------------------------------------- |
@@ -54,6 +54,8 @@ Provider overview (`lib/tts/types.ts:TTS_PROVIDERS`):
 | System     | `providers/system.ts`     | Web Speech API fallback                      |
 
 `tts-orchestrator.ts` is a singleton orchestrator: receives `SpeechSettings` → selects provider → `preprocessTextForProvider` + applies pronunciation dictionary + `splitTextForTTS` chunking → checks cache (`tts-cache.ts`) for hit → calls the corresponding provider → concatenates playback queue. The `auto-play-gates.ts` function `canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading, isStreaming })` is the single "should we auto-play?" gate after a chat send completes.
+
+The orchestrator is wired into chat through three surfaces: a per-message **read-aloud button** (`components/chat/read-aloud-button.tsx`, gated on `ttsEnabled`, using the focused `useReadAloudStatus` selector so a virtualized list of buttons never re-renders on progress ticks), **auto-play** (`hooks/media/use-chat-auto-play-tts.ts` fires `canAutoPlayTTS` on the turn-completes edge), and a single global **now-playing bar** (`components/tts/tts-now-playing-bar.tsx`, mounted at the app root). All three resolve a per-character voice via `resolveCharacterVoice` (team `senderId` or the direct session character) and share one imperative entry point, `lib/tts/speak-chat-message.ts`. The orchestrator's `activeSourceId` tags which message owns the active playback.
 
 Edge-TTS is blocked by CORS in the browser, so it goes through the Tauri bridge (`src-tauri/src/tts/edge.rs`): the Rust side opens a WSS to `speech.platform.bing.com`, sends SSML, and streams binary MP3 frames back to the frontend. `src-tauri/src/tts/keyring.rs` uses the OS keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service) to store API keys for the other 8 providers; service name is `com.cognia.tts`, account is the provider id. `src-tauri/src/tts/proxy.rs` is a generic HTTP proxy for REST providers that are blocked by CORS.
 

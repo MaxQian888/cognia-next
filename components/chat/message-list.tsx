@@ -26,6 +26,8 @@ import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
+import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
+import type { Character } from "@/lib/claude/types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
@@ -49,12 +51,21 @@ export const TIMELINE_THRESHOLD = 20
 interface Props {
   messages: UIMessage[]
   status: "idle" | "streaming" | "awaiting_approval" | "error"
+  /** Session-bound character in a 1:1 chat — drives read-aloud / auto-play voice. */
+  directCharacter?: Character | null
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
 }
 
-export function MessageList({ messages, status, onCopy, onRegenerate, onEditResend }: Props) {
+export function MessageList({
+  messages,
+  status,
+  directCharacter,
+  onCopy,
+  onRegenerate,
+  onEditResend,
+}: Props) {
   const t = useTranslations("chat.list")
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
@@ -72,6 +83,10 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   // stable hook only rebuilds when the id-set actually changes.
   const charactersList = useCharacters()
   const characterById = useStableCharacterById(charactersList)
+
+  // Auto-play the latest assistant reply aloud when the turn finishes (gated on
+  // ttsEnabled + ttsAutoPlay inside the hook).
+  useChatAutoPlayTTS({ messages, status, characterById, directCharacter })
 
   // Right-edge conversation-timeline minimap: long conversations only,
   // desktop only, and not disabled in settings.
@@ -194,6 +209,7 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
         <MessageRenderer
           message={m}
           characterById={characterById}
+          directCharacter={directCharacter}
           isStreaming={isStreaming}
           isLastAssistant={m.id === lastAssistantId}
           onCopy={onCopy}

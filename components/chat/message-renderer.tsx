@@ -56,6 +56,8 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { ReadAloudButton } from "./read-aloud-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -75,6 +77,11 @@ interface Props {
   isLastAssistant?: boolean
   /** Lookup table for resolving senderId → Character (team sessions). */
   characterById?: Map<string, Character>
+  /**
+   * The session-bound character in a 1:1 (direct) chat. Used as the read-aloud
+   * voice when the message has no `senderId` (i.e. not a team message).
+   */
+  directCharacter?: Character | null
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
@@ -130,6 +137,7 @@ function MessageRendererInner({
   isStreaming = false,
   isLastAssistant = false,
   characterById,
+  directCharacter,
   onCopy,
   onRegenerate,
   onEditResend,
@@ -137,6 +145,9 @@ function MessageRendererInner({
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
   const t = useTranslations("chat.message")
+  // Read-aloud is gated on the global TTS toggle; the selector keeps this
+  // re-render rare (settings change), not on every playback progress tick.
+  const ttsEnabled = useSettingsStore((s) => s.settings?.ttsEnabled ?? false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
@@ -381,6 +392,14 @@ function MessageRendererInner({
               </MessageAction>
             )}
 
+            {message.role === "assistant" && ttsEnabled && (
+              <ReadAloudButton
+                messageId={message.id}
+                text={extractText(message)}
+                character={speaker ?? directCharacter ?? null}
+              />
+            )}
+
             {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
 
             {message.role === "assistant" && isLastAssistant && onRegenerate && (
@@ -412,6 +431,7 @@ export const MessageRenderer = memo(
     prev.isStreaming === next.isStreaming &&
     prev.isLastAssistant === next.isLastAssistant &&
     prev.characterById === next.characterById &&
+    prev.directCharacter === next.directCharacter &&
     prev.onCopy === next.onCopy &&
     prev.onRegenerate === next.onRegenerate &&
     prev.onEditResend === next.onEditResend

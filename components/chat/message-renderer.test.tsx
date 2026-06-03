@@ -110,6 +110,18 @@ jest.mock("next-intl", () => {
   return { useTranslations: () => t }
 })
 
+// Read-aloud gating: control ttsEnabled via the settings selector, and stub
+// the button so we only assert it mounts (its own behavior is covered by
+// read-aloud-button.test.tsx).
+const settingsState = { settings: { ttsEnabled: false } as { ttsEnabled: boolean } }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: typeof settingsState) => unknown) => selector(settingsState),
+}))
+jest.mock("./read-aloud-button", () => ({
+  ReadAloudButton: ({ messageId }: { messageId: string }) =>
+    ReactForMocks.createElement("div", { "data-testid": "read-aloud", "data-msg": messageId }),
+}))
+
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
 }))
@@ -589,5 +601,33 @@ describe("regenerate action", () => {
       <MessageRenderer message={assistantMsg()} isLastAssistant={false} onRegenerate={jest.fn()} />
     )
     expect(screen.queryByLabelText("regenerateTooltip")).toBeNull()
+  })
+})
+
+// ── read-aloud gating ─────────────────────────────────────────────────────────
+
+describe("read-aloud button", () => {
+  afterEach(() => {
+    settingsState.settings.ttsEnabled = false
+  })
+
+  it("mounts the read-aloud button on assistant messages when TTS is enabled", () => {
+    settingsState.settings.ttsEnabled = true
+    render(<MessageRenderer message={assistantMsg("ra1")} />)
+    const el = screen.getByTestId("read-aloud")
+    expect(el).toBeInTheDocument()
+    expect(el).toHaveAttribute("data-msg", "ra1")
+  })
+
+  it("hides the read-aloud button when TTS is disabled", () => {
+    settingsState.settings.ttsEnabled = false
+    render(<MessageRenderer message={assistantMsg("ra2")} />)
+    expect(screen.queryByTestId("read-aloud")).toBeNull()
+  })
+
+  it("never shows the read-aloud button on user messages", () => {
+    settingsState.settings.ttsEnabled = true
+    render(<MessageRenderer message={userMsg("ra3")} />)
+    expect(screen.queryByTestId("read-aloud")).toBeNull()
   })
 })

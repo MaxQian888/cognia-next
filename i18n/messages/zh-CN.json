@@ -1,4 +1,12 @@
 {
+  "tts": {
+    "nowPlaying": {
+      "title": "正在朗读",
+      "pause": "暂停",
+      "resume": "继续",
+      "stop": "停止"
+    }
+  },
   "goal": {
     "console": {
       "title": "目标",
@@ -1386,6 +1394,8 @@
       "editLabel": "编辑并重发",
       "regenerateTooltip": "重新生成",
       "regenerateLabel": "重新生成",
+      "readAloud": "朗读",
+      "stopReading": "停止朗读",
       "usageInput": "输入：{n}",
       "usageOutput": "输出：{n}",
       "usageCacheHit": "缓存命中：{n}",

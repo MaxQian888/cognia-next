@@ -62,6 +62,7 @@ import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
 import { PetMount } from "@/components/pet/pet-mount"
+import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -215,6 +216,8 @@ export default async function RootLayout({
                     {/* Floating virtual-pet widget — gates itself on the pet
                      * setting and degrades on mobile / reduced motion. */}
                     <PetMount />
+                    {/* Global TTS "now playing" bar — self-hides when idle. */}
+                    <TtsNowPlayingBar />
                     <Toaster />
                     {/* Branded boot splash on the Capacitor shell — takes over
                      * from the static Android 12 system splash with an animated

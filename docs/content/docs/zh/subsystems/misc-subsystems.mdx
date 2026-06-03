@@ -27,7 +27,7 @@ description: TTS、推送、二维码、网络代理、连通性探测、队列�
 
 文本转语音，9 个 provider 加一个 Edge-TTS WebSocket 桥。前端 `lib/tts/`，Tauri 侧 `src-tauri/src/tts/`。
 
-供应商一览（`lib/tts/types.ts:TTS_PROVIDERS`）：
+供应商一览（`types/media/tts.ts:TTS_PROVIDERS`）：
 
 | Provider   | 入口文件                  | 备注                |
 | ---------- | ------------------------- | ------------------- |
@@ -43,6 +43,8 @@ description: TTS、推送、二维码、网络代理、连通性探测、队列�
 | System     | `providers/system.ts`     | Web Speech API 兜底 |
 
 `tts-orchestrator.ts` 是单例编排器：拿到 `SpeechSettings` → 选 provider → `preprocessTextForProvider` + 应用发音字典 + `splitTextForTTS` 分段 → 缓存（`tts-cache.ts`）查命中 → 调对应 provider → 串接播放队列。`auto-play-gates.ts` 的 `canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading, isStreaming })` 是聊天 send 完成后唯一的"该不该自动播"判定。
+
+编排器通过三个触点接入聊天：逐条消息的**朗读按钮**（`components/chat/read-aloud-button.tsx`，按 `ttsEnabled` 门控，用聚焦的 `useReadAloudStatus` 选择器，使虚拟化列表里的按钮不会被进度 tick 刷新）、**自动播放**（`hooks/media/use-chat-auto-play-tts.ts` 在回合完成的边沿触发 `canAutoPlayTTS`）、以及单实例全局**播放浮条**（`components/tts/tts-now-playing-bar.tsx`，挂在 app 根）。三者都经 `resolveCharacterVoice` 解析按角色声线（团队按 `senderId`，直聊用会话绑定角色），共用一个命令式入口 `lib/tts/speak-chat-message.ts`。编排器的 `activeSourceId` 标记当前由哪条消息持有播放。
 
 Edge-TTS 在浏览器里被 CORS 卡死，所以走 Tauri 桥（`src-tauri/src/tts/edge.rs`）：Rust 端开 WSS 到 `speech.platform.bing.com`，发 SSML，把二进制 MP3 帧拼回前端。`src-tauri/src/tts/keyring.rs` 用 OS keyring（macOS Keychain / Windows Credential Manager / Linux Secret Service）存其余 8 个 provider 的 API key；服务名 `com.cognia.tts`，account 是 provider id。`src-tauri/src/tts/proxy.rs` 是通用 HTTP 代理，给那些走 REST 但被 CORS 挡的 provider 用。
 

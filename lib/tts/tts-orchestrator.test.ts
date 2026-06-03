@@ -640,6 +640,57 @@ describe("audio element error path", () => {
   })
 })
 
+describe("activeSourceId tracking", () => {
+  it("tags state with sourceId while speaking and clears it on completion", async () => {
+    const settings: SpeechSettings = {
+      ...DEFAULT_SPEECH_SETTINGS,
+      ttsEnabled: true,
+      ttsProvider: "openai",
+    }
+    mockCache.mockResolvedValueOnce({ audioData: new ArrayBuffer(8), mimeType: "audio/mpeg" })
+    const o = new TTSOrchestrator()
+    const seen: (string | undefined)[] = []
+    o.subscribe((s) => seen.push(s.activeSourceId))
+
+    await o.speak("hello", {
+      speechSettings: settings,
+      providerSettings: { openai: { apiKey: "k" } },
+      source: "chat",
+      sourceId: "msg-1",
+    })
+
+    // The id is present during loading/playing and cleared once stopped.
+    expect(seen).toContain("msg-1")
+    expect(o.getState().activeSourceId).toBeUndefined()
+  })
+
+  it("clears activeSourceId on stop", () => {
+    const o = new TTSOrchestrator()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(o as any).state = { ...o.getState(), activeSourceId: "msg-9" }
+    o.stop()
+    expect(o.getState().activeSourceId).toBeUndefined()
+  })
+
+  it("clears activeSourceId on error", async () => {
+    const settings: SpeechSettings = {
+      ...DEFAULT_SPEECH_SETTINGS,
+      ttsEnabled: true,
+      ttsProvider: "openai",
+    }
+    mockCache.mockResolvedValueOnce(null)
+    const o = new TTSOrchestrator()
+    await expect(
+      o.speak("hi", {
+        speechSettings: settings,
+        providerSettings: { openai: { apiKey: "k" } },
+        sourceId: "msg-err",
+      })
+    ).rejects.toThrow()
+    expect(o.getState().activeSourceId).toBeUndefined()
+  })
+})
+
 describe("audio onpause emits paused state when not finished", () => {
   it("transitions to paused mid-playback", async () => {
     class PauseAudio implements Partial<MockAudio> {

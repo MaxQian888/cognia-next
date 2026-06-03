@@ -41,6 +41,12 @@ export interface UseTTSOptions {
   voiceOverlay?: Partial<SpeechSettings>
   /** Tag attached to orchestrator state for cancellation arbitration. */
   source?: TTSActiveSource
+  /**
+   * Opaque id for the surface that initiates playback (e.g. a chat message
+   * id). Surfaced back as `activeSourceId` so a per-item control can tell
+   * whether it owns the currently-playing audio.
+   */
+  sourceId?: string
   onStart?: () => void
   onEnd?: () => void
   onError?: (error: string) => void
@@ -56,6 +62,7 @@ export interface UseTTSReturn {
   error: string | null
   activeRequestId?: string
   activeSource?: TTSActiveSource
+  activeSourceId?: string
   speak: (text: string, overrideProvider?: TTSProvider) => Promise<void>
   stop: () => void
   pause: () => void
@@ -70,6 +77,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
     provider,
     voiceOverlay,
     source = "unknown",
+    sourceId,
     onStart,
     onEnd,
     onError,
@@ -109,6 +117,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
       await ttsOrchestrator.speak(text, {
         provider: active,
         source,
+        sourceId,
         speechSettings,
         providerSettings,
         onStart,
@@ -117,7 +126,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
         onProgress,
       })
     },
-    [currentProvider, source, speechSettings, onStart, onEnd, onError, onProgress]
+    [currentProvider, source, sourceId, speechSettings, onStart, onEnd, onError, onProgress]
   )
 
   const isSupported =
@@ -134,6 +143,7 @@ export function useTTS(options: UseTTSOptions = {}): UseTTSReturn {
     error: orchState.error,
     activeRequestId: orchState.activeRequestId,
     activeSource: orchState.activeSource,
+    activeSourceId: orchState.activeSourceId,
     speak,
     stop: () => ttsOrchestrator.stop(),
     pause: () => ttsOrchestrator.pause(),

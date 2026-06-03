@@ -301,6 +301,7 @@ export function ChatPane({
             transition={mobileTransition("normal")}
           >
             <ChatMessages
+              directCharacter={activeCharacter ?? null}
               onCopy={handleCopySuccess}
               onRegenerate={handleRegenerate}
               onEditResend={handleEditResend}
@@ -321,10 +322,12 @@ export function ChatPane({
  * / `MessageRenderer` memo identity.
  */
 function ChatMessages({
+  directCharacter,
   onCopy,
   onRegenerate,
   onEditResend,
 }: {
+  directCharacter?: Character | null
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
@@ -335,6 +338,7 @@ function ChatMessages({
     <MessageList
       messages={messages}
       status={status}
+      directCharacter={directCharacter}
       onCopy={onCopy}
       onRegenerate={onRegenerate}
       onEditResend={onEditResend}

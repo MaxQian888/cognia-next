@@ -49,11 +49,20 @@ export interface TTSOrchestratorState {
   currentProvider: TTSProvider
   activeRequestId?: string
   activeSource?: TTSActiveSource
+  /**
+   * Opaque caller-supplied id for the surface that owns the active playback
+   * (e.g. a chat message id). Lets consumers tell whether *they* are the
+   * current speaker without reaching for the internal requestId. Set on
+   * loading, cleared on stop/end/error.
+   */
+  activeSourceId?: string
 }
 
 export interface TTSOrchestratorSpeakOptions {
   provider?: TTSProvider
   source?: TTSActiveSource
+  /** Opaque id for the calling surface (e.g. chat message id). */
+  sourceId?: string
   speechSettings?: SpeechSettings
   providerSettings?: ProviderSettingsMap
   onStart?: () => void
@@ -99,6 +108,7 @@ export class TTSOrchestrator {
     const providerSettings = options.providerSettings
     const provider = options.provider ?? speechSettings.ttsProvider
     const source = options.source ?? "unknown"
+    const sourceId = options.sourceId
 
     if (!speechSettings.ttsEnabled) {
       this.setState({
@@ -126,6 +136,7 @@ export class TTSOrchestrator {
       currentProvider: provider,
       activeRequestId: requestId,
       activeSource: source,
+      activeSourceId: sourceId,
     })
 
     let normalizedText = preprocessTextForProvider(text, provider)
@@ -178,6 +189,7 @@ export class TTSOrchestrator {
           progress: 1,
           activeRequestId: undefined,
           activeSource: undefined,
+          activeSourceId: undefined,
         })
         options.onEnd?.()
       }
@@ -192,6 +204,7 @@ export class TTSOrchestrator {
         error: message,
         activeRequestId: undefined,
         activeSource: undefined,
+        activeSourceId: undefined,
       })
       options.onError?.(message)
       toast.error(message)
@@ -224,6 +237,7 @@ export class TTSOrchestrator {
       progress: 0,
       activeRequestId: undefined,
       activeSource: undefined,
+      activeSourceId: undefined,
     })
   }
 
