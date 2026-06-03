@@ -318,6 +318,39 @@ pub async fn claude_close_session(
     state.write_command(&msg).await
 }
 
+/// Build the `plugin_tool_response` JSON line written to the sidecar stdin.
+/// Pure so it is unit-testable without a running sidecar.
+fn build_plugin_tool_response_payload(
+    session_id: String,
+    tool_use_id: String,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Value {
+    json!({
+      "type": "plugin_tool_response",
+      "sessionId": session_id,
+      "toolUseId": tool_use_id,
+      "result": result,
+      "error": error,
+    })
+}
+
+/// Renderer → sidecar: resolve a pending plugin-tool call so the sidecar's
+/// `pendingPluginToolCalls` promise settles. Mirrors `claude_approve`.
+/// Renderer-only — NOT exposed via companion RPC (plugin tools execute on the
+/// desktop host, never the phone).
+#[tauri::command]
+pub async fn claude_plugin_tool_response(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    tool_use_id: String,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Result<(), String> {
+    let payload = build_plugin_tool_response_payload(session_id, tool_use_id, result, error);
+    state.write_command(&payload).await
+}
+
 #[tauri::command]
 pub async fn claude_sidecar_status(
     state: State<'_, SidecarState>,
@@ -347,6 +380,23 @@ mod tests {
 
     fn parse(json_str: &str) -> SendOptions {
         serde_json::from_str(json_str).expect("valid SendOptions JSON")
+    }
+
+    #[test]
+    fn builds_plugin_tool_response_payload_with_result() {
+        let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), Some(json!("ok")), None);
+        assert_eq!(p["type"], "plugin_tool_response");
+        assert_eq!(p["sessionId"], "s1");
+        assert_eq!(p["toolUseId"], "t1");
+        assert_eq!(p["result"], json!("ok"));
+        assert!(p["error"].is_null());
+    }
+
+    #[test]
+    fn builds_plugin_tool_response_payload_with_error() {
+        let p = build_plugin_tool_response_payload("s1".into(), "t1".into(), None, Some("boom".into()));
+        assert_eq!(p["error"], "boom");
+        assert!(p["result"].is_null());
     }
 
     #[test]

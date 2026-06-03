@@ -302,6 +302,7 @@ pub fn run() {
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
             claude::commands::claude_approve,
+            claude::commands::claude_plugin_tool_response,
             claude::commands::claude_close_session,
             claude::commands::claude_sidecar_status,
             claude::commands::sidecar_restart_count,
