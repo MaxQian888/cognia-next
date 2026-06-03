@@ -14,7 +14,7 @@ import {
   runEpisodicDistill,
   type RunEpisodicDistillDeps,
 } from "@/lib/memory/write/run-episodic-distill"
-import { evictOverflow, type DecayDeps } from "@/lib/memory/forget/decay"
+import { evictOverflow, expireStale, type DecayDeps } from "@/lib/memory/forget/decay"
 
 export interface MemoryMaintenanceInput {
   transcript: { role: string; text: string }[]
@@ -23,6 +23,8 @@ export interface MemoryMaintenanceInput {
   provenance: MemoryProvenance
   source?: { sessionId?: string }
   config: MemoryConfig
+  /** Clock injection for `expireStale` (tests); defaults to `Date.now()`. */
+  now?: number
 }
 
 export interface MemoryMaintenanceDeps {
@@ -51,6 +53,18 @@ export async function runMemoryMaintenance(
       scope: input.scope,
       characterId: input.characterId,
       maxActivePerScope: input.config.maxActivePerScope,
+    },
+    deps.decayDeps
+  )
+  // Access-time forgetting (opt-in via `maxIdleDays > 0`; a no-op otherwise).
+  // Runs on the same scope as eviction, so it forgets stale memories across the
+  // active scope whenever maintenance fires.
+  await expireStale(
+    {
+      scope: input.scope,
+      characterId: input.characterId,
+      maxIdleDays: input.config.maxIdleDays ?? 0,
+      now: input.now,
     },
     deps.decayDeps
   )

@@ -111,6 +111,11 @@ export interface MemoryConfig {
   relevanceFloor: number
   /** Eviction cap of active memories per scope. */
   maxActivePerScope: number
+  /**
+   * Access-time forgetting: invalidate non-pinned memories untouched for longer
+   * than this many days (à la Claude's memory tool). 0 disables it (default).
+   */
+  maxIdleDays?: number
   /** Informational half-life; recency uses an exponential 0.995^Δdays decay. */
   decayHalfLifeDays: number
   /** "Incognito": when true, the current context neither reads nor writes memory. */
@@ -126,6 +131,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   retrievalTopK: 8,
   relevanceFloor: 0.35,
   maxActivePerScope: 500,
+  maxIdleDays: 0,
   decayHalfLifeDays: 30,
   temporary: false,
 }

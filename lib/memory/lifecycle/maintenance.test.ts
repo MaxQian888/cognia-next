@@ -74,6 +74,60 @@ describe("runMemoryMaintenance", () => {
     expect(consolidated).toHaveLength(1)
     expect(invalidated).toEqual(["a"]) // lowest-scored evicted to reach cap 1
   })
+
+  it("expires stale non-pinned memories when maxIdleDays is set (access-time forgetting)", async () => {
+    const NOW = 1_700_000_000_000
+    const DAY = 24 * 60 * 60 * 1000
+    const invalidated: string[] = []
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: {
+        distill: async () => [],
+        consolidate: async () => ({ applied: [] }),
+      },
+      decayDeps: {
+        listActive: async () => [
+          mem({ id: "fresh", lastAccessedAt: NOW }),
+          mem({ id: "stale", lastAccessedAt: NOW - 40 * DAY }),
+          mem({ id: "pinned-stale", pinned: true, lastAccessedAt: NOW - 99 * DAY }),
+        ],
+        invalidate: async (id) => {
+          invalidated.push(id)
+        },
+      },
+    }
+    await runMemoryMaintenance(
+      {
+        transcript,
+        scope: "global",
+        provenance: "user",
+        // High cap → no overflow eviction; isolate expireStale.
+        config: cfg({ maxActivePerScope: 9999, maxIdleDays: 30 }),
+        now: NOW,
+      },
+      deps
+    )
+    expect(invalidated).toContain("stale")
+    expect(invalidated).not.toContain("fresh")
+    expect(invalidated).not.toContain("pinned-stale")
+  })
+
+  it("does not expire anything when maxIdleDays is 0 (default)", async () => {
+    const invalidated: string[] = []
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async () => [mem({ id: "old", lastAccessedAt: 1 })],
+        invalidate: async (id) => {
+          invalidated.push(id)
+        },
+      },
+    }
+    await runMemoryMaintenance(
+      { transcript, scope: "global", provenance: "user", config: cfg({ maxActivePerScope: 9999 }) },
+      deps
+    )
+    expect(invalidated).toEqual([])
+  })
 })
 
 describe("scheduleMemoryMaintenance", () => {
