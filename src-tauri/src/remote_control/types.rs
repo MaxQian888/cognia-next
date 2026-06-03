@@ -90,6 +90,27 @@ pub struct EmitEventRequestBody {
     pub data: Option<serde_json::Value>,
 }
 
+/// Body of `POST /api/v1/commands/:target`. `args` is free-form — each
+/// renderer-side handler validates its own required shape.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandRequestBody {
+    #[serde(default)]
+    pub args: serde_json::Value,
+}
+
+/// Payload emitted to the renderer on `remote-control://command`. The renderer
+/// dispatch registry routes by `target` into each subsystem's run entry.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandEvent {
+    pub target: String,
+    pub args: serde_json::Value,
+    pub run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
+}
+
 /// Payload emitted to the renderer on `remote-control://run-task`.
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

@@ -37,11 +37,26 @@ use tower_http::limit::RequestBodyLimitLayer;
 use super::allowlist::ParsedAllowlist;
 use super::rate_limit::FixedWindowRateLimiter;
 use super::types::{
-    EmitEvent, EmitEventRequestBody, RemoteControlError, RunTaskEvent, TriggerTaskRequestBody,
+    CommandEvent, CommandRequestBody, EmitEvent, EmitEventRequestBody, RemoteControlError,
+    RunTaskEvent, TriggerTaskRequestBody,
 };
 
 pub const RUN_TASK_EVENT: &str = "remote-control://run-task";
 pub const EMIT_EVENT_EVENT: &str = "remote-control://emit-event";
+pub const COMMAND_EVENT: &str = "remote-control://command";
+
+/// Generic command targets accepted by `POST /api/v1/commands/:target`. The
+/// renderer's dispatch registry owns the actual routing — this list only
+/// rejects unknown targets early so a typo doesn't emit a dead event.
+const KNOWN_TARGETS: &[&str] = &[
+    "scheduler.task.run",
+    "scheduler.event",
+    "workflow.run",
+    "goal.create",
+    "goal.continue",
+    "team.dispatch",
+    "plan.run",
+];
 
 const BODY_LIMIT_BYTES: usize = 8 * 1024;
 
@@ -101,6 +116,7 @@ pub async fn spawn_server(
         .route("/api/v1/health", get(health))
         .route("/api/v1/tasks/:id/run", post(run_task))
         .route("/api/v1/events", post(emit_event))
+        .route("/api/v1/commands/:target", post(run_command))
         .layer(from_fn_with_state(state.clone(), middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state);
@@ -179,6 +195,39 @@ async fn emit_event(
         return error_body(StatusCode::INTERNAL_SERVER_ERROR, "emit failed");
     }
     accepted()
+}
+
+async fn run_command(
+    State(state): State<AppState>,
+    Path(target): Path<String>,
+    headers: HeaderMap,
+    payload: Option<Json<CommandRequestBody>>,
+) -> impl IntoResponse {
+    if !KNOWN_TARGETS.contains(&target.as_str()) {
+        return error_body(StatusCode::NOT_FOUND, "unknown command target");
+    }
+    let body = payload.map(|Json(b)| b).unwrap_or_default();
+    let run_id = format!("run_{}", uuid::Uuid::new_v4());
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let event = CommandEvent {
+        target,
+        args: body.args,
+        run_id: run_id.clone(),
+        idempotency_key,
+    };
+    if let Err(error) = state.app_handle.emit(COMMAND_EVENT, event) {
+        log::warn!("remote-control failed to emit command event: {error}");
+        return error_body(StatusCode::INTERNAL_SERVER_ERROR, "emit failed");
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "accepted": true, "runId": run_id })),
+    )
+        .into_response()
 }
 
 fn accepted() -> Response {
@@ -274,5 +323,22 @@ mod tests {
     fn event_names_match_frontend_listeners() {
         assert_eq!(RUN_TASK_EVENT, "remote-control://run-task");
         assert_eq!(EMIT_EVENT_EVENT, "remote-control://emit-event");
+        assert_eq!(COMMAND_EVENT, "remote-control://command");
+    }
+
+    #[test]
+    fn known_targets_cover_all_subsystems() {
+        for t in [
+            "scheduler.task.run",
+            "scheduler.event",
+            "workflow.run",
+            "goal.create",
+            "goal.continue",
+            "team.dispatch",
+            "plan.run",
+        ] {
+            assert!(KNOWN_TARGETS.contains(&t), "missing target {t}");
+        }
+        assert_eq!(KNOWN_TARGETS.len(), 7);
     }
 }
