@@ -18,6 +18,7 @@ import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
+import { loggers } from "@/lib/logging"
 import type {
   AppSettings,
   Character,
@@ -1019,12 +1020,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     allowOcrOverride: imOverrideRow?.allowOcr,
   })
 
-  // --- Plugin tools → SDK sidecar (M2) -------------------------------------
-  // When the plugin store has enabled `tools` plugins, surface their tool
-  // manifest so the sidecar can build a synthetic `cognia-plugin-tools`
-  // in-process MCP server. Functions don't cross the stdio channel; the
-  // sidecar emits `plugin_tool_exec` events and the renderer dispatches
-  // them via `lib/claude/plugin-tool-ipc.ts:handlePluginToolExec`.
+  // --- Plugin tools → SDK sidecar ------------------------------------------
+  // Surface enabled plugin tools + ADR-0026 built-in skills + terminal_dock_*
+  // as a manifest the sidecar turns into the synthetic `cognia-plugin-tools`
+  // MCP server. Functions don't cross stdio; the sidecar emits
+  // `plugin_tool_exec` and the global `PluginToolDispatchProvider`
+  // (components/providers/plugin-tool-dispatch-provider.tsx) routes it to
+  // `handlePluginToolExec`, writing the result back via the
+  // `claude_plugin_tool_response` Tauri command.
   //
   // Per-character Computer Use gating: the `cognia-computer-use` plugin
   // contributes three tools (computer_use / bash / text_editor). Filter
@@ -1063,9 +1066,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         })),
       ]
       if (combined.length > 0) opts.pluginTools = combined
-    } catch {
-      // Non-fatal — skip plugin tools for this turn if the bridge isn't
-      // ready (e.g. the plugin store hasn't been hydrated yet on cold boot).
+    } catch (err) {
+      // Non-fatal — skip plugin tools for this turn if the bridge isn't ready
+      // (e.g. the plugin store hasn't been hydrated yet on cold boot). Log so a
+      // genuine manifest regression is visible instead of silently disabling
+      // every plugin tool.
+      loggers.app.warn("failed to build plugin tools manifest; tools skipped this turn", {
+        error: String(err),
+      })
     }
   }
 

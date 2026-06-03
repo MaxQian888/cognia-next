@@ -65,6 +65,8 @@ import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { getTeam } from "@/lib/db/teams"
+import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
+import { loggers } from "@/lib/logging"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -186,6 +188,21 @@ describe("resolveMemberConfig", () => {
     const member: TeamMember = { characterId: "c1" }
     const charNoMcp = makeChar({ id: "c1" })
     expect(resolveMemberConfig(team, member, charNoMcp).mcpServerIds).toEqual(["t-mcp-1"])
+  })
+})
+
+describe("resolveSendOptions — plugin tools manifest failure", () => {
+  it("logs (does not silently swallow) a plugin-tools manifest build failure", async () => {
+    const warnSpy = jest.spyOn(loggers.app, "warn").mockImplementation(() => {})
+    ;(buildPluginToolsManifest as jest.Mock).mockImplementationOnce(() => {
+      throw new Error("boom")
+    })
+    await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("plugin tools manifest"),
+      expect.objectContaining({ error: expect.stringContaining("boom") })
+    )
+    warnSpy.mockRestore()
   })
 })
 
