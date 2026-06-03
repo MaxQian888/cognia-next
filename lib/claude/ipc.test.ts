@@ -69,7 +69,7 @@ describe("subscribePluginToolExec", () => {
       .spyOn(transport, "subscribe")
       .mockImplementation((_ch: string, h: (evt: unknown) => void) => {
         captured = h
-        return Promise.resolve(() => {})
+        return () => {}
       })
     const handler = jest.fn()
     await subscribePluginToolExec(handler)

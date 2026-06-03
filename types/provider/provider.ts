@@ -166,6 +166,26 @@ export interface ProviderConnectionParams {
   concurrentLimit?: number
 }
 
+/**
+ * AI SDK v6 call-option sampling parameters, in the SDK's own naming
+ * (`maxOutputTokens`, not the legacy `maxTokens`). Produced by
+ * `lib/ai/providers/inference-params.ts:buildModelInferenceParams` from a
+ * provider's persisted `inferenceDefaults` / `connectionParams` /
+ * `advancedParams`, attached to `SendOptions.modelParams`, and spread into
+ * the sidecar's `streamText` call on the non-Anthropic path (ADR-0043).
+ */
+export interface ModelInferenceParams {
+  temperature?: number
+  maxOutputTokens?: number
+  topP?: number
+  topK?: number
+  frequencyPenalty?: number
+  presencePenalty?: number
+  seed?: number
+  stopSequences?: string[]
+  maxRetries?: number
+}
+
 export interface UserProviderSettings {
   providerId: string
   apiKey?: string
