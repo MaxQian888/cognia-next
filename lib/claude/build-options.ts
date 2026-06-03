@@ -41,6 +41,7 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
+import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
 import {
   ProviderRoutingEngine,
   createMappingRegistry,
@@ -534,10 +535,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         opts.providerCredentials = {
           apiKey: resolution.apiKey,
           baseURL: resolution.baseURL,
-          // Built-in id → sidecar derives protocol from the id; explicit
-          // `protocol` is required only for custom provider ids whose name
-          // tells the sidecar nothing.
-          protocol: resolution.isCustomProvider ? resolution.protocol : undefined,
+          // Always forward the resolved protocol. The resolver is the single
+          // authority on which AI SDK family a provider speaks; relying on the
+          // sidecar to re-derive it from the id silently broke built-in local
+          // providers (ollama / lmstudio / …) and the openai-compat aggregators
+          // (xai / togetherai / fireworks). The Anthropic path selects by id,
+          // so forwarding "anthropic" is inert there.
+          protocol: resolution.protocol,
         }
         // Backfill model from the provider's default when the caller didn't
         // pin one — keeps the resolver one-stop for "what should this turn
@@ -545,6 +549,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         if (!opts.model && resolution.model) {
           opts.model = resolution.model
         }
+        // Carry the provider's configured inference defaults (temperature,
+        // maxOutputTokens, penalties, …) so the non-Anthropic ai-sdk dispatcher
+        // honours them instead of dropping every knob. The Anthropic path
+        // ignores `modelParams` (ADR-0043).
+        const providerCfg =
+          appSettings?.providerSettings?.[providerId] ??
+          appSettings?.customProviders?.find((p) => p.id === providerId)
+        const modelParams = buildModelInferenceParams(providerCfg)
+        if (modelParams) opts.modelParams = modelParams
       }
       // Unresolved providers (no key, disabled, etc.) fall through with
       // `opts.provider` set but no credentials — for "anthropic" that means

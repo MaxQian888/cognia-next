@@ -206,6 +206,27 @@ describe("resolveSendOptions — plugin tools manifest failure", () => {
   })
 })
 
+describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
+  it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: { apiKey: "sk-test", inferenceDefaults: { temperature: 0.5, maxTokens: 1024 } },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openai")
+    // Unconditional protocol forwarding (previously custom-only → undefined).
+    expect(opts.providerCredentials?.protocol).toBe("openai")
+    // Configured inference defaults reach the turn (v6 `maxTokens → maxOutputTokens`).
+    expect(opts.modelParams).toEqual(
+      expect.objectContaining({ temperature: 0.5, maxOutputTokens: 1024 })
+    )
+  })
+})
+
 describe("resolveSendOptions — character + skills", () => {
   it("loads the character from the session id when not provided directly", async () => {
     mGetCharacter.mockResolvedValueOnce(
