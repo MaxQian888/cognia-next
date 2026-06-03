@@ -126,7 +126,11 @@ describe("useChatAutoPlayTTS", () => {
   })
 
   it("does not speak when the last assistant message has no text", () => {
-    const empty = { id: "a1", role: "assistant", parts: [{ type: "tool-Bash" }] } as UIMessage
+    const empty = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "tool-Bash" }],
+    } as unknown as UIMessage
     const { rerender } = setup({ messages: [empty], status: "streaming" })
     rerender({ messages: [empty], status: "idle" })
     expect(speakChatMessage).not.toHaveBeenCalled()
