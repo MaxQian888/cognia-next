@@ -270,6 +270,95 @@ describe("runPlan (orchestrated)", () => {
   })
 })
 
+function fakeClient(reply: string): { complete: jest.Mock } {
+  return { complete: jest.fn(async () => reply) }
+}
+
+describe("refinePlan", () => {
+  it("manual refine replaces steps, returns to awaiting_approval, logs events", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput())
+    const client = fakeClient('{"steps":["new a","new b","new c"],"reasoning":"clearer"}')
+    const refined = await rt.refinePlan(
+      { planId: plan.id, refinementType: "optimize", trigger: "manual" },
+      client as never
+    )
+    expect(refined?.status).toBe("awaiting_approval")
+    expect(refined?.steps.map((s) => s.title)).toEqual(["new a", "new b", "new c"])
+    expect(refined?.refinementCount).toBe(1)
+    const kinds = (await listPlanEvents(plan.id)).map((e) => e.kind)
+    expect(kinds).toEqual(expect.arrayContaining(["refined", "replanned"]))
+  })
+
+  it("auto triggers respect maxAutoRefinements (no LLM call past the cap)", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { maxAutoRefinements: 0 } }))
+    const client = fakeClient('{"steps":["x"]}')
+    const res = await rt.refinePlan(
+      { planId: plan.id, refinementType: "repair", trigger: "step_failure" },
+      client as never
+    )
+    expect(client.complete).not.toHaveBeenCalled()
+    expect(res?.refinementCount).toBe(0)
+  })
+
+  it("manual is allowed even when the auto budget is exhausted", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { maxAutoRefinements: 0 } }))
+    const client = fakeClient('{"steps":["y"]}')
+    const res = await rt.refinePlan(
+      { planId: plan.id, refinementType: "expand", trigger: "manual" },
+      client as never
+    )
+    expect(res?.refinementCount).toBe(1)
+  })
+
+  it("fails OPEN (keeps the plan) when the planner returns unusable output", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput())
+    const res = await rt.refinePlan(
+      { planId: plan.id, refinementType: "repair", trigger: "manual" },
+      fakeClient("not json") as never
+    )
+    expect(res?.refinementCount).toBe(0)
+    expect(res?.steps).toHaveLength(2) // unchanged
+  })
+
+  it("is a no-op on cancelled/missing plans", async () => {
+    const rt = getPlanRuntime()
+    expect(
+      await rt.refinePlan(
+        { planId: "ghost", refinementType: "repair", trigger: "manual" },
+        fakeClient("{}") as never
+      )
+    ).toBeNull()
+    const plan = await rt.createPlan(createInput())
+    await rt.cancelPlan(plan.id)
+    const res = await rt.refinePlan(
+      { planId: plan.id, refinementType: "repair", trigger: "manual" },
+      fakeClient('{"steps":["z"]}') as never
+    )
+    expect(res?.status).toBe("cancelled")
+  })
+
+  it("runPlan auto-replans on failure when a client is supplied", async () => {
+    runWorkflowMock.mockResolvedValue({
+      runId: "x",
+      status: "failed",
+      error: { message: "boom", nodeId: "stepX" },
+    })
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const client = fakeClient('{"steps":["recover step"],"reasoning":"route around"}')
+    await rt.runPlan(plan.id, { client: client as never })
+    // Fire-and-forget refine — allow the microtask chain to settle.
+    await new Promise((r) => setTimeout(r, 20))
+    const after = await rt.getPlan(plan.id)
+    expect(after?.refinementCount).toBe(1)
+    expect(after?.status).toBe("awaiting_approval")
+  })
+})
+
 describe("registerAbortController", () => {
   it("unregister clears only the matching controller (stale closure is a no-op)", async () => {
     const rt = getPlanRuntime()

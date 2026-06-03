@@ -24,11 +24,13 @@ import type {
   AgentPlan,
   CreatePlanInput,
   PlanConfig,
+  PlanRefinementRequest,
   PlanStatus,
   PlanStep,
   PlanStepStatus,
   UpdatePlanInput,
 } from "@/types/agent/plan"
+import type { LlmClient } from "@/lib/twin/distill/llm"
 import { DEFAULT_PLAN_CONFIG, computePlanCounts, isTerminalPlanStatus } from "@/types/agent/plan"
 import {
   appendPlanEvent,
@@ -292,7 +294,7 @@ class PlanRuntime {
    */
   async runPlan(
     planId: string,
-    opts: { signal?: AbortSignal } = {}
+    opts: { signal?: AbortSignal; client?: LlmClient } = {}
   ): Promise<{ status: PlanStatus; output?: unknown } | null> {
     const plan = await getPlan(planId)
     if (!plan) return null
@@ -355,11 +357,96 @@ class PlanRuntime {
       })
       const status: PlanStatus = result.status === "succeeded" ? "completed" : "failed"
       await this.finishPlanRun(planId, status, result.error?.message)
+      // Step-failure auto-replan (ADR-0045 §4): when a client is supplied and
+      // the refinement budget allows, repair the plan into a fresh
+      // awaiting_approval draft (fire-and-forget; never auto-re-executes).
+      if (status === "failed" && opts.client) {
+        const failedStepId = result.error?.nodeId
+        void this.refinePlan(
+          {
+            planId,
+            refinementType: "repair",
+            trigger: "step_failure",
+            ...(failedStepId ? { failedStepId } : {}),
+          },
+          opts.client
+        ).catch(() => {})
+      }
       return { status, output: result.output }
     } finally {
       planRunCtx.unregisterPlanRunContext(runId)
       unregisterAbort()
     }
+  }
+
+  /**
+   * Refine (replan) a plan via the planner LLM. Drives all three triggers
+   * (ADR-0045 §4): `manual`, `step_failure` (auto, capped by
+   * `config.maxAutoRefinements`), and `judge_deviation`. The revised steps
+   * replace the plan and it returns to `awaiting_approval` so a human (or the
+   * caller) re-confirms before the next run — auto-replan never silently
+   * re-executes. Fail-OPEN: any planner failure leaves the plan unchanged.
+   */
+  async refinePlan(
+    request: PlanRefinementRequest,
+    client: LlmClient,
+    opts: { signal?: AbortSignal } = {}
+  ): Promise<AgentPlan | null> {
+    const current = await getPlan(request.planId)
+    if (!current) return null
+    if (current.status === "cancelled" || current.status === "completed") return current
+
+    // Auto triggers respect the refinement budget; manual is always allowed.
+    if (
+      request.trigger !== "manual" &&
+      current.refinementCount >= current.config.maxAutoRefinements
+    ) {
+      return current
+    }
+
+    const { refinePlanSteps } = await import("./planner")
+    const result = await refinePlanSteps(current, request, client, opts.signal)
+    if (!result) return current // fail-OPEN — keep the existing plan
+
+    const steps = materializeSteps(
+      result.titles.map((title, i) => ({
+        title,
+        kind: "agent_turn" as const,
+        ...(i > 0 ? { dependsOn: [i - 1] } : {}),
+      }))
+    )
+    const counts = computePlanCounts(steps)
+    await updatePlan(request.planId, {
+      steps,
+      totalSteps: counts.totalSteps,
+      completedSteps: counts.completedSteps,
+      currentStepId: undefined,
+      status: "awaiting_approval",
+      refinementCount: current.refinementCount + 1,
+      generationId: crypto.randomUUID(),
+    })
+    await appendPlanEvent({
+      planId: request.planId,
+      kind: "refined",
+      payload: {
+        kind: "refined",
+        refinementType: request.refinementType,
+        trigger: request.trigger,
+        changes: [result.reasoning],
+      },
+    })
+    await appendPlanEvent({
+      planId: request.planId,
+      kind: "replanned",
+      payload: {
+        kind: "replanned",
+        reason: request.trigger,
+        ...(request.failedStepId ? { failedStepId: request.failedStepId } : {}),
+      },
+    })
+    const updated = (await getPlan(request.planId)) ?? null
+    void emitPlanStatus(updated)
+    return updated
   }
 
   /** Transition a finished run to its terminal status + log the exit event. */
