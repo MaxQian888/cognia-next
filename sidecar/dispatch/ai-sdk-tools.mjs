@@ -17,6 +17,7 @@ import { z } from "zod"
 import { randomUUID } from "node:crypto"
 
 import { collectCogniaToolDefs, SERVER_NAME } from "../builtin-tools/index.mjs"
+import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
@@ -127,16 +128,15 @@ function pluginToolToAiSdkTool(manifest, { emit, sessionId, pendingPluginToolCal
     execute: async (args) => {
       const effective = gate ? await gate(namespaced, args ?? {}) : (args ?? {})
       const toolUseId = randomUUID()
-      const response = await new Promise((resolve) => {
-        pendingPluginToolCalls.set(toolUseId, { resolve })
-        emit({
-          type: "plugin_tool_exec",
-          sessionId,
-          toolUseId,
-          name: manifest.name,
-          args: effective,
-        })
+      const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, manifest.name)
+      emit({
+        type: "plugin_tool_exec",
+        sessionId,
+        toolUseId,
+        name: manifest.name,
+        args: effective,
       })
+      const response = await pending
       if (response && response.error) throw new Error(String(response.error))
       const payload = response ? response.result : null
       return typeof payload === "string" ? payload : JSON.stringify(payload ?? null)

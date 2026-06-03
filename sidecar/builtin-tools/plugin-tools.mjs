@@ -22,6 +22,45 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"
 
+const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
+
+/**
+ * Register a resolver for `toolUseId` in `pending` and return a promise that
+ * settles when the renderer writes the matching `plugin_tool_response` (resolved
+ * by `claude-host.mjs:handlePluginToolResponse` via the registered `{ resolve }`),
+ * OR after `timeoutMs` with an error envelope. The timeout is the agent-loop
+ * safety net: a stalled / closed renderer must surface a clean tool error rather
+ * than hang the SDK turn forever. The resolver is registered SYNCHRONOUSLY so the
+ * caller can `emit` the request immediately after calling this.
+ *
+ * @param {Map<string, { resolve: (r: any) => void }>} pending
+ * @param {string} toolUseId
+ * @param {string} name  bare tool name, for the timeout message
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{ result?: unknown, error?: string }>}
+ */
+export function awaitPluginToolResponse(
+  pending,
+  toolUseId,
+  name,
+  timeoutMs = DEFAULT_PLUGIN_TOOL_TIMEOUT_MS
+) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(toolUseId)
+      resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
+    }, timeoutMs)
+    if (typeof timer.unref === "function") timer.unref()
+    pending.set(toolUseId, {
+      resolve: (r) => {
+        clearTimeout(timer)
+        pending.delete(toolUseId)
+        resolve(r)
+      },
+    })
+  })
+}
+
 /**
  * Build an in-process MCP server that proxies tool calls back to the
  * renderer process via the existing claude-host stdio protocol.
@@ -69,16 +108,15 @@ export function buildPluginToolsServer({
       zodShape,
       async (args) => {
         const toolUseId = randomUUID()
-        const response = await new Promise((resolve) => {
-          pendingPluginToolCalls.set(toolUseId, { resolve })
-          emit({
-            type: "plugin_tool_exec",
-            sessionId,
-            toolUseId,
-            name: t.name,
-            args,
-          })
+        const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, t.name)
+        emit({
+          type: "plugin_tool_exec",
+          sessionId,
+          toolUseId,
+          name: t.name,
+          args,
         })
+        const response = await pending
         if (response && response.error) {
           return {
             content: [{ type: "text", text: `Error: ${response.error}` }],
