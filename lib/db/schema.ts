@@ -72,6 +72,7 @@ import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
+import type { RemoteControlAuditEntry } from "@/types/remote-control"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -1806,6 +1807,14 @@ export class CogniaDB extends Dexie {
       agentPlans: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
       agentPlanEvents: "&id, planId, [planId+ts], kind, ts",
     })
+
+    // ── v72 — Remote-control durable audit trail (ADR-0005 activation). ──────
+    // One row per inbound command dispatch and per outbound delivery attempt.
+    // `at` drives the newest-first Events tab; `direction`/`kind` filter.
+    // See `lib/db/remote-control-audit.ts` and `@/types/remote-control`.
+    this.version(72).stores({
+      remoteControlAudit: "id, at, direction, kind, runId",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1833,6 +1842,8 @@ export class CogniaDB extends Dexie {
   petCharacterBindings!: Table<PetCharacterBinding, string>
   petActivityLog!: Table<PetActivityRow, number>
   petAchievements!: Table<PetAchievementRecord, string>
+  // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
+  remoteControlAudit!: Table<RemoteControlAuditEntry, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
