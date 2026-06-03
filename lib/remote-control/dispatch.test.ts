@@ -113,6 +113,35 @@ describe("dispatchRemoteCommand", () => {
     expect(bad.status).toBe("rejected")
   })
 
+  it.each([
+    ["scheduler.event"],
+    ["workflow.run"],
+    ["team.dispatch"],
+    ["plan.run"],
+    ["goal.continue"],
+    ["goal.create"],
+  ])("rejects %s with missing required args", async (target) => {
+    const r = await dispatchRemoteCommand(cmd({ target: target as never, args: {} }))
+    expect(r.status).toBe("rejected")
+  })
+
+  it("scheduler.event defaults data and eventSource when absent", async () => {
+    const r = await dispatchRemoteCommand(
+      cmd({ target: "scheduler.event", args: { eventType: "x" } })
+    )
+    expect(emitSchedulerEvent).toHaveBeenCalledWith("x", {}, undefined)
+    expect(r.status).toBe("accepted")
+  })
+
+  it("rejects with String(error) when a non-Error is thrown", async () => {
+    startWorkflowFromRemote.mockRejectedValueOnce("string failure")
+    const r = await dispatchRemoteCommand(
+      cmd({ target: "workflow.run", args: { workflowId: "wf_1" } })
+    )
+    expect(r.status).toBe("rejected")
+    expect(r.detail).toContain("string failure")
+  })
+
   it("rejects an unknown target", async () => {
     const r = await dispatchRemoteCommand(cmd({ target: "nope" as never, args: {} }))
     expect(r.status).toBe("rejected")

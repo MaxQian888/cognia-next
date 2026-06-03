@@ -77,6 +77,16 @@ describe("deliverWebhook", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4) // 1 + 3 retries
   })
 
+  it("uses the real backoff sleep by default (single retry then success)", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    // No opts → exercises the real setTimeout-backed sleep (one ~1s backoff).
+    const r = await deliverWebhook({ endpoint: endpoint(), event: event() })
+    expect(r.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  }, 10000)
+
   it("gives up with an error message on repeated network failure", async () => {
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"))
     const r = await deliverWebhook({ endpoint: endpoint(), event: event() }, instantSleep)
