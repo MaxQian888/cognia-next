@@ -2470,7 +2470,8 @@
       "notifications": "通知",
       "memory": "记忆",
       "discover": "发现",
-      "pet": "宠物"
+      "pet": "宠物",
+      "sourceControl": "源代码管理"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -2521,7 +2522,29 @@
       "notifications": "通知中心的渠道、安静时段、按来源静音与保留策略。",
       "memory": "自治长期记忆——助手跨会话记住关于你的事，含抽取、召回与隐私控制。",
       "discover": "置顶、排序或隐藏发现页的分类。",
-      "pet": "你的桌面动画伙伴。"
+      "pet": "你的桌面动画伙伴。",
+      "sourceControl": "AI 提交信息生成及其他 Git 面板偏好。"
+    },
+    "sourceControl": {
+      "title": "源代码管理",
+      "description": "AI 提交信息生成及其他 Git 面板偏好。",
+      "commitAi": {
+        "heading": "AI 提交信息",
+        "description": "在提交框显示一个按钮，根据已暂存的 diff 起草提交信息。",
+        "conventional": {
+          "heading": "Conventional Commits",
+          "description": "将生成的信息约束为 type(scope): summary 格式。"
+        },
+        "customInstructions": {
+          "heading": "自定义指令",
+          "placeholder": "给模型的额外指引（语气、scope 约定、语言…）"
+        },
+        "model": {
+          "provider": "服务商",
+          "model": "模型",
+          "useDefault": "使用聊天默认"
+        }
+      }
     },
     "notifications": {
       "title": "通知",
@@ -5345,7 +5368,7 @@
         "heading": "出站 webhook 签名",
         "description": "可选的 HMAC-SHA256 签名，会随每次出站 webhook 投递发送，接收方可据此验证请求确实来自这台 cognia。",
         "signingSecret": "签名密钥",
-        "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 X-Cognia-Signature: sha256='<hex>' 请求头。",
+        "signingSecretHelp": "在桌面端存放在 OS 钥匙串。投递会带上 Standard Webhooks 三件套请求头（webhook-id / webhook-timestamp / webhook-signature）。",
         "secretSet": "已配置签名密钥。",
         "secretMissing": "尚未设置签名密钥。",
         "setSecret": "保存密钥",
@@ -5362,7 +5385,20 @@
         "removeHeader": "删除",
         "retryConfigHeading": "投递限制（只读）",
         "retryConfigSummary": "重试 {retries} 次，基础延时 {baseDelayMs} 毫秒，单次请求超时 {timeoutMs} 毫秒。",
-        "perTaskHint": "单任务的 webhook URL 在调度器页面的任务表单里配置。"
+        "perTaskHint": "单任务的 webhook URL 在调度器页面的任务表单里配置。",
+        "endpointsHeading": "出站端点",
+        "endpointsHelp": "独立的 webhook 端点，任意子系统（调度器、目标、工作流、团队、计划）都可向其推送生命周期事件。每次投递都用上面的密钥签名。",
+        "endpointsEmpty": "尚未配置出站端点。",
+        "endpointName": "端点名称",
+        "endpointEnabled": "启用",
+        "endpointTest": "发送测试投递",
+        "endpointRemove": "删除端点",
+        "endpointUrlPlaceholder": "https://example.com/webhook",
+        "endpointUrlRequired": "测试前请先填写 URL。",
+        "endpointTestOk": "测试投递已被接受。",
+        "endpointTestFailed": "测试投递失败：{error}",
+        "addEndpoint": "新增端点",
+        "endpointsSchemeNote": "签名方案：Standard Webhooks（standardwebhooks.com）。"
       },
       "events": {
         "heading": "调度器事件类型",
@@ -9463,7 +9499,14 @@
       "commitAndPush": "提交并推送",
       "commitAndSync": "提交并同步",
       "signoff": "添加签署",
-      "more": "更多提交操作"
+      "more": "更多提交操作",
+      "autoGenerateAI": "用 AI 生成信息",
+      "ai": {
+        "generating": "正在生成提交信息…",
+        "failed": "生成提交信息失败",
+        "noStaged": "请先暂存更改再生成信息",
+        "redacted": "已脱敏敏感数据后再发送给模型"
+      }
     },
     "branches": {
       "search": "搜索分支…",
@@ -9495,7 +9538,10 @@
       "push": "推送",
       "sync": "同步更改",
       "more": "更多操作",
-      "refresh": "刷新"
+      "refresh": "刷新",
+      "abortMerge": "中止合并",
+      "restore": "恢复（到 HEAD）",
+      "viewBlame": "查看追溯"
     },
     "stash": {
       "title": "贮藏",
@@ -9509,6 +9555,56 @@
       "drop": "删除",
       "empty": "没有贮藏"
     },
+    "remotes": {
+      "title": "远程仓库",
+      "description": "管理仓库已配置的远程。",
+      "namePlaceholder": "远程名称（如 origin）",
+      "urlPlaceholder": "远程 URL",
+      "add": "添加远程",
+      "remove": "移除远程",
+      "copyUrl": "复制 URL",
+      "copied": "已复制远程 URL",
+      "copyFailed": "复制 URL 失败",
+      "empty": "未配置远程"
+    },
+    "roots": {
+      "switchRoot": "切换仓库根目录",
+      "select": "选择根目录",
+      "primary": "主"
+    },
+    "tags": {
+      "title": "标签",
+      "description": "在此仓库中创建、查看和删除标签。",
+      "namePlaceholder": "标签名称（如 v1.0.0）",
+      "messagePlaceholder": "注释信息（可选）",
+      "create": "创建标签",
+      "delete": "删除标签",
+      "push": "推送标签到远程",
+      "empty": "没有标签"
+    },
+    "reset": {
+      "label": "重置",
+      "soft": "Soft — 保留已暂存更改",
+      "mixed": "Mixed — 取消暂存更改",
+      "hard": "Hard — 丢弃所有更改",
+      "confirmTitle": "执行 Hard 重置？",
+      "confirmDescription": "这将把已暂存和工作区的所有更改永久丢弃，回退到所选提交。此操作无法撤销。",
+      "confirmAction": "Hard 重置",
+      "cancel": "取消"
+    },
+    "restore": {
+      "title": "恢复文件",
+      "description": "从所选来源恢复 {path}。",
+      "source": "来源（分支、标签或提交）",
+      "confirm": "恢复",
+      "cancel": "取消"
+    },
+    "blame": {
+      "title": "追溯 · {path}",
+      "loading": "正在加载追溯…",
+      "empty": "没有追溯信息",
+      "uncommitted": "未提交"
+    },
     "conflicts": {
       "acceptOurs": "采用当前更改",
       "acceptTheirs": "采用传入更改",
@@ -9518,7 +9614,10 @@
       "title": "时间线",
       "repository": "仓库",
       "thisFile": "当前文件",
-      "empty": "没有历史记录"
+      "empty": "没有历史记录",
+      "viewList": "列表视图",
+      "viewGraph": "图形视图",
+      "loadMore": "加载更多"
     },
     "errors": {
       "generic": "Git 操作失败：{message}",

@@ -2,22 +2,81 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, KeyRoundIcon, PlusIcon, ShieldIcon, XIcon } from "lucide-react"
+import { CheckCircle2Icon, KeyRoundIcon, PlusIcon, SendIcon, ShieldIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { WEBHOOK_DELIVERY_LIMITS } from "@/lib/scheduler/notification-integration"
+import type { WebhookEgressEndpoint } from "@/types/remote-control"
 
 export function OutboundTab() {
   const t = useTranslations("settings.remoteControl.outbound")
   const outbound = useRemoteControlStore((s) => s.config.outbound)
   const setSigningSecret = useRemoteControlStore((s) => s.setSigningSecret)
   const setOutboundHeaders = useRemoteControlStore((s) => s.setOutboundHeaders)
+  const updateOutbound = useRemoteControlStore((s) => s.updateOutbound)
 
   const [pendingSecret, setPendingSecret] = useState("")
+  const endpoints = outbound.endpoints ?? []
+
+  const onAddEndpoint = async () => {
+    const next: WebhookEgressEndpoint = {
+      id: crypto.randomUUID(),
+      name: "",
+      url: "",
+      headers: [],
+      enabled: true,
+    }
+    await updateOutbound({ endpoints: [...endpoints, next] })
+  }
+
+  const onUpdateEndpoint = async (id: string, patch: Partial<WebhookEgressEndpoint>) => {
+    await updateOutbound({
+      endpoints: endpoints.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    })
+  }
+
+  const onRemoveEndpoint = async (id: string) => {
+    await updateOutbound({ endpoints: endpoints.filter((e) => e.id !== id) })
+  }
+
+  const onTestEndpoint = async (endpoint: WebhookEgressEndpoint) => {
+    if (!endpoint.url) {
+      toast.error(t("endpointUrlRequired"))
+      return
+    }
+    try {
+      const [{ deliverWebhook }, { remoteControlGetSigningSecret }, { isTauri }] =
+        await Promise.all([
+          import("@/lib/remote-control/outbound/delivery"),
+          import("@/lib/tauri/remote-control"),
+          import("@/lib/tauri"),
+        ])
+      const signingSecret = isTauri()
+        ? ((await remoteControlGetSigningSecret().catch(() => null)) ?? undefined)
+        : undefined
+      const result = await deliverWebhook({
+        endpoint,
+        event: {
+          id: crypto.randomUUID(),
+          eventType: "remote-control.test",
+          source: "remote-control",
+          payload: { test: true },
+          occurredAt: new Date().toISOString(),
+        },
+        signingSecret,
+      })
+      if (result.ok) toast.success(t("endpointTestOk"))
+      else
+        toast.error(t("endpointTestFailed", { error: result.error ?? String(result.httpStatus) }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   const onSaveSecret = async () => {
     if (!pendingSecret) {
@@ -98,6 +157,61 @@ export function OutboundTab() {
               </Button>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("endpointsHeading")}</CardTitle>
+          <CardDescription>{t("endpointsHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {endpoints.length === 0 && (
+            <p className="text-xs text-muted-foreground">{t("endpointsEmpty")}</p>
+          )}
+          {endpoints.map((endpoint) => (
+            <div key={endpoint.id} className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder={t("endpointName")}
+                  value={endpoint.name}
+                  onChange={(e) => onUpdateEndpoint(endpoint.id, { name: e.target.value })}
+                  className="flex-1"
+                />
+                <Switch
+                  checked={endpoint.enabled}
+                  onCheckedChange={(v) => onUpdateEndpoint(endpoint.id, { enabled: v })}
+                  aria-label={t("endpointEnabled")}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onTestEndpoint(endpoint)}
+                  aria-label={t("endpointTest")}
+                >
+                  <SendIcon className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onRemoveEndpoint(endpoint.id)}
+                  aria-label={t("endpointRemove")}
+                >
+                  <XIcon className="h-4 w-4" />
+                </Button>
+              </div>
+              <Input
+                placeholder={t("endpointUrlPlaceholder")}
+                value={endpoint.url}
+                onChange={(e) => onUpdateEndpoint(endpoint.id, { url: e.target.value })}
+              />
+            </div>
+          ))}
+          <Button size="sm" variant="outline" onClick={onAddEndpoint}>
+            <PlusIcon className="mr-2 h-3.5 w-3.5" />
+            {t("addEndpoint")}
+          </Button>
+          <p className="text-xs text-muted-foreground">{t("endpointsSchemeNote")}</p>
         </CardContent>
       </Card>
 

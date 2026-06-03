@@ -65,4 +65,28 @@ describe("OutboundTab", () => {
     render(<OutboundTab />)
     expect(screen.getByText(/Retries.*3.*1000.*10000/i)).toBeInTheDocument()
   })
+
+  it("adds, edits, and removes an egress endpoint", async () => {
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /add endpoint/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints).toHaveLength(1)
+    )
+    const nameInput = screen.getByPlaceholderText(/Endpoint name/i) as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "My hook" } })
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints[0].name).toBe("My hook")
+    )
+    const urlInput = screen.getByPlaceholderText("https://example.com/webhook") as HTMLInputElement
+    fireEvent.change(urlInput, { target: { value: "https://x.test/h" } })
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints[0].url).toBe(
+        "https://x.test/h"
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: /remove endpoint/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.outbound.endpoints).toHaveLength(0)
+    )
+  })
 })
