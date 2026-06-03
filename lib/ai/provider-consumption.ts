@@ -20,6 +20,12 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createOpenAI } from "@ai-sdk/openai"
 
+import {
+  LOCAL_PROVIDER_URLS,
+  getOpenAICompatibleURL,
+  type LocalProviderName,
+} from "@/types/provider/local-provider"
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -242,8 +248,17 @@ function resolveOne(
     (custom?.protocol as ResolvedProvider["protocol"]) ?? BUILTIN_PROTOCOLS[providerId] ?? "openai"
 
   const apiKey = builtin?.apiKey ?? custom?.apiKey
-  const baseURL = builtin?.baseURL ?? custom?.baseURL
+  let baseURL = builtin?.baseURL ?? custom?.baseURL
   const model = builtin?.defaultModel ?? custom?.defaultModel
+
+  // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
+  // a well-known localhost port and need no API key. When the user enabled a
+  // built-in local provider without typing a base URL, fall back to the
+  // catalog default — normalised to the OpenAI-compatible `/v1` surface the
+  // AI SDK's openai client expects — so the turn can actually dispatch.
+  if (!baseURL && !custom && providerId in LOCAL_PROVIDER_URLS) {
+    baseURL = getOpenAICompatibleURL(LOCAL_PROVIDER_URLS[providerId as LocalProviderName])
+  }
 
   if (!apiKey && !baseURL) {
     return {

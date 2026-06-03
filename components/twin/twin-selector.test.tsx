@@ -167,12 +167,22 @@ describe("TwinSelector", () => {
       const rows = await refreshTwins()
       expect(rows.map((r) => r.id)).toEqual(["twin_keep"])
     })
-    expect(onAfterDelete).toHaveBeenCalledWith(
-      "twin_kill",
-      expect.objectContaining({ sources: 0, chunks: 0 })
-    )
+    // `deleteTwin` commits the cascade transaction (so the rows above are gone)
+    // before awaiting its best-effort post-commit cleanup and only then resolving.
+    // The callbacks fire after that resolution, so we must wait for them rather
+    // than asserting synchronously the moment the rows disappear. Waiting here
+    // also drains those post-commit promises before the suite tears down, which
+    // is what prevents the "Cannot log after tests are done" async leak.
+    await waitFor(() => {
+      expect(onAfterDelete).toHaveBeenCalledWith(
+        "twin_kill",
+        expect.objectContaining({ sources: 0, chunks: 0 })
+      )
+    })
     // We deleted the active twin, so the selector should fall back to the
     // other one and emit onSelect with its id.
-    expect(onSelect).toHaveBeenCalledWith("twin_keep")
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith("twin_keep")
+    })
   })
 })

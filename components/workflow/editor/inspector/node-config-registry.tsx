@@ -43,6 +43,13 @@ import {
   GithubWebhookTriggerConfig,
 } from "./forms/github-forms"
 import {
+  GitStageConfig,
+  GitCommitConfig,
+  GitPushConfig,
+  GitBranchConfig,
+  OcrExtractConfig,
+} from "./forms/git-ocr-forms"
+import {
   AiClassifyConfig,
   AiEmbedConfig,
   AiExtractConfig,
@@ -139,6 +146,13 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.desktop.wait": DesktopWaitConfig,
   // Actions: system (Wave 3 — integrated terminal)
   "action.system.terminal": SystemTerminalConfig,
+  // Actions: local Git (ADR-0038)
+  "action.git.stage": GitStageConfig,
+  "action.git.commit": GitCommitConfig,
+  "action.git.push": GitPushConfig,
+  "action.git.branch": GitBranchConfig,
+  // Data: OCR extraction (ADR-0024)
+  "ocr.extract": OcrExtractConfig,
   // AI
   "ai.prompt": AiPromptConfig,
   "ai.classify": AiClassifyConfig,

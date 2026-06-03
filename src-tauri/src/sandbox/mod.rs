@@ -168,8 +168,11 @@ mod tests {
         let health = backend.health();
         #[cfg(target_os = "windows")]
         {
-            // Vendor still pending — Phase 4.2 follow-up.
-            assert_eq!(health.backend, "windows-codex-vendor-pending");
+            // The Windows backend is the in-house "cognia-sandbox" runner
+            // (see `windows.rs`). It is unavailable until the user completes
+            // the elevated setup that writes the heartbeat marker, which a
+            // clean test environment never has.
+            assert_eq!(health.backend, "windows-cognia-sandbox");
             assert!(!backend.is_available());
         }
         #[cfg(target_os = "macos")]
@@ -189,7 +192,7 @@ mod tests {
         let health = sandbox_health_probe().await.unwrap();
         let ok = matches!(
             health.backend.as_str(),
-            "windows-codex-vendor-pending"
+            "windows-cognia-sandbox"
                 | "macos-sandbox-exec"
                 | "linux-bwrap"
                 | "mock"

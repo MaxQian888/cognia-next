@@ -157,17 +157,35 @@ fn load_file(path: &std::path::Path) -> Result<Option<AuthDotJson>, String> {
 }
 
 fn load_keyring() -> Result<Option<AuthDotJson>, String> {
+    // In test builds, an injected seam lets unit tests model the keyring
+    // contents deterministically instead of reading the developer's / CI
+    // host's real OS keyring (which may legitimately hold a live codex-cli
+    // credential and would otherwise make these tests environment-dependent).
+    #[cfg(test)]
+    if let Some(blob) = test_support::keyring_override() {
+        return parse_keyring_blob(blob.as_deref());
+    }
+
     let entry = Entry::new(CODEX_KEYRING_SERVICE, CODEX_KEYRING_ACCOUNT)
         .map_err(|e| format!("keyring init failed: {e}"))?;
     match entry.get_password() {
-        Ok(blob) => {
-            let parsed: AuthDotJson = serde_json::from_str(&blob).map_err(|e| {
+        Ok(blob) => parse_keyring_blob(Some(&blob)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("keyring read failed: {e}")),
+    }
+}
+
+/// Parse a raw keyring payload into an [`AuthDotJson`]. `None` models a missing
+/// entry; `Some(blob)` parses the JSON, surfacing malformed payloads as `Err`.
+fn parse_keyring_blob(blob: Option<&str>) -> Result<Option<AuthDotJson>, String> {
+    match blob {
+        Some(blob) => {
+            let parsed: AuthDotJson = serde_json::from_str(blob).map_err(|e| {
                 format!("parse keyring '{CODEX_KEYRING_SERVICE}' payload: {e}")
             })?;
             Ok(Some(parsed))
         }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+        None => Ok(None),
     }
 }
 
@@ -306,14 +324,108 @@ fn read_string_or_enum(v: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// Hermetic test seam shared by every codex test that exercises
+/// [`discover_codex_auth`] (this module's `tests` plus the sibling
+/// `commands::tests`).
+///
+/// `discover_codex_auth` reads two process-global surfaces — the `CODEX_HOME`
+/// env var and the OS keyring entry `"Codex Auth"`. Without isolation those
+/// tests (a) race each other over `CODEX_HOME` (cargo runs them in parallel)
+/// and (b) read the developer's real keyring, which on a machine with codex-cli
+/// installed holds a live credential. [`TestEnv`] serialises the env mutation
+/// behind a process-wide lock and routes the keyring read through an injected
+/// override, so every test runs against a fully controlled view regardless of
+/// host state.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    /// Injected keyring contents for the current test:
+    /// - `None`               → no override active; real keyring is consulted.
+    /// - `Some(None)`         → override active, keyring reports *no entry*.
+    /// - `Some(Some(blob))`   → override active, keyring returns `blob`.
+    static KEYRING_OVERRIDE: Mutex<Option<Option<String>>> = Mutex::new(None);
+
+    /// Serialises every test that mutates `CODEX_HOME` / the keyring override
+    /// so cargo's parallel runner can't interleave them. Exposed `pub(crate)`
+    /// so the rare test that pokes `CODEX_HOME` directly (without a `TestEnv`)
+    /// can hold the *same* lock and stay ordered against everything else.
+    pub(crate) fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        // Recover from a poisoned lock: a panicking test must not wedge the
+        // whole module.
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Read the injected keyring override (consumed by `super::load_keyring`).
+    /// Returns the inner `Option<String>` only when an override is active.
+    pub(crate) fn keyring_override() -> Option<Option<String>> {
+        KEYRING_OVERRIDE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// RAII guard that pins `CODEX_HOME` to a temp dir and forces the keyring
+    /// seam to report *no entry*, restoring both on drop. Holds the env lock
+    /// for its lifetime so concurrent tests never observe each other's state.
+    pub(crate) struct TestEnv {
+        _guard: MutexGuard<'static, ()>,
+        tmp: tempfile::TempDir,
+        prev_codex_home: Option<String>,
+    }
+
+    impl TestEnv {
+        /// New isolated environment with an empty keyring.
+        pub(crate) fn new() -> Self {
+            let guard = env_lock();
+            let prev_codex_home = std::env::var("CODEX_HOME").ok();
+            let tmp = tempfile::tempdir().unwrap();
+            std::env::set_var("CODEX_HOME", tmp.path());
+            // Default: keyring is empty unless a test overrides it explicitly.
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+            Self {
+                _guard: guard,
+                tmp,
+                prev_codex_home,
+            }
+        }
+
+        /// The isolated `CODEX_HOME` directory.
+        pub(crate) fn path(&self) -> &std::path::Path {
+            self.tmp.path()
+        }
+
+        /// Make the keyring seam return `blob` on the next discovery probe.
+        pub(crate) fn set_keyring(&self, blob: &str) {
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Some(blob.to_string()));
+        }
+    }
+
+    impl Drop for TestEnv {
+        fn drop(&mut self) {
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            match &self.prev_codex_home {
+                Some(v) => std::env::set_var("CODEX_HOME", v),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_support::{env_lock, TestEnv};
     use super::*;
 
     #[test]
     fn codex_home_honours_env_var() {
-        // SAFETY: tests run sequentially in this module; CODEX_HOME isn't
-        // expected to be set by the test harness.
+        // Serialise the `CODEX_HOME` mutation behind the same lock the
+        // discovery tests use, so cargo's parallel runner can't interleave.
+        let _guard = env_lock();
         let prev = std::env::var("CODEX_HOME").ok();
         std::env::set_var("CODEX_HOME", "C:/custom/codex");
         let resolved = codex_home().expect("env-var path resolvable");
@@ -326,6 +438,7 @@ mod tests {
 
     #[test]
     fn codex_home_falls_back_to_dot_codex() {
+        let _guard = env_lock();
         let prev = std::env::var("CODEX_HOME").ok();
         std::env::remove_var("CODEX_HOME");
         let resolved = codex_home().expect("home dir resolvable on test host");
@@ -338,9 +451,8 @@ mod tests {
 
     #[test]
     fn discovers_api_key_payload_from_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
-        let auth_path = tmp.path().join("auth.json");
+        let env = TestEnv::new();
+        let auth_path = env.path().join("auth.json");
         std::fs::write(
             &auth_path,
             r#"{"auth_mode":"ApiKey","OPENAI_API_KEY":"sk-test","tokens":null}"#,
@@ -352,8 +464,6 @@ mod tests {
         assert_eq!(got.auth_mode.as_deref(), Some("ApiKey"));
         assert_eq!(got.openai_api_key.as_deref(), Some("sk-test"));
         assert!(got.tokens.is_none());
-
-        std::env::remove_var("CODEX_HOME");
     }
 
     #[test]
@@ -385,15 +495,15 @@ mod tests {
             },
             "last_refresh": "2026-05-10T01:23:45Z"
         });
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
+        let env = TestEnv::new();
         std::fs::write(
-            tmp.path().join("auth.json"),
+            env.path().join("auth.json"),
             serde_json::to_string(&body).unwrap(),
         )
         .unwrap();
 
         let got = discover_codex_auth().unwrap().unwrap();
+        assert_eq!(got.source, DiscoverySource::File);
         let tokens = got.tokens.expect("tokens present");
         assert_eq!(tokens.access_token, "oat-test");
         assert_eq!(tokens.refresh_token, "rt-test");
@@ -403,41 +513,57 @@ mod tests {
         assert_eq!(tokens.chatgpt_user_id.as_deref(), Some("user_abc"));
         assert_eq!(tokens.chatgpt_account_id.as_deref(), Some("acct_def"));
         assert_eq!(got.last_refresh_iso.as_deref().is_some(), true);
-
-        std::env::remove_var("CODEX_HOME");
     }
 
     #[test]
     fn discovery_returns_none_when_nothing_exists() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
+        // No auth.json and an empty keyring (forced by the seam) → the clean
+        // logged-out state. The seam lets this be a strict `is_none()` instead
+        // of the old `|| source == Keyring` escape hatch that papered over a
+        // real keyring entry on the host.
+        let _env = TestEnv::new();
         let got = discover_codex_auth().unwrap();
-        // Without auth.json + without writing to the keyring, we expect None.
-        // On CI hosts where no codex-cli keyring entry exists this is the
-        // canonical clean state.
-        assert!(got.is_none() || got.unwrap().source == DiscoverySource::Keyring);
-        std::env::remove_var("CODEX_HOME");
+        assert!(got.is_none());
     }
 
     #[test]
     fn empty_auth_json_treated_as_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
-        std::fs::write(tmp.path().join("auth.json"), "  \n").unwrap();
+        // Whitespace-only auth.json is treated as missing, so discovery falls
+        // through to the (seam-forced empty) keyring and yields `None`.
+        let env = TestEnv::new();
+        std::fs::write(env.path().join("auth.json"), "  \n").unwrap();
         let got = discover_codex_auth().unwrap();
-        // Falls through to keyring lookup; treat as not found unless the
-        // CI host has a stray codex-cli keyring entry.
-        assert!(got.is_none() || got.unwrap().source == DiscoverySource::Keyring);
-        std::env::remove_var("CODEX_HOME");
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn discovers_from_keyring_when_no_auth_json() {
+        // With no auth.json present, discovery falls through to the keyring.
+        // The seam injects a valid payload so the `Keyring` branch is covered
+        // deterministically (previously it had no host-independent coverage).
+        let env = TestEnv::new();
+        env.set_keyring(
+            r#"{"auth_mode":"ApiKey","OPENAI_API_KEY":"sk-from-keyring","tokens":null}"#,
+        );
+        let got = discover_codex_auth().unwrap().unwrap();
+        assert_eq!(got.source, DiscoverySource::Keyring);
+        assert_eq!(got.openai_api_key.as_deref(), Some("sk-from-keyring"));
+    }
+
+    #[test]
+    fn malformed_keyring_payload_surfaces_parse_error() {
+        // A corrupt keyring blob must surface as `Err` (so the UI can show
+        // "credential corrupted") rather than silently appearing logged out.
+        let env = TestEnv::new();
+        env.set_keyring("{not json");
+        assert!(discover_codex_auth().is_err());
     }
 
     #[test]
     fn malformed_auth_json_surfaces_parse_error() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
-        std::fs::write(tmp.path().join("auth.json"), "{not json").unwrap();
+        let env = TestEnv::new();
+        std::fs::write(env.path().join("auth.json"), "{not json").unwrap();
         assert!(discover_codex_auth().is_err());
-        std::env::remove_var("CODEX_HOME");
     }
 
     #[test]

@@ -7,7 +7,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import { SidebarCustomizer } from "./sidebar-customizer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { DEFAULT_SIDEBAR_LAYOUT, SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 jest.mock("next-intl", () => ({
   // Return the leaf key so assertions can target stable strings, and item
@@ -139,24 +139,12 @@ describe("SidebarCustomizer", () => {
   })
 
   it("shows the More-empty placeholder when every item is pinned or hidden", () => {
-    // Pin all 15 catalog ids → nothing left for overflow.
-    const allIds = [
-      "workflows",
-      "inbox",
-      "twin",
-      "discover",
-      "skills",
-      "plugins",
-      "agent-teams",
-      "scheduler",
-      "goals",
-      "source-control",
-      "observability",
-      "eval",
-      "performance",
-      "logs",
-      "me",
-    ]
+    // Derive the full id universe from the real nav registry so this can't go
+    // stale when a wave adds a new section. The test runs under the "web"
+    // platform (jsdom has no Tauri/Capacitor globals), so no `desktopOnly`
+    // filtering happens and the whole catalog is in play. Pinning every id
+    // leaves nothing for overflow → the "More" bucket is empty.
+    const allIds = SIDEBAR_NAV_META.map((m) => m.id)
     setLayout(allIds, [])
     renderCustomizer()
     expect(screen.getByText("customize.moreEmpty")).toBeInTheDocument()

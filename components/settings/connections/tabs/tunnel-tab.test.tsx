@@ -2,12 +2,11 @@
  * @jest-environment jsdom
  */
 
-import "fake-indexeddb/auto"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 const mockIsTauri = jest.fn()
 jest.mock("@/lib/tauri", () => ({
@@ -33,11 +32,45 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// `getDb()` is only ever called inside the component's `useLiveQuery` querier.
+// Mock the Dexie hook so the adapter list is driven directly from the test —
+// same seam the sibling connector-tab tests (overview / outbound / audit) use.
+// This avoids the real-IndexedDB liveQuery subscription, whose teardown leaks a
+// fake-indexeddb connection past unmount (the component also renders Radix
+// tooltips on the install path) and makes the suite flaky/slow under jsdom.
+jest.mock("@/lib/db/schema", () => ({
+  getDb: jest.fn(),
+}))
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: jest.fn(),
+}))
+
+import { useLiveQuery } from "dexie-react-hooks"
+const mockUseLiveQuery = useLiveQuery as jest.MockedFunction<typeof useLiveQuery>
+
+/**
+ * The Tunnel tab calls `useLiveQuery` exactly once, for the adapter instances.
+ * Drive it from the test.
+ */
+function setAdapters(adapters: AdapterInstanceRow[] | undefined): void {
+  mockUseLiveQuery.mockReturnValue(adapters as unknown as ReturnType<typeof useLiveQuery>)
+}
+
+const baseAdapter = (overrides: Partial<AdapterInstanceRow>): AdapterInstanceRow =>
+  ({
+    enabled: true,
+    settings: {},
+    credentialsRef: { keyringService: "x", accounts: [] },
+    trigger: {} as never,
+    defaultMode: "auto",
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  }) as AdapterInstanceRow
+
 import { TunnelTab } from "./tunnel-tab"
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
+beforeEach(() => {
   mockIsTauri.mockReset()
   mockStart.mockReset()
   mockStop.mockReset()
@@ -45,6 +78,9 @@ beforeEach(async () => {
   mockCurrent.mockResolvedValue(null)
   mockConfig.mockReset()
   mockConfig.mockResolvedValue(null)
+  mockUseLiveQuery.mockReset()
+  // Default: no adapters registered.
+  setAdapters([])
 })
 
 function wrap(ui: React.ReactElement) {
@@ -90,6 +126,7 @@ describe("TunnelTab", () => {
 
   it("falls back to a no-adapters hint when none are registered", async () => {
     mockIsTauri.mockReturnValue(true)
+    setAdapters([])
     wrap(<TunnelTab />)
     await waitFor(() => expect(screen.getByTestId("tunnel-no-adapters")).toBeInTheDocument())
   })
@@ -100,33 +137,19 @@ describe("TunnelTab", () => {
       publicUrl: "https://abc.trycloudflare.com",
       localUrl: "https://127.0.0.1:7842",
     })
-    await getDb().adapterInstances.bulkAdd([
-      {
+    setAdapters([
+      baseAdapter({
         id: "lark-1",
         type: "lark",
         displayName: "Lark Prod",
-        enabled: true,
         transportMode: "webhook",
-        settings: {},
-        credentialsRef: { keyringService: "x", accounts: [] },
-        trigger: {} as never,
-        defaultMode: "auto",
-        createdAt: 0,
-        updatedAt: 0,
-      } as never,
-      {
+      }),
+      baseAdapter({
         id: "onebot-1",
         type: "onebot",
         displayName: "QQ Dev",
-        enabled: true,
         transportMode: "reverse-ws",
-        settings: {},
-        credentialsRef: { keyringService: "x", accounts: [] },
-        trigger: {} as never,
-        defaultMode: "auto",
-        createdAt: 0,
-        updatedAt: 0,
-      } as never,
+      }),
     ])
     wrap(<TunnelTab />)
     await waitFor(() =>

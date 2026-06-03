@@ -156,8 +156,9 @@ describe("a2ui MCP tool schemas", () => {
 
     it("descriptions and raw input schemas match the canonical tools", () => {
       for (const tool of A2UI_BRIDGE_TOOLS) {
-        expect(sidecarDefs.TOOL_DESCRIPTIONS[tool.name]).toBe(tool.description)
-        expect(sidecarDefs.RAW_INPUT_SCHEMAS[tool.name]).toEqual(tool.inputSchema)
+        const name = tool.name as keyof typeof sidecarDefs.TOOL_DESCRIPTIONS
+        expect(sidecarDefs.TOOL_DESCRIPTIONS[name]).toBe(tool.description)
+        expect(sidecarDefs.RAW_INPUT_SCHEMAS[name]).toEqual(tool.inputSchema)
       }
     })
 

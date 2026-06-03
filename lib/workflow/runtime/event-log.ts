@@ -17,12 +17,25 @@ export interface AppendEventInput {
   payload?: unknown
 }
 
+// Monotonic ts watermark. `listRunEvents` orders by the [runId+ts] index, and
+// for EQUAL ts IndexedDB falls back to primary-key order — a random nanoid —
+// which scrambles same-millisecond events (steps appeared out of order in the
+// run timeline and resume logic). The renderer is single-threaded, so a
+// module-level watermark guarantees strictly increasing ts across ALL appends.
+let lastTs = 0
+
+function nextTs(): number {
+  const now = Date.now()
+  lastTs = now > lastTs ? now : lastTs + 1
+  return lastTs
+}
+
 /** Append a single event. Use `appendEvents` for batches in a hot path. */
 export async function appendEvent(input: AppendEventInput): Promise<WorkflowRunEventRow> {
   const row: WorkflowRunEventRow = {
     id: "evt_" + nanoid(10),
     runId: input.runId,
-    ts: Date.now(),
+    ts: nextTs(),
     type: input.type,
     stepId: input.stepId,
     level: input.level,
@@ -35,12 +48,12 @@ export async function appendEvent(input: AppendEventInput): Promise<WorkflowRunE
 /** Append many events in a single transaction. Preserves the input order. */
 export async function appendEvents(inputs: AppendEventInput[]): Promise<void> {
   if (inputs.length === 0) return
-  const now = Date.now()
-  const rows: WorkflowRunEventRow[] = inputs.map((i, idx) => ({
+  const rows: WorkflowRunEventRow[] = inputs.map((i) => ({
     id: "evt_" + nanoid(10),
     runId: i.runId,
-    // Bump ts by index so two events appended in the same ms still sort.
-    ts: now + idx,
+    // nextTs() is strictly increasing, so input order is preserved even when
+    // the whole batch lands in one millisecond.
+    ts: nextTs(),
     type: i.type,
     stepId: i.stepId,
     level: i.level,

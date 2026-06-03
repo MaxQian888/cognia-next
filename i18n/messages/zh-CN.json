@@ -16328,6 +16328,108 @@
       }
     },
     "forms": {
+      "git": {
+        "repoPath": {
+          "label": "仓库路径",
+          "hint": "可选。默认为当前工作区根目录。支持 '{{ }}' 表达式。",
+          "placeholder": "D:/Projects/my-repo"
+        },
+        "stage": {
+          "paths": {
+            "label": "要暂存的路径",
+            "hint": "逗号分隔的文件路径或通配符。留空则暂存全部改动。",
+            "placeholder": "src/index.ts, docs/*.md"
+          }
+        },
+        "commit": {
+          "message": {
+            "label": "提交信息",
+            "hint": "必填。支持 '{{ }}' 表达式。",
+            "placeholder": "feat: 描述这次变更"
+          },
+          "signoff": {
+            "label": "添加 Signed-off-by",
+            "hint": "在提交信息末尾追加 Signed-off-by 署名。"
+          }
+        },
+        "push": {
+          "remote": {
+            "label": "远程仓库",
+            "hint": "默认为 origin。支持 '{{ }}' 表达式。",
+            "placeholder": "origin"
+          },
+          "branch": {
+            "label": "分支",
+            "hint": "默认为当前分支。支持 '{{ }}' 表达式。",
+            "placeholder": "main"
+          },
+          "setUpstream": {
+            "label": "设置上游",
+            "hint": "推送时附带 -u，让本地分支跟踪远程分支。"
+          }
+        },
+        "branch": {
+          "name": {
+            "label": "分支名",
+            "hint": "必填。支持 '{{ }}' 表达式。",
+            "placeholder": "feat/my-feature"
+          },
+          "from": {
+            "label": "基于",
+            "hint": "可选起点（分支、标签或提交），默认为 HEAD。",
+            "placeholder": "main"
+          },
+          "checkout": {
+            "label": "创建后切换",
+            "hint": "创建完成后将工作区切换到新分支。"
+          }
+        }
+      },
+      "ocr": {
+        "screen": {
+          "label": "截取屏幕",
+          "hint": "对实时截图执行 OCR，而不是使用提供的图片。"
+        },
+        "url": {
+          "label": "图片 / PDF URL",
+          "hint": "要提取文本的远程文件。支持 '{{ }}' 表达式。",
+          "placeholder": "https://example.com/scan.pdf"
+        },
+        "dataUrl": {
+          "label": "Data URL",
+          "hint": "图片的内联 data: URL。支持 '{{ }}' 表达式。",
+          "placeholder": "data:image/png;base64,…"
+        },
+        "imageBase64": {
+          "label": "图片 base64",
+          "hint": "base64 编码的原始图片字节。支持 '{{ }}' 表达式。",
+          "placeholder": "iVBORw0KGgo…"
+        },
+        "pageRange": {
+          "label": "页码范围",
+          "hint": "用于 PDF。示例：1-3,5。留空表示全部页面。",
+          "placeholder": "1-3,5"
+        },
+        "languages": {
+          "label": "语言",
+          "hint": "逗号分隔的语言提示，传给 OCR 引擎。",
+          "placeholder": "en, zh"
+        },
+        "provider": {
+          "label": "提供方",
+          "hint": "可选的 OCR 提供方 id。留空由自动路由选择。",
+          "placeholder": "auto"
+        },
+        "format": {
+          "label": "输出格式",
+          "hint": "提取文本返回给工作流的形式。",
+          "options": {
+            "markdown": "Markdown",
+            "text": "纯文本",
+            "blocks": "结构化块"
+          }
+        }
+      },
       "desktopShared": {
         "selector": {
           "label": "选择器",

@@ -111,6 +111,11 @@ pub async fn spawn_server(
     tls: TlsMaterial,
     state: SharedState,
 ) -> Result<ServerHandle, CompanionServerError> {
+    // rustls 0.23 needs an explicit crypto provider before building any TLS
+    // config; install one idempotently in case the server is spawned from a
+    // context that never ran `main.rs` (tests, headless entry points).
+    super::ensure_crypto_provider();
+
     let ip: IpAddr = if bind_loopback_only {
         IpAddr::V4(Ipv4Addr::LOCALHOST)
     } else {
@@ -300,8 +305,11 @@ mod tests {
     }
 
     fn insecure_client() -> reqwest::Client {
+        // `.no_proxy()` so the loopback HTTPS request goes straight to the
+        // in-process listener rather than through any ambient system proxy.
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
+            .no_proxy()
             .build()
             .expect("reqwest client")
     }
@@ -369,7 +377,16 @@ mod tests {
             "http://127.0.0.1:{}/api/v1/auth/pair/issue",
             handle.bound_port
         );
-        let client = reqwest::Client::new();
+        // `.no_proxy()` is essential: the default reqwest client honours the
+        // ambient `HTTP_PROXY`/`http_proxy` env, and a system proxy would
+        // intercept this plaintext request and answer 502 instead of letting
+        // it hit (and be rejected by) the TLS listener — making the test
+        // depend on the developer's proxy configuration. We want a direct,
+        // proxy-free connection so the handshake mismatch is what fails.
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("reqwest client");
         let result = client
             .post(&url)
             .timeout(Duration::from_secs(2))

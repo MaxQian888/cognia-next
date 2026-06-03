@@ -549,6 +549,33 @@ pub fn mobile_allowed_keys() -> &'static [&'static str] {
     APP_SETTINGS_MOBILE_ALLOWED_KEYS
 }
 
+/// Validate an `app_settings_update` payload against the mobile allowlist.
+///
+/// This is security-relevant and must run *before* the AppHandle short-circuit
+/// in [`rpc_handler`]: a phone that submits a disallowed key (e.g. a transport
+/// or provider field) must receive a deterministic `validation_failed` (400)
+/// instead of leaking the desktop's availability through a 503, and instead of
+/// ever reaching the desktop_writes_bridge. Returns `Ok(())` when the patch is
+/// well-formed and every key is allowlisted.
+fn validate_app_settings_update(args: &Value) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let patch: Value = required(args, "patch")?;
+    match patch.as_object() {
+        Some(map) => {
+            for key in map.keys() {
+                if !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key.as_str()) {
+                    return Err(RpcError::validation_failed(format!(
+                        "settings key '{key}' is not editable from the mobile client"
+                    )));
+                }
+            }
+            Ok(())
+        }
+        None => Err(RpcError::validation_failed(
+            "app_settings_update.patch must be an object".to_string(),
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Axum handler
 // ---------------------------------------------------------------------------
@@ -614,6 +641,14 @@ pub async fn rpc_handler(
                 return Ok(Json(cached));
             }
         }
+    }
+
+    // Allowlist validation that must reject (400 `validation_failed`)
+    // regardless of AppHandle availability — a disallowed settings key is a
+    // client error the phone can fix, not a transient server condition, so it
+    // must not be masked by the test-mode/headless 503 below.
+    if name == "app_settings_update" {
+        validate_app_settings_update(&args)?;
     }
 
     // Obtain the AppHandle — required for commands that spawn the sidecar.
@@ -1160,21 +1195,11 @@ pub(super) async fn dispatch(
             // preferences, never transport / sidecar / provider keys.
             // Wave 3.2: distinguish validation failures (recoverable —
             // user can fix the payload) from transport-level malformed
-            // requests by emitting `validation_failed` here.
-            let patch: Value = required(&args, "patch")?;
-            if let Some(map) = patch.as_object() {
-                for key in map.keys() {
-                    if !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key.as_str()) {
-                        return Err(RpcError::validation_failed(format!(
-                            "settings key '{key}' is not editable from the mobile client"
-                        )));
-                    }
-                }
-            } else {
-                return Err(RpcError::validation_failed(
-                    "app_settings_update.patch must be an object".to_string(),
-                ));
-            }
+            // requests by emitting `validation_failed` here. This is also
+            // enforced in `rpc_handler` *before* the AppHandle gate; we keep
+            // it here so the WebRTC `signaling::dispatch` path (which calls
+            // `dispatch` directly) stays guarded too.
+            validate_app_settings_update(&args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             bridge
                 .dispatch(

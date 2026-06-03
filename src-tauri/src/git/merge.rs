@@ -130,6 +130,10 @@ mod tests {
         git(p, &["init", "-q", "-b", "main"]);
         git(p, &["config", "user.email", "t@e.com"]);
         git(p, &["config", "user.name", "T"]);
+        // Pin line-ending handling so conflict sides ("ours\n"/"theirs\n")
+        // round-trip byte-exact regardless of the developer's global
+        // `core.autocrlf` (true on some Windows machines).
+        git(p, &["config", "core.autocrlf", "false"]);
         std::fs::write(p.join("a.txt"), "base\n").unwrap();
         git(p, &["add", "."]);
         git(p, &["commit", "-q", "-m", "base"]);

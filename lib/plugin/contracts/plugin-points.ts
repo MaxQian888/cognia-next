@@ -264,7 +264,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
   "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",
-  "inbox.conversation.actions": "components/inbox/conversation-list.tsx",
+  "inbox.conversation.actions": "components/inbox/conversation-row.tsx",
   "inbox.composer.actions": "components/inbox/inbox-composer-actions-host.tsx",
   "inbox.draft.actions": "components/inbox/draft-banner.tsx",
   "vscode.sidebar.view": "components/extensions/vscode-extension-panel.tsx",

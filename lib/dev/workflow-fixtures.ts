@@ -65,6 +65,13 @@ export type SeededWorkflowKind =
   // MCP + Plugin (stubs)
   | "action-mcp-invoke"
   | "action-plugin-invoke"
+  // Local Git actions (ADR-0038)
+  | "action-git-stage"
+  | "action-git-commit"
+  | "action-git-push"
+  | "action-git-branch"
+  // OCR (ADR-0024)
+  | "ocr-extract"
   // GitHub actions
   | "action-github-open-pr"
   | "action-github-close-pr"
@@ -815,6 +822,55 @@ const FIXTURES: Record<SeededWorkflowKind, () => WorkflowDraft> = {
         type: "action.github.runIssueLoop",
         label: "Issue Loop",
         params: { repo: "owner/repo", number: 1, maxIterations: 1 },
+      },
+    ]),
+
+  // ── Local Git actions (ADR-0038) ─────────────────────────────────────
+  "action-git-stage": () =>
+    chain("E2E Git Stage", [
+      {
+        id: "n_gstage",
+        type: "action.git.stage",
+        label: "Git Stage",
+        params: { repoPath: "/repo", paths: ["src/a.ts"] },
+      },
+    ]),
+  "action-git-commit": () =>
+    chain("E2E Git Commit", [
+      {
+        id: "n_gcommit",
+        type: "action.git.commit",
+        label: "Git Commit",
+        params: { repoPath: "/repo", message: "chore: e2e commit", signoff: false },
+      },
+    ]),
+  "action-git-push": () =>
+    chain("E2E Git Push", [
+      {
+        id: "n_gpush",
+        type: "action.git.push",
+        label: "Git Push",
+        params: { repoPath: "/repo", remote: "origin", branch: "main", setUpstream: false },
+      },
+    ]),
+  "action-git-branch": () =>
+    chain("E2E Git Branch", [
+      {
+        id: "n_gbranch",
+        type: "action.git.branch",
+        label: "Git Branch",
+        params: { repoPath: "/repo", name: "feat/e2e", checkout: true, from: "main" },
+      },
+    ]),
+
+  // ── OCR (ADR-0024) ───────────────────────────────────────────────────
+  "ocr-extract": () =>
+    chain("E2E OCR Extract", [
+      {
+        id: "n_ocr",
+        type: "ocr.extract",
+        label: "Extract text (OCR)",
+        params: { url: "https://example.test/receipt.png", format: "markdown", provider: "auto" },
       },
     ]),
 

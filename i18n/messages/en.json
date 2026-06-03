@@ -16328,6 +16328,108 @@
       }
     },
     "forms": {
+      "git": {
+        "repoPath": {
+          "label": "Repository path",
+          "hint": "Optional. Defaults to the active workspace root. Supports '{{ }}' expressions.",
+          "placeholder": "D:/Projects/my-repo"
+        },
+        "stage": {
+          "paths": {
+            "label": "Paths to stage",
+            "hint": "Comma-separated file paths or globs. Leave empty to stage all changes.",
+            "placeholder": "src/index.ts, docs/*.md"
+          }
+        },
+        "commit": {
+          "message": {
+            "label": "Commit message",
+            "hint": "Required. Supports '{{ }}' expressions.",
+            "placeholder": "feat: describe the change"
+          },
+          "signoff": {
+            "label": "Add Signed-off-by",
+            "hint": "Append a Signed-off-by trailer to the commit message."
+          }
+        },
+        "push": {
+          "remote": {
+            "label": "Remote",
+            "hint": "Defaults to origin. Supports '{{ }}' expressions.",
+            "placeholder": "origin"
+          },
+          "branch": {
+            "label": "Branch",
+            "hint": "Defaults to the current branch. Supports '{{ }}' expressions.",
+            "placeholder": "main"
+          },
+          "setUpstream": {
+            "label": "Set upstream",
+            "hint": "Pass -u so the local branch tracks the pushed remote branch."
+          }
+        },
+        "branch": {
+          "name": {
+            "label": "Branch name",
+            "hint": "Required. Supports '{{ }}' expressions.",
+            "placeholder": "feat/my-feature"
+          },
+          "from": {
+            "label": "Create from",
+            "hint": "Optional start point (branch, tag, or commit). Defaults to HEAD.",
+            "placeholder": "main"
+          },
+          "checkout": {
+            "label": "Check out after create",
+            "hint": "Switch the working tree to the new branch once it is created."
+          }
+        }
+      },
+      "ocr": {
+        "screen": {
+          "label": "Capture screen",
+          "hint": "Run OCR on a fresh screenshot instead of a provided image."
+        },
+        "url": {
+          "label": "Image / PDF URL",
+          "hint": "Remote file to extract text from. Supports '{{ }}' expressions.",
+          "placeholder": "https://example.com/scan.pdf"
+        },
+        "dataUrl": {
+          "label": "Data URL",
+          "hint": "Inline data: URL of the image. Supports '{{ }}' expressions.",
+          "placeholder": "data:image/png;base64,…"
+        },
+        "imageBase64": {
+          "label": "Image base64",
+          "hint": "Raw base64-encoded image bytes. Supports '{{ }}' expressions.",
+          "placeholder": "iVBORw0KGgo…"
+        },
+        "pageRange": {
+          "label": "Page range",
+          "hint": "For PDFs. Example: 1-3,5. Leave empty for all pages.",
+          "placeholder": "1-3,5"
+        },
+        "languages": {
+          "label": "Languages",
+          "hint": "Comma-separated language hints passed to the OCR engine.",
+          "placeholder": "en, zh"
+        },
+        "provider": {
+          "label": "Provider",
+          "hint": "Optional OCR provider id. Leave empty to let the auto-router pick.",
+          "placeholder": "auto"
+        },
+        "format": {
+          "label": "Output format",
+          "hint": "How the extracted text is returned to the workflow.",
+          "options": {
+            "markdown": "Markdown",
+            "text": "Plain text",
+            "blocks": "Structured blocks"
+          }
+        }
+      },
       "desktopShared": {
         "selector": {
           "label": "Selector",

@@ -48,14 +48,12 @@ mod tests {
 
     #[tokio::test]
     async fn discover_returns_none_when_codex_home_empty() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::env::set_var("CODEX_HOME", tmp.path());
-        // No auth.json + no keyring on most CI hosts → None. Tolerate the
-        // CI host having a stray codex-cli keyring entry.
+        // Use the shared hermetic seam: an isolated `CODEX_HOME` (held behind
+        // the cross-test env lock) plus a forced-empty keyring, so this never
+        // reads the developer's real keyring nor races the discovery tests
+        // over the process-global `CODEX_HOME`.
+        let _env = super::discovery::test_support::TestEnv::new();
         let got = codex_oauth_discover().await.unwrap();
-        if let Some(g) = got {
-            assert_eq!(g.source, super::discovery::DiscoverySource::Keyring);
-        }
-        std::env::remove_var("CODEX_HOME");
+        assert!(got.is_none());
     }
 }

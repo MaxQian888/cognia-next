@@ -32,6 +32,13 @@ function wrap(ui: React.ReactElement) {
   )
 }
 
+// This suite drives real fake-indexeddb transactions and runs inside a
+// CPU-starved parallel worker during full-suite runs — the library default
+// 1s waitFor window timed out purely on wall-clock starvation. Give the
+// whole file generous budgets; the assertions themselves are unchanged.
+jest.setTimeout(20000)
+const WAIT = { timeout: 10000 } as const
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -73,9 +80,13 @@ describe("ComputerUseToggle", () => {
         .equals("lark:lark-1:oc_on")
         .first()
       expect(row?.allowComputerUse).toBe(true)
-    })
-    const audit = await getDb().connectorAudit.toArray()
-    expect(audit.some((a) => a.kind === "override.computer_use_changed")).toBe(true)
+    }, WAIT)
+    // The audit append is a separate transaction after the override upsert, so
+    // it must be awaited independently (immediate read was load-flaky).
+    await waitFor(async () => {
+      const audit = await getDb().connectorAudit.toArray()
+      expect(audit.some((a) => a.kind === "override.computer_use_changed")).toBe(true)
+    }, WAIT)
   })
 
   it("does NOT enable when biometric is rejected", async () => {
@@ -114,7 +125,7 @@ describe("ComputerUseToggle", () => {
     await waitFor(async () => {
       const audit = await getDb().connectorAudit.toArray()
       expect(audit.some((a) => a.kind === "override.computer_use_changed")).toBe(true)
-    })
+    }, WAIT)
     expect(mockRequireBiometric).not.toHaveBeenCalled()
   })
 })

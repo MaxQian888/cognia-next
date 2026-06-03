@@ -113,7 +113,7 @@ pub fn decrypt(encoding_aes_key: &str, encrypt_b64: &str) -> Result<(String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::{block_padding::NoPadding as NoPad, BlockModeEncrypt, KeyIvInit as _};
+    use aes::cipher::{block_padding::NoPadding as NoPad, BlockModeEncrypt};
 
     type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 

@@ -5,7 +5,6 @@ import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 
 const setBuiltinToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
-const isTauriMock = jest.fn(() => true)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
@@ -16,9 +15,17 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+// `jest.mock` factories are hoisted above the imports, so they run before any
+// top-level `const` is initialised. `@/lib/tauri` is pulled in transitively by
+// the store chain at import time, which means a factory closing over an
+// outer-scope `const` would hit a temporal-dead-zone ReferenceError. Define the
+// mock inside the factory and reach it back via `require`.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn(() => true),
 }))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { isTauri: isTauriMock } = require("@/lib/tauri") as { isTauri: jest.Mock }
 
 const settingsState = {
   settings: {
@@ -40,13 +47,15 @@ describe("ToolSettingsSection", () => {
     isTauriMock.mockReturnValue(true)
   })
 
-  it("renders all five categories", () => {
+  it("renders all built-in tool categories", () => {
     render(<ToolSettingsSection />)
     expect(screen.getByText("fileExtras")).toBeInTheDocument()
     expect(screen.getByText("gitOperations")).toBeInTheDocument()
     expect(screen.getByText("processManagement")).toBeInTheDocument()
     expect(screen.getByText("environmentManagement")).toBeInTheDocument()
     expect(screen.getByText("shellExecution")).toBeInTheDocument()
+    expect(screen.getByText("terminalRepl")).toBeInTheDocument()
+    expect(screen.getByText("lspIntelligence")).toBeInTheDocument()
   })
 
   it("calls setBuiltinToolEnabled when a switch is toggled", () => {

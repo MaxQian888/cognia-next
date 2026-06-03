@@ -700,11 +700,15 @@ mod tests {
 
     #[test]
     fn get_store_size_reports_nonzero_after_init() {
-        // After `VectorStore::new` the sqlite file exists with a
-        // header + migrations applied — file size must be > 0.
+        // `VectorState::new` is lazy — the sqlite file is only created on the
+        // first `store()` call (see `VectorState::ensure`). Trigger that open
+        // before inspecting the file, mirroring how the commands resolve the
+        // store. After init the file exists with a header + migrations
+        // applied, so its size must be > 0.
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("v.sqlite");
-        let _state = VectorState::new(Some(path.clone()));
+        let state = VectorState::new(Some(path.clone()));
+        assert!(state.store().is_ok(), "store should open on first access");
         let bytes = std::fs::metadata(&path).expect("metadata").len();
         assert!(bytes > 0, "fresh store should have a non-empty sqlite file");
     }

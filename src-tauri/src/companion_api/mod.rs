@@ -183,6 +183,27 @@ pub fn advertised_port() -> u16 {
     ADVERTISED_PORT.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Idempotently install the process-level rustls `CryptoProvider`.
+///
+/// rustls 0.23.x refuses to auto-detect a provider when *both* `aws-lc-rs`
+/// and `ring` are present in the dependency graph (multiple crates pull in
+/// each). `main.rs` installs `ring` at boot, but the companion API server and
+/// the WebRTC peer-connection layer can be exercised from contexts that never
+/// run `main()` (notably the unit tests in this crate, and any future headless
+/// entry point). Calling `install_default` again after a successful install
+/// returns `Err`, so this swallows that error — the only contract we need is
+/// "a provider is installed by the time TLS/DTLS is set up". Cheap and safe to
+/// call on every server spawn / peer-connection construction.
+pub fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        // Ignore the result: a provider may already be installed (e.g. by
+        // `main.rs` in production, or by an earlier call in another test).
+        // `ring` is chosen to match axum-server's `tls-rustls` feature.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 /// Per-source-IP rate limiter for the pre-auth (`public_routes`) surface —
 /// the only endpoints reachable without a verified device JWT. Lives as a
 /// process-wide singleton (like [`TLS_FINGERPRINT`] / [`ADVERTISED_PORT`])

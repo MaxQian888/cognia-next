@@ -253,11 +253,15 @@ mod tests {
         {
             let mut map = state.loaded.write();
             let tmp = std::env::temp_dir();
-            let component = Component::new(
-                engine(),
-                r#"(component)"#,
-            )
-            .unwrap();
+            // Smallest valid component artifact: the binary preamble of an
+            // empty `(component)` — magic `\0asm` + component-model version
+            // (0x0d 0x00) + layer (0x01 0x00). Passing WAT *text* here only
+            // works when wasmtime is built with the optional `wat` feature,
+            // which this crate disables (`default-features = false`), so we
+            // feed the compiled bytes directly.
+            const EMPTY_COMPONENT: &[u8] =
+                &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+            let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
             map.insert(
                 "z-plugin".into(),
                 LoadedPlugin {

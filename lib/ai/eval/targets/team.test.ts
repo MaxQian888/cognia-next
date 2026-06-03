@@ -27,7 +27,7 @@ const evalCase: EvalCase = {
 
 describe("createTeamTarget", () => {
   it("runs the team with a fresh trace id and assembles a sample from trace spans", async () => {
-    const runTeam = jest.fn(async ({ traceId }: { traceId: string }) => ({
+    const runTeam = jest.fn(async ({ traceId }: { traceId: string; signal?: AbortSignal }) => ({
       runId: "r",
       status: "completed",
       text: "done",

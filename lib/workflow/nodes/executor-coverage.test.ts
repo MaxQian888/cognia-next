@@ -9,8 +9,15 @@
  * wired, which would only surface at run time as "no executor registered".
  */
 import "fake-indexeddb/auto"
-// Side-effect import: registers the built-in + desktop + terminal executors.
+// Side-effect import: registers the built-in + desktop + terminal + git + ocr
+// executors.
 import "./built-ins"
+// Side-effect import: registers the six ultracode `pattern.*` host executors.
+// They live under `lib/ai/agent/team/patterns` (imported lazily by
+// `runTeamLifecycle` before an ultracode run) but register under
+// `BUILTIN_PLUGIN_ID` — i.e. they ARE host executors, just authored in a
+// sibling module. Import them here so the parity check sees the full host set.
+import "@/lib/ai/agent/team/patterns"
 import { listRegisteredKinds } from "./registry"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 

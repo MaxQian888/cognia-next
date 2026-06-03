@@ -145,6 +145,11 @@ mod tests {
         git(p, &["init", "-q", "-b", "main"]);
         git(p, &["config", "user.email", "t@e.com"]);
         git(p, &["config", "user.name", "T"]);
+        // Pin line-ending handling so content round-trips byte-exact
+        // regardless of the developer's global `core.autocrlf` (true on some
+        // Windows machines), which would otherwise rewrite "\n" → "\r\n" on
+        // checkout/discard and break the byte-exact assertions below.
+        git(p, &["config", "core.autocrlf", "false"]);
         std::fs::write(p.join("a.txt"), "line1\nline2\nline3\n").unwrap();
         git(p, &["add", "."]);
         git(p, &["commit", "-q", "-m", "init"]);

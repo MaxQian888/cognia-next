@@ -13,6 +13,23 @@ import {
 const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
   // GitHub actions ship their own forms via the github-delivery plugin overlay,
   // but the trigger + 13 actions ARE wired below, so none remain here.
+  //
+  // The kinds below are synthesizer-emitted only — they carry NO palette /
+  // catalog entry (see `lib/workflow/nodes/catalog.ts` and the "not placed by
+  // users in the editor" comments in `types/workflow/visual.ts`), so the
+  // inspector never opens a dedicated form for them. They are built by the
+  // synthesizer at run time and validated by their executors:
+  //   • `action.plan.step.dispatch` — one-per-PlanStep (Unified Plan Execution
+  //     Hub, ADR-0045).
+  //   • the six `pattern.*` kinds — ultracode orchestration nodes emitted by
+  //     `synthesize-ultracode.ts` (ADR-0022 addendum).
+  "action.plan.step.dispatch",
+  "pattern.multi-modal-sweep",
+  "pattern.loop-until-dry",
+  "pattern.adversarial-verify",
+  "pattern.judge-panel",
+  "pattern.completeness-critic",
+  "pattern.synthesize",
 ])
 
 const DESKTOP_KINDS: WorkflowNodeKind[] = [

@@ -103,17 +103,22 @@ pub fn parse_chord(raw: &str) -> Result<Vec<KeyToken>, ChordParseError> {
     let mut modifiers: Vec<Modifier> = Vec::new();
     let mut main: Option<KeyToken> = None;
     for part in trimmed.split('+') {
-        let token = part.trim();
+        // Inspect the *raw* segment for whitespace before trimming.
+        // Chord notation across the desktop ecosystem never embeds
+        // spaces inside a segment (see module docs), so `"ctrl+ a"` is
+        // an operator error. Trimming first would silently swallow the
+        // padding and accept the chord, defeating the check below.
+        if part.contains(char::is_whitespace) {
+            return Err(ChordParseError {
+                raw: raw.to_string(),
+                message: format!("segment {part:?} contains whitespace"),
+            });
+        }
+        let token = part;
         if token.is_empty() {
             return Err(ChordParseError {
                 raw: raw.to_string(),
                 message: "empty segment between '+' separators".into(),
-            });
-        }
-        if token.contains(char::is_whitespace) {
-            return Err(ChordParseError {
-                raw: raw.to_string(),
-                message: format!("segment {token:?} contains whitespace"),
             });
         }
         if let Some(m) = parse_modifier(token) {

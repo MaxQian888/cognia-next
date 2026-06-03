@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(base36(35), "z");
         assert_eq!(base36(36), "10");
         assert_eq!(base36(1234567890), "kf12oi");
-        assert_eq!(base36(1_700_000_000_000), "lhpyuk000");
+        assert_eq!(base36(1_700_000_000_000), "loyw3v28");
     }
 
     #[test]

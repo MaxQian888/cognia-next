@@ -4,7 +4,16 @@
  */
 
 import "@testing-library/jest-dom"
+import { configure as configureTestingLibrary } from "@testing-library/dom"
 import React from "react"
+
+// Full-suite runs spawn one Jest worker per core; under that CPU contention a
+// starved worker can blow through testing-library's default 1s `waitFor`
+// window on pure wall-clock (observed as roulette single-suite failures —
+// computer-use-toggle, goal settings-tab — that always pass in isolation).
+// 5s changes nothing for passing tests (they resolve as soon as the assertion
+// holds) and removes the starvation lottery.
+configureTestingLibrary({ asyncUtilTimeout: 5000 })
 
 // jsdom omits `window.matchMedia` — provide a default (non-matching) stub so
 // viewport hooks (`hooks/ui/use-mobile.ts:useIsMobile`, the shadcn sidebar,

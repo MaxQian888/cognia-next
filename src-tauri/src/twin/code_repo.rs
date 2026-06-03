@@ -73,9 +73,14 @@ fn parse_repo_blocking(args: ParseGitRepoArgs) -> Result<Vec<CommitRecord>, Stri
     let mut walker = repo
         .revwalk()
         .map_err(|err| format!("create revwalk: {err}"))?;
-    // Newest-first traversal mirrors `git log` / `simple-git`'s default.
+    // Newest-first traversal mirrors `git log` / `simple-git`'s default
+    // (`--date-order`): topological ordering — a commit always precedes its
+    // parents — with same-generation commits broken by commit time. Plain
+    // `Sort::TIME` is insufficient: a back-dated commit (rebase, cherry-pick,
+    // amend with an older author/committer date) would otherwise sort *after*
+    // a parent that carries a newer timestamp, which `git log` never does.
     walker
-        .set_sorting(Sort::TIME)
+        .set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
         .map_err(|err| format!("set revwalk sort: {err}"))?;
     walker
         .push_head()
@@ -193,16 +198,22 @@ fn commit_diff(
     text.push('\n');
 
     diff.print(DiffFormat::Patch, |_delta, _hunk, line| {
-        match line.origin() {
-            '+' | '-' | ' ' => text.push(line.origin()),
-            _ => {}
+        // Stop *appending* once we have more than the caller will keep (it
+        // truncates at DIFF_BYTE_CAP). We must still return `true` so libgit2
+        // keeps invoking the callback to completion: returning `false` aborts
+        // the print and is surfaced by git2-rs as a `GIT_EUSER` (-7) error,
+        // which would discard the entire (large, truncatable) diff and emit a
+        // useless "(diff unavailable)" string instead.
+        if text.len() < DIFF_BYTE_CAP * 2 {
+            match line.origin() {
+                '+' | '-' | ' ' => text.push(line.origin()),
+                _ => {}
+            }
+            if let Ok(content) = str::from_utf8(line.content()) {
+                text.push_str(content);
+            }
         }
-        if let Ok(content) = str::from_utf8(line.content()) {
-            text.push_str(content);
-        }
-        // Stop appending once we have enough — `print` keeps walking, but the
-        // caller throws away anything past DIFF_BYTE_CAP anyway.
-        text.len() < DIFF_BYTE_CAP * 2
+        true
     })
     .map_err(|err| format!("print patch: {err}"))?;
 

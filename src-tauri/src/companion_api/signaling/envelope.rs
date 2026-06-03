@@ -417,12 +417,14 @@ mod tests {
         let v = json!({"body": null});
         assert_eq!(canonical_json(&v).unwrap(), r#"{"body":null}"#);
         // serde_json escapes control chars and quotes identically to
-        // JSON.stringify; both ` ` and `` are emitted as the JSON
-        // unicode escape (not raw bytes).
+        // JSON.stringify: U+0000 and U+001F are emitted as the \u00XX
+        // unicode escape (JSON requires control chars < U+0020 escaped),
+        // not raw bytes. The expected literal below uses the *escaped*
+        // forms to match the TS counterpart (lib/signaling/envelope.ts).
         let v = json!({"s": "\u{0000}\u{001f}\\\""});
         assert_eq!(
             canonical_json(&v).unwrap(),
-            r#"{"s":" \\\""}"#
+            r#"{"s":"\u0000\u001f\\\""}"#
         );
     }
 

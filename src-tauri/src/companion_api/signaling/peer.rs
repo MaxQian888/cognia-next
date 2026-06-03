@@ -65,6 +65,13 @@ impl PeerSession {
         ice_servers: Vec<RTCIceServer>,
         callbacks: PeerCallbacks,
     ) -> Result<Self, webrtc::Error> {
+        // The WebRTC DTLS handshake builds a rustls config, which in rustls
+        // 0.23 requires an explicit crypto provider when both `ring` and
+        // `aws-lc-rs` are in the dep graph. Install one idempotently here so
+        // peer connections work even when spawned outside `main.rs` (tests,
+        // headless entry points).
+        crate::companion_api::ensure_crypto_provider();
+
         let api = APIBuilder::new().build();
         let config = RTCConfiguration {
             ice_servers,

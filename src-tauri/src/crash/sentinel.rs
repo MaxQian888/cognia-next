@@ -33,8 +33,32 @@ pub struct PendingCrash {
     pub report_count: usize,
 }
 
+// Test-only override for the reports directory. Tests set this to an isolated
+// temp dir so they neither touch the developer's real
+// `<data_local_dir>/Cognia/crash-reports/` nor race each other over the single
+// shared `.session-running` marker. Production always resolves to
+// `crate::crash::crash_reports_dir`.
+#[cfg(test)]
+thread_local! {
+    static REPORTS_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn reports_dir() -> Option<PathBuf> {
+    if let Some(dir) = REPORTS_DIR_OVERRIDE.with(|o| o.borrow().clone()) {
+        return Some(dir);
+    }
+    crate::crash::crash_reports_dir()
+}
+
+#[cfg(not(test))]
+fn reports_dir() -> Option<PathBuf> {
+    crate::crash::crash_reports_dir()
+}
+
 fn sentinel_path() -> Option<PathBuf> {
-    crate::crash::crash_reports_dir().map(|d| d.join(SENTINEL_NAME))
+    reports_dir().map(|d| d.join(SENTINEL_NAME))
 }
 
 /// Write the marker for the current session. Best-effort.
@@ -80,7 +104,7 @@ pub fn take_pending() -> Option<PendingCrash> {
 
 /// Most-recently-modified report stem + total report-file count.
 fn scan_reports() -> (Option<String>, usize) {
-    let Some(dir) = crate::crash::crash_reports_dir() else {
+    let Some(dir) = reports_dir() else {
         return (None, 0);
     };
     let Ok(entries) = fs::read_dir(&dir) else {
@@ -116,6 +140,17 @@ fn scan_reports() -> (Option<String>, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    /// Point the sentinel at an isolated temp dir for the duration of a test.
+    /// Each `#[test]` runs on its own thread, so the thread-local override
+    /// keeps the stateful tests fully hermetic and race-free against the real
+    /// data dir and against one another.
+    fn with_isolated_reports_dir() -> tempfile::TempDir {
+        let dir = tempdir().expect("create temp reports dir");
+        REPORTS_DIR_OVERRIDE.with(|o| *o.borrow_mut() = Some(dir.path().to_path_buf()));
+        dir
+    }
 
     #[test]
     fn marker_serializes_with_expected_fields() {
@@ -133,17 +168,14 @@ mod tests {
 
     #[test]
     fn take_pending_is_none_without_marker() {
-        // With no marker file freshly written, and after consuming any leftover
-        // from a prior run, the result must be None.
-        let _ = take_pending();
+        let _guard = with_isolated_reports_dir();
+        // A freshly-created reports dir has no marker, so the result is None.
         assert!(take_pending().is_none());
     }
 
     #[test]
     fn mark_start_then_take_pending_reports_abnormal_exit() {
-        if sentinel_path().is_none() {
-            return; // no data dir in this sandbox
-        }
+        let _guard = with_isolated_reports_dir();
         mark_start();
         let pending = take_pending();
         assert!(pending.is_some());
@@ -155,9 +187,7 @@ mod tests {
 
     #[test]
     fn mark_clean_exit_clears_marker() {
-        if sentinel_path().is_none() {
-            return;
-        }
+        let _guard = with_isolated_reports_dir();
         mark_start();
         mark_clean_exit();
         assert!(take_pending().is_none());

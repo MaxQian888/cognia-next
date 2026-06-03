@@ -48,10 +48,16 @@ fn capture_undo_snapshot(path: &PathBuf) {
     }
 }
 
+/// Drop any stashed undo snapshot for a single path. Used by tests so a
+/// fixture starts from a clean slate without clobbering the snapshots of
+/// other tests that share the process-global `UNDO_STORE` while the suite
+/// runs in parallel. (A blanket `clear()` here would race: one test's
+/// `Create` could be wiped by another test's setup before its `UndoEdit`
+/// observed it.)
 #[cfg(test)]
-pub(super) fn reset_undo_store_for_testing() {
+pub(super) fn reset_undo_entry_for_testing(path: &std::path::Path) {
     if let Ok(mut store) = UNDO_STORE.lock() {
-        store.clear();
+        store.remove(path);
     }
 }
 
@@ -243,8 +249,9 @@ mod tests {
     use tempfile::tempdir;
 
     fn fresh_path(dir: &std::path::Path, name: &str) -> String {
-        reset_undo_store_for_testing();
-        dir.join(name).to_string_lossy().into_owned()
+        let path = dir.join(name);
+        reset_undo_entry_for_testing(&path);
+        path.to_string_lossy().into_owned()
     }
 
     #[tokio::test]

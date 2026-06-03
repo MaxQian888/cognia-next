@@ -16,6 +16,7 @@ export type BuiltinToolCategoryId =
   | "environment"
   | "shellAdvanced"
   | "terminalRepl"
+  | "lsp"
 
 export type BuiltinToolRiskLevel = "low" | "medium" | "high"
 

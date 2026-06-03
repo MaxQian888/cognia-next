@@ -100,8 +100,14 @@ mod tests {
         }
     }
 
+    /// Both tests mutate the process-global `CONTEXT`; serialize them so one
+    /// test's reset cannot interleave with the other's set→snapshot window
+    /// (they raced under the parallel test harness).
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn set_config_then_snapshot_roundtrips() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_config(serde_json::json!({ "theme": "dark" }));
         let snap = snapshot();
         assert_eq!(snap.config["theme"], "dark");
@@ -109,6 +115,7 @@ mod tests {
 
     #[test]
     fn breadcrumbs_are_capped_to_ring_size() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Reset to a known state first.
         set_config(serde_json::Value::Null);
         if let Ok(mut ctx) = CONTEXT.lock() {

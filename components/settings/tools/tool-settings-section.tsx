@@ -7,6 +7,7 @@ import {
   BoxIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CodeIcon,
   CpuIcon,
   FolderOpenIcon,
   GitBranchIcon,
@@ -41,6 +42,7 @@ const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   environment: <BoxIcon className="h-4 w-4" />,
   shellAdvanced: <TerminalIcon className="h-4 w-4" />,
   terminalRepl: <TerminalIcon className="h-4 w-4" />,
+  lsp: <CodeIcon className="h-4 w-4" />,
 }
 
 function riskLabelKey(level: BuiltinToolRiskLevel): string {

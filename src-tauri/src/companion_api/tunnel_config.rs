@@ -231,6 +231,14 @@ mod tests {
 
     #[test]
     fn summarize_default_when_missing() {
+        // `summarize` reads the connector token from the *process-global* OS
+        // keyring (service `com.cognia.companion-tunnel/v1`). A developer who
+        // has previously saved a tunnel token would leave a stale entry that
+        // makes `has_token` true, so make the "no token" precondition explicit
+        // and hermetic by clearing the keyring entry first. `clear_token` is a
+        // no-op on `NoEntry`, so this is safe even when nothing is stored and
+        // when the keyring backend is the headless mock used in CI.
+        let _ = clear_token();
         let tmp = tempdir().unwrap();
         let s = summarize(Some(tmp.path()));
         assert_eq!(s.mode, TunnelMode::Quick);

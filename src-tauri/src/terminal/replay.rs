@@ -118,7 +118,14 @@ impl ReplayBuffer {
         let retained = ring.total_bytes;
         let count = ring.events.len();
         drop(ring);
-        if retained > self.capacity_bytes * 3 / 4 {
+        // Divide before multiplying so the 75%-of-capacity threshold can't
+        // overflow when `capacity_bytes` is near `usize::MAX` (the buffer is
+        // intentionally constructed with `usize::MAX` when only TTL-based GC
+        // is wanted). `capacity / 4 * 3` stays within `usize` because the
+        // result is always <= `capacity`. The sub-`usize`-precision rounding
+        // is irrelevant for a diagnostic log threshold.
+        let warn_threshold = self.capacity_bytes / 4 * 3;
+        if retained > warn_threshold {
             log::debug!(
                 "replay buffer at {}/{} bytes ({} events), seq={}",
                 retained,

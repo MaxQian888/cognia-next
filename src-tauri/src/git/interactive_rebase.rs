@@ -13,7 +13,7 @@
 //! them. A conflict leaves the rebase in progress; the renderer's in-progress
 //! banner then drives continue/abort (shared with the sequencer ops).
 
-use git2::{Repository, Sort};
+use git2::Sort;
 
 use super::error::{GitError, Result};
 use super::exec;

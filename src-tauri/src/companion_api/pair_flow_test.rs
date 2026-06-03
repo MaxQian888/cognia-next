@@ -105,12 +105,14 @@ mod tests {
                     .uri("/api/v1/auth/pair")
                     .header("content-type", "application/json")
                     .body(Body::from(
+                        // PairRequest is `#[serde(rename_all = "camelCase")]`,
+                        // so the wire body uses camelCase keys.
                         json!({
-                            "pair_jwt": pair_jwt,
-                            "device_label": "integ-test-phone",
-                            "device_platform": "android",
-                            "device_pubkey": "",
-                            "app_version": "0.1.0",
+                            "pairJwt": pair_jwt,
+                            "deviceLabel": "integ-test-phone",
+                            "devicePlatform": "android",
+                            "devicePubkey": "",
+                            "appVersion": "0.1.0",
                         })
                         .to_string(),
                     ))
@@ -120,14 +122,17 @@ mod tests {
             .unwrap();
         assert_eq!(pair_resp.status().as_u16(), 200);
         let pair_body = body_json(pair_resp).await;
-        let device_jwt = pair_body["device_jwt"].as_str().expect("device_jwt string");
-        let device_id = pair_body["device_id"].as_str().expect("device_id string");
+        // `PairResponse` is `#[serde(rename_all = "camelCase")]`, so the wire
+        // keys are camelCase (`deviceJwt`, `deviceId`, `serverVersion`) — see
+        // `companion_api::auth::tests::pair_happy_path_returns_device_jwt`.
+        let device_jwt = pair_body["deviceJwt"].as_str().expect("deviceJwt string");
+        let device_id = pair_body["deviceId"].as_str().expect("deviceId string");
 
-        // Shape assertions — JWT has 3 dot-separated segments, device_id
+        // Shape assertions — JWT has 3 dot-separated segments, deviceId
         // is non-empty.
-        assert_eq!(device_jwt.split('.').count(), 3, "device_jwt is 3-part");
-        assert!(!device_id.is_empty(), "device_id is non-empty");
-        assert!(pair_body["server_version"].is_string());
+        assert_eq!(device_jwt.split('.').count(), 3, "deviceJwt is 3-part");
+        assert!(!device_id.is_empty(), "deviceId is non-empty");
+        assert!(pair_body["serverVersion"].is_string());
     }
 
     /// Wave 3.1 contract — auth errors use the unified flat envelope.
@@ -137,12 +142,14 @@ mod tests {
         let router = build_router(Arc::clone(&state));
         let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
 
+        // PairRequest is `#[serde(rename_all = "camelCase")]`, so the wire
+        // body uses camelCase keys.
         let body = json!({
-            "pair_jwt": pair_jwt,
-            "device_label": "phone",
-            "device_platform": "android",
-            "device_pubkey": "",
-            "app_version": "0.1.0",
+            "pairJwt": pair_jwt,
+            "deviceLabel": "phone",
+            "devicePlatform": "android",
+            "devicePubkey": "",
+            "appVersion": "0.1.0",
         })
         .to_string();
 

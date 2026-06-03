@@ -228,8 +228,10 @@ mod tests {
     use tower::ServiceExt;
 
     fn router_with_ws() -> Router<ConnectorsState> {
-        let base = build_unresolved_router();
-        register_routes(base)
+        // `build_unresolved_router` already wires in `register_routes`
+        // (see axum_app.rs); calling it a second time here would panic with
+        // "Overlapping method route". So just return the assembled router.
+        build_unresolved_router()
     }
 
     // -----------------------------------------------------------------------

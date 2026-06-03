@@ -57,12 +57,30 @@ describe("workflow-fixtures", () => {
     // exercised through the agent-team-runtime tests rather than fixtures.
     // `action.system.terminal` is exercised via terminal-dock E2E plus the
     // `lib/workflow/nodes/terminal.test.ts` executor spec; no seed fixture
-    // yet because the integrated terminal needs a Tauri host.)
+    // yet because the integrated terminal needs a Tauri host.
+    //
+    // The synthesizer-emitted-only kinds below are never placed by users in
+    // the editor and carry no palette/catalog entry (see
+    // `types/workflow/visual.ts` and `lib/workflow/nodes/catalog.ts`), so a
+    // standalone seed fixture would be meaningless — their params are shaped by
+    // the synthesizer at run time and covered by the relevant runtime specs:
+    //   • `action.plan.step.dispatch` — emitted one-per-PlanStep by the Unified
+    //     Plan Execution Hub (ADR-0045); covered by the plan-runtime specs.
+    //   • the six `pattern.*` kinds — emitted by `synthesize-ultracode.ts`
+    //     (ADR-0022 addendum); each is covered by its co-located executor spec
+    //     under `lib/ai/agent/team/patterns/`.)
     const skip = new Set<string>([
       "trigger.desktop.event",
       "trigger.team",
       "action.team.task.dispatch",
       "action.system.terminal",
+      "action.plan.step.dispatch",
+      "pattern.multi-modal-sweep",
+      "pattern.loop-until-dry",
+      "pattern.adversarial-verify",
+      "pattern.judge-panel",
+      "pattern.completeness-critic",
+      "pattern.synthesize",
     ])
     const missing = WORKFLOW_NODE_KINDS.filter((k) => !seen.has(k) && !skip.has(k))
     expect(missing).toEqual([])
