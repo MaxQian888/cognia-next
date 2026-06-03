@@ -33,6 +33,11 @@ jest.mock("@/lib/scheduler/event-integration", () => ({
   emitSchedulerEvent: (...args: unknown[]) => emitSchedulerEvent(...args),
 }))
 
+const dispatchRemoteCommand = jest.fn().mockResolvedValue({ runId: "run_1", status: "accepted" })
+jest.mock("@/lib/remote-control/dispatch", () => ({
+  dispatchRemoteCommand: (...args: unknown[]) => dispatchRemoteCommand(...args),
+}))
+
 beforeEach(() => {
   jest.clearAllMocks()
 })
@@ -71,8 +76,48 @@ describe("RemoteControlReceiver", () => {
       expect(handlers["remote-control://run-task"]).toBeDefined()
       expect(handlers["remote-control://emit-event"]).toBeDefined()
       expect(handlers["remote-control://inbound-call"]).toBeDefined()
+      expect(handlers["remote-control://command"]).toBeDefined()
     })
     expect(hydrate).toHaveBeenCalled()
+  })
+
+  it("routes command events through dispatchRemoteCommand", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    let commandHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://command") commandHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(commandHandler).not.toBeNull())
+    const command = { target: "workflow.run", args: { workflowId: "wf_1" }, runId: "run_1" }
+    commandHandler!({ payload: command })
+    await waitFor(() => expect(dispatchRemoteCommand).toHaveBeenCalledWith(command))
+  })
+
+  it("ignores command events with no target", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    let commandHandler: ((e: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation(
+      async (eventName: string, handler: (e: { payload: unknown }) => void) => {
+        if (eventName === "remote-control://command") commandHandler = handler
+        return jest.fn()
+      }
+    )
+    render(
+      <RemoteControlReceiver>
+        <div />
+      </RemoteControlReceiver>
+    )
+    await waitFor(() => expect(commandHandler).not.toBeNull())
+    commandHandler!({ payload: {} })
+    expect(dispatchRemoteCommand).not.toHaveBeenCalled()
   })
 
   it("invokes runTaskNow when run-task fires with a taskId", async () => {

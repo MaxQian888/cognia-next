@@ -24,6 +24,7 @@ import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
 import { loggers } from "@/lib/logging"
 import type {
   EmitEventRequest,
+  RemoteCommand,
   RemoteControlInboundCallLog,
   TriggerTaskRequest,
 } from "@/types/remote-control"
@@ -76,12 +77,27 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
         }
       )
 
+      const { dispatchRemoteCommand } = await import("@/lib/remote-control/dispatch")
+      const off4 = await listen<RemoteCommand>("remote-control://command", (event) => {
+        const command = event.payload
+        if (!command?.target) {
+          log.warn("remote-control://command missing target", { payload: event.payload })
+          return
+        }
+        log.info("remote-control: command", { target: command.target, runId: command.runId })
+        void dispatchRemoteCommand(command).then((result) => {
+          // Durable audit row is written here in a later phase (Task 5.2).
+          void result
+        })
+      })
+
       if (cancelled) {
         off1()
         off2()
         off3()
+        off4()
       } else {
-        unlisteners.push(off1, off2, off3)
+        unlisteners.push(off1, off2, off3, off4)
       }
     })().catch((error) => {
       log.error("remote-control: failed to subscribe to Tauri events", error as Error)
