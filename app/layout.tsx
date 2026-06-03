@@ -40,6 +40,7 @@ import { DesktopMessageSourceProvider } from "@/components/providers/desktop-mes
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
+import { PluginToolDispatchProvider } from "@/components/providers/plugin-tool-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { ConsentOverlay } from "@/components/automation/consent-overlay"
@@ -143,38 +144,40 @@ export default async function RootLayout({
                           <CanvasBridgeProvider>
                             <HookTrustSyncProvider>
                               <A2UIDispatchProvider>
-                                <DataAdapterProvider adapter={dexieAdapter}>
-                                  {/* Appearance v47 — Typography / density / radius
+                                <PluginToolDispatchProvider>
+                                  <DataAdapterProvider adapter={dexieAdapter}>
+                                    {/* Appearance v47 — Typography / density / radius
                                   / motion run before color appliers so the
                                   colorblind & high-contrast transforms in
                                   CustomThemeApplier see stable base values. */}
-                                  <TypographyApplier />
-                                  <DensityApplier />
-                                  <RadiusApplier />
-                                  <MotionApplier />
-                                  {/* Keeps body[data-bg-*] + the cognia user-css */}
-                                  {/* style tag in sync with the appearance store. */}
-                                  <BackgroundApplier />
-                                  <ComponentStyleApplier />
-                                  <CustomThemeApplier />
-                                  <ConnectorBusProvider>
-                                    <ConnectorDeepLinkRouter>
-                                      <SubscriptionUsageProvider>
-                                        <CompanionBootProvider>
-                                          <DesktopSyncSourceProvider>
-                                            <DesktopMessageSourceProvider>
-                                              <div data-bg-target="global" className="contents">
-                                                <MobileShellWrapper>
-                                                  <DesktopAppShell>{children}</DesktopAppShell>
-                                                </MobileShellWrapper>
-                                              </div>
-                                            </DesktopMessageSourceProvider>
-                                          </DesktopSyncSourceProvider>
-                                        </CompanionBootProvider>
-                                      </SubscriptionUsageProvider>
-                                    </ConnectorDeepLinkRouter>
-                                  </ConnectorBusProvider>
-                                </DataAdapterProvider>
+                                    <TypographyApplier />
+                                    <DensityApplier />
+                                    <RadiusApplier />
+                                    <MotionApplier />
+                                    {/* Keeps body[data-bg-*] + the cognia user-css */}
+                                    {/* style tag in sync with the appearance store. */}
+                                    <BackgroundApplier />
+                                    <ComponentStyleApplier />
+                                    <CustomThemeApplier />
+                                    <ConnectorBusProvider>
+                                      <ConnectorDeepLinkRouter>
+                                        <SubscriptionUsageProvider>
+                                          <CompanionBootProvider>
+                                            <DesktopSyncSourceProvider>
+                                              <DesktopMessageSourceProvider>
+                                                <div data-bg-target="global" className="contents">
+                                                  <MobileShellWrapper>
+                                                    <DesktopAppShell>{children}</DesktopAppShell>
+                                                  </MobileShellWrapper>
+                                                </div>
+                                              </DesktopMessageSourceProvider>
+                                            </DesktopSyncSourceProvider>
+                                          </CompanionBootProvider>
+                                        </SubscriptionUsageProvider>
+                                      </ConnectorDeepLinkRouter>
+                                    </ConnectorBusProvider>
+                                  </DataAdapterProvider>
+                                </PluginToolDispatchProvider>
                               </A2UIDispatchProvider>
                             </HookTrustSyncProvider>
                           </CanvasBridgeProvider>
