@@ -67,6 +67,26 @@ export function createEventAdapter(ctx) {
     })
   }
 
+  function buildToolResultMessage(toolCallId, content, isError) {
+    return {
+      type: "user",
+      session_id: ctx.sdkSessionId,
+      uuid: randomUUID(),
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolCallId ?? "",
+            content,
+            is_error: isError,
+          },
+        ],
+      },
+    }
+  }
+
   function buildAssistantSnapshot() {
     const content = []
     if (textBuf) content.push({ type: "text", text: textBuf })
@@ -106,14 +126,16 @@ export function createEventAdapter(ctx) {
             messageId = randomUUID()
           }
           activeBlockKind = "text"
-          textBuf += event.textDelta ?? event.delta ?? ""
+          // v6 high-level fullStream uses `text`; v4 used `textDelta`; the
+          // low-level model stream uses `delta`. Accept all three.
+          textBuf += event.text ?? event.textDelta ?? event.delta ?? ""
           out.push(buildAssistantSnapshot())
           return out
         }
         case "reasoning":
         case "reasoning-delta": {
           activeBlockKind = "reasoning"
-          reasoningBuf += event.textDelta ?? event.delta ?? ""
+          reasoningBuf += event.text ?? event.textDelta ?? event.delta ?? ""
           out.push(buildAssistantSnapshot())
           return out
         }
@@ -130,26 +152,21 @@ export function createEventAdapter(ctx) {
         }
         case "tool-result": {
           // Mirror the Anthropic SDK shape: tool results arrive as a synthetic
-          // user message with `tool_result` content blocks.
-          const flat =
-            typeof event.result === "string" ? event.result : JSON.stringify(event.result)
-          out.push({
-            type: "user",
-            session_id: ctx.sdkSessionId,
-            uuid: randomUUID(),
-            parent_tool_use_id: null,
-            message: {
-              role: "user",
-              content: [
-                {
-                  type: "tool_result",
-                  tool_use_id: event.toolCallId ?? "",
-                  content: flat,
-                  is_error: Boolean(event.isError),
-                },
-              ],
-            },
-          })
+          // user message with `tool_result` content blocks. v6 carries the
+          // payload in `output`; v4 used `result`.
+          const payload = event.output ?? event.result
+          const flat = typeof payload === "string" ? payload : JSON.stringify(payload)
+          out.push(buildToolResultMessage(event.toolCallId, flat, Boolean(event.isError)))
+          return out
+        }
+        case "tool-error": {
+          // v6 surfaces a thrown tool `execute` as a distinct event. Project it
+          // as an errored tool_result so the model can recover and the renderer
+          // styles it as a failure.
+          const err = event.error
+          const msg =
+            err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err)
+          out.push(buildToolResultMessage(event.toolCallId, msg, true))
           return out
         }
         case "finish": {

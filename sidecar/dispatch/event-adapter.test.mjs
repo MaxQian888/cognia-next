@@ -24,6 +24,44 @@ test("emits a system init message before the first content event", () => {
   assert.equal(out[1].type, "assistant")
 })
 
+// ── AI SDK v6 field shapes (ai@6) ──────────────────────────────────────────
+// v6 renamed the high-level fullStream fields: text-delta/reasoning-delta carry
+// `text` (not `textDelta`), tool-result carries `output` (not `result`), and a
+// thrown tool execute surfaces as a distinct `tool-error` part.
+
+test("v6 text-delta uses `text` and accumulates non-empty assistant text", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({ type: "text-delta", id: "1", text: "Hello" })
+  const assistant = out.find((m) => m.type === "assistant")
+  assert.equal(assistant.message.content[0].type, "text")
+  assert.equal(assistant.message.content[0].text, "Hello")
+})
+
+test("v6 reasoning-delta uses `text`", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({ type: "reasoning-delta", id: "1", text: "thinking..." })
+  const assistant = out.find((m) => m.type === "assistant")
+  const thinking = assistant.message.content.find((b) => b.type === "thinking")
+  assert.equal(thinking.thinking, "thinking...")
+})
+
+test("v6 tool-result reads `output`", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({ type: "tool-result", toolCallId: "c1", output: "done" })
+  const user = out.find((m) => m.type === "user")
+  assert.equal(user.message.content[0].type, "tool_result")
+  assert.equal(user.message.content[0].content, "done")
+  assert.equal(user.message.content[0].tool_use_id, "c1")
+})
+
+test("v6 tool-error projects an errored tool_result the model can recover from", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const out = adapter.handle({ type: "tool-error", toolCallId: "c2", error: new Error("nope") })
+  const user = out.find((m) => m.type === "user")
+  assert.equal(user.message.content[0].is_error, true)
+  assert.match(user.message.content[0].content, /nope/)
+})
+
 test("init message is only emitted once across many events", () => {
   const adapter = createEventAdapter(baseCtx())
   const a = adapter.handle({ type: "text-delta", textDelta: "h" })
