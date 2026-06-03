@@ -5,6 +5,21 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Token capability — mirrors the TS `TokenCapability`. `Read` permits only
+/// the health route; `Write` permits the trigger routes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Capability {
+    Read,
+    Write,
+}
+
+impl Default for Capability {
+    fn default() -> Self {
+        Capability::Write
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteControlInboundConfig {
@@ -12,6 +27,10 @@ pub struct RemoteControlInboundConfig {
     pub port: u16,
     pub allowlist: Vec<String>,
     pub rate_limit_per_min: u32,
+    /// Token capability gate. `#[serde(default)]` so configs persisted before
+    /// this field existed deserialize as `Write`.
+    #[serde(default)]
+    pub capability: Capability,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +62,7 @@ impl Default for RemoteControlConfig {
                 port: 47821,
                 allowlist: vec!["127.0.0.1/32".to_string()],
                 rate_limit_per_min: 60,
+                capability: Capability::Write,
             },
             outbound: RemoteControlOutboundConfig {
                 has_signing_secret: false,

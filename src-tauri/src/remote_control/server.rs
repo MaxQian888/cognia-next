@@ -38,8 +38,8 @@ use super::allowlist::ParsedAllowlist;
 use super::idempotency::IdempotencyCache;
 use super::rate_limit::FixedWindowRateLimiter;
 use super::types::{
-    CommandEvent, CommandRequestBody, EmitEvent, EmitEventRequestBody, RemoteControlError,
-    RunTaskEvent, TriggerTaskRequestBody,
+    Capability, CommandEvent, CommandRequestBody, EmitEvent, EmitEventRequestBody,
+    RemoteControlError, RunTaskEvent, TriggerTaskRequestBody,
 };
 
 pub const RUN_TASK_EVENT: &str = "remote-control://run-task";
@@ -75,6 +75,13 @@ struct AppState {
     rate_limiter: Arc<FixedWindowRateLimiter>,
     on_request: Arc<dyn RequestObserver>,
     idempotency: Arc<IdempotencyCache>,
+    capability: Capability,
+}
+
+/// Only the health route is allowed for a `read` token; everything else
+/// (the trigger routes) needs `write`.
+fn route_needs_write(route: &str) -> bool {
+    route != "/api/v1/health"
 }
 
 /// Hook fired on every successful (post-auth, post-allowlist, post-rate-limit)
@@ -86,12 +93,14 @@ pub trait RequestObserver: Send + Sync + 'static {
 /// Spawn the axum server on `127.0.0.1:<port>`. Returns the bound port (so
 /// the caller can record `port: 0` → OS-assigned ephemeral) plus the
 /// shutdown channel.
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_server(
     app_handle: AppHandle,
     port: u16,
     token: String,
     allowlist: Vec<String>,
     rate_limit_per_min: u32,
+    capability: Capability,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, RemoteControlError> {
     let parsed_allowlist =
@@ -113,6 +122,7 @@ pub async fn spawn_server(
         rate_limiter: Arc::new(FixedWindowRateLimiter::new(rate_limit_per_min)),
         on_request,
         idempotency: Arc::new(IdempotencyCache::new()),
+        capability,
     };
 
     let app = Router::new()
@@ -366,6 +376,14 @@ async fn middleware(
         return error_body(StatusCode::UNAUTHORIZED, "invalid token");
     }
 
+    // 2b. Capability gate — a `read` token may only hit the health route.
+    if route_needs_write(&route) && state.capability != Capability::Write {
+        state
+            .on_request
+            .on_call(&route, StatusCode::FORBIDDEN, remote_ip);
+        return error_body(StatusCode::FORBIDDEN, "insufficient capability");
+    }
+
     // 3. Rate limit.
     if !state.rate_limiter.try_acquire() {
         state
@@ -400,6 +418,14 @@ mod tests {
         assert_eq!(RUN_TASK_EVENT, "remote-control://run-task");
         assert_eq!(EMIT_EVENT_EVENT, "remote-control://emit-event");
         assert_eq!(COMMAND_EVENT, "remote-control://command");
+    }
+
+    #[test]
+    fn capability_gate_only_exempts_health() {
+        assert!(!route_needs_write("/api/v1/health"));
+        assert!(route_needs_write("/api/v1/tasks/abc/run"));
+        assert!(route_needs_write("/api/v1/events"));
+        assert!(route_needs_write("/api/v1/commands/workflow.run"));
     }
 
     #[test]

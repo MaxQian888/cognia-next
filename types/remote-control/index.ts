@@ -27,6 +27,12 @@ export interface RemoteControlInboundConfig {
   allowlist: string[]
   /** Per-token rate limit, in requests per minute. */
   rateLimitPerMin: number
+  /**
+   * Token capability (Tailscale-style read/write split). `read` permits only
+   * `GET /api/v1/health`; `write` permits the trigger routes. Applied at listener
+   * start — changing it takes effect on the next stop/start, like port/allowlist.
+   */
+  capability: TokenCapability
 }
 
 export interface RemoteControlOutboundHeader {
@@ -231,6 +237,7 @@ export const DEFAULT_REMOTE_CONTROL_CONFIG: RemoteControlConfig = {
     port: DEFAULT_REMOTE_CONTROL_PORT,
     allowlist: [...DEFAULT_REMOTE_CONTROL_ALLOWLIST],
     rateLimitPerMin: DEFAULT_REMOTE_CONTROL_RATE_LIMIT_PER_MIN,
+    capability: DEFAULT_TOKEN_CAPABILITY,
   },
   outbound: {
     hasSigningSecret: false,
