@@ -562,7 +562,11 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         sendContent: trigger,
         promptAddendum,
         messageMetadata: { supervisorRound: round },
-        postProcessText: round === 2 ? (text) => stripDispatches(text) : undefined,
+        // Strip <dispatch> tags from EVERY supervisor round's visible reply.
+        // Round 1 is exactly the turn instructed to emit them (team-router
+        // roster), so gating this on round===2 leaked raw `<dispatch …>` XML
+        // into the round-1 message the user sees.
+        postProcessText: (text) => stripDispatches(text),
         resolvers,
         turnTwinDeps,
         turnEmbedding,
