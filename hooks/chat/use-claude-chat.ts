@@ -71,6 +71,7 @@ import {
 } from "@/hooks/workflow/use-debounced-callback"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
+import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
 import {
   clearToolSpansForSession,
@@ -1252,6 +1253,19 @@ async function handleEvent(
       const isActive = evt.sessionId === activeRef.current
       if (isActive) {
         if (evt.error) {
+          // ADR-0043 Phase 4 — record the failure against the provider that
+          // errored BEFORE any fallback re-issues against the next chain entry
+          // (which overwrites the cached send). Trips its breaker after repeats.
+          const failedProvider =
+            useChatStore.getState().lastSendBySession[evt.sessionId]?.options.provider
+          if (failedProvider) {
+            recordProviderOutcome({
+              providerId: failedProvider,
+              ok: false,
+              latencyMs: 0,
+              errorMessage: evt.error,
+            })
+          }
           // P4 routing-fallback: re-issue against the next entry in the
           // chain when the cached send carried fallbackEntries and the
           // error class is transient. `attemptRoutingFallback` returns
@@ -1547,6 +1561,19 @@ async function handleEvent(
         // `sendPrompt` in `send`). `endSpan` is idempotent — fallback retries
         // that reuse the same spanId are safe.
         const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
+        // ADR-0043 Phase 4 — feed provider reliability telemetry on a clean
+        // turn (drives the health-metrics + circuit-breaker stores the routing
+        // engine reads). Best-effort; recordProviderOutcome never throws.
+        const telemetryProvider = lastSendForSpan?.options.provider
+        if (telemetryProvider) {
+          const r = sdkResult as unknown as { duration_ms?: number; total_cost_usd?: number }
+          recordProviderOutcome({
+            providerId: telemetryProvider,
+            ok: true,
+            latencyMs: typeof r.duration_ms === "number" ? r.duration_ms : 0,
+            estimatedCostUsd: typeof r.total_cost_usd === "number" ? r.total_cost_usd : undefined,
+          })
+        }
         const turnSpanId = lastSendForSpan?.options.spanId
         if (turnSpanId) {
           const usage = extractUsage(sdkResult)

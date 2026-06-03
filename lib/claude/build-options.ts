@@ -43,6 +43,12 @@ import {
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
 import {
+  resolveModelPriceUsdPer1M,
+  type PriceLookupSettings,
+} from "@/lib/ai/providers/model-pricing"
+import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
+import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
+import {
   ProviderRoutingEngine,
   createMappingRegistry,
   type RoutingEngineDeps,
@@ -473,19 +479,29 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const registry = createMappingRegistry(appSettings.modelMappings)
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
     const deps: RoutingEngineDeps = {
-      // Skeleton deps — health-metrics-store + circuit-breaker-store still
-      // return defaults until P6 wires real samples. The engine treats
-      // missing metrics as "no-info" and falls back to priority order, which
-      // matches our intent ("first available wins") until rolling stats land.
-      getHealthMetrics: () => undefined,
-      getCircuitBreakerState: () => "closed",
+      // Real reliability telemetry (ADR-0043 Phase 4), fed per-turn by
+      // `recordProviderOutcome`. A provider with zero recorded requests reports
+      // `undefined` so the engine treats it as "no-info" and keeps priority
+      // order until rolling stats accrue.
+      getHealthMetrics: (id) => {
+        const m = useHealthMetricsStore.getState().getMetrics(id)
+        return m.totalRequests > 0 ? m : undefined
+      },
+      getCircuitBreakerState: (id) => useCircuitBreakerStore.getState().getState(id),
       isProviderAvailable: (id) => {
+        // An OPEN circuit breaker takes a provider out of rotation; otherwise
+        // fall back to the provider's enabled flag.
+        if (!useCircuitBreakerStore.getState().isAvailable(id)) return false
         const enabled = appSettings.providerSettings?.[id]?.enabled
         // Custom providers carry their own `enabled` flag.
         const custom = appSettings.customProviders?.find((p) => p.id === id)
         return enabled !== false || (custom?.enabled !== false && Boolean(custom))
       },
-      getPricing: () => undefined,
+      getPricing: (id, modelId) =>
+        resolveModelPriceUsdPer1M(id, modelId, {
+          providerSettings: appSettings.providerSettings,
+          customProviders: appSettings.customProviders,
+        } as PriceLookupSettings),
     }
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
     const result = engine.selectProvider({ model })
