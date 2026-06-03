@@ -5,15 +5,13 @@ description: 一个绑定在本地 127.0.0.1 的 axum HTTP 监听器，让外部
 
 # Remote Control
 
-<Status variant="beta">入站监听器已接通 · 出站签名已构建但尚未接通</Status>
+<Status variant="stable">已全面激活 —— 入站分发已上线 · 出站签名已接通 · 持久审计</Status>
 
 <TLDR>
-  Tauri Rust 后端启动一个绑定到
-  `127.0.0.1:<port>`（默认 **47821**）的 [axum](https://docs.rs/axum) HTTP 服务器，对外暴露 **3** 个 `/api/v1` 端点 —— 健康检查、运行某个调度器任务、发送某个调度器事件。每个请求都要穿过一道四级中间件闸门
-  （`server.rs:192`）：8&nbsp;KiB 请求体上限 → IPv4 CIDR 允许列表 → 常量时间 Bearer 鉴权 →
-  固定窗口限流。密钥保存在操作系统密钥环（`com.cognia.remote-control`）中。该监听器
-  **默认关闭**，并且在生成令牌之前启用开关一直处于禁用状态。另一半，即出站方向 —— 由密钥环存储的 HMAC 密钥 + 用于调度器 Webhook 通道的自定义请求头 —— 已经完整构建并通过单元测试，但 **尚未接入实际的发送路径**；参见
-  [出站 Webhook](./outbound-webhooks)。
+  Tauri Rust 后端启动一个绑定到 `127.0.0.1:<port>`（默认 **47821**）的
+  [axum](https://docs.rs/axum) HTTP 服务器，对外暴露 `/api/v1` 端点 —— 健康检查、运行调度器任务、发送调度器事件，以及一个**通用的 `POST /commands/:target`**，可分发到任意执行子系统（调度器、目标、工作流、Agent 团队、计划中枢）。Rust 保持极薄入口：只做鉴权并发出 `remote-control://command` 事件；渲染端的
+  `lib/remote-control/dispatch.ts` 路由表按 target 分发到各子系统已有的无头运行入口。每个请求都要穿过一道加固后的中间件闸门：**Host 头白名单 + 拒绝 Origin**（DNS rebinding 缓解）→ 8&nbsp;KiB 请求体上限 → IPv4 CIDR 允许列表 → 常量时间 Bearer 鉴权 → **读/写能力闸门** → 固定窗口限流，并带有 **Idempotency-Key** 重放缓存以及每个响应上的 `Content-Security-Policy: default-src 'none'`。出站这一半现已接通：调度器 Webhook 与任意已配置的**出站端点**都用
+  [Standard Webhooks](https://www.standardwebhooks.com/) 方案签名。每次入站分发与出站投递都会记录到持久化的 Dexie 审计表（`remoteControlAudit`，schema v72）。密钥保存在操作系统密钥环中；监听器**默认关闭**。
 </TLDR>
 
 <StatGrid>
@@ -46,21 +44,15 @@ Remote Control 是 Cognia 三个 [外部 API](../companion-api) 接入面中最�
 
 | 方向 | 所在位置 | 传输 | 鉴权 | 状态 |
 | --- | --- | --- | --- | --- |
-| **入站** | `src-tauri/src/remote_control/` | 绑定 `127.0.0.1:47821` 的 axum HTTP | Bearer + IPv4 CIDR 允许列表 | 已接通（见注意事项） |
-| **出站** | `lib/scheduler/webhook-*.ts` + 密钥环 | 调度器 Webhook 通道 | HMAC-SHA256 签名 | 已构建 + 已测试，**尚未接入** `sendWebhookNotification` |
+| **入站** | `src-tauri/src/remote_control/` + `lib/remote-control/dispatch.ts` | 绑定 `127.0.0.1:47821` 的 axum HTTP | Host/Origin + Bearer + IPv4 CIDR + 读/写能力 | 已上线 —— 分发到调度器 / 目标 / 工作流 / 团队 / 计划 |
+| **出站** | `lib/remote-control/outbound/` + 密钥环 | 调度器 Webhook 通道 + 出站端点 | Standard Webhooks HMAC-SHA256 | 已接入 `sendWebhookNotification` + `publishOutboundEvent` |
 
-<Callout type="warn">
-  与本文较早草稿相比，有两处诚实的偏差，均已对照源码核实：
+<Callout type="info">
+  激活更新（2026-06-03）。较早草稿里的三条死链路现已全部接通：
 
-  1. **`RemoteControlReceiver` provider 没有被挂载。** `components/providers/remote-control-receiver.tsx`
-     仅被它自己的测试引用 —— `app/layout.tsx` 并未导入它。Rust 服务器仍然
-     接受请求并累加其计数器，但渲染端向 `runTaskNow` /
-     `emitSchedulerEvent` 的分发，以及实时的最近调用环形缓冲区，都要等到该 provider 被
-     挂载后才会触发。总量仍然通过 `remote_control_get_status` 暴露出来。
-  2. **出站签名没有被接通。** `signWebhookBody` / `getWebhookOutboundConfig` 已存在并
-     通过单元测试，但 `sendWebhookNotification(url, payload)`（`notification-integration.ts:185`）
-     不接收任何 `opts`，不添加 `X-Cognia-Signature` 请求头，也不合并任何自定义请求头。设置
-     界面允许你存储该密钥；但发送路径尚未消费它。
+  1. **`RemoteControlReceiver` 已挂载**到 `app/layout.tsx`（位于桌面 provider 内，非 Tauri 下自动 no-op），入站请求会真正分发 —— 包括经 `lib/remote-control/dispatch.ts` 路由的新 `remote-control://command` 事件。
+  2. **出站签名已接通。** `sendWebhookNotification` 现在经 `lib/remote-control/outbound/delivery.ts` 投递，用 Standard Webhooks 三件套请求头（`webhook-id` / `webhook-timestamp` / `webhook-signature`）+ 用户自定义头签名，并把事件扇出到所有已配置的出站端点。旧的 `X-Cognia-Signature` 十六进制辅助函数已退役。
+  3. **新增 `"remote"` `TaskExecutionTriggerSource`**，远程派发的调度器运行在执行历史里可区分。
 </Callout>
 
 ## 架构速览
@@ -82,18 +74,20 @@ flowchart LR
   end
 
   subgraph Renderer["渲染端"]
-    Recv["remote-control-receiver.tsx<br/>（未挂载 —— 见注意事项）"]
+    Recv["remote-control-receiver.tsx<br/>（已挂载到 app/layout.tsx）"]
+    Disp["lib/remote-control/dispatch.ts<br/>target → 子系统运行入口"]
     Store["stores/remote-control<br/>Zustand + persist(config)"]
-    Sched["useSchedulerStore.runTaskNow<br/>emitSchedulerEvent"]
+    Sched["调度器 / 目标 / 工作流<br/>团队 / 计划中枢"]
+    Audit["lib/db/remote-control-audit<br/>持久 Dexie v72"]
     UI["settings/remote-control<br/>4 个标签页"]
   end
 
   Curl -->|"POST /api/v1/..."| Server
   Server --> MW --> Routes
-  Routes -->|"emit remote-control://run-task"| Recv
-  Routes -->|"emit remote-control://emit-event"| Recv
-  Routes -->|"emit remote-control://inbound-call"| Recv
-  Recv --> Sched
+  Routes -->|"emit remote-control://command"| Recv
+  Routes -->|"emit remote-control://run-task / emit-event"| Recv
+  Recv --> Disp --> Sched
+  Recv --> Audit
   Recv --> Store
   UI --> Store
   Server -.-> State
@@ -104,7 +98,7 @@ flowchart LR
   classDef ts fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef ext fill:#0c4a6e,stroke:#38bdf8,color:#e0f2fe
   class Server,MW,Routes,State,KR,AL rust
-  class Recv,Store,Sched,UI ts
+  class Recv,Disp,Store,Sched,Audit,UI ts
   class Curl ext
 ```
 
@@ -125,6 +119,9 @@ flowchart LR
 | `GET` | `/api/v1/health` | `{ ok: true, version }`。**需要鉴权** —— 中间件闸门会在每条路由上运行，因此版本信息绝不会泄露给未鉴权的探测者。 | `server.rs:138` |
 | `POST` | `/api/v1/tasks/:id/run` | 发送 `remote-control://run-task`，携带 `{ taskId, payload? }`；返回 `202 Accepted`。请求体可选。 | `server.rs:145` |
 | `POST` | `/api/v1/events` | 发送 `remote-control://emit-event`，携带 `{ eventType, eventSource?, data? }`；若 `eventType` 缺失或为空则返回 `400`，否则返回 `202`。 | `server.rs:162` |
+| `POST` | `/api/v1/commands/:target` | 校验 `target` 是否在已知集合内，生成 `runId`，遵循 `Idempotency-Key`，发送 `remote-control://command`（携带 `{ target, args, runId }`）；返回 `202` 并带 `runId`。目标：`scheduler.task.run`、`scheduler.event`、`workflow.run`、`goal.create`、`goal.continue`、`team.dispatch`、`plan.run`。 | `server.rs` |
+
+所有路由还要求 `Host` 头为回环地址，并拒绝任何带 `Origin`/`Referer` 的请求（DNS rebinding 缓解）；触发类路由需要 `write` 能力令牌。另一个独立的本地 axum 入口 —— 可视化工作流的 webhook 路由器（`workflow_register_trigger`）—— 与本监听器无关，两者相互独立。
 
 ```bash
 # 从脚本触发一个调度器任务（桌面端必须正在运行 + 监听器已启用）

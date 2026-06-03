@@ -5,18 +5,23 @@ description: A local 127.0.0.1 axum HTTP listener that lets external scripts tri
 
 # Remote Control
 
-<Status variant="beta">inbound listener wired · outbound signing built but not yet wired</Status>
+<Status variant="stable">fully activated — inbound dispatch live · outbound signing wired · durable audit</Status>
 
 <TLDR>
   The Tauri Rust backend starts an [axum](https://docs.rs/axum) HTTP server bound to
-  `127.0.0.1:<port>` (default **47821**) that exposes **3** `/api/v1` endpoints — health, run a
-  scheduler task, fire a scheduler event. Every request passes a four-stage middleware gate
-  (`server.rs:192`): 8&nbsp;KiB body limit → IPv4 CIDR allowlist → constant-time bearer auth →
-  fixed-window rate limit. Secrets live in the OS keyring (`com.cognia.remote-control`). The listener
-  is **off by default** and the enable Switch stays disabled until a token is generated. A second,
-  outbound half — keyring-stored HMAC secret + custom headers for the scheduler webhook channel —
-  is fully built and unit-tested but is **not yet connected to the live send path**; see
-  [Outbound Webhooks](./outbound-webhooks).
+  `127.0.0.1:<port>` (default **47821**) that exposes `/api/v1` endpoints — health, run a scheduler
+  task, fire a scheduler event, and a **generic `POST /commands/:target`** that dispatches into any
+  execution subsystem (scheduler, goals, workflows, agent team, plan hub). Rust stays a thin ingress:
+  it authenticates and emits a `remote-control://command` event; the renderer's
+  `lib/remote-control/dispatch.ts` registry routes by target into each subsystem's existing headless
+  run entry. Every request passes a hardened middleware gate: **Host-header allowlist + Origin
+  rejection** (DNS-rebinding mitigation) → 8&nbsp;KiB body limit → IPv4 CIDR allowlist → constant-time
+  bearer auth → **read/write capability gate** → fixed-window rate limit, with an **Idempotency-Key**
+  replay cache and `Content-Security-Policy: default-src 'none'` on every response. The outbound half
+  is now wired: scheduler webhooks and any configured **egress endpoints** are signed with the
+  [Standard Webhooks](https://www.standardwebhooks.com/) scheme. Every inbound dispatch and outbound
+  delivery is recorded to a durable Dexie audit table (`remoteControlAudit`, schema v72). Secrets live
+  in the OS keyring; the listener is **off by default**.
 </TLDR>
 
 <StatGrid>
@@ -51,21 +56,22 @@ device JWTs and off-loopback binding.
 
 | Direction | Lives in | Transport | Auth | Status |
 | --- | --- | --- | --- | --- |
-| **Inbound** | `src-tauri/src/remote_control/` | axum HTTP on `127.0.0.1:47821` | bearer + IPv4 CIDR allowlist | wired (see caveat) |
-| **Outbound** | `lib/scheduler/webhook-*.ts` + keyring | scheduler webhook channel | HMAC-SHA256 signature | built + tested, **not yet wired** into `sendWebhookNotification` |
+| **Inbound** | `src-tauri/src/remote_control/` + `lib/remote-control/dispatch.ts` | axum HTTP on `127.0.0.1:47821` | Host/Origin + bearer + IPv4 CIDR + read/write capability | live — dispatches to scheduler / goals / workflows / team / plan |
+| **Outbound** | `lib/remote-control/outbound/` + keyring | scheduler webhook channel + egress endpoints | Standard Webhooks HMAC-SHA256 | wired into `sendWebhookNotification` + `publishOutboundEvent` |
 
-<Callout type="warn">
-  Two honest divergences from older drafts of this doc, both verified against the source:
+<Callout type="info">
+  Activation update (2026-06-03). The three dead wiring paths from earlier drafts are now closed:
 
-  1. **The `RemoteControlReceiver` provider is not mounted.** `components/providers/remote-control-receiver.tsx`
-     is referenced only by its own test — `app/layout.tsx` does not import it. The Rust server still
-     accepts requests and bumps its counters, but the renderer-side dispatch to `runTaskNow` /
-     `emitSchedulerEvent` and the live recent-calls ring buffer do not fire until the provider is
-     mounted. Totals still surface via `remote_control_get_status`.
-  2. **Outbound signing is not connected.** `signWebhookBody` / `getWebhookOutboundConfig` exist and
-     are unit-tested, but `sendWebhookNotification(url, payload)` (`notification-integration.ts:185`)
-     takes no `opts`, adds no `X-Cognia-Signature` header, and merges no custom headers. The settings
-     UI lets you store the secret; the send path does not consume it yet.
+  1. **`RemoteControlReceiver` is mounted** in `app/layout.tsx` (inside the desktop providers, no-op
+     off Tauri), so inbound requests actually dispatch — including the new `remote-control://command`
+     event routed through `lib/remote-control/dispatch.ts`.
+  2. **Outbound signing is wired.** `sendWebhookNotification` now delivers through
+     `lib/remote-control/outbound/delivery.ts`, signing each delivery with the Standard Webhooks
+     header trio (`webhook-id` / `webhook-timestamp` / `webhook-signature`) and the user's custom
+     headers; it also fans the event to any configured egress endpoints. The legacy
+     `X-Cognia-Signature` hex helper was retired.
+  3. **A `"remote"` `TaskExecutionTriggerSource`** now tags remote-dispatched scheduler runs so they
+     are distinguishable in execution history.
 </Callout>
 
 ## Architecture at a Glance
@@ -87,18 +93,20 @@ flowchart LR
   end
 
   subgraph Renderer["Renderer"]
-    Recv["remote-control-receiver.tsx<br/>(NOT mounted — see caveat)"]
+    Recv["remote-control-receiver.tsx<br/>(mounted in app/layout.tsx)"]
+    Disp["lib/remote-control/dispatch.ts<br/>target → subsystem run entry"]
     Store["stores/remote-control<br/>Zustand + persist(config)"]
-    Sched["useSchedulerStore.runTaskNow<br/>emitSchedulerEvent"]
+    Sched["scheduler / goals / workflows<br/>team / plan hub"]
+    Audit["lib/db/remote-control-audit<br/>durable Dexie v72"]
     UI["settings/remote-control<br/>4 tabs"]
   end
 
   Curl -->|"POST /api/v1/..."| Server
   Server --> MW --> Routes
-  Routes -->|"emit remote-control://run-task"| Recv
-  Routes -->|"emit remote-control://emit-event"| Recv
-  Routes -->|"emit remote-control://inbound-call"| Recv
-  Recv --> Sched
+  Routes -->|"emit remote-control://command"| Recv
+  Routes -->|"emit remote-control://run-task / emit-event"| Recv
+  Recv --> Disp --> Sched
+  Recv --> Audit
   Recv --> Store
   UI --> Store
   Server -.-> State
@@ -109,7 +117,7 @@ flowchart LR
   classDef ts fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef ext fill:#0c4a6e,stroke:#38bdf8,color:#e0f2fe
   class Server,MW,Routes,State,KR,AL rust
-  class Recv,Store,Sched,UI ts
+  class Recv,Disp,Store,Sched,Audit,UI ts
   class Curl ext
 ```
 
@@ -130,6 +138,9 @@ flowchart LR
 | `GET` | `/api/v1/health` | `{ ok: true, version }`. **Requires auth** — the middleware gate runs on every route, so the version is never leaked to an unauthenticated prober. | `server.rs:138` |
 | `POST` | `/api/v1/tasks/:id/run` | Emits `remote-control://run-task` with `{ taskId, payload? }`; returns `202 Accepted`. Body optional. | `server.rs:145` |
 | `POST` | `/api/v1/events` | Emits `remote-control://emit-event` with `{ eventType, eventSource?, data? }`; `400` if `eventType` is missing/empty; otherwise `202`. | `server.rs:162` |
+| `POST` | `/api/v1/commands/:target` | Validates `target` against the known set, generates a `runId`, honors `Idempotency-Key`, emits `remote-control://command` with `{ target, args, runId }`; returns `202` with the `runId`. Targets: `scheduler.task.run`, `scheduler.event`, `workflow.run`, `goal.create`, `goal.continue`, `team.dispatch`, `plan.run`. | `server.rs` |
+
+All routes additionally require a loopback `Host` header and reject any request carrying `Origin`/`Referer` (DNS-rebinding mitigation); trigger routes require a `write`-capability token. A separate local axum ingress — the Visual Workflows webhook router (`workflow_register_trigger`) — is unrelated to this listener; the two are independent.
 
 ```bash
 # Trigger a scheduler task from a script (desktop must be running + listener enabled)
