@@ -22,7 +22,9 @@ import {
   readTextFile,
   restartSidecar,
   scanClaudeSkills,
+  sendPluginToolResponse,
   sendPrompt,
+  subscribePluginToolExec,
   setApiKey,
   skillsFetchRemoteMd,
   skillsInstallNative,
@@ -58,6 +60,45 @@ beforeEach(() => {
 afterEach(() => {
   setTauri(false)
   jest.restoreAllMocks()
+})
+
+describe("subscribePluginToolExec", () => {
+  it("forwards only plugin_tool_exec events to the handler", async () => {
+    let captured: ((evt: unknown) => void) | null = null
+    const sub = jest
+      .spyOn(transport, "subscribe")
+      .mockImplementation((_ch: string, h: (evt: unknown) => void) => {
+        captured = h
+        return Promise.resolve(() => {})
+      })
+    const handler = jest.fn()
+    await subscribePluginToolExec(handler)
+    expect(sub).toHaveBeenCalled()
+    captured!({ type: "plugin_tool_exec", sessionId: "s", toolUseId: "t", name: "n", args: {} })
+    captured!({ type: "ready" })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "plugin_tool_exec", toolUseId: "t" })
+    )
+  })
+})
+
+describe("sendPluginToolResponse", () => {
+  it("invokes claude_plugin_tool_response with the response payload", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await sendPluginToolResponse({
+      type: "plugin_tool_response",
+      sessionId: "s1",
+      toolUseId: "t1",
+      result: "ok",
+    })
+    expect(callSpy).toHaveBeenCalledWith("claude_plugin_tool_response", {
+      sessionId: "s1",
+      toolUseId: "t1",
+      result: "ok",
+      error: undefined,
+    })
+  })
 })
 
 describe("web-mode rejection", () => {

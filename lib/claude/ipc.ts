@@ -10,9 +10,12 @@ import type {
   ApprovalDecision,
   ChatSession,
   ClaudeEvent,
+  PluginToolExecEvent,
   SendContent,
   SendOptions,
 } from "./types"
+import { isPluginToolExecEvent } from "./types"
+import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -191,6 +194,33 @@ export async function restartSidecar(): Promise<void> {
 
 export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
   return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, handler)
+}
+
+/**
+ * Subscribe to `plugin_tool_exec` events on the sidecar channel and forward
+ * them to `handler` (which runs the tool via `handlePluginToolExec` and writes
+ * the result back with `sendPluginToolResponse`). Reuses the single
+ * `onClaudeMessage` subscription + the `ClaudeEvent` type guard. No-op in web.
+ */
+export async function subscribePluginToolExec(
+  handler: (req: PluginToolExecEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if (isPluginToolExecEvent(evt)) handler(evt)
+  })
+}
+
+/**
+ * Write a `plugin_tool_response` back onto the sidecar stdin so the pending
+ * `pendingPluginToolCalls` entry resolves. Mirrors `approveTool`/`claude_approve`.
+ */
+export async function sendPluginToolResponse(resp: PluginToolExecResponse): Promise<void> {
+  await transport.call("claude_plugin_tool_response", {
+    sessionId: resp.sessionId,
+    toolUseId: resp.toolUseId,
+    result: resp.result,
+    error: resp.error,
+  })
 }
 
 // ---- File-system commands (Skills + MCP import/export) -------------------
