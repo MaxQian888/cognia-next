@@ -71,6 +71,7 @@ import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
+import type { AgentPlan, PlanEvent } from "@/types/agent/plan"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
@@ -246,6 +247,12 @@ export class CogniaDB extends Dexie {
   // access; booleans (builtin/isFavorite) are filtered in-memory by the CRUD
   // layer since IndexedDB doesn't index booleans reliably.
   goalTemplates!: Table<GoalTemplate, string>
+  // v71 — Unified Plan Execution Hub (ADR-0045). `agentPlans` is one row per
+  // plan, session-scoped (one "open" plan per session enforced by the writer
+  // in `lib/db/plans.ts`); `agentPlanEvents` is the append-only lifecycle log
+  // driving the tracker panel + audit trail (capped per-plan).
+  agentPlans!: Table<AgentPlan, string>
+  agentPlanEvents!: Table<PlanEvent, string>
   /**
    * v35 — Visual workflow editor viewport bookmarks. One row per saved view,
    * scoped to a workflow. The `[workflowId+createdAt]` compound index drives
@@ -1785,6 +1792,19 @@ export class CogniaDB extends Dexie {
     // See `lib/subscription/balance/` and `@/types/subscription`.
     this.version(70).stores({
       subscriptionBalance: "++localId, fetchedAt, accountId, [providerKey+accountId]",
+    })
+
+    // v71 — Unified Plan Execution Hub (ADR-0045). Additive; no upgrade hook.
+    // Indices mirror `chatGoals` / `chatGoalEvents` (v30):
+    //   • agentPlans       — `&id` primary; `[sessionId+status]` for the
+    //     one-open-plan-per-session lookup; `sessionId` for the per-session
+    //     history; `createdAt`/`updatedAt` for sorting.
+    //   • agentPlanEvents  — `&id` primary; `planId` for cascade-delete;
+    //     `[planId+ts]` for the newest-first audit trail; `kind` for filtering.
+    // See `lib/db/plans.ts` and `@/types/agent/plan`.
+    this.version(71).stores({
+      agentPlans: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
+      agentPlanEvents: "&id, planId, [planId+ts], kind, ts",
     })
   }
 

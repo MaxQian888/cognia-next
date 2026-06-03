@@ -1438,6 +1438,12 @@ async function handleEvent(
       try {
         const session = await getSession(sessionId)
         applyPlanModeBridge(env.event, sessionId, session?.teamId)
+        // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
+        // a structured draft AgentPlan so it can be approved + executed through
+        // the unified plan pipeline. Runs once per turn (turnComplete). Lazy
+        // import keeps the plan runtime out of the hot path until used.
+        const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
+        await captureExitPlanMode(env.event, sessionId, session?.characterId)
       } catch (err) {
         console.warn("planModeBridge failed", err)
       }

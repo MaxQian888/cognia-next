@@ -2,7 +2,7 @@
  * Agent types - agent modes, tools, and execution
  */
 
-export * from "./agent"
+export * from "./plan"
 export * from "./agent-mode"
 export * from "./agent-trace"
 export * from "./sub-agent"
