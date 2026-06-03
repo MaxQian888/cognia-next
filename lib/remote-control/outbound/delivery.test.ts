@@ -76,4 +76,12 @@ describe("deliverWebhook", () => {
     expect(r.httpStatus).toBe(503)
     expect(fetchMock).toHaveBeenCalledTimes(4) // 1 + 3 retries
   })
+
+  it("gives up with an error message on repeated network failure", async () => {
+    fetchMock.mockRejectedValue(new Error("ECONNREFUSED"))
+    const r = await deliverWebhook({ endpoint: endpoint(), event: event() }, instantSleep)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain("ECONNREFUSED")
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
 })

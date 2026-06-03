@@ -36,6 +36,14 @@ describe("remote-control audit", () => {
     expect(rows[1].runId).toBe("r1")
   })
 
+  it("defaults id and timestamp when not supplied", async () => {
+    await appendRemoteControlAudit({ direction: "inbound", kind: "inbound.command" })
+    const rows = await listRemoteControlAudit()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toMatch(/.+/)
+    expect(rows[0].at).toBeGreaterThan(0)
+  })
+
   it("filters by direction", async () => {
     await appendRemoteControlAudit({ direction: "inbound", kind: "inbound.command", at: 1 })
     await appendRemoteControlAudit({ direction: "outbound", kind: "outbound.failed", at: 2 })
