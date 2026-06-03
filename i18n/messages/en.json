@@ -9632,6 +9632,24 @@
         "revert": "Revert in progress — resolve conflicts, then continue."
       }
     },
+    "irebase": {
+      "title": "Interactive rebase",
+      "description": "Reorder, reword, squash, or drop commits, then apply.",
+      "fromHere": "Interactive rebase from here…",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "rewordPlaceholder": "New commit message",
+      "empty": "No commits to rebase",
+      "cancel": "Cancel",
+      "apply": "Start rebase",
+      "action": {
+        "pick": "pick",
+        "reword": "reword",
+        "squash": "squash",
+        "fixup": "fixup",
+        "drop": "drop"
+      }
+    },
     "conflicts": {
       "acceptOurs": "Accept Current",
       "acceptTheirs": "Accept Incoming",

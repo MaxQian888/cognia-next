@@ -123,6 +123,26 @@ where
     Ok(())
 }
 
+/// Run `git <args>` in `cwd` with extra environment variables layered on top
+/// of the standard non-interactive base (used by interactive rebase to point
+/// `GIT_SEQUENCE_EDITOR` / `GIT_EDITOR` at generated scripts).
+pub async fn run_with_env<I, S>(cwd: &Path, args: I, envs: &[(&str, &str)]) -> Result<(), GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut cmd = base_command(cwd);
+    cmd.args(args);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let output = cmd.output().await.map_err(spawn_error)?;
+    if !output.status.success() {
+        return Err(classify_failure(&String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(())
+}
+
 /// Run `git <args>` in `cwd`, returning trimmed stdout.
 pub async fn capture<I, S>(cwd: &Path, args: I) -> Result<String, GitError>
 where

@@ -11,11 +11,12 @@ use super::error::GitError;
 use super::types::{
     AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
     GitFileChange, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus, GitTag,
+    RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
 use super::{
-    blame, branch, commit, diff, history, merge, read, remote, reset, restore, sequencer, stage,
-    stash, status, tag,
+    blame, branch, commit, diff, history, interactive_rebase, merge, read, remote, reset, restore,
+    sequencer, stage, stash, status, tag,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -353,6 +354,26 @@ pub async fn git_sequencer_continue(repo_path: String) -> Result<(), GitError> {
 #[tauri::command]
 pub async fn git_sequencer_abort(repo_path: String) -> Result<(), GitError> {
     sequencer::sequencer_abort(&repo_path).await
+}
+
+#[tauri::command]
+pub async fn git_rebase_commits(
+    repo_path: String,
+    base: String,
+) -> Result<Vec<GitCommit>, GitError> {
+    blocking("git_rebase_commits", move || {
+        interactive_rebase::list_commits(&repo_path, &base)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_interactive_rebase(
+    repo_path: String,
+    base: String,
+    entries: Vec<RebaseTodoEntry>,
+) -> Result<(), GitError> {
+    interactive_rebase::run(&repo_path, &base, &entries).await
 }
 
 #[tauri::command]

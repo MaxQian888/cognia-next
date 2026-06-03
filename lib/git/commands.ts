@@ -25,6 +25,7 @@ import {
   type GitStashEntry,
   type GitStatus,
   type GitTag,
+  type RebaseTodoEntry,
 } from "@/types/git"
 
 // ----------------------------------------------------------------- reads
@@ -375,6 +376,21 @@ export async function gitSequencerContinue(repoPath: string): Promise<void> {
 export async function gitSequencerAbort(repoPath: string): Promise<void> {
   if (!isTauri()) return
   await transport.call("git_sequencer_abort", { repoPath })
+}
+
+/** Commits in `base..HEAD`, oldest first — the rows for the interactive rebase editor. */
+export async function gitRebaseCommits(repoPath: string, base: string): Promise<GitCommit[]> {
+  if (!isTauri()) return []
+  return transport.call<GitCommit[]>("git_rebase_commits", { repoPath, base })
+}
+
+export async function gitInteractiveRebase(
+  repoPath: string,
+  base: string,
+  entries: RebaseTodoEntry[]
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_interactive_rebase", { repoPath, base, entries })
 }
 
 export async function gitWatchStart(repoPath: string): Promise<void> {

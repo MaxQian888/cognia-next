@@ -24,6 +24,7 @@ import { CommitDetail } from "./commit-detail"
 import { ConflictResolver } from "./conflict-resolver"
 import { BlameView } from "./blame-view"
 import { DiffPane } from "./diff-pane"
+import { InteractiveRebaseDialog } from "./interactive-rebase-dialog"
 import { RemotePanel } from "./remote-panel"
 import { RestoreDialog } from "./restore-dialog"
 import { RootSwitcher } from "./root-switcher"
@@ -54,6 +55,7 @@ export function SourceControlPanel() {
   const [tagOpen, setTagOpen] = useState(false)
   const [blameTarget, setBlameTarget] = useState<{ path: string; rev?: string } | null>(null)
   const [restorePath, setRestorePath] = useState<string | null>(null)
+  const [rebaseBase, setRebaseBase] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
   const layout = useResizableLayout("cognia-git-panel")
@@ -196,6 +198,7 @@ export function SourceControlPanel() {
               commit={syntheticCommit(selectedCommit)}
               actions={actions}
               onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
+              onInteractiveRebase={(base) => setRebaseBase(base)}
             />
           ) : conflict ? (
             <ConflictResolver
@@ -235,6 +238,13 @@ export function SourceControlPanel() {
         rootDir={rootDir}
         path={restorePath}
         onOpenChange={(open) => !open && setRestorePath(null)}
+        actions={actions}
+      />
+      <InteractiveRebaseDialog
+        key={rebaseBase ?? "none"}
+        rootDir={rootDir}
+        base={rebaseBase}
+        onOpenChange={(open) => !open && setRebaseBase(null)}
         actions={actions}
       />
       <Sheet open={blameTarget !== null} onOpenChange={(open) => !open && setBlameTarget(null)}>

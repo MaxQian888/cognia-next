@@ -175,6 +175,27 @@ pub struct GitRef {
     pub target_hash: String,
 }
 
+/// Interactive-rebase action for a single commit (mirrors git's todo verbs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RebaseAction {
+    Pick,
+    Reword,
+    Squash,
+    Fixup,
+    Drop,
+}
+
+/// One row of an interactive-rebase plan, in final (top→bottom) order.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseTodoEntry {
+    pub sha: String,
+    pub action: RebaseAction,
+    /// New message for `reword` (collected up-front in the dialog).
+    pub message: Option<String>,
+}
+
 /// One blamed line: which commit last touched it, author, time, and content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

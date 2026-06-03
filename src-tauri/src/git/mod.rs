@@ -17,6 +17,7 @@ pub mod diff;
 pub mod error;
 pub mod exec;
 pub mod history;
+pub mod interactive_rebase;
 pub mod merge;
 pub mod read;
 pub mod remote;

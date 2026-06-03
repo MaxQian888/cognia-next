@@ -53,6 +53,7 @@ function makeActions(): UseGitActionsResult {
     revert: jest.fn().mockResolvedValue(undefined),
     sequencerContinue: jest.fn().mockResolvedValue(undefined),
     sequencerAbort: jest.fn().mockResolvedValue(undefined),
+    interactiveRebase: jest.fn().mockResolvedValue(undefined),
   }
 }
 

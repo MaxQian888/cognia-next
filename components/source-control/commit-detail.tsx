@@ -48,9 +48,17 @@ interface CommitDetailProps {
     Partial<Pick<UseGitActionsResult, "cherryPick" | "revert">>
   /** Open blame for a file pinned to this commit. */
   onViewBlame?: (path: string, rev: string) => void
+  /** Start an interactive rebase from this commit (base = this commit). */
+  onInteractiveRebase?: (base: string) => void
 }
 
-export function CommitDetail({ rootDir, commit, actions, onViewBlame }: CommitDetailProps) {
+export function CommitDetail({
+  rootDir,
+  commit,
+  actions,
+  onViewBlame,
+  onInteractiveRebase,
+}: CommitDetailProps) {
   const t = useTranslations("sourceControl")
   const [confirmHardReset, setConfirmHardReset] = useState(false)
   const [files, setFiles] = useState<GitFileChange[]>([])
@@ -135,7 +143,17 @@ export function CommitDetail({ rootDir, commit, actions, onViewBlame }: CommitDe
                     {t("sequencer.revert")}
                   </DropdownMenuItem>
                 )}
-                {(actions.cherryPick || actions.revert) && <DropdownMenuSeparator />}
+                {onInteractiveRebase && (
+                  <DropdownMenuItem
+                    onSelect={() => onInteractiveRebase(commit.hash)}
+                    data-testid="commit-interactive-rebase"
+                  >
+                    {t("irebase.fromHere")}
+                  </DropdownMenuItem>
+                )}
+                {(actions.cherryPick || actions.revert || onInteractiveRebase) && (
+                  <DropdownMenuSeparator />
+                )}
                 <DropdownMenuItem
                   onSelect={() => void actions.reset("soft", commit.hash)}
                   data-testid="reset-soft"

@@ -28,6 +28,7 @@ import {
   gitPull,
   gitPush,
   gitRebase,
+  gitInteractiveRebase,
   gitRemoteAdd,
   gitRemoteRemove,
   gitRenameBranch,
@@ -45,7 +46,7 @@ import {
   gitSync,
   gitUnstage,
 } from "@/lib/git/commands"
-import { asGitError, type ConflictSide, type GitResetMode } from "@/types/git"
+import { asGitError, type ConflictSide, type GitResetMode, type RebaseTodoEntry } from "@/types/git"
 import { useGitStore, type GitOp } from "@/stores/git/git-store"
 
 const OP_ERROR_KEY: Partial<Record<GitOp, string>> = {
@@ -94,6 +95,7 @@ export interface UseGitActionsResult {
   revert: (sha: string) => Promise<void>
   sequencerContinue: () => Promise<void>
   sequencerAbort: () => Promise<void>
+  interactiveRebase: (base: string, entries: RebaseTodoEntry[]) => Promise<void>
 }
 
 export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult {
@@ -172,6 +174,8 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       revert: (sha) => run("sequence", (rp) => gitRevert(rp, sha)),
       sequencerContinue: () => run("sequence", (rp) => gitSequencerContinue(rp)),
       sequencerAbort: () => run("sequence", (rp) => gitSequencerAbort(rp)),
+      interactiveRebase: (base, entries) =>
+        run("sequence", (rp) => gitInteractiveRebase(rp, base, entries)),
     }),
     [run, currentBranch]
   )

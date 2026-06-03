@@ -152,6 +152,17 @@ export interface CommitGraphLayout {
   laneCount: number
 }
 
+/** Interactive-rebase action for a commit (mirrors git's todo verbs). */
+export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop"
+
+/** One row of an interactive-rebase plan, in final (top→bottom) order. */
+export interface RebaseTodoEntry {
+  sha: string
+  action: RebaseAction
+  /** New message for `reword` (collected up-front in the dialog). */
+  message?: string
+}
+
 /** One blamed line: which commit last touched it, author, time, and content. */
 export interface GitBlameLine {
   lineNumber: number

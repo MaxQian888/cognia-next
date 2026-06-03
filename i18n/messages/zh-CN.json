@@ -9632,6 +9632,24 @@
         "revert": "还原进行中——解决冲突后继续。"
       }
     },
+    "irebase": {
+      "title": "交互式变基",
+      "description": "重排、改写、压缩或丢弃提交，然后应用。",
+      "fromHere": "从此处交互式变基…",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "rewordPlaceholder": "新的提交信息",
+      "empty": "没有可变基的提交",
+      "cancel": "取消",
+      "apply": "开始变基",
+      "action": {
+        "pick": "采用 pick",
+        "reword": "改写 reword",
+        "squash": "压缩 squash",
+        "fixup": "合并 fixup",
+        "drop": "丢弃 drop"
+      }
+    },
     "blame": {
       "title": "追溯 · {path}",
       "loading": "正在加载追溯…",

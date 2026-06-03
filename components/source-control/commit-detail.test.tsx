@@ -83,6 +83,22 @@ describe("CommitDetail", () => {
     expect(revert).toHaveBeenCalledWith(commit.hash)
   })
 
+  it("starts an interactive rebase from the commit", async () => {
+    const user = userEvent.setup()
+    const onInteractiveRebase = jest.fn()
+    render(
+      <CommitDetail
+        rootDir="/r"
+        commit={commit}
+        actions={{ reset: jest.fn() }}
+        onInteractiveRebase={onInteractiveRebase}
+      />
+    )
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-interactive-rebase"))
+    expect(onInteractiveRebase).toHaveBeenCalledWith(commit.hash)
+  })
+
   it("opens commit-pinned blame for a file", async () => {
     const onViewBlame = jest.fn()
     render(<CommitDetail rootDir="/r" commit={commit} onViewBlame={onViewBlame} />)
