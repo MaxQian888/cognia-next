@@ -37,6 +37,7 @@ import { CrashReportDialog } from "@/components/desktop/crash-report-dialog"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
+import { RemoteControlReceiver } from "@/components/providers/remote-control-receiver"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
@@ -165,11 +166,16 @@ export default async function RootLayout({
                                           <CompanionBootProvider>
                                             <DesktopSyncSourceProvider>
                                               <DesktopMessageSourceProvider>
-                                                <div data-bg-target="global" className="contents">
-                                                  <MobileShellWrapper>
-                                                    <DesktopAppShell>{children}</DesktopAppShell>
-                                                  </MobileShellWrapper>
-                                                </div>
+                                                {/* Subscribes the renderer to the remote-control axum
+                                                    server's Tauri events so inbound HTTP triggers
+                                                    actually dispatch. No-op off Tauri. */}
+                                                <RemoteControlReceiver>
+                                                  <div data-bg-target="global" className="contents">
+                                                    <MobileShellWrapper>
+                                                      <DesktopAppShell>{children}</DesktopAppShell>
+                                                    </MobileShellWrapper>
+                                                  </div>
+                                                </RemoteControlReceiver>
                                               </DesktopMessageSourceProvider>
                                             </DesktopSyncSourceProvider>
                                           </CompanionBootProvider>
