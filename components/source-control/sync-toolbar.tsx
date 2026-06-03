@@ -11,9 +11,12 @@ import {
   ArchiveIcon,
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
+  CloudIcon,
+  GitMergeIcon,
   HistoryIcon,
   MoreHorizontalIcon,
   RefreshCwIcon,
+  TagIcon,
   Trash2Icon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -30,9 +33,14 @@ import { useGitStore } from "@/stores/git/git-store"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 interface SyncToolbarProps {
-  actions: Pick<UseGitActionsResult, "fetch" | "pull" | "push" | "sync" | "discardAll">
+  actions: Pick<
+    UseGitActionsResult,
+    "fetch" | "pull" | "push" | "sync" | "discardAll" | "mergeAbort"
+  >
   onOpenStash: () => void
   onOpenTimeline: () => void
+  onOpenRemotes: () => void
+  onOpenTags: () => void
   onRefresh: () => void
 }
 
@@ -65,9 +73,17 @@ function IconBtn({ label, busy, onClick, children, testId }: IconBtnProps) {
   )
 }
 
-export function SyncToolbar({ actions, onOpenStash, onOpenTimeline, onRefresh }: SyncToolbarProps) {
+export function SyncToolbar({
+  actions,
+  onOpenStash,
+  onOpenTimeline,
+  onOpenRemotes,
+  onOpenTags,
+  onRefresh,
+}: SyncToolbarProps) {
   const t = useTranslations("sourceControl")
   const ops = useGitStore((s) => s.ops)
+  const isMerging = useGitStore((s) => s.status?.isMerging ?? false)
 
   return (
     <div className="flex items-center gap-0.5" data-testid="sync-toolbar">
@@ -129,6 +145,23 @@ export function SyncToolbar({ actions, onOpenStash, onOpenTimeline, onRefresh }:
             <HistoryIcon className="size-3.5" />
             {t("timeline.title")}
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenRemotes} data-testid="more-remotes">
+            <CloudIcon className="size-3.5" />
+            {t("remotes.title")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenTags} data-testid="more-tags">
+            <TagIcon className="size-3.5" />
+            {t("tags.title")}
+          </DropdownMenuItem>
+          {isMerging && (
+            <DropdownMenuItem
+              onSelect={() => void actions.mergeAbort()}
+              data-testid="more-abort-merge"
+            >
+              <GitMergeIcon className="size-3.5" />
+              {t("actions.abortMerge")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive"

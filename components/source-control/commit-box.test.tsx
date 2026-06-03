@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { CommitBox } from "./commit-box"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+
+const mockGenerate = jest.fn().mockResolvedValue("feat: ai message")
+jest.mock("@/hooks/git/use-ai-commit-message", () => ({
+  useAiCommitMessage: () => ({ generating: false, error: null, generate: mockGenerate }),
+}))
 
 function makeActions() {
   return {
@@ -10,10 +17,24 @@ function makeActions() {
   }
 }
 
+function setAiEnabled(enabled: boolean) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: enabled
+        ? ({
+            gitSettings: { commitMessageAI: { enabled: true, conventionalCommits: true } },
+          } as never)
+        : null,
+    })
+  })
+}
+
 beforeEach(() => {
+  jest.clearAllMocks()
   act(() => {
     useGitStore.setState({ commitDraft: {}, commitAmend: false })
   })
+  setAiEnabled(false)
 })
 
 describe("CommitBox", () => {
@@ -48,5 +69,36 @@ describe("CommitBox", () => {
     act(() => useGitStore.getState().setAmend(true))
     render(<CommitBox rootDir="/r" stagedCount={0} committing={false} actions={makeActions()} />)
     expect(screen.getByTestId("commit-button")).not.toBeDisabled()
+  })
+
+  it("hides the AI generate button when the feature is disabled", () => {
+    setAiEnabled(false)
+    render(<CommitBox rootDir="/r" stagedCount={2} committing={false} actions={makeActions()} />)
+    expect(screen.queryByTestId("commit-ai-generate")).not.toBeInTheDocument()
+  })
+
+  it("shows and triggers the AI generate button when enabled", async () => {
+    setAiEnabled(true)
+    render(
+      <TooltipProvider>
+        <CommitBox rootDir="/r" stagedCount={2} committing={false} actions={makeActions()} />
+      </TooltipProvider>
+    )
+    const btn = screen.getByTestId("commit-ai-generate")
+    expect(btn).not.toBeDisabled()
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(mockGenerate).toHaveBeenCalled()
+  })
+
+  it("disables the AI generate button with no staged files", () => {
+    setAiEnabled(true)
+    render(
+      <TooltipProvider>
+        <CommitBox rootDir="/r" stagedCount={0} committing={false} actions={makeActions()} />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("commit-ai-generate")).toBeDisabled()
   })
 })

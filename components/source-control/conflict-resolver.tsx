@@ -22,7 +22,7 @@ import {
 import { resolveActiveThemeColors } from "@/lib/themes"
 import { useSettingsStore } from "@/stores"
 import { languageFromPath } from "@/lib/git/language-map"
-import type { ConflictSide, GitConflict } from "@/lib/git/types"
+import type { ConflictSide, GitConflict } from "@/types/git"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
   ssr: false,

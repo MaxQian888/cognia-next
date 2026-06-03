@@ -3,7 +3,7 @@
  * a single letter, a Tailwind color class, and the i18n label key.
  */
 
-import type { GitFileStatus } from "@/lib/git/types"
+import type { GitFileStatus } from "@/types/git"
 
 export interface StatusDecoration {
   letter: string

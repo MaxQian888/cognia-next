@@ -23,7 +23,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { gitDiffFile } from "@/lib/git/commands"
 import { DiffPane } from "./diff-pane"
 import { useGitStore } from "@/stores/git/git-store"
-import type { GitHunk } from "@/lib/git/types"
+import type { GitHunk } from "@/types/git"
 
 const gitDiffFileMock = gitDiffFile as jest.Mock
 

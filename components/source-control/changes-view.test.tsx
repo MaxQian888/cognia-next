@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { ChangesView } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
-import type { GitStatus } from "@/lib/git/types"
+import type { GitStatus } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 const status: GitStatus = {
@@ -41,6 +41,13 @@ function makeActions(): UseGitActionsResult {
     stashDrop: jest.fn(),
     resolveConflict: jest.fn(),
     mergeAbort: jest.fn(),
+    remoteAdd: jest.fn().mockResolvedValue(undefined),
+    remoteRemove: jest.fn().mockResolvedValue(undefined),
+    createTag: jest.fn().mockResolvedValue(undefined),
+    deleteTag: jest.fn().mockResolvedValue(undefined),
+    pushTag: jest.fn().mockResolvedValue(undefined),
+    reset: jest.fn().mockResolvedValue(undefined),
+    restore: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -62,6 +69,8 @@ describe("ChangesView", () => {
         selectedPath={null}
         onSelectFile={() => {}}
         onViewHistory={() => {}}
+        onViewBlame={() => {}}
+        onRestore={() => {}}
       />
     )
     expect(screen.getByTestId("change-group-merge")).toBeInTheDocument()
@@ -80,6 +89,8 @@ describe("ChangesView", () => {
         selectedPath={null}
         onSelectFile={() => {}}
         onViewHistory={() => {}}
+        onViewBlame={() => {}}
+        onRestore={() => {}}
       />
     )
     fireEvent.click(screen.getByTestId("group-action-changes-stage-all"))
@@ -97,6 +108,8 @@ describe("ChangesView", () => {
         selectedPath={null}
         onSelectFile={onSelectFile}
         onViewHistory={() => {}}
+        onViewBlame={() => {}}
+        onRestore={() => {}}
       />
     )
     fireEvent.click(screen.getByTestId("change-item-staged.ts"))
@@ -116,6 +129,8 @@ describe("ChangesView", () => {
         selectedPath={null}
         onSelectFile={() => {}}
         onViewHistory={() => {}}
+        onViewBlame={() => {}}
+        onRestore={() => {}}
       />
     )
     expect(screen.getByTestId("no-changes")).toBeInTheDocument()

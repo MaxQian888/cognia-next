@@ -36,7 +36,7 @@ jest.mock("./sync-toolbar", () => ({ SyncToolbar: () => <div data-testid="sync-t
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { SourceControlPanel } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
-import type { GitStatus } from "@/lib/git/types"
+import type { GitStatus } from "@/types/git"
 
 const status: GitStatus = {
   branch: "main",

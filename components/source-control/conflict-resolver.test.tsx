@@ -18,7 +18,7 @@ jest.mock("@/lib/canvas/monaco-loader", () => ({ configureMonacoLoader: jest.fn(
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { ConflictResolver, mergeBoth } from "./conflict-resolver"
-import type { GitConflict } from "@/lib/git/types"
+import type { GitConflict } from "@/types/git"
 
 const conflict: GitConflict = {
   path: "a.ts",

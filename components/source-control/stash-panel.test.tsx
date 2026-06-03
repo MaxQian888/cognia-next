@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { StashPanel } from "./stash-panel"
-import type { GitStashEntry } from "@/lib/git/types"
+import type { GitStashEntry } from "@/types/git"
 
 const stashes: GitStashEntry[] = [
   { index: 0, message: "WIP on main: abc tweak", branch: "main" },

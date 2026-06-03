@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { ChangeItem } from "./change-item"
-import type { GitFileChange } from "@/lib/git/types"
+import type { GitFileChange } from "@/types/git"
 
 const change: GitFileChange = {
   path: "src/app/page.tsx",
@@ -50,5 +50,25 @@ describe("ChangeItem", () => {
     expect(onUnstage).toHaveBeenCalled()
     fireEvent.click(screen.getByTestId(`discard-${change.path}`))
     expect(onDiscard).toHaveBeenCalled()
+  })
+
+  it("offers Restore from the context menu when provided", async () => {
+    const onRestore = jest.fn()
+    render(
+      <ChangeItem change={change} selected={false} onSelect={() => {}} onRestore={onRestore} />
+    )
+    fireEvent.contextMenu(screen.getByTestId(`change-item-${change.path}`))
+    fireEvent.click(await screen.findByTestId(`restore-${change.path}`))
+    expect(onRestore).toHaveBeenCalled()
+  })
+
+  it("offers View Blame from the context menu when provided", async () => {
+    const onViewBlame = jest.fn()
+    render(
+      <ChangeItem change={change} selected={false} onSelect={() => {}} onViewBlame={onViewBlame} />
+    )
+    fireEvent.contextMenu(screen.getByTestId(`change-item-${change.path}`))
+    fireEvent.click(await screen.findByTestId(`blame-${change.path}`))
+    expect(onViewBlame).toHaveBeenCalled()
   })
 })

@@ -12,21 +12,14 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
-import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { CheckIcon, MinusIcon, Undo2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { FileQuestionIcon } from "lucide-react"
-import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
-import {
-  COGNIA_ACTIVE_THEME_ID,
-  syncCogniaActiveTheme,
-} from "@/lib/canvas/themes/cognia-active-theme"
-import { resolveActiveThemeColors } from "@/lib/themes"
-import { useSettingsStore } from "@/stores"
-import type { GitDiff, GitHunk } from "@/lib/git/types"
+import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
+import type { GitDiff, GitHunk } from "@/types/git"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
   ssr: false,
@@ -67,52 +60,9 @@ const ICON = {
 
 export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
   const t = useTranslations("sourceControl")
-  const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
-  const monacoRef = useRef<typeof import("monaco-editor") | null>(null)
-
-  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
-  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
-  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
-
-  useEffect(() => {
-    configureMonacoLoader()
-  }, [])
-
-  // Register the cognia-active Monaco theme from the live appearance palette so
-  // the diff paints with the user's chosen colors instead of stock VS Code —
-  // matching the canvas / skills editors (see SkillMonacoEditor for the pattern).
-  const applyActiveTheme = useCallback(
-    (monaco: typeof import("monaco-editor")) => {
-      if (!resolvedTheme) return
-      const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
-      const resolved = resolveActiveThemeColors({
-        colorTheme: appearanceColorTheme,
-        resolvedTheme: variant,
-        activeCustomThemeId: appearanceActiveCustomThemeId,
-        customThemes: appearanceCustomThemes,
-      })
-      syncCogniaActiveTheme(
-        monaco as unknown as Parameters<typeof syncCogniaActiveTheme>[0],
-        resolved.colors,
-        variant
-      )
-      // Re-apply explicitly so an already-mounted editor follows a light/dark
-      // toggle. `defineTheme` only refreshes when cognia-active is the *active*
-      // theme — which isn't guaranteed if the static `theme` prop was applied
-      // before the theme existed (Monaco then falls back to vs/light). Mirrors
-      // the canvas `setTheme` effect.
-      monaco.editor.setTheme(COGNIA_ACTIVE_THEME_ID)
-    },
-    [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes]
-  )
-
-  // Re-sync the theme whenever the appearance palette or light/dark mode changes
-  // while the editor is mounted.
-  useEffect(() => {
-    if (monacoRef.current) applyActiveTheme(monacoRef.current)
-  }, [applyActiveTheme])
+  const { themeId, registerMonaco } = useMonacoActiveTheme()
 
   // Scroll the modified side to a hunk's first line and place the caret there.
   const revealHunk = useCallback((hunk: GitHunk) => {
@@ -231,12 +181,11 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
             original={diff.oldContent}
             modified={diff.newContent}
             language={diff.language ?? "plaintext"}
-            theme={COGNIA_ACTIVE_THEME_ID}
+            theme={themeId}
             options={options}
             onMount={(editor, monaco) => {
               editorRef.current = editor
-              monacoRef.current = monaco
-              applyActiveTheme(monaco)
+              registerMonaco(monaco)
             }}
           />
         </Suspense>

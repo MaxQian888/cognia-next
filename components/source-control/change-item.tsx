@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { GitFileChange } from "@/lib/git/types"
+import type { GitFileChange } from "@/types/git"
 import { splitPath, statusDecoration } from "./status-decoration"
 
 export interface ChangeItemProps {
@@ -28,6 +28,8 @@ export interface ChangeItemProps {
   onDiscard?: () => void
   onCopyPath?: () => void
   onViewHistory?: () => void
+  onViewBlame?: () => void
+  onRestore?: () => void
 }
 
 export function ChangeItem({
@@ -39,6 +41,8 @@ export function ChangeItem({
   onDiscard,
   onCopyPath,
   onViewHistory,
+  onViewBlame,
+  onRestore,
 }: ChangeItemProps) {
   const t = useTranslations("sourceControl")
   const deco = statusDecoration(change.status)
@@ -140,12 +144,26 @@ export function ChangeItem({
             {t("actions.discard")}
           </ContextMenuItem>
         )}
+        {onRestore && (
+          <ContextMenuItem
+            onSelect={onRestore}
+            className="text-destructive"
+            data-testid={`restore-${change.path}`}
+          >
+            {t("actions.restore")}
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         {onCopyPath && (
           <ContextMenuItem onSelect={onCopyPath}>{t("actions.copyPath")}</ContextMenuItem>
         )}
         {onViewHistory && (
           <ContextMenuItem onSelect={onViewHistory}>{t("actions.viewHistory")}</ContextMenuItem>
+        )}
+        {onViewBlame && (
+          <ContextMenuItem onSelect={onViewBlame} data-testid={`blame-${change.path}`}>
+            {t("actions.viewBlame")}
+          </ContextMenuItem>
         )}
       </ContextMenuContent>
     </ContextMenu>

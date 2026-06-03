@@ -10,7 +10,7 @@ import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { GitStatusGroup } from "@/lib/git/types"
+import type { GitStatusGroup } from "@/types/git"
 
 export interface GroupAction {
   key: string

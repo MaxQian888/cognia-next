@@ -7,7 +7,7 @@
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -18,9 +18,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { useAiCommitMessage } from "@/hooks/git/use-ai-commit-message"
 import { GIT_DEFAULTS, useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 interface CommitBoxProps {
   rootDir: string
@@ -36,6 +39,10 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
   const amend = useGitStore((s) => s.commitAmend)
   const setAmend = useGitStore((s) => s.setAmend)
   const [signoff, setSignoff] = useState(false)
+  const aiEnabled = useSettingsStore(
+    (s) => s.settings?.gitSettings?.commitMessageAI?.enabled ?? false
+  )
+  const ai = useAiCommitMessage(rootDir)
 
   const canCommit = (draft.trim().length > 0 || amend) && (stagedCount > 0 || amend) && !committing
 
@@ -69,6 +76,28 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
         data-testid="commit-message"
       />
       <div className="flex items-stretch gap-px">
+        {aiEnabled && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="px-2"
+                disabled={ai.generating || stagedCount === 0}
+                aria-label={t("commit.autoGenerateAI")}
+                onClick={() => void ai.generate()}
+                data-testid="commit-ai-generate"
+              >
+                {ai.generating ? (
+                  <Spinner className="size-3.5" />
+                ) : (
+                  <SparklesIcon className="size-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("commit.autoGenerateAI")}</TooltipContent>
+          </Tooltip>
+        )}
         <Button
           className="flex-1 gap-1.5"
           size="sm"

@@ -48,7 +48,7 @@ jest.mock("@/lib/canvas/themes/cognia-active-theme", () => ({
 import { fireEvent, render, screen } from "@testing-library/react"
 import { DiffViewer } from "./diff-viewer"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
-import type { GitDiff, GitHunk } from "@/lib/git/types"
+import type { GitDiff, GitHunk } from "@/types/git"
 
 const hunk: GitHunk = {
   header: "@@ -1,2 +1,2 @@",

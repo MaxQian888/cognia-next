@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl"
 import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import type { GitBranch } from "@/lib/git/types"
+import type { GitBranch } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { BranchPicker } from "./branch-picker"
 

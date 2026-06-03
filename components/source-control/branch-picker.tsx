@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import type { GitBranch } from "@/lib/git/types"
+import type { GitBranch } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 interface BranchPickerProps {

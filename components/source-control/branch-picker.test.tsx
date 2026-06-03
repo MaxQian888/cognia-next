@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { BranchPicker } from "./branch-picker"
-import type { GitBranch } from "@/lib/git/types"
+import type { GitBranch } from "@/types/git"
 
 const branches: GitBranch[] = [
   { name: "main", isCurrent: true, isRemote: false, upstream: "origin/main", ahead: 0, behind: 0 },

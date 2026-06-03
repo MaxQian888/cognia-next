@@ -7,21 +7,48 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { HistoryIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { gitCommitFiles, gitDiffCommit } from "@/lib/git/commands"
-import { commitDiffKey, type GitCommit, type GitDiff, type GitFileChange } from "@/lib/git/types"
+import {
+  commitDiffKey,
+  type GitCommit,
+  type GitDiff,
+  type GitFileChange,
+  type GitResetMode,
+} from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
 import { cn } from "@/lib/utils"
+import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer } from "./diff-viewer"
 import { splitPath, statusDecoration } from "./status-decoration"
 
 interface CommitDetailProps {
   rootDir: string
   commit: GitCommit
+  actions?: Pick<UseGitActionsResult, "reset">
 }
 
-export function CommitDetail({ rootDir, commit }: CommitDetailProps) {
+export function CommitDetail({ rootDir, commit, actions }: CommitDetailProps) {
   const t = useTranslations("sourceControl")
+  const [confirmHardReset, setConfirmHardReset] = useState(false)
   const [files, setFiles] = useState<GitFileChange[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [diff, setDiff] = useState<GitDiff | null>(null)
@@ -72,7 +99,45 @@ export function CommitDetail({ rootDir, commit }: CommitDetailProps) {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="commit-detail">
       <header className="shrink-0 border-b p-3">
-        <div className="text-sm font-medium">{commit.summary}</div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 text-sm font-medium">{commit.summary}</div>
+          {actions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 shrink-0 gap-1 px-1.5 text-xs"
+                  data-testid="commit-reset"
+                >
+                  <HistoryIcon className="size-3.5" />
+                  {t("reset.label")}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem
+                  onSelect={() => void actions.reset("soft", commit.hash)}
+                  data-testid="reset-soft"
+                >
+                  {t("reset.soft")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void actions.reset("mixed", commit.hash)}
+                  data-testid="reset-mixed"
+                >
+                  {t("reset.mixed")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onSelect={() => setConfirmHardReset(true)}
+                  data-testid="reset-hard"
+                >
+                  {t("reset.hard")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
         {commit.body && (
           <pre className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
             {commit.body}
@@ -84,6 +149,24 @@ export function CommitDetail({ rootDir, commit }: CommitDetailProps) {
           <span>{commit.authorName}</span>
         </div>
       </header>
+
+      <AlertDialog open={confirmHardReset} onOpenChange={setConfirmHardReset}>
+        <AlertDialogContent data-testid="reset-hard-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("reset.confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("reset.confirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void actions?.reset("hard" as GitResetMode, commit.hash)}
+              data-testid="reset-hard-confirm-action"
+            >
+              {t("reset.confirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex min-h-0 flex-1">
         <ScrollArea className="w-56 shrink-0 border-r">
           <ul className="flex flex-col p-1">

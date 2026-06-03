@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import { FolderOpenIcon, GitBranchIcon } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
@@ -21,9 +22,14 @@ import { BranchHeader } from "./branch-header"
 import { ChangesView } from "./changes-view"
 import { CommitDetail } from "./commit-detail"
 import { ConflictResolver } from "./conflict-resolver"
+import { BlameView } from "./blame-view"
 import { DiffPane } from "./diff-pane"
+import { RemotePanel } from "./remote-panel"
+import { RestoreDialog } from "./restore-dialog"
+import { RootSwitcher } from "./root-switcher"
 import { StashPanel } from "./stash-panel"
 import { SyncToolbar } from "./sync-toolbar"
+import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
 
 export function SourceControlPanel() {
@@ -44,6 +50,10 @@ export function SourceControlPanel() {
   const committing = useGitStore((s) => s.ops.commit)
 
   const [stashOpen, setStashOpen] = useState(false)
+  const [remoteOpen, setRemoteOpen] = useState(false)
+  const [tagOpen, setTagOpen] = useState(false)
+  const [blamePath, setBlamePath] = useState<string | null>(null)
+  const [restorePath, setRestorePath] = useState<string | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
   const layout = useResizableLayout("cognia-git-panel")
@@ -108,17 +118,22 @@ export function SourceControlPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="source-control-panel">
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-2">
-        <BranchHeader
-          branch={status?.branch ?? null}
-          ahead={status?.ahead ?? 0}
-          behind={status?.behind ?? 0}
-          branches={branches}
-          actions={actions}
-        />
+        <div className="flex min-w-0 items-center gap-1">
+          <RootSwitcher />
+          <BranchHeader
+            branch={status?.branch ?? null}
+            ahead={status?.ahead ?? 0}
+            behind={status?.behind ?? 0}
+            branches={branches}
+            actions={actions}
+          />
+        </div>
         <SyncToolbar
           actions={actions}
           onOpenStash={() => setStashOpen(true)}
           onOpenTimeline={() => openTimelineFor(null)}
+          onOpenRemotes={() => setRemoteOpen(true)}
+          onOpenTags={() => setTagOpen(true)}
           onRefresh={() => void refresh()}
         />
       </header>
@@ -139,13 +154,19 @@ export function SourceControlPanel() {
               selectedPath={selectedPath}
               onSelectFile={(path, staged) => selectFile(path, staged)}
               onViewHistory={(path) => openTimelineFor(path)}
+              onViewBlame={(path) => setBlamePath(path)}
+              onRestore={(path) => setRestorePath(path)}
             />
           ) : null}
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel id="sc-diff" defaultSize={68} minSize={30}>
           {selectedCommit ? (
-            <CommitDetail rootDir={rootDir} commit={syntheticCommit(selectedCommit)} />
+            <CommitDetail
+              rootDir={rootDir}
+              commit={syntheticCommit(selectedCommit)}
+              actions={actions}
+            />
           ) : conflict ? (
             <ConflictResolver
               conflict={conflict}
@@ -173,6 +194,31 @@ export function SourceControlPanel() {
         stashes={stashes}
         actions={actions}
       />
+      <RemotePanel
+        open={remoteOpen}
+        onOpenChange={setRemoteOpen}
+        rootDir={rootDir}
+        actions={actions}
+      />
+      <TagPanel open={tagOpen} onOpenChange={setTagOpen} rootDir={rootDir} actions={actions} />
+      <RestoreDialog
+        rootDir={rootDir}
+        path={restorePath}
+        onOpenChange={(open) => !open && setRestorePath(null)}
+        actions={actions}
+      />
+      <Sheet open={blamePath !== null} onOpenChange={(open) => !open && setBlamePath(null)}>
+        <SheetContent side="right" className="flex w-[40rem] flex-col" data-testid="blame-sheet">
+          <SheetHeader>
+            <SheetTitle className="truncate">
+              {t("blame.title", { path: blamePath ?? "" })}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 flex-1">
+            {blamePath && <BlameView key={blamePath} rootDir={rootDir} path={blamePath} />}
+          </div>
+        </SheetContent>
+      </Sheet>
       <TimelineView
         open={timelineOpen}
         onOpenChange={(open) => {

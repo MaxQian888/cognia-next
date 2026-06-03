@@ -9,10 +9,11 @@ jest.mock("./diff-viewer", () => ({
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { gitCommitFiles, gitDiffCommit } from "@/lib/git/commands"
 import { CommitDetail } from "./commit-detail"
 import { useGitStore } from "@/stores/git/git-store"
-import type { GitCommit } from "@/lib/git/types"
+import type { GitCommit } from "@/types/git"
 
 const filesMock = gitCommitFiles as jest.Mock
 const diffMock = gitDiffCommit as jest.Mock
@@ -60,5 +61,31 @@ describe("CommitDetail", () => {
       fireEvent.click(file)
     })
     await waitFor(() => expect(diffMock).toHaveBeenCalledWith("/r", commit.hash, "a.ts"))
+  })
+
+  it("hides the reset control without actions", () => {
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    expect(screen.queryByTestId("commit-reset")).not.toBeInTheDocument()
+  })
+
+  it("performs a soft reset to the commit", async () => {
+    const user = userEvent.setup()
+    const reset = jest.fn().mockResolvedValue(undefined)
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("reset-soft"))
+    expect(reset).toHaveBeenCalledWith("soft", commit.hash)
+  })
+
+  it("confirms before a hard reset", async () => {
+    const user = userEvent.setup()
+    const reset = jest.fn().mockResolvedValue(undefined)
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("reset-hard"))
+    // Not reset yet — confirmation dialog is shown.
+    expect(reset).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("reset-hard-confirm-action"))
+    expect(reset).toHaveBeenCalledWith("hard", commit.hash)
   })
 })

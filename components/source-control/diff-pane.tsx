@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { gitDiffFile } from "@/lib/git/commands"
-import { fileDiffKey, type GitDiff, type GitHunk } from "@/lib/git/types"
+import { fileDiffKey, type GitDiff, type GitHunk } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer, type HunkAction } from "./diff-viewer"

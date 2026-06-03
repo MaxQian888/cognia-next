@@ -9,7 +9,7 @@ import { useTranslations } from "next-intl"
 import { CheckIcon, MinusIcon, Trash2Icon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
-import type { GitStatus, GitStatusGroup } from "@/lib/git/types"
+import type { GitStatus, GitStatusGroup } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { useGitStore } from "@/stores/git/git-store"
 import { ChangeGroup } from "./change-group"
@@ -24,6 +24,8 @@ interface ChangesViewProps {
   selectedPath: string | null
   onSelectFile: (path: string, staged: boolean) => void
   onViewHistory: (path: string) => void
+  onViewBlame: (path: string) => void
+  onRestore: (path: string) => void
 }
 
 export function ChangesView({
@@ -34,6 +36,8 @@ export function ChangesView({
   selectedPath,
   onSelectFile,
   onViewHistory,
+  onViewBlame,
+  onRestore,
 }: ChangesViewProps) {
   const t = useTranslations("sourceControl")
   const expandedGroups = useGitStore((s) => s.expandedGroups)
@@ -71,6 +75,7 @@ export function ChangesView({
                   onSelect={() => onSelectFile(c.path, false)}
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={() => onViewHistory(c.path)}
+                  onViewBlame={() => onViewBlame(c.path)}
                 />
               ))}
             </ChangeGroup>
@@ -100,6 +105,8 @@ export function ChangesView({
                   onUnstage={() => void actions.unstage([c.path])}
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={() => onViewHistory(c.path)}
+                  onViewBlame={() => onViewBlame(c.path)}
+                  onRestore={() => onRestore(c.path)}
                 />
               ))}
             </ChangeGroup>
@@ -137,6 +144,8 @@ export function ChangesView({
                   onDiscard={() => void actions.discard([c.path])}
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={() => onViewHistory(c.path)}
+                  onViewBlame={() => onViewBlame(c.path)}
+                  onRestore={() => onRestore(c.path)}
                 />
               ))}
             </ChangeGroup>

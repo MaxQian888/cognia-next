@@ -11,6 +11,7 @@ function makeActions() {
     push: jest.fn().mockResolvedValue(undefined),
     sync: jest.fn().mockResolvedValue(undefined),
     discardAll: jest.fn().mockResolvedValue(undefined),
+    mergeAbort: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -19,6 +20,8 @@ function renderToolbar(actions = makeActions(), handlers = {}) {
     actions,
     onOpenStash: jest.fn(),
     onOpenTimeline: jest.fn(),
+    onOpenRemotes: jest.fn(),
+    onOpenTags: jest.fn(),
     onRefresh: jest.fn(),
     ...handlers,
   }
@@ -61,5 +64,42 @@ describe("SyncToolbar", () => {
     const refresh = await screen.findByTestId("more-refresh")
     await user.click(refresh)
     expect(props.onRefresh).toHaveBeenCalled()
+  })
+
+  it("opens the remotes panel from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const props = renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-remotes"))
+    expect(props.onOpenRemotes).toHaveBeenCalled()
+  })
+
+  it("hides Abort Merge unless a merge is in progress", async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    expect(screen.queryByTestId("more-abort-merge")).not.toBeInTheDocument()
+  })
+
+  it("aborts a merge when one is in progress", async () => {
+    const user = userEvent.setup()
+    act(() =>
+      useGitStore.getState().setStatus({
+        branch: "main",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        changes: [],
+        merge: [],
+        isRebasing: false,
+        isMerging: true,
+      })
+    )
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-abort-merge"))
+    expect(actions.mergeAbort).toHaveBeenCalled()
   })
 })

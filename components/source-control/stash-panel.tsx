@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import type { GitStashEntry } from "@/lib/git/types"
+import type { GitStashEntry } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 
 interface StashPanelProps {

@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { gitFileHistory, gitLog } from "@/lib/git/commands"
 import { TimelineView } from "./timeline-view"
 import { useGitStore } from "@/stores/git/git-store"
-import type { GitCommit } from "@/lib/git/types"
+import type { GitCommit } from "@/types/git"
 
 const gitLogMock = gitLog as jest.Mock
 const gitFileHistoryMock = gitFileHistory as jest.Mock
