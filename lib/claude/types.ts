@@ -511,6 +511,25 @@ export interface UsageHeadersEvent {
   headers: Record<string, string>
 }
 
+/**
+ * Emitted by the sidecar's synthetic `cognia-plugin-tools` MCP server when the
+ * model calls a renderer-proxied tool (plugin tool, ADR-0026 built-in skill, or
+ * `terminal_dock_*`). The renderer executes it via `handlePluginToolExec` and
+ * writes the result back through the `claude_plugin_tool_response` command.
+ * Fans out on the same `claude://message` channel as every other ClaudeEvent.
+ */
+export interface PluginToolExecEvent {
+  type: "plugin_tool_exec"
+  sessionId: string
+  toolUseId: string
+  name: string
+  args: Record<string, unknown>
+}
+
+export function isPluginToolExecEvent(evt: ClaudeEvent): evt is PluginToolExecEvent {
+  return evt.type === "plugin_tool_exec"
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -520,6 +539,7 @@ export type ClaudeEvent =
   | PermissionRequestEvent
   | SDKEventEnvelope
   | UsageHeadersEvent
+  | PluginToolExecEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
