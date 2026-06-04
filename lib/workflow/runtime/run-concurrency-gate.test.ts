@@ -39,6 +39,17 @@ describe("ConcurrencyGate", () => {
     r2()
   })
 
+  it("reports pending waiters", async () => {
+    const gate = new ConcurrencyGate(1)
+    const r1 = await gate.acquire()
+    const p2 = gate.acquire()
+    expect(gate.pending).toBe(1)
+    r1()
+    const r2 = await p2
+    expect(gate.pending).toBe(0)
+    r2()
+  })
+
   it("processes the queue in FIFO order", async () => {
     const gate = new ConcurrencyGate(1)
     const order: number[] = []

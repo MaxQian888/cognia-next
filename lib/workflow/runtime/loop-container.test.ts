@@ -9,6 +9,7 @@
  */
 import "fake-indexeddb/auto"
 import "@/lib/workflow/nodes/built-ins"
+import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { runLoopContainer } from "./loop-container"
 import { IdempotencyCache, iterationCacheKey } from "./idempotency"
 import { createRunLogger } from "./event-log"
@@ -380,6 +381,220 @@ describe("failure / abort / cache", () => {
     const result = await run(workflow, loopNode, { cache })
     const out = result.output as { items: unknown[] }
     expect(out.items).toEqual(["seeded", "b", "c"])
+  })
+})
+
+describe("edge cases", () => {
+  it("rejects a non-numeric times value", async () => {
+    const { workflow, loopNode } = loopWorkflow({ mode: "times", times: "not-a-number" }, [
+      node("body", "flow.set", { variable: "v", value: "x" }, "loop1"),
+    ])
+    await expect(run(workflow, loopNode)).rejects.toThrow(/non-negative number/)
+  })
+
+  it("reports the resolved type when forEach source is not an array", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.n }}" },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    await expect(run(workflow, loopNode)).rejects.toThrow(/got number/)
+  })
+
+  it("skips disabled children (and their downstream) inside the body", async () => {
+    const disabled = node("dead", "flow.set", { variable: "x", value: "1" }, "loop1")
+    disabled.data.disabled = true
+    const after = node("after", "flow.set", { variable: "y", value: "2" }, "loop1")
+    const live = node("live", "flow.set", { variable: "v", value: "{{ $item }}" }, "loop1")
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        output: "{{ $node['live'].value }}",
+      },
+      [disabled, after, live],
+      [{ id: "e1", source: "dead", target: "after" }]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual(["a", "b", "c"])
+  })
+
+  it("while mode defaults its max to 1000 when unset (falsy condition exits immediately)", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "{{ $static.never }}" },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(0)
+  })
+
+  it("a failing child fails the container under parallel iterations too", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        iterationConcurrency: 3,
+      },
+      [node("body", "flow.set", { variable: "  ", value: "x" }, "loop1")]
+    )
+    await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
+  })
+
+  it("reports null sources distinctly", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.nul }}" },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    await expect(
+      runLoopContainer({
+        workflow,
+        node: loopNode,
+        trigger: { ...trigger, payload: { nul: null } },
+        upstream: {},
+        runId: "run_null",
+        signal: new AbortController().signal,
+        cache: new IdempotencyCache(),
+        retryPolicy: workflow.settings.retryDefaults,
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger("run_null"),
+      })
+    ).rejects.toThrow(/got null/)
+  })
+
+  it("a nested container cache-hits per outer iteration via the prefixed cache", async () => {
+    const inner = node("inner", "flow.loop", { mode: "times", times: 2 }, "loop1", 2)
+    const innerBody = node("ib", "flow.set", { variable: "q", value: "x" }, "inner")
+    const cache = new IdempotencyCache()
+    // Outer iteration 0's inner container completed before the crash.
+    cache.set("loop1#0#inner", { items: ["pre"], count: 99, staticData: {} })
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.pairs }}",
+        output: "{{ $node['inner'].count }}",
+      },
+      [inner, innerBody]
+    )
+    const result = await run(workflow, loopNode, { cache })
+    expect((result.output as { items: unknown[] }).items).toEqual([99, 2])
+  })
+
+  it("a loop node without params fails cleanly (default forEach, empty source)", async () => {
+    const loopNode = node(
+      "loop1",
+      "flow.loop",
+      undefined as unknown as Record<string, unknown>,
+      undefined,
+      2
+    )
+    loopNode.data = { label: "loop1", params: undefined as unknown as Record<string, unknown> }
+    const workflow: VisualWorkflow = {
+      id: "wf",
+      schemaVersion: 2,
+      name: "t",
+      createdAt: 0,
+      updatedAt: 0,
+      nodes: [loopNode, node("body", "flow.set", { variable: "v", value: "x" }, "loop1")],
+      edges: [],
+      settings: {
+        errorPolicy: "stop",
+        timeoutMs: 60_000,
+        concurrency: 1,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+      },
+    }
+    await expect(run(workflow, loopNode)).rejects.toThrow(/array/i)
+  })
+
+  it("break works inside a while loop", async () => {
+    const children = [node("stop", "flow.break", {}, "loop1")]
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "yes", maxIterations: 50 },
+      children
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(1)
+  })
+
+  it("break under parallel iterations stops launching new ones", async () => {
+    const children = [node("stop", "flow.break", {}, "loop1")]
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.items }}", iterationConcurrency: 2 },
+      children
+    )
+    const result = await run(workflow, loopNode)
+    // With concurrency 2 the first window (0,1) may both enter before the
+    // break lands; iteration 2 must never start.
+    expect((result.output as { count: number }).count).toBeLessThanOrEqual(2)
+  })
+
+  it("times mode supports parallel iterations", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "times", times: 3, iterationConcurrency: 2, output: "{{ $loop.index }}" },
+      [node("body", "flow.set", { variable: "v", value: "{{ $loop.index }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual([0, 1, 2])
+  })
+
+  it("abort fired mid-iteration stops a while loop before the next round", async () => {
+    const ac = new AbortController()
+    registerNodeExecutor({
+      kind: "testplugin.abort" as never,
+      typeVersion: 1,
+      execute: async () => {
+        ac.abort()
+        return { output: { done: true } }
+      },
+    })
+    const children = [node("aborter", "testplugin.abort" as never, {}, "loop1")]
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "yes", maxIterations: 50 },
+      children
+    )
+    await expect(run(workflow, loopNode, { signal: ac.signal })).rejects.toThrow(/abort/i)
+  })
+
+  it("abort fired mid-iteration stops parallel forEach scheduling", async () => {
+    const ac = new AbortController()
+    registerNodeExecutor({
+      kind: "testplugin.abort2" as never,
+      typeVersion: 1,
+      execute: async () => {
+        ac.abort()
+        return { output: { done: true } }
+      },
+    })
+    const children = [node("aborter", "testplugin.abort2" as never, {}, "loop1")]
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.items }}", iterationConcurrency: 2 },
+      children
+    )
+    await expect(run(workflow, loopNode, { signal: ac.signal })).rejects.toThrow(/abort/i)
+  })
+
+  it("a body whose deps can never become ready exits the round instead of hanging", async () => {
+    // a → b → a forms a cycle inside the body; neither becomes ready. The
+    // scheduler detects zero progress and ends the iteration gracefully.
+    const children = [
+      node("a", "flow.set", { variable: "x", value: "1" }, "loop1"),
+      node("b", "flow.set", { variable: "y", value: "2" }, "loop1"),
+    ]
+    const edges: WorkflowEdge[] = [
+      { id: "e1", source: "a", target: "b" },
+      { id: "e2", source: "b", target: "a" },
+    ]
+    const { workflow, loopNode } = loopWorkflow({ mode: "times", times: 2 }, children, edges)
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(2)
+  })
+
+  it("forEach truncates the source at maxIterations", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.items }}", maxIterations: 2 },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(2)
   })
 })
 

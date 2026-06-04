@@ -424,18 +424,16 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
     if (firstError || loopSignal) break
     if (input.signal.aborted && inflight.size === 0) break
 
-    let scheduled = 0
     for (const id of order) {
       if (!isReady(id)) continue
       const child = children.find((n) => n.id === id)!
       const p = runChild(child).finally(() => inflight.delete(id))
       inflight.set(id, p)
-      scheduled += 1
     }
-    if (inflight.size === 0) {
-      if (scheduled === 0) break
-      continue
-    }
+    // Every scheduled child lands in `inflight` (runChild is async), so an
+    // empty in-flight set here means zero progress is possible — e.g. a
+    // dependency cycle inside the body. Exit instead of spinning.
+    if (inflight.size === 0) break
     await Promise.race(inflight.values())
   }
   if (inflight.size > 0) await Promise.allSettled(inflight.values())

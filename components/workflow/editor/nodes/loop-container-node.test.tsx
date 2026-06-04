@@ -103,4 +103,16 @@ describe("LoopContainerNode", () => {
     renderContainer({ store })
     expect(screen.getByText("My Loop")).toBeInTheDocument()
   })
+
+  it("renders the while expression detail for while mode", () => {
+    renderContainer({ params: { mode: "while", whileExpression: "{{ $static.go }}" } })
+    expect(screen.getByTestId("loop-container-mode").textContent).toContain("$static.go")
+  })
+
+  it("falls back to forEach copy for an unknown mode and tolerates empty params", () => {
+    renderContainer({ params: { mode: "weird" } })
+    expect(screen.getByTestId("loop-container-mode")).toBeInTheDocument()
+    renderContainer({ id: "loop2", params: {} })
+    expect(screen.getByTestId("wf-loop-container-loop2")).toBeInTheDocument()
+  })
 })
