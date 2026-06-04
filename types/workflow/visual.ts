@@ -114,6 +114,9 @@ export type WorkflowNodeKind =
   | "data.code"
   | "data.template"
   | "ocr.extract"
+  // Eval (agent evaluation engine)
+  | "eval.run"
+  | "eval.gate"
   // I/O
   | "io.http"
   | "io.webhook.respond"
@@ -150,6 +153,8 @@ export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCatego
   if (head === "io") return "io"
   // OCR extraction is a data-producing node (ADR-0024).
   if (head === "ocr") return "data"
+  // Eval nodes run / judge agent evaluations — a flavour of action.
+  if (head === "eval") return "action"
   // Ultracode pattern nodes are a flavour of action.
   if (head === "pattern") return "action"
   return "annotation"
@@ -232,6 +237,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "data.code",
   "data.template",
   "ocr.extract",
+  "eval.run",
+  "eval.gate",
   "io.http",
   "io.webhook.respond",
   "annotation.note",

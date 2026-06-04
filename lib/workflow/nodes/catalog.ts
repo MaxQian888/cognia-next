@@ -499,6 +499,20 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "ScanText",
     keywords: ["ocr", "extract", "text", "image", "pdf", "scan", "recognize"],
   },
+  // ── Eval ──────────────────────────────────────────────────────────────────
+  "eval.run": {
+    label: "Run eval",
+    description:
+      "Run an eval dataset against a chat / team / workflow target and output pass rates.",
+    iconName: "ClipboardCheck",
+    keywords: ["eval", "evaluate", "dataset", "score", "benchmark", "quality", "test"],
+  },
+  "eval.gate": {
+    label: "Eval gate",
+    description: "Pass/fail verdict for an eval run against thresholds; branches on pass / fail.",
+    iconName: "ShieldCheck",
+    keywords: ["eval", "gate", "threshold", "quality", "ci", "verdict"],
+  },
   // ── IO ────────────────────────────────────────────────────────────────────
   "io.http": {
     label: "HTTP request",

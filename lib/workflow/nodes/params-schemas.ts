@@ -585,6 +585,27 @@ export const PARAMS_SCHEMAS = {
     format: z.enum(["markdown", "text", "blocks"]).optional(),
     pageRange: z.string().optional(),
   }),
+  // Eval nodes — single target per node instance (compose nodes for a matrix).
+  "eval.run": z.object({
+    datasetId: z.string(),
+    targetKind: z.enum(["chat", "team", "workflow"]).optional(),
+    model: z.string().optional(),
+    characterId: z.string().optional(),
+    teamId: z.string().optional(),
+    workflowId: z.string().optional(),
+    label: z.string().optional(),
+    scorerIds: z.array(z.string()).optional(),
+    k: z.number().int().min(1).optional(),
+    split: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
+  }),
+  "eval.gate": z.object({
+    runId: z.string(),
+    minPassAt1: z.number().min(0).max(1).optional(),
+    minPassHatK: z.number().min(0).max(1).optional(),
+    minScorerPassRate: z.number().min(0).max(1).optional(),
+    maxTotalCostUsd: z.number().min(0).optional(),
+  }),
   // Local Git (Source Control panel backend — ADR-0038). `repoPath` is
   // optional; it defaults to the active workspace root at run time.
   "action.git.stage": z.object({

@@ -43,6 +43,9 @@ import "./desktop"
 // OCR extraction node (ADR-0024) — turns an image/PDF/screen into text.
 import "./ocr"
 
+// Eval nodes — run a dataset eval / gate a run from a workflow.
+import "./eval"
+
 // Wave 3 — registers the `action.system.terminal` executor that drives
 // the integrated terminal dock from a workflow step.
 import "./terminal"
