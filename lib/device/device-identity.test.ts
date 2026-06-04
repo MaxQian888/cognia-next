@@ -61,6 +61,20 @@ describe("getDeviceId", () => {
     const id = await getDeviceId()
     expect(id).toBeTruthy()
   })
+
+  it("generates an id even without crypto.randomUUID (old WebViews)", async () => {
+    const cryptoObj = globalThis.crypto as { randomUUID?: () => string }
+    const original = cryptoObj.randomUUID
+
+    delete cryptoObj.randomUUID
+    try {
+      const id = await getDeviceId()
+      expect(id).toBeTruthy()
+      expect(id!.startsWith("dev-")).toBe(true)
+    } finally {
+      if (original) cryptoObj.randomUUID = original
+    }
+  })
 })
 
 describe("getFriendlyDeviceLabel", () => {

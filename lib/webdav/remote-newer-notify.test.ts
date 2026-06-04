@@ -56,6 +56,14 @@ describe("notifyIfRemoteNewer", () => {
     )
   })
 
+  it("falls back to an 'unknown' dedupe key when remoteAt is missing", async () => {
+    mockCheck.mockResolvedValue({ newer: true })
+    await notifyIfRemoteNewer({ title: "t" })
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: "webdav-remote-newer:unknown" })
+    )
+  })
+
   it("stays silent when the check returns null (unconfigured) or not newer", async () => {
     expect(await notifyIfRemoteNewer({ title: "t" })).toBe(false)
     mockCheck.mockResolvedValue({ newer: false, remoteAt: 1 })

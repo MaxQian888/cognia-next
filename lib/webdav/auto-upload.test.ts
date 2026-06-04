@@ -183,4 +183,21 @@ describe("maybeAutoUploadNow", () => {
     expect(out.ran).toBe(true)
     expect((out as { ok: boolean }).ok).toBe(false)
   })
+
+  it("treats an unparseable lastSyncAt as never-uploaded", async () => {
+    mockHas.mockReturnValue(true)
+    mockGet.mockReturnValue("pass")
+    settings = { webdavSync: { enabled: true, lastSyncAt: "not-a-date" } }
+    const out = await maybeAutoUploadNow(NOW)
+    expect(out).toEqual({ ran: true, ok: true })
+  })
+
+  it("stringifies non-Error throwables", async () => {
+    mockHas.mockReturnValue(true)
+    mockGet.mockReturnValue("pass")
+    settings = { webdavSync: { enabled: true } }
+    mockRun.mockRejectedValueOnce("plain string failure")
+    const out = await maybeAutoUploadNow(NOW)
+    expect(out).toEqual({ ran: true, ok: false, error: "plain string failure" })
+  })
 })
