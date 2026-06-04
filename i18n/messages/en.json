@@ -2427,6 +2427,7 @@
     },
     "tabs": {
       "general": "General",
+      "profile": "Profile",
       "appearance": "Appearance",
       "sidebar": "Sidebar",
       "terminal": "Terminal",
@@ -2479,6 +2480,7 @@
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
+      "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
       "appearance": "Theme, font scale, language and motion.",
       "sidebar": "Pin, reorder, or hide the left navigation rail items.",
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
@@ -2528,6 +2530,25 @@
       "discover": "Pin, reorder, or hide the Discover categories.",
       "pet": "Your animated desktop companion.",
       "sourceControl": "AI commit-message generation and other Git panel preferences."
+    },
+    "profile": {
+      "title": "Profile",
+      "description": "Your local display name, avatar and bio. Stored on this device, synced to companion devices, and included in backups — no cloud account.",
+      "fallbackName": "Signed-out",
+      "displayNameLabel": "Display name",
+      "displayNamePlaceholder": "How should we call you?",
+      "displayNameHint": "Leave empty to use the name derived from your subscription account.",
+      "bioLabel": "Bio",
+      "bioPlaceholder": "A short line about you (optional).",
+      "bioCounter": "{count} / {max}",
+      "avatarLabel": "Avatar image",
+      "avatarUpload": "Upload avatar",
+      "avatarClear": "Remove",
+      "avatarHint": "PNG, JPEG, WebP, GIF or AVIF. Downscaled to 128 px and stored locally.",
+      "avatarInvalidType": "Unsupported image type — use PNG, JPEG, WebP, GIF or AVIF.",
+      "avatarProcessFailed": "Could not process this image. Try a different file.",
+      "emailReadOnly": "Signed in as {email}",
+      "reset": "Reset to default"
     },
     "sourceControl": {
       "title": "Source Control",
@@ -14654,6 +14675,8 @@
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
       "versionLabel": "Version",
+      "profileRow": "Profile",
+      "profileBackAria": "Back to Me",
       "subscriptionRow": "Subscription & account",
       "syncRow": "Sync status",
       "devicesRow": "Paired devices",

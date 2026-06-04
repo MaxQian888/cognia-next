@@ -19,6 +19,7 @@ import { runSyncHandler } from "./base"
  * row, leaving everything else the phone set locally untouched.
  */
 export const CROSS_PLATFORM_SETTING_KEYS = [
+  "profile",
   "theme",
   "language",
   "fontScale",

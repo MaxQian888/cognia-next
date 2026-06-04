@@ -98,12 +98,22 @@ export function AccountCard({ className }: { className?: string }) {
         <CardContent className="flex flex-col gap-3 p-0">
           <div className="flex items-center gap-3">
             <Avatar className="size-12">
-              <AvatarFallback
-                style={{ backgroundColor: deterministicColor(displayName) }}
-                className="text-base"
-              >
-                {initials(displayName)}
-              </AvatarFallback>
+              {resolvedAvatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- avatar is a small data: URL, not an optimizable remote asset
+                <img
+                  src={resolvedAvatarUrl}
+                  alt=""
+                  className="size-full object-cover"
+                  data-testid="account-card-avatar-img"
+                />
+              ) : (
+                <AvatarFallback
+                  style={{ backgroundColor: deterministicColor(displayName) }}
+                  className="text-base"
+                >
+                  {initials(displayName)}
+                </AvatarFallback>
+              )}
             </Avatar>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
