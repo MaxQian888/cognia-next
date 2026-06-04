@@ -66,6 +66,7 @@ const config: Config = {
     "!lib/db/connector-types.ts",
     "!lib/claude/subagent-importers/types.ts",
     "!lib/perf/backend/types.ts",
+    "!lib/pet/live2d/types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC
     // of stdio + JSON-RPC + Tauri-IPC plumbing that only runs against a real
     // subprocess. jsdom can stub the surface but can't drive the live
@@ -297,6 +298,14 @@ const config: Config = {
     "^remark-gfm$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^remark-math$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^rehype-raw$": "<rootDir>/__mocks__/esm-plugin-stub.js",
+
+    // The Live2D engine + pixi.js are WebGL/Cubism runtimes jsdom can't host.
+    // The pet Live2D loader does `import("untitled-pixi-live2d-engine/cubism")`
+    // and `import("pixi.js")`; both map to lightweight jest-fn stubs so the
+    // module graph resolves and tests can assert on the engine/app surface.
+    "^untitled-pixi-live2d-engine/cubism$": "<rootDir>/__mocks__/untitled-pixi-live2d-engine.js",
+    "^untitled-pixi-live2d-engine$": "<rootDir>/__mocks__/untitled-pixi-live2d-engine.js",
+    "^pixi\\.js$": "<rootDir>/__mocks__/pixi.js.js",
 
     // @octokit/* v7 packages are pure ESM and Next.js's transform doesn't
     // strip ESM imports inside node_modules. Manual mocks expose only the

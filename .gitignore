@@ -27,6 +27,10 @@ junit.xml
 /.next/
 /out/
 
+# Live2D Cubism Core — proprietary, fetched at build time by
+# scripts/download-cubism-core.mjs (predev/prebuild). Never committed.
+/public/live2d/
+
 # production
 /build
 

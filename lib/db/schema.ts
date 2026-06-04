@@ -80,6 +80,7 @@ import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow, SyncTombstoneRow, SyncableTable } from "@/lib/sync/types"
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { PetModelRow, PetModelFileRow } from "./pet-models"
 // Row types relocated out of this file but still wired into the table
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
@@ -1815,6 +1816,20 @@ export class CogniaDB extends Dexie {
     this.version(72).stores({
       remoteControlAudit: "id, at, direction, kind, runId",
     })
+
+    // ── v73 — Pet Live2D model storage (Live2D skin engine). ─────────────────
+    // Imported / sample-downloaded Live2D models live in two tables:
+    //   • petModels      — `&id` primary; one row per model with capability
+    //     metadata (motion groups / expressions) for state mapping. `name`,
+    //     `createdAt`, `source` index the list/sort/filter surfaces.
+    //   • petModelFiles  — `&id` (`${modelId}:${path}`) primary; one row per
+    //     model asset blob. `modelId` drives cascade-delete; `[modelId+path]`
+    //     gives O(1) per-file lookup for the runtime URL resolver.
+    // Additive; no upgrade hook. See `lib/db/pet-models.ts`.
+    this.version(73).stores({
+      petModels: "&id, name, createdAt, source",
+      petModelFiles: "&id, modelId, [modelId+path]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1844,6 +1859,9 @@ export class CogniaDB extends Dexie {
   petAchievements!: Table<PetAchievementRecord, string>
   // v72 — Remote-control durable audit. See `lib/db/remote-control-audit.ts`.
   remoteControlAudit!: Table<RemoteControlAuditEntry, string>
+  // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
+  petModels!: Table<PetModelRow, string>
+  petModelFiles!: Table<PetModelFileRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -1862,6 +1880,7 @@ export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
 export type { TraceAnnotationRow } from "./trace-annotations"
+export type { PetModelRow, PetModelFileRow } from "./pet-models"
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null

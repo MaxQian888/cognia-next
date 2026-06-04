@@ -23,5 +23,10 @@ export type {
   PetAchievementRecord,
 } from "./achievements"
 export type { PetSkin, PetSkinRenderProps } from "./skin"
-export type { PetAnchor, PetMotionPreference, PetSettings } from "./settings"
-export { DEFAULT_PET_SETTINGS } from "./settings"
+export type {
+  PetAnchor,
+  PetMotionPreference,
+  PetSettings,
+  PetDesktopOverlaySettings,
+} from "./settings"
+export { DEFAULT_PET_SETTINGS, DEFAULT_PET_DESKTOP_OVERLAY } from "./settings"

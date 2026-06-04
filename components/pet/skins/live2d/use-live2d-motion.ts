@@ -1,0 +1,107 @@
+// Drives a loaded Live2D model from the pet's semantic (state, oneShot) by
+// diffing against a ref each render and applying `resolveLive2dPlan`. Motions
+// fire through `model.motion(group, index, priority)` and expressions through
+// `model.expression(id)`. One-shots are edge-triggered (fire once on the
+// transition to a non-null shot). The numeric MotionPriority map is local —
+// the engine enum is never imported here so this hook stays bundle-light and
+// test-friendly (the engine import lives only inside the loader).
+
+"use client"
+
+import { useEffect, useRef } from "react"
+import type { PetOneShot, PetVisualState } from "@/types/pet"
+import { resolveLive2dPlan } from "@/lib/pet/live2d/state-mapping"
+import type { Live2dCapabilities, MotionPlan } from "@/lib/pet/live2d/types"
+
+/** Structural slice of a loaded Live2D model the motion driver needs. */
+export interface Live2dModelLike {
+  motion(group: string, index?: number, priority?: number): unknown
+  expression(id?: number | string): unknown
+  internalModel?: {
+    motionManager?: {
+      stopAllMotions?: () => void
+    }
+  }
+}
+
+// Mirrors the engine's MotionPriority enum (NONE=0, IDLE=1, NORMAL=2, FORCE=3)
+// without importing it — keeps the engine out of this module's graph.
+const PRIORITY_VALUE: Record<MotionPlan["priority"], number> = {
+  idle: 1,
+  normal: 2,
+  force: 3,
+}
+
+/** Apply a resolved plan to the model. */
+function applyPlan(model: Live2dModelLike, plan: MotionPlan): void {
+  if (plan.expressionId !== undefined) {
+    model.expression(plan.expressionId)
+  }
+  // parameterFallback === true means no motion matched: leave the engine's
+  // native breathing / eye-blink in control rather than forcing a motion.
+  if (!plan.parameterFallback && plan.motionGroup !== undefined) {
+    model.motion(plan.motionGroup, plan.motionIndex ?? 0, PRIORITY_VALUE[plan.priority])
+  }
+}
+
+/**
+ * Reactively map (state, oneShot) onto motions/expressions of a loaded model.
+ *
+ * - State changes apply a fresh plan (idle/normal priority).
+ * - One-shots are edge-triggered: a plan fires only on the transition into a
+ *   non-null shot (so a re-render with the same active shot doesn't replay it).
+ * - `reducedMotion` stops all motions once on entering reduced mode, then no
+ *   further motions are applied while it stays on.
+ */
+export function useLive2dMotion(
+  model: Live2dModelLike | null,
+  state: PetVisualState,
+  oneShot: PetOneShot | null,
+  caps: Live2dCapabilities,
+  reducedMotion: boolean
+): void {
+  const prevState = useRef<PetVisualState | null>(null)
+  const prevOneShot = useRef<PetOneShot | null>(null)
+  const prevReduced = useRef<boolean | null>(null)
+
+  useEffect(() => {
+    if (!model) {
+      // No model yet — reset diff refs so the first real model gets a fresh plan.
+      prevState.current = null
+      prevOneShot.current = null
+      prevReduced.current = null
+      return
+    }
+
+    const enteringReduced = reducedMotion && prevReduced.current !== true
+    prevReduced.current = reducedMotion
+
+    if (reducedMotion) {
+      if (enteringReduced) {
+        model.internalModel?.motionManager?.stopAllMotions?.()
+      }
+      // Hold the resting frame; refresh diff refs so leaving reduced re-applies.
+      prevState.current = state
+      prevOneShot.current = oneShot
+      return
+    }
+
+    // Edge-trigger one-shots: fire only when transitioning into a non-null shot.
+    const oneShotEntered = oneShot !== null && oneShot !== prevOneShot.current
+    const stateChanged = state !== prevState.current
+    const leftReduced = enteringReduced === false && prevReduced.current === false
+
+    prevState.current = state
+    prevOneShot.current = oneShot
+
+    if (oneShotEntered) {
+      applyPlan(model, resolveLive2dPlan(state, oneShot, caps, false))
+      return
+    }
+    // Only re-apply the resting plan when the state actually changed (or we just
+    // left reduced mode) — avoids replaying the same idle motion every render.
+    if (oneShot === null && (stateChanged || leftReduced)) {
+      applyPlan(model, resolveLive2dPlan(state, null, caps, false))
+    }
+  }, [model, state, oneShot, caps, reducedMotion])
+}

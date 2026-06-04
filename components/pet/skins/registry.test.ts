@@ -8,6 +8,11 @@ describe("skin registry", () => {
     expect(getSkin("svg").id).toBe("svg")
   })
 
+  it("ships the svg and live2d skins", () => {
+    expect(listSkinIds()).toEqual(expect.arrayContaining(["svg", "live2d"]))
+    expect(getSkin("live2d").id).toBe("live2d")
+  })
+
   it("registers and lists a new skin", () => {
     const fake: PetSkin = { id: "fake-skin", render: () => null }
     registerSkin(fake)
