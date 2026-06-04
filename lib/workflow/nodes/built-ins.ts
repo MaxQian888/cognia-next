@@ -16,6 +16,10 @@ import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workfl
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import {
+  evaluateConditionGroup,
+  type ResolvedConditionGroup,
+} from "@/lib/workflow/runtime/conditions"
+import {
   createSkill,
   deleteSkill,
   getSkill,
@@ -168,6 +172,32 @@ registerNodeExecutor({
     const decision = isTruthy(params.condition) ? truthyLabel : falsyLabel
     return {
       output: { decision, evaluated: params.condition },
+      decision,
+    }
+  },
+})
+
+// ── flow.branch (typeVersion 2) ───────────────────────────────────────────
+// Structured condition language (types/workflow/conditions.ts). Operands are
+// authored as expression strings but arrive resolved (resolveDeep runs over
+// `params` before execution), so the executor hands the resolved group to the
+// pure evaluator. Decisions are the FIXED handle ids "true" / "false" —
+// matching `outputHandlesFor` — never user-editable labels.
+registerNodeExecutor({
+  kind: "flow.branch",
+  typeVersion: 2,
+  execute: async (ctx) => {
+    const params = ctx.params as { conditions?: ResolvedConditionGroup }
+    const group = params.conditions
+    // No conditions configured → "false" branch (matches the v1 intuition
+    // that an unset condition means "no").
+    const passed =
+      !!group && Array.isArray(group.conditions) && group.conditions.length > 0
+        ? evaluateConditionGroup(group)
+        : false
+    const decision = passed ? "true" : "false"
+    return {
+      output: { decision, conditionCount: group?.conditions?.length ?? 0 },
       decision,
     }
   },
@@ -380,6 +410,34 @@ registerNodeExecutor({
       output: { decision, evaluated: params.subject },
       decision,
     }
+  },
+})
+
+// ── flow.switch (typeVersion 2) ───────────────────────────────────────────
+// Ordered cases, each holding a structured condition group. The FIRST case
+// whose group passes wins; otherwise the "default" handle. Decisions are
+// stable case ids (not display labels) so renaming a case never re-routes.
+registerNodeExecutor({
+  kind: "flow.switch",
+  typeVersion: 2,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      cases?: Array<{ id?: string; label?: string; when?: ResolvedConditionGroup }>
+    }
+    const cases = Array.isArray(params.cases) ? params.cases : []
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i]
+      const group = c.when
+      if (!group || !Array.isArray(group.conditions)) continue
+      if (evaluateConditionGroup(group)) {
+        const decision = typeof c.id === "string" && c.id.trim() ? c.id : `case-${i}`
+        return {
+          output: { decision, matchedLabel: c.label, matchedIndex: i },
+          decision,
+        }
+      }
+    }
+    return { output: { decision: "default", matchedIndex: null }, decision: "default" }
   },
 })
 

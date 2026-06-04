@@ -269,17 +269,76 @@ const AiEmbedParams = z.object({
 
 // ── Flow ────────────────────────────────────────────────────────────────────
 
-const BranchParams = z.object({
+// Structured condition language (typeVersion 2) — mirrors
+// `types/workflow/conditions.ts`. Operand fields are expression strings.
+const conditionOperatorSchema = z.enum([
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "notContains",
+  "startsWith",
+  "endsWith",
+  "regex",
+  "inRange",
+  "isEmpty",
+  "isNotEmpty",
+  "truthy",
+])
+
+const conditionSchema = z.object({
+  left: z.string(),
+  operator: conditionOperatorSchema,
+  right: optionalString,
+  rightUpper: optionalString,
+  caseSensitive: z.boolean().optional(),
+})
+
+const conditionGroupSchema = z.object({
+  combinator: z.enum(["all", "any"]),
+  conditions: z.array(conditionSchema),
+})
+
+// Legacy (typeVersion 1) truthiness-expression shape.
+const BranchParamsV1 = z.object({
   condition: requiredString("required"),
   truthyLabel: optionalString,
   falsyLabel: optionalString,
 })
 
-const SwitchParams = z.object({
+// typeVersion 2 — structured condition group routing to true/false handles.
+const BranchParamsV2 = z.object({
+  conditions: conditionGroupSchema,
+})
+
+// The schema map is keyed by kind only (no typeVersion), so accept both
+// authoring generations. The inspector renders per-version forms; the
+// validator just needs either shape to pass.
+const BranchParams = z.union([BranchParamsV2, BranchParamsV1])
+
+const SwitchParamsV1 = z.object({
   subject: requiredString("required"),
   cases: z.array(z.object({ value: z.unknown(), label: z.string() })).min(1, "switchCasesRequired"),
   defaultLabel: optionalString,
 })
+
+// typeVersion 2 — ordered cases, each with a stable id + condition group.
+const SwitchParamsV2 = z.object({
+  cases: z
+    .array(
+      z.object({
+        id: optionalString,
+        label: optionalString,
+        when: conditionGroupSchema,
+      })
+    )
+    .min(1, "switchCasesRequired"),
+})
+
+const SwitchParams = z.union([SwitchParamsV2, SwitchParamsV1])
 
 const SplitParams = z.object({
   branchLabels: z.array(z.string()).min(2, "splitBranchesRequired"),

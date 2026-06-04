@@ -268,6 +268,44 @@ describe("flow schemas", () => {
     expect(PARAMS_SCHEMAS["flow.join"].safeParse({}).success).toBe(true)
   })
 
+  it("flow.branch accepts the v2 structured-conditions shape", () => {
+    const s = PARAMS_SCHEMAS["flow.branch"]
+    expect(
+      s.safeParse({
+        conditions: {
+          combinator: "all",
+          conditions: [{ left: "{{ $node['n1'].x }}", operator: "eq", right: "1" }],
+        },
+      }).success
+    ).toBe(true)
+    // Bad operator fails
+    expect(
+      s.safeParse({
+        conditions: { combinator: "all", conditions: [{ left: "x", operator: "wat" }] },
+      }).success
+    ).toBe(false)
+  })
+
+  it("flow.switch accepts the v2 cases shape (id + when group)", () => {
+    const s = PARAMS_SCHEMAS["flow.switch"]
+    expect(
+      s.safeParse({
+        cases: [
+          {
+            id: "c_1",
+            label: "One",
+            when: {
+              combinator: "any",
+              conditions: [{ left: "{{ $trigger.payload.n }}", operator: "gt", right: "5" }],
+            },
+          },
+        ],
+      }).success
+    ).toBe(true)
+    // v2 with empty cases fails (needs at least one)
+    expect(s.safeParse({ cases: [] }).success).toBe(false)
+  })
+
   it("flow.loop requires bodyExpression and per-mode source", () => {
     const s = PARAMS_SCHEMAS["flow.loop"]
     // Missing body
