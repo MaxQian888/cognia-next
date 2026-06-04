@@ -440,6 +440,7 @@ pub fn run() {
             terminal::commands::terminal_kill,
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
+            terminal::path_scan::terminal_list_path_executables,
             terminal::commands::terminal_list_for_project,
             terminal::commands::terminal_list_all,
             tts::keyring::tts_keyring_get,
