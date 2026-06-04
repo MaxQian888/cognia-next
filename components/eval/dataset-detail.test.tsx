@@ -32,6 +32,19 @@ jest.mock("./run-config-dialog", () => ({
 jest.mock("./version-history", () => ({
   VersionHistory: () => <div data-testid="version-history" />,
 }))
+jest.mock("./runs-list", () => ({
+  RunsList: ({ onOpenRun }: { onOpenRun: (id: string) => void }) => (
+    <button data-testid="runs-list" onClick={() => onOpenRun("r1")} />
+  ),
+}))
+jest.mock("./run-detail", () => ({
+  RunDetail: ({ runId, onBack }: { runId: string; onBack: () => void }) => (
+    <button data-testid={`run-detail-${runId}`} onClick={onBack} />
+  ),
+}))
+jest.mock("./gate-config-section", () => ({
+  GateConfigSection: () => <div data-testid="gate-config-section" />,
+}))
 
 const toJsonl = jest.fn(() => "jsonl-content")
 const toCsv = jest.fn(() => "csv-content")
@@ -57,23 +70,38 @@ beforeEach(() => {
 })
 
 describe("DatasetDetail", () => {
-  it("renders header + embeds the case list", () => {
+  it("renders header + the cases segment by default", () => {
     render(<DatasetDetail dataset={dataset} appSettings={null} />)
     expect(screen.getByText("My Set")).toBeInTheDocument()
     expect(screen.getByTestId("case-list")).toBeInTheDocument()
+    expect(screen.queryByText("detail.gateConfigured")).not.toBeInTheDocument()
   })
 
-  it("toggles the import / run / versions panels", () => {
+  it("shows a gate badge when the dataset has thresholds", () => {
+    render(<DatasetDetail dataset={{ ...dataset, gate: { minPassAt1: 0.9 } }} appSettings={null} />)
+    expect(screen.getByText("detail.gateConfigured")).toBeInTheDocument()
+  })
+
+  it("switches between cases, runs and versions segments", () => {
     render(<DatasetDetail dataset={dataset} appSettings={null} />)
-    fireEvent.click(screen.getByText("detail.import"))
-    expect(screen.getByTestId("import-dialog")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("detail.run"))
-    expect(screen.getByTestId("run-config-dialog")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("detail.versions"))
+    fireEvent.click(screen.getByText("detail.segments.runs"))
+    expect(screen.getByTestId("runs-list")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("detail.segments.versions"))
     expect(screen.getByTestId("version-history")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("detail.segments.cases"))
+    expect(screen.getByTestId("case-list")).toBeInTheDocument()
   })
 
-  it("toggles a panel off on second click and accepts runOptions", () => {
+  it("drills into a run from the runs segment and backs out", () => {
+    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    fireEvent.click(screen.getByText("detail.segments.runs"))
+    fireEvent.click(screen.getByTestId("runs-list")) // stub calls onOpenRun("r1")
+    expect(screen.getByTestId("run-detail-r1")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("run-detail-r1")) // stub calls onBack
+    expect(screen.getByTestId("runs-list")).toBeInTheDocument()
+  })
+
+  it("opens the import, run and gate dialogs", () => {
     render(
       <DatasetDetail
         dataset={dataset}
@@ -83,8 +111,11 @@ describe("DatasetDetail", () => {
     )
     fireEvent.click(screen.getByText("detail.import"))
     expect(screen.getByTestId("import-dialog")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("detail.import"))
+    fireEvent.click(screen.getByText("detail.run"))
+    expect(screen.getByTestId("run-config-dialog")).toBeInTheDocument()
     expect(screen.queryByTestId("import-dialog")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("detail.gate"))
+    expect(screen.getByTestId("gate-config-section")).toBeInTheDocument()
   })
 
   it("exports JSONL + CSV via a blob download", () => {

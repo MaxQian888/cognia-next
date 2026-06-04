@@ -9940,7 +9940,14 @@
       "exportJsonl": "Export JSONL",
       "exportCsv": "Export CSV",
       "versions": "Versions",
-      "run": "Run"
+      "run": "Run",
+      "gate": "Gate",
+      "gateConfigured": "Gated",
+      "segments": {
+        "cases": "Cases",
+        "runs": "Runs",
+        "versions": "Versions"
+      }
     },
     "runsList": {
       "empty": "No runs yet — configure and run this dataset.",

@@ -9940,7 +9940,14 @@
       "exportJsonl": "导出 JSONL",
       "exportCsv": "导出 CSV",
       "versions": "版本",
-      "run": "运行"
+      "run": "运行",
+      "gate": "门限",
+      "gateConfigured": "已设门限",
+      "segments": {
+        "cases": "用例",
+        "runs": "运行",
+        "versions": "版本"
+      }
     },
     "runsList": {
       "empty": "暂无运行记录 — 配置并运行该数据集。",
