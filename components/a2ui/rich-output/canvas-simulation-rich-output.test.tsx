@@ -35,7 +35,7 @@ describe("CanvasSimulationRichOutput", () => {
     }
     getContextSpy = jest
       .spyOn(HTMLCanvasElement.prototype, "getContext")
-      .mockImplementation(() => ctxMock as unknown as CanvasRenderingContext2D)
+      .mockImplementation(() => ctxMock as unknown as never)
 
     // Capture the latest RAF callback without auto-firing it, so tests can
     // step the animation deterministically (and the renderFrame self-RAF

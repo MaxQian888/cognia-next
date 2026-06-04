@@ -42,8 +42,8 @@ function buildResult(overrides: Record<string, unknown> = {}) {
   return {
     profile: {},
     loaded: true,
-    resolvedDisplayName: null,
-    resolvedAvatarUrl: null,
+    resolvedDisplayName: null as string | null,
+    resolvedAvatarUrl: null as string | null,
     email: "",
     credentialLoading: false,
     save: jest.fn().mockResolvedValue(undefined),

@@ -53,9 +53,7 @@ const installCanvasMock = (opts: CanvasMockOptions = {}) => {
   const drawImage = jest.fn()
   const getContext = jest
     .spyOn(HTMLCanvasElement.prototype, "getContext")
-    .mockImplementation(() =>
-      opts.noContext ? null : ({ drawImage } as unknown as CanvasRenderingContext2D)
-    )
+    .mockImplementation(() => (opts.noContext ? null : ({ drawImage } as unknown as never)))
   const toDataURL = jest
     .spyOn(HTMLCanvasElement.prototype, "toDataURL")
     .mockImplementation((mime?: string, quality?: unknown) =>
