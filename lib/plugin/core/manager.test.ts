@@ -7,6 +7,7 @@ import {
   PluginManager,
   PluginEnableError,
   PluginDependencyError,
+  PythonRuntimeDisabledError,
   resolveGovernanceMode,
   createPluginManager,
   getPluginManager,
@@ -1061,7 +1062,9 @@ describe("PluginManager", () => {
           }),
         })
       )
-      expect(store.installPlugin).not.toHaveBeenCalled()
+      // Built-ins discovered by the same scan may install themselves; the
+      // assertion under test is that the *existing* plugin isn't reinstalled.
+      expect(store.installPlugin).not.toHaveBeenCalledWith("source-shift-plugin")
     })
 
     it("should skip invalid manifests", async () => {
@@ -1097,7 +1100,12 @@ describe("PluginManager", () => {
 
       await manager.scanPlugins()
 
-      expect(store.discoverPlugin).not.toHaveBeenCalled()
+      // Built-ins are still discovered on the tauri profile; the invalid
+      // directory entry itself must be skipped.
+      const discoveredIds = (store.discoverPlugin as jest.Mock).mock.calls.map(
+        (c) => (c[0] as PluginManifest).id
+      )
+      expect(discoveredIds).not.toContain("invalid-plugin")
       expect(store.plugins["invalid-plugin"]).toBeUndefined()
     })
 
@@ -2155,6 +2163,217 @@ describe("PluginManager", () => {
     it("ignores invalid env values", () => {
       process.env.COGNIA_PLUGIN_POINT_GOVERNANCE_MODE = "nonsense"
       expect(resolveGovernanceMode("block")).toBe("block")
+    })
+  })
+
+  describe("Python runtime integration", () => {
+    const createTypedPlugin = (
+      id: string,
+      type: PluginManifest["type"],
+      status: Plugin["status"] = "installed"
+    ): Plugin => ({
+      manifest: {
+        ...createManifest(id),
+        type,
+        ...(type === "python" || type === "hybrid" ? { pythonMain: "main.py" } : {}),
+        ...(type === "wasm"
+          ? { wasmMain: "plugin.wasm", main: undefined, wasm: { apiVersion: "0.1.0" } }
+          : {}),
+      },
+      status,
+      source: "local",
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
+    const createLoadStore = (plugin: Plugin) => ({
+      plugins: { [plugin.manifest.id]: plugin } as Record<string, Plugin>,
+      loadPlugin: jest.fn(async () => undefined),
+      setPluginError: jest.fn(),
+      registerPluginHooks: jest.fn(),
+      registerPluginTool: jest.fn(),
+    })
+
+    const stubLoader = (manager: PluginManager) => {
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: (plugin: Plugin) => Promise<unknown>
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => ({
+        manifest: plugin.manifest,
+        activate: jest.fn(),
+      }))
+      loader.isLoaded = jest.fn(() => false)
+    }
+
+    it("loadPythonPlugin throws PythonRuntimeDisabledError when enablePython is off", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: false })
+
+      await expect(manager.loadPythonPlugin("py-plugin")).rejects.toBeInstanceOf(
+        PythonRuntimeDisabledError
+      )
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
+    })
+
+    it("loadPythonPlugin loads the module and registers returned tools", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_get_tools") {
+          return [
+            {
+              name: "double",
+              description: "Doubles a number",
+              parameters: { x: { type: "number", required: true } },
+            },
+          ]
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_load", {
+        pluginId: "py-plugin",
+        pluginPath: "/plugins/py-plugin",
+        mainModule: "main.py",
+        dependencies: undefined,
+      })
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "py-plugin",
+        expect.objectContaining({ name: "py-plugin:double" })
+      )
+    })
+
+    it("loadPlugin routes python plugins through the Python host", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) =>
+        cmd === "plugin_python_get_tools" ? [] : undefined
+      )
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      stubLoader(manager)
+      await manager.loadPlugin("py-plugin")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_python_load",
+        expect.objectContaining({ pluginId: "py-plugin" })
+      )
+      // Success path clears the error slot with null — only a string
+      // (an actual failure message) would indicate a load error.
+      expect(store.setPluginError).not.toHaveBeenCalledWith("py-plugin", expect.any(String))
+    })
+
+    it("loadPlugin does NOT route wasm plugins through the Python host", async () => {
+      const plugin = createTypedPlugin("wasm-plugin", "wasm")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      stubLoader(manager)
+      await manager.loadPlugin("wasm-plugin")
+
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_get_tools", expect.anything())
+    })
+
+    it("disablePlugin unloads the Python module only for python/hybrid plugins", async () => {
+      const pythonPlugin = createTypedPlugin("py-plugin", "hybrid", "enabled")
+      const store = {
+        plugins: { "py-plugin": pythonPlugin } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.disablePlugin("py-plugin")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_unload", { pluginId: "py-plugin" })
+
+      mockInvoke.mockClear()
+      const wasmPlugin = createTypedPlugin("wasm-plugin", "wasm", "enabled")
+      const wasmStore = {
+        plugins: { "wasm-plugin": wasmPlugin } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(wasmStore)
+      await manager.disablePlugin("wasm-plugin")
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_unload", expect.anything())
+    })
+
+    it("initializePythonRuntime warns (not errors) when the backend reports unavailable", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: false,
+            version: null,
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_initialize", {
+        pythonPath: undefined,
+      })
+      // available:false must not record a python version.
+      expect(
+        (manager as unknown as { compatibilityRuntime: { pythonVersion?: string } })
+          .compatibilityRuntime.pythonVersion
+      ).toBeUndefined()
+    })
+
+    it("initializePythonRuntime records the interpreter version when available", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: true,
+            version: "3.12.4",
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(
+        (manager as unknown as { compatibilityRuntime: { pythonVersion?: string } })
+          .compatibilityRuntime.pythonVersion
+      ).toBe("3.12.4")
+    })
+
+    it("initializePythonRuntime swallows backend failures and continues", async () => {
+      mockInvoke.mockRejectedValue(new Error("command plugin_python_initialize not found"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await expect(
+        (
+          manager as unknown as { initializePythonRuntime: () => Promise<void> }
+        ).initializePythonRuntime()
+      ).resolves.toBeUndefined()
     })
   })
 

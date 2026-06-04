@@ -274,6 +274,19 @@ export class PluginEnableError extends Error {
  * callers can show "install/enable the missing dependency" rather than a
  * generic retry. The unmet reasons are carried for messaging.
  */
+/**
+ * Thrown when a python/hybrid plugin is loaded while the manager's
+ * `enablePython` config is off (browser profile, or desktop with the
+ * runtime explicitly disabled). Typed so UI callers can distinguish
+ * "runtime disabled by configuration" from a backend load failure.
+ */
+export class PythonRuntimeDisabledError extends Error {
+  constructor(public readonly pluginId: string) {
+    super(`Cannot load Python plugin "${pluginId}": the Python runtime is disabled in this profile`)
+    this.name = "PythonRuntimeDisabledError"
+  }
+}
+
 export class PluginDependencyError extends Error {
   constructor(
     public readonly pluginId: string,
@@ -696,11 +709,21 @@ export class PluginManager {
         pythonPath: this.config.pythonPath,
       })
       const runtime = await this.getPythonRuntimeInfo().catch(() => null)
+      if (runtime && !runtime.available) {
+        // Supported configuration, not an error: the backend probed and
+        // found no usable interpreter — python plugins stay disabled.
+        loggers.manager.warn(
+          "Python runtime unavailable: no python >= 3.9 interpreter found; python plugins disabled"
+        )
+        return
+      }
       if (runtime?.version) {
         this.compatibilityRuntime.pythonVersion = runtime.version
       }
     } catch (error) {
-      loggers.manager.error("Failed to initialize Python runtime:", error)
+      // Pass a string: a bare Error renders as "{}" in the console
+      // transport's data slot, hiding the actual failure.
+      loggers.manager.error("Failed to initialize Python runtime:", String(error))
       // Continue without Python support
     }
   }
@@ -875,7 +898,12 @@ export class PluginManager {
       return this.scanBrowserBuiltins()
     }
 
-    const discovered: DiscoveredPlugin[] = []
+    // Built-in plugins are statically bundled into the renderer (see
+    // `browser-builtin-registry.ts`) — they are not present in the on-disk
+    // plugin directory, so the desktop shell must discover them through the
+    // same registry walk the browser profile uses. Run it first so a failed
+    // directory scan below still leaves the built-ins discovered.
+    const discovered: DiscoveredPlugin[] = await this.scanBrowserBuiltins()
     const store = usePluginStore.getState()
 
     try {
@@ -1488,7 +1516,10 @@ export class PluginManager {
         this.hooksManager.registerHooks(pluginId, hooks)
       }
 
-      if (plugin.manifest.type !== "frontend") {
+      // Only python/hybrid plugins carry a Python module — wasm (and
+      // vscode-extension) types have their own runtimes and must not be
+      // routed through the Python host.
+      if (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid") {
         await this.loadPythonPlugin(pluginId)
       }
 
@@ -2262,7 +2293,7 @@ export class PluginManager {
       await Promise.resolve(definition.deactivate())
     }
 
-    if (plugin && plugin.manifest.type !== "frontend") {
+    if (plugin && (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid")) {
       try {
         await this.unloadPythonPlugin(pluginId)
       } catch (error) {
@@ -2816,6 +2847,10 @@ export class PluginManager {
   // ===========================================================================
 
   async loadPythonPlugin(pluginId: string): Promise<void> {
+    if (!this.config.enablePython) {
+      throw new PythonRuntimeDisabledError(pluginId)
+    }
+
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 

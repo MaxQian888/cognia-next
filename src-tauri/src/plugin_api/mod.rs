@@ -38,6 +38,8 @@ pub mod node_permission;
 pub mod notification;
 pub mod permissions;
 pub mod process_ops;
+pub mod python;
+pub mod scan;
 pub mod shortcut_ops;
 pub mod signature;
 pub mod tray_items;
@@ -128,6 +130,43 @@ impl PluginRuntimeState {
     pub(crate) fn plugin_dir(&self, plugin_id: &str) -> PathBuf {
         self.plugin_install_dir.join(sanitize_plugin_id(plugin_id))
     }
+
+    /// True when the plugin holds a live (non-expired) grant for
+    /// `permission`. Checks the in-memory ledger first and falls back to
+    /// the on-disk `permissions.json` on cold-start, caching the result —
+    /// mirroring `plugin_permission_list`. Used as the defense-in-depth
+    /// gate by the `plugin_python_*` execution commands.
+    pub fn has_permission(&self, plugin_id: &str, permission: &str) -> bool {
+        let cached = self.permissions.read().get(plugin_id).cloned();
+        let grants = match cached {
+            Some(grants) => grants,
+            None => {
+                let from_disk =
+                    permissions::read_ledger(self, plugin_id).unwrap_or_default();
+                if !from_disk.is_empty() {
+                    self.permissions
+                        .write()
+                        .insert(plugin_id.to_string(), from_disk.clone());
+                }
+                from_disk
+            }
+        };
+        grants
+            .iter()
+            .any(|g| g.permission == permission && !grant_expired(g))
+    }
+}
+
+/// A grant with a parseable past `expires_at` is expired; absent or
+/// unparseable timestamps mean "no expiry" (matches the lenient ledger
+/// semantics — corrupted dates must not lock users out of revocation).
+fn grant_expired(grant: &PermissionGrant) -> bool {
+    match grant.expires_at.as_deref() {
+        None => false,
+        Some(raw) => chrono::DateTime::parse_from_rfc3339(raw)
+            .map(|expiry| expiry < chrono::Utc::now())
+            .unwrap_or(false),
+    }
 }
 
 /// Allow only `[A-Za-z0-9._-]` in path components. Defense-in-depth against
@@ -167,5 +206,93 @@ mod tests {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
         assert!(state.plugins.read().is_empty());
         assert!(state.permissions.read().is_empty());
+    }
+
+    fn make_grant(plugin_id: &str, permission: &str, expires_at: Option<String>) -> PermissionGrant {
+        PermissionGrant {
+            plugin_id: plugin_id.into(),
+            permission: permission.into(),
+            granted_by: "test".into(),
+            granted_at: chrono::Utc::now().to_rfc3339(),
+            expires_at,
+        }
+    }
+
+    #[test]
+    fn has_permission_false_when_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        assert!(!state.has_permission("demo", "python:execute"));
+    }
+
+    #[test]
+    fn has_permission_true_after_in_memory_grant() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state
+            .permissions
+            .write()
+            .insert("demo".into(), vec![make_grant("demo", "python:execute", None)]);
+        assert!(state.has_permission("demo", "python:execute"));
+        assert!(!state.has_permission("demo", "filesystem:write"));
+    }
+
+    #[test]
+    fn has_permission_falls_back_to_disk_ledger() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        let grants = vec![make_grant("demo", "python:execute", None)];
+        let dir = state.plugin_dir("demo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("permissions.json"),
+            serde_json::to_vec(&grants).unwrap(),
+        )
+        .unwrap();
+
+        assert!(state.has_permission("demo", "python:execute"));
+        // Disk read is cached into the in-memory ledger.
+        assert!(state.permissions.read().contains_key("demo"));
+    }
+
+    #[test]
+    fn has_permission_expired_grant_is_false() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.permissions.write().insert(
+            "demo".into(),
+            vec![make_grant(
+                "demo",
+                "python:execute",
+                Some("2000-01-01T00:00:00Z".into()),
+            )],
+        );
+        assert!(!state.has_permission("demo", "python:execute"));
+    }
+
+    #[test]
+    fn has_permission_future_expiry_is_true() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.permissions.write().insert(
+            "demo".into(),
+            vec![make_grant(
+                "demo",
+                "python:execute",
+                Some("2999-01-01T00:00:00Z".into()),
+            )],
+        );
+        assert!(state.has_permission("demo", "python:execute"));
+    }
+
+    #[test]
+    fn has_permission_unparseable_expiry_is_lenient() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.permissions.write().insert(
+            "demo".into(),
+            vec![make_grant("demo", "python:execute", Some("not-a-date".into()))],
+        );
+        assert!(state.has_permission("demo", "python:execute"));
     }
 }

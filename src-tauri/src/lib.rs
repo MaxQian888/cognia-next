@@ -278,6 +278,13 @@ pub fn run() {
                 .map(|d| d.join("cognia").join("plugins"))
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
+        // Python plugin runtime (subprocess JSON-RPC host) — separate state
+        // from PluginRuntimeState: subprocess handles vs install-dir ledger.
+        .manage(plugin_api::python::PythonRuntimeState::new(
+            dirs::data_dir()
+                .map(|d| d.join("cognia").join("python"))
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        ))
         .manage(plugin_api::wasm::WasmPluginState::default())
         // ADR-0028 Phase 14 — OAuth refresh watchers per Anthropic account.
         .manage(subscription::anthropic::credential::WatcherRegistry::new())
@@ -630,6 +637,16 @@ pub fn run() {
             workflow::commands::workflow_ack_completed,
             workflow::commands::workflow_get_webhook_url,
             plugin_api::scan::plugin_scan_directory,
+            plugin_api::python::commands::plugin_python_initialize,
+            plugin_api::python::commands::plugin_python_runtime_info,
+            plugin_api::python::commands::plugin_python_load,
+            plugin_api::python::commands::plugin_python_get_tools,
+            plugin_api::python::commands::plugin_python_call_tool,
+            plugin_api::python::commands::plugin_python_call,
+            plugin_api::python::commands::plugin_python_is_initialized,
+            plugin_api::python::commands::plugin_python_get_info,
+            plugin_api::python::commands::plugin_python_unload,
+            plugin_api::python::commands::plugin_python_list,
             plugin_api::lifecycle::plugin_load,
             plugin_api::lifecycle::plugin_enable,
             plugin_api::lifecycle::plugin_disable,

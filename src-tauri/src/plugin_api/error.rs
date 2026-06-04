@@ -35,6 +35,17 @@ pub enum PluginError {
 
     #[error("internal: {0}")]
     Internal(String),
+
+    /// Python interpreter missing or runtime never initialized — the inner
+    /// string says which (e.g. "runtime not initialized", "no interpreter
+    /// found (looked for: py -3, python3, python)").
+    #[error("python unavailable: {0}")]
+    PythonUnavailable(String),
+
+    /// Python host subprocess failure: spawn error, protocol corruption,
+    /// timeout, unexpected exit, or an error reported by the host itself.
+    #[error("python host: {0}")]
+    PythonHost(String),
 }
 
 impl serde::Serialize for PluginError {
@@ -53,3 +64,28 @@ impl From<PluginError> for String {
 }
 
 pub type Result<T> = std::result::Result<T, PluginError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_variants_display_with_prefix() {
+        assert_eq!(
+            PluginError::PythonUnavailable("runtime not initialized".into()).to_string(),
+            "python unavailable: runtime not initialized"
+        );
+        assert_eq!(
+            PluginError::PythonHost("host exited: 1".into()).to_string(),
+            "python host: host exited: 1"
+        );
+    }
+
+    #[test]
+    fn python_variants_serialize_to_display_string() {
+        let json = serde_json::to_string(&PluginError::PythonUnavailable("x".into())).unwrap();
+        assert_eq!(json, r#""python unavailable: x""#);
+        let json = serde_json::to_string(&PluginError::PythonHost("boom".into())).unwrap();
+        assert_eq!(json, r#""python host: boom""#);
+    }
+}

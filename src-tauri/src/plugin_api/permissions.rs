@@ -23,7 +23,10 @@ fn write_ledger(state: &PluginRuntimeState, plugin_id: &str, grants: &[Permissio
     Ok(())
 }
 
-fn read_ledger(state: &PluginRuntimeState, plugin_id: &str) -> Result<Vec<PermissionGrant>> {
+pub(crate) fn read_ledger(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+) -> Result<Vec<PermissionGrant>> {
     let path = ledger_path(state, plugin_id);
     if !path.exists() {
         return Ok(Vec::new());
