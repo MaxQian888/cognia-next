@@ -20,6 +20,7 @@ export default function MobileProfilePage() {
     <SubPageShell
       title={t("profileRow")}
       backAria={t("profileBackAria")}
+      width="wide"
       testid="mobile-profile-page"
     >
       <ProfileSection />

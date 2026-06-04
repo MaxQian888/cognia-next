@@ -69,4 +69,27 @@ describe("<SubPageShell />", () => {
     expect(container.querySelector("section")?.className).toMatch(/max-w-2xl/)
     expect(container.querySelector("header > div")?.className).toMatch(/max-w-2xl/)
   })
+
+  it("keeps the default width without the lg relaxation", () => {
+    const { container } = render(
+      <SubPageShell title="X" backAria="Back">
+        body
+      </SubPageShell>
+    )
+    expect(container.querySelector("section")?.className).not.toMatch(/lg:max-w-4xl/)
+    expect(container.querySelector("header > div")?.className).not.toMatch(/lg:max-w-4xl/)
+  })
+
+  it('relaxes the clamp to lg:max-w-4xl when width="wide"', () => {
+    const { container } = render(
+      <SubPageShell title="X" backAria="Back" width="wide">
+        body
+      </SubPageShell>
+    )
+    // Both the body and the sticky header widen together so the back button
+    // stays aligned with the content edge on large tablets.
+    expect(container.querySelector("section")?.className).toMatch(/max-w-2xl/)
+    expect(container.querySelector("section")?.className).toMatch(/lg:max-w-4xl/)
+    expect(container.querySelector("header > div")?.className).toMatch(/lg:max-w-4xl/)
+  })
 })

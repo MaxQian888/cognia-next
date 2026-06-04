@@ -125,13 +125,15 @@ export default function MePage() {
       data-testid="me-page"
     >
       <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 lg:max-w-4xl">
           <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
           <ConnectionStateBadge />
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-3">
+      {/* Widen on large tablets/landscape so the lg 3-column grid below has
+          room to breathe; phones keep the original max-w-2xl clamp. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-3 lg:max-w-4xl">
         <DiscoverSearch
           value={query}
           onChange={setQuery}
@@ -169,7 +171,7 @@ export default function MePage() {
               </MeSection>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {ME_SECTION_ORDER.map((section) => (
                 <MeSection
                   key={section}

@@ -32,6 +32,13 @@ export interface SubPageShellProps {
   bodyClassName?: string
   /** Custom Suspense fallback. Defaults to a 3-block Skeleton. */
   fallback?: ReactNode
+  /**
+   * Content width on large tablets/landscape. `"default"` keeps the
+   * phone-first `max-w-2xl` clamp everywhere; `"wide"` relaxes it to
+   * `lg:max-w-4xl` — for sub-pages that embed desktop settings sections
+   * (appearance, subscription, profile) and benefit from the room.
+   */
+  width?: "default" | "wide"
   testid?: string
 }
 
@@ -54,15 +61,17 @@ export function SubPageShell({
   children,
   bodyClassName,
   fallback,
+  width = "default",
   testid,
 }: SubPageShellProps) {
+  const widthClass = width === "wide" ? "max-w-2xl lg:max-w-4xl" : "max-w-2xl"
   return (
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
       data-testid={testid}
     >
       <header className="sticky top-0 z-10 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+        <div className={cn("mx-auto flex w-full items-center gap-2", widthClass)}>
           <Button
             asChild
             variant="ghost"
@@ -78,7 +87,7 @@ export function SubPageShell({
           {headerAccessory ? <div className="shrink-0">{headerAccessory}</div> : null}
         </div>
       </header>
-      <section className={cn("mx-auto w-full max-w-2xl px-4 py-4", bodyClassName)}>
+      <section className={cn("mx-auto w-full px-4 py-4", widthClass, bodyClassName)}>
         <Suspense fallback={fallback ?? <DefaultFallback />}>{children}</Suspense>
       </section>
     </main>

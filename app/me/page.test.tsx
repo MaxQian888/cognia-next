@@ -144,6 +144,16 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("me-section-about")).toBeInTheDocument()
   })
 
+  it("reflows the section grid responsively (2-col tablet, 3-col landscape)", () => {
+    platformValue = "mobile"
+    const { container } = render(<MePage />)
+    const grid = container.querySelector(".grid")
+    expect(grid?.className).toMatch(/sm:grid-cols-2/)
+    expect(grid?.className).toMatch(/lg:grid-cols-3/)
+    // The content column widens with the 3-col grid so columns stay readable.
+    expect(grid?.parentElement?.className).toMatch(/lg:max-w-4xl/)
+  })
+
   it("renders the scheduler row in the automation section pointing at /me/scheduler", () => {
     platformValue = "mobile"
     render(<MePage />)

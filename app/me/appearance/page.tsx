@@ -32,6 +32,7 @@ export default function MobileAppearancePage() {
     <SubPageShell
       title={t("sectionAppearance")}
       backAria={t("appearanceBackAria")}
+      width="wide"
       testid="mobile-appearance-page"
     >
       <AppearanceSection />
