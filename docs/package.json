@@ -11,7 +11,7 @@
     "fumadocs-ui": "latest",
     "fumadocs-core": "latest",
     "fumadocs-mdx": "latest",
-    "mermaid": "^11.4.0",
+    "mermaid": "^11.15.0",
     "next": "^16.2.4",
     "next-themes": "^0.4.6",
     "react": "^19.2.5",
