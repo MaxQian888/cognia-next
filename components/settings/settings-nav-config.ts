@@ -48,12 +48,14 @@ import {
   CompassIcon,
   BrainIcon,
   GitBranchIcon,
+  UserRoundIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
 
 export type SettingsSectionId =
   | "general"
+  | "profile"
   | "api-key"
   | "providers"
   | "ocr"
@@ -145,6 +147,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "ocr",
     group: "ai",
     icon: ScrollTextIcon,
+  },
+  {
+    id: "profile",
+    labelKey: "profile",
+    descriptionKey: "profile",
+    group: "ai",
+    icon: UserRoundIcon,
   },
   {
     id: "subscription",
@@ -510,6 +519,7 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
  */
 export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
   general: ["defaults", "model", "system prompt", "permission"],
+  profile: ["profile", "name", "avatar", "bio", "identity", "资料", "昵称", "头像"],
   "api-key": ["anthropic", "key", "secret", "claude"],
   providers: [
     "providers",

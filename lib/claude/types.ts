@@ -889,6 +889,31 @@ export interface ToolSearchRuntimeConfig {
   alwaysLoadTools?: string[]
 }
 
+/**
+ * Local-first user profile (no cloud account). Stored as a nested blob on the
+ * `AppSettings` singleton so it rides the existing settings persistence,
+ * companion sync (`CROSS_PLATFORM_SETTING_KEYS`) and WebDAV backup without a
+ * Dexie schema bump. Every field is optional: an empty profile falls back to
+ * the credential-derived identity (Anthropic email prefix + initials avatar)
+ * in `lib/profile/use-user-profile.ts`.
+ */
+export interface UserProfile {
+  /** Custom display name. Empty/undefined → credential-derived fallback. */
+  displayName?: string
+  /** Short bio / signature, editor-capped at 280 chars. */
+  bio?: string
+  /**
+   * Self-contained `data:` URL for the avatar, downscaled + size-capped
+   * (≤96 KB) by `lib/profile/avatar-image.ts` BEFORE write — never store a
+   * raw FileReader result here (settings row syncs to companions).
+   */
+  avatarDataUrl?: string
+  /** Epoch ms of the last profile edit. */
+  updatedAt?: number
+}
+
+export const DEFAULT_USER_PROFILE: UserProfile = {}
+
 export interface AppSettings {
   id: "singleton"
   /**
@@ -899,6 +924,12 @@ export interface AppSettings {
    * had no `updatedAt` and only ever synced once, on the first pull).
    */
   updatedAt?: number
+  /**
+   * Local user profile (editable display name / avatar / bio). Merged forward
+   * by `lib/db/settings.ts:getSettings()`; synced to companion devices via
+   * the `CROSS_PLATFORM_SETTING_KEYS` allowlist.
+   */
+  profile?: UserProfile
   /**
    * OCR subsystem preferences (default provider, cloud fallback, per-provider
    * config, cache TTL, platform overrides, wizard dismissal). Merged forward

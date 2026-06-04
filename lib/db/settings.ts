@@ -1,5 +1,9 @@
 import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
-import { DEFAULT_BIOMETRIC_GUARD, DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import {
+  DEFAULT_BIOMETRIC_GUARD,
+  DEFAULT_BUILTIN_TOOLS,
+  DEFAULT_USER_PROFILE,
+} from "@/lib/claude/types"
 import { DEFAULT_TTS_SETTINGS } from "@/types/media/tts"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
@@ -127,6 +131,10 @@ const DEFAULTS: AppSettings = {
   // Source Control preferences (AI commit message generation, …).
   gitSettings: { ...DEFAULT_GIT_SETTINGS },
 
+  // Local user profile — empty by default; identity falls back to the
+  // credential-derived name/avatar (see `lib/profile/use-user-profile.ts`).
+  profile: { ...DEFAULT_USER_PROFILE },
+
   // Conversation title auto-generation — on by default (the instant
   // first-message truncation always runs; this gates the LLM upgrade).
   conversationTitle: { enabled: true },
@@ -171,6 +179,7 @@ export async function getSettings(): Promise<AppSettings> {
     // features + "More". Arrays replace wholesale (an explicit empty `pinned`
     // is a deliberate user choice, not a missing field).
     sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT, ...(row.sidebarLayout ?? {}) },
+    profile: { ...DEFAULT_USER_PROFILE, ...(row.profile ?? {}) },
     conversationTitle: { ...DEFAULTS.conversationTitle, ...(row.conversationTitle ?? {}) },
     conversationTimeline: {
       ...DEFAULTS.conversationTimeline,

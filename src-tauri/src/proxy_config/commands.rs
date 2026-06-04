@@ -4,6 +4,8 @@
 //!   subsequent reqwest builders pick it up. Idempotent.
 //! - `proxy_detect` — port-probe + Clash API; returns the candidate list
 //!   the Detection tab renders.
+//! - `proxy_identify_clash` — single cheap probe of Clash/Mihomo's default
+//!   controller; powers the Detection tab's quick status line on mount.
 //! - `proxy_test` — issue a one-off request through the *current* config
 //!   and report status + latency.
 //! - `proxy_get_active` — debug aid; returns the live config snapshot.
@@ -13,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::detect::{probe_all, ProxyCandidate};
+use super::detect::{identify_clash, probe_all, ProxyCandidate};
 use super::{set_current, ProxyConfig};
 
 #[derive(Debug, Serialize)]
@@ -46,6 +48,16 @@ pub async fn proxy_get_active() -> Result<ProxyConfig, String> {
 #[tauri::command]
 pub async fn proxy_detect() -> Result<Vec<ProxyCandidate>, String> {
     Ok(probe_all().await)
+}
+
+/// Lightweight probe of Clash/Mihomo's default controller (127.0.0.1:9090).
+/// Returns the core version when the controller answers openly, `None` when
+/// it is absent or secret-protected. Far cheaper than `proxy_detect` (no
+/// process snapshot, config reads, or port sweep) — the Detection tab fires
+/// it on mount for an instant "a Clash core is running" status line.
+#[tauri::command]
+pub async fn proxy_identify_clash() -> Result<Option<String>, String> {
+    Ok(identify_clash().await)
 }
 
 /// Test the *current* proxy by issuing a request to the supplied URL.
@@ -233,6 +245,16 @@ mod tests {
         let result = proxy_detect().await.unwrap();
         for c in &result {
             assert!(c.port > 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_identify_clash_completes() {
+        // The dev machine may or may not run Clash on 9090 — Ok(None) and
+        // Ok(Some(version)) are both valid; the call must never error.
+        let result = proxy_identify_clash().await.unwrap();
+        if let Some(version) = result {
+            assert!(!version.is_empty());
         }
     }
 

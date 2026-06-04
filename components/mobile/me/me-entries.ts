@@ -33,6 +33,7 @@ import {
   SmartphoneIcon,
   TerminalSquareIcon,
   TypeIcon,
+  UserRoundIcon,
 } from "lucide-react"
 
 export type MeSectionId =
@@ -82,6 +83,14 @@ export const ME_SECTION_TITLE_KEY: Record<MeSectionId, string> = {
  */
 export const ME_ENTRIES: MeEntry[] = [
   // === Account ===
+  {
+    id: "profile",
+    icon: UserRoundIcon,
+    labelKey: "profileRow",
+    href: "/me/profile",
+    section: "account",
+    keywords: ["profile", "name", "avatar", "bio", "资料", "昵称", "头像"],
+  },
   {
     id: "subscription",
     icon: KeyRoundIcon,

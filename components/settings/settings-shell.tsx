@@ -88,6 +88,10 @@ const GeneralSection = dynamic(() => import("./general-section").then((m) => m.G
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const ProfileSection = dynamic(
+  () => import("./profile/profile-section").then((m) => m.ProfileSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const A2UISection = dynamic(() => import("./a2ui-section").then((m) => m.A2UISection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -334,6 +338,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
   switch (section) {
     case "general":
       return <GeneralSection onClose={onClose} />
+    case "profile":
+      return <ProfileSection />
     case "api-key":
       return <ApiKeySection />
     case "providers":

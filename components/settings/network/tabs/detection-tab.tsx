@@ -9,7 +9,7 @@
  * `networkProxy` (mode flips to `auto`) and pushes the new config to Rust.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { invoke } from "@tauri-apps/api/core"
 import { CheckCircle2Icon, AlertTriangleIcon, RefreshCwIcon } from "lucide-react"
@@ -61,8 +61,32 @@ export function NetworkDetectionTab() {
   const [candidates, setCandidates] = useState<ProxyCandidate[] | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Version reported by the quick `proxy_identify_clash` mount probe. */
+  const [clashVersion, setClashVersion] = useState<string | null>(null)
 
   const cfg: NetworkProxySettings = settings ?? DEFAULT_NETWORK_PROXY_SETTINGS
+
+  // Quick status probe: one cheap HTTP call against Clash/Mihomo's default
+  // controller (127.0.0.1:9090), so the tab can say "a Clash core is
+  // running" before the user pays for the full process+config+port scan.
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    const probe = async () => {
+      try {
+        const version = await invoke<string | null>("proxy_identify_clash")
+        if (!cancelled && typeof version === "string" && version) {
+          setClashVersion(version)
+        }
+      } catch {
+        // Quiet probe — an absent controller is the normal case, not an error.
+      }
+    }
+    void probe()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const runDetect = async () => {
     if (!isTauri()) {
@@ -93,6 +117,12 @@ export function NetworkDetectionTab() {
         <div>
           <p className="text-sm font-medium">{t("detection.heading")}</p>
           <p className="text-xs text-muted-foreground">{t("detection.subheading")}</p>
+          {clashVersion && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CheckCircle2Icon className="size-3.5 text-primary" />
+              {t("detection.quickClash", { version: clashVersion })}
+            </p>
+          )}
         </div>
         <Button onClick={runDetect} disabled={running} aria-label={t("detection.button")}>
           <RefreshCwIcon className={running ? "size-4 animate-spin" : "size-4"} />

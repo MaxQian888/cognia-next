@@ -208,4 +208,56 @@ describe("NetworkDetectionTab", () => {
     expect(invokeMock).not.toHaveBeenCalled()
     expect(screen.getByText("detection.webUnsupported")).toBeInTheDocument()
   })
+
+  describe("quick Clash status", () => {
+    it("probes the controller on mount and shows the status line on a version hit", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash" ? Promise.resolve("1.18.0") : Promise.resolve([])
+      )
+      await act(async () => {
+        render(<NetworkDetectionTab />)
+      })
+      expect(invokeMock).toHaveBeenCalledWith("proxy_identify_clash")
+      expect(screen.getByText("detection.quickClash")).toBeInTheDocument()
+    })
+
+    it("renders no status line when the controller is absent", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash" ? Promise.resolve(null) : Promise.resolve([])
+      )
+      await act(async () => {
+        render(<NetworkDetectionTab />)
+      })
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
+
+    it("ignores non-string payloads from the quick probe", async () => {
+      invokeMock.mockResolvedValue([])
+      await act(async () => {
+        render(<NetworkDetectionTab />)
+      })
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
+
+    it("skips the quick probe outside Tauri", async () => {
+      isTauriMock.mockReturnValue(false)
+      await act(async () => {
+        render(<NetworkDetectionTab />)
+      })
+      expect(invokeMock).not.toHaveBeenCalled()
+    })
+
+    it("swallows quick-probe failures silently", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash"
+          ? Promise.reject(new Error("probe boom"))
+          : Promise.resolve([])
+      )
+      await act(async () => {
+        render(<NetworkDetectionTab />)
+      })
+      expect(screen.queryByText(/probe boom/)).not.toBeInTheDocument()
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
+  })
 })

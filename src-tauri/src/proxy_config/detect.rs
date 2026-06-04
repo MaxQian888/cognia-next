@@ -153,7 +153,8 @@ async fn probe_controller(host: &str, port: u16) -> ControllerStatus {
 }
 
 /// Hit Clash/Mihomo's default controller at 127.0.0.1:9090 and return the
-/// reported version string. Kept as the stable public probe API.
+/// reported version string. Exposed to the frontend through the
+/// `proxy_identify_clash` command — the Detection tab's quick status probe.
 pub async fn identify_clash() -> Option<String> {
     match probe_controller(CLASH_API_HOST, CLASH_API_PORT).await {
         ControllerStatus::Version(v) => Some(v),

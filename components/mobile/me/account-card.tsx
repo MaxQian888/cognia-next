@@ -22,6 +22,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { useUserProfile } from "@/lib/profile/use-user-profile"
 import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { deterministicColor, initials } from "@/lib/ui/avatar"
 
@@ -71,16 +72,16 @@ export function AccountCard({ className }: { className?: string }) {
   const t = useTranslations("mobile.me.account")
   const tProfile = useTranslations("mobile.me.profile")
   const { credential, loading } = useActiveAnthropicCredential()
+  const { resolvedDisplayName, resolvedAvatarUrl } = useUserProfile()
   const { latest } = useAnthropicUsage(1)
 
   const fallbackName = tProfile("fallbackName")
   const fallbackPlan = tProfile("fallbackPlan")
 
   const email = credential?.email ?? ""
-  const displayName =
-    credential?.email && credential.email.includes("@")
-      ? credential.email.split("@")[0]
-      : fallbackName
+  // Precedence: custom profile > credential-derived (both resolved by
+  // `useUserProfile`) > localized fallback. Plan + usage stay credential-only.
+  const displayName = resolvedDisplayName ?? fallbackName
   const planLabel = credential?.plan ? credential.plan.toUpperCase() : fallbackPlan
 
   const fiveHour = latest?.fiveHour ?? null
