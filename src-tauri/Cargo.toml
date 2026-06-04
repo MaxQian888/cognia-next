@@ -217,7 +217,7 @@ local-ip-address = "0.6"
 # `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
 # developer machines don't need a system install — critical on Windows
 # where libgit2 isn't typically present.
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
 # Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
