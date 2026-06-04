@@ -9942,6 +9942,28 @@
       "versions": "版本",
       "run": "运行"
     },
+    "runsList": {
+      "empty": "暂无运行记录 — 配置并运行该数据集。",
+      "openRun": "打开运行 {label}",
+      "passAt1": "pass@1 {pct}%",
+      "passHatK": "pass^{k} {pct}%",
+      "gatePassed": "门限通过",
+      "gateFailed": "门限未过"
+    },
+    "runDetail": {
+      "loading": "正在加载运行…",
+      "back": "返回",
+      "passAt1": "pass@1 {pct}%",
+      "passHatK": "pass^{k} {pct}%",
+      "latency": "{ms} 毫秒",
+      "gatePassed": "门限通过",
+      "gateFailed": "门限未过",
+      "noCases": "该运行没有逐用例结果。",
+      "caseColumn": "用例",
+      "verdict": "判定",
+      "pass": "通过",
+      "fail": "失败"
+    },
     "gate": {
       "heading": "质量门限",
       "hint": "可选的通过/失败阈值，应用于该数据集的每次运行。",

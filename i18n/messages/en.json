@@ -9942,6 +9942,28 @@
       "versions": "Versions",
       "run": "Run"
     },
+    "runsList": {
+      "empty": "No runs yet — configure and run this dataset.",
+      "openRun": "Open run {label}",
+      "passAt1": "pass@1 {pct}%",
+      "passHatK": "pass^{k} {pct}%",
+      "gatePassed": "Gate passed",
+      "gateFailed": "Gate failed"
+    },
+    "runDetail": {
+      "loading": "Loading run…",
+      "back": "Back",
+      "passAt1": "pass@1 {pct}%",
+      "passHatK": "pass^{k} {pct}%",
+      "latency": "{ms} ms",
+      "gatePassed": "Gate passed",
+      "gateFailed": "Gate failed",
+      "noCases": "No per-case results recorded for this run.",
+      "caseColumn": "Case",
+      "verdict": "Verdict",
+      "pass": "Pass",
+      "fail": "Fail"
+    },
     "gate": {
       "heading": "Quality gate",
       "hint": "Optional pass/fail thresholds applied to every run of this dataset.",
