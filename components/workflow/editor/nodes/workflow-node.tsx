@@ -21,6 +21,7 @@ import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
 import { getEdgeById, hasEdgeBetween } from "@/lib/workflow/editor/edge-index"
+import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { useShallow } from "zustand/react/shallow"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
@@ -260,6 +261,16 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
     !data.kind.startsWith("trigger.") &&
     !isAnnotation
 
+  // Labeled decision handles (branch/switch v2) — single source of truth in
+  // `node-handles.ts`, shared with the connection validator and smart edge.
+  const decisionHandles = showOutput
+    ? outputHandlesFor({
+        kind: data.kind,
+        typeVersion: data.typeVersion,
+        params: (data.params as Record<string, unknown>) ?? {},
+      })
+    : null
+
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
   const showLastRun = !!effectiveLastRun && status === "idle"
@@ -294,6 +305,14 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           !selected &&
           "ring-2 ring-primary/40 ring-offset-1 ring-offset-background"
       )}
+      // Give the card room for every stacked decision handle + label chip.
+      style={
+        decisionHandles
+          ? {
+              minHeight: (decisionHandles.length + (showErrorHandle ? 1 : 0)) * 22 + 36,
+            }
+          : undefined
+      }
       data-testid={`wf-node-${data.kind}`}
       data-run-status={status}
       data-spotlit={isSpotlit ? "true" : undefined}
@@ -395,7 +414,54 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       </div>
       {showLastRun && effectiveLastRun ? <LastRunFooter lastRun={effectiveLastRun} /> : null}
       {showOutput ? (
-        // When the workflow's errorPolicy is "branch", actions expose a second
+        decisionHandles ? (
+          // Labeled multi-output handles (branch/switch v2). Each decision
+          // handle is distributed down the right edge with its label chip;
+          // the error handle (when the workflow routes errors) sits last.
+          <>
+            {decisionHandles.map((h, i) => {
+              const total = decisionHandles.length + (showErrorHandle ? 1 : 0)
+              const top = `${Math.round(((i + 1) / (total + 1)) * 100)}%`
+              const label = h.kind === "case" ? (h.label ?? h.id) : tNode(`outputHandles.${h.kind}`)
+              return (
+                <span key={h.id}>
+                  <Handle
+                    type="source"
+                    id={h.id}
+                    position={Position.Right}
+                    style={{ top }}
+                    className={cn(
+                      "!h-3 !w-3 !rounded-full !border-2 !bg-background",
+                      h.kind === "true" && "!border-emerald-500",
+                      h.kind === "false" && "!border-rose-500",
+                      (h.kind === "case" || h.kind === "default") && "!border-current"
+                    )}
+                    data-testid={`wf-node-handle-out-${id}-${h.id}`}
+                  />
+                  <span
+                    style={{ top }}
+                    className="absolute right-2 -translate-y-1/2 text-[9px] font-medium uppercase tracking-wide opacity-70"
+                    data-testid={`wf-node-handle-label-${id}-${h.id}`}
+                  >
+                    {label}
+                  </span>
+                </span>
+              )
+            })}
+            {showErrorHandle ? (
+              <Handle
+                type="source"
+                id="error"
+                position={Position.Right}
+                style={{
+                  top: `${Math.round(((decisionHandles.length + 1) / (decisionHandles.length + 2)) * 100)}%`,
+                }}
+                className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
+                data-testid={`wf-node-handle-error-${id}`}
+              />
+            ) : null}
+          </>
+        ) : // When the workflow's errorPolicy is "branch", actions expose a second
         // source handle ("error") that routes the run down a failure path. The
         // success handle shifts up to make room. Triggers/annotations keep a
         // single handle (they can't fail into a branch meaningfully).

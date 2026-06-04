@@ -9629,7 +9629,10 @@
       "refresh": "Refresh",
       "abortMerge": "Abort Merge",
       "restore": "Restore (to HEAD)",
-      "viewBlame": "View Blame"
+      "viewBlame": "View Blame",
+      "publish": "Publish Branch",
+      "undoLastCommit": "Undo Last Commit",
+      "addToGitignore": "Add to .gitignore"
     },
     "stash": {
       "title": "Stashes",
@@ -9700,6 +9703,16 @@
         "cherryPick": "Cherry-pick in progress — resolve conflicts, then continue.",
         "revert": "Revert in progress — resolve conflicts, then continue."
       }
+    },
+    "commitDetail": {
+      "createBranchHere": "Create branch from here…",
+      "createBranchTitle": "Create branch from this commit",
+      "branchNamePlaceholder": "New branch name",
+      "createBranchAction": "Create & switch",
+      "checkoutCommit": "Checkout this commit…",
+      "checkoutCommitTitle": "Checkout commit?",
+      "checkoutCommitDescription": "This switches to a detached HEAD at this commit. Create a branch from here if you plan to make changes.",
+      "checkoutAction": "Checkout"
     },
     "irebase": {
       "title": "Interactive rebase",
@@ -15927,6 +15940,11 @@
     },
     "node": {
       "pinnedTitle": "Pinned test data",
+      "outputHandles": {
+        "true": "true",
+        "false": "false",
+        "default": "default"
+      },
       "lastRun": {
         "succeeded": "Ran {ago} · {duration}",
         "succeededNoDuration": "Ran {ago}",

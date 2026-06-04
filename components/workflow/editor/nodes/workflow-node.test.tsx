@@ -56,6 +56,8 @@ interface RenderArgs {
   label?: string
   store?: EditorStore
   withProvider?: boolean
+  typeVersion?: number
+  params?: Record<string, unknown>
 }
 
 function renderNode({
@@ -65,6 +67,8 @@ function renderNode({
   label = "Prompt",
   store,
   withProvider = true,
+  typeVersion = 1,
+  params = {},
 }: RenderArgs = {}) {
   const ui = (
     <TooltipProvider>
@@ -74,9 +78,9 @@ function renderNode({
         selected={selected}
         data={{
           label,
-          params: {},
+          params,
           kind,
-          typeVersion: 1,
+          typeVersion,
         }}
         positionAbsoluteX={0}
         positionAbsoluteY={0}
@@ -275,5 +279,48 @@ describe("WorkflowNodeComponent", () => {
   it("does NOT render the error handle on a trigger node even under 'branch'", () => {
     renderNode({ store: branchStore(), id: "n_t", kind: "trigger.manual" })
     expect(screen.queryByTestId("wf-node-handle-error-n_t")).toBeNull()
+  })
+
+  // ── labeled multi-output handles (branch/switch v2) ──────────────────────
+  it("renders true/false handles with labels for a v2 branch", () => {
+    const { store } = withStore()
+    renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 2 })
+    expect(screen.getByTestId("wf-node-handle-out-n_b-true")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-out-n_b-false")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-label-n_b-true")).toHaveTextContent(/true/i)
+    expect(screen.getByTestId("wf-node-handle-label-n_b-false")).toHaveTextContent(/false/i)
+  })
+
+  it("renders one handle per case plus default for a v2 switch", () => {
+    const { store } = withStore()
+    renderNode({
+      store,
+      id: "n_s",
+      kind: "flow.switch",
+      typeVersion: 2,
+      params: {
+        cases: [
+          { id: "c_a", label: "Alpha", when: { combinator: "all", conditions: [] } },
+          { id: "c_b", label: "Beta", when: { combinator: "all", conditions: [] } },
+        ],
+      },
+    })
+    expect(screen.getByTestId("wf-node-handle-out-n_s-c_a")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-out-n_s-c_b")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-out-n_s-default")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-label-n_s-c_a")).toHaveTextContent("Alpha")
+    expect(screen.getByTestId("wf-node-handle-label-n_s-c_b")).toHaveTextContent("Beta")
+  })
+
+  it("keeps the error handle alongside v2 decision handles under 'branch' policy", () => {
+    renderNode({ store: branchStore(), id: "n_b", kind: "flow.branch", typeVersion: 2 })
+    expect(screen.getByTestId("wf-node-handle-out-n_b-true")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-node-handle-error-n_b")).toBeInTheDocument()
+  })
+
+  it("v1 branch keeps the single unlabeled output handle", () => {
+    const { store } = withStore()
+    renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 1 })
+    expect(screen.queryByTestId("wf-node-handle-out-n_b-true")).toBeNull()
   })
 })

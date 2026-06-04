@@ -9629,7 +9629,10 @@
       "refresh": "刷新",
       "abortMerge": "中止合并",
       "restore": "恢复（到 HEAD）",
-      "viewBlame": "查看追溯"
+      "viewBlame": "查看追溯",
+      "publish": "发布分支",
+      "undoLastCommit": "撤销上次提交",
+      "addToGitignore": "添加到 .gitignore"
     },
     "stash": {
       "title": "贮藏",
@@ -9700,6 +9703,16 @@
         "cherryPick": "拣选进行中——解决冲突后继续。",
         "revert": "还原进行中——解决冲突后继续。"
       }
+    },
+    "commitDetail": {
+      "createBranchHere": "从此提交创建分支…",
+      "createBranchTitle": "从此提交创建分支",
+      "branchNamePlaceholder": "新分支名称",
+      "createBranchAction": "创建并切换",
+      "checkoutCommit": "检出此提交…",
+      "checkoutCommitTitle": "检出提交？",
+      "checkoutCommitDescription": "这将切换到该提交的分离 HEAD 状态。如需修改，请从此处创建分支。",
+      "checkoutAction": "检出"
     },
     "irebase": {
       "title": "交互式变基",
@@ -15927,6 +15940,11 @@
     },
     "node": {
       "pinnedTitle": "已固定测试数据",
+      "outputHandles": {
+        "true": "真",
+        "false": "假",
+        "default": "默认"
+      },
       "lastRun": {
         "succeeded": "{ago} 运行 · 用时 {duration}",
         "succeededNoDuration": "{ago} 运行",
