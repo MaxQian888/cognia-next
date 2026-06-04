@@ -22,12 +22,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { classifyCommand } from "@/lib/claude/permissions/command-safety"
 import { detectPlatform } from "@/lib/terminal/shell-detect"
 import { AutocompleteController, type AutocompleteView } from "@/lib/terminal/completion/controller"
 import {
   buildAutocompleteContext,
   ensureBuiltinCompletionProviders,
 } from "@/lib/terminal/completion/builtins"
+import { getCompletions } from "@/lib/terminal/completion/registry"
 import type { AppSettings } from "@/lib/claude/types"
 import type { AcceptEdit, TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 
@@ -43,6 +45,8 @@ function readAutocompleteSettings(): AutocompleteSettings | undefined {
 
 export interface UseTerminalAutocompleteResult {
   enabled: boolean
+  /** Whether the multi-candidate popup feature is switched on. */
+  popupEnabled: boolean
   ghost: string
   ghostSuggestion: TerminalCompletionSuggestion | null
   /** Whether the candidate popup is open (and has candidates to show). */
@@ -66,6 +70,7 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     (s) => (s.settings?.terminal as NonNullable<AppSettings["terminal"]>)?.autocomplete
   )
   const enabled = !!ac?.enabled
+  const popupEnabled = enabled && ac?.popup !== false
   const debounceMs = Math.min(
     MAX_DEBOUNCE,
     Math.max(MIN_DEBOUNCE, ac?.debounceMs ?? DEFAULT_DEBOUNCE)
@@ -111,6 +116,14 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
           projectId: row.projectId ?? null,
         })
       },
+      // Registry fan-out plus the safety floor: a candidate whose resulting
+      // line the classifier outright denies is never shown anywhere — not
+      // as ghost text, not in the popup. (`ask` verdicts surface with a
+      // warning badge in the popup instead.)
+      query: async (qctx, signal) => {
+        const results = await getCompletions(qctx, signal)
+        return results.filter((s) => classifyCommand(s.text).verdict !== "deny")
+      },
       onChange: () => setView(controller.getView()),
     })
     controllerRef.current = controller
@@ -151,9 +164,9 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
   }, [enabled])
 
   const openList = useCallback(() => {
-    if (!enabled) return
+    if (!enabled || !popupEnabled) return
     controllerRef.current?.openList()
-  }, [enabled])
+  }, [enabled, popupEnabled])
 
   const closeList = useCallback(() => controllerRef.current?.closeList(), [])
   const moveSelection = useCallback(
@@ -165,6 +178,7 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
 
   return {
     enabled,
+    popupEnabled,
     ghost: view.ghost,
     ghostSuggestion: view.ghostSuggestion,
     listOpen: view.listOpen,

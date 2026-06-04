@@ -49,8 +49,16 @@ describe("ensureBuiltinCompletionProviders", () => {
     return { complete: async () => reply }
   }
 
-  it("registers history + ai providers (idempotently)", () => {
-    const deps = { getSettings: () => ({ source: "both" as const }), buildClient: () => null }
+  /** Legacy-shaped settings: only history/AI active. */
+  const legacy = (source: "both" | "ai" | "history") => ({
+    source,
+    path: false,
+    exe: false,
+    spec: false,
+  })
+
+  it("registers the providers (idempotently)", () => {
+    const deps = { getSettings: () => legacy("both"), buildClient: () => null }
     ensureBuiltinCompletionProviders(deps)
     ensureBuiltinCompletionProviders(deps) // second call is a no-op
     // history (offline) should answer even with no client
@@ -61,7 +69,7 @@ describe("ensureBuiltinCompletionProviders", () => {
 
   it("source='ai' suppresses the history provider", async () => {
     ensureBuiltinCompletionProviders({
-      getSettings: () => ({ source: "ai" }),
+      getSettings: () => legacy("ai"),
       buildClient: () => fakeClient("git stash"),
     })
     const out = await getCompletions(ctx(), signal)
@@ -72,7 +80,7 @@ describe("ensureBuiltinCompletionProviders", () => {
   it("source='history' suppresses the AI provider", async () => {
     let clientCalls = 0
     ensureBuiltinCompletionProviders({
-      getSettings: () => ({ source: "history" }),
+      getSettings: () => legacy("history"),
       buildClient: () => {
         clientCalls++
         return fakeClient("git stash")
@@ -81,5 +89,58 @@ describe("ensureBuiltinCompletionProviders", () => {
     const out = await getCompletions(ctx(), signal)
     expect(out.map((s) => s.source)).toEqual(["history"])
     expect(clientCalls).toBe(0)
+  })
+
+  it("registers the spec provider, gated by the spec toggle", async () => {
+    let spec = true
+    ensureBuiltinCompletionProviders({
+      getSettings: () => ({ source: "history", path: false, exe: false, spec }),
+      buildClient: () => null,
+    })
+    const withSpec = await getCompletions(ctx({ input: "git ch", cursor: 6 }), signal)
+    expect(withSpec.map((s) => s.source)).toContain("spec")
+    spec = false
+    const without = await getCompletions(ctx({ input: "git ch", cursor: 6 }), signal)
+    expect(without.map((s) => s.source)).not.toContain("spec")
+  })
+
+  it("registers the path and exe providers behind injected desktop deps", async () => {
+    ensureBuiltinCompletionProviders({
+      getSettings: () => ({ source: "history", path: true, exe: true, spec: false }),
+      buildClient: () => null,
+      pathDeps: {
+        isDesktop: () => true,
+        invoke: async () => [{ name: "src", isDir: true }],
+      },
+      exeDeps: {
+        isDesktop: () => true,
+        invoke: async () => ["gitk"],
+      },
+    })
+    const pathOut = await getCompletions(
+      ctx({ input: "cd s", cursor: 4, recentCommands: [] }),
+      signal
+    )
+    expect(pathOut.map((s) => s.source)).toContain("path")
+    const exeOut = await getCompletions(
+      ctx({ input: "git", cursor: 3, recentCommands: [] }),
+      signal
+    )
+    expect(exeOut.map((s) => s.source)).toContain("exe")
+  })
+
+  it("path/exe toggles gate their providers", async () => {
+    const pathInvoke = jest.fn(async () => [{ name: "src", isDir: true }])
+    const exeInvoke = jest.fn(async () => ["gitk"])
+    ensureBuiltinCompletionProviders({
+      getSettings: () => ({ source: "history", path: false, exe: false, spec: false }),
+      buildClient: () => null,
+      pathDeps: { isDesktop: () => true, invoke: pathInvoke },
+      exeDeps: { isDesktop: () => true, invoke: exeInvoke },
+    })
+    await getCompletions(ctx({ input: "cd s", cursor: 4 }), signal)
+    await getCompletions(ctx({ input: "git", cursor: 3 }), signal)
+    expect(pathInvoke).not.toHaveBeenCalled()
+    expect(exeInvoke).not.toHaveBeenCalled()
   })
 })

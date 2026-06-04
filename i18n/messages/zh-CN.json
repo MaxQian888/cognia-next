@@ -266,6 +266,19 @@
     "ghost": {
       "acceptHint": "Tab"
     },
+    "popup": {
+      "label": "补全候选",
+      "hint": "↑↓ 选择 · Enter 接受 · Esc 关闭",
+      "safetyAsk": "执行前需要确认",
+      "source": {
+        "history": "历史",
+        "ai": "AI",
+        "plugin": "插件",
+        "path": "路径",
+        "exe": "命令",
+        "spec": "CLI"
+      }
+    },
     "shellPicker": {
       "label": "选择 Shell",
       "auto": "默认 Shell",

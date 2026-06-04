@@ -71,6 +71,7 @@ import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalAutocomplete } from "@/hooks/terminal/use-terminal-autocomplete"
+import { TerminalCompletionPopup } from "@/components/terminal/terminal-completion-popup"
 import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
 
 /**
@@ -306,13 +307,14 @@ function TerminalInstanceImpl(
   })
   const [ghostPos, setGhostPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 })
 
-  // Re-anchor the ghost text to the cursor whenever the suffix changes
-  // (covers both keystroke-driven and async-resolved suggestions).
+  // Re-anchor the ghost text / popup to the cursor whenever the suffix or
+  // popup state changes (covers both keystroke-driven and async-resolved
+  // suggestions).
   useEffect(() => {
-    if (!autocomplete.ghost) return
+    if (!autocomplete.ghost && !autocomplete.listOpen) return
     const pos = cursorPixelPosition(termRef.current)
     if (pos) setGhostPos(pos)
-  }, [autocomplete.ghost])
+  }, [autocomplete.ghost, autocomplete.listOpen, autocomplete.candidates])
 
   // Imperative API for the search overlay + context-menu actions.
   useImperativeHandle(
@@ -498,15 +500,47 @@ function TerminalInstanceImpl(
         // completion and → still moves the cursor.
         const ac = acRef.current
         if (ac.enabled) {
+          const applyEdit = (edit: { backspaces: number; write: string } | null): boolean => {
+            if (!edit) return false
+            if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
+            void session.write(edit.write)
+            return true
+          }
+          // While the popup is open it owns ↑/↓/Enter/Tab/Esc.
+          if (ac.listOpen) {
+            if (e.key === "ArrowDown") {
+              ac.moveSelection(1)
+              return false
+            }
+            if (e.key === "ArrowUp") {
+              ac.moveSelection(-1)
+              return false
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              if (applyEdit(ac.acceptSelected())) return false
+              ac.closeList()
+              return false
+            }
+            if (e.key === "Escape") {
+              ac.closeList()
+              return false
+            }
+          }
+          // Ctrl+Space opens the candidate popup.
+          if (ac.popupEnabled && e.ctrlKey && !e.shiftKey && !e.altKey && e.code === "Space") {
+            ac.openList()
+            return false
+          }
           if (e.key === "Escape" && ac.ghostSuggestion) {
             ac.dismiss()
             return false
           }
           if (e.key === "Tab" || (e.key === "ArrowRight" && !e.shiftKey && !e.altKey && !mod)) {
-            const edit = ac.accept()
-            if (edit) {
-              if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
-              void session.write(edit.write)
+            if (applyEdit(ac.accept())) return false
+            // Second Tab: no ghost to accept but candidates exist → open
+            // the popup instead of falling through to shell completion.
+            if (e.key === "Tab" && ac.popupEnabled && ac.candidates.length > 0) {
+              ac.openList()
               return false
             }
           }
@@ -855,6 +889,29 @@ function TerminalInstanceImpl(
           fontSize={fontSize}
           source={autocomplete.ghostSuggestion?.source}
           acceptHint={t("ghost.acceptHint")}
+        />
+      ) : null}
+      {autocomplete.enabled && autocomplete.listOpen ? (
+        <TerminalCompletionPopup
+          candidates={autocomplete.candidates}
+          selectedIndex={autocomplete.selectedIndex}
+          left={ghostPos.left}
+          top={ghostPos.top}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
+          onPick={(index) => {
+            const ac = acRef.current
+            const delta = index - ac.selectedIndex
+            if (delta !== 0) ac.moveSelection(delta)
+            const edit = ac.acceptSelected()
+            if (edit) {
+              const session = getLiveSession(sessionId)
+              if (session) {
+                if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
+                void session.write(edit.write)
+              }
+            }
+          }}
         />
       ) : null}
     </div>

@@ -266,6 +266,19 @@
     "ghost": {
       "acceptHint": "Tab"
     },
+    "popup": {
+      "label": "Completion suggestions",
+      "hint": "↑↓ navigate · Enter accept · Esc close",
+      "safetyAsk": "Needs confirmation before running",
+      "source": {
+        "history": "History",
+        "ai": "AI",
+        "plugin": "Plugin",
+        "path": "Path",
+        "exe": "Command",
+        "spec": "CLI"
+      }
+    },
     "shellPicker": {
       "label": "Choose a shell",
       "auto": "Default shell",

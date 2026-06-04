@@ -5,10 +5,34 @@ import { __resetBuiltinCompletionProvidersForTesting } from "@/lib/terminal/comp
 
 const mockSettingsState: {
   settings: {
-    terminal: { autocomplete: { enabled: boolean; source: string; debounceMs: number } }
+    terminal: {
+      autocomplete: {
+        enabled: boolean
+        source: string
+        debounceMs: number
+        path: boolean
+        exe: boolean
+        spec: boolean
+        popup: boolean
+      }
+    }
   }
 } = {
-  settings: { terminal: { autocomplete: { enabled: true, source: "history", debounceMs: 50 } } },
+  settings: {
+    terminal: {
+      autocomplete: {
+        enabled: true,
+        source: "history",
+        debounceMs: 50,
+        // The desktop/spec providers are exercised in their own suites —
+        // keep these hook tests pinned to the history provider.
+        path: false,
+        exe: false,
+        spec: false,
+        popup: true,
+      },
+    },
+  },
 }
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -47,6 +71,10 @@ describe("useTerminalAutocomplete", () => {
     __resetBuiltinCompletionProvidersForTesting()
     mockSettingsState.settings.terminal.autocomplete.enabled = true
     mockSettingsState.settings.terminal.autocomplete.source = "history"
+    mockSettingsState.settings.terminal.autocomplete.path = false
+    mockSettingsState.settings.terminal.autocomplete.exe = false
+    mockSettingsState.settings.terminal.autocomplete.spec = false
+    mockSettingsState.settings.terminal.autocomplete.popup = true
     mockBuildClient.mockReset().mockReturnValue(null)
   })
 
@@ -132,6 +160,32 @@ describe("useTerminalAutocomplete", () => {
     await new Promise((r) => setTimeout(r, 80))
     expect(result.current.ghost).toBe("")
     delete mockTerminalState.sessions["s2"]
+  })
+
+  it("openList() is a no-op when the popup setting is off", async () => {
+    mockSettingsState.settings.terminal.autocomplete.popup = false
+    const { result } = renderHook(() => useTerminalAutocomplete("s1"))
+    expect(result.current.popupEnabled).toBe(false)
+    act(() => feedAll(result.current.feed, "git "))
+    await waitFor(() => expect(result.current.ghost).toBe("status"))
+    act(() => result.current.openList())
+    await new Promise((r) => setTimeout(r, 80))
+    expect(result.current.listOpen).toBe(false)
+  })
+
+  it("filters deny-verdict suggestions out entirely", async () => {
+    mockTerminalState.sessions["s3"] = {
+      id: "s3",
+      shell: "/bin/bash",
+      cwd: "/repo",
+      lastCommands: [{ cmd: "rm -rf / --no-preserve-root", exitCode: 1, endedAt: 1 }],
+    }
+    const { result } = renderHook(() => useTerminalAutocomplete("s3"))
+    act(() => feedAll(result.current.feed, "rm"))
+    await new Promise((r) => setTimeout(r, 120))
+    expect(result.current.ghost).toBe("")
+    expect(result.current.candidates).toHaveLength(0)
+    delete mockTerminalState.sessions["s3"]
   })
 
   it("is a no-op when disabled", async () => {

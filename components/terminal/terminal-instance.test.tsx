@@ -129,6 +129,7 @@ jest.mock("@/lib/terminal/session-registry", () => ({
 // prompt-reset).
 const mockAutocomplete: {
   enabled: boolean
+  popupEnabled: boolean
   ghost: string
   ghostSuggestion: { source: "history" | "ai" | "plugin" | "path" | "exe" | "spec" } | null
   listOpen: boolean
@@ -144,6 +145,7 @@ const mockAutocomplete: {
   reset: jest.Mock
 } = {
   enabled: false,
+  popupEnabled: false,
   ghost: "",
   ghostSuggestion: null,
   listOpen: false,
@@ -217,6 +219,7 @@ beforeEach(() => {
   ;(MockTerminal as unknown as jest.Mock).mockClear()
   sessionRegistry.current = makeFakeSession()
   mockAutocomplete.enabled = false
+  mockAutocomplete.popupEnabled = false
   mockAutocomplete.ghost = ""
   mockAutocomplete.ghostSuggestion = null
   mockAutocomplete.listOpen = false
@@ -619,6 +622,82 @@ describe("TerminalInstance", () => {
       await flushAsync()
       const result = captured.cb!(key({ key: "Tab" }))
       expect(result).toBe(true) // falls through to xterm default
+    })
+
+    it("opens the popup on Ctrl+Space when enabled", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: " ", code: "Space", ctrlKey: true }))
+      expect(mockAutocomplete.openList).toHaveBeenCalled()
+      expect(result).toBe(false)
+    })
+
+    it("does not open the popup when the popup setting is off", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = false
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      captured.cb!(key({ key: " ", code: "Space", ctrlKey: true }))
+      expect(mockAutocomplete.openList).not.toHaveBeenCalled()
+    })
+
+    it("routes ArrowUp/ArrowDown/Esc to the popup while open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      expect(captured.cb!(key({ key: "ArrowDown" }))).toBe(false)
+      expect(mockAutocomplete.moveSelection).toHaveBeenCalledWith(1)
+      expect(captured.cb!(key({ key: "ArrowUp" }))).toBe(false)
+      expect(mockAutocomplete.moveSelection).toHaveBeenCalledWith(-1)
+      expect(captured.cb!(key({ key: "Escape" }))).toBe(false)
+      expect(mockAutocomplete.closeList).toHaveBeenCalled()
+    })
+
+    it("accepts the highlighted candidate on Enter while the popup is open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.acceptSelected.mockReturnValue({ backspaces: 2, write: "src/" })
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Enter" }))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(1, del.repeat(2))
+      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(2, "src/")
+      expect(result).toBe(false)
+    })
+
+    it("opens the popup on a second Tab when candidates exist but no ghost", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.accept.mockReturnValue(null)
+      mockAutocomplete.candidates = [{ text: "cd src/" }]
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      expect(mockAutocomplete.openList).toHaveBeenCalled()
+      expect(result).toBe(false)
+    })
+
+    it("renders the completion popup while the list is open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.candidates = [
+        { text: "git status", source: "history", providerId: "builtin:history" },
+      ]
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      expect(container.querySelector('[data-testid="terminal-completion-popup"]')).toBeTruthy()
     })
 
     it("dismisses on Escape when a suggestion is active", async () => {
