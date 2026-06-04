@@ -4,6 +4,58 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
+
+// Radix Select → native <select> so `onValueChange` is driveable in jsdom
+// (same pattern as edge-inspector.test.tsx — the portal/pointer flow is flaky).
+jest.mock("@/components/ui/select", () => {
+  const Select = ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value: string
+    onValueChange: (v: string) => void
+    children: React.ReactNode
+  }) => (
+    <select value={value} onChange={(e) => onValueChange(e.target.value)}>
+      {children}
+    </select>
+  )
+  const SelectItem = ({ value, children }: { value: string; children: React.ReactNode }) => (
+    <option value={value}>{children}</option>
+  )
+  const Passthrough = ({ children }: { children?: React.ReactNode }) => <>{children}</>
+  return {
+    Select,
+    SelectItem,
+    SelectTrigger: Passthrough,
+    SelectContent: Passthrough,
+    SelectValue: Passthrough,
+  }
+})
+
+// CodeMirror-hosted expression editor → plain input for deterministic typing.
+jest.mock("./expression-field", () => ({
+  ExpressionField: ({
+    id,
+    value,
+    onChange,
+    "aria-label": ariaLabel,
+  }: {
+    id?: string
+    value: string
+    onChange: (v: string) => void
+    "aria-label"?: string
+  }) => (
+    <input
+      data-testid={`ef-${id}`}
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 import { ConditionBuilder } from "./condition-builder"
 
 function lastCall(fn: jest.Mock): WorkflowConditionGroup {
@@ -106,5 +158,64 @@ describe("ConditionBuilder", () => {
     }
     render(<ConditionBuilder idPrefix="cb" value={value} onChange={onChange} />)
     expect(screen.queryByTestId("cb-case-sensitive-0")).toBeNull()
+  })
+
+  it("edits left, right, and rightUpper operands", () => {
+    const onChange = jest.fn()
+    const value: WorkflowConditionGroup = {
+      combinator: "all",
+      conditions: [{ left: "", operator: "inRange", right: "", rightUpper: "" }],
+    }
+    render(<ConditionBuilder idPrefix="cb" value={value} onChange={onChange} />)
+    fireEvent.change(screen.getByTestId("ef-cb-left-0"), { target: { value: "{{ $x }}" } })
+    expect(lastCall(onChange).conditions[0].left).toBe("{{ $x }}")
+    fireEvent.change(screen.getByTestId("ef-cb-right-0"), { target: { value: "1" } })
+    expect(lastCall(onChange).conditions[0].right).toBe("1")
+    fireEvent.change(screen.getByTestId("cb-right-upper-0"), { target: { value: "9" } })
+    expect(lastCall(onChange).conditions[0].rightUpper).toBe("9")
+  })
+
+  it("switching to a unary operator strips the right operand", () => {
+    const onChange = jest.fn()
+    const value: WorkflowConditionGroup = {
+      combinator: "all",
+      conditions: [{ left: "a", operator: "eq", right: "b", caseSensitive: true }],
+    }
+    const { container } = render(
+      <ConditionBuilder idPrefix="cb" value={value} onChange={onChange} />
+    )
+    const select = container.querySelector("select")!
+    fireEvent.change(select, { target: { value: "isEmpty" } })
+    const next = lastCall(onChange).conditions[0]
+    expect(next.operator).toBe("isEmpty")
+    expect(next.right).toBeUndefined()
+    expect(next.caseSensitive).toBeUndefined()
+  })
+
+  it("switching to a non-range operator strips the upper bound", () => {
+    const onChange = jest.fn()
+    const value: WorkflowConditionGroup = {
+      combinator: "all",
+      conditions: [{ left: "a", operator: "inRange", right: "1", rightUpper: "9" }],
+    }
+    const { container } = render(
+      <ConditionBuilder idPrefix="cb" value={value} onChange={onChange} />
+    )
+    const select = container.querySelector("select")!
+    fireEvent.change(select, { target: { value: "gt" } })
+    const next = lastCall(onChange).conditions[0]
+    expect(next.operator).toBe("gt")
+    expect(next.rightUpper).toBeUndefined()
+  })
+
+  it("unchecking case sensitivity clears the flag back to undefined", () => {
+    const onChange = jest.fn()
+    const value: WorkflowConditionGroup = {
+      combinator: "all",
+      conditions: [{ left: "a", operator: "contains", right: "b", caseSensitive: true }],
+    }
+    render(<ConditionBuilder idPrefix="cb" value={value} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId("cb-case-sensitive-0"))
+    expect(lastCall(onChange).conditions[0].caseSensitive).toBeUndefined()
   })
 })
