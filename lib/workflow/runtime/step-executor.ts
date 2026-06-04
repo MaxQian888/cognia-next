@@ -37,6 +37,26 @@ export interface RunStepInput {
   honorPinData?: boolean
   /** Run-scoped agent-trace id, threaded onto the step context for AI-node spans. */
   traceId?: string
+  /**
+   * Extra expression idents merged over `upstream` for this step only — the
+   * loop container injects `$item` / `$loop` here (see the ident fallback in
+   * `expression.ts#evalToken`). Visible both to `resolveDeep` and to the
+   * executor's `ctx.upstream`.
+   */
+  extraUpstream?: Record<string, unknown>
+  /**
+   * Run-shared mutable state exposed as `{{ $static.* }}`. The loop container
+   * threads its accumulator object here; top-level steps default to `{}`.
+   */
+  staticData?: Record<string, unknown>
+  /**
+   * Idempotency key override. Loop iterations pass
+   * `iterationCacheKey(loopId, i, node.id)` so each iteration memoizes
+   * independently; defaults to `node.id`.
+   */
+  cacheKey?: string
+  /** Iteration provenance stamped onto step start/complete event payloads. */
+  iterationMeta?: { loopId: string; iterationIndex: number }
 }
 
 export interface StepExecution {
@@ -55,9 +75,10 @@ export interface StepExecution {
  */
 export async function runStep(input: RunStepInput): Promise<StepExecution> {
   const { node, runId, cache, signal, logger, retryPolicy } = input
+  const cacheKey = input.cacheKey ?? node.id
 
-  if (cache.has(node.id)) {
-    return { output: cache.get(node.id), fromCache: true }
+  if (cache.has(cacheKey)) {
+    return { output: cache.get(cacheKey), fromCache: true }
   }
 
   // Pin-data short-circuit (editor manual runs only). The pinned value stands
@@ -69,9 +90,9 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     Object.prototype.hasOwnProperty.call(input.workflow.pinData, node.id)
   ) {
     const pinned = input.workflow.pinData[node.id]
-    await logger.stepStarted(node.id, { pinned: true })
-    cache.set(node.id, pinned)
-    await logger.stepCompleted(node.id, pinned)
+    await logger.stepStarted(node.id, { pinned: true }, input.iterationMeta)
+    cache.set(cacheKey, pinned)
+    await logger.stepCompleted(node.id, pinned, input.iterationMeta)
     return { output: pinned, fromCache: false }
   }
 
@@ -86,10 +107,15 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
   }
 
   // Resolve params with expression substitution before passing to the executor.
+  // `extraUpstream` rides on top of the real upstream map so loop-injected
+  // idents (`$item` / `$loop`) resolve through evalToken's ident fallback.
+  const upstream = input.extraUpstream
+    ? { ...input.upstream, ...input.extraUpstream }
+    : input.upstream
   const resolvedParams = resolveDeep(node.data.params, {
-    upstream: input.upstream,
+    upstream,
     trigger: input.trigger,
-    staticData: {},
+    staticData: input.staticData ?? {},
     params: node.data.params as Record<string, unknown>,
     variables: input.workflow.variables ?? {},
   })
@@ -99,7 +125,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     workflowId: input.workflow.id,
     stepId: node.id,
     params: resolvedParams as Record<string, unknown>,
-    upstream: input.upstream,
+    upstream,
     trigger: input.trigger,
     signal,
     log: (level, message, payload) => void logger.log(level, message, payload, node.id),
@@ -117,7 +143,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       throw err
     }
 
-    await logger.stepStarted(node.id, { attempt })
+    await logger.stepStarted(node.id, { attempt }, input.iterationMeta)
     try {
       const result = await runWithTimeout(
         reg.timeoutMs ?? input.workflow.settings.timeoutMs,
@@ -136,8 +162,8 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
           await logger.log(l.level, l.message, l.payload, node.id)
         }
       }
-      cache.set(node.id, result.output)
-      await logger.stepCompleted(node.id, result.output)
+      cache.set(cacheKey, result.output)
+      await logger.stepCompleted(node.id, result.output, input.iterationMeta)
       return exec
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

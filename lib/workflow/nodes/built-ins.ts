@@ -441,6 +441,24 @@ registerNodeExecutor({
   },
 })
 
+// ── flow.break / flow.continue ────────────────────────────────────────────
+// Loop-body jump markers (schemaVersion 2). Pure sentinels: the subgraph
+// runner inspects `__loopSignal` on the output and stops the INNERMOST
+// loop (break) or ends the current iteration (continue). Outside a loop
+// body the validator rejects them at definition time, so the sentinel
+// never leaks into a top-level run.
+registerNodeExecutor({
+  kind: "flow.break",
+  typeVersion: 1,
+  execute: async () => ({ output: { __loopSignal: "break" } }),
+})
+
+registerNodeExecutor({
+  kind: "flow.continue",
+  typeVersion: 1,
+  execute: async () => ({ output: { __loopSignal: "continue" } }),
+})
+
 // ── flow.split ────────────────────────────────────────────────────────────
 // Pure passthrough — the orchestrator inspects the graph to fan out, so
 // this executor just forwards its upstream so downstream branches can

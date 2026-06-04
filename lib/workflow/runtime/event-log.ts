@@ -87,6 +87,17 @@ export async function completedStepIds(runId: string): Promise<Set<string>> {
 }
 
 /**
+ * Iteration provenance attached to step events emitted from inside a loop
+ * container body. Carried in the event PAYLOAD (the stepId stays the plain
+ * child node id so the timeline UI groups by node); the idempotency cache
+ * uses it to reconstruct per-iteration keys on resume.
+ */
+export interface StepIterationMeta {
+  loopId: string
+  iterationIndex: number
+}
+
+/**
  * Convenience scoped logger — captures runId once so nodes don't re-pass it.
  */
 export function createRunLogger(runId: string) {
@@ -102,10 +113,10 @@ export function createRunLogger(runId: string) {
         payload: error,
       }),
     runCancelled: () => appendEvent({ runId, type: "run_cancelled" }),
-    stepStarted: (stepId: string, params?: unknown) =>
-      appendEvent({ runId, type: "step_started", stepId, payload: { params } }),
-    stepCompleted: (stepId: string, output: unknown) =>
-      appendEvent({ runId, type: "step_completed", stepId, payload: { output } }),
+    stepStarted: (stepId: string, params?: unknown, meta?: StepIterationMeta) =>
+      appendEvent({ runId, type: "step_started", stepId, payload: { params, ...meta } }),
+    stepCompleted: (stepId: string, output: unknown, meta?: StepIterationMeta) =>
+      appendEvent({ runId, type: "step_completed", stepId, payload: { output, ...meta } }),
     stepFailed: (stepId: string, error: { message: string; retryable?: boolean }) =>
       appendEvent({
         runId,

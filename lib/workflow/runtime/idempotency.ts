@@ -7,6 +7,15 @@
 
 import { listRunEvents } from "./event-log"
 
+/**
+ * Cache key for a child step executed inside a loop-container iteration —
+ * `(runId, stepId)` becomes `(runId, loopId, iterationIndex, stepId)` so a
+ * resumed run replays only the iterations that never completed.
+ */
+export function iterationCacheKey(loopId: string, iterationIndex: number, stepId: string): string {
+  return `${loopId}#${iterationIndex}#${stepId}`
+}
+
 export class IdempotencyCache {
   private cache = new Map<string, unknown>()
 
@@ -35,8 +44,23 @@ export class IdempotencyCache {
     const events = await listRunEvents(runId)
     for (const e of events) {
       if (e.type === "step_completed" && e.stepId) {
-        const output = (e.payload as { output?: unknown } | undefined)?.output
-        cache.set(e.stepId, output)
+        const payload = e.payload as
+          | { output?: unknown; loopId?: string; iterationIndex?: number }
+          | undefined
+        // Loop-body completions hydrate under their per-iteration key ONLY —
+        // a child id must never cache-hit at the top level.
+        if (
+          payload &&
+          typeof payload.loopId === "string" &&
+          typeof payload.iterationIndex === "number"
+        ) {
+          cache.set(
+            iterationCacheKey(payload.loopId, payload.iterationIndex, e.stepId),
+            payload.output
+          )
+        } else {
+          cache.set(e.stepId, payload?.output)
+        }
       }
     }
     return cache
