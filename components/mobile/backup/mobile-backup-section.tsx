@@ -401,8 +401,16 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
                     <ItemContent>
                       <ItemDescription className="text-xs">
                         {new Date(row.completedAt).toLocaleString()}
+                        {row.deviceLabel ? ` · ${row.deviceLabel}` : ""}
                       </ItemDescription>
                     </ItemContent>
+                    <Badge variant="outline" className="text-[10px]">
+                      {row.encryption === "passphrase"
+                        ? t("historyEncryptionPassphrase")
+                        : row.encryption === "auto-key"
+                          ? t("historyEncryptionAutoKey")
+                          : t("historyEncryptionNone")}
+                    </Badge>
                     {!row.success ? (
                       <Badge variant="destructive" className="text-[10px]">
                         {row.errorMessage ?? t("historyFailedLabel")}

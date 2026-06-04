@@ -5,6 +5,7 @@
 
 import { getDb } from "@/lib/db/schema"
 import { getSettings } from "@/lib/db/settings"
+import { getDeviceMetadata } from "@/lib/device/device-identity"
 import { isTauri } from "@/lib/tauri"
 import { canonicalStringify } from "./migrate"
 import { sha256Hex } from "./crypto"
@@ -165,6 +166,8 @@ export async function buildBackupPackage(
   }
 
   const checksum = await sha256Hex(canonicalStringify(payload))
+  // Optional provenance — restore + history surface "which device wrote this".
+  const device = (await getDeviceMetadata()) ?? undefined
   const manifest: BackupManifestV3 = {
     version: "3.0",
     schemaVersion: EXPORT_SCHEMA_VERSION,
@@ -173,6 +176,7 @@ export async function buildBackupPackage(
     appVersion: APP_VERSION,
     backend: isTauri() ? "tauri-dexie" : "web-dexie",
     integrity: { algorithm: "SHA-256", checksum },
+    ...(device ? { device } : {}),
   }
 
   return { version: "3.0", manifest, payload }

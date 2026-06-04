@@ -2,7 +2,9 @@
 
 // WebDAV snapshot-sync settings. Server URL/folder/username live in
 // AppSettings; the password lives in the OS keyring; the zero-knowledge sync
-// passphrase is session-only (never persisted). Mirrors <ShareSettingsCard/>.
+// passphrase is session-only by default, with an opt-in "remember on this
+// device" keyring persistence for unattended automation. Mirrors
+// <ShareSettingsCard/>.
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -15,16 +17,24 @@ import { Badge } from "@/components/ui/badge"
 import { CloudIcon } from "lucide-react"
 import { toast } from "sonner"
 import { getSettings, saveSettings } from "@/lib/db/settings"
+import { listBackupHistory } from "@/lib/db/backup-history"
 import {
   DEFAULT_WEBDAV_REMOTE_DIR,
+  clearStoredSyncPassphrase,
   hasWebDavPassword,
   setWebDavPassword,
   getWebDavPassword,
 } from "@/lib/webdav/config"
 import { createWebDavClient } from "@/lib/webdav/client"
 import { isWebDavSupported } from "@/lib/webdav/transport"
-import { setSyncPassphrase, hasSyncPassphrase } from "@/lib/webdav/passphrase-cache"
-import { runWebDavSyncNow } from "@/lib/webdav/sync-now"
+import {
+  getSyncPassphrase,
+  hasSyncPassphrase,
+  loadPersistedSyncPassphrase,
+  persistSyncPassphrase,
+  setSyncPassphrase,
+} from "@/lib/webdav/passphrase-cache"
+import { runWebDavSyncNow, type WebDavSyncPhase } from "@/lib/webdav/sync-now"
 import { WebDavRestoreDialog } from "@/components/data/import/webdav-restore-dialog"
 
 export function WebDavSyncCard() {
@@ -37,7 +47,10 @@ export function WebDavSyncCard() {
   const [passwordSaved, setPasswordSaved] = useState(false)
   const [passphrase, setPassphrase] = useState("")
   const [unlocked, setUnlocked] = useState(false)
+  const [remember, setRemember] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | undefined>()
+  const [lastSyncDevice, setLastSyncDevice] = useState<string | undefined>()
+  const [syncPhase, setSyncPhase] = useState<WebDavSyncPhase | null>(null)
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
   const [supported, setSupported] = useState(true)
@@ -52,10 +65,42 @@ export function WebDavSyncCard() {
       setRemoteDir(cfg?.remoteDir ?? DEFAULT_WEBDAV_REMOTE_DIR)
       setUsername(cfg?.username ?? "")
       setLastSyncAt(cfg?.lastSyncAt)
+      setRemember(cfg?.rememberPassphrase ?? false)
       setPasswordSaved(await hasWebDavPassword())
+      // Hydrate the opt-in persisted passphrase so the card shows "unlocked"
+      // right after a restart instead of demanding a re-type.
+      await loadPersistedSyncPassphrase()
       setUnlocked(hasSyncPassphrase())
+      // Which device produced the newest successful WebDAV upload.
+      try {
+        const rows = await listBackupHistory({ successOnly: true, limit: 20 })
+        const lastWebDav = rows.find((r) => r.encryption === "passphrase" && r.deviceLabel)
+        setLastSyncDevice(lastWebDav?.deviceLabel)
+      } catch {
+        // History unavailable — cosmetic only.
+      }
     })()
   }, [])
+
+  const onToggleRemember = async (next: boolean) => {
+    setRemember(next)
+    const settings = await getSettings()
+    await saveSettings({
+      webdavSync: { ...(settings.webdavSync ?? {}), rememberPassphrase: next },
+    })
+    if (next) {
+      // Persist immediately when the session already holds a proven passphrase.
+      const current = getSyncPassphrase()
+      if (current) await persistSyncPassphrase(current)
+    } else {
+      // Wipe the keyring copy; the session cache stays valid until app exit.
+      try {
+        await clearStoredSyncPassphrase()
+      } catch {
+        // Best-effort.
+      }
+    }
+  }
 
   const onSave = async () => {
     setSaving(true)
@@ -120,7 +165,7 @@ export function WebDavSyncCard() {
     }
     setBusy(true)
     try {
-      const result = await runWebDavSyncNow(passphrase || "")
+      const result = await runWebDavSyncNow(passphrase || "", { onProgress: setSyncPhase })
       if (result.ok) {
         setUnlocked(true)
         setLastSyncAt(new Date().toISOString())
@@ -130,6 +175,20 @@ export function WebDavSyncCard() {
       }
     } finally {
       setBusy(false)
+      setSyncPhase(null)
+    }
+  }
+
+  const phaseLabel = (phase: WebDavSyncPhase): string => {
+    switch (phase) {
+      case "building":
+        return t("phaseBuilding")
+      case "encrypting":
+        return t("phaseEncrypting")
+      case "uploading":
+        return t("phaseUploading")
+      case "done":
+        return t("phaseDone")
     }
   }
 
@@ -231,11 +290,30 @@ export function WebDavSyncCard() {
         <p className="text-[11px] text-muted-foreground">{t("passphraseHint")}</p>
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-sm">
+          <Switch
+            checked={remember}
+            onCheckedChange={(next) => void onToggleRemember(next)}
+            data-testid="webdav-remember-passphrase"
+          />
+          <span className="font-medium">{t("rememberPassphraseLabel")}</span>
+        </label>
+        <p className="text-[11px] text-muted-foreground">{t("rememberPassphraseDescription")}</p>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground" data-testid="webdav-last-sync-line">
         {lastSyncAt
           ? t("lastSync", { time: new Date(lastSyncAt).toLocaleString() })
           : t("neverSynced")}
+        {lastSyncDevice ? ` · ${t("producedBy", { device: lastSyncDevice })}` : ""}
       </p>
+
+      {syncPhase ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="webdav-sync-phase">
+          {phaseLabel(syncPhase)}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap justify-end gap-2">
         <Button

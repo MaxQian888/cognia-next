@@ -4,8 +4,15 @@
 // (and once on mount) we check `appSettings.backupAutoSchedule`; if it's
 // enabled and the interval has elapsed since the last success, we kick off a
 // new auto-key-encrypted backup.
+//
+// The same tick (single timer — deliberately no second interval) also:
+//   1. hydrates the opt-in persisted sync passphrase from the keyring so
+//      unattended WebDAV uploads work across restarts, and
+//   2. runs the "remote snapshot newer than local?" check, surfacing a
+//      notification-center entry via `notifyIfRemoteNewer`.
 
 import { useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
@@ -22,12 +29,18 @@ import {
   uploadSnapshotToWebDav,
   webdavSnapshotName,
 } from "@/lib/data/destinations/webdav"
-import { getSyncPassphrase, hasSyncPassphrase } from "@/lib/webdav/passphrase-cache"
+import {
+  getSyncPassphrase,
+  hasSyncPassphrase,
+  loadPersistedSyncPassphrase,
+} from "@/lib/webdav/passphrase-cache"
+import { notifyIfRemoteNewer } from "@/lib/webdav/remote-newer-notify"
 import type { BackupPackageV3 } from "@/lib/data/types"
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 
 export function BackupSchedulerProvider({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("settings.data.webdav.startup")
   const ranOnceRef = useRef(false)
 
   useEffect(() => {
@@ -36,13 +49,20 @@ export function BackupSchedulerProvider({ children }: { children: React.ReactNod
     if (process.env.NODE_ENV === "test") return
     if (typeof window === "undefined") return
 
+    const strings = { title: t("newerFound"), body: t("newerBody") }
     const tick = async () => {
       try {
+        // Hydrate the opt-in persisted passphrase BEFORE the run so the
+        // WebDAV piggyback upload can fire unattended after a restart.
+        await loadPersistedSyncPassphrase()
         await runOnce()
       } catch (err) {
         // Schedule failures bubble up via backupHistory; nothing else to do.
         console.warn("scheduled backup tick failed", err)
       }
+      // Periodic remote-newer check rides the same timer (never throws;
+      // self-gated on webdavSync being configured).
+      await notifyIfRemoteNewer(strings)
     }
 
     if (!ranOnceRef.current) {
@@ -53,7 +73,7 @@ export function BackupSchedulerProvider({ children }: { children: React.ReactNod
       void tick()
     }, CHECK_INTERVAL_MS)
     return () => window.clearInterval(id)
-  }, [])
+  }, [t])
 
   return <>{children}</>
 }
@@ -139,6 +159,8 @@ export async function runOnce(): Promise<boolean> {
       encryption: "auto-key",
       sizeBytes: body.length,
       filename: fileName,
+      deviceId: pkg.manifest.device?.id,
+      deviceLabel: pkg.manifest.device?.label,
     })
 
     // WebDAV upload piggybacks on the local schedule. It re-encrypts the same
@@ -209,6 +231,8 @@ export async function maybeUploadToWebDav(
       sizeBytes: result.ok ? body.length : undefined,
       filename: result.ok ? filename : undefined,
       errorMessage: result.ok ? undefined : result.error,
+      deviceId: pkg.manifest.device?.id,
+      deviceLabel: pkg.manifest.device?.label,
     })
     if (result.ok) {
       const settings = await getSettings()

@@ -58,6 +58,10 @@ export async function encryptSnapshotBody(
     appVersion: pkg.manifest.appVersion,
     backend: pkg.manifest.backend,
     encryption: { enabled: true, format: "encrypted-envelope-v1" },
+    // Optional device provenance (generic label, never the raw user agent) —
+    // rides cleartext in the envelope so the restore dialog can show it
+    // without decrypting.
+    ...(pkg.manifest.device ? { device: pkg.manifest.device } : {}),
   })
   return JSON.stringify(env)
 }

@@ -4035,8 +4035,15 @@
         "passphraseLabel": "同步口令",
         "passphrasePlaceholder": "在你的多台设备间共享",
         "passphraseUnlocked": "本次会话已解锁",
-        "passphraseHint": "绝不存储——每次会话需重新输入才能启用自动同步与恢复。会对备份加密，服务器看不到明文。",
+        "passphraseHint": "默认仅本次会话有效——每次会话需重新输入，或在下方选择记住口令。会对备份加密，服务器看不到明文。",
         "unlocked": "已解锁",
+        "rememberPassphraseLabel": "在本设备记住同步口令",
+        "rememberPassphraseDescription": "把口令存入本设备的系统密钥环，重启后定时上传和恢复检测可无人值守运行。但任何能解锁本设备的人都能解密你的同步数据——保持关闭则口令仅保留在内存中。",
+        "producedBy": "来自 {device}",
+        "phaseBuilding": "正在构建快照…",
+        "phaseEncrypting": "正在加密…",
+        "phaseUploading": "正在上传…",
+        "phaseDone": "完成。",
         "save": "保存",
         "saved": "WebDAV 设置已保存。",
         "clear": "清除",
@@ -4067,10 +4074,13 @@
           "restoring": "恢复中…",
           "restoreButton": "恢复",
           "close": "关闭",
-          "failed": "恢复失败：{error}"
+          "failed": "恢复失败：{error}",
+          "producedBy": "该快照由 {device} 生成。",
+          "producedByUnknown": "无法识别快照来源设备（较旧的备份）。"
         },
         "startup": {
           "newerFound": "你的 WebDAV 服务器上有更新的备份。",
+          "newerBody": "另一台设备上传了更新的快照。打开备份设置以查看并恢复。",
           "restoreAction": "恢复"
         }
       },
@@ -15290,6 +15300,9 @@
       "historyHeader": "历史",
       "historyEmpty": "尚无历史记录。",
       "historyFailedLabel": "失败",
+      "historyEncryptionPassphrase": "口令加密",
+      "historyEncryptionAutoKey": "自动密钥",
+      "historyEncryptionNone": "未加密",
       "passphraseLabel": "可选密码（留空则使用自动密钥）",
       "exportBiometricTitle": "确认导出",
       "exportBiometricReason": "通过生物识别验证后导出加密备份。",
@@ -16259,6 +16272,12 @@
         "team": {
           "label": "团队运行开始时",
           "description": "由智能体团队合成器在团队运行启动时触发的内部触发器，不可手工编排。"
+        },
+        "terminal": {
+          "command": {
+            "label": "终端命令结束时",
+            "description": "当用户自己打开的终端 dock 标签页中有命令结束时触发。可按会话、项目、退出状态或命令子串过滤。"
+          }
         }
       },
       "action": {
@@ -16476,6 +16495,18 @@
               "label": "关闭终端会话",
               "description": "关闭本次运行中打开的终端会话。运行结束时会自动关闭遗留会话。"
             }
+          },
+          "script": {
+            "label": "运行脚本文件",
+            "description": "以正确的解释器运行脚本文件（.sh / .ps1 / .py / .js / …），按扩展名自动检测，也可显式覆盖。"
+          },
+          "readRecent": {
+            "label": "读取终端历史",
+            "description": "读取终端 dock 标签页的最近命令环（命令、退出码、结束时间）。"
+          },
+          "waitForExit": {
+            "label": "等待终端命令结束",
+            "description": "阻塞直到终端 dock 标签页中正在运行的命令结束，并按退出码路由。"
           }
         }
       },
@@ -18108,6 +18139,91 @@
         },
         "height": {
           "label": "高度（像素）"
+        }
+      },
+      "terminalScript": {
+        "scriptPath": {
+          "label": "脚本路径",
+          "hint": "脚本文件路径。解释器按扩展名检测（.sh、.ps1、.py、.js 等）。",
+          "placeholder": "scripts/deploy.ps1"
+        },
+        "interpreter": {
+          "label": "解释器（可选）",
+          "hint": "显式指定解释器，跳过扩展名检测。",
+          "placeholder": "python3"
+        },
+        "cwd": {
+          "label": "工作目录",
+          "hint": "可选。默认为 shell 解析的工作目录。",
+          "placeholder": "D:\\repo"
+        },
+        "timeoutSec": {
+          "label": "超时（秒）",
+          "hint": "5–600。等待脚本结束的最长时间。"
+        },
+        "onFailure": {
+          "label": "失败时",
+          "hint": "抛出将使运行失败；分支则路由到失败端口。",
+          "options": {
+            "throw": "使运行失败",
+            "branch": "路由到失败分支"
+          }
+        }
+      },
+      "terminalReadRecent": {
+        "tabId": {
+          "label": "标签页 id",
+          "hint": "要读取的终端 dock 标签页。可用表达式引用先前打开的会话。",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "lineLimit": {
+          "label": "最大记录数",
+          "hint": "返回最近 1–50 条命令记录（默认 10）。"
+        }
+      },
+      "terminalWaitForExit": {
+        "tabId": {
+          "label": "标签页 id",
+          "hint": "要等待下一条命令结束的终端 dock 标签页。",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "timeoutSec": {
+          "label": "超时（秒）",
+          "hint": "5–600。窗口期内没有命令结束则失败。"
+        },
+        "onFailure": {
+          "label": "失败时",
+          "hint": "抛出将使运行失败；分支则路由到失败端口。",
+          "options": {
+            "throw": "使运行失败",
+            "branch": "路由到失败分支"
+          }
+        }
+      },
+      "terminalCommandTrigger": {
+        "sessionId": {
+          "label": "标签页 id（可选）",
+          "hint": "仅对该终端标签页触发。留空匹配任意用户打开的标签页。",
+          "placeholder": "term-…"
+        },
+        "projectId": {
+          "label": "项目 id（可选）",
+          "hint": "仅对绑定到该项目的标签页触发。",
+          "placeholder": "proj-…"
+        },
+        "status": {
+          "label": "退出状态",
+          "hint": "任意退出、仅成功（退出码 0）或仅失败时触发。",
+          "options": {
+            "any": "任意退出",
+            "success": "仅成功（退出码 0）",
+            "failure": "仅失败"
+          }
+        },
+        "commandContains": {
+          "label": "命令包含（可选）",
+          "hint": "仅当命令行包含该子串时触发。疑似含密钥的命令会被脱敏，不参与匹配。",
+          "placeholder": "pnpm test"
         }
       }
     }

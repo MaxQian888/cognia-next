@@ -71,6 +71,42 @@ describe("migrateEnvelope", () => {
     expect(out).toBe(pkg)
   })
 
+  it("accepts manifests with and without the optional device provenance", async () => {
+    // Pre-2026-06 files have no `manifest.device`; newer files do. Both must
+    // validate identically — the checksum covers the payload only, and the
+    // shape guard checks version fields only (no schemaVersion bump).
+    const payload: BackupPayloadV3 = { settings: undefined, characters: [] }
+    const checksum = await sha256Hex(canonicalStringify(payload))
+    const base: BackupPackageV3 = {
+      version: "3.0",
+      manifest: {
+        version: "3.0",
+        schemaVersion: 3,
+        traceId: "t-dev",
+        exportedAt: "2024-01-01T00:00:00.000Z",
+        appVersion: "0.1.0",
+        backend: "web-dexie",
+        integrity: { algorithm: "SHA-256", checksum },
+      },
+      payload,
+    }
+    await expect(migrateEnvelope(base)).resolves.toBe(base)
+
+    const withDevice: BackupPackageV3 = {
+      ...base,
+      manifest: {
+        ...base.manifest,
+        device: { id: "dev-1", label: "Windows desktop", platform: "desktop" },
+      },
+    }
+    const out = await migrateEnvelope(withDevice)
+    expect(out.manifest.device).toEqual({
+      id: "dev-1",
+      label: "Windows desktop",
+      platform: "desktop",
+    })
+  })
+
   it("throws IntegrityCheckFailedError when the v3 checksum is wrong", async () => {
     const payload: BackupPayloadV3 = { characters: [{ id: "c1" } as never] }
     const pkg: BackupPackageV3 = {

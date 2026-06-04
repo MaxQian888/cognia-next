@@ -1774,8 +1774,10 @@ export interface AppSettings {
    * WebDAV snapshot sync (ADR-0001 extension). Periodically uploads the
    * encrypted backup package to a WebDAV server so another device can
    * download + restore it. The server password lives in the OS keyring
-   * (`WEBDAV_PASSWORD_REF`); the zero-knowledge sync passphrase is never
-   * persisted (session-only, see `lib/webdav/passphrase-cache.ts`).
+   * (`WEBDAV_PASSWORD_REF`); the zero-knowledge sync passphrase is
+   * session-only by default (`lib/webdav/passphrase-cache.ts`) and is
+   * persisted to the keyring (`WEBDAV_PASSPHRASE_REF`) only when the user
+   * opts into {@link rememberPassphrase}.
    */
   webdavSync?: {
     enabled?: boolean
@@ -1788,6 +1790,13 @@ export interface AppSettings {
     lastSyncAt?: string
     /** ISO mtime of the newest remote snapshot the startup check has seen. */
     lastRemoteSeenAt?: string
+    /**
+     * Opt-in: persist the sync passphrase in the OS keyring so scheduled
+     * uploads and the remote-newer check run unattended across restarts.
+     * Default off → memory-only. Only this boolean lives here; the secret
+     * itself never touches Dexie.
+     */
+    rememberPassphrase?: boolean
   }
   /**
    * Additional ICE servers presented to the browser's `RTCPeerConnection`.

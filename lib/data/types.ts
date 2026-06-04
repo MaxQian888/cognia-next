@@ -52,6 +52,14 @@ export interface BackupManifestV3 {
   integrity: { algorithm: "SHA-256"; checksum: string }
   /** Present only when the file is wrapped in `EncryptedEnvelopeV1`. */
   encryption?: { enabled: true; format: "encrypted-envelope-v1" }
+  /**
+   * Provenance of the device that produced the snapshot (added 2026-06,
+   * OPTIONAL — older files restore unchanged, no `schemaVersion` bump). The
+   * label is a generic platform string ("Windows desktop"), never the raw
+   * user agent: the manifest rides cleartext in the encrypted envelope.
+   * See `lib/device/device-identity.ts`.
+   */
+  device?: { id: string; label?: string; platform?: string }
 }
 
 /**

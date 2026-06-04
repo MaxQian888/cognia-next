@@ -1,20 +1,30 @@
+/**
+ * @jest-environment jsdom
+ */
 import { render, screen, waitFor } from "@testing-library/react"
 
-const checkMock = jest.fn(async (..._a: unknown[]) => ({ newer: false }) as { newer: boolean })
-jest.mock("@/lib/webdav/startup-check", () => ({
-  checkRemoteNewerThanLocal: (...a: unknown[]) => checkMock(...a),
+const notifyIfRemoteNewerMock = jest.fn(async (..._a: unknown[]) => false)
+jest.mock("@/lib/webdav/remote-newer-notify", () => ({
+  notifyIfRemoteNewer: (...a: unknown[]) => notifyIfRemoteNewerMock(...a),
 }))
 
-const toastInfo = jest.fn()
-jest.mock("sonner", () => ({
-  toast: { info: (msg: string, opts: unknown) => toastInfo(msg, opts) },
-}))
+// Capture the resume / network handlers so the test can fire them manually.
+let resumeHandler: (() => void) | null = null
+let networkHandler: ((s: { connected: boolean }) => void) | null = null
+const resumeUnsub = jest.fn()
+const networkUnsub = jest.fn()
 
-// Capture the controlled dialog's open state.
-jest.mock("@/components/data/import/webdav-restore-dialog", () => ({
-  WebDavRestoreDialog: ({ open }: { open?: boolean }) => (
-    <div data-testid="restore-dialog">{open ? "open" : "closed"}</div>
-  ),
+jest.mock("@/lib/capacitor/app", () => ({
+  subscribeResume: async (h: () => void) => {
+    resumeHandler = h
+    return resumeUnsub
+  },
+}))
+jest.mock("@/lib/capacitor/network", () => ({
+  subscribe: async (h: (s: { connected: boolean }) => void) => {
+    networkHandler = h
+    return networkUnsub
+  },
 }))
 
 import { WebDavStartupPromptProvider } from "./webdav-startup-prompt-provider"
@@ -25,48 +35,77 @@ function setNodeEnv(value: string) {
   ;(process.env as Record<string, string>).NODE_ENV = value
 }
 
+beforeEach(() => {
+  jest.useFakeTimers()
+  notifyIfRemoteNewerMock.mockClear()
+  resumeUnsub.mockClear()
+  networkUnsub.mockClear()
+  resumeHandler = null
+  networkHandler = null
+})
+
 afterEach(() => {
+  jest.useRealTimers()
   setNodeEnv(ORIGINAL_ENV as string)
-  checkMock.mockReset()
-  checkMock.mockResolvedValue({ newer: false })
-  toastInfo.mockClear()
 })
 
 describe("WebDavStartupPromptProvider", () => {
-  it("renders children and skips the check in test mode", async () => {
+  it("renders children and skips the check in test mode", () => {
     render(
       <WebDavStartupPromptProvider>
         <span>child</span>
       </WebDavStartupPromptProvider>
     )
     expect(screen.getByText("child")).toBeInTheDocument()
-    // Guarded out under NODE_ENV=test.
-    expect(checkMock).not.toHaveBeenCalled()
+    expect(notifyIfRemoteNewerMock).not.toHaveBeenCalled()
   })
 
-  it("shows a toast when the remote snapshot is newer", async () => {
+  it("runs the boot check with localized strings", async () => {
     setNodeEnv("development")
-    checkMock.mockResolvedValue({ newer: true })
     render(
       <WebDavStartupPromptProvider>
         <span>child</span>
       </WebDavStartupPromptProvider>
     )
-    await waitFor(() => expect(toastInfo).toHaveBeenCalled())
-    // The toast action opens the (controlled) restore dialog.
-    const [, opts] = toastInfo.mock.calls[0] as [string, { action: { onClick: () => void } }]
-    expect(typeof opts.action.onClick).toBe("function")
+    await waitFor(() => expect(notifyIfRemoteNewerMock).toHaveBeenCalledTimes(1))
+    const [strings] = notifyIfRemoteNewerMock.mock.calls[0] as [{ title: string; body: string }]
+    expect(typeof strings.title).toBe("string")
+    expect(strings.title.length).toBeGreaterThan(0)
   })
 
-  it("stays quiet when the remote is not newer", async () => {
+  it("re-checks (debounced) on resume and network recovery", async () => {
     setNodeEnv("development")
-    checkMock.mockResolvedValue({ newer: false })
     render(
       <WebDavStartupPromptProvider>
         <span>child</span>
       </WebDavStartupPromptProvider>
     )
-    await waitFor(() => expect(checkMock).toHaveBeenCalled())
-    expect(toastInfo).not.toHaveBeenCalled()
+    await waitFor(() => expect(resumeHandler).not.toBeNull())
+    notifyIfRemoteNewerMock.mockClear()
+
+    // Burst: resume + online within the debounce window → ONE check.
+    resumeHandler!()
+    networkHandler!({ connected: true })
+    jest.advanceTimersByTime(5_000)
+    expect(notifyIfRemoteNewerMock).toHaveBeenCalledTimes(1)
+
+    // Offline events never trigger a check.
+    notifyIfRemoteNewerMock.mockClear()
+    networkHandler!({ connected: false })
+    jest.advanceTimersByTime(10_000)
+    expect(notifyIfRemoteNewerMock).not.toHaveBeenCalled()
+  })
+
+  it("unsubscribes listeners on unmount", async () => {
+    setNodeEnv("development")
+    const { unmount } = render(
+      <WebDavStartupPromptProvider>
+        <span>child</span>
+      </WebDavStartupPromptProvider>
+    )
+    await waitFor(() => expect(resumeHandler).not.toBeNull())
+    unmount()
+    expect(resumeUnsub).toHaveBeenCalled()
+    expect(networkUnsub).toHaveBeenCalled()
   })
 })

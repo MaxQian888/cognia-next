@@ -30,6 +30,7 @@ import { PetWindowInitializer } from "@/components/providers/initializers/pet-wi
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
+import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobile-autosync-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { AppSplash } from "@/components/mobile/splash/app-splash"
@@ -149,53 +150,60 @@ export default async function RootLayout({
                     <PetWindowInitializer />
                     <BackupSchedulerProvider>
                       <WebDavStartupPromptProvider>
-                        <CompanionEventBridgeProvider>
-                          <CanvasBridgeProvider>
-                            <HookTrustSyncProvider>
-                              <A2UIDispatchProvider>
-                                <PluginToolDispatchProvider>
-                                  <DataAdapterProvider adapter={dexieAdapter}>
-                                    {/* Appearance v47 — Typography / density / radius
+                        <WebDavMobileAutosyncProvider>
+                          <CompanionEventBridgeProvider>
+                            <CanvasBridgeProvider>
+                              <HookTrustSyncProvider>
+                                <A2UIDispatchProvider>
+                                  <PluginToolDispatchProvider>
+                                    <DataAdapterProvider adapter={dexieAdapter}>
+                                      {/* Appearance v47 — Typography / density / radius
                                   / motion run before color appliers so the
                                   colorblind & high-contrast transforms in
                                   CustomThemeApplier see stable base values. */}
-                                    <TypographyApplier />
-                                    <DensityApplier />
-                                    <RadiusApplier />
-                                    <MotionApplier />
-                                    {/* Keeps body[data-bg-*] + the cognia user-css */}
-                                    {/* style tag in sync with the appearance store. */}
-                                    <BackgroundApplier />
-                                    <ComponentStyleApplier />
-                                    <CustomThemeApplier />
-                                    <ConnectorBusProvider>
-                                      <ConnectorDeepLinkRouter>
-                                        <SubscriptionUsageProvider>
-                                          <CompanionBootProvider>
-                                            <DesktopSyncSourceProvider>
-                                              <DesktopMessageSourceProvider>
-                                                {/* Subscribes the renderer to the remote-control axum
+                                      <TypographyApplier />
+                                      <DensityApplier />
+                                      <RadiusApplier />
+                                      <MotionApplier />
+                                      {/* Keeps body[data-bg-*] + the cognia user-css */}
+                                      {/* style tag in sync with the appearance store. */}
+                                      <BackgroundApplier />
+                                      <ComponentStyleApplier />
+                                      <CustomThemeApplier />
+                                      <ConnectorBusProvider>
+                                        <ConnectorDeepLinkRouter>
+                                          <SubscriptionUsageProvider>
+                                            <CompanionBootProvider>
+                                              <DesktopSyncSourceProvider>
+                                                <DesktopMessageSourceProvider>
+                                                  {/* Subscribes the renderer to the remote-control axum
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
-                                                <RemoteControlReceiver>
-                                                  <div data-bg-target="global" className="contents">
-                                                    <MobileShellWrapper>
-                                                      <DesktopAppShell>{children}</DesktopAppShell>
-                                                    </MobileShellWrapper>
-                                                  </div>
-                                                </RemoteControlReceiver>
-                                              </DesktopMessageSourceProvider>
-                                            </DesktopSyncSourceProvider>
-                                          </CompanionBootProvider>
-                                        </SubscriptionUsageProvider>
-                                      </ConnectorDeepLinkRouter>
-                                    </ConnectorBusProvider>
-                                  </DataAdapterProvider>
-                                </PluginToolDispatchProvider>
-                              </A2UIDispatchProvider>
-                            </HookTrustSyncProvider>
-                          </CanvasBridgeProvider>
-                        </CompanionEventBridgeProvider>
+                                                  <RemoteControlReceiver>
+                                                    <div
+                                                      data-bg-target="global"
+                                                      className="contents"
+                                                    >
+                                                      <MobileShellWrapper>
+                                                        <DesktopAppShell>
+                                                          {children}
+                                                        </DesktopAppShell>
+                                                      </MobileShellWrapper>
+                                                    </div>
+                                                  </RemoteControlReceiver>
+                                                </DesktopMessageSourceProvider>
+                                              </DesktopSyncSourceProvider>
+                                            </CompanionBootProvider>
+                                          </SubscriptionUsageProvider>
+                                        </ConnectorDeepLinkRouter>
+                                      </ConnectorBusProvider>
+                                    </DataAdapterProvider>
+                                  </PluginToolDispatchProvider>
+                                </A2UIDispatchProvider>
+                              </HookTrustSyncProvider>
+                            </CanvasBridgeProvider>
+                          </CompanionEventBridgeProvider>
+                        </WebDavMobileAutosyncProvider>
                       </WebDavStartupPromptProvider>
                     </BackupSchedulerProvider>
                     <ConsentOverlay />

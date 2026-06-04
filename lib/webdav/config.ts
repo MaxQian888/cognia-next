@@ -13,6 +13,22 @@ export const WEBDAV_PASSWORD_REF: KeyringRef = {
   key: "server-password",
 }
 
+/**
+ * Opt-in persisted copy of the zero-knowledge sync passphrase. Only written
+ * when `webdavSync.rememberPassphrase === true` (default off → the passphrase
+ * stays session-only in `passphrase-cache.ts`). Same keyring namespace as the
+ * server password: OS keyring on Tauri, secure storage on Capacitor,
+ * auto-key-encrypted IndexedDB on web.
+ *
+ * Threat model: storing it lets scheduled uploads / restore checks run
+ * unattended, but anyone able to unlock this device's keyring can decrypt
+ * synced data. The settings toggle's description must say so.
+ */
+export const WEBDAV_PASSPHRASE_REF: KeyringRef = {
+  namespace: "webdav-sync",
+  key: "sync-passphrase",
+}
+
 /** Fully resolved config — only returned when sync is enabled AND complete. */
 export interface WebDavSyncConfig {
   baseUrl: string
@@ -59,6 +75,24 @@ export async function resolveWebDavConfig(): Promise<WebDavSyncConfig | null> {
 export async function setWebDavPassword(password: string): Promise<void> {
   if (password) await setSecret(WEBDAV_PASSWORD_REF, password)
   else await clearSecret(WEBDAV_PASSWORD_REF)
+}
+
+/** Upsert (or clear, when empty) the persisted sync passphrase in the keyring. */
+export async function setStoredSyncPassphrase(passphrase: string): Promise<void> {
+  if (passphrase) await setSecret(WEBDAV_PASSPHRASE_REF, passphrase)
+  else await clearSecret(WEBDAV_PASSPHRASE_REF)
+}
+
+export async function getStoredSyncPassphrase(): Promise<string | null> {
+  return getSecret(WEBDAV_PASSPHRASE_REF)
+}
+
+export async function clearStoredSyncPassphrase(): Promise<void> {
+  await clearSecret(WEBDAV_PASSPHRASE_REF)
+}
+
+export async function hasStoredSyncPassphrase(): Promise<boolean> {
+  return Boolean(await getSecret(WEBDAV_PASSPHRASE_REF))
 }
 
 export async function hasWebDavPassword(): Promise<boolean> {

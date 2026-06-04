@@ -150,6 +150,10 @@ describe("buildBackupPackage", () => {
     expect(pkg.manifest.version).toBe("3.0")
     expect(pkg.manifest.schemaVersion).toBe(3)
     expect(pkg.manifest.appVersion).toMatch(/\d+\.\d+\.\d+/)
+    // Device provenance is stamped in browser-like runtimes (jsdom has
+    // window + localStorage) with a generic label, never the raw user agent.
+    expect(pkg.manifest.device?.id).toEqual(expect.any(String))
+    expect(pkg.manifest.device?.platform).toBe("web")
     expect(pkg.payload.settings?.apiKey).toBeUndefined()
     // onboardingDismissedAt rides on the generic settings blob — never
     // stripped (unlike apiKey) so the user's "I've seen the wizard" flag

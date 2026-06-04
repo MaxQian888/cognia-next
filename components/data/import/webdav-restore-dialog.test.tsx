@@ -11,9 +11,8 @@ const listMock = jest.fn(async (..._a: unknown[]) => [
   },
 ])
 const restoreMock = jest.fn(async (..._a: unknown[]) => ({
-  added: {},
-  overwritten: {},
-  skipped: {},
+  summary: { added: {}, overwritten: {}, skipped: {} },
+  sourceDevice: undefined as { id: string; label?: string } | undefined,
 }))
 
 jest.mock("@/lib/webdav/restore", () => ({
@@ -29,7 +28,10 @@ import { WebDavRestoreDialog } from "./webdav-restore-dialog"
 beforeEach(() => {
   listMock.mockClear()
   restoreMock.mockClear()
-  restoreMock.mockResolvedValue({ added: {}, overwritten: {}, skipped: {} })
+  restoreMock.mockResolvedValue({
+    summary: { added: {}, overwritten: {}, skipped: {} },
+    sourceDevice: undefined,
+  })
 })
 
 describe("WebDavRestoreDialog", () => {
@@ -50,6 +52,23 @@ describe("WebDavRestoreDialog", () => {
       )
     )
     expect(await screen.findByTestId("summary")).toBeInTheDocument()
+    // No device on this snapshot → "unknown device" provenance line.
+    expect(screen.getByTestId("webdav-restore-device")).toBeInTheDocument()
+  })
+
+  it("shows the producing device after a restore when the manifest carries one", async () => {
+    restoreMock.mockResolvedValueOnce({
+      summary: { added: {}, overwritten: {}, skipped: {} },
+      sourceDevice: { id: "dev-1", label: "Windows desktop" },
+    })
+    const user = userEvent.setup()
+    render(<WebDavRestoreDialog trigger={<Button>Open</Button>} />)
+    await user.click(screen.getByRole("button", { name: "Open" }))
+    await screen.findByText("Restore from WebDAV")
+    await user.type(screen.getByLabelText("Passphrase"), "secret")
+    await user.click(screen.getByRole("button", { name: "Restore" }))
+    const line = await screen.findByTestId("webdav-restore-device")
+    expect(line).toHaveTextContent(/Windows desktop/)
   })
 
   it("shows an empty state when the server has no snapshots", async () => {

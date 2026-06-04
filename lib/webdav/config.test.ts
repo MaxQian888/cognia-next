@@ -28,7 +28,12 @@ import {
   setWebDavPassword,
   hasWebDavPassword,
   makeWebDavClient,
+  setStoredSyncPassphrase,
+  getStoredSyncPassphrase,
+  clearStoredSyncPassphrase,
+  hasStoredSyncPassphrase,
   WEBDAV_PASSWORD_REF,
+  WEBDAV_PASSPHRASE_REF,
   DEFAULT_WEBDAV_REMOTE_DIR,
 } from "./config"
 
@@ -89,6 +94,41 @@ describe("password helpers", () => {
     expect(await hasWebDavPassword()).toBe(true)
     await setWebDavPassword("")
     expect(await hasWebDavPassword()).toBe(false)
+  })
+})
+
+describe("stored sync passphrase helpers", () => {
+  const PASS_KEY = `${WEBDAV_PASSPHRASE_REF.namespace}:${WEBDAV_PASSPHRASE_REF.key}`
+
+  it("lives in the same keyring namespace as the server password", () => {
+    expect(WEBDAV_PASSPHRASE_REF.namespace).toBe(WEBDAV_PASSWORD_REF.namespace)
+    expect(WEBDAV_PASSPHRASE_REF.key).not.toBe(WEBDAV_PASSWORD_REF.key)
+  })
+
+  it("sets, reads, reports, and clears the persisted passphrase", async () => {
+    expect(await hasStoredSyncPassphrase()).toBe(false)
+    expect(await getStoredSyncPassphrase()).toBeNull()
+
+    await setStoredSyncPassphrase("correct horse")
+    expect(secrets.get(PASS_KEY)).toBe("correct horse")
+    expect(await hasStoredSyncPassphrase()).toBe(true)
+    expect(await getStoredSyncPassphrase()).toBe("correct horse")
+
+    await clearStoredSyncPassphrase()
+    expect(await hasStoredSyncPassphrase()).toBe(false)
+  })
+
+  it("setStoredSyncPassphrase('') clears instead of storing empty", async () => {
+    await setStoredSyncPassphrase("x")
+    await setStoredSyncPassphrase("")
+    expect(await hasStoredSyncPassphrase()).toBe(false)
+  })
+
+  it("does not collide with the server password slot", async () => {
+    await setWebDavPassword("server-pwd")
+    await setStoredSyncPassphrase("sync-pass")
+    expect(await getStoredSyncPassphrase()).toBe("sync-pass")
+    expect(secrets.get(PWD_KEY)).toBe("server-pwd")
   })
 })
 

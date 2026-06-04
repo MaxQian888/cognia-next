@@ -40,6 +40,7 @@ jest.mock("@/lib/db/settings", () => ({
 jest.mock("./passphrase-cache", () => ({
   setSyncPassphrase: (...a: unknown[]) => setSyncPassphraseMock(...a),
   getSyncPassphrase: () => getSyncPassphraseMock(),
+  persistSyncPassphrase: jest.fn(async () => undefined),
 }))
 
 import { runWebDavSyncNow } from "./sync-now"

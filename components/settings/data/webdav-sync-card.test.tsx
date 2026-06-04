@@ -20,11 +20,13 @@ jest.mock("@/lib/db/settings", () => ({
   getSettings: async () => storedSettings,
   saveSettings: (...a: unknown[]) => saveSettingsMock(...a),
 }))
+const clearStoredSyncPassphraseMock = jest.fn(async (..._a: unknown[]) => {})
 jest.mock("@/lib/webdav/config", () => ({
   DEFAULT_WEBDAV_REMOTE_DIR: "/cognia-backups",
   hasWebDavPassword: async () => hasPassword,
   setWebDavPassword: (...a: unknown[]) => setWebDavPasswordMock(...a),
   getWebDavPassword: (...a: unknown[]) => getWebDavPasswordMock(...a),
+  clearStoredSyncPassphrase: (...a: unknown[]) => clearStoredSyncPassphraseMock(...a),
 }))
 jest.mock("@/lib/webdav/client", () => ({
   createWebDavClient: (...a: unknown[]) => createWebDavClientMock(...a),
@@ -33,9 +35,17 @@ let supported = true
 jest.mock("@/lib/webdav/transport", () => ({
   isWebDavSupported: () => supported,
 }))
+const loadPersistedMock = jest.fn(async (..._a: unknown[]) => false)
+const persistSyncPassphraseMock = jest.fn(async (..._a: unknown[]) => {})
 jest.mock("@/lib/webdav/passphrase-cache", () => ({
   setSyncPassphrase: (...a: unknown[]) => setSyncPassphraseMock(...a),
   hasSyncPassphrase: () => hasPass,
+  getSyncPassphrase: () => (hasPass ? "cached-pass" : null),
+  loadPersistedSyncPassphrase: (...a: unknown[]) => loadPersistedMock(...a),
+  persistSyncPassphrase: (...a: unknown[]) => persistSyncPassphraseMock(...a),
+}))
+jest.mock("@/lib/db/backup-history", () => ({
+  listBackupHistory: jest.fn(async () => []),
 }))
 jest.mock("@/lib/webdav/sync-now", () => ({
   runWebDavSyncNow: (...a: unknown[]) => runSyncNowMock(...a),
@@ -66,6 +76,9 @@ beforeEach(() => {
   createWebDavClientMock.mockClear()
   toastSuccess.mockClear()
   toastError.mockClear()
+  loadPersistedMock.mockClear()
+  persistSyncPassphraseMock.mockClear()
+  clearStoredSyncPassphraseMock.mockClear()
 })
 
 describe("WebDavSyncCard", () => {
@@ -123,7 +136,60 @@ describe("WebDavSyncCard", () => {
 
     await user.type(screen.getByLabelText("Sync passphrase"), "secret")
     await user.click(screen.getByRole("button", { name: "Sync now" }))
-    await waitFor(() => expect(runSyncNowMock).toHaveBeenCalledWith("secret"))
+    await waitFor(() =>
+      expect(runSyncNowMock).toHaveBeenCalledWith(
+        "secret",
+        expect.objectContaining({ onProgress: expect.any(Function) })
+      )
+    )
+  })
+
+  it("hydrates the persisted passphrase on mount (opt-in unattended unlock)", async () => {
+    loadPersistedMock.mockImplementation(async () => {
+      hasPass = true
+      return true
+    })
+    render(<WebDavSyncCard />)
+    await waitFor(() => expect(loadPersistedMock).toHaveBeenCalled())
+    // The unlocked badge appears without any user input.
+    await waitFor(() => expect(screen.getByText("Unlocked")).toBeInTheDocument())
+  })
+
+  it("remember toggle persists the cached passphrase when turned on", async () => {
+    hasPass = true
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+
+    await user.click(screen.getByTestId("webdav-remember-passphrase"))
+    await waitFor(() =>
+      expect(saveSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          webdavSync: expect.objectContaining({ rememberPassphrase: true }),
+        })
+      )
+    )
+    expect(persistSyncPassphraseMock).toHaveBeenCalledWith("cached-pass")
+  })
+
+  it("remember toggle wipes the keyring copy when turned off", async () => {
+    storedSettings = { webdavSync: { rememberPassphrase: true } }
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+    const toggle = screen.getByTestId("webdav-remember-passphrase")
+    await waitFor(() => expect(toggle).toHaveAttribute("data-state", "checked"))
+
+    await user.click(toggle)
+    await waitFor(() =>
+      expect(saveSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          webdavSync: expect.objectContaining({ rememberPassphrase: false }),
+        })
+      )
+    )
+    expect(clearStoredSyncPassphraseMock).toHaveBeenCalled()
+    expect(persistSyncPassphraseMock).not.toHaveBeenCalled()
   })
 
   it("disables network actions and shows a note on web", async () => {

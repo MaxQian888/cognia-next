@@ -24,6 +24,14 @@ export interface BackupHistoryRow {
   filename?: string
   /** When `success === false`, the human-readable error. */
   errorMessage?: string
+  /**
+   * Provenance of the device that produced the snapshot (additive 2026-06 —
+   * no Dexie index change; old rows simply lack it). Mirrors
+   * `BackupManifestV3.device`.
+   */
+  deviceId?: string
+  /** Friendly label ("Windows desktop"), never the raw user agent. */
+  deviceLabel?: string
   /** Always 3 for now; kept for forward-compatibility logging. */
   schemaVersion: 3
 }
@@ -46,6 +54,8 @@ export async function appendBackupHistory(
     sizeBytes: partial.sizeBytes,
     filename: partial.filename,
     errorMessage: partial.errorMessage,
+    deviceId: partial.deviceId,
+    deviceLabel: partial.deviceLabel,
     schemaVersion: 3,
   }
   await db.transaction("rw", db.backupHistory, async () => {

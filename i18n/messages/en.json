@@ -4035,8 +4035,15 @@
         "passphraseLabel": "Sync passphrase",
         "passphrasePlaceholder": "Shared across your devices",
         "passphraseUnlocked": "Unlocked for this session",
-        "passphraseHint": "Never stored — re-enter each session to enable auto-sync and restore. Encrypts the backup so the server never sees plaintext.",
+        "passphraseHint": "Session-only by default — re-enter each session, or opt into remembering it below. Encrypts the backup so the server never sees plaintext.",
         "unlocked": "Unlocked",
+        "rememberPassphraseLabel": "Remember sync passphrase on this device",
+        "rememberPassphraseDescription": "Stores the passphrase in this device's OS keyring so scheduled uploads and restore checks run unattended after a restart. Anyone who can unlock this device can then decrypt your synced data — leave off to keep it memory-only.",
+        "producedBy": "from {device}",
+        "phaseBuilding": "Building snapshot…",
+        "phaseEncrypting": "Encrypting…",
+        "phaseUploading": "Uploading…",
+        "phaseDone": "Done.",
         "save": "Save",
         "saved": "WebDAV settings saved.",
         "clear": "Clear",
@@ -4067,10 +4074,13 @@
           "restoring": "Restoring…",
           "restoreButton": "Restore",
           "close": "Close",
-          "failed": "Restore failed: {error}"
+          "failed": "Restore failed: {error}",
+          "producedBy": "Snapshot produced by {device}.",
+          "producedByUnknown": "Snapshot producer unknown (older backup)."
         },
         "startup": {
           "newerFound": "A newer backup is available on your WebDAV server.",
+          "newerBody": "Another device uploaded a newer snapshot. Open backup settings to review and restore it.",
           "restoreAction": "Restore"
         }
       },
@@ -15290,6 +15300,9 @@
       "historyHeader": "History",
       "historyEmpty": "No history yet.",
       "historyFailedLabel": "Failed",
+      "historyEncryptionPassphrase": "Passphrase",
+      "historyEncryptionAutoKey": "Auto-key",
+      "historyEncryptionNone": "Plain",
       "passphraseLabel": "Optional passphrase (blank uses auto key)",
       "exportBiometricTitle": "Confirm export",
       "exportBiometricReason": "Authenticate to export an encrypted backup.",
@@ -16259,6 +16272,12 @@
         "team": {
           "label": "On team run start",
           "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored."
+        },
+        "terminal": {
+          "command": {
+            "label": "On terminal command",
+            "description": "Fires when a command finishes in a user-spawned terminal dock tab. Scope by session, project, exit status, or a command substring."
+          }
         }
       },
       "action": {
@@ -16476,6 +16495,18 @@
               "label": "Close terminal session",
               "description": "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends."
             }
+          },
+          "script": {
+            "label": "Run script file",
+            "description": "Run a script file (.sh / .ps1 / .py / .js / …) under the right interpreter, detected from its extension or overridden explicitly."
+          },
+          "readRecent": {
+            "label": "Read terminal history",
+            "description": "Read the recent-commands ring (command, exit code, ended-at) of a terminal dock tab."
+          },
+          "waitForExit": {
+            "label": "Wait for terminal exit",
+            "description": "Block until the command currently running in a terminal dock tab finishes, then route on its exit code."
           }
         }
       },
@@ -18108,6 +18139,91 @@
         },
         "height": {
           "label": "Height (px)"
+        }
+      },
+      "terminalScript": {
+        "scriptPath": {
+          "label": "Script path",
+          "hint": "Path to the script file. The interpreter is detected from the extension (.sh, .ps1, .py, .js, …).",
+          "placeholder": "scripts/deploy.ps1"
+        },
+        "interpreter": {
+          "label": "Interpreter (optional)",
+          "hint": "Explicit interpreter override — bypasses extension detection.",
+          "placeholder": "python3"
+        },
+        "cwd": {
+          "label": "Working directory",
+          "hint": "Optional. Defaults to the shell's resolved cwd.",
+          "placeholder": "D:\\repo"
+        },
+        "timeoutSec": {
+          "label": "Timeout (sec)",
+          "hint": "5–600. How long to wait for the script to finish."
+        },
+        "onFailure": {
+          "label": "On failure",
+          "hint": "Throw fails the run; branch routes down the failure port.",
+          "options": {
+            "throw": "Fail the run",
+            "branch": "Route to failure branch"
+          }
+        }
+      },
+      "terminalReadRecent": {
+        "tabId": {
+          "label": "Tab id",
+          "hint": "The terminal dock tab to read. Use an expression to reference a session opened earlier.",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "lineLimit": {
+          "label": "Max records",
+          "hint": "1–50 most recent command records (default 10)."
+        }
+      },
+      "terminalWaitForExit": {
+        "tabId": {
+          "label": "Tab id",
+          "hint": "The terminal dock tab to watch for the next command to finish.",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "timeoutSec": {
+          "label": "Timeout (sec)",
+          "hint": "5–600. Fails when no command finishes within this window."
+        },
+        "onFailure": {
+          "label": "On failure",
+          "hint": "Throw fails the run; branch routes down the failure port.",
+          "options": {
+            "throw": "Fail the run",
+            "branch": "Route to failure branch"
+          }
+        }
+      },
+      "terminalCommandTrigger": {
+        "sessionId": {
+          "label": "Tab id (optional)",
+          "hint": "Only fire for this terminal tab. Empty matches any user-spawned tab.",
+          "placeholder": "term-…"
+        },
+        "projectId": {
+          "label": "Project id (optional)",
+          "hint": "Only fire for tabs bound to this project.",
+          "placeholder": "proj-…"
+        },
+        "status": {
+          "label": "Exit status",
+          "hint": "Fire on any exit, only successes (exit 0), or only failures.",
+          "options": {
+            "any": "Any exit",
+            "success": "Success only (exit 0)",
+            "failure": "Failure only"
+          }
+        },
+        "commandContains": {
+          "label": "Command contains (optional)",
+          "hint": "Only fire when the command line contains this substring. Commands that look like secrets are redacted and won't match.",
+          "placeholder": "pnpm test"
         }
       }
     }
