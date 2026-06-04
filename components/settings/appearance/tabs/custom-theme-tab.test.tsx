@@ -25,6 +25,31 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Radix DropdownMenu uses a portal + pointer-event flow that's brittle in
+// jsdom. Match the project convention from `saved-themes-rail.test.tsx` and
+// replace it with thin pass-throughs so the rail's per-item menu actions are
+// plain buttons reachable by testid.
+jest.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    "data-testid": testId,
+  }: {
+    children: React.ReactNode
+    onSelect?: () => void
+    "data-testid"?: string
+    variant?: string
+  }) => (
+    <button onClick={() => onSelect?.()} data-testid={testId}>
+      {children}
+    </button>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 const createCustomTheme = jest.fn().mockReturnValue("ct-new")
 const updateCustomTheme = jest.fn()
 const deleteCustomTheme = jest.fn()
@@ -126,36 +151,161 @@ describe("CustomThemeTab", () => {
     expect(arg.colors).toBeDefined()
   })
 
-  it("renders the saved themes list and switches the draft on click", () => {
+  it("renders the saved themes rail and switches the draft on click", () => {
     storeState.settings = {
       customThemes: [sampleTheme("a"), sampleTheme("b", { name: "Beta" })],
       activeCustomThemeId: null,
     }
     render(<CustomThemeTab />)
+    expect(screen.getByTestId("saved-themes-rail")).toBeInTheDocument()
     expect(screen.getByText("Theme a")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Beta"))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Beta")
   })
 
-  it("activates and deactivates a theme", () => {
+  it("activates and deactivates a theme from the action row", () => {
     storeState.settings = {
       customThemes: [sampleTheme("ct-1")],
       activeCustomThemeId: null,
     }
     render(<CustomThemeTab />)
     fireEvent.click(screen.getByText("Theme ct-1"))
-    fireEvent.click(screen.getByRole("button", { name: /activateButton/ }))
+    fireEvent.click(screen.getByTestId("custom-theme-activate"))
     expect(setActiveCustomTheme).toHaveBeenCalledWith("ct-1")
   })
 
-  it("deletes the active draft theme", () => {
+  it("deactivates the active theme from the action row", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("ct-on")],
+      activeCustomThemeId: "ct-on",
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Theme ct-on"))
+    fireEvent.click(screen.getByTestId("custom-theme-deactivate"))
+    expect(setActiveCustomTheme).toHaveBeenCalledWith(null)
+  })
+
+  it("activates a theme straight from the rail menu without selecting it", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("ct-r")],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("saved-theme-ct-r-activate"))
+    expect(setActiveCustomTheme).toHaveBeenCalledWith("ct-r")
+  })
+
+  it("deletes the edited theme via the confirm dialog and resets the editor", async () => {
     storeState.settings = {
       customThemes: [sampleTheme("ct-2")],
       activeCustomThemeId: null,
     }
     render(<CustomThemeTab />)
     fireEvent.click(screen.getByText("Theme ct-2"))
-    fireEvent.click(screen.getByRole("button", { name: /deleteButton/ }))
+    fireEvent.click(screen.getByTestId("custom-theme-delete"))
+    // Nothing deleted until the dialog is confirmed.
+    expect(deleteCustomTheme).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("deleteDialog.title")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: /deleteDialog\.confirm/ }))
     expect(deleteCustomTheme).toHaveBeenCalledWith("ct-2")
+    // The editor reset to an empty draft.
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("")
+  })
+
+  it("delete from the rail menu confirms but keeps an unrelated draft", async () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("keep"), sampleTheme("drop", { name: "Drop" })],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Theme keep"))
+    fireEvent.click(screen.getByTestId("saved-theme-drop-delete"))
+    // Cancelling closes the dialog without deleting.
+    let dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /deleteDialog\.cancel/ }))
+    expect(deleteCustomTheme).not.toHaveBeenCalled()
+    // Re-open and confirm.
+    fireEvent.click(screen.getByTestId("saved-theme-drop-delete"))
+    dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/deleteDialog\.body.*Drop/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: /deleteDialog\.confirm/ }))
+    expect(deleteCustomTheme).toHaveBeenCalledWith("drop")
+    // The edited draft was a different row — it stays loaded.
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Theme keep")
+  })
+
+  it("duplicates a theme from the rail menu and loads the copy", () => {
+    const source = sampleTheme("src", { name: "Source" })
+    storeState.settings = {
+      customThemes: [source],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("saved-theme-src-duplicate"))
+    expect(createCustomTheme).toHaveBeenCalledTimes(1)
+    const arg = createCustomTheme.mock.calls[0][0]
+    expect(arg.name).toBe('rail.copySuffix:{"name":"Source"}')
+    expect(arg.tokens).toEqual(source.tokens)
+    expect(arg.baseVariant).toBe("dark")
+    // The copy is loaded into the editor.
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue(
+      'rail.copySuffix:{"name":"Source"}'
+    )
+  })
+
+  it("loads legacy single-variant rows (colors/isDark, no tokens) into the draft", () => {
+    const legacyDark: CustomTheme = {
+      id: "leg-d",
+      name: "Legacy Dark",
+      colors: { background: "#111111" },
+      isDark: true,
+    }
+    const legacyLight: CustomTheme = {
+      id: "leg-l",
+      name: "Legacy Light",
+      colors: { background: "#fefefe" },
+      isDark: false,
+    }
+    // Degenerate row with neither tokens nor colors — draft falls back to empty.
+    const bare: CustomTheme = { id: "bare", name: "Bare" }
+    storeState.settings = {
+      customThemes: [legacyDark, legacyLight, bare],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Legacy Dark"))
+    expect(screen.getByLabelText("darkLabel")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("color-token-background-hex")).toHaveValue("#111111")
+    fireEvent.click(screen.getByText("Legacy Light"))
+    expect(screen.getByLabelText("darkLabel")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("color-token-background-hex")).toHaveValue("#fefefe")
+    fireEvent.click(screen.getByText("Bare"))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Bare")
+  })
+
+  it("editing a color alone marks the draft dirty", () => {
+    render(<CustomThemeTab />)
+    expect(screen.queryByTestId("custom-theme-unsaved")).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+      target: { value: "#222222" },
+    })
+    expect(screen.getByTestId("custom-theme-unsaved")).toBeInTheDocument()
+  })
+
+  it("export falls back to a generic filename when the theme name is empty", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("noname", { name: "" })],
+      activeCustomThemeId: null,
+    }
+    const createObjectURL = jest.fn().mockReturnValue("blob:fake")
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: jest.fn() })
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("saved-theme-noname-export"))
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it("renders without infinite re-renders when customThemes is undefined", () => {
@@ -175,6 +325,37 @@ describe("CustomThemeTab", () => {
     expect(createCustomTheme).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Light", isDark: false, baseVariant: "light" })
     )
+  })
+
+  it("renders the role-based token groups with State/Sidebar collapsed by default", () => {
+    render(<CustomThemeTab />)
+    // Open groups expose their rows.
+    expect(screen.getByTestId("token-group-surface-trigger")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("token-group-brand-trigger")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("color-token-background-hex")).toBeInTheDocument()
+    // State / Sidebar start collapsed (Radix keeps the content mounted but
+    // hidden, so assert via the trigger's data-state).
+    expect(screen.getByTestId("token-group-state-trigger")).toHaveAttribute("data-state", "closed")
+    expect(screen.getByTestId("token-group-sidebar-trigger")).toHaveAttribute(
+      "data-state",
+      "closed"
+    )
+    // Expanding works.
+    fireEvent.click(screen.getByTestId("token-group-state-trigger"))
+    expect(screen.getByTestId("token-group-state-trigger")).toHaveAttribute("data-state", "open")
+  })
+
+  it("editing a token through a group updates the draft palette on save", () => {
+    render(<CustomThemeTab />)
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Tweaked" },
+    })
+    fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+      target: { value: "#123456" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^saveButton$/ }))
+    const arg = createCustomTheme.mock.calls[0][0]
+    expect(arg.tokens.dark.background).toBe("#123456")
   })
 
   it("renders the audit health badge with no failures by default", () => {
@@ -221,11 +402,13 @@ describe("CustomThemeTab", () => {
     expect(failureBadge).toBeInTheDocument()
     expect(failureBadge.textContent).toContain('"count":8')
     expect(failureBadge.textContent).toContain('"total":8')
-    // Per-row chips appear next to the flagged tokens.
+    // Per-row chips appear next to flagged tokens in the open groups.
     expect(screen.getAllByText("audit.lowContrast").length).toBeGreaterThan(0)
+    // Group headers surface their own failure counts.
+    expect(screen.getByTestId("token-group-surface-failures")).toBeInTheDocument()
   })
 
-  it("export button creates a download for the theme", () => {
+  it("export from the rail menu creates a download for the theme", () => {
     storeState.settings = {
       customThemes: [sampleTheme("ct-x", { name: "Exportable" })],
       activeCustomThemeId: null,
@@ -253,12 +436,28 @@ describe("CustomThemeTab", () => {
     })
 
     render(<CustomThemeTab />)
-    fireEvent.click(screen.getByRole("button", { name: /actions\.export Exportable/ }))
+    fireEvent.click(screen.getByTestId("saved-theme-ct-x-export"))
 
     expect(createObjectURL).toHaveBeenCalled()
     expect(click).toHaveBeenCalled()
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake")
     createSpy.mockRestore()
+  })
+
+  it("export failure surfaces a toast.error", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("ct-err", { name: "Broken" })],
+      activeCustomThemeId: null,
+    }
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: () => {
+        throw new Error("blob unavailable")
+      },
+    })
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("saved-theme-ct-err-export"))
+    expect(toastError).toHaveBeenCalled()
   })
 
   it("import button reads the selected file and calls createCustomTheme", async () => {
@@ -391,5 +590,107 @@ describe("CustomThemeTab", () => {
     expect(updates.tokens.light.primary).toBe("#aaaaaa")
     expect(updates.tokens.light.background).toBe("#fefefe")
     expect(updates.baseVariant).toBe("dark")
+  })
+
+  it("shows the unsaved badge while dirty and clears it after save", () => {
+    render(<CustomThemeTab />)
+    expect(screen.queryByTestId("custom-theme-unsaved")).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Dirty" },
+    })
+    expect(screen.getByTestId("custom-theme-unsaved")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^saveButton$/ }))
+    expect(screen.queryByTestId("custom-theme-unsaved")).not.toBeInTheDocument()
+  })
+
+  it("switching themes with a dirty draft asks for confirmation; cancel keeps edits", async () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("a"), sampleTheme("b", { name: "Beta" })],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Theme a"))
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Edited" },
+    })
+    fireEvent.click(screen.getByText("Beta"))
+    // Switch intercepted by the discard dialog.
+    let dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("discardDialog.title")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: /discardDialog\.cancel/ }))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Edited")
+    // Confirming the second attempt discards and loads the target.
+    fireEvent.click(screen.getByText("Beta"))
+    dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /discardDialog\.discard/ }))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Beta")
+  })
+
+  it("starting a new draft while dirty asks for confirmation", async () => {
+    render(<CustomThemeTab />)
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Half-done" },
+    })
+    fireEvent.click(screen.getByTestId("custom-theme-new"))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("discardDialog.title")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: /discardDialog\.discard/ }))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("")
+  })
+
+  it("duplicating while dirty routes through the discard dialog", async () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("dup", { name: "Dup" })],
+      activeCustomThemeId: null,
+    }
+    render(<CustomThemeTab />)
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "WIP" },
+    })
+    fireEvent.click(screen.getByTestId("saved-theme-dup-duplicate"))
+    expect(createCustomTheme).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /discardDialog\.discard/ }))
+    expect(createCustomTheme).toHaveBeenCalledTimes(1)
+    expect(createCustomTheme.mock.calls[0][0].name).toBe('rail.copySuffix:{"name":"Dup"}')
+  })
+
+  it("keeps dirty edits when an unrelated store mutation refreshes the theme list", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("a")],
+      activeCustomThemeId: null,
+    }
+    const { rerender } = render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Theme a"))
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Edited" },
+    })
+    // Simulate an external mutation (e.g. another row activated/duplicated)
+    // producing a new customThemes array reference.
+    storeState.settings = {
+      customThemes: [sampleTheme("a"), sampleTheme("b", { name: "Beta" })],
+      activeCustomThemeId: null,
+    }
+    rerender(<CustomThemeTab />)
+    // The dirty draft survives the reconciler pass.
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Edited")
+    expect(screen.getByTestId("custom-theme-unsaved")).toBeInTheDocument()
+  })
+
+  it("pulls the latest copy of the edited row when clean and the list changes", () => {
+    storeState.settings = {
+      customThemes: [sampleTheme("a")],
+      activeCustomThemeId: null,
+    }
+    const { rerender } = render(<CustomThemeTab />)
+    fireEvent.click(screen.getByText("Theme a"))
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Theme a")
+    // External rename of the edited row while the draft is clean.
+    storeState.settings = {
+      customThemes: [sampleTheme("a", { name: "Renamed" })],
+      activeCustomThemeId: null,
+    }
+    rerender(<CustomThemeTab />)
+    expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Renamed")
   })
 })

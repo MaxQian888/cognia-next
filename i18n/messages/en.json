@@ -1320,26 +1320,9 @@
         "toggleLabel": "Switch welcome layout"
       },
       "sections": {
-        "quickStart": "Quick start",
         "tryPrompt": "Try a prompt",
         "characterPrompts": "Try with this character",
         "continue": "Continue"
-      },
-      "capabilities": {
-        "workflows": "Workflows",
-        "agentTeams": "Agent teams",
-        "connectors": "Connectors",
-        "twin": "Digital twin",
-        "computerUse": "Computer use",
-        "ocr": "OCR"
-      },
-      "capabilitiesDesc": {
-        "workflows": "Orchestrate multi-step tasks into reusable automations — build once, run again and again.",
-        "agentTeams": "Multiple agents that plan, divide work, and execute in parallel.",
-        "connectors": "Bring the assistant into Lark, Slack, and other platforms.",
-        "twin": "Teach the assistant your context, preferences, and voice.",
-        "computerUse": "Let it click, type, and operate the screen for you.",
-        "ocr": "Pull text out of images and screenshots."
       },
       "samples": {
         "exploreTitle": "Explore the project",
@@ -2655,7 +2638,9 @@
         "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
         "runtime:plugins": "Exposes the list and metadata of installed plugins.",
         "runtime:agent-teams": "Exposes agent-team definitions.",
-        "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay."
+        "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
+        "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
+        "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF."
       },
       "server": {
         "title": "MCP server",
@@ -2755,14 +2740,20 @@
       },
       "detection": {
         "heading": "Detect a local proxy",
-        "subheading": "Probes 127.0.0.1 ports 7890/7891/1080/10808/8080/8888 and queries the Clash/Mihomo controller API.",
+        "subheading": "Discovers FlClash, Clash Verge Rev, Mihomo, and v2rayN via running processes and config files, then probes the well-known loopback ports.",
         "button": "Detect now",
         "empty": "No local proxy found on the well-known ports. Configure one manually in the General tab.",
         "running": "Probing local ports…",
         "results": "Candidates",
         "apply": "Apply",
         "currentBadge": "Active",
-        "webUnsupported": "Auto-detection requires the Tauri desktop app."
+        "webUnsupported": "Auto-detection requires the Tauri desktop app.",
+        "source": {
+          "config": "Port read from the client's config file",
+          "process": "Client process detected, using its default port",
+          "port": "Found by open-port probe"
+        },
+        "controllerSecured": "Controller API requires a secret"
       },
       "test": {
         "urlLabel": "Test URL",
@@ -2969,6 +2960,48 @@
         "components": "Components",
         "a11y": "Accessibility",
         "advanced": "Advanced"
+      },
+      "a11y": {
+        "wcag": {
+          "targetLabel": "WCAG contrast target",
+          "targetHint": "Contrast level the theme audit checks your colors against.",
+          "target": {
+            "off": "Off",
+            "AA": "AA (4.5:1)",
+            "AAA": "AAA (7:1)"
+          },
+          "enforcementLabel": "Contrast enforcement",
+          "enforcementHint": "Choose whether audit violations only warn or are also auto-fixed.",
+          "enforcement": {
+            "warn": "Warn only",
+            "warnFix": "Warn and auto-fix"
+          }
+        },
+        "highContrast": {
+          "label": "High-contrast preset",
+          "hint": "Applies a high-contrast color layer on top of the current theme.",
+          "off": "Off",
+          "light": "High-contrast light",
+          "dark": "High-contrast dark"
+        },
+        "colorblind": {
+          "label": "Colorblind palette",
+          "hint": "Shifts accent and status colors to a palette distinguishable with the selected color-vision deficiency.",
+          "off": "Off",
+          "deuter": "Deuteranopia (red-green)",
+          "protan": "Protanopia (red-weak)",
+          "tritan": "Tritanopia (blue-yellow)"
+        },
+        "motion": {
+          "speedLabel": "Animation speed",
+          "speed": {
+            "slow": "Slow (0.5×)",
+            "normal": "Normal (1×)",
+            "fast": "Fast (1.5×)"
+          },
+          "reduceLabel": "Reduce motion",
+          "reduceHint": "Minimizes animations and transitions across the app."
+        }
       },
       "componentCustomize": {
         "description": "Customize individual surface components. Tonality controls how the surface looks over a wallpaper; elevation and radius always apply.",
@@ -3211,6 +3244,35 @@
           "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
           "cancel": "Cancel",
           "saveAnyway": "Save anyway"
+        },
+        "groups": {
+          "surface": "Surface",
+          "text": "Text",
+          "brand": "Brand",
+          "state": "State",
+          "sidebar": "Sidebar"
+        },
+        "groupFailures": "{count, plural, one {# fails} other {# fail}}",
+        "rail": {
+          "duplicate": "Duplicate",
+          "more": "More actions",
+          "lightSwatchAria": "Light variant swatch",
+          "darkSwatchAria": "Dark variant swatch",
+          "activeBadgeAria": "Active theme",
+          "copySuffix": "{name} (copy)"
+        },
+        "unsavedBadge": "Unsaved changes",
+        "discardDialog": {
+          "title": "Discard unsaved changes?",
+          "body": "The current draft has unsaved changes. Switching will discard them.",
+          "discard": "Discard changes",
+          "cancel": "Keep editing"
+        },
+        "deleteDialog": {
+          "title": "Delete theme",
+          "body": "Delete \"{name}\"? This cannot be undone.",
+          "confirm": "Delete",
+          "cancel": "Cancel"
         },
         "tokens": {
           "background": "Background",
@@ -10395,6 +10457,14 @@
       "general": {
         "name": "General Assistant",
         "description": "General purpose AI assistant for various tasks"
+      },
+      "plan": {
+        "name": "Plan (read-only)",
+        "description": "Investigate and propose a step-by-step plan without editing files or running mutating commands"
+      },
+      "build": {
+        "name": "Build",
+        "description": "Full access — implement changes, edit files, and run commands"
       },
       "web-design": {
         "name": "Web Designer",

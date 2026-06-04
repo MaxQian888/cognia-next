@@ -1,21 +1,27 @@
 "use client"
 
 // Edit the cognia ThemeColors palette directly. The user picks an existing
-// theme (or "new"), tweaks tokens via `ColorTokenRow`, watches the
-// `<ThemePreview />` update live, then saves. Saved themes are stored in
-// `AppSettings.customThemes[]`; activation goes through
+// theme (or "new"), tweaks tokens via the role-based `TokenGroup` clusters,
+// watches the `<ThemePreview />` update live, then saves. Saved themes are
+// stored in `AppSettings.customThemes[]`; activation goes through
 // `setActiveCustomTheme` so the rest of the app picks them up.
 //
-// Phase 5 / Task 18 wires four new affordances on top of the editor:
-//   1. Per-card "Export" button — downloads the theme as a versioned
-//      `*.cognia-theme.json` document.
-//   2. Top-of-tab "Import theme JSON" button — hidden file input that
-//      parses via `importThemeFromJson` and creates a new theme.
-//   3. Per-row contrast chip — flags the eight critical foreground/
-//      background pairs from `auditThemeContrast`.
-//   4. Save warning dialog — confirms when audit failures are present.
-// `handleSave` now writes the dual-variant `tokens.{light, dark}` shape
-// directly (closing the TODO from the Task 7 follow-up commit `6ffc9a8`),
+// Layout: xl+ renders two columns — the editor (name / dark switch /
+// action row / five collapsible token groups) on the left, and a sticky
+// column with the live preview plus the `SavedThemesRail` on the right.
+// Below xl everything stacks into a single column and the rail becomes a
+// wrapping horizontal strip (handled inside the rail component).
+//
+// Interaction hardening on top of the original editor:
+//   1. Dirty-state protection — a `baseline` snapshot is kept for every
+//      draft load point; switching themes / starting a new draft /
+//      duplicating while dirty asks for confirmation instead of silently
+//      discarding edits.
+//   2. Delete confirmation — both the action-row button and the rail's
+//      dropdown route through an AlertDialog before `deleteCustomTheme`.
+//   3. Duplicate — clones a saved row (tokens + legacy fields) under a
+//      localised "(copy)" name and loads the copy into the editor.
+// `handleSave` writes the dual-variant `tokens.{light, dark}` shape while
 // keeping the legacy `colors`/`isDark` fields populated for the
 // one-release rollback contract.
 
@@ -41,12 +47,12 @@ import { Trash2Icon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
 import { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "@/lib/appearance"
-import { auditThemeContrast, isFlaggedPair } from "@/lib/appearance/contrast-audit"
+import { auditThemeContrast } from "@/lib/appearance/contrast-audit"
 import { exportThemeToJson, importThemeFromJson } from "@/lib/appearance/theme-export"
 import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
-import { ColorTokenRow } from "../components/color-token-row"
+import { DEFAULT_GROUP_OPEN, TOKEN_GROUPS, TokenGroup } from "../components/token-group"
+import { SavedThemesRail } from "../components/saved-themes-rail"
 import { ThemePreview } from "../components/theme-preview"
-import { cn } from "@/lib/utils"
 
 interface DraftTheme {
   id?: string
@@ -62,6 +68,12 @@ interface DraftTheme {
   existingOpposite?: ThemeColors
 }
 
+/** Pending navigation that was intercepted by the dirty-draft guard. */
+type PendingAction =
+  | { type: "select"; theme: CustomTheme }
+  | { type: "new" }
+  | { type: "duplicate"; theme: CustomTheme }
+
 // Stable empty fallback so the render-time reconciler below can use
 // reference equality without thrashing when `customThemes` is undefined.
 const EMPTY_THEMES: CustomTheme[] = []
@@ -72,6 +84,16 @@ function emptyDraft(isDark: boolean): DraftTheme {
     colors: { ...DEFAULT_FALLBACKS[isDark ? "dark" : "light"] },
     isDark,
   }
+}
+
+/** Editable-field equality — drives the dirty check. `existingOpposite` is
+ * save-time metadata, not user input, so it's deliberately excluded. */
+function draftEquals(a: DraftTheme, b: DraftTheme): boolean {
+  if (a.name !== b.name || a.isDark !== b.isDark) return false
+  for (const key of THEME_COLOR_KEYS) {
+    if (a.colors[key] !== b.colors[key]) return false
+  }
+  return true
 }
 
 /**
@@ -119,20 +141,38 @@ export function CustomThemeTab() {
   const setActive = useSettingsStore((s) => s.setActiveCustomTheme)
 
   const [draft, setDraft] = useState<DraftTheme>(() => emptyDraft(true))
+  // Snapshot of the last loaded/saved draft — the dirty check compares
+  // against this. Updated at every draft load point (select / new / save /
+  // duplicate / reconciler rebuild).
+  const [baseline, setBaseline] = useState<DraftTheme>(() => emptyDraft(true))
   const [showSaveWarning, setShowSaveWarning] = useState(false)
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+
+  const isDirty = !draftEquals(draft, baseline)
+
+  /** Load a draft and reset the dirty baseline in one step. */
+  const applyDraft = (next: DraftTheme) => {
+    setDraft(next)
+    setBaseline(next)
+  }
 
   // Track the theme list reference we last reconciled with — when it
   // changes (e.g. an external save mutated the row we're editing), pull
   // the latest copy into the draft. Done during render to avoid the
-  // setState-in-effect anti-pattern.
+  // setState-in-effect anti-pattern. Skipped while the draft is dirty so
+  // rail actions on *other* rows (activate / duplicate / delete) never
+  // clobber in-progress edits.
   const [reconciledThemes, setReconciledThemes] = useState(themes)
   if (themes !== reconciledThemes) {
     setReconciledThemes(themes)
-    if (draft.id) {
+    if (draft.id && !isDirty) {
       const found = themes.find((th) => th.id === draft.id)
       if (found) {
-        setDraft(buildDraftFromTheme(found))
+        const next = buildDraftFromTheme(found)
+        setDraft(next)
+        setBaseline(next)
       }
     }
   }
@@ -150,8 +190,46 @@ export function CustomThemeTab() {
   )
   const audit = useMemo(() => auditThemeContrast(auditTokens), [auditTokens])
 
-  const handleSelect = (theme: CustomTheme) => {
-    setDraft(buildDraftFromTheme(theme))
+  const doSelect = (theme: CustomTheme) => {
+    applyDraft(buildDraftFromTheme(theme))
+  }
+
+  const doNew = () => applyDraft(emptyDraft(true))
+
+  const doDuplicate = (theme: CustomTheme) => {
+    const copy: Omit<CustomTheme, "id"> = {
+      name: t("rail.copySuffix", { name: theme.name }),
+      baseVariant: theme.baseVariant,
+      tokens: theme.tokens,
+      colors: theme.colors,
+      isDark: theme.isDark,
+    }
+    const id = createCustomTheme(copy)
+    applyDraft(buildDraftFromTheme({ ...copy, id }))
+  }
+
+  // Dirty-guarded entry points — intercept with the discard dialog when
+  // the draft has unsaved edits.
+  const guard = (action: PendingAction, run: () => void) => {
+    if (isDirty) {
+      setPendingAction(action)
+    } else {
+      run()
+    }
+  }
+  const handleSelect = (theme: CustomTheme) =>
+    guard({ type: "select", theme }, () => doSelect(theme))
+  const handleNew = () => guard({ type: "new" }, doNew)
+  const handleDuplicate = (theme: CustomTheme) =>
+    guard({ type: "duplicate", theme }, () => doDuplicate(theme))
+
+  const handleConfirmDiscard = () => {
+    const action = pendingAction
+    setPendingAction(null)
+    if (!action) return
+    if (action.type === "select") doSelect(action.theme)
+    else if (action.type === "new") doNew()
+    else doDuplicate(action.theme)
   }
 
   // Writes the dual-variant `tokens.{light, dark}` shape AND keeps the
@@ -179,6 +257,7 @@ export function CustomThemeTab() {
         colors: draft.colors,
         isDark: draft.isDark,
       })
+      applyDraft({ ...draft, existingOpposite: oppositeTokens })
     } else {
       const newId = createCustomTheme({
         name: draft.name.trim(),
@@ -187,7 +266,7 @@ export function CustomThemeTab() {
         colors: draft.colors,
         isDark: draft.isDark,
       })
-      setDraft((d) => ({ ...d, id: newId, existingOpposite: oppositeTokens }))
+      applyDraft({ ...draft, id: newId, existingOpposite: oppositeTokens })
     }
   }
 
@@ -205,11 +284,18 @@ export function CustomThemeTab() {
     performSave()
   }
 
-  const handleNew = () => setDraft(emptyDraft(true))
-  const handleDelete = () => {
-    if (!draft.id) return
-    deleteCustomTheme(draft.id)
-    setDraft(emptyDraft(true))
+  // Deletion always routes through the confirm dialog — from the action
+  // row (current draft) or from the rail's per-item dropdown (any row).
+  const requestDelete = (id: string, name: string) => setDeleteTarget({ id, name })
+
+  const handleConfirmDelete = () => {
+    const target = deleteTarget
+    setDeleteTarget(null)
+    if (!target) return
+    deleteCustomTheme(target.id)
+    if (target.id === draft.id) {
+      applyDraft(emptyDraft(true))
+    }
   }
 
   const handleActivate = () => {
@@ -269,143 +355,144 @@ export function CustomThemeTab() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input
-          placeholder={t("namePlaceholder")}
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          className="h-8"
-        />
-        <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1">
-          <Label className="text-xs">{t("darkLabel")}</Label>
-          <Switch
-            checked={draft.isDark}
-            onCheckedChange={(v) => setDraft({ ...draft, isDark: v })}
-            aria-label={t("darkLabel")}
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={handleSaveClick} disabled={!draft.name.trim()}>
-          {isExisting ? t("updateButton") : t("saveButton")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={handleNew}>
-          {t("newButton")}
-        </Button>
-        {isExisting && draft.id !== activeId && (
-          <Button size="sm" variant="outline" onClick={handleActivate}>
-            {t("activateButton")}
-          </Button>
-        )}
-        {isExisting && draft.id === activeId && (
-          <Button size="sm" variant="outline" onClick={handleDeactivate}>
-            {t("deactivateButton")}
-          </Button>
-        )}
-        {isExisting && (
-          <Button size="sm" variant="destructive" onClick={handleDelete}>
-            <Trash2Icon className="mr-1 size-3" />
-            {t("deleteButton")}
-          </Button>
-        )}
-        <div className="ml-auto">
-          {audit.failureCount === 0 ? (
-            <Badge variant="default">{t("audit.allPass")}</Badge>
-          ) : (
-            <Badge variant="destructive">
-              {t("audit.failuresCount", {
-                count: audit.failureCount,
-                total: audit.totalPairs,
-              })}
-            </Badge>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2 rounded-md border p-3">
-          {THEME_COLOR_KEYS.map((key) => (
-            <div key={key} className="flex items-center gap-2">
-              <ColorTokenRow
-                tokenKey={key}
-                label={tokenT(key)}
-                value={draft.colors[key] ?? fallback[key]}
-                onChange={(next) =>
-                  setDraft({ ...draft, colors: { ...draft.colors, [key]: next } })
-                }
-                className="flex-1"
-                swatchAriaLabel={tokenT("aria.swatch", { label: tokenT(key) })}
-                hexAriaLabel={tokenT("aria.hex", { label: tokenT(key) })}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {/* Editor column */}
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              placeholder={t("namePlaceholder")}
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              className="h-8"
+            />
+            <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1">
+              <Label className="text-xs">{t("darkLabel")}</Label>
+              <Switch
+                checked={draft.isDark}
+                onCheckedChange={(v) => setDraft({ ...draft, isDark: v })}
+                aria-label={t("darkLabel")}
               />
-              {isFlaggedPair(audit, key) && (
-                <Badge
-                  variant="destructive"
-                  className="shrink-0 text-[10px]"
-                  data-testid={`audit-chip-${key}`}
-                >
-                  {t("audit.lowContrast")}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={handleSaveClick} disabled={!draft.name.trim()}>
+              {isExisting ? t("updateButton") : t("saveButton")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleNew} data-testid="custom-theme-new">
+              {t("newButton")}
+            </Button>
+            {isExisting && draft.id !== activeId && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleActivate}
+                data-testid="custom-theme-activate"
+              >
+                {t("activateButton")}
+              </Button>
+            )}
+            {isExisting && draft.id === activeId && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDeactivate}
+                data-testid="custom-theme-deactivate"
+              >
+                {t("deactivateButton")}
+              </Button>
+            )}
+            {isExisting && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => draft.id && requestDelete(draft.id, draft.name)}
+                data-testid="custom-theme-delete"
+              >
+                <Trash2Icon className="mr-1 size-3" />
+                {t("deleteButton")}
+              </Button>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {isDirty && (
+                <Badge variant="secondary" data-testid="custom-theme-unsaved">
+                  {t("unsavedBadge")}
+                </Badge>
+              )}
+              {audit.failureCount === 0 ? (
+                <Badge variant="default">{t("audit.allPass")}</Badge>
+              ) : (
+                <Badge variant="destructive">
+                  {t("audit.failuresCount", {
+                    count: audit.failureCount,
+                    total: audit.totalPairs,
+                  })}
                 </Badge>
               )}
             </div>
-          ))}
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs">{t("previewLabel")}</Label>
-          <ThemePreview colors={draft.colors} fallback={fallback} />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs">{t("savedLabel")}</Label>
-        {themes.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("noSaved")}</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {themes.map((th) => {
-              const active = th.id === activeId
-              const editing = th.id === draft.id
-              return (
-                <div
-                  key={th.id}
-                  className={cn(
-                    "flex items-center gap-1 rounded border px-2 py-1 text-xs transition",
-                    editing ? "border-primary" : "border-border",
-                    active && "bg-primary/10"
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleSelect(th)}
-                    className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span
-                      className="inline-block size-3 rounded-full border"
-                      style={{
-                        // Phase 2: read from the new `tokens` shape first;
-                        // fall back to legacy `colors`.
-                        background:
-                          (th.baseVariant ?? (th.isDark ? "dark" : "light")) === "dark"
-                            ? (th.tokens?.dark.primary ?? th.colors?.primary ?? "#888")
-                            : (th.tokens?.light.primary ?? th.colors?.primary ?? "#888"),
-                      }}
-                    />
-                    {th.name}
-                  </button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-[10px]"
-                    onClick={() => handleExport(th)}
-                    aria-label={`${t("actions.export")} ${th.name}`}
-                  >
-                    {t("actions.export")}
-                  </Button>
-                </div>
-              )
-            })}
           </div>
-        )}
+
+          <div className="space-y-2">
+            {TOKEN_GROUPS.map((group) => (
+              <TokenGroup
+                key={group.key}
+                groupKey={group.key}
+                label={t(`groups.${group.key}`)}
+                tokens={group.tokens}
+                defaultOpen={DEFAULT_GROUP_OPEN[group.key]}
+                values={draft.colors}
+                fallback={fallback}
+                audit={audit}
+                tokenLabel={(key) => tokenT(key)}
+                swatchAriaLabel={(key) => tokenT("aria.swatch", { label: tokenT(key) })}
+                hexAriaLabel={(key) => tokenT("aria.hex", { label: tokenT(key) })}
+                auditChipLabel={t("audit.lowContrast")}
+                failureBadgeLabel={(count) => t("groupFailures", { count })}
+                onChange={(key, next) =>
+                  setDraft({ ...draft, colors: { ...draft.colors, [key]: next } })
+                }
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Preview + saved-themes column (sticky on xl so the preview stays
+            visible while scrolling through token groups) */}
+        <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+          <div className="space-y-2">
+            <Label className="text-xs">{t("previewLabel")}</Label>
+            <ThemePreview colors={draft.colors} fallback={fallback} />
+          </div>
+          <SavedThemesRail
+            themes={themes}
+            activeId={activeId}
+            editingId={draft.id}
+            labels={{
+              title: t("savedLabel"),
+              empty: t("noSaved"),
+              startNew: t("newButton"),
+              activate: t("activateButton"),
+              deactivate: t("deactivateButton"),
+              duplicate: t("rail.duplicate"),
+              export: t("actions.export"),
+              delete: t("deleteButton"),
+              more: t("rail.more"),
+              lightSwatchAria: t("rail.lightSwatchAria"),
+              darkSwatchAria: t("rail.darkSwatchAria"),
+              activeBadgeAria: t("rail.activeBadgeAria"),
+            }}
+            onSelect={handleSelect}
+            onActivate={(id) => void setActive(id)}
+            onDeactivate={handleDeactivate}
+            onDuplicate={handleDuplicate}
+            onExport={handleExport}
+            onDelete={(id) => {
+              const th = themes.find((item) => item.id === id)
+              requestDelete(id, th?.name ?? "")
+            }}
+            onNew={handleNew}
+          />
+        </div>
       </div>
 
       <AlertDialog open={showSaveWarning} onOpenChange={setShowSaveWarning}>
@@ -420,6 +507,48 @@ export function CustomThemeTab() {
             <AlertDialogCancel>{t("audit.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmSaveAnyway}>
               {t("audit.saveAnyway")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAction(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("discardDialog.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("discardDialog.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("discardDialog.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDiscard}>
+              {t("discardDialog.discard")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteDialog.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteDialog.body", { name: deleteTarget?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("deleteDialog.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete}>
+              {t("deleteDialog.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

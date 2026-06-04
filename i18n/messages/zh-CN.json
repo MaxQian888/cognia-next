@@ -1320,26 +1320,9 @@
         "toggleLabel": "切换欢迎页布局"
       },
       "sections": {
-        "quickStart": "快速开始",
         "tryPrompt": "试试这些",
         "characterPrompts": "用该角色试试",
         "continue": "最近"
-      },
-      "capabilities": {
-        "workflows": "工作流",
-        "agentTeams": "智能体团队",
-        "connectors": "连接器",
-        "twin": "数字分身",
-        "computerUse": "计算机操作",
-        "ocr": "OCR"
-      },
-      "capabilitiesDesc": {
-        "workflows": "把多步任务编排成可复用的自动化流程——搭一次，反复运行。",
-        "agentTeams": "多个智能体分工规划、并行执行。",
-        "connectors": "把助手接入飞书、Slack 等平台。",
-        "twin": "让助手了解你的背景、偏好和语气。",
-        "computerUse": "代你点击、输入、操作界面。",
-        "ocr": "从图片与截图中提取文字。"
       },
       "samples": {
         "exploreTitle": "探索项目",
@@ -2655,7 +2638,9 @@
         "runtime:twins": "⚠ 暴露孪生档案。已执行 PII 脱敏，但启用前请审核。",
         "runtime:plugins": "暴露已安装插件的列表与元数据。",
         "runtime:agent-teams": "暴露 Agent 团队定义。",
-        "mcp:computer-use": "⚠ 允许外部 Agent 操控本机（鼠标 / 键盘 / 截图）。遵循 设置 → 自动化 → 权限策略；每次调用按权限层级弹出授权确认。"
+        "mcp:computer-use": "⚠ 允许外部 Agent 操控本机（鼠标 / 键盘 / 截图）。遵循 设置 → 自动化 → 权限策略；每次调用按权限层级弹出授权确认。",
+        "inbox:connectors:read": "⚠ 只读收件箱自省 — 适配器、会话、草稿、审计。元数据可能包含会话句柄与近期消息片段。默认关闭。",
+        "inbox:connectors:send": "⚠ 允许外部 Agent 向你的 IM 收件箱发送 AI 回复。与应用内聊天走同一管线（PII 门控、策略评估、出站队列）。默认关闭。"
       },
       "server": {
         "title": "MCP 服务器",
@@ -2755,14 +2740,20 @@
       },
       "detection": {
         "heading": "扫描本地代理",
-        "subheading": "探测 127.0.0.1 端口 7890/7891/1080/10808/8080/8888，并尝试访问 Clash / Mihomo 控制台 API。",
+        "subheading": "通过运行中的进程与配置文件发现 FlClash、Clash Verge Rev、Mihomo、v2rayN，并探测常见回环端口。",
         "button": "立即检测",
         "empty": "未在常见端口找到本地代理，可在「通用」分页手动配置。",
         "running": "正在扫描端口…",
         "results": "发现的代理",
         "apply": "应用",
         "currentBadge": "当前使用",
-        "webUnsupported": "自动检测仅支持 Tauri 桌面端。"
+        "webUnsupported": "自动检测仅支持 Tauri 桌面端。",
+        "source": {
+          "config": "已从客户端配置文件读取端口",
+          "process": "检测到客户端进程，使用其默认端口",
+          "port": "通过开放端口探测发现"
+        },
+        "controllerSecured": "控制台 API 需要密钥"
       },
       "test": {
         "urlLabel": "测试 URL",
@@ -2948,6 +2939,48 @@
         "components": "组件",
         "a11y": "无障碍",
         "advanced": "高级"
+      },
+      "a11y": {
+        "wcag": {
+          "targetLabel": "WCAG 对比度目标",
+          "targetHint": "主题审计检查颜色时使用的对比度等级。",
+          "target": {
+            "off": "关闭",
+            "AA": "AA（4.5:1）",
+            "AAA": "AAA（7:1）"
+          },
+          "enforcementLabel": "对比度强制策略",
+          "enforcementHint": "选择审计发现违规时仅提示还是同时自动修复。",
+          "enforcement": {
+            "warn": "仅提示",
+            "warnFix": "提示并自动修复"
+          }
+        },
+        "highContrast": {
+          "label": "高对比度预设",
+          "hint": "在当前主题之上叠加一层高对比度配色。",
+          "off": "关闭",
+          "light": "高对比度浅色",
+          "dark": "高对比度深色"
+        },
+        "colorblind": {
+          "label": "色盲调色板",
+          "hint": "将强调色与状态色调整为所选色觉缺陷下可区分的调色板。",
+          "off": "关闭",
+          "deuter": "绿色弱视（红绿）",
+          "protan": "红色弱视（红弱）",
+          "tritan": "蓝色弱视（蓝黄）"
+        },
+        "motion": {
+          "speedLabel": "动画速度",
+          "speed": {
+            "slow": "慢速（0.5×）",
+            "normal": "正常（1×）",
+            "fast": "快速（1.5×）"
+          },
+          "reduceLabel": "减弱动态效果",
+          "reduceHint": "在整个应用中尽量减少动画与过渡效果。"
+        }
       },
       "componentCustomize": {
         "description": "逐个自定义面板类组件。透明度控制组件在壁纸之上的呈现；阴影与圆角始终生效。",
@@ -3190,6 +3223,35 @@
           "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
           "cancel": "取消",
           "saveAnyway": "仍然保存"
+        },
+        "groups": {
+          "surface": "表面",
+          "text": "文字",
+          "brand": "品牌",
+          "state": "状态",
+          "sidebar": "侧边栏"
+        },
+        "groupFailures": "{count} 项未通过",
+        "rail": {
+          "duplicate": "复制",
+          "more": "更多操作",
+          "lightSwatchAria": "浅色变体色板",
+          "darkSwatchAria": "深色变体色板",
+          "activeBadgeAria": "当前应用的主题",
+          "copySuffix": "{name}（副本）"
+        },
+        "unsavedBadge": "未保存的修改",
+        "discardDialog": {
+          "title": "放弃未保存的修改？",
+          "body": "当前草稿有未保存的修改，切换后将会丢失。",
+          "discard": "放弃修改",
+          "cancel": "继续编辑"
+        },
+        "deleteDialog": {
+          "title": "删除主题",
+          "body": "确定删除“{name}”？此操作无法撤销。",
+          "confirm": "删除",
+          "cancel": "取消"
         },
         "tokens": {
           "background": "背景",
@@ -10395,6 +10457,14 @@
       "general": {
         "name": "通用助手",
         "description": "面向各类任务的通用 AI 助手"
+      },
+      "plan": {
+        "name": "规划（只读）",
+        "description": "调研并提出分步实施计划，不编辑文件、不执行变更命令"
+      },
+      "build": {
+        "name": "构建",
+        "description": "完全访问 —— 实施变更、编辑文件并运行命令"
       },
       "web-design": {
         "name": "网页设计师",
