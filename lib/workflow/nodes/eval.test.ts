@@ -141,4 +141,34 @@ describe("eval.gate", () => {
     await expect(exec.execute(ctx({ runId: "ghost" }))).rejects.toThrow(/not found/)
     await expect(exec.execute(ctx({}))).rejects.toThrow(/runId/)
   })
+
+  it("throws when neither params nor the dataset define thresholds", async () => {
+    const { getDataset } = jest.requireMock("@/lib/db/eval-datasets") as {
+      getDataset: jest.Mock
+    }
+    getDataset.mockResolvedValueOnce({ id: "d1" }) // no gate field
+    const exec = getExecutor("eval.gate", 1)!
+    await expect(exec.execute(ctx({ runId: "r1" }))).rejects.toThrow(/no thresholds/)
+  })
+})
+
+describe("eval.run output without a configured gate", () => {
+  it("omits gatePassed and defaults k to 1 for non-numeric values", async () => {
+    ;(runEvalService as jest.Mock).mockResolvedValueOnce({
+      reports: [{ runId: "r2", passAt1: 1, passHatK: 1, totalCostUsd: 0 }],
+      deterministicOnly: true,
+    })
+    const exec = getExecutor("eval.run", 1)!
+    const res = await exec.execute(ctx({ datasetId: "d1", model: "m", k: "three" }))
+    expect(runEvalService).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ k: 1 }) })
+    )
+    expect(res.output).not.toHaveProperty("gatePassed")
+  })
+
+  it("throws when the service produces no report", async () => {
+    ;(runEvalService as jest.Mock).mockResolvedValueOnce({ reports: [], deterministicOnly: true })
+    const exec = getExecutor("eval.run", 1)!
+    await expect(exec.execute(ctx({ datasetId: "d1", model: "m" }))).rejects.toThrow(/no report/)
+  })
 })

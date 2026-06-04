@@ -47,6 +47,36 @@ describe("EvalRunConfig", () => {
     )
   })
 
+  it("patches label, characterId, split and capabilities", () => {
+    const onChange = jest.fn()
+    render(<EvalRunConfig params={{}} onChange={onChange} />)
+    fireEvent.change(document.getElementById("eval-label")!, { target: { value: "L" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ label: "L" }))
+    fireEvent.change(document.getElementById("eval-char")!, { target: { value: "ch1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ characterId: "ch1" }))
+    fireEvent.change(document.getElementById("eval-split")!, { target: { value: "test" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ split: "test" }))
+    fireEvent.change(document.getElementById("eval-caps")!, { target: { value: "a, b" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ capabilities: ["a", "b"] }))
+  })
+
+  it("patches team and workflow refs", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <EvalRunConfig params={{ targetKind: "team" }} onChange={onChange} />
+    )
+    fireEvent.change(screen.getByPlaceholderText("workflows.forms.eval.run.teamId.placeholder"), {
+      target: { value: "tm1" },
+    })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ teamId: "tm1" }))
+    rerender(<EvalRunConfig params={{ targetKind: "workflow" }} onChange={onChange} />)
+    fireEvent.change(
+      screen.getByPlaceholderText("workflows.forms.eval.run.workflowId.placeholder"),
+      { target: { value: "wf1" } }
+    )
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ workflowId: "wf1" }))
+  })
+
   it("shows the chat model field by default and team/workflow refs by kind", () => {
     const { rerender } = render(<EvalRunConfig params={{}} onChange={jest.fn()} />)
     expect(screen.getByText("workflows.forms.eval.run.model.label")).toBeInTheDocument()
@@ -54,6 +84,19 @@ describe("EvalRunConfig", () => {
     expect(screen.getByText("workflows.forms.eval.run.teamId.label")).toBeInTheDocument()
     rerender(<EvalRunConfig params={{ targetKind: "workflow" }} onChange={jest.fn()} />)
     expect(screen.getByText("workflows.forms.eval.run.workflowId.label")).toBeInTheDocument()
+  })
+})
+
+describe("EvalRunConfig prefilled", () => {
+  it("renders list params as comma-joined strings", () => {
+    render(
+      <EvalRunConfig
+        params={{ scorerIds: ["assertion", "cost"], capabilities: ["a"] }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(document.getElementById("eval-scorers")).toHaveValue("assertion, cost")
+    expect(document.getElementById("eval-caps")).toHaveValue("a")
   })
 })
 

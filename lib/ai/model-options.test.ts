@@ -33,10 +33,17 @@ describe("collectModelOptions", () => {
 
   it("appends enabled custom providers after the built-ins", () => {
     const out = collectModelOptions(undefined, [
-      { id: "local", name: "Local", enabled: true, defaultModel: "llama3" } as never,
+      {
+        id: "local",
+        name: "Local",
+        enabled: true,
+        defaultModel: "llama3",
+        models: [{ id: "llama3" }, { id: "qwen3" }, {}],
+      } as never,
       { id: "off", name: "Off", enabled: false, defaultModel: "x" } as never,
     ])
-    expect(out[out.length - 1]).toEqual(
+    expect(out).toContainEqual(expect.objectContaining({ providerId: "local", modelId: "qwen3" }))
+    expect(out).toContainEqual(
       expect.objectContaining({ providerId: "local", providerName: "Local", modelId: "llama3" })
     )
     expect(out.some((o) => o.providerId === "off")).toBe(false)

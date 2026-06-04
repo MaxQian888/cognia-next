@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 
@@ -58,5 +58,15 @@ describe("RunComparisonView", () => {
   it("prompts to pick two when fewer than two runs exist", () => {
     render(<RunComparisonView runs={[run("A", 1)]} />)
     expect(screen.getByText("compare.pickTwo")).toBeInTheDocument()
+  })
+
+  it("toggles a run out of the selection via its checkbox", async () => {
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('compare.selectRun:{"label":"B"}'))
+    expect(screen.getByText("compare.pickTwo")).toBeInTheDocument()
+    // re-adding restores the grid
+    fireEvent.click(screen.getByLabelText('compare.selectRun:{"label":"B"}'))
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
   })
 })

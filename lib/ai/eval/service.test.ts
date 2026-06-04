@@ -22,6 +22,11 @@ jest.mock("@/lib/db/eval-run-cases", () => ({
     { id: "r1::c1", runId: "r1", caseId: "c1", scores: {}, passAt1: true },
   ]),
 }))
+// Default-wiring seam: the no-deps path goes through buildConfiguredRunDeps.
+const buildConfiguredRunDeps = jest.fn()
+jest.mock("./browser-deps", () => ({
+  buildConfiguredRunDeps: (...a: unknown[]) => buildConfiguredRunDeps(...(a as [])),
+}))
 
 const dataset: EvalDataset = {
   id: "d1",
@@ -129,6 +134,32 @@ describe("runEvalService", () => {
     expect(res.gatePassed).toBeUndefined()
   })
 
+  it("falls back to buildConfiguredRunDeps (with judgeModel) when no deps are injected", async () => {
+    buildConfiguredRunDeps.mockReturnValue({ deps: makeDeps(), deterministicOnly: true })
+    const res = await runEvalService({
+      datasetId: "d1",
+      config: { targets: [{ kind: "chat", label: "t", model: "m" }], scorerIds: [], k: 1 },
+      appSettings: null,
+      judgeModel: "judge-x",
+    })
+    expect(buildConfiguredRunDeps).toHaveBeenCalledWith({
+      appSettings: null,
+      judgeModel: "judge-x",
+    })
+    expect(res.deterministicOnly).toBe(true)
+    expect(res.reports).toHaveLength(1)
+  })
+
+  it("omits judgeModel from the default wiring when not given", async () => {
+    buildConfiguredRunDeps.mockReturnValue({ deps: makeDeps(), deterministicOnly: false })
+    await runEvalService({
+      datasetId: "d1",
+      config: { targets: [{ kind: "chat", label: "t", model: "m" }], scorerIds: [], k: 1 },
+      appSettings: null,
+    })
+    expect(buildConfiguredRunDeps).toHaveBeenLastCalledWith({ appSettings: null })
+  })
+
   it("flags gatePassed=false when any report misses a threshold", async () => {
     const failingDataset = { ...dataset, gate: { minPassAt1: 2 } }
     const deps = { ...makeDeps(), loadDataset: async () => failingDataset }
@@ -153,6 +184,15 @@ describe("queries", () => {
         latestRun: expect.objectContaining({ runId: "r1" }),
       }),
     ])
+  })
+
+  it("omits latestRun when a dataset has no runs", async () => {
+    const { listRunsByDataset } = jest.requireMock("@/lib/db/eval-runs") as {
+      listRunsByDataset: jest.Mock
+    }
+    listRunsByDataset.mockResolvedValueOnce([])
+    const rows = await listDatasetSummaries()
+    expect(rows[0]).not.toHaveProperty("latestRun")
   })
 
   it("getRunDetail joins report and per-case rows", async () => {

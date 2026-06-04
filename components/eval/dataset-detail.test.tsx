@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { EvalDataset } from "@/types/eval/eval"
 
 jest.mock("next-intl", () => ({
@@ -116,6 +116,14 @@ describe("DatasetDetail", () => {
     expect(screen.queryByTestId("import-dialog")).not.toBeInTheDocument()
     fireEvent.click(screen.getByText("detail.gate"))
     expect(screen.getByTestId("gate-config-section")).toBeInTheDocument()
+  })
+
+  it("closes a dialog via Escape (onOpenChange)", async () => {
+    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    fireEvent.click(screen.getByText("detail.import"))
+    expect(screen.getByTestId("import-dialog")).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByTestId("import-dialog")).not.toBeInTheDocument())
   })
 
   it("exports JSONL + CSV via a blob download", () => {

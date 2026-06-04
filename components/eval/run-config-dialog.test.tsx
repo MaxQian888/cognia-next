@@ -119,6 +119,31 @@ describe("RunConfigDialog", () => {
     expect(config.subset).toEqual({ split: "test", capabilities: ["a", "b"] })
   })
 
+  it("builds team and workflow target specs from the kind select", async () => {
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.change(screen.getByLabelText("runConfig.targetKind"), { target: { value: "team" } })
+    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "tm1" } })
+    fireEvent.click(screen.getByText("runConfig.addTarget"))
+    fireEvent.change(screen.getAllByLabelText("runConfig.targetKind")[1], {
+      target: { value: "workflow" },
+    })
+    fireEvent.change(screen.getAllByLabelText("runConfig.targetRef")[1], {
+      target: { value: "wf1" },
+    })
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    const config = runEvalService.mock.calls[0][0].config
+    expect(config.targets[0]).toMatchObject({ kind: "team", teamId: "tm1" })
+    expect(config.targets[1]).toMatchObject({ kind: "workflow", workflowId: "wf1" })
+  })
+
+  it("surfaces a service failure as an alert", async () => {
+    runEvalService.mockRejectedValueOnce(new Error("boom"))
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+  })
+
   it("shows progress while running and supports cancel", async () => {
     let capturedSignal: AbortSignal | undefined
     let release: () => void = () => {}

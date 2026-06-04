@@ -66,6 +66,17 @@ describe("RunDetail", () => {
     expect(screen.getByText("fail")).toBeInTheDocument()
   })
 
+  it("shows a passing gate badge and falls back to caseId for unknown cases", async () => {
+    // Persistent (not Once): the hook re-runs on the post-getRun re-render.
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+      { id: "r1::cX", runId: "r1", caseId: "cX", scores: {}, passAt1: true },
+    ])
+    render(<RunDetail runId="r1" gate={{ minPassAt1: 0.1 }} onBack={jest.fn()} />)
+    expect(await screen.findByText("gatePassed")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.getByText("cX")).toBeInTheDocument() // no input → caseId label
+  })
+
   it("calls onBack and renders without a gate", async () => {
     const onBack = jest.fn()
     render(<RunDetail runId="r1" onBack={onBack} />)

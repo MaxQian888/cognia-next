@@ -102,6 +102,56 @@ describe("cognia-eval plugin", () => {
     await expect(runEvalDatasetTool({ datasetId: "" } as never)).rejects.toThrow(/datasetId/)
   })
 
+  it("eval_run_dataset passes workflow targets, character, subset and gates through", async () => {
+    ;(runEvalService as jest.Mock).mockResolvedValueOnce({
+      reports: [{ runId: "r9", passAt1: 0.5, passHatK: 0.5, totalCostUsd: 1, targetLabel: "wf1" }],
+      gates: { r9: { passed: false, failures: ["x"] } },
+      gatePassed: false,
+      deterministicOnly: false,
+    })
+    const res = await runEvalDatasetTool({
+      datasetId: "d1",
+      targetKind: "workflow",
+      workflowId: "wf1",
+      split: "test",
+      capabilities: ["a"],
+      scorerIds: ["assertion"],
+      k: 2,
+    })
+    expect(runEvalService).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          targets: [expect.objectContaining({ kind: "workflow", workflowId: "wf1" })],
+          subset: { split: "test", capabilities: ["a"] },
+          scorerIds: ["assertion"],
+          k: 2,
+        }),
+      })
+    )
+    expect(res).toEqual(
+      expect.objectContaining({
+        gatePassed: false,
+        gates: { r9: { passed: false, failures: ["x"] } },
+      })
+    )
+  })
+
+  it("eval_run_dataset includes characterId on chat targets", async () => {
+    await runEvalDatasetTool({ datasetId: "d1", model: "m", characterId: "ch1" })
+    expect(runEvalService).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          targets: [expect.objectContaining({ kind: "chat", characterId: "ch1" })],
+        }),
+      })
+    )
+  })
+
+  it("eval_run_dataset throws when the service produces no report", async () => {
+    ;(runEvalService as jest.Mock).mockResolvedValueOnce({ reports: [], deterministicOnly: true })
+    await expect(runEvalDatasetTool({ datasetId: "d1", model: "m" })).rejects.toThrow(/no report/)
+  })
+
   it("eval_get_run returns the detail and rejects unknown runs", async () => {
     const tools = await activate()
     await expect(tools.get("eval_get_run")!.execute({ runId: "r1" })).resolves.toEqual(
@@ -110,5 +160,12 @@ describe("cognia-eval plugin", () => {
     await expect(tools.get("eval_get_run")!.execute({ runId: "ghost" })).rejects.toThrow(
       /not found/
     )
+    await expect(tools.get("eval_get_run")!.execute({})).rejects.toThrow(/not found/)
+  })
+
+  it("omits gate fields when the dataset has no thresholds and deactivates cleanly", async () => {
+    const res = await runEvalDatasetTool({ datasetId: "d1", model: "m" })
+    expect(res).not.toHaveProperty("gates")
+    await expect(evalPlugin.deactivate!(undefined as never)).resolves.toBeUndefined()
   })
 })
