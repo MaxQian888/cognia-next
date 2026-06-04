@@ -235,6 +235,141 @@ describe("runWorkflow — branch decisions", () => {
     expect(ev2.find((e) => e.type === "step_completed" && e.stepId === "n_no")).toBeDefined()
     expect(ev2.find((e) => e.type === "step_skipped" && e.stepId === "n_yes")).toBeDefined()
   })
+
+  it("routes a v2 branch by sourceHandle even when edges carry custom labels", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_branch",
+          type: "flow.branch",
+          typeVersion: 2,
+          position: { x: 200, y: 0 },
+          data: {
+            label: "branch v2",
+            params: {
+              conditions: {
+                combinator: "all",
+                conditions: [{ left: "{{ $trigger.payload.count }}", operator: "gt", right: "5" }],
+              },
+            },
+          },
+        },
+        {
+          id: "n_yes",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: -100 },
+          data: { label: "yes branch", params: { variable: "branch", value: "yes" } },
+        },
+        {
+          id: "n_no",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: 100 },
+          data: { label: "no branch", params: { variable: "branch", value: "no" } },
+        },
+      ],
+      [
+        { id: "e1", source: "n_start", target: "n_branch" },
+        // Custom display labels must NOT override sourceHandle routing.
+        { id: "e2", source: "n_branch", sourceHandle: "true", target: "n_yes", label: "happy" },
+        { id: "e3", source: "n_branch", sourceHandle: "false", target: "n_no", label: "sad" },
+      ]
+    )
+
+    // count=10 > 5 → group passes → "true" handle.
+    const r1 = await runWorkflow({
+      workflow: wf,
+      trigger: { ...trigger, payload: { count: 10 } },
+    })
+    expect(r1.status).toBe("succeeded")
+    const ev1 = await listRunEvents(r1.runId)
+    expect(ev1.find((e) => e.type === "step_completed" && e.stepId === "n_yes")).toBeDefined()
+    expect(ev1.find((e) => e.type === "step_skipped" && e.stepId === "n_no")).toBeDefined()
+
+    // count=3 → group fails → "false" handle.
+    const r2 = await runWorkflow({
+      workflow: wf,
+      trigger: { ...trigger, payload: { count: 3 } },
+    })
+    expect(r2.status).toBe("succeeded")
+    const ev2 = await listRunEvents(r2.runId)
+    expect(ev2.find((e) => e.type === "step_completed" && e.stepId === "n_no")).toBeDefined()
+    expect(ev2.find((e) => e.type === "step_skipped" && e.stepId === "n_yes")).toBeDefined()
+  })
+
+  it("routes a v2 switch by case id handles with default fall-through", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_switch",
+          type: "flow.switch",
+          typeVersion: 2,
+          position: { x: 200, y: 0 },
+          data: {
+            label: "switch v2",
+            params: {
+              cases: [
+                {
+                  id: "c_small",
+                  label: "Small",
+                  when: {
+                    combinator: "all",
+                    conditions: [{ left: "{{ $trigger.payload.n }}", operator: "lt", right: "10" }],
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          id: "n_small",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: -100 },
+          data: { label: "small", params: { variable: "size", value: "small" } },
+        },
+        {
+          id: "n_default",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: 100 },
+          data: { label: "default", params: { variable: "size", value: "other" } },
+        },
+      ],
+      [
+        { id: "e1", source: "n_start", target: "n_switch" },
+        { id: "e2", source: "n_switch", sourceHandle: "c_small", target: "n_small" },
+        { id: "e3", source: "n_switch", sourceHandle: "default", target: "n_default" },
+      ]
+    )
+
+    const r1 = await runWorkflow({ workflow: wf, trigger: { ...trigger, payload: { n: 3 } } })
+    expect(r1.status).toBe("succeeded")
+    const ev1 = await listRunEvents(r1.runId)
+    expect(ev1.find((e) => e.type === "step_completed" && e.stepId === "n_small")).toBeDefined()
+    expect(ev1.find((e) => e.type === "step_skipped" && e.stepId === "n_default")).toBeDefined()
+
+    const r2 = await runWorkflow({ workflow: wf, trigger: { ...trigger, payload: { n: 42 } } })
+    expect(r2.status).toBe("succeeded")
+    const ev2 = await listRunEvents(r2.runId)
+    expect(ev2.find((e) => e.type === "step_completed" && e.stepId === "n_default")).toBeDefined()
+    expect(ev2.find((e) => e.type === "step_skipped" && e.stepId === "n_small")).toBeDefined()
+  })
 })
 
 describe("runWorkflow — failure handling", () => {

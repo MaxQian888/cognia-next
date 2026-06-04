@@ -384,13 +384,17 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         )
 
         // Branch routing — if a node returned `decision`, mark non-chosen
-        // outgoing edges' targets as skipped.
+        // outgoing edges' targets as skipped. `sourceHandle` is the stable
+        // routing key (v2 multi-output handles emit decisions as handle ids);
+        // `label` is the v1 fallback for edges drawn from a single handle and
+        // routed by display label. Handle must win — otherwise renaming an
+        // edge's label on a v2 node would silently re-route the run.
         if (result.decision !== undefined) {
           const decisions = Array.isArray(result.decision) ? result.decision : [result.decision]
           const chosen = new Set(decisions)
           for (const edge of validated.edges.filter((e) => e.source === stepId)) {
-            const label = edge.label ?? edge.sourceHandle ?? "default"
-            if (!chosen.has(label) && chosen.size > 0) {
+            const routeKey = edge.sourceHandle ?? edge.label ?? "default"
+            if (!chosen.has(routeKey) && chosen.size > 0) {
               propagateSkip(validated as VisualWorkflow, edge.target, skipped)
             }
           }

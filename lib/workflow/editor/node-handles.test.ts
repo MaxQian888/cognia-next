@@ -1,0 +1,67 @@
+import { defaultTypeVersionFor, outputHandlesFor } from "./node-handles"
+
+describe("outputHandlesFor", () => {
+  it("returns null for plain single-output kinds", () => {
+    expect(outputHandlesFor({ kind: "ai.prompt", typeVersion: 1, params: {} })).toBeNull()
+    expect(outputHandlesFor({ kind: "flow.set", typeVersion: 1, params: {} })).toBeNull()
+  })
+
+  it("returns null for v1 branch/switch (legacy single handle + edge labels)", () => {
+    expect(
+      outputHandlesFor({ kind: "flow.branch", typeVersion: 1, params: { condition: "x" } })
+    ).toBeNull()
+    expect(outputHandlesFor({ kind: "flow.switch", typeVersion: 1, params: {} })).toBeNull()
+  })
+
+  it("branch v2 exposes true/false handles", () => {
+    const handles = outputHandlesFor({ kind: "flow.branch", typeVersion: 2, params: {} })
+    expect(handles).toEqual([
+      { id: "true", kind: "true" },
+      { id: "false", kind: "false" },
+    ])
+  })
+
+  it("switch v2 exposes one handle per case plus default", () => {
+    const handles = outputHandlesFor({
+      kind: "flow.switch",
+      typeVersion: 2,
+      params: {
+        cases: [
+          { id: "c_a", label: "Alpha", when: { combinator: "all", conditions: [] } },
+          { label: "NoId", when: { combinator: "all", conditions: [] } },
+        ],
+      },
+    })
+    expect(handles).toEqual([
+      { id: "c_a", kind: "case", label: "Alpha" },
+      { id: "case-1", kind: "case", label: "NoId" },
+      { id: "default", kind: "default" },
+    ])
+  })
+
+  it("switch v2 with no cases still exposes the default handle", () => {
+    const handles = outputHandlesFor({ kind: "flow.switch", typeVersion: 2, params: {} })
+    expect(handles).toEqual([{ id: "default", kind: "default" }])
+  })
+
+  it("case handles fall back to the id when no label is set", () => {
+    const handles = outputHandlesFor({
+      kind: "flow.switch",
+      typeVersion: 2,
+      params: { cases: [{ id: "c_x", when: { combinator: "all", conditions: [] } }] },
+    })
+    expect(handles?.[0]).toEqual({ id: "c_x", kind: "case", label: undefined })
+  })
+})
+
+describe("defaultTypeVersionFor", () => {
+  it("new branch/switch nodes author at typeVersion 2", () => {
+    expect(defaultTypeVersionFor("flow.branch")).toBe(2)
+    expect(defaultTypeVersionFor("flow.switch")).toBe(2)
+  })
+
+  it("everything else stays at 1", () => {
+    expect(defaultTypeVersionFor("ai.prompt")).toBe(1)
+    expect(defaultTypeVersionFor("flow.loop")).toBe(1)
+  })
+})
