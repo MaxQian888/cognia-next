@@ -44,6 +44,7 @@ export function buildAutocompleteContext(args: {
   recentCommands: string[]
   input: string
   platform: ShellPlatform
+  projectId?: string | null
 }): TerminalCompletionContext {
   return {
     sessionId: args.sessionId,
@@ -54,6 +55,7 @@ export function buildAutocompleteContext(args: {
     cursor: args.input.length,
     recentCommands: args.recentCommands,
     platform: args.platform,
+    projectId: args.projectId ?? null,
   }
 }
 

@@ -55,19 +55,46 @@ describe("useTerminalAutocomplete", () => {
     expect(result.current.enabled).toBe(true)
     act(() => feedAll(result.current.feed, "git "))
     await waitFor(() => expect(result.current.ghost).toBe("status"))
-    expect(result.current.suggestion?.text).toBe("git status")
+    expect(result.current.ghostSuggestion?.text).toBe("git status")
   })
 
-  it("accept() returns the suffix and clears the ghost", async () => {
+  it("accept() returns the edit and clears the ghost", async () => {
     const { result } = renderHook(() => useTerminalAutocomplete("s1"))
     act(() => feedAll(result.current.feed, "git "))
     await waitFor(() => expect(result.current.ghost).toBe("status"))
-    let suffix: string | null = null
+    let edit: { backspaces: number; write: string } | null = null
     act(() => {
-      suffix = result.current.accept()
+      edit = result.current.accept()
     })
-    expect(suffix).toBe("status")
+    expect(edit).toEqual({ backspaces: 0, write: "status" })
     await waitFor(() => expect(result.current.ghost).toBe(""))
+  })
+
+  it("openList()/moveSelection()/acceptSelected() drive the popup", async () => {
+    const { result } = renderHook(() => useTerminalAutocomplete("s1"))
+    act(() => feedAll(result.current.feed, "git "))
+    await waitFor(() => expect(result.current.ghost).toBe("status"))
+    act(() => result.current.openList())
+    await waitFor(() => expect(result.current.listOpen).toBe(true))
+    expect(result.current.candidates.length).toBeGreaterThan(0)
+    expect(result.current.selectedIndex).toBe(0)
+    let edit: { backspaces: number; write: string } | null = null
+    act(() => {
+      edit = result.current.acceptSelected()
+    })
+    expect(edit).toEqual({ backspaces: 0, write: "status" })
+    await waitFor(() => expect(result.current.listOpen).toBe(false))
+  })
+
+  it("closeList() keeps the ghost suggestion", async () => {
+    const { result } = renderHook(() => useTerminalAutocomplete("s1"))
+    act(() => feedAll(result.current.feed, "git "))
+    await waitFor(() => expect(result.current.ghost).toBe("status"))
+    act(() => result.current.openList())
+    await waitFor(() => expect(result.current.listOpen).toBe(true))
+    act(() => result.current.closeList())
+    expect(result.current.listOpen).toBe(false)
+    expect(result.current.ghost).toBe("status")
   })
 
   it("dismiss() hides the suggestion", async () => {
@@ -87,7 +114,7 @@ describe("useTerminalAutocomplete", () => {
     expect(mockBuildClient).toHaveBeenCalledWith(
       expect.objectContaining({ featureId: "terminal-autocomplete" })
     )
-    expect(result.current.suggestion?.source).toBe("ai")
+    expect(result.current.ghostSuggestion?.source).toBe("ai")
   })
 
   it("yields no suggestion when the session row is missing", async () => {

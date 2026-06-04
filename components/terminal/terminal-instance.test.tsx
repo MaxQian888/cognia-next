@@ -130,17 +130,31 @@ jest.mock("@/lib/terminal/session-registry", () => ({
 const mockAutocomplete: {
   enabled: boolean
   ghost: string
-  suggestion: { source: "history" | "ai" | "plugin" } | null
+  ghostSuggestion: { source: "history" | "ai" | "plugin" | "path" | "exe" | "spec" } | null
+  listOpen: boolean
+  candidates: unknown[]
+  selectedIndex: number
   feed: jest.Mock
   accept: jest.Mock
+  acceptSelected: jest.Mock
+  openList: jest.Mock
+  closeList: jest.Mock
+  moveSelection: jest.Mock
   dismiss: jest.Mock
   reset: jest.Mock
 } = {
   enabled: false,
   ghost: "",
-  suggestion: null,
+  ghostSuggestion: null,
+  listOpen: false,
+  candidates: [],
+  selectedIndex: 0,
   feed: jest.fn(),
   accept: jest.fn(() => null),
+  acceptSelected: jest.fn(() => null),
+  openList: jest.fn(),
+  closeList: jest.fn(),
+  moveSelection: jest.fn(),
   dismiss: jest.fn(),
   reset: jest.fn(),
 }
@@ -204,9 +218,16 @@ beforeEach(() => {
   sessionRegistry.current = makeFakeSession()
   mockAutocomplete.enabled = false
   mockAutocomplete.ghost = ""
-  mockAutocomplete.suggestion = null
+  mockAutocomplete.ghostSuggestion = null
+  mockAutocomplete.listOpen = false
+  mockAutocomplete.candidates = []
+  mockAutocomplete.selectedIndex = 0
   mockAutocomplete.feed.mockReset()
   mockAutocomplete.accept.mockReset().mockReturnValue(null)
+  mockAutocomplete.acceptSelected.mockReset().mockReturnValue(null)
+  mockAutocomplete.openList.mockReset()
+  mockAutocomplete.closeList.mockReset()
+  mockAutocomplete.moveSelection.mockReset()
   mockAutocomplete.dismiss.mockReset()
   mockAutocomplete.reset.mockReset()
 })
@@ -534,7 +555,7 @@ describe("TerminalInstance", () => {
     it("renders the ghost overlay when there is a suggestion", async () => {
       mockAutocomplete.enabled = true
       mockAutocomplete.ghost = "status"
-      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
       const { container } = render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()
       const ghost = container.querySelector('[data-testid="terminal-ghost-text"]')
@@ -564,8 +585,8 @@ describe("TerminalInstance", () => {
 
     it("accepts on Tab: writes the suffix to the PTY and swallows the key", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "ai" }
-      mockAutocomplete.accept.mockReturnValue("status")
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
+      mockAutocomplete.accept.mockReturnValue({ backspaces: 0, write: "status" })
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()
@@ -575,9 +596,23 @@ describe("TerminalInstance", () => {
       expect(result).toBe(false)
     })
 
+    it("erases a replaced span with DEL bytes before writing the insert", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.ghostSuggestion = { source: "path" }
+      mockAutocomplete.accept.mockReturnValue({ backspaces: 3, write: "Documents/" })
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(1, del.repeat(3))
+      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(2, "Documents/")
+      expect(result).toBe(false)
+    })
+
     it("lets Tab through to the shell when there is no suggestion", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
       mockAutocomplete.accept.mockReturnValue(null) // not at end / nothing to accept
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
@@ -588,7 +623,7 @@ describe("TerminalInstance", () => {
 
     it("dismisses on Escape when a suggestion is active", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "history" }
+      mockAutocomplete.ghostSuggestion = { source: "history" }
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()

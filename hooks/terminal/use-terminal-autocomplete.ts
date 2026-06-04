@@ -14,8 +14,8 @@
  *    to drive from the xterm input + key handlers, plus the current ghost
  *    `view` to render.
  *
- * `accept()` returns the suffix the caller must write into the PTY — the
- * hook never executes anything itself.
+ * `accept()` / `acceptSelected()` return the PTY edit (backspaces + text)
+ * the caller must apply — the hook never executes anything itself.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -29,7 +29,7 @@ import {
   ensureBuiltinCompletionProviders,
 } from "@/lib/terminal/completion/builtins"
 import type { AppSettings } from "@/lib/claude/types"
-import type { TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
+import type { AcceptEdit, TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 
 const MIN_DEBOUNCE = 50
 const MAX_DEBOUNCE = 2000
@@ -44,10 +44,19 @@ function readAutocompleteSettings(): AutocompleteSettings | undefined {
 export interface UseTerminalAutocompleteResult {
   enabled: boolean
   ghost: string
-  suggestion: TerminalCompletionSuggestion | null
+  ghostSuggestion: TerminalCompletionSuggestion | null
+  /** Whether the candidate popup is open (and has candidates to show). */
+  listOpen: boolean
+  candidates: TerminalCompletionSuggestion[]
+  selectedIndex: number
   feed: (chunk: string) => void
-  /** Accept the suggestion; returns the suffix to write into the PTY, or null. */
-  accept: () => string | null
+  /** Accept the ghost suggestion; returns the PTY edit to apply, or null. */
+  accept: () => AcceptEdit | null
+  /** Accept the highlighted popup candidate. */
+  acceptSelected: () => AcceptEdit | null
+  openList: () => void
+  closeList: () => void
+  moveSelection: (delta: number) => void
   dismiss: () => void
   reset: () => void
 }
@@ -62,7 +71,13 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     Math.max(MIN_DEBOUNCE, ac?.debounceMs ?? DEFAULT_DEBOUNCE)
   )
 
-  const [view, setView] = useState<AutocompleteView>({ ghost: "", suggestion: null })
+  const [view, setView] = useState<AutocompleteView>({
+    ghost: "",
+    ghostSuggestion: null,
+    listOpen: false,
+    candidates: [],
+    selectedIndex: 0,
+  })
   const controllerRef = useRef<AutocompleteController | null>(null)
 
   // Register the built-in providers once. `getSettings` / `buildClient` read
@@ -93,6 +108,7 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
           recentCommands: (row.lastCommands ?? []).map((c) => c.cmd),
           input,
           platform: detectPlatform(),
+          projectId: row.projectId ?? null,
         })
       },
       onChange: () => setView(controller.getView()),
@@ -101,7 +117,13 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     return () => {
       controller.dispose()
       controllerRef.current = null
-      setView({ ghost: "", suggestion: null })
+      setView({
+        ghost: "",
+        ghostSuggestion: null,
+        listOpen: false,
+        candidates: [],
+        selectedIndex: 0,
+      })
     }
   }, [sessionId, debounceMs])
 
@@ -118,13 +140,43 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     [enabled]
   )
 
-  const accept = useCallback((): string | null => {
+  const accept = useCallback((): AcceptEdit | null => {
     if (!enabled) return null
     return controllerRef.current?.accept() ?? null
   }, [enabled])
 
+  const acceptSelected = useCallback((): AcceptEdit | null => {
+    if (!enabled) return null
+    return controllerRef.current?.acceptSelected() ?? null
+  }, [enabled])
+
+  const openList = useCallback(() => {
+    if (!enabled) return
+    controllerRef.current?.openList()
+  }, [enabled])
+
+  const closeList = useCallback(() => controllerRef.current?.closeList(), [])
+  const moveSelection = useCallback(
+    (delta: number) => controllerRef.current?.moveSelection(delta),
+    []
+  )
   const dismiss = useCallback(() => controllerRef.current?.dismiss(), [])
   const reset = useCallback(() => controllerRef.current?.reset(), [])
 
-  return { enabled, ghost: view.ghost, suggestion: view.suggestion, feed, accept, dismiss, reset }
+  return {
+    enabled,
+    ghost: view.ghost,
+    ghostSuggestion: view.ghostSuggestion,
+    listOpen: view.listOpen,
+    candidates: view.candidates,
+    selectedIndex: view.selectedIndex,
+    feed,
+    accept,
+    acceptSelected,
+    openList,
+    closeList,
+    moveSelection,
+    dismiss,
+    reset,
+  }
 }

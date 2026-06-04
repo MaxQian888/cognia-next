@@ -19,7 +19,7 @@ import {
 } from "./types"
 
 const DEFAULT_PER_PROVIDER_TIMEOUT_MS = 4000
-const DEFAULT_MAX = 6
+const DEFAULT_MAX = 8
 const DEFAULT_SCORE = 0.5
 
 const providers = new Map<string, TerminalCompletionProvider>()
@@ -51,8 +51,13 @@ export function rankSuggestions(
   const seen = new Set<string>()
   const out: TerminalCompletionSuggestion[] = []
   for (const s of sorted) {
-    if (seen.has(s.text)) continue
-    seen.add(s.text)
+    // Two suggestions with the same resulting line are duplicates even when
+    // they arrive in different shapes (append vs replace), so key on the
+    // resulting `text` plus the replacement span start (a same-text pair
+    // with different spans erases different amounts and is kept distinct).
+    const key = JSON.stringify([s.text, s.replace ? s.replace.from : -1])
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push(s)
   }
   return out

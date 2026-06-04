@@ -73,6 +73,13 @@ import { useSettingsStore } from "@/stores/settings"
 import { useTerminalAutocomplete } from "@/hooks/terminal/use-terminal-autocomplete"
 import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
 
+/**
+ * DEL (0x7f) — what xterm emits for Backspace and what readline/PSReadLine
+ * interpret as delete-back. Used to erase a replaced span when accepting a
+ * token-replacement completion.
+ */
+const DEL_BYTE = String.fromCharCode(0x7f)
+
 export interface TerminalInstanceProps {
   sessionId: string
   /** Override the settings-store fontFamily (mobile screens may want a smaller default). */
@@ -491,14 +498,15 @@ function TerminalInstanceImpl(
         // completion and → still moves the cursor.
         const ac = acRef.current
         if (ac.enabled) {
-          if (e.key === "Escape" && ac.suggestion) {
+          if (e.key === "Escape" && ac.ghostSuggestion) {
             ac.dismiss()
             return false
           }
           if (e.key === "Tab" || (e.key === "ArrowRight" && !e.shiftKey && !e.altKey && !mod)) {
-            const suffix = ac.accept()
-            if (suffix) {
-              void session.write(suffix)
+            const edit = ac.accept()
+            if (edit) {
+              if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
+              void session.write(edit.write)
               return false
             }
           }
@@ -845,7 +853,7 @@ function TerminalInstanceImpl(
           top={ghostPos.top}
           fontFamily={fontFamily}
           fontSize={fontSize}
-          source={autocomplete.suggestion?.source}
+          source={autocomplete.ghostSuggestion?.source}
           acceptHint={t("ghost.acceptHint")}
         />
       ) : null}

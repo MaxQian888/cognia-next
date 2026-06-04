@@ -13,6 +13,7 @@
  */
 
 import { cn } from "@/lib/utils"
+import type { TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 
 export interface TerminalGhostTextProps {
   /** The suffix to render after the cursor. Empty → nothing rendered. */
@@ -24,7 +25,7 @@ export interface TerminalGhostTextProps {
   fontFamily: string
   fontSize: number
   /** Where the suggestion came from — drives the small badge. */
-  source?: "history" | "ai" | "plugin"
+  source?: TerminalCompletionSuggestion["source"]
   /** Translated hint shown in the badge (e.g. "Tab"). Omit to hide. */
   acceptHint?: string
   className?: string
