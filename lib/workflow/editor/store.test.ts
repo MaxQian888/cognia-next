@@ -60,6 +60,17 @@ describe("editor store — graph mutations", () => {
     expect(useStore.getState().nodes.find((n) => n.id === id2)?.data.label).toBe("data.code")
   })
 
+  it("authors new branch/switch nodes at typeVersion 2, others at 1", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const branchId = useStore.getState().addNode("flow.branch", { x: 0, y: 0 })
+    const switchId = useStore.getState().addNode("flow.switch", { x: 0, y: 0 })
+    const aiId = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    const byId = (id: string) => useStore.getState().nodes.find((n) => n.id === id)!
+    expect(byId(branchId).data.typeVersion).toBe(2)
+    expect(byId(switchId).data.typeVersion).toBe(2)
+    expect(byId(aiId).data.typeVersion).toBe(1)
+  })
+
   it("respects label/notes/params overrides at addNode time", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const id = useStore

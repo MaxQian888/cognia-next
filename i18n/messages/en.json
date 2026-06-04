@@ -2342,6 +2342,12 @@
       }
     },
     "diagnostics": {
+      "tabs": {
+        "label": "Diagnostics sections",
+        "crashLogs": "Crash logs",
+        "nativeReports": "Native reports",
+        "system": "System"
+      },
       "sandboxAudit": {
         "title": "Sandbox event log",
         "description": "Recent sandbox_exec calls — allow / deny / error, command, duration. Mirrors the in-memory audit ring.",
@@ -7015,7 +7021,10 @@
       "loading": "Loading marketplace…",
       "empty": "No skills found.",
       "errorLoad": "Could not load marketplace ({error}).",
-      "configureSkillsmp": "Configure the SkillsMP base URL in Settings → API to enable this source."
+      "configureSkillsmp": "Configure the SkillsMP base URL in Settings → API to enable this source.",
+      "selectItemTitle": "No skill selected",
+      "selectItemHint": "Select a skill to view details.",
+      "listAriaLabel": "Marketplace items"
     },
     "analytics": {
       "loading": "Loading analytics…",
@@ -7118,7 +7127,13 @@
       "editorPlaceholder": "Open a skill from the My Skills grid to edit it inline.",
       "openCategoriesAria": "Open categories",
       "categoriesSheetTitle": "Categories",
-      "categoriesSheetDescription": "Filter skills by category or source."
+      "categoriesSheetDescription": "Filter skills by category or source.",
+      "selectSkillTitle": "No skill selected",
+      "selectSkillHint": "Select a skill to view details.",
+      "statsBar": "{enabled} enabled · {total} total",
+      "listAriaLabel": "Skills list",
+      "selectSourceAria": "Filter by source",
+      "selectCategoryAria": "Filter by category"
     },
     "toasts": {
       "enabledCount": "{count, plural, =1 {Enabled 1 skill.} other {Enabled # skills.}}",
@@ -9304,8 +9319,6 @@
       "removeBookmark": "Remove bookmark"
     },
     "crash": {
-      "title": "Crash Logs",
-      "description": "Inspect recent failures, stored crash logs, and native diagnostics in one place.",
       "actions": {
         "refresh": "Refresh",
         "pauseRefresh": "Pause Refresh",
@@ -9318,7 +9331,9 @@
         "clear": "Clear",
         "clearRecent": "Clear Recent",
         "clearPersisted": "Clear Stored",
-        "openDirectory": "Open Directory"
+        "openDirectory": "Open Directory",
+        "back": "Back to list",
+        "notes": "Before you share"
       },
       "sourceCount": "sources",
       "notes": {
@@ -9330,18 +9345,10 @@
       },
       "summary": {
         "total": "Visible Incidents",
-        "totalDescription": "All crash-log rows after filters",
         "recent": "Recent Errors",
         "recentDescription": "In-memory failures from this session",
-        "bySource": "By Source",
-        "bySourceDescription": "Incident counts grouped by origin",
-        "native": "Native Logging",
-        "nativeDescription": "Current desktop logging health"
+        "native": "Native Logging"
       },
-      "listTitle": "Incident List",
-      "listDescription": "Recent errors, stored failures, and diagnostic snapshots.",
-      "detailTitle": "Incident Detail",
-      "detailDescription": "Select an incident to inspect its log body and native diagnostics.",
       "noSelectionTitle": "No Incident Selected",
       "noSelectionDescription": "Pick a row on the left to inspect crash details.",
       "emptyTitle": "No Crash Logs Found",
@@ -9367,7 +9374,6 @@
       "native": {
         "title": "Native Logging",
         "status": "Status",
-        "statusHint": "Check native diagnostics for details on the degraded state.",
         "details": "Full Native Logging Details",
         "platformBackend": "Platform Backend",
         "platformHealth": "Platform Health",
@@ -9685,6 +9691,7 @@
       "cherryPick": "Cherry-pick this commit",
       "revert": "Revert this commit",
       "rebaseOnto": "Rebase current branch onto this",
+      "mergeInto": "Merge this branch into the current branch",
       "continue": "Continue",
       "abort": "Abort",
       "inProgress": {
@@ -9737,7 +9744,8 @@
       "commitFailed": "Commit failed: {message}",
       "pushFailed": "Push failed: {message}",
       "pullFailed": "Pull failed: {message}",
-      "checkoutFailed": "Switch branch failed: {message}"
+      "checkoutFailed": "Switch branch failed: {message}",
+      "noRepo": "No repository is bound — open a folder first"
     },
     "statusBar": {
       "openSourceControl": "Open Source Control"
@@ -15806,7 +15814,16 @@
       "connection": {
         "incompatible": "Can't connect to this handle",
         "compatible": "Drop to connect",
-        "snapHint": "Snapping to nearest handle"
+        "snapHint": "Snapping to nearest handle",
+        "missingEndpoint": "Connection must have both endpoints",
+        "selfLoop": "Self-loops are not allowed",
+        "endpointMissing": "Endpoint node is missing from the graph",
+        "triggerTarget": "Triggers are sources only",
+        "annotation": "Annotations cannot be connected",
+        "duplicateEdge": "These nodes are already connected",
+        "handleRequired": "Pick one of this node's output handles",
+        "unknownHandle": "Unknown output handle on the source node",
+        "notConnecting": "Not in connect mode"
       }
     },
     "empty": {

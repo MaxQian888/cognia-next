@@ -26,6 +26,7 @@
 
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type ComponentType,
@@ -50,6 +51,7 @@ import {
   type OnConnectStart,
 } from "@xyflow/react"
 import { useShallow } from "zustand/react/shallow"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { EditorStore, EditorState } from "@/lib/workflow/editor/store"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
@@ -134,10 +136,12 @@ export function FlowCanvas({
 }: FlowCanvasProps) {
   const useStore = store
   const rf = useReactFlow()
+  const tConnection = useTranslations("workflows.editor.connection")
 
   // The ONLY per-frame subscription in the editor. `setNodes` replaces these
   // references on every drag tick; isolating the subscription here keeps the
-  // churn out of `CanvasInner` and the chrome.
+  // churn out of `CanvasInner` and the chrome. (`viewport` only changes once
+  // per pan/zoom gesture — see the uncontrolled-camera note below.)
   const { nodes, edges, viewport, isDraggingAny, snapToGrid } = useStore(
     useShallow((s: EditorState) => ({
       nodes: s.nodes,
@@ -147,6 +151,28 @@ export function FlowCanvas({
       snapToGrid: s.snapToGrid,
     }))
   )
+
+  // ── Uncontrolled camera ───────────────────────────────────────────────────
+  // The viewport is deliberately NOT passed as React Flow's controlled
+  // `viewport` prop: in controlled mode the library stops writing pan/zoom
+  // transforms to its internal store and instead requires an
+  // `onViewportChange` round-trip through React on EVERY gesture frame —
+  // without it the canvas simply does not move until `onMoveEnd` (the
+  // "canvas doesn't follow the drag" bug), and with it the whole subtree
+  // re-renders per frame. Uncontrolled, d3 drives the camera with zero React
+  // work; the store keeps the persisted value via `onMoveEnd` below.
+  //
+  // The mount-time store value seeds the camera; *wholesale* replaces
+  // (switching workflows re-creates the store, JSON import rewrites it via
+  // `loadWorkflow`) are pushed imperatively by the effect. Gesture-end echoes
+  // from `onMoveEnd` are value-equal to the live camera, so the guard skips
+  // them and no feedback loop forms.
+  const [initialViewport] = useState(viewport)
+  useEffect(() => {
+    const cur = rf.getViewport()
+    if (cur.x === viewport.x && cur.y === viewport.y && cur.zoom === viewport.zoom) return
+    rf.setViewport(viewport)
+  }, [rf, viewport])
 
   // Alignment guides — populated by `onNodeDrag` while a node is moving,
   // cleared on drag stop so the overlay doesn't linger.
@@ -189,7 +215,7 @@ export function FlowCanvas({
       const s = useStore.getState()
       const result = validateConnection(connection, s.nodes, s.edges)
       if (!result.valid) {
-        toast.error(result.reason)
+        toast.error(tConnection(result.reasonKey))
         return
       }
       s.setEdges(
@@ -203,7 +229,7 @@ export function FlowCanvas({
         ) as typeof s.edges
       )
     },
-    [useStore]
+    [useStore, tConnection]
   )
 
   const isValidConnection = useCallback(
@@ -362,7 +388,7 @@ export function FlowCanvas({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          viewport={viewport}
+          defaultViewport={initialViewport}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}

@@ -2342,6 +2342,12 @@
       }
     },
     "diagnostics": {
+      "tabs": {
+        "label": "诊断分区",
+        "crashLogs": "崩溃日志",
+        "nativeReports": "原生报告",
+        "system": "系统"
+      },
       "sandboxAudit": {
         "title": "沙盒事件日志",
         "description": "最近的 sandbox_exec 调用：allow / deny / error、命令、耗时。镜像自内存审计环。",
@@ -7015,7 +7021,10 @@
       "loading": "加载市场中…",
       "empty": "暂无技能。",
       "errorLoad": "加载市场失败（{error}）。",
-      "configureSkillsmp": "在 设置 → API 配置 SkillsMP 基础地址以启用此来源。"
+      "configureSkillsmp": "在 设置 → API 配置 SkillsMP 基础地址以启用此来源。",
+      "selectItemTitle": "未选择技能",
+      "selectItemHint": "选择一个技能查看详情。",
+      "listAriaLabel": "市场条目"
     },
     "analytics": {
       "loading": "正在加载统计…",
@@ -7118,7 +7127,13 @@
       "editorPlaceholder": "在「我的技能」网格中打开一个技能即可在此内联编辑。",
       "openCategoriesAria": "打开分类",
       "categoriesSheetTitle": "分类",
-      "categoriesSheetDescription": "按类别或来源筛选技能。"
+      "categoriesSheetDescription": "按类别或来源筛选技能。",
+      "selectSkillTitle": "未选择技能",
+      "selectSkillHint": "选择一个技能查看详情。",
+      "statsBar": "已启用 {enabled} · 共 {total}",
+      "listAriaLabel": "技能列表",
+      "selectSourceAria": "按来源筛选",
+      "selectCategoryAria": "按类别筛选"
     },
     "toasts": {
       "enabledCount": "已启用 {count} 个技能。",
@@ -9304,8 +9319,6 @@
       "removeBookmark": "取消收藏"
     },
     "crash": {
-      "title": "崩溃日志",
-      "description": "在同一处查看最近故障、已存储的崩溃日志和原生诊断信息。",
       "actions": {
         "refresh": "刷新",
         "pauseRefresh": "暂停刷新",
@@ -9318,7 +9331,9 @@
         "clear": "清除",
         "clearRecent": "清空最近错误",
         "clearPersisted": "清空已存储日志",
-        "openDirectory": "打开日志目录"
+        "openDirectory": "打开日志目录",
+        "back": "返回列表",
+        "notes": "分享前须知"
       },
       "sourceCount": "个来源",
       "notes": {
@@ -9330,18 +9345,10 @@
       },
       "summary": {
         "total": "当前可见事件",
-        "totalDescription": "应用筛选后的崩溃日志条目",
         "recent": "最近错误",
         "recentDescription": "当前会话内存中的失败记录",
-        "bySource": "按来源",
-        "bySourceDescription": "按来源分组的事件数量",
-        "native": "原生日志",
-        "nativeDescription": "桌面日志系统当前健康状态"
+        "native": "原生日志"
       },
-      "listTitle": "事件列表",
-      "listDescription": "最近错误、已存储失败记录和诊断快照。",
-      "detailTitle": "事件详情",
-      "detailDescription": "从左侧选择一条事件以查看日志正文和原生诊断。",
       "noSelectionTitle": "尚未选择事件",
       "noSelectionDescription": "从左侧列表选择一条记录查看崩溃详情。",
       "emptyTitle": "未找到崩溃日志",
@@ -9367,7 +9374,6 @@
       "native": {
         "title": "原生日志",
         "status": "状态",
-        "statusHint": "查看原生诊断信息以了解降级状态的详情。",
         "details": "完整原生日志详情",
         "platformBackend": "平台后端",
         "platformHealth": "平台健康度",
@@ -9685,6 +9691,7 @@
       "cherryPick": "拣选此提交",
       "revert": "还原此提交",
       "rebaseOnto": "将当前分支变基到此",
+      "mergeInto": "将此分支合并到当前分支",
       "continue": "继续",
       "abort": "中止",
       "inProgress": {
@@ -9737,7 +9744,8 @@
       "commitFailed": "提交失败：{message}",
       "pushFailed": "推送失败：{message}",
       "pullFailed": "拉取失败：{message}",
-      "checkoutFailed": "切换分支失败：{message}"
+      "checkoutFailed": "切换分支失败：{message}",
+      "noRepo": "未绑定仓库——请先打开一个文件夹"
     },
     "statusBar": {
       "openSourceControl": "打开源代码管理"
@@ -15806,7 +15814,16 @@
       "connection": {
         "incompatible": "无法连接此端口",
         "compatible": "松开以连接",
-        "snapHint": "已吸附到最近端口"
+        "snapHint": "已吸附到最近端口",
+        "missingEndpoint": "连接必须有两个端点",
+        "selfLoop": "不允许自环连接",
+        "endpointMissing": "图中找不到端点节点",
+        "triggerTarget": "触发器只能作为起点",
+        "annotation": "批注节点不能参与连接",
+        "duplicateEdge": "这两个节点已经连接",
+        "handleRequired": "请选择该节点的一个输出端口",
+        "unknownHandle": "源节点上不存在该输出端口",
+        "notConnecting": "当前不在连线模式"
       }
     },
     "empty": {

@@ -47,6 +47,7 @@ import {
   selectionBounds,
   type ClipboardEnvelope,
 } from "./clipboard"
+import { defaultTypeVersionFor } from "./node-handles"
 import type { ProposalOp } from "./proposal-types"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
@@ -531,7 +532,10 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               // workflow-ai plugin tools, "user" / undefined otherwise.
               authoredBy: overrides?.authoredBy,
               kind,
-              typeVersion: 1,
+              // New nodes author at the kind's current generation (e.g.
+              // branch/switch v2 structured conditions); loaded graphs keep
+              // their stored version.
+              typeVersion: defaultTypeVersionFor(kind),
             },
           }
           set({ nodes: [...get().nodes, node], dirty: true })

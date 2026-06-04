@@ -29,7 +29,11 @@ describe("validateConnection", () => {
 
   it("rejects self-loops", () => {
     const r = validateConnection({ source: "a", target: "a" }, NODES, [])
-    expect(r).toEqual({ valid: false, reason: "Self-loops are not allowed." })
+    expect(r).toEqual({
+      valid: false,
+      reason: "Self-loops are not allowed.",
+      reasonKey: "selfLoop",
+    })
   })
 
   it("rejects unknown endpoints", () => {
@@ -40,7 +44,11 @@ describe("validateConnection", () => {
 
   it("rejects edges that target a trigger", () => {
     const r = validateConnection({ source: "a", target: "trg" }, NODES, [])
-    expect(r).toEqual({ valid: false, reason: "Triggers are sources only." })
+    expect(r).toEqual({
+      valid: false,
+      reason: "Triggers are sources only.",
+      reasonKey: "triggerTarget",
+    })
   })
 
   it("rejects connections to/from annotation nodes", () => {
@@ -70,6 +78,7 @@ describe("validateConnection", () => {
     expect(r).toEqual({
       valid: false,
       reason: "Duplicate edge — these nodes are already connected.",
+      reasonKey: "duplicateEdge",
     })
   })
 
@@ -100,5 +109,58 @@ describe("validateConnection", () => {
   it("accepts a normal trigger → action edge", () => {
     const r = validateConnection({ source: "trg", target: "a" }, NODES, [])
     expect(r).toEqual({ valid: true })
+  })
+
+  it("attaches stable reason keys for i18n", () => {
+    const r = validateConnection({ source: "a", target: "a" }, NODES, [])
+    expect(r).toMatchObject({ valid: false, reasonKey: "selfLoop" })
+  })
+})
+
+describe("validateConnection — labeled output handles (v2)", () => {
+  const branchV2: NodeShapeForValidation = {
+    id: "br",
+    data: { kind: "flow.branch", typeVersion: 2, params: {} },
+  }
+  const switchV2: NodeShapeForValidation = {
+    id: "sw",
+    data: {
+      kind: "flow.switch",
+      typeVersion: 2,
+      params: { cases: [{ id: "c_a", label: "A", when: { combinator: "all", conditions: [] } }] },
+    },
+  }
+  const nodes = [...NODES, branchV2, switchV2]
+
+  it("accepts edges from a declared handle", () => {
+    expect(
+      validateConnection({ source: "br", target: "a", sourceHandle: "true" }, nodes, [])
+    ).toEqual({ valid: true })
+    expect(
+      validateConnection({ source: "sw", target: "a", sourceHandle: "c_a" }, nodes, [])
+    ).toEqual({ valid: true })
+    expect(
+      validateConnection({ source: "sw", target: "a", sourceHandle: "default" }, nodes, [])
+    ).toEqual({ valid: true })
+  })
+
+  it("always accepts the error handle", () => {
+    expect(
+      validateConnection({ source: "br", target: "a", sourceHandle: "error" }, nodes, [])
+    ).toEqual({ valid: true })
+  })
+
+  it("rejects an unknown sourceHandle on a handle-bearing node", () => {
+    const r = validateConnection({ source: "sw", target: "a", sourceHandle: "c_gone" }, nodes, [])
+    expect(r).toMatchObject({ valid: false, reasonKey: "unknownHandle" })
+  })
+
+  it("rejects a handle-less edge leaving a handle-bearing node", () => {
+    const r = validateConnection({ source: "br", target: "a" }, nodes, [])
+    expect(r).toMatchObject({ valid: false, reasonKey: "handleRequired" })
+  })
+
+  it("v1 nodes are unaffected (no params/typeVersion in shape)", () => {
+    expect(validateConnection({ source: "a", target: "b" }, nodes, [])).toEqual({ valid: true })
   })
 })

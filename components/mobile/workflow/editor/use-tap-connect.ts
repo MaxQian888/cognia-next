@@ -56,7 +56,8 @@ export function useTapConnect(store: EditorStore): TapConnect {
 
   const completeTo = useCallback(
     (targetId: string): ReturnType<typeof validateConnection> => {
-      if (!sourceId) return { valid: false, reason: "Not in connect mode." }
+      if (!sourceId)
+        return { valid: false, reason: "Not in connect mode.", reasonKey: "notConnecting" }
       const state = store.getState()
       const result = validateConnection(
         { source: sourceId, target: targetId },

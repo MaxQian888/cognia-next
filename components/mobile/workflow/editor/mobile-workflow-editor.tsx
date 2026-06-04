@@ -36,6 +36,7 @@ import { useTapConnect } from "./use-tap-connect"
 
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
+  const tConnection = useTranslations("workflows.editor.connection")
   const [mode, setMode] = useState<"read" | "edit">("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -57,13 +58,13 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
     (id: string) => {
       if (tapConnect.active) {
         const result = tapConnect.completeTo(id)
-        if (!result.valid && result.reason) toast.error(result.reason)
+        if (!result.valid) toast.error(tConnection(result.reasonKey))
         return
       }
       store.getState().setSelectedNodes([id])
       setInspectorOpen(true)
     },
-    [store, tapConnect]
+    [store, tapConnect, tConnection]
   )
 
   const onPaneTap = useCallback(() => {
