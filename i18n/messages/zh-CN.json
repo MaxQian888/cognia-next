@@ -15819,7 +15819,8 @@
           "else": "否则",
           "true": "真",
           "false": "假",
-          "error": "错误时"
+          "error": "错误时",
+          "default": "默认"
         },
         "labelPlaceholder": "连接标签…",
         "editLabelHint": "双击编辑标签"

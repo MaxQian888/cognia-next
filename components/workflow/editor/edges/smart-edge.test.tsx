@@ -163,6 +163,38 @@ describe("SmartEdge", () => {
     expect(store.getState().editingEdgeIdInline).toBeNull()
   })
 
+  it("renders true/false chips from a v2 handle id without data.kind", () => {
+    renderEdge({ sourceHandleId: "true" } as Partial<React.ComponentProps<typeof SmartEdge>>)
+    expect(screen.getByTestId("smart-edge-kind-e_1").getAttribute("data-kind")).toBe("true")
+  })
+
+  it("renders the default chip for the switch fall-through handle", () => {
+    renderEdge({ sourceHandleId: "default" } as Partial<React.ComponentProps<typeof SmartEdge>>)
+    expect(screen.getByTestId("smart-edge-kind-e_1").getAttribute("data-kind")).toBe("default")
+  })
+
+  it("renders a switch case label chip resolved from the source node", () => {
+    const store = createEditorStore(makeWorkflow())
+    const sw = store.getState().addNode(
+      "flow.switch",
+      { x: 0, y: 0 },
+      {
+        params: {
+          cases: [{ id: "c_vip", label: "VIP", when: { combinator: "all", conditions: [] } }],
+        },
+      }
+    )
+    const b = store.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    renderEdge(
+      { source: sw, target: b, sourceHandleId: "c_vip" } as Partial<
+        React.ComponentProps<typeof SmartEdge>
+      >,
+      store
+    )
+    const chip = screen.getByTestId("smart-edge-case-e_1")
+    expect(chip.textContent).toBe("VIP")
+  })
+
   it("does not re-render when a node moves but the node count is unchanged", () => {
     const store = seedStore()
     renderEdge({}, store)

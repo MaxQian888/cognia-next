@@ -15819,7 +15819,8 @@
           "else": "else",
           "true": "true",
           "false": "false",
-          "error": "on error"
+          "error": "on error",
+          "default": "default"
         },
         "labelPlaceholder": "Edge label…",
         "editLabelHint": "Double-click to edit label"

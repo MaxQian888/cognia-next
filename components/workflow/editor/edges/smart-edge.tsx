@@ -23,7 +23,7 @@ import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { computeSmartRoute, type HandlePosition } from "@/lib/workflow/editor/edge-routing"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 
-type EdgeKind = "then" | "else" | "true" | "false" | "error"
+type EdgeKind = "then" | "else" | "true" | "false" | "error" | "default"
 
 const KIND_CLASSES: Record<EdgeKind, string> = {
   then: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -31,10 +31,18 @@ const KIND_CLASSES: Record<EdgeKind, string> = {
   true: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   false: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
   error: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  default: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
 }
 
 function isEdgeKind(v: unknown): v is EdgeKind {
-  return v === "then" || v === "else" || v === "true" || v === "false" || v === "error"
+  return (
+    v === "then" ||
+    v === "else" ||
+    v === "true" ||
+    v === "false" ||
+    v === "error" ||
+    v === "default"
+  )
 }
 
 function toRouteRect(n: {
@@ -115,10 +123,31 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
     const v = (data as { kind?: unknown } | undefined)?.kind
     if (isEdgeKind(v)) return v
     // Edges drawn from a node's "error" source handle are error-branch edges
-    // even when their data.kind hasn't been stamped.
-    if (sourceHandleId === "error") return "error" as EdgeKind
+    // even when their data.kind hasn't been stamped. Branch/switch v2 handle
+    // ids likewise imply their chip without any data.kind stamp.
+    if (isEdgeKind(sourceHandleId)) return sourceHandleId as EdgeKind
     return null
   }, [data, sourceHandleId])
+
+  // Switch-case chip — resolve the case label from the source node's params.
+  // Read lazily via getState() (NOT a subscription): per the perf note above,
+  // edges must not re-render on node-array churn. A renamed case label
+  // refreshes on the edge's next natural re-render.
+  const caseLabel = useMemo(() => {
+    if (!store || kind !== null || !sourceHandleId) return null
+    const sourceNode = store.getState().nodes.find((n) => n.id === source)
+    if (!sourceNode || sourceNode.data.kind !== "flow.switch") return null
+    const params = (sourceNode.data.params ?? {}) as {
+      cases?: Array<{ id?: string; label?: string }>
+    }
+    const cases = Array.isArray(params.cases) ? params.cases : []
+    const idx = cases.findIndex(
+      (c, i) => (c.id && c.id === sourceHandleId) || `case-${i}` === sourceHandleId
+    )
+    if (idx < 0) return null
+    const c = cases[idx]
+    return typeof c.label === "string" && c.label.trim() ? c.label : (c.id ?? `case-${idx}`)
+  }, [store, kind, sourceHandleId, source])
 
   const customLabel = useMemo(() => {
     const v = (data as { label?: unknown } | undefined)?.label
@@ -188,6 +217,13 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
               data-kind={kind}
             >
               {t(`edgeKind.${kind}`)}
+            </span>
+          ) : caseLabel ? (
+            <span
+              className="rounded-md bg-sky-500/15 px-1.5 py-px text-[10px] font-medium text-sky-700 dark:text-sky-300"
+              data-testid={`smart-edge-case-${id}`}
+            >
+              {caseLabel}
             </span>
           ) : null}
           {isEditing ? (
