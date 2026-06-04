@@ -16447,6 +16447,16 @@
           "label": "提取文本（OCR）",
           "description": "对图片或 PDF（URL、base64 或屏幕）执行 OCR 并输出文本。"
         }
+      },
+      "eval": {
+        "run": {
+          "label": "运行评估",
+          "description": "对聊天/团队/工作流目标运行评估数据集并输出通过率。"
+        },
+        "gate": {
+          "label": "评估门限",
+          "description": "按阈值对评估运行给出通过/失败判定，并按结果分支。"
+        }
       }
     },
     "runs": {
@@ -16652,6 +16662,76 @@
             "markdown": "Markdown",
             "text": "纯文本",
             "blocks": "结构化块"
+          }
+        }
+      },
+      "eval": {
+        "run": {
+          "datasetId": {
+            "label": "数据集 ID",
+            "hint": "要运行的评估数据集。支持 '{{ }}' 表达式。",
+            "placeholder": "evds_…"
+          },
+          "targetKind": {
+            "label": "目标类型",
+            "chat": "聊天模型",
+            "team": "Agent 团队",
+            "workflow": "工作流"
+          },
+          "model": {
+            "label": "模型",
+            "hint": "聊天目标的模型 ID。",
+            "placeholder": "claude-opus-4-8"
+          },
+          "characterId": {
+            "label": "角色 ID（可选）",
+            "placeholder": "char_…"
+          },
+          "teamId": {
+            "label": "团队 ID",
+            "placeholder": "team_…"
+          },
+          "workflowId": {
+            "label": "工作流 ID",
+            "placeholder": "wf_…"
+          },
+          "label": {
+            "label": "运行标签",
+            "hint": "显示在报告上。默认为目标引用。"
+          },
+          "k": {
+            "label": "重复次数（k）",
+            "hint": "每个用例的重复次数，用于 pass^k 可靠性。"
+          },
+          "scorerIds": {
+            "label": "评分器",
+            "hint": "逗号分隔的评分器 ID。留空 = 全部评分器。",
+            "placeholder": "assertion, cost"
+          },
+          "split": {
+            "label": "子集筛选"
+          },
+          "capabilities": {
+            "label": "能力（逗号分隔）"
+          }
+        },
+        "gate": {
+          "runId": {
+            "label": "运行 ID",
+            "hint": "要判定的评估运行。可从上游运行评估节点接入 '{{ $node['…'].out.runIds[0] }}'。",
+            "placeholder": "evrun_…"
+          },
+          "minPassAt1": {
+            "label": "最低 pass@1"
+          },
+          "minPassHatK": {
+            "label": "最低 pass^k"
+          },
+          "minScorerPassRate": {
+            "label": "最低单评分器通过率"
+          },
+          "maxTotalCostUsd": {
+            "label": "最高总成本（USD）"
           }
         }
       },

@@ -49,6 +49,7 @@ import {
   GitBranchConfig,
   OcrExtractConfig,
 } from "./forms/git-ocr-forms"
+import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import {
   AiClassifyConfig,
   AiEmbedConfig,
@@ -157,6 +158,9 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.git.branch": GitBranchConfig,
   // Data: OCR extraction (ADR-0024)
   "ocr.extract": OcrExtractConfig,
+  // Eval nodes
+  "eval.run": EvalRunConfig,
+  "eval.gate": EvalGateConfig,
   // AI
   "ai.prompt": AiPromptConfig,
   "ai.classify": AiClassifyConfig,

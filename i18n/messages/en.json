@@ -16447,6 +16447,16 @@
           "label": "Extract text (OCR)",
           "description": "Run OCR on an image or PDF (URL, base64, or screen) and output its text."
         }
+      },
+      "eval": {
+        "run": {
+          "label": "Run eval",
+          "description": "Run an eval dataset against a chat / team / workflow target and output pass rates."
+        },
+        "gate": {
+          "label": "Eval gate",
+          "description": "Pass/fail verdict for an eval run against thresholds; branches on pass / fail."
+        }
       }
     },
     "runs": {
@@ -16652,6 +16662,76 @@
             "markdown": "Markdown",
             "text": "Plain text",
             "blocks": "Structured blocks"
+          }
+        }
+      },
+      "eval": {
+        "run": {
+          "datasetId": {
+            "label": "Dataset id",
+            "hint": "Eval dataset to run. Supports '{{ }}' expressions.",
+            "placeholder": "evds_…"
+          },
+          "targetKind": {
+            "label": "Target kind",
+            "chat": "Chat model",
+            "team": "Agent team",
+            "workflow": "Workflow"
+          },
+          "model": {
+            "label": "Model",
+            "hint": "Chat target model id.",
+            "placeholder": "claude-opus-4-8"
+          },
+          "characterId": {
+            "label": "Character id (optional)",
+            "placeholder": "char_…"
+          },
+          "teamId": {
+            "label": "Team id",
+            "placeholder": "team_…"
+          },
+          "workflowId": {
+            "label": "Workflow id",
+            "placeholder": "wf_…"
+          },
+          "label": {
+            "label": "Run label",
+            "hint": "Shown on the report. Defaults to the target ref."
+          },
+          "k": {
+            "label": "Repetitions (k)",
+            "hint": "Repetitions per case for pass^k reliability."
+          },
+          "scorerIds": {
+            "label": "Scorers",
+            "hint": "Comma-separated scorer ids. Empty = all scorers.",
+            "placeholder": "assertion, cost"
+          },
+          "split": {
+            "label": "Split filter"
+          },
+          "capabilities": {
+            "label": "Capabilities (comma-separated)"
+          }
+        },
+        "gate": {
+          "runId": {
+            "label": "Run id",
+            "hint": "Eval run to judge. Wire '{{ $node['…'].out.runIds[0] }}' from an upstream Run eval node.",
+            "placeholder": "evrun_…"
+          },
+          "minPassAt1": {
+            "label": "Min pass@1"
+          },
+          "minPassHatK": {
+            "label": "Min pass^k"
+          },
+          "minScorerPassRate": {
+            "label": "Min per-scorer pass rate"
+          },
+          "maxTotalCostUsd": {
+            "label": "Max total cost (USD)"
           }
         }
       },
