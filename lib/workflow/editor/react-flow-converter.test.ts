@@ -173,4 +173,24 @@ describe("parentId + authoredBy round-trip", () => {
     expect(child.parentId).toBe("loop")
     expect(child.data.authoredBy).toBe("ai")
   })
+
+  it("carries edge source/target handles through the forward map", () => {
+    const base = wf()
+    base.edges = [
+      { id: "e1", source: "loop", sourceHandle: "done", target: "child", targetHandle: "in" },
+    ]
+    const rf = workflowToReactFlow(base)
+    expect(rf.edges[0].sourceHandle).toBe("done")
+    expect(rf.edges[0].targetHandle).toBe("in")
+  })
+
+  it("tolerates a React Flow node with missing data on the inverse trip", () => {
+    const rf = workflowToReactFlow(wf())
+    const stripped = rf.nodes.map((n) =>
+      n.id === "child" ? ({ ...n, data: undefined } as unknown as (typeof rf.nodes)[number]) : n
+    )
+    const back = reactFlowToWorkflow(wf(), stripped, rf.edges, rf.viewport)
+    const child = back.nodes.find((n) => n.id === "child")!
+    expect(child.data.params).toBeUndefined()
+  })
 })
