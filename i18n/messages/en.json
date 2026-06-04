@@ -9941,6 +9941,18 @@
       "exportCsv": "Export CSV",
       "versions": "Versions",
       "run": "Run"
+    },
+    "gate": {
+      "heading": "Quality gate",
+      "hint": "Optional pass/fail thresholds applied to every run of this dataset.",
+      "save": "Save gate",
+      "savedNotice": "Gate saved",
+      "fields": {
+        "minPassAt1": "Min pass@1",
+        "minPassHatK": "Min pass^k",
+        "minScorerPassRate": "Min per-scorer pass rate",
+        "maxTotalCostUsd": "Max total cost (USD)"
+      }
     }
   },
   "memory": {

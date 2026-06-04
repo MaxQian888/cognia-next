@@ -9941,6 +9941,18 @@
       "exportCsv": "导出 CSV",
       "versions": "版本",
       "run": "运行"
+    },
+    "gate": {
+      "heading": "质量门限",
+      "hint": "可选的通过/失败阈值，应用于该数据集的每次运行。",
+      "save": "保存门限",
+      "savedNotice": "门限已保存",
+      "fields": {
+        "minPassAt1": "最低 pass@1",
+        "minPassHatK": "最低 pass^k",
+        "minScorerPassRate": "最低单评分器通过率",
+        "maxTotalCostUsd": "最高总成本（USD）"
+      }
     }
   },
   "memory": {
