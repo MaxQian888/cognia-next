@@ -444,6 +444,18 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Repeat",
     keywords: ["loop", "for-each", "while", "iterate"],
   },
+  "flow.break": {
+    label: "Break",
+    description: "Stops the innermost loop after the current iteration.",
+    iconName: "CircleStop",
+    keywords: ["break", "stop", "loop", "exit"],
+  },
+  "flow.continue": {
+    label: "Continue",
+    description: "Skips the rest of the current loop iteration.",
+    iconName: "SkipForward",
+    keywords: ["continue", "skip", "loop", "next"],
+  },
   "flow.wait": {
     label: "Wait",
     description: "Pauses for a fixed duration or until a wake-up event arrives.",

@@ -268,6 +268,24 @@ describe("flow schemas", () => {
     expect(PARAMS_SCHEMAS["flow.join"].safeParse({}).success).toBe(true)
   })
 
+  it("flow.loop accepts the v2 container shape per mode", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    expect(
+      s.safeParse({ mode: "forEach", source: "{{ $node['n1'].items }}", output: "{{ $item }}" })
+        .success
+    ).toBe(true)
+    expect(s.safeParse({ mode: "forEach" }).success).toBe(false)
+    expect(s.safeParse({ mode: "times", times: 3, iterationConcurrency: 4 }).success).toBe(true)
+    expect(s.safeParse({ mode: "times", times: "{{ $trigger.payload.n }}" }).success).toBe(true)
+    expect(s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}" }).success).toBe(true)
+    expect(s.safeParse({ mode: "while" }).success).toBe(false)
+  })
+
+  it("flow.break / flow.continue accept empty params", () => {
+    expect(PARAMS_SCHEMAS["flow.break"].safeParse({}).success).toBe(true)
+    expect(PARAMS_SCHEMAS["flow.continue"].safeParse({}).success).toBe(true)
+  })
+
   it("flow.branch accepts the v2 structured-conditions shape", () => {
     const s = PARAMS_SCHEMAS["flow.branch"]
     expect(

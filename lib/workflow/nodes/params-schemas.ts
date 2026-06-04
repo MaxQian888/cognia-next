@@ -349,7 +349,8 @@ const JoinParams = z.object({
   timeoutMs: numberRange(0).optional(),
 })
 
-const LoopParams = z
+// Legacy (typeVersion 1) flat array-transform loop.
+const LoopParamsV1 = z
   .object({
     mode: z.enum(["forEach", "times", "while"]).optional(),
     times: numberRange(0).optional(),
@@ -372,6 +373,35 @@ const LoopParams = z
       path: ["mode"],
     }
   )
+
+// typeVersion 2 — container sub-canvas (types/workflow/visual.ts LoopNodeParams).
+const LoopParamsV2 = z
+  .object({
+    mode: z.enum(["forEach", "times", "while"]),
+    source: optionalString,
+    times: z.union([numberRange(0), z.string()]).optional(),
+    whileExpression: optionalString,
+    output: optionalString,
+    iterationConcurrency: numberRange(1, 64).optional(),
+    maxIterations: numberRange(1, 100_000).optional(),
+  })
+  .refine(
+    (v) => {
+      if (v.mode === "forEach") return typeof v.source === "string" && v.source.length > 0
+      if (v.mode === "while")
+        return typeof v.whileExpression === "string" && v.whileExpression.length > 0
+      return typeof v.times === "number"
+        ? v.times > 0
+        : typeof v.times === "string" && v.times.trim() !== ""
+    },
+    {
+      message: "loopSourceRequired",
+      path: ["mode"],
+    }
+  )
+
+// Schema lookup is keyed by kind only — accept both generations.
+const LoopParams = z.union([LoopParamsV2, LoopParamsV1])
 
 const WaitParams = z.object({
   mode: z.enum(["duration", "event"]).optional(),

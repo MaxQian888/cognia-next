@@ -78,6 +78,9 @@ export function outputHandlesFor(node: NodeShapeForHandles): OutputHandleSpec[] 
 const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
   "flow.branch": 2,
   "flow.switch": 2,
+  // New loops author as container sub-canvases; legacy flat-transform loops
+  // (typeVersion 1) keep running unchanged.
+  "flow.loop": 2,
 }
 
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {
