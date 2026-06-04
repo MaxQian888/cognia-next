@@ -5,12 +5,16 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
+import { useActiveCharacterId } from "@/hooks/pet/use-active-character-id"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { isTauri } from "@/lib/platform/detect"
+import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
@@ -18,11 +22,20 @@ export function PetMount() {
   const save = useSettingsStore((s) => s.save)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const enabled = pet.enabled
+  const activeCharacterId = useActiveCharacterId()
 
-  usePetEventBus(enabled)
+  // Resolve the window role once: the shared root layout mounts PetMount in
+  // every webview, but the controller (event bus + XP awards) and the widget
+  // must live only in the main window. The transparent overlay window
+  // (`/pet-overlay`, label "pet") renders presentation via PetOverlayView, so
+  // here it must contribute nothing — otherwise XP double-awards.
+  const role = useMemo(() => getPetWindowRole(), [])
+  const isOverlay = role === "overlay"
+
+  usePetEventBus(enabled && !isOverlay)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || isOverlay) return
     let cancelled = false
     void (async () => {
       const accountId = await ensurePetAccountId(settings, save)
@@ -32,8 +45,17 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [enabled, settings, save])
+  }, [enabled, isOverlay, settings, save])
 
-  if (!enabled) return null
-  return <PetWidget settings={pet} />
+  // Main window owns the cross-window bridge: it broadcasts the controller's
+  // visual-state/bubble/one-shots and replays overlay interactions. Pointless
+  // on the web (single browsing context), so gate on Tauri.
+  useEffect(() => {
+    if (!enabled || isOverlay || !isTauri()) return
+    const dispose = startMainPetBridge()
+    return dispose
+  }, [enabled, isOverlay])
+
+  if (!enabled || isOverlay) return null
+  return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
 }

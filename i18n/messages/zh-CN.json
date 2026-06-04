@@ -2759,7 +2759,8 @@
           "process": "检测到客户端进程，使用其默认端口",
           "port": "通过开放端口探测发现"
         },
-        "controllerSecured": "控制台 API 需要密钥"
+        "controllerSecured": "控制台 API 需要密钥",
+        "quickClash": "检测到 Clash / Mihomo 内核 v{version}（127.0.0.1:9090）——点击「立即检测」列出其端口。"
       },
       "test": {
         "urlLabel": "测试 URL",
@@ -6603,6 +6604,53 @@
         "label": "重置宠物",
         "description": "删除所有宠物数据并重新开始。",
         "action": "重置"
+      },
+      "skin": {
+        "label": "皮肤",
+        "options": {
+          "svg": "矢量吉祥物",
+          "live2d": "Live2D 模型"
+        }
+      },
+      "desktopPet": {
+        "title": "桌面宠物",
+        "description": "在透明、置顶的独立窗口中将宠物悬浮到桌面上（仅桌面应用）。",
+        "enabled": {
+          "label": "桌面宠物",
+          "description": "在应用窗口之外，将宠物悬浮显示在桌面上。"
+        },
+        "clickThrough": {
+          "label": "鼠标穿透",
+          "description": "让鼠标点击穿过宠物，作用到其后方的内容。"
+        },
+        "clickThroughHint": "开启鼠标穿透后，桌宠将忽略鼠标。只能通过此处或托盘菜单的“关闭鼠标穿透”恢复。",
+        "size": {
+          "label": "桌宠大小（{size}px）"
+        }
+      },
+      "live2d": {
+        "title": "Live2D 模型",
+        "import": "导入模型",
+        "importFolder": "导入文件夹",
+        "importHint": "选择模型文件夹，或包含 .model3.json 的 .zip 压缩包。",
+        "delete": "删除",
+        "setActive": "设为当前",
+        "active": "当前",
+        "download": "下载示例模型",
+        "downloading": "下载中…",
+        "storageUsage": "{count} 个模型 · {size}",
+        "coreMissing": "Live2D 运行时未就绪，将回退到 SVG 皮肤。",
+        "noModels": "暂无 Live2D 模型，请导入或下载示例。",
+        "errors": {
+          "noSettings": "未找到 .model3.json 配置文件。",
+          "multipleSettings": "找到多个 .model3.json，请只保留一个。",
+          "invalidJson": "配置文件不是有效的 JSON。",
+          "missingReferenced": "模型缺少其引用的文件。",
+          "tooLarge": "模型超过 50 MB 上限。",
+          "cubism2Unsupported": "暂不支持 Cubism 2 模型。",
+          "zipFailed": "无法读取 .zip 压缩包。",
+          "downloadFailed": "无法下载示例模型。"
+        }
       }
     }
   },
@@ -8984,6 +9032,8 @@
     "settings": "设置",
     "quit": "退出",
     "automationKill": "🛑 触发自动化中止开关",
+    "petToggle": "切换桌面宠物",
+    "petClickThroughOff": "关闭桌宠鼠标穿透",
     "quickGoal": "/goal …",
     "allCommands": "所有命令",
     "categories": {
@@ -18977,6 +19027,25 @@
     }
   },
   "pet": {
+    "live2d": {
+      "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
+    },
+    "quickMenu": {
+      "feed": "喂食",
+      "play": "玩耍",
+      "pet": "抚摸",
+      "talk": "聊天",
+      "openConsole": "打开宠物面板",
+      "showDesktopPet": "显示桌宠",
+      "hideDesktopPet": "隐藏桌宠",
+      "minimize": "最小化",
+      "openSettings": "打开设置",
+      "clickThrough": "鼠标穿透",
+      "showMainWindow": "显示主窗口"
+    },
+    "overlay": {
+      "petLabel": "桌面宠物"
+    },
     "statCard": {
       "unhatched": "未孵化",
       "shiny": "闪光"

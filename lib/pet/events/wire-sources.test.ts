@@ -18,6 +18,6 @@ describe("wirePetSources", () => {
   })
 
   it("ships the full default source set", () => {
-    expect(DEFAULT_PET_SOURCES).toHaveLength(6)
+    expect(DEFAULT_PET_SOURCES).toHaveLength(7)
   })
 })

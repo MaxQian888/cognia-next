@@ -2,9 +2,9 @@
 // by `hooks/pet/use-pet-event-bus.ts`. The source list is injectable so the
 // composition is unit-tested without touching real stores.
 //
-// Scheduler occurrences have no clean store/bus seam to observe passively; any
-// caller can still nudge the pet directly via
-// `emitPetEvent({ source: "scheduler", kind: "scheduledRun" })`.
+// The scheduler is observed passively via its `cognia-scheduler-executions`
+// BroadcastChannel (see `sources/scheduler-source.ts`); any caller can still
+// nudge the pet directly via `emitPetEvent(...)`.
 
 import { emitPetEvent, type PetEmit } from "./pet-event-bus"
 import { wireChatSource } from "./sources/chat-source"
@@ -13,6 +13,7 @@ import { wireAgentTeamSource } from "./sources/agent-team-source"
 import { wireConnectorSource } from "./sources/connector-source"
 import { wireGoalSource } from "./sources/goal-source"
 import { wireWorkflowSource } from "./sources/workflow-source"
+import { wireSchedulerSource } from "./sources/scheduler-source"
 
 export type PetSourceWire = (emit: PetEmit) => () => void
 
@@ -23,6 +24,7 @@ export const DEFAULT_PET_SOURCES: PetSourceWire[] = [
   wireConnectorSource,
   wireGoalSource,
   wireWorkflowSource,
+  wireSchedulerSource,
 ]
 
 export function wirePetSources(

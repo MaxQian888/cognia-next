@@ -2759,7 +2759,8 @@
           "process": "Client process detected, using its default port",
           "port": "Found by open-port probe"
         },
-        "controllerSecured": "Controller API requires a secret"
+        "controllerSecured": "Controller API requires a secret",
+        "quickClash": "Clash / Mihomo core v{version} detected on 127.0.0.1:9090 — run a detection to list its ports."
       },
       "test": {
         "urlLabel": "Test URL",
@@ -6603,6 +6604,53 @@
         "label": "Reset pet",
         "description": "Delete all pet data and start over.",
         "action": "Reset"
+      },
+      "skin": {
+        "label": "Skin",
+        "options": {
+          "svg": "Vector mascot",
+          "live2d": "Live2D model"
+        }
+      },
+      "desktopPet": {
+        "title": "Desktop pet",
+        "description": "Float the pet on your desktop in a transparent always-on-top window (desktop app only).",
+        "enabled": {
+          "label": "Desktop pet",
+          "description": "Show the pet floating on your desktop, outside the app window."
+        },
+        "clickThrough": {
+          "label": "Click-through",
+          "description": "Let clicks pass through the pet to whatever is behind it."
+        },
+        "clickThroughHint": "While click-through is on, the desktop pet ignores the mouse. Turn it back off here or from the tray menu's \"Disable click-through\".",
+        "size": {
+          "label": "Desktop pet size ({size}px)"
+        }
+      },
+      "live2d": {
+        "title": "Live2D models",
+        "import": "Import model",
+        "importFolder": "Import folder",
+        "importHint": "Choose a model folder or a .zip containing a .model3.json.",
+        "delete": "Delete",
+        "setActive": "Set active",
+        "active": "Active",
+        "download": "Download sample",
+        "downloading": "Downloading…",
+        "storageUsage": "{count} models · {size}",
+        "coreMissing": "Live2D runtime isn't ready — the pet will fall back to the SVG skin.",
+        "noModels": "No Live2D models yet. Import one or download a sample.",
+        "errors": {
+          "noSettings": "No .model3.json settings file was found.",
+          "multipleSettings": "More than one .model3.json was found — keep just one.",
+          "invalidJson": "The settings file isn't valid JSON.",
+          "missingReferenced": "The model is missing files it references.",
+          "tooLarge": "The model is larger than the 50 MB limit.",
+          "cubism2Unsupported": "Cubism 2 models aren't supported.",
+          "zipFailed": "The .zip couldn't be read.",
+          "downloadFailed": "The sample model couldn't be downloaded."
+        }
       }
     }
   },
@@ -8984,6 +9032,8 @@
     "settings": "Settings",
     "quit": "Quit",
     "automationKill": "🛑 Engage automation kill switch",
+    "petToggle": "Toggle desktop pet",
+    "petClickThroughOff": "Disable desktop pet click-through",
     "quickGoal": "/goal …",
     "allCommands": "All Commands",
     "categories": {
@@ -18977,6 +19027,25 @@
     }
   },
   "pet": {
+    "live2d": {
+      "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
+    },
+    "quickMenu": {
+      "feed": "Feed",
+      "play": "Play",
+      "pet": "Pet",
+      "talk": "Talk",
+      "openConsole": "Open pet panel",
+      "showDesktopPet": "Show desktop pet",
+      "hideDesktopPet": "Hide desktop pet",
+      "minimize": "Minimize",
+      "openSettings": "Open settings",
+      "clickThrough": "Click-through",
+      "showMainWindow": "Show main window"
+    },
+    "overlay": {
+      "petLabel": "Desktop pet"
+    },
     "statCard": {
       "unhatched": "Unhatched",
       "shiny": "Shiny"
