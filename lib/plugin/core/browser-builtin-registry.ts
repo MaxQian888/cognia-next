@@ -10,6 +10,7 @@ import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
 import screenshotManifest from "@/plugins/screenshot/plugin.json"
 import ocrManifest from "@/plugins/ocr/plugin.json"
+import evalManifest from "@/plugins/eval/plugin.json"
 import webToolsManifest from "@/plugins/web-tools/plugin.json"
 import workflowAiManifest from "@/plugins/workflow-ai/plugin.json"
 import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
@@ -27,6 +28,7 @@ import workspaceToolsModule from "@/plugins/workspace-tools/src/index"
 import webToolsModule from "@/plugins/web-tools/src/index"
 import screenshotModule from "@/plugins/screenshot/src/index"
 import ocrModule from "@/plugins/ocr/src/index"
+import evalModule from "@/plugins/eval/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
@@ -46,107 +48,136 @@ export interface BrowserBuiltinRegistryEntry {
   load?: () => Promise<PluginDefinition>
 }
 
-function asPluginManifest(manifest: unknown): PluginManifest {
-  return manifest as PluginManifest
-}
-
 function resolvePluginModule(mod: unknown): PluginDefinition {
   return (mod as { default?: PluginDefinition }).default || (mod as PluginDefinition)
 }
 
+/**
+ * Build a builtin entry's discovery manifest by overlaying the module
+ * definition's manifest on top of the plugin.json base.
+ *
+ * The declarative contribution arrays (workflowTemplates / skills /
+ * mcpServerPresets / characterPacks / agentTeamTemplates / subagents /
+ * dexie / i18n) are authored in TypeScript on the module manifest, next to
+ * the runtime values they reference (custom node kinds, prompt constants) —
+ * plugin.json cannot hold them. Discovery (`scanBrowserBuiltins`) persists
+ * the manifest it gets here into the plugin store, and the manager's
+ * `OVERLAY_REGISTRY_CAPABILITIES` dispatch loop plus the dexie/i18n enable
+ * steps read those fields from the store record. Without this merge they
+ * read fields that don't exist and silently skip every declarative
+ * contribution (the bug that left e.g. the zhihu-content-pipeline workflow
+ * template unregistered).
+ *
+ * plugin.json stays the base so identity/compat fields the module manifest
+ * omits (description, author, license, engines, activationEvents,
+ * runtimeCompatibility) survive; `id` stays authoritative from the JSON.
+ */
+export function builtinManifest(jsonManifest: unknown, mod: unknown): PluginManifest {
+  const base = jsonManifest as PluginManifest
+  const rich = resolvePluginModule(mod)?.manifest as PluginManifest | undefined
+  if (!rich) return base
+  return { ...base, ...rich, id: base.id }
+}
+
 const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   {
-    manifest: asPluginManifest(clipboardToolsManifest),
+    manifest: builtinManifest(clipboardToolsManifest, clipboardToolsModule),
     path: "builtin://cognia-clipboard-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(clipboardToolsModule),
   },
   {
-    manifest: asPluginManifest(workspaceToolsManifest),
+    manifest: builtinManifest(workspaceToolsManifest, workspaceToolsModule),
     path: "builtin://cognia-workspace-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(workspaceToolsModule),
   },
   {
-    manifest: asPluginManifest(webToolsManifest),
+    manifest: builtinManifest(webToolsManifest, webToolsModule),
     path: "builtin://cognia-web-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(webToolsModule),
   },
   {
-    manifest: asPluginManifest(screenshotManifest),
+    manifest: builtinManifest(screenshotManifest, screenshotModule),
     path: "builtin://cognia-screenshot",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(screenshotModule),
   },
   {
-    manifest: asPluginManifest(ocrManifest),
+    manifest: builtinManifest(ocrManifest, ocrModule),
     path: "builtin://cognia-ocr",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(ocrModule),
   },
   {
-    manifest: asPluginManifest(promptTemplatesManifest),
+    manifest: builtinManifest(evalManifest, evalModule),
+    path: "builtin://cognia-eval",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(evalModule),
+  },
+  {
+    manifest: builtinManifest(promptTemplatesManifest, promptTemplatesModule),
     path: "builtin://cognia-prompt-templates",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(promptTemplatesModule),
   },
   {
-    manifest: asPluginManifest(clipboardHistoryManifest),
+    manifest: builtinManifest(clipboardHistoryManifest, clipboardHistoryModule),
     path: "builtin://cognia-clipboard-history",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(clipboardHistoryModule),
   },
   {
-    manifest: asPluginManifest(githubDeliveryManifest),
+    manifest: builtinManifest(githubDeliveryManifest, githubDeliveryModule),
     path: "builtin://github-delivery",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
   },
   {
-    manifest: asPluginManifest(workflowAiManifest),
+    manifest: builtinManifest(workflowAiManifest, workflowAiModule),
     path: "builtin://cognia-workflow-ai",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(workflowAiModule),
   },
   {
-    manifest: asPluginManifest(agentTeamExamplesManifest),
+    manifest: builtinManifest(agentTeamExamplesManifest, agentTeamExamplesModule),
     path: "builtin://cognia-agent-team-examples",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(agentTeamExamplesModule),
   },
   {
-    manifest: asPluginManifest(backendRefactorManifest),
+    manifest: builtinManifest(backendRefactorManifest, backendRefactorModule),
     path: "builtin://cognia-backend-refactor",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(backendRefactorModule),
   },
   {
-    manifest: asPluginManifest(zhihuContentPipelineManifest),
+    manifest: builtinManifest(zhihuContentPipelineManifest, zhihuContentPipelineModule),
     path: "builtin://zhihu-content-pipeline",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(zhihuContentPipelineModule),
   },
   {
-    manifest: asPluginManifest(appearanceDemoManifest),
+    manifest: builtinManifest(appearanceDemoManifest, appearanceDemoModule),
     path: "builtin://cognia-appearance-demo",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(appearanceDemoModule),
   },
   {
-    manifest: asPluginManifest(schedulingDemoManifest),
+    manifest: builtinManifest(schedulingDemoManifest, schedulingDemoModule),
     path: "builtin://cognia-scheduling-demo",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(schedulingDemoModule),
   },
   {
-    manifest: asPluginManifest(goalInsightsManifest),
+    manifest: builtinManifest(goalInsightsManifest, goalInsightsModule),
     path: "builtin://cognia-goal-insights",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(goalInsightsModule),
   },
   {
-    manifest: asPluginManifest(shareWatchManifest),
+    manifest: builtinManifest(shareWatchManifest, shareWatchModule),
     path: "builtin://cognia-share-watch",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(shareWatchModule),

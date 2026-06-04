@@ -3,9 +3,11 @@
  */
 
 import {
+  builtinManifest,
   getBrowserBuiltinRegistry,
   getBrowserBuiltinRegistryEntry,
 } from "./browser-builtin-registry"
+import type { PluginManifest } from "@/types/plugin"
 
 describe("browser-builtin-registry", () => {
   it("exposes the built-in plugin entries", () => {
@@ -17,6 +19,7 @@ describe("browser-builtin-registry", () => {
       "cognia-backend-refactor",
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
+      "cognia-eval",
       "cognia-goal-insights",
       "cognia-ocr",
       "cognia-prompt-templates",
@@ -35,6 +38,13 @@ describe("browser-builtin-registry", () => {
     const entries = getBrowserBuiltinRegistry()
     for (const entry of entries) {
       expect(typeof entry.load).toBe("function")
+    }
+  })
+
+  it("load() resolves a plugin definition for every entry", async () => {
+    for (const entry of getBrowserBuiltinRegistry()) {
+      const def = await entry.load!()
+      expect(typeof def.activate === "function" || typeof def.manifest === "object").toBe(true)
     }
   })
 
@@ -58,5 +68,66 @@ describe("browser-builtin-registry", () => {
     const a = getBrowserBuiltinRegistry()
     const b = getBrowserBuiltinRegistry()
     expect(a[0]?.compatibilityDiagnostics).not.toBe(b[0]?.compatibilityDiagnostics)
+  })
+
+  describe("builtinManifest", () => {
+    const base = {
+      id: "demo",
+      name: "Demo",
+      version: "1.0.0",
+      description: "from plugin.json",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "src/index.ts",
+      activationEvents: ["onStartup"],
+    }
+
+    it("overlays the module manifest's contribution arrays on the plugin.json base", () => {
+      const mod = {
+        default: {
+          manifest: {
+            id: "demo",
+            name: "Demo",
+            version: "1.0.0",
+            type: "frontend",
+            capabilities: ["tools", "workflow-template"],
+            main: "src/index.ts",
+            workflowTemplates: [{ id: "t1" }],
+            dexie: { tables: [{ name: "rows", schema: "&id" }] },
+          },
+          activate: async () => undefined,
+        },
+      }
+      const merged = builtinManifest(base, mod) as PluginManifest & {
+        workflowTemplates?: unknown[]
+      }
+      // Module manifest arrays ride along…
+      expect(merged.workflowTemplates).toEqual([{ id: "t1" }])
+      expect(merged.dexie).toBeDefined()
+      expect(merged.capabilities).toEqual(["tools", "workflow-template"])
+      // …while plugin.json-only identity fields survive.
+      expect(merged.description).toBe("from plugin.json")
+      expect(merged.activationEvents).toEqual(["onStartup"])
+      expect(merged.id).toBe("demo")
+    })
+
+    it("keeps the plugin.json id authoritative over a drifted module id", () => {
+      const mod = { default: { manifest: { ...base, id: "drifted" }, activate: async () => {} } }
+      expect(builtinManifest(base, mod).id).toBe("demo")
+    })
+
+    it("falls back to the plugin.json manifest for activate-only modules", () => {
+      const mod = { default: { activate: async () => undefined } }
+      expect(builtinManifest(base, mod)).toBe(base)
+    })
+
+    it("hydrates the zhihu-content-pipeline entry with its declarative contributions", () => {
+      const manifest = getBrowserBuiltinRegistryEntry("zhihu-content-pipeline")
+        ?.manifest as PluginManifest & { workflowTemplates?: unknown[]; skills?: unknown[] }
+      expect(manifest.workflowTemplates?.length).toBe(1)
+      expect(manifest.skills?.length).toBeGreaterThan(0)
+      expect(manifest.dexie).toBeDefined()
+      expect(manifest.description).toBeTruthy()
+    })
   })
 })
