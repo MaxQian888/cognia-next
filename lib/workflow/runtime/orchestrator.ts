@@ -48,6 +48,22 @@ import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 
+/**
+ * Release run-scoped resources, then drop the cancel-registry entry.
+ * Terminal sessions opened by `action.terminal.session.open` are closed
+ * here so a run can never leak a PTY — regardless of how it terminated.
+ * Cleanup failures are swallowed: they must never mask the run's result.
+ */
+async function releaseRunResources(runId: string): Promise<void> {
+  try {
+    const { closeRunSessions } = await import("@/lib/terminal/headless-session-registry")
+    await closeRunSessions(runId)
+  } catch {
+    // best-effort cleanup
+  }
+  unregisterRun(runId)
+}
+
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
   trigger: TriggerEvent
@@ -226,7 +242,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const sortError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
-    unregisterRun(runId)
+    await releaseRunResources(runId)
     return { runId, status: "failed", error: { message } }
   }
 
@@ -265,7 +281,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
       getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
       getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
-      unregisterRun(runId)
+      await releaseRunResources(runId)
       return { runId, status: "failed", error: { message } }
     }
     const reachable = new Set<string>([input.startStepId])
@@ -539,7 +555,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const failureError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
-    unregisterRun(runId)
+    await releaseRunResources(runId)
     return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
   }
 
@@ -568,7 +584,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // Plugin host hook: workflow finished successfully.
   getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
 
-  unregisterRun(runId)
+  await releaseRunResources(runId)
   return { runId, status: "succeeded", output: finalOutput }
 }
 

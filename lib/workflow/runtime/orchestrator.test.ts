@@ -20,6 +20,13 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => mockHooksManager),
 }))
 
+// Run-scoped terminal-session cleanup — the orchestrator must close
+// whatever a run opened on EVERY terminal path (success + failure).
+const mockCloseRunSessions = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/terminal/headless-session-registry", () => ({
+  closeRunSessions: (...args: unknown[]) => mockCloseRunSessions(...args),
+}))
+
 import { runWorkflow } from "./orchestrator"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listRunEvents } from "./event-log"
@@ -1173,5 +1180,35 @@ describe("runWorkflow — debugging options", () => {
     const events = await listRunEvents(r.runId)
     const completed = events.find((e) => e.type === "step_completed" && e.stepId === "n_a")
     expect((completed?.payload as { output?: { value?: string } })?.output?.value).toBe("ORIGINAL")
+  })
+})
+
+describe("run-scoped terminal-session cleanup", () => {
+  it("closes run sessions after a successful run", async () => {
+    const r = await runWorkflow({ workflow: buildWorkflow([setNode("n_a", "v")]), trigger })
+    expect(r.status).toBe("succeeded")
+    expect(mockCloseRunSessions).toHaveBeenCalledWith(r.runId)
+  })
+
+  it("closes run sessions after a failed run", async () => {
+    // `action.system.terminal` with no command throws a non-retryable error.
+    const wf = buildWorkflow([
+      {
+        id: "n_term",
+        type: "action.system.terminal",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: { label: "term", params: {} },
+      },
+    ])
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("failed")
+    expect(mockCloseRunSessions).toHaveBeenCalledWith(r.runId)
+  })
+
+  it("a cleanup failure never masks the run result", async () => {
+    mockCloseRunSessions.mockRejectedValueOnce(new Error("backend gone"))
+    const r = await runWorkflow({ workflow: buildWorkflow([setNode("n_a", "v")]), trigger })
+    expect(r.status).toBe("succeeded")
   })
 })

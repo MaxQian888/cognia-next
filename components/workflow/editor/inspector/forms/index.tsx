@@ -40,7 +40,10 @@ import {
   PluginPicker,
   SubworkflowPicker,
   TwinPicker,
+  EntityPicker,
 } from "./shared/entity-picker"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
+import type { PluginCapabilities } from "@/lib/plugin/api/plugin-capability-registry"
 import { CronBuilder } from "./shared/cron-builder"
 import { DurationField } from "./shared/duration-field"
 
@@ -1499,32 +1502,120 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── action.plugin.invoke ──────────────────────────────────────────────────
+// Two dispatch modes mirroring the executor (`lib/workflow/nodes/built-ins.ts`):
+//  - "tool": pick an enabled plugin + one of its registered agent tools from
+//    dropdowns fed by the capability enumeration API.
+//  - "task": legacy free-text `workflow.task` id (ADR-0017 back-compat).
 export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.pluginInvoke")
   const pluginId = readString(params, "pluginId")
+  const toolName = readString(params, "toolName")
   const taskId = readString(params, "taskId")
   const argsJson = readString(params, "argsJson", "{}")
+  // Mode inference mirrors the executor: explicit discriminator wins, then
+  // whichever target field a persisted node carries; new nodes default to
+  // the tool path.
+  const storedMode = readString(params, "mode")
+  const mode =
+    storedMode === "task" || storedMode === "tool"
+      ? storedMode
+      : toolName
+        ? "tool"
+        : taskId
+          ? "task"
+          : "tool"
+
+  // Capability snapshot for the tool-mode dropdowns. Re-fetched whenever the
+  // plugin runtime store mutates (enable/disable/tool registration).
+  const [capabilities, setCapabilities] = useState<PluginCapabilities[]>([])
+  const pluginsRevision = usePluginStore((s) => s.plugins)
+  useEffect(() => {
+    if (mode !== "tool") return
+    let cancelled = false
+    import("@/lib/plugin/api/plugin-capability-registry")
+      .then(({ listPluginCapabilities }) => listPluginCapabilities())
+      .then((all) => {
+        if (!cancelled) setCapabilities(all)
+      })
+      .catch(() => {
+        // Capability sources unavailable (early boot) — pickers stay empty.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, pluginsRevision])
+
+  const pluginOptions = capabilities
+    .filter((c) => c.enabled && c.tools.length > 0)
+    .map((c) => ({ value: c.pluginId, label: c.pluginId }))
+  const selectedTools = capabilities.find((c) => c.pluginId === pluginId)?.tools ?? []
+  const toolOptions = selectedTools.map((tool) => ({ value: tool.id, label: tool.label }))
+  const selectedToolSchema = selectedTools.find((tool) => tool.id === toolName)?.argsSchema
+  const schemaFields =
+    selectedToolSchema && typeof selectedToolSchema.properties === "object"
+      ? Object.keys(selectedToolSchema.properties as Record<string, unknown>)
+      : []
+
   return (
     <FieldGroup>
+      <Field label={t("mode.label")} htmlFor="pi-mode" name="mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="pi-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tool">{t("mode.options.tool")}</SelectItem>
+            <SelectItem value="task">{t("mode.options.task")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
       <Field label={t("pluginId.label")} htmlFor="pi-plug" name="pluginId" required>
-        <PluginPicker
-          id="pi-plug"
-          value={pluginId}
-          onChange={(v) => onChange(patchParam(params, "pluginId", v))}
-        />
+        {mode === "tool" ? (
+          <EntityPicker
+            id="pi-plug"
+            value={pluginId}
+            onChange={(v) => onChange(patchParam(params, "pluginId", v))}
+            options={pluginOptions}
+            placeholder={t("pluginId.toolPlaceholder")}
+            allowExpression
+          />
+        ) : (
+          <PluginPicker
+            id="pi-plug"
+            value={pluginId}
+            onChange={(v) => onChange(patchParam(params, "pluginId", v))}
+          />
+        )}
       </Field>
-      <Field label={t("taskId.label")} htmlFor="pi-task" name="taskId" required>
-        <Input
-          id="pi-task"
-          value={taskId}
-          onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
-          placeholder={t("taskId.placeholder")}
-        />
-      </Field>
+      {mode === "tool" ? (
+        <Field label={t("toolName.label")} htmlFor="pi-tool" name="toolName" required>
+          <EntityPicker
+            id="pi-tool"
+            value={toolName}
+            onChange={(v) => onChange(patchParam(params, "toolName", v))}
+            options={toolOptions}
+            placeholder={pluginId ? t("toolName.placeholder") : t("toolName.empty")}
+            allowExpression
+          />
+        </Field>
+      ) : (
+        <Field label={t("taskId.label")} htmlFor="pi-task" name="taskId" required>
+          <Input
+            id="pi-task"
+            value={taskId}
+            onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
+            placeholder={t("taskId.placeholder")}
+          />
+        </Field>
+      )}
       <Field
         label={t("argsJson.label")}
         htmlFor="pi-args"
-        hint={t("argsJson.hint")}
+        hint={
+          mode === "tool" && schemaFields.length > 0
+            ? t("argsJson.toolHint", { fields: schemaFields.join(", ") })
+            : t("argsJson.hint")
+        }
         name="argsJson"
       >
         <Textarea
@@ -2734,6 +2825,8 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
   const tabId = readString(params, "tabId")
   const timeoutSec = readNumber(params, "timeoutSec", 60)
   const onFailure = readString(params, "onFailure", "throw")
+  const unattended = readBoolean(params, "unattended", false)
+  const onAskVerdict = readString(params, "onAskVerdict", "fail")
   return (
     <FieldGroup>
       <Field
@@ -2822,6 +2915,250 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
           </Select>
         </Field>
       </div>
+      <TerminalUnattendedFields
+        params={params}
+        onChange={onChange}
+        unattended={unattended}
+        onAskVerdict={onAskVerdict}
+        idPrefix="term"
+      />
+    </FieldGroup>
+  )
+}
+
+/**
+ * Shared unattended-mode controls (`action.system.terminal` +
+ * `action.terminal.session.*`): the headless toggle and, while it is on,
+ * the ask-verdict policy. Keys live under `workflows.forms.terminalUnattended`.
+ */
+function TerminalUnattendedFields({
+  params,
+  onChange,
+  unattended,
+  onAskVerdict,
+  idPrefix,
+}: {
+  params: Params
+  onChange: ChangeFn
+  unattended: boolean
+  onAskVerdict: string
+  idPrefix: string
+}) {
+  const t = useTranslations("workflows.forms.terminalUnattended")
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <Field
+          label={t("unattended.label")}
+          htmlFor={`${idPrefix}-unattended`}
+          hint={t("unattended.hint")}
+          name="unattended"
+        >
+          <Switch
+            id={`${idPrefix}-unattended`}
+            checked={unattended}
+            onCheckedChange={(v) => onChange(patchParam(params, "unattended", v))}
+          />
+        </Field>
+      </div>
+      {unattended ? (
+        <Field
+          label={t("onAskVerdict.label")}
+          htmlFor={`${idPrefix}-askverdict`}
+          hint={t("onAskVerdict.hint")}
+          name="onAskVerdict"
+        >
+          <Select
+            value={onAskVerdict}
+            onValueChange={(v) => onChange(patchParam(params, "onAskVerdict", v))}
+          >
+            <SelectTrigger id={`${idPrefix}-askverdict`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fail">{t("onAskVerdict.options.fail")}</SelectItem>
+              <SelectItem value="consent">{t("onAskVerdict.options.consent")}</SelectItem>
+              <SelectItem value="run">{t("onAskVerdict.options.run")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
+    </>
+  )
+}
+
+// ── action.terminal.session.* ───────────────────────────────────────────────
+export function TerminalSessionOpenConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalSessionOpen")
+  const cwd = readString(params, "cwd")
+  const shell = readString(params, "shell")
+  const unattended = readBoolean(params, "unattended", false)
+  return (
+    <FieldGroup>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label={t("cwd.label")} htmlFor="tsopen-cwd" hint={t("cwd.hint")} name="cwd">
+          <Input
+            id="tsopen-cwd"
+            value={cwd}
+            onChange={(e) => onChange(patchParam(params, "cwd", e.target.value))}
+            placeholder={t("cwd.placeholder")}
+          />
+        </Field>
+        <Field label={t("shell.label")} htmlFor="tsopen-shell" hint={t("shell.hint")} name="shell">
+          <Input
+            id="tsopen-shell"
+            value={shell}
+            onChange={(e) => onChange(patchParam(params, "shell", e.target.value))}
+            placeholder={t("shell.placeholder")}
+          />
+        </Field>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <Field
+          label={t("unattended.label")}
+          htmlFor="tsopen-unattended"
+          hint={t("unattended.hint")}
+          name="unattended"
+        >
+          <Switch
+            id="tsopen-unattended"
+            checked={unattended}
+            onCheckedChange={(v) => onChange(patchParam(params, "unattended", v))}
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+export function TerminalSessionRunConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalSessionRun")
+  const sessionId = readString(params, "sessionId")
+  const command = readString(params, "command")
+  const timeoutSec = readNumber(params, "timeoutSec", 60)
+  const onFailure = readString(params, "onFailure", "throw")
+  const onAskVerdict = readString(params, "onAskVerdict", "fail")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="tsrun-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+        required
+      >
+        <Input
+          id="tsrun-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          placeholder={t("sessionId.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("command.label")}
+        htmlFor="tsrun-command"
+        hint={t("command.hint")}
+        name="command"
+        required
+      >
+        <Textarea
+          id="tsrun-command"
+          value={command}
+          onChange={(e) => onChange(patchParam(params, "command", e.target.value))}
+          placeholder={t("command.placeholder")}
+          rows={3}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("timeoutSec.label")}
+          htmlFor="tsrun-timeout"
+          hint={t("timeoutSec.hint")}
+          name="timeoutSec"
+        >
+          <Input
+            id="tsrun-timeout"
+            type="number"
+            min={5}
+            max={600}
+            value={timeoutSec}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "timeoutSec",
+                  Math.max(5, Math.min(600, Number(e.target.value) || 60))
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("onFailure.label")}
+          htmlFor="tsrun-onfail"
+          hint={t("onFailure.hint")}
+          name="onFailure"
+        >
+          <Select
+            value={onFailure}
+            onValueChange={(v) => onChange(patchParam(params, "onFailure", v))}
+          >
+            <SelectTrigger id="tsrun-onfail">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="throw">{t("onFailure.options.throw")}</SelectItem>
+              <SelectItem value="branch">{t("onFailure.options.branch")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field
+        label={t("onAskVerdict.label")}
+        htmlFor="tsrun-askverdict"
+        hint={t("onAskVerdict.hint")}
+        name="onAskVerdict"
+      >
+        <Select
+          value={onAskVerdict}
+          onValueChange={(v) => onChange(patchParam(params, "onAskVerdict", v))}
+        >
+          <SelectTrigger id="tsrun-askverdict">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fail">{t("onAskVerdict.options.fail")}</SelectItem>
+            <SelectItem value="consent">{t("onAskVerdict.options.consent")}</SelectItem>
+            <SelectItem value="run">{t("onAskVerdict.options.run")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    </FieldGroup>
+  )
+}
+
+export function TerminalSessionCloseConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalSessionClose")
+  const sessionId = readString(params, "sessionId")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("sessionId.label")}
+        htmlFor="tsclose-session"
+        hint={t("sessionId.hint")}
+        name="sessionId"
+        required
+      >
+        <Input
+          id="tsclose-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          placeholder={t("sessionId.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
     </FieldGroup>
   )
 }

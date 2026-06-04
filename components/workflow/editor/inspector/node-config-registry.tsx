@@ -85,6 +85,9 @@ import {
   SubworkflowConfig,
   SwitchConfig,
   SystemTerminalConfig,
+  TerminalSessionCloseConfig,
+  TerminalSessionOpenConfig,
+  TerminalSessionRunConfig,
   TeamCreateConfig,
   TeamRunConfig,
   TeamTaskDispatchConfig,
@@ -151,6 +154,9 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.desktop.wait": DesktopWaitConfig,
   // Actions: system (Wave 3 — integrated terminal)
   "action.system.terminal": SystemTerminalConfig,
+  "action.terminal.session.open": TerminalSessionOpenConfig,
+  "action.terminal.session.run": TerminalSessionRunConfig,
+  "action.terminal.session.close": TerminalSessionCloseConfig,
   // Actions: local Git (ADR-0038)
   "action.git.stage": GitStageConfig,
   "action.git.commit": GitCommitConfig,

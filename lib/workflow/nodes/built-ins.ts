@@ -50,6 +50,10 @@ import "./eval"
 // the integrated terminal dock from a workflow step.
 import "./terminal"
 
+// Persistent terminal-session nodes (open / run / close) — dock or
+// unattended-headless mode, with run-scoped cleanup via the orchestrator.
+import "./terminal-session"
+
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "./git"
@@ -1887,26 +1891,74 @@ registerNodeExecutor({
 })
 
 // ── action.plugin.invoke ──────────────────────────────────────────────────
-// Looks up an enabled plugin by id and dispatches a task to its registered
-// task handler via the plugin runtime bridge. Tasks are arbitrary string
-// keys; the plugin's manifest declares which tasks it accepts.
+// Two dispatch modes, inferred for persisted-node back-compat:
+//
+//  - "tool" (new, UI default): invokes a plugin-registered agent tool
+//    (`ctx.agent.registerTool()` / manifest `tools[]`) through the unified
+//    `invokePluginTool` seam — the same path the chat agent's sidecar
+//    round-trip uses, so lazy `onTool:` activation and the permission
+//    consent gate behave identically.
+//  - "task" (legacy, ADR-0017): dispatches to a `workflow.task` extension
+//    registered under the plugin id. Kept verbatim so existing nodes and
+//    the formalized extension path stay valid.
+//
+// The registration deliberately stays at typeVersion 1: executor lookup is
+// an exact `(kind, typeVersion)` match with no fallback
+// (`lib/workflow/runtime/step-executor.ts`), so a bump would orphan every
+// persisted v1 node, and the params change is purely additive.
 registerNodeExecutor({
   kind: "action.plugin.invoke",
   typeVersion: 1,
   execute: async (ctx) => {
     const params = ctx.params as {
       pluginId?: string
+      mode?: "task" | "tool"
+      toolName?: string
       taskId?: string
       args?: Record<string, unknown>
     }
     const pluginId = params.pluginId?.trim()
+    const toolName = params.toolName?.trim()
     const taskId = params.taskId?.trim()
     if (!pluginId) throw nonRetryable("action.plugin.invoke requires 'pluginId'")
-    if (!taskId) throw nonRetryable("action.plugin.invoke requires 'taskId'")
+    const mode = params.mode ?? (toolName ? "tool" : "task")
     const args = (params.args && typeof params.args === "object" ? params.args : {}) as Record<
       string,
       unknown
     >
+
+    if (mode === "tool") {
+      if (!toolName) {
+        throw nonRetryable("action.plugin.invoke (tool mode) requires 'toolName'")
+      }
+      const { invokePluginTool, PluginToolInvocationError } =
+        await import("@/lib/plugin/core/invoke-plugin-tool")
+      try {
+        const { result } = await invokePluginTool(pluginId, toolName, args, {
+          signal: ctx.signal,
+          reason: "workflow:action.plugin.invoke",
+        })
+        return {
+          output: { pluginId, toolName, ok: true, data: result },
+        }
+      } catch (err) {
+        if (err instanceof PluginToolInvocationError) {
+          // Configuration/permission failures won't heal on retry; runtime
+          // failures (execution-failed / aborted) stay retryable.
+          if (
+            err.code === "plugin-not-found" ||
+            err.code === "plugin-disabled" ||
+            err.code === "tool-not-found" ||
+            err.code === "permission-denied"
+          ) {
+            throw nonRetryable(err.message)
+          }
+        }
+        throw err
+      }
+    }
+
+    if (!taskId) throw nonRetryable("action.plugin.invoke requires 'taskId'")
 
     const { getPlugin } = await import("@/lib/db/plugins")
     const plugin = await getPlugin(pluginId)

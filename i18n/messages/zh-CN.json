@@ -1244,6 +1244,7 @@
         "compactThreshold": "{pct} 时自动压缩",
         "contextUsageAria": "上下文窗口已用 {pct}",
         "pluginExtensionOverflow": "更多插件操作",
+        "quickActions": "插件快捷操作",
         "workflow": {
           "validate": "校验",
           "validateAria": "校验当前工作流",
@@ -1375,6 +1376,7 @@
       "loading": "正在加载对话…"
     },
     "message": {
+      "pluginMenu": "插件操作",
       "editingCancel": "取消",
       "editingSubmit": "发送（⌘/Ctrl+Enter）",
       "copyTooltip": "复制消息",
@@ -11817,7 +11819,8 @@
         "newChat": "与角色开始新聊天",
         "switchTeam": "切换团队",
         "workspaces": "切换工作区",
-        "sessions": "会话"
+        "sessions": "会话",
+        "pluginActions": "插件操作"
       },
       "actions": {
         "newChat": "新建聊天",
@@ -16435,6 +16438,22 @@
             "label": "运行终端命令",
             "description": "在集成终端中执行 shell 命令，stdout 与退出码传递给下游。"
           }
+        },
+        "terminal": {
+          "session": {
+            "open": {
+              "label": "打开终端会话",
+              "description": "打开持久终端会话（可见 dock 标签，或无人值守模式下的私有后台 shell），用于多步命令执行。"
+            },
+            "run": {
+              "label": "在终端会话中运行",
+              "description": "在本次运行中已打开的会话里执行一条命令并等待其退出码。"
+            },
+            "close": {
+              "label": "关闭终端会话",
+              "description": "关闭本次运行中打开的终端会话。运行结束时会自动关闭遗留会话。"
+            }
+          }
         }
       },
       "ai": {
@@ -17307,6 +17326,77 @@
           }
         }
       },
+      "terminalUnattended": {
+        "unattended": {
+          "label": "无人值守（后台执行）",
+          "hint": "不占用可见终端标签、无需逐条确认。需先开启无人值守执行设置；每条命令都会经过安全分类器筛查。"
+        },
+        "onAskVerdict": {
+          "label": "需要确认时",
+          "hint": "当安全分类器无法确定某条命令时的处理方式。",
+          "options": {
+            "fail": "使该步骤失败",
+            "consent": "在终端面板中询问",
+            "run": "仍然执行"
+          }
+        }
+      },
+      "terminalSessionOpen": {
+        "cwd": {
+          "label": "工作目录",
+          "hint": "可选；默认为用户主目录。",
+          "placeholder": "/repo"
+        },
+        "shell": {
+          "label": "Shell（覆盖）",
+          "hint": "留空时沿用默认 shell。",
+          "placeholder": "/bin/bash"
+        },
+        "unattended": {
+          "label": "无人值守（后台执行）",
+          "hint": "打开私有后台 shell 而非可见 dock 标签。在其中运行的每条命令都会经过安全分类器筛查。"
+        }
+      },
+      "terminalSessionRun": {
+        "sessionId": {
+          "label": "会话 ID",
+          "hint": "取自「打开终端会话」节点的输出，可用表达式。",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "command": {
+          "label": "命令",
+          "hint": "单行命令，由会话的 shell 自行分词。",
+          "placeholder": "pnpm test"
+        },
+        "timeoutSec": {
+          "label": "超时（秒）",
+          "hint": "范围 5–600；等待命令完成的最长时间。"
+        },
+        "onFailure": {
+          "label": "退出码非零时的处理",
+          "hint": "当命令以非零码退出时如何响应。",
+          "options": {
+            "throw": "让工作流步骤失败",
+            "branch": "路由到 failure 出口"
+          }
+        },
+        "onAskVerdict": {
+          "label": "需要确认时",
+          "hint": "仅无人值守会话有效 — 安全分类器无法确定时的处理方式。",
+          "options": {
+            "fail": "使该步骤失败",
+            "consent": "在终端面板中询问",
+            "run": "仍然执行"
+          }
+        }
+      },
+      "terminalSessionClose": {
+        "sessionId": {
+          "label": "会话 ID",
+          "hint": "要关闭的会话。运行结束时会自动关闭遗留会话。",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        }
+      },
       "twinRag": {
         "twinId": {
           "label": "数字分身 ID",
@@ -17752,8 +17842,21 @@
         }
       },
       "pluginInvoke": {
+        "mode": {
+          "label": "模式",
+          "options": {
+            "tool": "插件工具",
+            "task": "任务处理器（旧版）"
+          }
+        },
         "pluginId": {
-          "label": "插件"
+          "label": "插件",
+          "toolPlaceholder": "选择已启用的插件"
+        },
+        "toolName": {
+          "label": "工具",
+          "placeholder": "选择工具",
+          "empty": "请先选择插件"
         },
         "taskId": {
           "label": "任务 ID",
@@ -17761,7 +17864,8 @@
         },
         "argsJson": {
           "label": "参数（JSON）",
-          "hint": "转发给插件的任务处理器。"
+          "hint": "转发给插件的任务处理器。",
+          "toolHint": "期望字段：{fields}"
         }
       },
       "connectorDraft": {

@@ -11,6 +11,11 @@ jest.mock("@/lib/terminal/dock-tool-handler", () => ({
   runTerminalDockAction: (...args: unknown[]) => mockRun(...args),
 }))
 
+const mockHeadless = jest.fn()
+jest.mock("@/lib/terminal/headless-exec", () => ({
+  runHeadlessExec: (...args: unknown[]) => mockHeadless(...args),
+}))
+
 // Force the executor to register on import.
 import "./terminal"
 
@@ -36,6 +41,7 @@ function makeCtx(
 
 beforeEach(() => {
   mockRun.mockReset()
+  mockHeadless.mockReset()
 })
 
 describe("action.system.terminal executor", () => {
@@ -139,5 +145,71 @@ describe("action.system.terminal executor", () => {
     await expect(reg.execute(makeCtx({ params: { command: "ls" } }))).rejects.toThrow(
       /agent terminal access is disabled/
     )
+  })
+
+  describe("unattended mode", () => {
+    it("routes through runHeadlessExec with run context, never the dock", async () => {
+      mockHeadless.mockResolvedValue({
+        ok: true,
+        exitCode: 0,
+        output: "done",
+        durationMs: 30,
+        timedOut: false,
+        verdict: "allow",
+      })
+      const reg = getExecutor("action.system.terminal", 1)!
+      const result = await reg.execute(
+        makeCtx({
+          params: {
+            command: "pnpm test",
+            unattended: true,
+            onAskVerdict: "run",
+            timeoutSec: 30,
+            cwd: "/repo",
+          },
+        })
+      )
+      expect(mockRun).not.toHaveBeenCalled()
+      expect(mockHeadless).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "pnpm test",
+          cwd: "/repo",
+          timeoutMs: 30_000,
+          onAskVerdict: "run",
+          runId: "run-1",
+          source: "workflow",
+        })
+      )
+      expect(result.decision).toBe("success")
+      expect(result.output).toMatchObject({ exitCode: 0, output: "done" })
+    })
+
+    it("surfaces policy blocks as workflow failures", async () => {
+      mockHeadless.mockResolvedValue({ ok: false, reason: "blocked by the classifier" })
+      const reg = getExecutor("action.system.terminal", 1)!
+      await expect(
+        reg.execute(makeCtx({ params: { command: "rm -rf /", unattended: true } }))
+      ).rejects.toThrow(/blocked by the classifier/)
+    })
+
+    it("throws on a timeout by default and branches with onFailure=branch", async () => {
+      mockHeadless.mockResolvedValue({
+        ok: true,
+        exitCode: null,
+        output: "partial",
+        durationMs: 9000,
+        timedOut: true,
+        verdict: "allow",
+      })
+      const reg = getExecutor("action.system.terminal", 1)!
+      await expect(
+        reg.execute(makeCtx({ params: { command: "sleep 99", unattended: true } }))
+      ).rejects.toThrow(/timed out/)
+      const result = await reg.execute(
+        makeCtx({ params: { command: "sleep 99", unattended: true, onFailure: "branch" } })
+      )
+      expect(result.decision).toBe("failure")
+      expect(result.output).toMatchObject({ timedOut: true })
+    })
   })
 })

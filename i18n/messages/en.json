@@ -1244,6 +1244,7 @@
         "compactThreshold": "Auto-compact at {pct}",
         "contextUsageAria": "Context window {pct} used",
         "pluginExtensionOverflow": "More plugin actions",
+        "quickActions": "Plugin quick actions",
         "workflow": {
           "validate": "Validate",
           "validateAria": "Validate the current workflow",
@@ -1375,6 +1376,7 @@
       "loading": "Loading conversation…"
     },
     "message": {
+      "pluginMenu": "Plugin actions",
       "editingCancel": "Cancel",
       "editingSubmit": "Send (⌘/Ctrl+Enter)",
       "copyTooltip": "Copy message",
@@ -11817,7 +11819,8 @@
         "newChat": "New chat with character",
         "switchTeam": "Switch to team",
         "workspaces": "Switch workspace",
-        "sessions": "Sessions"
+        "sessions": "Sessions",
+        "pluginActions": "Plugin actions"
       },
       "actions": {
         "newChat": "New chat",
@@ -16435,6 +16438,22 @@
             "label": "Run terminal command",
             "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream."
           }
+        },
+        "terminal": {
+          "session": {
+            "open": {
+              "label": "Open terminal session",
+              "description": "Open a persistent terminal session (visible dock tab, or a headless private shell with unattended mode) for multi-step command runs."
+            },
+            "run": {
+              "label": "Run in terminal session",
+              "description": "Run one command in a session opened earlier in this run and wait for its exit code."
+            },
+            "close": {
+              "label": "Close terminal session",
+              "description": "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends."
+            }
+          }
         }
       },
       "ai": {
@@ -17307,6 +17326,77 @@
           }
         }
       },
+      "terminalUnattended": {
+        "unattended": {
+          "label": "Unattended (headless)",
+          "hint": "Run without a visible terminal tab or consent prompt. Requires the unattended-execution setting; every command is screened by the safety classifier."
+        },
+        "onAskVerdict": {
+          "label": "When confirmation is needed",
+          "hint": "What to do when the safety classifier is unsure about a command.",
+          "options": {
+            "fail": "Fail the step",
+            "consent": "Ask in the terminal dock",
+            "run": "Run anyway"
+          }
+        }
+      },
+      "terminalSessionOpen": {
+        "cwd": {
+          "label": "Working directory",
+          "hint": "Optional. Defaults to the home directory.",
+          "placeholder": "/repo"
+        },
+        "shell": {
+          "label": "Shell (override)",
+          "hint": "Leave empty to inherit the default shell.",
+          "placeholder": "/bin/bash"
+        },
+        "unattended": {
+          "label": "Unattended (headless)",
+          "hint": "Open a private headless shell instead of a visible dock tab. Each command run in it is screened by the safety classifier."
+        }
+      },
+      "terminalSessionRun": {
+        "sessionId": {
+          "label": "Session id",
+          "hint": "From the 'Open terminal session' node's output, e.g. an expression.",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        },
+        "command": {
+          "label": "Command",
+          "hint": "One command line; the session's shell tokenizes it.",
+          "placeholder": "pnpm test"
+        },
+        "timeoutSec": {
+          "label": "Timeout (seconds)",
+          "hint": "5–600. How long to wait for the command to finish."
+        },
+        "onFailure": {
+          "label": "On non-zero exit",
+          "hint": "How to react when the command exits with a non-zero code.",
+          "options": {
+            "throw": "Fail the workflow step",
+            "branch": "Route to the failure port"
+          }
+        },
+        "onAskVerdict": {
+          "label": "When confirmation is needed",
+          "hint": "Unattended sessions only — what to do when the safety classifier is unsure.",
+          "options": {
+            "fail": "Fail the step",
+            "consent": "Ask in the terminal dock",
+            "run": "Run anyway"
+          }
+        }
+      },
+      "terminalSessionClose": {
+        "sessionId": {
+          "label": "Session id",
+          "hint": "The session to close. Leftovers are closed automatically when the run ends.",
+          "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+        }
+      },
       "twinRag": {
         "twinId": {
           "label": "Twin id",
@@ -17752,8 +17842,21 @@
         }
       },
       "pluginInvoke": {
+        "mode": {
+          "label": "Mode",
+          "options": {
+            "tool": "Plugin tool",
+            "task": "Task handler (legacy)"
+          }
+        },
         "pluginId": {
-          "label": "Plugin"
+          "label": "Plugin",
+          "toolPlaceholder": "Select an enabled plugin"
+        },
+        "toolName": {
+          "label": "Tool",
+          "placeholder": "Select a tool",
+          "empty": "Select a plugin first"
         },
         "taskId": {
           "label": "Task id",
@@ -17761,7 +17864,8 @@
         },
         "argsJson": {
           "label": "Arguments (JSON)",
-          "hint": "Forwarded to the plugin task handler."
+          "hint": "Forwarded to the plugin task handler.",
+          "toolHint": "Expected fields: {fields}"
         }
       },
       "connectorDraft": {

@@ -193,9 +193,9 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   },
   "action.plugin.invoke": {
     label: "Invoke plugin",
-    description: "Calls a plugin task handler registered in the plugin runtime.",
+    description: "Calls a plugin tool or legacy task handler registered in the plugin runtime.",
     iconName: "Boxes",
-    keywords: ["plugin", "extension", "run"],
+    keywords: ["plugin", "extension", "run", "tool"],
   },
   // ── GitHub Delivery ───────────────────────────────────────────────────────
   "action.github.openPr": {
@@ -386,6 +386,30 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
       "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
     iconName: "Terminal",
     keywords: ["terminal", "shell", "command", "bash", "powershell", "dock", "run"],
+    desktopOnly: true,
+  },
+  "action.terminal.session.open": {
+    label: "Open terminal session",
+    description:
+      "Open a persistent terminal session (visible dock tab, or a headless private shell with unattended: true) for multi-step command runs.",
+    iconName: "Terminal",
+    keywords: ["terminal", "session", "shell", "open", "spawn", "headless", "unattended"],
+    desktopOnly: true,
+  },
+  "action.terminal.session.run": {
+    label: "Run in terminal session",
+    description:
+      "Run one command in a session opened by 'Open terminal session' and wait for its exit code.",
+    iconName: "Terminal",
+    keywords: ["terminal", "session", "shell", "command", "run", "exec"],
+    desktopOnly: true,
+  },
+  "action.terminal.session.close": {
+    label: "Close terminal session",
+    description:
+      "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends.",
+    iconName: "Terminal",
+    keywords: ["terminal", "session", "close", "kill", "cleanup"],
     desktopOnly: true,
   },
   // ── AI primitives ─────────────────────────────────────────────────────────

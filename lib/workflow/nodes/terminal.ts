@@ -43,6 +43,13 @@ interface TerminalParams {
   tabId?: string
   timeoutSec?: number
   onFailure?: "throw" | "branch"
+  /**
+   * Unattended mode: run headlessly (no dock tab, no consent prompt)
+   * through the `runHeadlessExec` policy layer — master switch +
+   * classifyCommand verdict + ask-policy. Default false (dock path).
+   */
+  unattended?: boolean
+  onAskVerdict?: "fail" | "consent" | "run"
 }
 
 registerNodeExecutor({
@@ -63,6 +70,53 @@ registerNodeExecutor({
         : command
 
     const timeoutSec = clampTimeout(params.timeoutSec)
+
+    // Unattended mode — headless policy layer instead of the dock.
+    if (params.unattended === true) {
+      const { runHeadlessExec } = await import("@/lib/terminal/headless-exec")
+      const result = await runHeadlessExec({
+        command: composed,
+        cwd: params.cwd,
+        shell: params.shell,
+        timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
+        onAskVerdict: params.onAskVerdict,
+        chatSessionId: ctx.runId,
+        runId: ctx.runId,
+        source: "workflow",
+      })
+      if (!result.ok) {
+        throw nonRetryable(`action.system.terminal: ${result.reason}`)
+      }
+      const success = !result.timedOut && result.exitCode === 0
+      const decision = success ? "success" : "failure"
+      if (!success && (params.onFailure ?? "throw") === "throw") {
+        throw nonRetryable(
+          result.timedOut
+            ? "action.system.terminal: command timed out"
+            : `action.system.terminal: command exited with code ${result.exitCode ?? "null"}`
+        )
+      }
+      return {
+        output: {
+          exitCode: result.exitCode,
+          output: result.output,
+          command: composed,
+          durationMs: result.durationMs,
+          timedOut: result.timedOut,
+        },
+        decision,
+        logs: [
+          {
+            level: success ? ("info" as const) : ("warn" as const),
+            message: success
+              ? `terminal command succeeded (exit ${result.exitCode})`
+              : result.timedOut
+                ? "terminal command timed out"
+                : `terminal command failed (exit ${result.exitCode ?? "null"})`,
+          },
+        ],
+      }
+    }
 
     // Lazy-import to avoid pulling the renderer-only store graph into
     // any environment that doesn't actually run this node (tests for

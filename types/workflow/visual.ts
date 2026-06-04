@@ -93,6 +93,14 @@ export type WorkflowNodeKind =
   // Reuses `lib/terminal/run-in-dock.ts` so the consent + tab gating
   // matches the chat affordance and the agent's MCP tool path.
   | "action.system.terminal"
+  // Persistent terminal sessions — open once, run several commands in the
+  // same shell/cwd, close (or let the orchestrator's run cleanup close).
+  // Dock mode shares the consent gate with `action.system.terminal`;
+  // `unattended: true` routes through the headless policy layer
+  // (`lib/terminal/headless-exec.ts`).
+  | "action.terminal.session.open"
+  | "action.terminal.session.run"
+  | "action.terminal.session.close"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -219,6 +227,9 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.desktop.wait",
   "trigger.desktop.event",
   "action.system.terminal",
+  "action.terminal.session.open",
+  "action.terminal.session.run",
+  "action.terminal.session.close",
   "ai.prompt",
   "ai.classify",
   "ai.extract",

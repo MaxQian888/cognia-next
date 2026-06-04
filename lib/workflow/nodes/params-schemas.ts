@@ -211,9 +211,15 @@ const McpInvokeToolParams = z.object({
   args: z.unknown().optional(),
 })
 
+// `taskId` is optional at this layer because tool-mode nodes don't carry
+// one — the executor enforces the per-mode requirement (`toolName` for
+// "tool", `taskId` for "task") with a non-retryable error, and the
+// inspector form provides richer client-side validation.
 const PluginInvokeParams = z.object({
   pluginId: requiredString("required"),
-  taskId: requiredString("required"),
+  mode: z.enum(["task", "tool"]).optional(),
+  toolName: optionalString,
+  taskId: optionalString,
   argsJson: optionalString,
   args: z.unknown().optional(),
 })
@@ -431,6 +437,32 @@ const SystemTerminalParams = z.object({
   tabId: optionalString,
   timeoutSec: numberRange(0).optional(),
   onFailure: z.enum(["throw", "branch"]).optional(),
+  // Unattended mode (headless, no consent) — gated by
+  // settings.terminal.allowUnattendedExecution + classifyCommand.
+  unattended: z.boolean().optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+// ── Terminal: persistent sessions ───────────────────────────────────────────
+// Executors at `lib/workflow/nodes/terminal-session.ts`.
+const TerminalSessionOpenParams = z.object({
+  cwd: optionalString,
+  shell: optionalString,
+  projectId: optionalString,
+  unattended: z.boolean().optional(),
+})
+
+const TerminalSessionRunParams = z.object({
+  sessionId: requiredString("required"),
+  command: requiredString("required"),
+  args: z.array(z.string()).optional(),
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+const TerminalSessionCloseParams = z.object({
+  sessionId: requiredString("required"),
 })
 
 // ── Data ────────────────────────────────────────────────────────────────────
@@ -543,6 +575,9 @@ export const PARAMS_SCHEMAS = {
   "trigger.desktop.event": z.object({}).passthrough(),
   // System: integrated terminal
   "action.system.terminal": SystemTerminalParams,
+  "action.terminal.session.open": TerminalSessionOpenParams,
+  "action.terminal.session.run": TerminalSessionRunParams,
+  "action.terminal.session.close": TerminalSessionCloseParams,
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,
