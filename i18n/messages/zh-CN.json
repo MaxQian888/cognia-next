@@ -9557,6 +9557,7 @@
       "noFolder": "未打开文件夹",
       "openFolder": "打开文件夹",
       "notARepo": "该文件夹不是 Git 仓库",
+      "initRepo": "初始化仓库",
       "noChanges": "没有更改"
     },
     "diff": {
@@ -9750,7 +9751,8 @@
       "empty": "没有历史记录",
       "viewList": "列表视图",
       "viewGraph": "图形视图",
-      "loadMore": "加载更多"
+      "loadMore": "加载更多",
+      "filterPlaceholder": "过滤已加载的提交（信息、作者、哈希）"
     },
     "errors": {
       "generic": "Git 操作失败：{message}",
@@ -17096,7 +17098,64 @@
         },
         "falsyLabel": {
           "label": "假分支标签"
+        },
+        "conditions": {
+          "label": "条件组",
+          "hint": "条件组通过时走「真」端口，否则走「假」端口。"
         }
+      },
+      "switchV2": {
+        "cases": {
+          "label": "分支条件",
+          "hint": "自上而下求值——第一个命中的分支生效；都不命中则走默认端口。",
+          "caseLabelPlaceholder": "分支标签",
+          "addCase": "添加分支",
+          "removeCase": "移除分支",
+          "caseTitle": "分支 {index}"
+        }
+      },
+      "conditionBuilder": {
+        "combinator": {
+          "aria": "条件组合方式",
+          "all": "全部满足（与）",
+          "any": "任一满足（或）"
+        },
+        "left": {
+          "placeholder": "'{{ $node[''n1''].out.value }}'",
+          "aria": "左操作数"
+        },
+        "operator": {
+          "aria": "操作符"
+        },
+        "right": {
+          "placeholder": "值或表达式",
+          "aria": "右操作数"
+        },
+        "rightUpper": {
+          "placeholder": "上界",
+          "aria": "区间上界"
+        },
+        "operators": {
+          "eq": "等于",
+          "neq": "不等于",
+          "gt": "大于",
+          "gte": "不小于",
+          "lt": "小于",
+          "lte": "不大于",
+          "contains": "包含",
+          "notContains": "不包含",
+          "startsWith": "开头是",
+          "endsWith": "结尾是",
+          "regex": "匹配正则",
+          "inRange": "在区间内",
+          "isEmpty": "为空",
+          "isNotEmpty": "不为空",
+          "truthy": "为真值"
+        },
+        "caseSensitive": "区分大小写",
+        "addCondition": "添加条件",
+        "removeCondition": "移除条件",
+        "coercionHint": "比较操作符在两侧都是数字时按数值比较，否则按文本比较；文本比较默认不区分大小写，可勾选「区分大小写」。"
       },
       "setVariable": {
         "variable": {

@@ -50,16 +50,18 @@ const NodeConfigFormSection = memo(function NodeConfigFormSection({
   paramsSchema,
   params,
   onChange,
+  typeVersion,
 }: {
   kind: WorkflowNodeKind
   paramsSchema?: Record<string, unknown>
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
+  typeVersion?: number
 }) {
   const Component = getNodeConfigComponentForEntry({ kind, paramsSchema })
   return (
     // eslint-disable-next-line react-hooks/static-components
-    <Component params={params} onChange={onChange} />
+    <Component params={params} onChange={onChange} typeVersion={typeVersion} />
   )
 })
 
@@ -311,6 +313,7 @@ function InspectorPanelInner({
                     paramsSchema={entry.paramsSchema}
                     params={configFormParams}
                     onChange={handleParamsChange}
+                    typeVersion={node.data.typeVersion as number | undefined}
                   />
                 </InspectorExpressionProvider>
               </FieldErrorProvider>

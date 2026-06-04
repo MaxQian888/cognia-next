@@ -9557,6 +9557,7 @@
       "noFolder": "No folder open",
       "openFolder": "Open Folder",
       "notARepo": "This folder is not a Git repository",
+      "initRepo": "Initialize Repository",
       "noChanges": "No changes"
     },
     "diff": {
@@ -9750,7 +9751,8 @@
       "empty": "No history",
       "viewList": "List view",
       "viewGraph": "Graph view",
-      "loadMore": "Load more"
+      "loadMore": "Load more",
+      "filterPlaceholder": "Filter loaded commits (message, author, hash)"
     },
     "errors": {
       "generic": "Git operation failed: {message}",
@@ -17096,7 +17098,64 @@
         },
         "falsyLabel": {
           "label": "Falsy label"
+        },
+        "conditions": {
+          "label": "Conditions",
+          "hint": "Routes to the true handle when the group passes, otherwise false."
         }
+      },
+      "switchV2": {
+        "cases": {
+          "label": "Cases",
+          "hint": "Evaluated top to bottom — the first matching case wins; otherwise the default handle.",
+          "caseLabelPlaceholder": "Case label",
+          "addCase": "Add case",
+          "removeCase": "Remove case",
+          "caseTitle": "Case {index}"
+        }
+      },
+      "conditionBuilder": {
+        "combinator": {
+          "aria": "Combine conditions with",
+          "all": "All (AND)",
+          "any": "Any (OR)"
+        },
+        "left": {
+          "placeholder": "'{{ $node[''n1''].out.value }}'",
+          "aria": "Left operand"
+        },
+        "operator": {
+          "aria": "Operator"
+        },
+        "right": {
+          "placeholder": "Value or expression",
+          "aria": "Right operand"
+        },
+        "rightUpper": {
+          "placeholder": "Upper bound",
+          "aria": "Range upper bound"
+        },
+        "operators": {
+          "eq": "equals",
+          "neq": "not equals",
+          "gt": "greater than",
+          "gte": "at least",
+          "lt": "less than",
+          "lte": "at most",
+          "contains": "contains",
+          "notContains": "does not contain",
+          "startsWith": "starts with",
+          "endsWith": "ends with",
+          "regex": "matches regex",
+          "inRange": "in range",
+          "isEmpty": "is empty",
+          "isNotEmpty": "is not empty",
+          "truthy": "is truthy"
+        },
+        "caseSensitive": "Case sensitive",
+        "addCondition": "Add condition",
+        "removeCondition": "Remove condition",
+        "coercionHint": "Ordering operators compare numerically when both sides are numbers; otherwise they fall back to text comparison. Text comparisons ignore case unless 'Case sensitive' is on."
       },
       "setVariable": {
         "variable": {

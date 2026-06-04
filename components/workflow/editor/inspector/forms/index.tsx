@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/select"
 import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
+import { ConditionBuilder } from "./shared/condition-builder"
+import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
 import { useInspectorExpressionCtx } from "./shared/inspector-context"
 import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
@@ -48,6 +50,12 @@ type ChangeFn = (next: Params) => void
 interface ConfigProps {
   params: Params
   onChange: ChangeFn
+  /**
+   * The node's `typeVersion` — forms with a structured v2 params generation
+   * (branch/switch) dispatch on it. Omitted by callers that predate the
+   * field; treated as 1 (legacy shape).
+   */
+  typeVersion?: number
 }
 
 // ── trigger.manual ────────────────────────────────────────────────────────
@@ -519,8 +527,46 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── flow.branch ───────────────────────────────────────────────────────────
-export function BranchConfig({ params, onChange }: ConfigProps) {
+export function BranchConfig({ params, onChange, typeVersion }: ConfigProps) {
   const t = useTranslations("workflows.forms.branch")
+  if ((typeVersion ?? 1) >= 2) {
+    return <BranchConfigV2 params={params} onChange={onChange} />
+  }
+  return <BranchConfigV1 params={params} onChange={onChange} t={t} />
+}
+
+/** typeVersion 2 — structured condition group routing to true/false handles. */
+function BranchConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn }) {
+  const t = useTranslations("workflows.forms.branch")
+  const conditions = (params.conditions ?? undefined) as WorkflowConditionGroup | undefined
+  return (
+    <FieldGroup>
+      <Field
+        label={t("conditions.label")}
+        htmlFor="br-conditions"
+        hint={t("conditions.hint")}
+        name="conditions"
+        required
+      >
+        <ConditionBuilder
+          idPrefix="branch-conditions"
+          value={conditions}
+          onChange={(next) => onChange(patchParam(params, "conditions", next))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+function BranchConfigV1({
+  params,
+  onChange,
+  t,
+}: {
+  params: Params
+  onChange: ChangeFn
+  t: ReturnType<typeof useTranslations>
+}) {
   const condition = readString(params, "condition")
   const truthy = readString(params, "truthyLabel", "true")
   const falsy = readString(params, "falsyLabel", "false")
@@ -1859,7 +1905,105 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── flow.switch ───────────────────────────────────────────────────────────
-export function SwitchConfig({ params, onChange }: ConfigProps) {
+export function SwitchConfig({ params, onChange, typeVersion }: ConfigProps) {
+  if ((typeVersion ?? 1) >= 2) {
+    return <SwitchConfigV2 params={params} onChange={onChange} />
+  }
+  return <SwitchConfigV1 params={params} onChange={onChange} />
+}
+
+interface SwitchCaseV2 {
+  id: string
+  label?: string
+  when: WorkflowConditionGroup
+}
+
+/** typeVersion 2 — ordered cases, each with a stable id + condition group. */
+function SwitchConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn }) {
+  const t = useTranslations("workflows.forms.switchV2")
+  const tBuilder = useTranslations("workflows.forms.conditionBuilder")
+  const cases = Array.isArray(params.cases) ? (params.cases as SwitchCaseV2[]) : []
+
+  function updateCases(next: SwitchCaseV2[]) {
+    onChange(patchParam(params, "cases", next))
+  }
+
+  return (
+    <FieldGroup>
+      <Field
+        label={t("cases.label")}
+        htmlFor="swv2-cases"
+        hint={t("cases.hint")}
+        name="cases"
+        required
+      >
+        <div className="space-y-3">
+          {cases.map((c, i) => (
+            <div key={c.id || i} className="space-y-2 rounded-md border p-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("cases.caseTitle", { index: i + 1 })}
+                </span>
+                <Input
+                  value={c.label ?? ""}
+                  onChange={(e) => {
+                    const next = [...cases]
+                    next[i] = { ...c, label: e.target.value }
+                    updateCases(next)
+                  }}
+                  placeholder={t("cases.caseLabelPlaceholder")}
+                  data-testid={`switch-v2-case-label-${i}`}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => updateCases(cases.filter((_, j) => j !== i))}
+                  aria-label={t("cases.removeCase")}
+                  data-testid={`switch-v2-remove-case-${i}`}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+              <ConditionBuilder
+                idPrefix={`switch-case-${i}`}
+                value={c.when}
+                onChange={(when) => {
+                  const next = [...cases]
+                  next[i] = { ...c, when }
+                  updateCases(next)
+                }}
+              />
+            </div>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              updateCases([
+                ...cases,
+                {
+                  // Stable routing id — survives label renames so edges and
+                  // run decisions never silently re-route.
+                  id: "c_" + Math.random().toString(36).slice(2, 8),
+                  label: "",
+                  when: { combinator: "all", conditions: [] },
+                },
+              ])
+            }
+            data-testid="switch-v2-add-case"
+          >
+            <Plus className="size-3.5 mr-1" /> {t("cases.addCase")}
+          </Button>
+        </div>
+      </Field>
+      <p className="text-[11px] text-muted-foreground">{tBuilder("coercionHint")}</p>
+    </FieldGroup>
+  )
+}
+
+function SwitchConfigV1({ params, onChange }: { params: Params; onChange: ChangeFn }) {
   const t = useTranslations("workflows.forms.switch")
   const subject = readString(params, "subject")
   const cases = Array.isArray(params.cases)

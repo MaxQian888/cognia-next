@@ -99,6 +99,8 @@ import {
 export type NodeConfigComponent = ComponentType<{
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
+  /** Node's params generation — v2-aware forms (branch/switch) dispatch on it. */
+  typeVersion?: number
 }>
 
 const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {

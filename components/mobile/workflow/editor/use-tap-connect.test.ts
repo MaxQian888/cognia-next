@@ -88,7 +88,7 @@ describe("useTapConnect", () => {
   it("rejects connecting INTO a trigger and creates no edge", () => {
     const { store, result } = setup()
     act(() => result.current.start("ai_a"))
-    let outcome: ReturnType<typeof result.current.completeTo> = { valid: false, reason: "" }
+    let outcome: ReturnType<typeof result.current.completeTo> = { valid: false, reason: "", reasonKey: "" }
     act(() => {
       outcome = result.current.completeTo("trigger")
     })
@@ -101,7 +101,7 @@ describe("useTapConnect", () => {
   it("rejects a self-loop", () => {
     const { store, result } = setup()
     act(() => result.current.start("ai_a"))
-    let outcome: ReturnType<typeof result.current.completeTo> = { valid: false, reason: "" }
+    let outcome: ReturnType<typeof result.current.completeTo> = { valid: false, reason: "", reasonKey: "" }
     act(() => {
       outcome = result.current.completeTo("ai_a")
     })
