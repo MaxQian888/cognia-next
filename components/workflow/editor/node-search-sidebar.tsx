@@ -60,6 +60,7 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
   embedded?: boolean
 }) {
   const t = useTranslations("workflows.sidebar")
+  const tNodesSearch = useTranslations("workflows.nodes")
   const [query, setQuery] = useState("")
   // Subscribe to the plugin catalog so newly-registered plugin nodes appear
   // in the sidebar without a page reload. The snapshot identity changes on
@@ -78,8 +79,17 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
   }, [query, pluginEntries])
   const flatResults = useMemo(() => {
     void pluginEntries
-    return query.trim() ? searchCatalog(query) : null
-  }, [query, pluginEntries])
+    if (!query.trim()) return null
+    // Search the localized strings too so e.g. zh-CN users can find nodes by
+    // their translated palette names. `tNode` falls back to undefined-ish for
+    // plugin kinds, which searchCatalog tolerates.
+    return searchCatalog(query, {
+      getText: (kind) => ({
+        label: tNode(tNodesSearch, `${kind}.label`, ""),
+        description: tNode(tNodesSearch, `${kind}.description`, ""),
+      }),
+    })
+  }, [query, pluginEntries, tNodesSearch])
 
   // Favorite + recent kinds (persisted). Resolve each stored kind to a live
   // catalog entry and drop any that no longer exist (e.g. a plugin node whose

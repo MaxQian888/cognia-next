@@ -16086,6 +16086,16 @@
             "label": "On UIA event",
             "description": "Fire when a UIA focus / structure / property event matches."
           }
+        },
+        "goal": {
+          "completed": {
+            "label": "On goal completed",
+            "description": "Fires when a /goal reaches a terminal status (completed, stopped, budget/turn/timeout)."
+          }
+        },
+        "team": {
+          "label": "On team run start",
+          "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored."
         }
       },
       "action": {
@@ -16115,6 +16125,12 @@
           "update": {
             "label": "Update team",
             "description": "Patches an existing team's roster or orchestration mode."
+          },
+          "task": {
+            "dispatch": {
+              "label": "Dispatch team task",
+              "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored."
+            }
           }
         },
         "skill": {
@@ -16258,6 +16274,30 @@
             "label": "Wait for element",
             "description": "Block until an element appears, disappears, or matches a property."
           }
+        },
+        "git": {
+          "stage": {
+            "label": "Git stage",
+            "description": "Stage paths in the repo (git add). Defaults to the active workspace root."
+          },
+          "commit": {
+            "label": "Git commit",
+            "description": "Commit staged changes with a message (optionally signed off)."
+          },
+          "push": {
+            "label": "Git push",
+            "description": "Push commits to a remote (optionally set upstream)."
+          },
+          "branch": {
+            "label": "Git branch",
+            "description": "Create or switch to a branch."
+          }
+        },
+        "system": {
+          "terminal": {
+            "label": "Run terminal command",
+            "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream."
+          }
         }
       },
       "ai": {
@@ -16310,6 +16350,14 @@
         "subworkflow": {
           "label": "Run subworkflow",
           "description": "Invokes another workflow as a step."
+        },
+        "break": {
+          "label": "Break",
+          "description": "Stops the innermost loop after the current iteration."
+        },
+        "continue": {
+          "label": "Continue",
+          "description": "Skips the rest of the current loop iteration."
         }
       },
       "data": {
@@ -16346,6 +16394,12 @@
         "group": {
           "label": "Group frame",
           "description": "Visual group around several nodes. Has no execution."
+        }
+      },
+      "ocr": {
+        "extract": {
+          "label": "Extract text (OCR)",
+          "description": "Run OCR on an image or PDF (URL, base64, or screen) and output its text."
         }
       }
     },

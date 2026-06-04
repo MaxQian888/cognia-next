@@ -90,4 +90,15 @@ describe("searchCatalog", () => {
     expect(out.length).toBeGreaterThan(0)
     expect(out.every((e) => e.kind.startsWith("ai."))).toBe(true)
   })
+
+  it("matches localized labels/descriptions when a translator is supplied", () => {
+    const getText = (kind: string) =>
+      kind === "flow.loop" ? { label: "循环", description: "重复执行子图" } : undefined
+    const byLabel = searchCatalog("循环", { getText })
+    expect(byLabel[0]?.kind).toBe("flow.loop")
+    const byDesc = searchCatalog("子图", { getText })
+    expect(byDesc.some((e) => e.kind === "flow.loop")).toBe(true)
+    // Without the translator the same query finds nothing.
+    expect(searchCatalog("循环").some((e) => e.kind === "flow.loop")).toBe(false)
+  })
 })

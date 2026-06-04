@@ -670,7 +670,16 @@ export function groupedCatalog(opts?: {
  */
 export function searchCatalog(
   query: string,
-  opts?: { includeDesktopOnly?: boolean }
+  opts?: {
+    includeDesktopOnly?: boolean
+    /**
+     * Localized display strings per kind (from `workflows.nodes.<kind>` via
+     * `tNode`). When supplied, the translated label/description participate
+     * in matching alongside the English catalog text, so e.g. a zh-CN user
+     * can search "循环" and find `flow.loop`.
+     */
+    getText?: (kind: string) => { label?: string; description?: string } | undefined
+  }
 ): NodeCatalogEntry[] {
   const q = query.trim().toLowerCase()
   const desktopOnly = opts?.includeDesktopOnly ?? true
@@ -679,15 +688,23 @@ export function searchCatalog(
   const scored = all
     .filter((e) => desktopOnly || !e.desktopOnly)
     .map((e) => {
-      const label = e.label.toLowerCase()
-      const desc = e.description.toLowerCase()
+      const localized = opts?.getText?.(e.kind)
+      const labels = [e.label, localized?.label].filter(
+        (v): v is string => typeof v === "string" && v !== ""
+      )
+      const descs = [e.description, localized?.description].filter(
+        (v): v is string => typeof v === "string" && v !== ""
+      )
       const kind = e.kind.toLowerCase()
       let score = 0
-      if (label === q) score = Math.max(score, 100)
-      else if (label.startsWith(q)) score = Math.max(score, 80)
-      else if (label.includes(q)) score = Math.max(score, 60)
+      for (const raw of labels) {
+        const label = raw.toLowerCase()
+        if (label === q) score = Math.max(score, 100)
+        else if (label.startsWith(q)) score = Math.max(score, 80)
+        else if (label.includes(q)) score = Math.max(score, 60)
+      }
       if (e.keywords.some((k) => k.toLowerCase().includes(q))) score = Math.max(score, 40)
-      if (desc.includes(q)) score = Math.max(score, 20)
+      if (descs.some((d) => d.toLowerCase().includes(q))) score = Math.max(score, 20)
       if (kind.includes(q)) score = Math.max(score, 10)
       return { entry: e, score }
     })
