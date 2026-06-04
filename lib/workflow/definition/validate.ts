@@ -185,6 +185,47 @@ export function validateGraphIntegrity(wf: VisualWorkflow): GraphIntegrityResult
     warnings.push("Workflow has no trigger node; manual run only.")
   }
 
+  // Loop-body integrity (schemaVersion 2 containers).
+  const nodeById = new Map(wf.nodes.map((n) => [n.id, n]))
+  const isLoopContainer = (id: string | undefined): boolean => {
+    if (!id) return false
+    const n = nodeById.get(id)
+    return !!n && n.type === "flow.loop" && n.typeVersion >= 2
+  }
+  for (const node of wf.nodes) {
+    if (node.parentId !== undefined) {
+      if (node.parentId === node.id) {
+        errors.push(`Node ${node.id} cannot be its own parent`)
+      } else if (!nodeById.has(node.parentId)) {
+        errors.push(`Node ${node.id} has a parentId referencing missing node ${node.parentId}`)
+      } else if (!isLoopContainer(node.parentId)) {
+        errors.push(
+          `Node ${node.id} has parentId ${node.parentId}, which is not a loop container ` +
+            "(flow.loop typeVersion 2)"
+        )
+      }
+    }
+    if (
+      (node.type === "flow.break" || node.type === "flow.continue") &&
+      !isLoopContainer(node.parentId)
+    ) {
+      errors.push(`${node.type} node ${node.id} must live inside a loop body`)
+    }
+  }
+  // Edges must not cross a container boundary — both endpoints share the same
+  // parent (top level counts as a parent of `undefined`). Edges to/from the
+  // container node itself are ordinary top-level edges.
+  for (const edge of wf.edges) {
+    const s = nodeById.get(edge.source)
+    const t = nodeById.get(edge.target)
+    if (!s || !t) continue
+    if ((s.parentId ?? null) !== (t.parentId ?? null)) {
+      errors.push(
+        `Edge ${edge.id} crosses a loop container boundary (${edge.source} → ${edge.target})`
+      )
+    }
+  }
+
   // Cycle detection — DFS with three colors. Cycles allowed only if any node
   // on the cycle is a flow.loop / flow.wait (explicit back-edge nodes).
   const adj = new Map<string, string[]>()

@@ -59,6 +59,96 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  describe("loop-body integrity (schemaVersion 2)", () => {
+    function withLoop(extra: Partial<VisualWorkflow> = {}): VisualWorkflow {
+      const wf = baseWorkflow({ schemaVersion: 2 })
+      wf.nodes = [
+        wf.nodes[0], // n1 trigger
+        {
+          id: "loop",
+          type: "flow.loop",
+          typeVersion: 2,
+          position: { x: 100, y: 0 },
+          data: { label: "Loop", params: { mode: "forEach", source: "{{ $trigger.payload.x }}" } },
+        },
+        {
+          id: "child",
+          type: "flow.set",
+          typeVersion: 1,
+          parentId: "loop",
+          position: { x: 10, y: 10 },
+          data: { label: "Body", params: { variable: "v", value: "1" } },
+        },
+      ]
+      wf.edges = [{ id: "e1", source: "n1", target: "loop" }]
+      return { ...wf, ...extra }
+    }
+
+    it("accepts a well-formed loop container with a body child", () => {
+      const r = validateWorkflow(withLoop())
+      expect(r.ok).toBe(true)
+    })
+
+    it("rejects a parentId referencing a missing node", () => {
+      const wf = withLoop()
+      wf.nodes[2] = { ...wf.nodes[2], parentId: "ghost" }
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.errors.join(" ")).toMatch(/parentId/i)
+    })
+
+    it("rejects a parentId pointing at a non-container node", () => {
+      const wf = withLoop()
+      wf.nodes[2] = { ...wf.nodes[2], parentId: "n1" }
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.errors.join(" ")).toMatch(/container/i)
+    })
+
+    it("rejects flow.break / flow.continue outside a loop body", () => {
+      const wf = withLoop()
+      wf.nodes.push({
+        id: "stray",
+        type: "flow.break",
+        typeVersion: 1,
+        position: { x: 300, y: 0 },
+        data: { label: "Break", params: {} },
+      })
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.errors.join(" ")).toMatch(/loop body/i)
+    })
+
+    it("accepts flow.break inside a loop body", () => {
+      const wf = withLoop()
+      wf.nodes.push({
+        id: "brk",
+        type: "flow.break",
+        typeVersion: 1,
+        parentId: "loop",
+        position: { x: 20, y: 20 },
+        data: { label: "Break", params: {} },
+      })
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(true)
+    })
+
+    it("rejects edges that cross the container boundary", () => {
+      const wf = withLoop()
+      wf.edges.push({ id: "e2", source: "n1", target: "child" })
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.errors.join(" ")).toMatch(/container boundary/i)
+    })
+
+    it("rejects a self-parented container", () => {
+      const wf = withLoop()
+      wf.nodes[1] = { ...wf.nodes[1], parentId: "loop" }
+      const r = validateWorkflow(wf)
+      expect(r.ok).toBe(false)
+    })
+  })
+
   it("accepts a plugin-namespaced node kind", () => {
     const wf = baseWorkflow()
     wf.nodes[1] = {

@@ -372,6 +372,81 @@ describe("runWorkflow — branch decisions", () => {
   })
 })
 
+describe("runWorkflow — loop container (flow.loop v2)", () => {
+  it("delegates the container to the loop runtime and never schedules children top-level", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_loop",
+          type: "flow.loop",
+          typeVersion: 2,
+          position: { x: 200, y: 0 },
+          data: {
+            label: "loop",
+            params: {
+              mode: "forEach",
+              source: "{{ $trigger.payload.list }}",
+              output: "{{ $node['n_body'].value }}",
+            },
+          },
+        },
+        {
+          id: "n_body",
+          type: "flow.set",
+          typeVersion: 1,
+          parentId: "n_loop",
+          position: { x: 10, y: 10 },
+          data: { label: "body", params: { variable: "v", value: "{{ $item }}!" } },
+        },
+        {
+          id: "n_after",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: 0 },
+          data: {
+            label: "after",
+            params: { variable: "summary", value: "{{ $node['n_loop'].count }}" },
+          },
+        },
+      ],
+      [
+        { id: "e1", source: "n_start", target: "n_loop" },
+        { id: "e2", source: "n_loop", target: "n_after" },
+      ]
+    )
+
+    const r = await runWorkflow({
+      workflow: wf,
+      trigger: { ...trigger, payload: { list: ["x", "y"] } },
+    })
+    expect(r.status).toBe("succeeded")
+    // Terminal output is n_after's; the loop's count flowed through.
+    expect(r.output).toMatchObject({ variable: "summary", value: 2 })
+
+    const events = await listRunEvents(r.runId)
+    const loopCompleted = events.find((e) => e.type === "step_completed" && e.stepId === "n_loop")
+    expect(loopCompleted).toBeDefined()
+    expect((loopCompleted?.payload as { output: { items: unknown[] } }).output.items).toEqual([
+      "x!",
+      "y!",
+    ])
+    // Child completions carry iteration provenance and never appear as
+    // top-level scheduled steps outside their loop payloads.
+    const bodyEvents = events.filter((e) => e.stepId === "n_body" && e.type === "step_completed")
+    expect(bodyEvents).toHaveLength(2)
+    for (const e of bodyEvents) {
+      expect((e.payload as { loopId?: string }).loopId).toBe("n_loop")
+    }
+  })
+})
+
 describe("runWorkflow — failure handling", () => {
   it("reports a failed run when an executor is missing for a node kind", async () => {
     // Use annotation.note — annotations are intentionally not executable

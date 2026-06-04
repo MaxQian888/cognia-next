@@ -42,6 +42,7 @@ import { createRunLogger } from "./event-log"
 import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
+import { runLoopContainer } from "./loop-container"
 import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
@@ -202,12 +203,18 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const concurrency =
     input.concurrency ?? createConcurrencyController(validated.settings.maxConcurrency ?? 1)
 
+  // Loop-container bodies (schemaVersion 2): nodes with a `parentId` belong
+  // to their container's sub-canvas and are executed by the loop runtime —
+  // they must NEVER be scheduled at the top level.
+  const childNodeIds = new Set(validated.nodes.filter((n) => n.parentId).map((n) => n.id))
+  const topLevelNodeCount = validated.nodes.length - childNodeIds.size
+
   // 4. Topo-sort. If sort throws (cycles snuck past validation), fail loudly.
   let order: string[]
   let backEdgeIds: Set<string>
   try {
     const sortResult = topoSort(validated as VisualWorkflow)
-    order = sortResult.order
+    order = sortResult.order.filter((id) => !childNodeIds.has(id))
     backEdgeIds = new Set(sortResult.backEdges.map((e) => e.id))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -231,11 +238,15 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   let executedStepIndex = -1
   let firstFailure: { stepId: string; err: unknown } | undefined
 
-  // Forward-edge dependency map for cheap ready checks.
+  // Forward-edge dependency map for cheap ready checks (top-level only —
+  // body-internal edges are the loop runtime's concern).
   const stepDeps = new Map<string, Set<string>>()
-  for (const n of validated.nodes) stepDeps.set(n.id, new Set())
+  for (const n of validated.nodes) {
+    if (!childNodeIds.has(n.id)) stepDeps.set(n.id, new Set())
+  }
   for (const edge of validated.edges) {
     if (backEdgeIds.has(edge.id)) continue
+    if (childNodeIds.has(edge.source) || childNodeIds.has(edge.target)) continue
     stepDeps.get(edge.target)?.add(edge.source)
   }
 
@@ -344,20 +355,38 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     return (async () => {
       try {
         getPluginEventHooks().dispatchWorkflowNodeStart(workflow.id, node.id, node.type)
-        const result = await runStep({
-          workflow: validated as VisualWorkflow,
-          node,
-          trigger,
-          upstream: upstreamMap,
-          runId,
-          signal: ac.signal,
-          cache,
-          retryPolicy,
-          secretResolver,
-          logger,
-          honorPinData: input.honorPinData,
-          ...(input.traceId ? { traceId: input.traceId } : {}),
-        })
+        // Loop containers (schemaVersion 2) run their body subgraph through
+        // the loop runtime; everything else goes through the plain step path.
+        const result: { output: unknown; decision?: string | string[]; fromCache: boolean } =
+          node.type === "flow.loop" && node.typeVersion >= 2
+            ? await runLoopContainer({
+                workflow: validated as VisualWorkflow,
+                node,
+                trigger,
+                upstream: upstreamMap,
+                runId,
+                signal: ac.signal,
+                cache,
+                retryPolicy,
+                secretResolver,
+                logger,
+                honorPinData: input.honorPinData,
+                ...(input.traceId ? { traceId: input.traceId } : {}),
+              })
+            : await runStep({
+                workflow: validated as VisualWorkflow,
+                node,
+                trigger,
+                upstream: upstreamMap,
+                runId,
+                signal: ac.signal,
+                cache,
+                retryPolicy,
+                secretResolver,
+                logger,
+                honorPinData: input.honorPinData,
+                ...(input.traceId ? { traceId: input.traceId } : {}),
+              })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)
         runRow = { ...runRow, lastCompletedStepId: stepId }
@@ -444,7 +473,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   }
 
   // Main scheduling loop. Continue while there is more work and no failure.
-  while (completed.size + skipped.size < validated.nodes.length) {
+  while (completed.size + skipped.size < topLevelNodeCount) {
     if (firstFailure) break
     if (ac.signal.aborted && inflight.size === 0) break
 
@@ -577,6 +606,13 @@ function propagateSkip(workflow: VisualWorkflow, startId: string, skipped: Set<s
 function computeTerminalNodes(workflow: VisualWorkflow): string[] {
   const hasOutgoing = new Set(workflow.edges.map((e) => e.source))
   return workflow.nodes
-    .filter((n) => !hasOutgoing.has(n.id) && !n.type.startsWith("trigger."))
+    .filter(
+      (n) =>
+        !hasOutgoing.has(n.id) &&
+        !n.type.startsWith("trigger.") &&
+        // Loop-body children are internal to their container — the container
+        // itself is the visible terminal when nothing follows it.
+        !n.parentId
+    )
     .map((n) => n.id)
 }
