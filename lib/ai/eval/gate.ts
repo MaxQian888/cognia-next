@@ -7,25 +7,9 @@
  */
 
 import type { EvalReport } from "@/types/eval/eval"
+import type { GateThresholds, GateResult } from "@/types/eval/gate"
 
-export interface GateThresholds {
-  /** Minimum acceptable pass^k reliability. */
-  minPassHatK?: number
-  /** Minimum acceptable pass@1. */
-  minPassAt1?: number
-  /**
-   * Per-scorer pass-rate floor: a single number applied to every scorer, or a
-   * map of scorerId → floor (scorers absent from the report are ignored).
-   */
-  minScorerPassRate?: number | Record<string, number>
-  /** Maximum acceptable total cost. */
-  maxTotalCostUsd?: number
-}
-
-export interface GateResult {
-  passed: boolean
-  failures: string[]
-}
+export type { GateThresholds, GateResult } from "@/types/eval/gate"
 
 export function evaluateGate(report: EvalReport, thresholds: GateThresholds): GateResult {
   const failures: string[] = []

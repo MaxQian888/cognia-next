@@ -47,6 +47,13 @@ describe("dataset CRUD", () => {
     expect(updated?.version).toBe(1)
   })
 
+  it("updateDataset persists gate thresholds", async () => {
+    const ds = await createDataset({ name: "g", capability: "chat.tool-use" })
+    const next = await updateDataset(ds.id, { gate: { minPassAt1: 0.8 } })
+    expect(next?.gate).toEqual({ minPassAt1: 0.8 })
+    expect((await getDataset(ds.id))?.gate).toEqual({ minPassAt1: 0.8 })
+  })
+
   it("deletes a dataset and cascades its cases", async () => {
     const ds = await createDataset({ name: "A", capability: "chat.tool-use" })
     await addCase(ds.id, { input: "x", source: "handwritten" })

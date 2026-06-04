@@ -63,7 +63,7 @@ export async function listDatasetsByCapability(capability: string): Promise<Eval
 
 export async function updateDataset(
   id: string,
-  patch: Partial<Pick<EvalDataset, "name" | "description">>
+  patch: Partial<Pick<EvalDataset, "name" | "description" | "gate">>
 ): Promise<EvalDataset | undefined> {
   const existing = await getDataset(id)
   if (!existing) return undefined

@@ -133,6 +133,8 @@ export interface EvalDataset {
   capability: string
   /** Monotonic version, bumped on case add / edit / remove. */
   version: number
+  /** Optional pass/fail thresholds applied to this dataset's runs. */
+  gate?: import("./gate").GateThresholds
   createdAt: number
   updatedAt: number
 }
