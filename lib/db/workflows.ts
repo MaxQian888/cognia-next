@@ -18,6 +18,7 @@ import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
 
 function newWorkflowId(): string {
   return "wf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -28,11 +29,13 @@ function nowMs(): number {
 }
 
 export async function listWorkflows(): Promise<WorkflowRow[]> {
-  return getDb().workflows.orderBy("name").toArray()
+  const rows = await getDb().workflows.orderBy("name").toArray()
+  return rows.map(migrateWorkflow)
 }
 
 export async function listWorkflowsByUpdated(): Promise<WorkflowRow[]> {
-  return getDb().workflows.orderBy("updatedAt").reverse().toArray()
+  const rows = await getDb().workflows.orderBy("updatedAt").reverse().toArray()
+  return rows.map(migrateWorkflow)
 }
 
 export async function listTemplateWorkflows(): Promise<WorkflowRow[]> {
@@ -44,7 +47,8 @@ export async function listTemplateWorkflows(): Promise<WorkflowRow[]> {
 }
 
 export async function getWorkflow(id: string): Promise<WorkflowRow | undefined> {
-  return getDb().workflows.get(id)
+  const row = await getDb().workflows.get(id)
+  return row ? migrateWorkflow(row) : undefined
 }
 
 export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
@@ -68,7 +72,7 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
   const now = nowMs()
   const workflow: VisualWorkflow = {
     id: newWorkflowId(),
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: draft.name.trim() || "Untitled workflow",
     description: draft.description,
     icon: draft.icon,
@@ -111,7 +115,7 @@ export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
   if (!existing) {
     throw new Error(`Workflow ${workflow.id} not found`)
   }
-  await getDb().workflows.put({ ...workflow, updatedAt: nowMs() })
+  await getDb().workflows.put({ ...workflow, schemaVersion: 2, updatedAt: nowMs() })
 }
 
 /** Query options for {@link listWorkflowRuns}. */

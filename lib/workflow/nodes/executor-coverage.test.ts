@@ -48,6 +48,11 @@ const KINDS_WITHOUT_HOST_EXECUTOR: ReadonlySet<WorkflowNodeKind> = new Set<Workf
   "action.github.generateChangelog",
   "action.github.pushTag",
   "action.github.runIssueLoop",
+  // Loop-body jump markers (schemaVersion 2). Their executors land with the
+  // loop-container runtime (subgraph-runner) — remove from this allowlist
+  // when that phase registers them.
+  "flow.break",
+  "flow.continue",
 ])
 
 describe("executor coverage parity", () => {

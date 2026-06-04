@@ -44,6 +44,9 @@ const nodeDataSchema = z.object({
 const nodeSchema = z.object({
   id: z.string().min(1),
   type: workflowNodeKindSchema,
+  /** Container nesting (schemaVersion 2) — must reference a real node id;
+   * referential integrity is enforced in `validateGraphIntegrity`. */
+  parentId: z.string().min(1).optional(),
   typeVersion: z.number().int().min(1),
   position: positionSchema,
   data: nodeDataSchema,
@@ -109,7 +112,7 @@ const viewportSchema = z.object({
  */
 export const visualWorkflowSchema = z.object({
   id: z.string().min(1),
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   name: z.string().min(1, "Workflow name is required").max(120),
   description: z.string().optional(),
   icon: z.string().optional(),

@@ -46,6 +46,19 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it("accepts schemaVersion 2 and nodes carrying a parentId", () => {
+    const wf = baseWorkflow({ schemaVersion: 2 })
+    wf.nodes[1] = { ...wf.nodes[1], parentId: "n1" }
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+  })
+
+  it("rejects an unknown schemaVersion", () => {
+    const wf = baseWorkflow({ schemaVersion: 3 as unknown as VisualWorkflow["schemaVersion"] })
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(false)
+  })
+
   it("accepts a plugin-namespaced node kind", () => {
     const wf = baseWorkflow()
     wf.nodes[1] = {

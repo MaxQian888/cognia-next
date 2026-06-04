@@ -25,7 +25,7 @@ import {
 } from "./workflows"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -53,7 +53,7 @@ describe("createWorkflow", () => {
     const wf = await createWorkflow({ name: "  Daily digest  " })
     expect(wf.id).toMatch(/^wf_/)
     expect(wf.name).toBe("Daily digest")
-    expect(wf.schemaVersion).toBe(1)
+    expect(wf.schemaVersion).toBe(2)
     expect(wf.isBuiltIn).toBe(false)
     expect(wf.isTemplate).toBe(false)
     expect(wf.tags).toEqual([])
@@ -345,5 +345,54 @@ describe("getRecentlyFailedWorkflowIds", () => {
     const ids = await getRecentlyFailedWorkflowIds(500)
     expect(ids.has(a.id)).toBe(true) // failed at 1000 ≥ 500
     expect(ids.has(b.id)).toBe(false) // failed at 100 < 500
+  })
+})
+
+describe("schemaVersion 2 funnel", () => {
+  it("createWorkflow stamps schemaVersion 2", async () => {
+    const wf = await createWorkflow({ name: "fresh" })
+    expect(wf.schemaVersion).toBe(2)
+  })
+
+  it("getWorkflow migrates a stored v1 row to v2 on read", async () => {
+    const legacy: VisualWorkflow = {
+      id: "wf_legacy",
+      schemaVersion: 1,
+      name: "old",
+      createdAt: 1,
+      updatedAt: 1,
+      nodes: [],
+      edges: [],
+      settings: DEFAULT_WORKFLOW_SETTINGS,
+    }
+    await getDb().workflows.put(legacy)
+    const out = await getWorkflow("wf_legacy")
+    expect(out?.schemaVersion).toBe(2)
+  })
+
+  it("listWorkflows and listWorkflowsByUpdated migrate v1 rows on read", async () => {
+    const legacy: VisualWorkflow = {
+      id: "wf_legacy_list",
+      schemaVersion: 1,
+      name: "old-list",
+      createdAt: 1,
+      updatedAt: 1,
+      nodes: [],
+      edges: [],
+      settings: DEFAULT_WORKFLOW_SETTINGS,
+    }
+    await getDb().workflows.put(legacy)
+    const byName = await listWorkflows()
+    const byUpdated = await listWorkflowsByUpdated()
+    expect(byName.find((w) => w.id === "wf_legacy_list")?.schemaVersion).toBe(2)
+    expect(byUpdated.find((w) => w.id === "wf_legacy_list")?.schemaVersion).toBe(2)
+  })
+
+  it("replaceWorkflow writes schemaVersion 2", async () => {
+    const wf = await createWorkflow({ name: "rw" })
+    await replaceWorkflow({ ...wf, schemaVersion: 1, name: "rw2" })
+    const out = await getWorkflow(wf.id)
+    expect(out?.schemaVersion).toBe(2)
+    expect(out?.name).toBe("rw2")
   })
 })
