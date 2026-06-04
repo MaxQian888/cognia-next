@@ -123,8 +123,13 @@ export function resolveSuggestionEdit(
     if (from > input.length) return null
     const insert = replace.insert
     if (!insert) return null
-    const replaced = input.slice(from)
-    if (!insert.toLowerCase().startsWith(replaced.toLowerCase())) return null
+    const replaced = input.slice(from).toLowerCase()
+    // A re-quoted completion legitimately prepends one quote character to
+    // the typed token (`My F` → `"My Folder/`): compare against both the
+    // raw insert and the insert with a single leading quote stripped.
+    const insertLower = insert.toLowerCase()
+    const dequotedLower = insertLower.replace(/^["']/, "")
+    if (!insertLower.startsWith(replaced) && !dequotedLower.startsWith(replaced)) return null
     const result = input.slice(0, from) + insert
     if (result === input) return null
     return { from, insert, result }

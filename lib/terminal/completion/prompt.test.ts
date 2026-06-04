@@ -139,6 +139,15 @@ describe("resolveSuggestionEdit", () => {
     ).toBeNull()
   })
 
+  it("tolerates a re-quoted insert that prepends one quote character", () => {
+    const edit = resolveSuggestionEdit("cd My", {
+      text: 'cd "My Folder\\',
+      replace: { from: 3, insert: '"My Folder\\' },
+    })
+    expect(edit?.result).toBe('cd "My Folder\\')
+    expect(edit?.from).toBe(3)
+  })
+
   it("clamps a negative span start to zero", () => {
     expect(
       resolveSuggestionEdit("ls", { text: "ls -la", replace: { from: -2, insert: "ls -la" } })

@@ -439,6 +439,7 @@ pub fn run() {
             terminal::commands::terminal_resize,
             terminal::commands::terminal_kill,
             terminal::exec::terminal_exec,
+            terminal::complete::terminal_complete_paths,
             terminal::commands::terminal_list_for_project,
             terminal::commands::terminal_list_all,
             tts::keyring::tts_keyring_get,
