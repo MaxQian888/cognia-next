@@ -92,6 +92,8 @@ pub const NATIVE_ACTIONS: &[&str] = &[
     "settings",
     "open-logs",
     "automation-kill",
+    "pet-toggle",
+    "pet-disable-click-through",
     "quit",
 ];
 
@@ -164,7 +166,16 @@ mod tests {
     fn native_actions_table_lists_every_string_referenced_elsewhere() {
         // The builder's whitelist must include every action the
         // bootstrap defaults emit (see `tray::defaults::bootstrap_items`).
-        for action in ["show", "new-chat", "settings", "open-logs", "automation-kill", "quit"] {
+        for action in [
+            "show",
+            "new-chat",
+            "settings",
+            "open-logs",
+            "automation-kill",
+            "pet-toggle",
+            "pet-disable-click-through",
+            "quit",
+        ] {
             assert!(
                 NATIVE_ACTIONS.contains(&action),
                 "{action} is referenced by defaults but missing from NATIVE_ACTIONS"

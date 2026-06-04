@@ -294,6 +294,16 @@ html.reduce-motion *::after {
     overflow: hidden;
   }
 
+  /* Transparent desktop-pet overlay window. PetOverlayView sets
+     `data-pet-overlay` on <html> while mounted so the frameless always-on-top
+     "pet" window paints through to the desktop. `!important` overrides both the
+     `body { @apply bg-background }` base rule and the BOOT_SCRIPT CSS-var
+     background snapshot applied before React hydrates. */
+  html[data-pet-overlay],
+  html[data-pet-overlay] body {
+    background: transparent !important;
+  }
+
   /* Window-blur dim. WindowFocusTracker writes data-window-focused on the
      <html> root; everything tagged [data-app-chrome] (title bar / status bar /
      resize handles) recedes when the user clicks away. */

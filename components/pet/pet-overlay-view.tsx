@@ -1,0 +1,284 @@
+// The transparent desktop-pet overlay window's root view. Rendered by
+// `app/pet-overlay/page.tsx` inside the frameless always-on-top "pet" Tauri
+// window (window role "overlay"). It owns NO controller: the pet profile flows
+// in via Dexie `useLiveQuery` (cross-window reactive), and the ephemeral visual
+// state / one-shots / bubble arrive over the cross-window bridge. User
+// interactions are posted back to the main window, which awards XP exactly once.
+//
+// Responsibilities:
+//  - Make the window paint through to the desktop (`data-pet-overlay` on <html>).
+//  - Render the pet (effective skin) + its speech bubble, centered.
+//  - Drag the OS window with a small movement threshold (rAF-throttled), and
+//    persist the resting position into PetSettings on pointer-up.
+//  - Treat a non-drag click as a "pet" interaction (mirrors the widget delight).
+//
+// The right-click quick menu wraps the stable `data-testid="pet-overlay-root"`
+// container; opening it grows the window for menu space and restores it on close.
+
+"use client"
+
+import { useEffect, useMemo, useRef } from "react"
+import { useReducedMotion } from "motion/react"
+import { useTranslations } from "next-intl"
+import { useSettingsStore } from "@/stores/settings"
+import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
+import { usePet } from "@/hooks/pet/use-pet"
+import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
+import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { usePetStore } from "@/stores/pet/pet-store"
+import { startOverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import {
+  closePetWindow,
+  getPetWindowPosition,
+  resizePetWindow,
+  setPetClickThrough,
+  setPetWindowPosition,
+  showMainWindow,
+} from "@/lib/tauri/pet-window"
+import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
+import { PetRenderer } from "./pet-renderer"
+import { PetBubbleView } from "./pet-bubble"
+import { PetQuickMenu } from "./pet-quick-menu"
+
+const DRAG_THRESHOLD_PX = 4
+
+// Extra vertical room the window grows by while the (upward-opening) quick menu
+// is visible, restored to the resting box on close.
+const MENU_GROW_H = 240
+
+export function PetOverlayView() {
+  const t = useTranslations("pet.overlay")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const pet: PetSettings = settings?.petSettings ?? DEFAULT_PET_SETTINGS
+  const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+  const size = desktopPet.size ?? DEFAULT_PET_DESKTOP_OVERLAY.size
+
+  // Unified skin resolution — identical to the in-app widget: live2d renders
+  // only when picked, the Cubism runtime is ready, and an active model exists;
+  // otherwise the SVG mascot.
+  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const skinId = resolveEffectiveSkin(pet.skinId, {
+    coreReady,
+    hasActiveModel: Boolean(modelId),
+  })
+
+  const osReduced = useReducedMotion()
+  const reduced = pet.motion === "reduced" || (pet.motion === "auto" && Boolean(osReduced))
+
+  const { profile, view } = usePet(undefined)
+  const { state, oneShot } = usePetAnimationState(reduced)
+  const bubble = usePetStore((s) => s.bubble)
+
+  // Paint through to the desktop while this window is mounted.
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.petOverlay = "1"
+    return () => {
+      delete root.dataset.petOverlay
+    }
+  }, [])
+
+  // Single cross-window bridge: subscribes the per-window store to inbound
+  // messages (requesting the current snapshot on connect) and exposes
+  // `sendInteraction` to the click handler + quick menu via a stable ref so the
+  // pointer callbacks don't re-bind every render.
+  const sendInteractionRef = useRef<(kind: "fed" | "played" | "petted" | "talked") => void>(
+    () => {}
+  )
+  useEffect(() => {
+    const bridge = startOverlayPetBridge()
+    sendInteractionRef.current = (kind) => bridge.sendInteraction(kind)
+    return () => {
+      sendInteractionRef.current = () => {}
+      bridge.dispose()
+    }
+  }, [])
+
+  // Persist the click-through flag alongside the live OS-window toggle. `save`
+  // is a shallow top-level merge, so the whole `petSettings` is passed.
+  const handleClickThrough = () => {
+    void setPetClickThrough(true)
+    void save({
+      petSettings: { ...pet, desktopPet: { ...desktopPet, clickThrough: true } },
+    })
+  }
+
+  // Grow the window upward while the menu is open so it isn't clipped by the
+  // small resting box, and restore the resting size on close.
+  const handleMenuOpenChange = (open: boolean) => {
+    if (open) {
+      void resizePetWindow(size, size + MENU_GROW_H)
+    } else {
+      void resizePetWindow(size, size)
+    }
+  }
+
+  // Drag the OS window. We capture the pointer's screen origin + the window's
+  // origin on pointerdown, then drive `setPetWindowPosition` (rAF-throttled)
+  // once movement crosses the threshold. A sequence that never crosses the
+  // threshold is a click → "pet" interaction.
+  const dragRef = useRef<{
+    pointerId: number
+    startScreenX: number
+    startScreenY: number
+    /** Window origin captured async on pointerdown; null until it lands. */
+    winX: number | null
+    winY: number | null
+    dragging: boolean
+    rafId: number | null
+    pending: { x: number; y: number } | null
+  } | null>(null)
+
+  useEffect(() => {
+    // Cancel any in-flight rAF on unmount.
+    return () => {
+      const d = dragRef.current
+      if (d?.rafId != null) cancelAnimationFrame(d.rafId)
+      dragRef.current = null
+    }
+  }, [])
+
+  const flushMove = () => {
+    const d = dragRef.current
+    if (!d) return
+    d.rafId = null
+    if (!d.pending) return
+    const { x, y } = d.pending
+    d.pending = null
+    void setPetWindowPosition(x, y)
+  }
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return // left button only; right-click stays free for the menu
+    // Capture the screen origin synchronously so click-vs-drag disambiguation
+    // never races the async window-position fetch; fill the window origin when
+    // it lands (window moves only apply once it's known).
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startScreenX: e.screenX,
+      startScreenY: e.screenY,
+      winX: null,
+      winY: null,
+      dragging: false,
+      rafId: null,
+      pending: null,
+    }
+    const id = e.pointerId
+    void (async () => {
+      const winPos = await getPetWindowPosition()
+      const base = winPos ?? { x: 0, y: 0 }
+      const d = dragRef.current
+      if (d && d.pointerId === id) {
+        d.winX = base.x
+        d.winY = base.y
+      }
+    })()
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    const dx = e.screenX - d.startScreenX
+    const dy = e.screenY - d.startScreenY
+    if (!d.dragging && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) {
+      return
+    }
+    d.dragging = true
+    if (d.winX == null || d.winY == null) return // window origin not known yet
+    d.pending = { x: d.winX + dx, y: d.winY + dy }
+    if (d.rafId == null) d.rafId = requestAnimationFrame(flushMove)
+  }
+
+  // Persist the resting position back into PetSettings. `save` is a shallow
+  // top-level merge, so the whole `petSettings` (with the nested desktopPet)
+  // must be passed.
+  const persistOverlayPosition = async (x: number, y: number) => {
+    await save({
+      petSettings: {
+        ...pet,
+        desktopPet: { ...desktopPet, position: { x, y } },
+      },
+    })
+  }
+
+  const endPointer = (e: React.PointerEvent, sendInteraction: () => void) => {
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
+    if (d.rafId != null) {
+      cancelAnimationFrame(d.rafId)
+      d.rafId = null
+    }
+    const dx = e.screenX - d.startScreenX
+    const dy = e.screenY - d.startScreenY
+    const wasDrag = d.dragging
+    const winX = d.winX
+    const winY = d.winY
+    dragRef.current = null
+    if (wasDrag && winX != null && winY != null) {
+      void persistOverlayPosition(winX + dx, winY + dy)
+    } else if (!wasDrag) {
+      sendInteraction()
+    }
+  }
+
+  const onPointerUp = (e: React.PointerEvent) =>
+    endPointer(e, () => sendInteractionRef.current("petted"))
+  const onPointerCancel = (e: React.PointerEvent) => {
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    if (d.rafId != null) cancelAnimationFrame(d.rafId)
+    dragRef.current = null
+  }
+
+  const containerStyle = useMemo(() => ({ width: size, height: size }), [size])
+
+  return (
+    <PetQuickMenu
+      context="overlay"
+      onOpenChange={handleMenuOpenChange}
+      actions={{
+        onFeed: () => sendInteractionRef.current("fed"),
+        onPlay: () => sendInteractionRef.current("played"),
+        onPet: () => sendInteractionRef.current("petted"),
+        onTalk: () => sendInteractionRef.current("talked"),
+        onClickThrough: handleClickThrough,
+        onHideDesktopPet: () => void closePetWindow(),
+        onShowMainWindow: () => void showMainWindow(),
+      }}
+    >
+      <div
+        data-testid="pet-overlay-root"
+        data-pet-overlay-root
+        className="flex h-screen w-screen select-none flex-col items-center justify-center overflow-hidden bg-transparent"
+      >
+        {bubble && <PetBubbleView bubble={bubble} className="mb-2" />}
+        {profile && view ? (
+          <div
+            data-testid="pet-overlay-pet"
+            role="img"
+            aria-label={t("petLabel")}
+            className="cursor-grab touch-none active:cursor-grabbing"
+            style={containerStyle}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
+          >
+            <PetRenderer
+              bones={view.effectiveBones}
+              stage={profile.stage}
+              state={state}
+              oneShot={oneShot}
+              reducedMotion={reduced}
+              size={size}
+              skinId={skinId}
+            />
+          </div>
+        ) : null}
+      </div>
+    </PetQuickMenu>
+  )
+}

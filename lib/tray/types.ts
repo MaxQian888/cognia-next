@@ -14,6 +14,8 @@ export type TrayNativeAction =
   | "settings"
   | "open-logs"
   | "automation-kill"
+  | "pet-toggle"
+  | "pet-disable-click-through"
   | "quit"
 
 /**

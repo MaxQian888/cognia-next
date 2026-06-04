@@ -67,7 +67,7 @@ serde = { version = "1.0", features = ["derive"] }
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
 cognia-signaling-core = { path = "../signaling-server/core" }
 log = "0.4"
-tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.11.1", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 
 # Native logging — fern dispatch chain mirrors records into the OS-native

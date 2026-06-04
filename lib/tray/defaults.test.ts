@@ -5,6 +5,8 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     const ids = DEFAULT_TRAY_ITEMS.map((it) => ("id" in it ? it.id : `(sep)`))
     expect(ids).toEqual([
       "tray.show",
+      "tray.pet-toggle",
+      "tray.pet-disable-click-through",
       "tray.new-chat",
       "tray.quick-goal",
       "tray.sep-1",
@@ -26,6 +28,8 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "settings",
       "open-logs",
       "automation-kill",
+      "pet-toggle",
+      "pet-disable-click-through",
       "quit",
     ])
     for (const item of DEFAULT_TRAY_ITEMS) {
@@ -44,6 +48,25 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     if (allCmd && allCmd.kind === "submenu") {
       expect(allCmd.items).toEqual([])
     }
+  })
+
+  it("includes the desktop-pet toggle and click-through recovery entries", () => {
+    const toggle = DEFAULT_TRAY_ITEMS.find(
+      (it) => it.kind === "action" && it.id === "tray.pet-toggle"
+    )
+    const recover = DEFAULT_TRAY_ITEMS.find(
+      (it) => it.kind === "action" && it.id === "tray.pet-disable-click-through"
+    )
+    expect(toggle).toMatchObject({
+      label: "tray.petToggle",
+      payload: { kind: "native", action: "pet-toggle" },
+    })
+    expect(recover).toMatchObject({
+      label: "tray.petClickThroughOff",
+      payload: { kind: "native", action: "pet-disable-click-through" },
+    })
+    // The recovery item is unconditional (no `when` gate) so it's always reachable.
+    expect((recover as { when?: string }).when).toBeUndefined()
   })
 
   it("attaches the documented accelerators to the built-in shortcut ids", () => {

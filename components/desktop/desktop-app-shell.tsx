@@ -41,7 +41,7 @@ import { useUIStore } from "@/stores/ui/ui-store"
 
 const log = loggers.shell
 
-const BYPASS_PREFIXES = ["/share-target", "/pair", "/oauth", "/canvas/join"]
+const BYPASS_PREFIXES = ["/share-target", "/pair", "/oauth", "/canvas/join", "/pet-overlay"]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {
   if (!pathname) return false

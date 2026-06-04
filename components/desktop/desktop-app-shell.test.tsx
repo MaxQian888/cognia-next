@@ -228,11 +228,15 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/pair")).toBe(true)
     expect(isShellBypassRoute("/oauth")).toBe(true)
     expect(isShellBypassRoute("/canvas/join")).toBe(true)
+    // The transparent desktop-pet overlay route must render full-bleed with no
+    // desktop chrome so the frameless window stays transparent.
+    expect(isShellBypassRoute("/pet-overlay")).toBe(true)
   })
 
   test("matches nested bypass route", () => {
     expect(isShellBypassRoute("/share-target/abc")).toBe(true)
     expect(isShellBypassRoute("/canvas/join/room-123")).toBe(true)
+    expect(isShellBypassRoute("/pet-overlay/foo")).toBe(true)
   })
 
   test("does not match unrelated routes", () => {

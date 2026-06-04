@@ -20,6 +20,23 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
   },
   {
     kind: "action",
+    id: "tray.pet-toggle",
+    label: "tray.petToggle",
+    iconHint: "pet",
+    payload: { kind: "native", action: "pet-toggle" },
+  },
+  {
+    // Unconditional click-through recovery: while the overlay ignores the
+    // cursor it can't surface its own menu, so this lives in the tray. The
+    // underlying command is idempotent when click-through is already off.
+    kind: "action",
+    id: "tray.pet-disable-click-through",
+    label: "tray.petClickThroughOff",
+    iconHint: "pet",
+    payload: { kind: "native", action: "pet-disable-click-through" },
+  },
+  {
+    kind: "action",
     id: "tray.new-chat",
     label: "tray.newChat",
     iconHint: "chat",

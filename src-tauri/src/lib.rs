@@ -23,6 +23,7 @@ mod mcp_server;
 mod ocr;
 mod parse;
 mod perf;
+mod pet_window;
 mod plugin_api;
 mod plugins;
 mod proxy_config;
@@ -154,7 +155,13 @@ pub fn run() {
     #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
     {
         builder = builder
-            .plugin(tauri_plugin_window_state::Builder::default().build())
+            .plugin(
+                // The pet overlay owns its own position via PetSettings, so
+                // exclude it from the window-state plugin's save/restore.
+                tauri_plugin_window_state::Builder::default()
+                    .with_denylist(&["pet"])
+                    .build(),
+            )
             .plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, shortcut, event| {
@@ -368,6 +375,15 @@ pub fn run() {
             window_behavior::set_close_behavior,
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,
+            pet_window::open_pet_window,
+            pet_window::close_pet_window,
+            pet_window::destroy_pet_window,
+            pet_window::pet_window_set_ignore_cursor_events,
+            pet_window::pet_window_set_position,
+            pet_window::pet_window_get_position,
+            pet_window::pet_window_resize,
+            pet_window::is_pet_window_open,
+            pet_window::show_main_window,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,
@@ -576,6 +592,7 @@ pub fn run() {
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,
+            proxy_config::commands::proxy_identify_clash,
             proxy_config::commands::proxy_test,
             proxy_config::commands::proxy_http_request,
             connectors::commands::connectors_register_adapter,
@@ -610,6 +627,7 @@ pub fn run() {
             workflow::commands::workflow_reload_in_flight_runs,
             workflow::commands::workflow_ack_completed,
             workflow::commands::workflow_get_webhook_url,
+            plugin_api::scan::plugin_scan_directory,
             plugin_api::lifecycle::plugin_load,
             plugin_api::lifecycle::plugin_enable,
             plugin_api::lifecycle::plugin_disable,

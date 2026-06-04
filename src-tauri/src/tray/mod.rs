@@ -238,6 +238,27 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             state.gate.engage_kill_switch();
             let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
         }
+        "pet-toggle" => {
+            // Toggle the desktop pet: hide if visible, otherwise open with
+            // defaults. The tray has no PetWindowOpts from the renderer, so
+            // the open path uses the persisted-size-agnostic defaults.
+            let handle = app.app_handle();
+            if crate::pet_window::is_pet_window_open_inner(handle) {
+                let _ = crate::pet_window::close_pet_window_inner(handle);
+            } else {
+                let _ = crate::pet_window::open_pet_window_inner(
+                    handle,
+                    crate::pet_window::PetWindowOpts::default(),
+                );
+            }
+        }
+        "pet-disable-click-through" => {
+            // Click-through recovery path — re-enable cursor events so a
+            // pointer-trapped overlay becomes interactive again.
+            if let Some(window) = app.get_webview_window("pet") {
+                let _ = window.set_ignore_cursor_events(false);
+            }
+        }
         "quit" => {
             // Handled by PredefinedMenuItem::quit — should never reach here
             // because the builder routes quit-natives away from the index.
