@@ -5048,7 +5048,35 @@
         "debounce": {
           "label": "Debounce (ms)"
         },
+        "path": {
+          "label": "File paths"
+        },
+        "exe": {
+          "label": "Command names"
+        },
+        "spec": {
+          "label": "CLI flags"
+        },
+        "popup": {
+          "label": "Candidate popup",
+          "helper": "Ctrl+Space or a second Tab opens a keyboard-navigable list of candidates at the cursor."
+        },
+        "persistHistory": {
+          "label": "Persist command history",
+          "helper": "Store executed commands locally so suggestions survive restarts. Lines that look like secrets are never stored."
+        },
         "privacy": "When AI is enabled, the current command, working directory, and recent history are sent to your configured model to generate a suggestion. Context that looks like a secret (API keys, tokens, credentials) is detected and skipped. Plugin-contributed providers are unaffected by this setting."
+      },
+      "unattended": {
+        "label": "Allow unattended execution",
+        "helper": "Let workflow terminal steps run shell commands headlessly — no visible terminal tab, no consent prompt. Every command is screened by the safety classifier first; clearly dangerous commands are always blocked.",
+        "askPolicy": {
+          "label": "When a command needs confirmation",
+          "helper": "Applies to commands the safety classifier is unsure about (verdict \"ask\").",
+          "fail": "Fail the step",
+          "consent": "Ask in the terminal dock",
+          "run": "Run anyway"
+        }
       },
       "projectOverride": {
         "title": "Per-project override",

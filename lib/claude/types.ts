@@ -1198,7 +1198,52 @@ export interface AppSettings {
       source?: "history" | "ai" | "both"
       /** Debounce before querying, ms. Default 350. Clamped [50, 2000]. */
       debounceMs?: number
+      /**
+       * File/directory path completion for the token under the cursor,
+       * resolved against the session cwd (OSC 633 P). Desktop only — the
+       * provider degrades to nothing in web mode. Default true.
+       */
+      path?: boolean
+      /**
+       * PATH-executable + shell-builtin completion for the head word.
+       * The PATH scan is desktop only; static builtins work everywhere.
+       * Default true.
+       */
+      exe?: boolean
+      /**
+       * Declarative subcommand/flag completion for common CLIs (git, npm,
+       * cargo, docker, …) from the in-repo spec set. Default true.
+       */
+      spec?: boolean
+      /**
+       * Persist executed commands to Dexie (cross-session history-based
+       * suggestions). Lines that fail the PII gate are never persisted.
+       * Default true; the in-memory ring keeps working when off.
+       */
+      persistHistory?: boolean
+      /**
+       * The multi-candidate popup (Ctrl+Space / second Tab). Off → ghost
+       * text only. Default true.
+       */
+      popup?: boolean
     }
+    /**
+     * Master switch for *unattended* terminal execution: workflow terminal
+     * nodes (and, later, agent tools) running shell commands headlessly —
+     * no visible dock tab, no per-command consent prompt. The
+     * `classifyCommand` safety verdict replaces the human gate: `allow`
+     * runs, `deny` is always blocked, `ask` follows
+     * `unattendedAskPolicy`. Off by default — fail closed.
+     */
+    allowUnattendedExecution?: boolean
+    /**
+     * What an unattended execution does when the safety classifier returns
+     * an `ask` verdict:
+     *  - `"fail"` (default) — the step fails with the classifier's reason.
+     *  - `"consent"` — fall back to the visible-dock consent path.
+     *  - `"run"` — run anyway (explicit trust-my-workflow opt-in).
+     */
+    unattendedAskPolicy?: "fail" | "consent" | "run"
   }
   /** BCP-47 language tag for the composer's voice-input controls. */
   sttLanguage?: string

@@ -206,5 +206,80 @@ describe("TerminalCard", () => {
         }),
       })
     })
+
+    it.each(["path", "exe", "spec"] as const)(
+      "toggles the %s provider off (defaults on)",
+      async (key) => {
+        settingsState = { terminal: { autocomplete: { enabled: true } } }
+        render(<TerminalCard />)
+        const toggle = screen.getByTestId(`terminal-card-autocomplete-${key}`)
+        await act(async () => {
+          fireEvent.click(toggle)
+        })
+        expect(settingsSave).toHaveBeenLastCalledWith({
+          terminal: expect.objectContaining({
+            autocomplete: expect.objectContaining({ [key]: false }),
+          }),
+        })
+      }
+    )
+
+    it("toggles the candidate popup off (defaults on)", async () => {
+      settingsState = { terminal: { autocomplete: { enabled: true } } }
+      render(<TerminalCard />)
+      const toggle = screen.getByTestId("terminal-card-autocomplete-popup")
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(settingsSave).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({
+          autocomplete: expect.objectContaining({ popup: false }),
+        }),
+      })
+    })
+
+    it("toggles history persistence off (defaults on)", async () => {
+      settingsState = { terminal: { autocomplete: { enabled: true } } }
+      render(<TerminalCard />)
+      const toggle = screen.getByTestId("terminal-card-autocomplete-persist-history")
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(settingsSave).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({
+          autocomplete: expect.objectContaining({ persistHistory: false }),
+        }),
+      })
+    })
+
+    it("hides the provider toggles until autocomplete is enabled", () => {
+      render(<TerminalCard />)
+      expect(screen.queryByTestId("terminal-card-autocomplete-path")).toBeNull()
+      expect(screen.queryByTestId("terminal-card-autocomplete-popup")).toBeNull()
+    })
+  })
+
+  describe("unattended execution", () => {
+    it("enables the master switch (default off)", async () => {
+      render(<TerminalCard />)
+      const toggle = screen.getByTestId("terminal-card-unattended")
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(settingsSave).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({ allowUnattendedExecution: true }),
+      })
+    })
+
+    it("hides the ask-policy select until enabled", () => {
+      render(<TerminalCard />)
+      expect(screen.queryByTestId("terminal-card-unattended-policy")).toBeNull()
+    })
+
+    it("shows the ask-policy select when enabled", () => {
+      settingsState = { terminal: { allowUnattendedExecution: true } }
+      render(<TerminalCard />)
+      expect(screen.getByTestId("terminal-card-unattended-policy")).toBeInTheDocument()
+    })
   })
 })

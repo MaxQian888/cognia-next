@@ -53,8 +53,21 @@ const DEFAULT_VALUES: TerminalSettings = {
   forceUtf8: true,
   colorScheme: AUTO_SCHEME_ID,
   renderer: "auto",
-  autocomplete: { enabled: false, source: "both", debounceMs: 350 },
+  autocomplete: {
+    enabled: false,
+    source: "both",
+    debounceMs: 350,
+    path: true,
+    exe: true,
+    spec: true,
+    persistHistory: true,
+    popup: true,
+  },
+  allowUnattendedExecution: false,
+  unattendedAskPolicy: "fail",
 }
+
+const ASK_POLICIES: ReadonlyArray<"fail" | "consent" | "run"> = ["fail", "consent", "run"]
 
 const AUTOCOMPLETE_SOURCES: ReadonlyArray<"both" | "ai" | "history"> = ["both", "ai", "history"]
 
@@ -475,10 +488,107 @@ export function TerminalCard() {
                 />
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-3">
+              {(["path", "exe", "spec"] as const).map((key) => (
+                <div key={key} className="flex items-center justify-between rounded border p-2">
+                  <Label className="text-xs">
+                    {t(`settings.terminal.autocomplete.${key}.label` as never)}
+                  </Label>
+                  <Switch
+                    checked={autocomplete[key] ?? true}
+                    onCheckedChange={(checked) =>
+                      update({ autocomplete: { ...autocomplete, [key]: checked } })
+                    }
+                    aria-label={t(`settings.terminal.autocomplete.${key}.label` as never)}
+                    data-testid={`terminal-card-autocomplete-${key}`}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between rounded border p-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs">{t("settings.terminal.autocomplete.popup.label")}</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.autocomplete.popup.helper")}
+                </p>
+              </div>
+              <Switch
+                checked={autocomplete.popup ?? true}
+                onCheckedChange={(checked) =>
+                  update({ autocomplete: { ...autocomplete, popup: checked } })
+                }
+                aria-label={t("settings.terminal.autocomplete.popup.label")}
+                data-testid="terminal-card-autocomplete-popup"
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded border p-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs">
+                  {t("settings.terminal.autocomplete.persistHistory.label")}
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("settings.terminal.autocomplete.persistHistory.helper")}
+                </p>
+              </div>
+              <Switch
+                checked={autocomplete.persistHistory ?? true}
+                onCheckedChange={(checked) =>
+                  update({ autocomplete: { ...autocomplete, persistHistory: checked } })
+                }
+                aria-label={t("settings.terminal.autocomplete.persistHistory.label")}
+                data-testid="terminal-card-autocomplete-persist-history"
+              />
+            </div>
+
             <p className="text-[11px] text-muted-foreground">
               {t("settings.terminal.autocomplete.privacy")}
             </p>
           </>
+        ) : null}
+      </div>
+
+      <div className="space-y-3 rounded border p-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("settings.terminal.unattended.label")}</Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.unattended.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={terminal.allowUnattendedExecution ?? false}
+            onCheckedChange={(checked) => update({ allowUnattendedExecution: checked })}
+            aria-label={t("settings.terminal.unattended.label")}
+            data-testid="terminal-card-unattended"
+          />
+        </div>
+
+        {terminal.allowUnattendedExecution ? (
+          <div className="space-y-2">
+            <Label className="text-xs">{t("settings.terminal.unattended.askPolicy.label")}</Label>
+            <Select
+              value={terminal.unattendedAskPolicy ?? "fail"}
+              onValueChange={(value) =>
+                update({ unattendedAskPolicy: value as "fail" | "consent" | "run" })
+              }
+            >
+              <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-unattended-policy">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ASK_POLICIES.map((p) => (
+                  <SelectItem key={p} value={p} className="text-xs">
+                    {t(`settings.terminal.unattended.askPolicy.${p}` as never)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.unattended.askPolicy.helper")}
+            </p>
+          </div>
         ) : null}
       </div>
 
