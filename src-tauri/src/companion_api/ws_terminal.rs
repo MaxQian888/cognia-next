@@ -512,6 +512,7 @@ fn build_spawn_request(params: &WsTerminalParams) -> Result<SpawnRequest, String
         // server codepage would still corrupt output.
         force_utf8: true,
         origin: SessionOrigin::Remote,
+        skip_user_profile: false,
     })
 }
 

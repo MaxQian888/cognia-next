@@ -114,6 +114,22 @@ pub fn build(
     enable_integration: bool,
     force_utf8: bool,
 ) -> io::Result<IntegrationSetup> {
+    build_with_profile(kind, script_dir, nonce, enable_integration, force_utf8, false)
+}
+
+/// `build` with the headless knob: `skip_user_profile` suppresses the
+/// `$PROFILE` dot-source in the PowerShell integration command so an
+/// unattended shell starts clean (prompt frameworks / custom PSReadLine
+/// handlers break scripted input). POSIX shells handle profile skipping
+/// via argv (`--noprofile`) on the spawner side instead.
+pub fn build_with_profile(
+    kind: ShellKind,
+    script_dir: &Path,
+    nonce: &str,
+    enable_integration: bool,
+    force_utf8: bool,
+    skip_user_profile: bool,
+) -> io::Result<IntegrationSetup> {
     match kind {
         // POSIX shells: integration is the only reason to touch argv; when
         // disabled they spawn untouched (no codepage concept to fix).
@@ -126,9 +142,13 @@ pub fn build(
         }
         // PowerShell composes a single `-Command` that pins UTF-8 first
         // (when requested), then optionally sources the integration script.
-        ShellKind::Pwsh | ShellKind::PowerShell => {
-            build_pwsh(script_dir, nonce, enable_integration, force_utf8)
-        }
+        ShellKind::Pwsh | ShellKind::PowerShell => build_pwsh(
+            script_dir,
+            nonce,
+            enable_integration,
+            force_utf8,
+            skip_user_profile,
+        ),
         // cmd.exe has no rc hook — the only thing we can do is fix the
         // codepage via `/K chcp 65001`.
         ShellKind::Cmd => Ok(build_cmd(force_utf8)),
@@ -209,6 +229,7 @@ fn build_pwsh(
     nonce: &str,
     enable_integration: bool,
     force_utf8: bool,
+    skip_user_profile: bool,
 ) -> io::Result<IntegrationSetup> {
     let script = script_dir.join("shell-integration.ps1");
     let want_integration = enable_integration && script.exists();
@@ -231,11 +252,21 @@ fn build_pwsh(
         // Dot-source $PROFILE first (try/catch so a missing/erroring profile
         // doesn't abort), then our integration script. Single quotes in the
         // path are doubled per PowerShell single-quote escaping rules.
+        // Headless spawns skip the profile entirely — `-NoProfile` on the
+        // argv can't suppress this explicit dot-source, so the knob must
+        // reach down here.
         let script_str = script.to_string_lossy();
-        command.push_str(&format!(
-            "try {{ if (Test-Path $PROFILE) {{ . $PROFILE }} }} catch {{}} ; . '{script}'",
-            script = script_str.replace('\'', "''")
-        ));
+        if skip_user_profile {
+            command.push_str(&format!(
+                ". '{script}'",
+                script = script_str.replace('\'', "''")
+            ));
+        } else {
+            command.push_str(&format!(
+                "try {{ if (Test-Path $PROFILE) {{ . $PROFILE }} }} catch {{}} ; . '{script}'",
+                script = script_str.replace('\'', "''")
+            ));
+        }
         env.insert("COGNIA_TERM_NONCE".to_string(), nonce.to_string());
     }
 
@@ -597,6 +628,27 @@ mod tests {
         let cmd = &setup.extra_args[cmd_idx + 1];
         // Embedded single quotes are doubled per PowerShell single-quote escape rules.
         assert!(cmd.contains("''"));
+        let _ = fs::remove_file(script);
+        let _ = fs::remove_dir_all(&tempdir);
+    }
+
+    #[test]
+    fn build_pwsh_headless_skips_the_user_profile() {
+        let tempdir = std::env::temp_dir().join("cognia-test-pwsh-headless");
+        let _ = fs::create_dir_all(&tempdir);
+        let script = tempdir.join("shell-integration.ps1");
+        fs::write(&script, "# stub").unwrap();
+        let setup =
+            build_with_profile(ShellKind::Pwsh, &tempdir, "hl-nonce", true, true, true).unwrap();
+        let cmd_idx = setup
+            .extra_args
+            .iter()
+            .position(|a| a == "-Command")
+            .unwrap();
+        let cmd = &setup.extra_args[cmd_idx + 1];
+        // The integration script still loads, the user's $PROFILE does not.
+        assert!(cmd.contains("shell-integration.ps1"));
+        assert!(!cmd.contains("$PROFILE"));
         let _ = fs::remove_file(script);
         let _ = fs::remove_dir_all(&tempdir);
     }

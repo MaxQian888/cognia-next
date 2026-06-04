@@ -22,6 +22,7 @@
 pub mod commands;
 pub mod complete;
 pub mod exec;
+pub mod headless;
 pub mod integration;
 pub mod osc633;
 pub mod path_scan;

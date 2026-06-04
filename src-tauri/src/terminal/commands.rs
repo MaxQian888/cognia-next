@@ -26,7 +26,7 @@ use super::TerminalState;
 /// Locate the bundled shell-integration script directory. In dev
 /// (`pnpm tauri dev`) this resolves to the workspace path; in production
 /// it's the Tauri resource dir.
-fn resolve_script_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+pub(super) fn resolve_script_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     let resource_root = app
         .path()
         .resource_dir()
@@ -76,7 +76,7 @@ fn resolve_cli_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 ///     install wins), then a dev/bundled `cli` dir if present;
 ///   * append  — `~/.cargo/bin` as a low-priority fallback for a
 ///     `cargo install`ed copy.
-fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection {
+pub(super) fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection {
     let mut prepend = crate::cli_bridge::detect::managed_dirs_snapshot();
     if let Some(dir) = resolve_cli_dir(app) {
         prepend.push(dir);

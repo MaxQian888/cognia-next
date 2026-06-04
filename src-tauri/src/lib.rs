@@ -293,6 +293,10 @@ pub fn run() {
         // The store outlives the window; dropping it on app shutdown
         // cascades into per-session Drop kills.
         .manage(terminal::TerminalState::new())
+        // Headless (unattended) terminal sessions — workflow nodes running
+        // shell lines with no visible dock tab. Independent of TerminalState
+        // so dock listing / audit views never see them.
+        .manage(terminal::headless::HeadlessTerminalState::new())
         // Source Control panel (ADR-0038) — the watcher map per active repo.
         // Stateless commands aside, this is the subsystem's only managed state.
         .manage(git::GitWatcherState::new())
@@ -448,6 +452,10 @@ pub fn run() {
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
+            terminal::headless::terminal_headless_exec,
+            terminal::headless::terminal_headless_spawn,
+            terminal::headless::terminal_headless_run,
+            terminal::headless::terminal_headless_kill,
             terminal::commands::terminal_list_for_project,
             terminal::commands::terminal_list_all,
             tts::keyring::tts_keyring_get,

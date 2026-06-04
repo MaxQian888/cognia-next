@@ -88,6 +88,14 @@ pub struct SpawnRequest {
     pub force_utf8: bool,
     #[serde(default)]
     pub origin: SessionOrigin,
+    /// Headless (unattended) spawns set this so the shell starts WITHOUT
+    /// the user's interactive profile — prompt frameworks and custom
+    /// PSReadLine key handlers routinely break scripted input. Today this
+    /// gates the `$PROFILE` dot-source in the PowerShell integration
+    /// command; POSIX shells additionally receive `--noprofile`-style argv
+    /// from the headless spawner. Default false (dock behavior unchanged).
+    #[serde(default)]
+    pub skip_user_profile: bool,
 }
 
 fn default_true() -> bool {
@@ -375,12 +383,13 @@ pub fn spawn_session_with_sink(
     let shell_kind = ShellKind::from_shell_path(&req.shell);
     // The UTF-8 prelude is applied independently of the integration toggle;
     // `build` gates the OSC 633 hooks on `enable_shell_integration` itself.
-    let setup = integration::build(
+    let setup = integration::build_with_profile(
         shell_kind,
         script_dir,
         &nonce,
         req.enable_shell_integration,
         req.force_utf8,
+        req.skip_user_profile,
     )
     .map_err(|e| format!("integration setup failed: {e}"))?;
 
@@ -777,6 +786,7 @@ mod tests {
             enable_shell_integration: false,
             force_utf8: false,
             origin: SessionOrigin::Local,
+            skip_user_profile: false,
         };
         let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
         assert!(result.is_err());
@@ -810,6 +820,7 @@ mod tests {
             enable_shell_integration: false,
             force_utf8: false,
             origin: SessionOrigin::Local,
+            skip_user_profile: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -869,6 +880,7 @@ mod tests {
             enable_shell_integration: false,
             force_utf8: false,
             origin: SessionOrigin::Local,
+            skip_user_profile: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -904,6 +916,7 @@ mod tests {
             enable_shell_integration: false,
             force_utf8: false,
             origin: SessionOrigin::Remote,
+            skip_user_profile: false,
         };
         let session = match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
             Ok(s) => s,
@@ -936,6 +949,7 @@ mod tests {
             enable_shell_integration: false,
             force_utf8: false,
             origin: SessionOrigin::Local,
+            skip_user_profile: false,
         };
         spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()
     }
