@@ -68,7 +68,8 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
       additionalProperties: false,
     },
     defaultParams: {
-      candidates: "{{ $node['rank'].out.completion }}",
+      // No `.out` wrapper — `upstream[id]` is the raw executor output.
+      candidates: "{{ $node['rank'].completion }}",
       source: "zhihu-hot",
     },
     execute,

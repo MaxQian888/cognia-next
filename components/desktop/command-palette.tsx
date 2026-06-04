@@ -18,6 +18,7 @@ import {
   MessageSquareIcon,
   MoonIcon,
   PlusIcon,
+  PuzzleIcon,
   RefreshCwIcon,
   ServerIcon,
   SettingsIcon,
@@ -48,6 +49,11 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { toast } from "sonner"
 import { AvatarBadge } from "./avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
+import {
+  runQuickAction,
+  type QuickActionEntry,
+} from "@/lib/plugin/registries/quick-action-registry"
 
 const log = loggers.ui
 
@@ -68,6 +74,7 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
   const { theme, setTheme } = useTheme()
+  const pluginQuickActions = usePluginQuickActions("palette")
 
   // Global Cmd/Ctrl+K trigger.
   useEffect(() => {
@@ -102,6 +109,14 @@ export function CommandPalette({ onOpenSettings }: Props) {
     log.info("command-palette select session", { sessionId: id })
     close()
     select(id)
+  }
+
+  const handleQuickAction = (action: QuickActionEntry) => {
+    log.info("command-palette quick-action", { id: action.fullId })
+    close()
+    runQuickAction(action).catch((err) => {
+      log.warn("quick action dispatch failed", { id: action.fullId, error: String(err) })
+    })
   }
 
   const handleSettings = (tab?: string) => {
@@ -354,6 +369,29 @@ export function CommandPalette({ onOpenSettings }: Props) {
                 >
                   <MessageSquareIcon className="size-4" />
                   <span className="truncate">{s.title}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {pluginQuickActions.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t("groups.pluginActions")}>
+              {pluginQuickActions.map((action) => (
+                <CommandItem
+                  key={action.fullId}
+                  value={`plugin ${action.title} ${action.description ?? ""}`}
+                  onSelect={() => handleQuickAction(action)}
+                >
+                  <PuzzleIcon className="size-4" />
+                  <span className="truncate">{action.title}</span>
+                  {action.description && (
+                    <span className="ml-auto truncate text-xs text-muted-foreground">
+                      {action.description}
+                    </span>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

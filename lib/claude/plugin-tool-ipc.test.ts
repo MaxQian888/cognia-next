@@ -135,6 +135,113 @@ describe("handlePluginToolExec", () => {
   })
 })
 
+// ── Unified seam — production path (no resolver override) ────────────
+describe("handlePluginToolExec — unified invokePluginTool path", () => {
+  afterEach(async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    __setInvokePluginToolDepsForTesting(null)
+  })
+
+  function makeSeamDeps(overrides?: {
+    status?: string
+    executeImpl?: jest.Mock
+    consentAnswer?: boolean
+    permissions?: string[]
+    tier?: "silent" | "confirm" | "forbid"
+  }) {
+    const execute = overrides?.executeImpl ?? jest.fn().mockResolvedValue({ ok: true })
+    const plugin = {
+      status: overrides?.status ?? "enabled",
+      config: { token: "t" },
+      manifest: { permissions: overrides?.permissions ?? [] },
+    }
+    return {
+      execute,
+      deps: {
+        getManager: () => ({
+          getPlugin: () => plugin,
+          getRegistry: () => ({
+            getTool: (name: string) =>
+              name === "demo_tool"
+                ? {
+                    name: "demo_tool",
+                    pluginId: "plug-a",
+                    definition: { name: "demo_tool", description: "d", parametersSchema: {} },
+                    execute,
+                  }
+                : undefined,
+          }),
+          handleActivationEvent: async () => {},
+        }),
+        getGuard: () => ({
+          getTier: () => overrides?.tier ?? "silent",
+          checkWithConsent: async () => overrides?.consentAnswer ?? true,
+        }),
+        getBroker: () => ({ request: async () => overrides?.consentAnswer ?? true }),
+      },
+    }
+  }
+
+  it("routes through invokePluginTool with sessionId + plugin config", async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const { execute, deps } = makeSeamDeps()
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    const response = await handlePluginToolExec(makeRequest())
+
+    expect(response).toEqual({
+      type: "plugin_tool_response",
+      sessionId: "session-1",
+      toolUseId: "use-1",
+      result: { ok: true },
+    })
+    expect(execute).toHaveBeenCalledWith(
+      { hello: "world" },
+      expect.objectContaining({ sessionId: "session-1", config: { token: "t" } })
+    )
+  })
+
+  it("collapses a plugin-disabled seam error onto the error field", async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const { deps } = makeSeamDeps({ status: "disabled" })
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    const response = await handlePluginToolExec(makeRequest())
+
+    expect(response.result).toBeUndefined()
+    expect(response.error).toContain("not enabled")
+  })
+
+  it("collapses a permission denial onto the error field", async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const { deps } = makeSeamDeps({
+      permissions: ["shell:execute"],
+      tier: "confirm",
+      consentAnswer: false,
+    })
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    const response = await handlePluginToolExec(makeRequest())
+
+    expect(response.error).toContain("denied")
+  })
+
+  it("falls through to the not-found error when no plugin registered the name", async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const { deps } = makeSeamDeps()
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    const response = await handlePluginToolExec(makeRequest({ name: "unknown_tool" }))
+
+    expect(response.error).toBe("plugin tool not found: unknown_tool")
+  })
+})
+
 // ── ADR-0026 — built-in skill fallback ────────────────────────────────
 describe("handlePluginToolExec — built-in skill fallback", () => {
   afterEach(async () => {

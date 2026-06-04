@@ -25,7 +25,7 @@ describe("save-topics node", () => {
     expect(node.category).toBe("plugin")
     expect(node.retryable).toBe(false)
     expect((node.paramsSchema as { required: string[] }).required).toContain("candidates")
-    expect(node.defaultParams?.candidates).toBe("{{ $node['rank'].out.completion }}")
+    expect(node.defaultParams?.candidates).toBe("{{ $node['rank'].completion }}")
   })
 
   it("parses candidates and persists them, returning ids", async () => {

@@ -2814,6 +2814,27 @@ export class PluginManager {
       // optional dep — non-Tauri builds and tests without the modules wired
     }
 
+    // Shortcut cleanup — unbinds every chord the plugin registered via
+    // `ctx.shortcuts.register(...)` or a quick-action `accelerator`. The
+    // bridge unbinds the OS rail + removes wrapper commands in one pass.
+    try {
+      const { unbindAllPluginShortcuts } =
+        await import("@/lib/plugin/shortcuts/plugin-shortcut-bridge")
+      unbindAllPluginShortcuts(pluginId)
+    } catch {
+      // optional dep — tests without the bridge wired
+    }
+
+    // Context-menu cleanup — drops every renderer-side item the plugin
+    // registered via `ctx.contextMenu.register(...)`.
+    try {
+      const { unregisterContextMenuItemsByPlugin } =
+        await import("@/lib/plugin/context-menu/registry")
+      unregisterContextMenuItemsByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
     // Command-safety cleanup — drop every command rule the plugin contributed
     // via `ctx.terminal.registerCommandSafetyRule(...)`. Idempotent no-op for
     // plugins that never registered any.

@@ -89,6 +89,7 @@ export type PluginCapability =
   | "workflow-template" // Contributes complete visual-workflow blueprints surfaced in the editor (ADR-0017/0032)
   | "automation" // Drives the desktop via Computer Use (screenshot/click/type/…) — gates ctx.automation
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
+  | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
 
 /**
  * Plugin status in the lifecycle
@@ -533,6 +534,13 @@ export interface PluginManifest {
 
   /** Slash commands provided */
   commands?: PluginManifestCommandDef[]
+
+  /**
+   * Quick actions surfaced in the command palette / composer menu / tray.
+   * Requires the `"quick-action"` capability. Each entry must name a
+   * dispatch target (`command` or `slash`).
+   */
+  quickActions?: PluginQuickActionDef[]
 
   // Activation
   /** Activation events - when to load the plugin */
@@ -1299,6 +1307,67 @@ export interface PluginManifestCommandDef {
 }
 
 // =============================================================================
+// Quick Actions
+// =============================================================================
+
+/** Surfaces a quick action can appear on. Defaults to all three. */
+export type PluginQuickActionSurface = "palette" | "composer" | "tray"
+
+/**
+ * Declarative quick-action contribution (manifest `quickActions[]`).
+ * One registration surfaces in up to three places: the command palette
+ * ("Plugin actions" group), the chat composer's quick-actions dropdown,
+ * and the tray "All Commands ▶ Plugins" bucket.
+ *
+ * A quick action IS a command — registration mirrors it into
+ * `lib/plugin/commands/registry.ts`, so dispatch (palette select, tray
+ * click, shortcut accelerator) reuses `executeCommand` with zero new
+ * dispatch rails. Manifest actions must name a dispatch target via
+ * `command` (a command-registry id) or `slash` (a slash-command line);
+ * imperative registrations may pass a `run` handler instead.
+ */
+export interface PluginQuickActionDef {
+  /** Local id — the host prefixes it with the plugin id. */
+  id: string
+  /** Display title (literal string, shown verbatim on every surface). */
+  title: string
+  /** One-line description shown in the palette. */
+  description?: string
+  /** Lucide icon name; resolved by the renderer. */
+  icon?: string
+  /** Tray bucket (see `lib/tray/all-commands.ts`). Defaults to "plugins". */
+  category?: string
+  /** `when` expression evaluated by `lib/tray/when.ts` before rendering. */
+  when?: string
+  /** Optional keyboard chord bound through the plugin shortcut bridge. */
+  accelerator?: string
+  /** Dispatch target: a command-registry id to execute. */
+  command?: string
+  /** Dispatch target: a slash-command line (with or without leading `/`). */
+  slash?: string
+  /** Surfaces to appear on. Defaults to all three. */
+  surfaces?: PluginQuickActionSurface[]
+}
+
+/** Imperative registration shape — adds an inline handler option. */
+export interface PluginQuickActionInput extends PluginQuickActionDef {
+  /** Inline handler; takes precedence over `command` / `slash`. */
+  run?: () => void | Promise<void>
+}
+
+/**
+ * Quick Actions API surfaced via `ctx.quickActions`. Gated on the
+ * `"quick-action"` capability — without it every method is a warn-once
+ * no-op, mirroring `PluginTrayAPI`.
+ */
+export interface PluginQuickActionsAPI {
+  /** Register one quick action. Returns a disposer. */
+  register: (action: PluginQuickActionInput) => () => void
+  /** Convenience for multiple actions; the disposer drops all of them. */
+  registerMany: (actions: PluginQuickActionInput[]) => () => void
+}
+
+// =============================================================================
 // Plugin Hooks
 // =============================================================================
 
@@ -1621,6 +1690,13 @@ export interface PluginContext {
    * otherwise the API is a no-op (every method returns a disposed handle).
    */
   tray: PluginTrayAPI
+
+  /**
+   * Quick Actions API — register actions surfaced in the command palette,
+   * composer quick-actions menu, and tray. Available only when the plugin
+   * declares the `"quick-action"` capability; otherwise a warn-once no-op.
+   */
+  quickActions: PluginQuickActionsAPI
 
   /** Window API */
   window: PluginWindowAPI

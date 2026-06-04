@@ -73,7 +73,9 @@ const NODES: PluginWorkflowTemplateNode[] = [
       label: "聚类打分",
       params: {
         systemPrompt: RANK_SYSTEM_PROMPT,
-        userPrompt: "知乎热榜原始数据如下，请产出候选选题 JSON：\n\n{{ $node['scan'].out.output }}",
+        // NOTE: no `.out` wrapper — the runtime stores a node's raw executor
+        // output at `upstream[id]` (see lib/workflow/editor/expr-ref.ts).
+        userPrompt: "知乎热榜原始数据如下，请产出候选选题 JSON：\n\n{{ $node['scan'].output }}",
       },
     },
   },
@@ -84,7 +86,7 @@ const NODES: PluginWorkflowTemplateNode[] = [
     position: { x: 720, y: 0 },
     data: {
       label: "存选题候选",
-      params: { candidates: "{{ $node['rank'].out.completion }}", source: "zhihu-hot" },
+      params: { candidates: "{{ $node['rank'].completion }}", source: "zhihu-hot" },
     },
   },
 ]

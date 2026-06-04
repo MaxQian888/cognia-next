@@ -66,47 +66,13 @@ export interface PluginToolResolver {
 let resolverOverride: PluginToolResolver | null = null
 
 /**
- * Inject a custom resolver. Intended for tests — production code reads
- * the singleton plugin manager via {@link defaultResolver}. Pass `null`
- * to restore the default.
+ * Inject a custom resolver. Intended for tests — when set, resolution AND
+ * execution short-circuit through the injected object (the historical
+ * contract). Production code routes through the unified
+ * `invokePluginTool` seam instead. Pass `null` to restore the default.
  */
 export function __setPluginToolResolverForTesting(resolver: PluginToolResolver | null): void {
   resolverOverride = resolver
-}
-
-/**
- * Default resolver — pulls the live plugin manager + plugin store. Wrapped
- * in lazy dynamic imports so the module graph doesn't drag the plugin
- * manager into bundles that only need the type declarations.
- */
-async function defaultResolver(): Promise<PluginToolResolver> {
-  const [{ getPluginManager }, { usePluginStore }] = await Promise.all([
-    import("@/lib/plugin/core/manager"),
-    import("@/stores/plugin-runtime/plugin-store"),
-  ])
-  return {
-    getTool: (name) => {
-      let registry
-      try {
-        registry = getPluginManager().getRegistry()
-      } catch {
-        // Manager not yet initialised (e.g. very early renderer boot).
-        return undefined
-      }
-      const tool = registry.getTool(name)
-      if (!tool) return undefined
-      const plugin = usePluginStore.getState().plugins[tool.pluginId]
-      // Disabled plugins must not respond — the model can still emit a
-      // stale tool_use, but we refuse to execute. The sidecar surfaces this
-      // as an MCP tool error so the model sees a clean failure.
-      if (!plugin || plugin.status !== "enabled") return undefined
-      return {
-        pluginId: tool.pluginId,
-        execute: (args, context) => tool.execute(args, context),
-      }
-    },
-    getPluginConfig: (pluginId) => usePluginStore.getState().plugins[pluginId]?.config ?? {},
-  }
 }
 
 /**
@@ -127,15 +93,35 @@ export async function handlePluginToolExec(
     toolUseId: request.toolUseId,
   }
   try {
-    const resolver = resolverOverride ?? (await defaultResolver())
-    const tool = resolver.getTool(request.name)
-    if (tool) {
-      const context: PluginToolContext = {
-        sessionId: request.sessionId,
-        config: resolver.getPluginConfig?.(tool.pluginId) ?? {},
+    if (resolverOverride) {
+      // Test seam — execute through the injected resolver directly so
+      // suites that stub resolution + execution in one object keep their
+      // historical contract. Production never takes this branch.
+      const tool = resolverOverride.getTool(request.name)
+      if (tool) {
+        const context: PluginToolContext = {
+          sessionId: request.sessionId,
+          config: resolverOverride.getPluginConfig?.(tool.pluginId) ?? {},
+        }
+        const result = await tool.execute(request.args, context)
+        return { ...baseResponse, result }
       }
-      const result = await tool.execute(request.args, context)
-      return { ...baseResponse, result }
+    } else {
+      // Production path — resolve the owning plugin by bare tool name,
+      // then route through the unified invocation seam so lazy
+      // `onTool:` activation, the permission consent gate, and error
+      // normalization match every other plugin-tool call site (workflow
+      // `action.plugin.invoke`, quick actions).
+      const { resolvePluginToolByName, invokePluginTool } =
+        await import("@/lib/plugin/core/invoke-plugin-tool")
+      const resolved = await resolvePluginToolByName(request.name)
+      if (resolved) {
+        const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
+          sessionId: request.sessionId,
+          reason: `chat:plugin_tool_exec:${request.name}`,
+        })
+        return { ...baseResponse, result }
+      }
     }
     // ── ADR-0026 — built-in skill fallback ────────────────────────────
     // Tool not in the plugin registry — try the built-in skill registry.

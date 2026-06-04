@@ -78,6 +78,11 @@ import {
   registerWorkflowTemplate,
   unregisterWorkflowTemplatesByPlugin,
 } from "@/lib/plugin/registries/workflow-template-registry"
+import {
+  registerQuickAction,
+  unregisterQuickActionsByPlugin,
+} from "@/lib/plugin/registries/quick-action-registry"
+import type { PluginQuickActionDef } from "@/types/plugin"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -287,6 +292,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerSharedMemoryAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
+  }),
+  "quick-action": defineOverlayCapability<PluginQuickActionDef>({
+    // Quick actions surfaced in the command palette / composer menu / tray.
+    // `registerQuickAction` mirrors each entry into the unified command
+    // registry (dispatch handle) and the overlay registry (surface
+    // metadata); `unregisterQuickActionsByPlugin` drops both.
+    manifestField: "quickActions",
+    registerEntry: (def, ctx) => {
+      registerQuickAction(ctx.pluginId, def)
+    },
+    unregisterAllByPlugin: unregisterQuickActionsByPlugin,
   }),
   "workflow-template": defineOverlayCapability<PluginWorkflowTemplateDef>({
     // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —

@@ -35,6 +35,7 @@ describe("plugin-sdk: context", () => {
       shortcuts: {} as PluginContext["shortcuts"],
       contextMenu: {} as PluginContext["contextMenu"],
       tray: {} as PluginContext["tray"],
+      quickActions: {} as PluginContext["quickActions"],
       window: {} as PluginContext["window"],
       secrets: {} as PluginContext["secrets"],
       scheduler: {} as PluginContext["scheduler"],

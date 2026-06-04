@@ -27,6 +27,11 @@ import {
 import type { EditorStore, EditorState } from "@/lib/workflow/editor/store"
 import { workflowNodeCategory } from "@/types/workflow/visual"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
+import {
+  firePluginContextMenuItem,
+  isContextMenuItemDisabled,
+  usePluginContextMenuItems,
+} from "@/hooks/plugins/use-plugin-context-menu-items"
 
 export type ContextTarget =
   | { kind: "pane"; flowPos: { x: number; y: number } }
@@ -108,6 +113,10 @@ export function CanvasContextMenu({
     return edges.find((e) => e.id === target.edgeId) ?? null
   }, [target, edges])
   /* eslint-enable react-hooks/preserve-manual-memoization */
+
+  // Plugin-contributed items for the `canvas` zone (subscribed live so a
+  // plugin enable/disable mid-session updates the menu).
+  const pluginItems = usePluginContextMenuItems("canvas")
 
   // Close on outside-click / Escape — radix DropdownMenu handles both via the
   // controlled `open` prop, but we still need to surface that to the parent.
@@ -325,6 +334,27 @@ export function CanvasContextMenu({
               )
             })()
           : null}
+
+        {/* Plugin-contributed items targeting the `canvas` zone
+            (ctx.contextMenu.register). Dispatch goes through the
+            `plugin-context-menu:<id>` CustomEvent contract. */}
+        {pluginItems.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            {pluginItems.map((entry) => (
+              <DropdownMenuItem
+                key={entry.id}
+                disabled={isContextMenuItemDisabled(entry, { target: "canvas", position })}
+                onSelect={fire(() =>
+                  firePluginContextMenuItem(entry, { target: "canvas", position })
+                )}
+                data-testid={`ctx-plugin-${entry.id}`}
+              >
+                {entry.item.label}
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )

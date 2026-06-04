@@ -38,7 +38,12 @@ describe("TOPIC_DISCOVERY_TEMPLATE", () => {
 
   it("passes the terminal output into the ranking prompt and the rank output into save", () => {
     const byId = Object.fromEntries(t.nodes.map((n) => [n.id, n]))
-    expect(String(byId.rank.data.params?.userPrompt)).toContain("$node['scan'].out.output")
-    expect(String(byId.save.data.params?.candidates)).toContain("$node['rank'].out.completion")
+    // No `.out` wrapper — the runtime exposes the raw executor output at
+    // `upstream[id]` (lib/workflow/editor/expr-ref.ts); `.out.` paths
+    // silently resolve to undefined.
+    expect(String(byId.rank.data.params?.userPrompt)).toContain("$node['scan'].output")
+    expect(String(byId.rank.data.params?.userPrompt)).not.toContain(".out.")
+    expect(String(byId.save.data.params?.candidates)).toContain("$node['rank'].completion")
+    expect(String(byId.save.data.params?.candidates)).not.toContain(".out.")
   })
 })

@@ -61,6 +61,7 @@ import { ReadAloudButton } from "./read-aloud-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
 import {
   getMessagePartRenderer,
   subscribeMessagePartRenderers,
@@ -339,6 +340,26 @@ function MessageRendererInner({
             message.role === "user" ? "ml-auto" : ""
           )}
         />
+
+        {/* Plugin context-menu items targeting the `chat:message` zone
+            (ctx.contextMenu.register) — hover ellipsis dropdown. Renders
+            nothing when no plugin contributed items. */}
+        <div
+          className={cn(
+            "opacity-0 transition-opacity group-hover:opacity-100",
+            message.role === "user" ? "ml-auto" : ""
+          )}
+        >
+          <MessagePluginMenu
+            messageId={message.id}
+            sessionId={
+              typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
+              "string"
+                ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
+                : undefined
+            }
+          />
+        </div>
 
         {!editing && (
           <MessageActions

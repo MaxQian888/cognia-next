@@ -126,6 +126,7 @@ import { invokePluginApi, PluginGatewayError } from "./transport"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
+import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
 import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
 
@@ -205,6 +206,10 @@ export function createPluginContext(
     shortcuts: createShortcutsAPI(pluginId),
     contextMenu: createContextMenuAPI(pluginId),
     tray: createTrayAPI({
+      pluginId,
+      capabilities: plugin.manifest.capabilities ?? [],
+    }),
+    quickActions: createQuickActionsAPI({
       pluginId,
       capabilities: plugin.manifest.capabilities ?? [],
     }),
@@ -1390,46 +1395,47 @@ function createDatabaseAPI(pluginId: string): PluginDatabaseAPI {
 function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
   const registeredShortcuts = new Set<string>()
 
-  return {
+  const api: PluginShortcutsAPI = {
     register: (shortcut: string, callback: () => void, options?: ShortcutOptions) => {
-      const id = `${pluginId}:${shortcut}`
       registeredShortcuts.add(shortcut)
 
-      invoke("plugin_shortcut_register", { pluginId, shortcut, options }).catch((error) =>
-        recordSilentFailure(
-          pluginId,
-          {
-            site: "shortcut.register",
-            message: `Failed to register shortcut: ${shortcut}`,
-            expected: false,
-          },
-          error
+      // Route onto the live shortcut rail (Rust ShortcutRegistry on
+      // desktop, the shared keydown fallback in the browser) via the
+      // plugin shortcut bridge. The bind is async (conflict check + IPC);
+      // the sync disposer contract is kept with a deferred handle.
+      let dispose: (() => void) | null = null
+      let disposed = false
+      import("@/lib/plugin/shortcuts/plugin-shortcut-bridge")
+        .then(({ bindPluginShortcut }) =>
+          bindPluginShortcut({ pluginId, chord: shortcut, run: callback, options })
         )
-      )
-
-      const handler = () => callback()
-      window.addEventListener(`plugin-shortcut:${id}`, handler)
-
-      return () => {
-        registeredShortcuts.delete(shortcut)
-        window.removeEventListener(`plugin-shortcut:${id}`, handler)
-        invoke("plugin_shortcut_unregister", { pluginId, shortcut }).catch((error) =>
+        .then((d) => {
+          if (disposed) d()
+          else dispose = d
+        })
+        .catch((error) =>
           recordSilentFailure(
             pluginId,
             {
-              site: "shortcut.unregister",
-              message: `Failed to unregister shortcut: ${shortcut}`,
+              site: "shortcut.register",
+              message: `Failed to register shortcut: ${shortcut}`,
               expected: false,
             },
             error
           )
         )
+
+      return () => {
+        disposed = true
+        registeredShortcuts.delete(shortcut)
+        dispose?.()
+        dispose = null
       }
     },
 
     registerMany: (shortcuts: ShortcutRegistration[]) => {
       const unsubscribes = shortcuts.map(({ shortcut, callback, options }) =>
-        createShortcutsAPI(pluginId).register(shortcut, callback, options)
+        api.register(shortcut, callback, options)
       )
 
       return () => unsubscribes.forEach((unsub) => unsub())
@@ -1438,6 +1444,8 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
     isAvailable: (shortcut: string) => !registeredShortcuts.has(shortcut),
     getRegistered: () => Array.from(registeredShortcuts),
   }
+
+  return api
 }
 
 // =============================================================================
@@ -1447,11 +1455,33 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
 function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
   const handlers = new Map<string, (context: ContextMenuClickContext) => void>()
 
-  return {
+  const api: PluginContextMenuAPI = {
     register: (item: ContextMenuItem) => {
       const id = `${pluginId}:${item.id}`
       handlers.set(id, item.onClick)
 
+      // Renderer registry — the consumer half. UI surfaces (chat message
+      // menu, workflow canvas menu, …) read items per zone via
+      // `usePluginContextMenuItems` and dispatch the CustomEvent below.
+      let unregisterRenderer: (() => void) | null = null
+      import("@/lib/plugin/context-menu/registry")
+        .then(({ registerContextMenuItem, unregisterContextMenuItem }) => {
+          registerContextMenuItem({ id, pluginId, item: { ...item, id } })
+          unregisterRenderer = () => unregisterContextMenuItem(id)
+        })
+        .catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "contextMenu.register",
+              message: `Failed to register context menu in renderer registry: ${item.id}`,
+              expected: false,
+            },
+            error
+          )
+        )
+
+      // Rust mirror — persistence of the registration intent (desktop).
       invoke("plugin_context_menu_register", {
         pluginId,
         item: { ...item, id },
@@ -1476,6 +1506,8 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
       return () => {
         handlers.delete(id)
         window.removeEventListener(`plugin-context-menu:${id}`, handler)
+        unregisterRenderer?.()
+        unregisterRenderer = null
         invoke("plugin_context_menu_unregister", { pluginId, itemId: id }).catch((error) =>
           recordSilentFailure(
             pluginId,
@@ -1491,11 +1523,13 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
     },
 
     registerMany: (items: ContextMenuItem[]) => {
-      const unsubscribes = items.map((item) => createContextMenuAPI(pluginId).register(item))
+      const unsubscribes = items.map((item) => api.register(item))
 
       return () => unsubscribes.forEach((unsub) => unsub())
     },
   }
+
+  return api
 }
 
 // =============================================================================

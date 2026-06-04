@@ -206,10 +206,15 @@ describe("action: twin / connector / mcp / plugin", () => {
     expect(s.safeParse({ serverId: "s", toolName: "t" }).success).toBe(true)
   })
 
-  it("action.plugin.invoke requires pluginId + taskId", () => {
+  it("action.plugin.invoke requires pluginId; taskId/toolName are per-mode optional", () => {
     const s = PARAMS_SCHEMAS["action.plugin.invoke"]
     expect(s.safeParse({}).success).toBe(false)
+    // Legacy task-mode nodes (no mode discriminator).
     expect(s.safeParse({ pluginId: "p", taskId: "t" }).success).toBe(true)
+    // Tool-mode nodes carry toolName instead of taskId.
+    expect(s.safeParse({ pluginId: "p", mode: "tool", toolName: "demo" }).success).toBe(true)
+    // Mode is constrained to the known discriminators.
+    expect(s.safeParse({ pluginId: "p", mode: "bogus" }).success).toBe(false)
   })
 })
 

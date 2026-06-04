@@ -104,4 +104,33 @@ describe("buildAllCommandsSubmenu", () => {
     )
     expect(other).toBeDefined()
   })
+
+  it("picks up tray-surface quick actions and excludes _qa: (tray-excluded) ones", async () => {
+    const { registerQuickAction, __resetQuickActionsForTesting } =
+      await import("@/lib/plugin/registries/quick-action-registry")
+    const { __resetCommandRegistryForTesting } = await import("@/lib/plugin/commands/registry")
+    try {
+      registerQuickAction("plug-a", { id: "sync", title: "Sync now", run: () => {} })
+      registerQuickAction("plug-a", {
+        id: "palette-only",
+        title: "Palette only",
+        run: () => {},
+        surfaces: ["palette"],
+      })
+
+      const root = buildAllCommandsSubmenu()
+      const plugins = root.items.find(
+        (it) => it.kind === "submenu" && it.label === "tray.categories.plugins"
+      )
+      expect(plugins).toBeDefined()
+      if (plugins && plugins.kind === "submenu") {
+        const labels = plugins.items.map((i) => (i.kind === "action" ? i.label : null))
+        expect(labels).toContain("Sync now")
+        expect(labels).not.toContain("Palette only")
+      }
+    } finally {
+      __resetQuickActionsForTesting()
+      __resetCommandRegistryForTesting()
+    }
+  })
 })

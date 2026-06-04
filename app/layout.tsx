@@ -17,6 +17,7 @@ import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
+import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { ComputerUseKillSwitchInitializer } from "@/components/providers/initializers/computer-use-kill-switch-initializer"
@@ -128,6 +129,11 @@ export default async function RootLayout({
               <TauriProvider>
                 <TooltipProvider>
                   <LoggerProvider>
+                    {/* Boots the plugin platform (manager + built-in plugin
+                     * discovery + onStartup activation). Must run before any
+                     * surface that reads plugin registries or calls
+                     * getPluginManager(). */}
+                    <PluginRuntimeInitializer />
                     <SubscriptionInitializer />
                     <AutomationPolicyInitializer />
                     <AuditRetentionInitializer />

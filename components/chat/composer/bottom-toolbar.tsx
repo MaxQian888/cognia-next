@@ -25,6 +25,7 @@ import { ExternalAgentSelector } from "@/components/agent/external-agent/selecto
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
+import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
 
 interface BottomToolbarProps {
@@ -152,6 +153,10 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
             className="flex items-center gap-1 empty:hidden"
             overflowLabel={t("pluginExtensionOverflow")}
           />
+          {/* Declarative quick actions (manifest `quickActions[]` /
+              ctx.quickActions) — renders nothing when no plugin
+              contributed composer-surface actions. */}
+          <PluginQuickActionsMenu disabled={isStreaming} />
         </div>
       </div>
 

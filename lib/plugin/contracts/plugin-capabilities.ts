@@ -739,6 +739,39 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: ["lib/plugin/bridge/wallpaper-bridge.test.ts"],
   },
   {
+    // Quick actions surfaced in the command palette ("Plugin actions"
+    // group), the chat composer's quick-actions dropdown, and the tray
+    // "All Commands ▶ Plugins" bucket. Declarative via
+    // `manifest.quickActions[]` (overlay-registry dispatch through
+    // `capability-bridge-map.ts`) or imperative via
+    // `ctx.quickActions.register`. Every action mirrors a command into
+    // `lib/plugin/commands/registry.ts`, so dispatch reuses
+    // `executeCommand` on every surface.
+    id: "quick-action",
+    support: "supported",
+    manifestFields: ["quickActions"],
+    runtimeBinding:
+      "ctx.quickActions.register + quick-action-registry overlay + command-registry mirror",
+    hostBindings: [
+      "lib/plugin/registries/quick-action-registry.ts",
+      "lib/plugin/api/quick-actions-api.ts",
+      "lib/plugin/commands/registry.ts",
+      "components/desktop/command-palette.tsx",
+      "components/chat/composer/plugin-quick-actions-menu.tsx",
+      "lib/tray/all-commands.ts",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/registries/quick-action-registry.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // System tray items. Registered imperatively at activation via
     // `ctx.tray.register` (no manifest field); desktop-only. Experimental
     // pending a declarative manifest surface + SDK helper.
