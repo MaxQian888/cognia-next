@@ -89,50 +89,75 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
       ) : comparison.rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("compare.noCases")}</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="border p-2 text-left">{t("compare.case")}</th>
-                {comparison.runIds.map((id) => {
-                  const run = runs.find((r) => r.runId === id)
-                  return (
-                    <th key={id} className="border p-2 text-left">
-                      {run?.targetLabel ?? id}
-                    </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {comparison.rows.map((row) => (
-                <tr key={row.caseId}>
-                  <td className="border p-2 align-top">
-                    <span className="line-clamp-2">{row.input || row.caseId}</span>
-                  </td>
-                  {row.cells.map((cell, i) => (
-                    <td
-                      key={cell.runId}
-                      className={cn(
-                        "border p-2 text-center",
-                        cell.passAt1 ? "bg-emerald-500/15" : "bg-destructive/15",
-                        cell.regression && "ring-2 ring-destructive ring-inset"
-                      )}
-                      data-regression={cell.regression ? "true" : undefined}
-                    >
-                      <span>{cell.passAt1 ? t("compare.pass") : t("compare.fail")}</span>
-                      {i > 0 && typeof cell.delta === "number" && cell.delta !== 0 && (
-                        <span className="text-muted-foreground ml-1 text-xs">
-                          {cell.delta > 0 ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </td>
-                  ))}
+        <>
+          {/* <md: per-case cards (the table below is unusable on small screens) */}
+          <div className="flex flex-col gap-2 md:hidden" data-testid="compare-cards">
+            {comparison.rows.map((row) => (
+              <div key={row.caseId} className="rounded-md border p-2">
+                <p className="line-clamp-2 text-sm">{row.input || row.caseId}</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {row.cells.map((cell) => {
+                    const run = runs.find((r) => r.runId === cell.runId)
+                    return (
+                      <Badge
+                        key={cell.runId}
+                        variant={cell.passAt1 ? "secondary" : "destructive"}
+                        className={cn("text-[10px]", cell.regression && "ring-destructive ring-2")}
+                      >
+                        {run?.targetLabel ?? cell.runId}:{" "}
+                        {cell.passAt1 ? t("compare.pass") : t("compare.fail")}
+                      </Badge>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="border p-2 text-left">{t("compare.case")}</th>
+                  {comparison.runIds.map((id) => {
+                    const run = runs.find((r) => r.runId === id)
+                    return (
+                      <th key={id} className="border p-2 text-left">
+                        {run?.targetLabel ?? id}
+                      </th>
+                    )
+                  })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {comparison.rows.map((row) => (
+                  <tr key={row.caseId}>
+                    <td className="border p-2 align-top">
+                      <span className="line-clamp-2">{row.input || row.caseId}</span>
+                    </td>
+                    {row.cells.map((cell, i) => (
+                      <td
+                        key={cell.runId}
+                        className={cn(
+                          "border p-2 text-center",
+                          cell.passAt1 ? "bg-emerald-500/15" : "bg-destructive/15",
+                          cell.regression && "ring-2 ring-destructive ring-inset"
+                        )}
+                        data-regression={cell.regression ? "true" : undefined}
+                      >
+                        <span>{cell.passAt1 ? t("compare.pass") : t("compare.fail")}</span>
+                        {i > 0 && typeof cell.delta === "number" && cell.delta !== 0 && (
+                          <span className="text-muted-foreground ml-1 text-xs">
+                            {cell.delta > 0 ? "▲" : "▼"}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )

@@ -13,9 +13,13 @@ let datasets: EvalDataset[] = []
 jest.mock("@/hooks/eval/use-eval-data", () => ({
   useEvalDatasets: () => datasets,
 }))
+jest.mock("@/hooks/eval/use-run-config-options", () => ({
+  useRunConfigOptions: () => ({ models: ["m1"], characters: [], teams: [], workflows: [] }),
+}))
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (s: { settings: null }) => unknown) => selector({ settings: null }),
 }))
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: jest.fn(() => false) }))
 const createDataset = jest.fn(async () => ({ id: "new-ds" }))
 jest.mock("@/lib/db/eval-datasets", () => ({
   createDataset: (...a: unknown[]) => createDataset(...(a as [])),
@@ -27,6 +31,7 @@ jest.mock("./dataset-detail", () => ({
   ),
 }))
 
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { EvalDashboard } from "./eval-dashboard"
 
 function dataset(id: string, name: string, version = 1): EvalDataset {
@@ -36,6 +41,7 @@ function dataset(id: string, name: string, version = 1): EvalDataset {
 beforeEach(() => {
   datasets = []
   createDataset.mockClear()
+  ;(useIsMobile as jest.Mock).mockReturnValue(false)
 })
 
 describe("EvalDashboard", () => {
@@ -66,5 +72,28 @@ describe("EvalDashboard", () => {
     expect(screen.getByTestId("dataset-detail")).toHaveTextContent("First")
     fireEvent.click(screen.getByText("Second"))
     expect(screen.getByTestId("dataset-detail")).toHaveTextContent("Second")
+  })
+
+  it("filters the dataset list by search (name or capability)", () => {
+    datasets = [dataset("d1", "alpha-ds"), dataset("d2", "beta-ds")]
+    render(<EvalDashboard />)
+    fireEvent.change(screen.getByLabelText("datasets.searchPlaceholder"), {
+      target: { value: "alpha" },
+    })
+    // list row + detail stub both show the name → use getAllByText
+    expect(screen.getAllByText("alpha-ds").length).toBeGreaterThan(0)
+    expect(screen.queryByText("beta-ds")).not.toBeInTheDocument()
+  })
+
+  it("on mobile, shows list first and switches to detail on selection with back", () => {
+    ;(useIsMobile as jest.Mock).mockReturnValue(true)
+    datasets = [dataset("d1", "alpha-ds")]
+    render(<EvalDashboard />)
+    expect(screen.queryByTestId("dataset-detail")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("alpha-ds"))
+    expect(screen.getByTestId("dataset-detail")).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("datasets.back"))
+    expect(screen.queryByTestId("dataset-detail")).not.toBeInTheDocument()
+    expect(screen.getByText("alpha-ds")).toBeInTheDocument()
   })
 })

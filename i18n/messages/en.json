@@ -9789,6 +9789,8 @@
       "new": "New dataset",
       "namePlaceholder": "Dataset name",
       "capabilityPlaceholder": "Capability (e.g. chat.tool-use)",
+      "searchPlaceholder": "Search datasets…",
+      "back": "Back to datasets",
       "create": "Create",
       "cancel": "Cancel",
       "cases": "{count, plural, =1 {# case} other {# cases}}",

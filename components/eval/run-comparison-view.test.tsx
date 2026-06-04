@@ -40,10 +40,19 @@ const run = (runId: string, passAt1: number): EvalRunRow =>
 describe("RunComparisonView", () => {
   it("auto-selects two runs, loads results, and flags a regression cell", async () => {
     render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} inputsByCase={{ c1: "hi" }} />)
-    await waitFor(() => expect(screen.getByText("hi")).toBeInTheDocument())
+    // the case input renders twice: small-screen cards + the desktop table
+    await waitFor(() => expect(screen.getAllByText("hi")).toHaveLength(2))
     // c1: A passed, B failed -> B cell is a regression
     const regressionCells = document.querySelectorAll('[data-regression="true"]')
     expect(regressionCells.length).toBe(1)
+  })
+
+  it("renders the per-case card list for small screens alongside the table", async () => {
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} inputsByCase={{ c1: "hi" }} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    const cards = screen.getByTestId("compare-cards")
+    expect(cards).toHaveTextContent("A: compare.pass")
+    expect(cards).toHaveTextContent("B: compare.fail")
   })
 
   it("prompts to pick two when fewer than two runs exist", () => {

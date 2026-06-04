@@ -9789,6 +9789,8 @@
       "new": "新建评测集",
       "namePlaceholder": "评测集名称",
       "capabilityPlaceholder": "能力（如 chat.tool-use）",
+      "searchPlaceholder": "搜索评测集…",
+      "back": "返回评测集列表",
       "create": "创建",
       "cancel": "取消",
       "cases": "{count, plural, other {# 个用例}}",
