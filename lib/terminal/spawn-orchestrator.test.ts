@@ -6,6 +6,47 @@ import { spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrat
 import { __clearLiveSessionsForTesting, getLiveSession } from "./session-registry"
 import type { SpawnRequest, SessionInfo } from "./types"
 
+// The persist path (`persistCommandHistory`) lazy-imports these three —
+// mocked so command_end events in every test stay deterministic and the
+// durable-history gating is assertable.
+jest.mock("@/lib/db/terminal-history", () => ({
+  recordTerminalHistory: jest.fn(async () => undefined),
+}))
+jest.mock("@/stores/settings/settings-store", () => {
+  const state = { persistHistory: undefined as boolean | undefined }
+  return {
+    __mockSettingsState: state,
+    useSettingsStore: {
+      getState: () => ({
+        settings: { terminal: { autocomplete: { persistHistory: state.persistHistory } } },
+      }),
+    },
+  }
+})
+jest.mock("@/lib/twin/ingest/redact", () => {
+  const state = { piiOk: true }
+  return {
+    __mockPiiState: state,
+    hasNoLeakingPii: () => state.piiOk,
+  }
+})
+
+const { recordTerminalHistory: mockRecordHistory } = jest.requireMock(
+  "@/lib/db/terminal-history"
+) as { recordTerminalHistory: jest.Mock }
+const { __mockSettingsState } = jest.requireMock("@/stores/settings/settings-store") as {
+  __mockSettingsState: { persistHistory: boolean | undefined }
+}
+const { __mockPiiState } = jest.requireMock("@/lib/twin/ingest/redact") as {
+  __mockPiiState: { piiOk: boolean }
+}
+
+/** Flush the fire-and-forget persist chain (dynamic imports + awaits). */
+async function flushPersist(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0))
+  await new Promise((r) => setTimeout(r, 0))
+}
+
 interface FakeSession {
   info: SessionInfo
   killed: number
@@ -183,6 +224,9 @@ const baseReq: SpawnRequest = {
 
 beforeEach(() => {
   __clearLiveSessionsForTesting()
+  mockRecordHistory.mockClear()
+  __mockSettingsState.persistHistory = undefined
+  __mockPiiState.piiOk = true
 })
 
 describe("spawnFromDock", () => {
@@ -415,6 +459,81 @@ describe("spawnFromDock", () => {
     fake.onIntegrationListeners[0]?.({ kind: "command_start" })
     fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
     expect(store.commands[0]?.cmd).toBe("ls")
+  })
+
+  describe("durable history persistence", () => {
+    async function runCommand(cmd: string, exitCode = 0) {
+      const hooks = makeFakeHooks()
+      const store = makeFakeStore()
+      const fake = makeFakeSession("s-1")
+      await spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn: async () =>
+          fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      })
+      fake.onIntegrationListeners[0]?.({ kind: "cwd_changed", cwd: "/work" })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (fake as any).write(`${cmd}\r`)
+      fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+      fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: exitCode })
+      await flushPersist()
+      return { store, fake }
+    }
+
+    it("records the command with shell, cwd, project, and exit code", async () => {
+      await runCommand("git status")
+      expect(mockRecordHistory).toHaveBeenCalledWith({
+        command: "git status",
+        shell: "/bin/bash",
+        cwd: "/work",
+        exitCode: 0,
+        sessionId: "s-1",
+        projectId: "proj-a",
+      })
+    })
+
+    it("still pushes the ring record exactly once (consume-once capture)", async () => {
+      const { store } = await runCommand("ls -la")
+      expect(store.commands).toHaveLength(1)
+      expect(store.commands[0]?.cmd).toBe("ls -la")
+      expect(mockRecordHistory).toHaveBeenCalledTimes(1)
+    })
+
+    it("skips persistence when the setting is off", async () => {
+      __mockSettingsState.persistHistory = false
+      await runCommand("git status")
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("skips persistence when the PII gate fails", async () => {
+      __mockPiiState.piiOk = false
+      await runCommand("export TOKEN=sk-secret")
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("skips persistence for an empty captured command", async () => {
+      const hooks = makeFakeHooks()
+      const store = makeFakeStore()
+      const fake = makeFakeSession("s-1")
+      await spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn: async () =>
+          fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      })
+      // command_end with no typed input → blank capture.
+      fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
+      await flushPersist()
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("never throws when the history write rejects", async () => {
+      mockRecordHistory.mockRejectedValueOnce(new Error("quota exceeded"))
+      await expect(runCommand("git status")).resolves.toBeDefined()
+    })
   })
 
   it("honors mutated request from the plugin hook", async () => {

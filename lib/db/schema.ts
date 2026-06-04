@@ -81,6 +81,8 @@ import type { SyncCursorRow, SyncTombstoneRow, SyncableTable } from "@/lib/sync/
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { PetModelRow, PetModelFileRow } from "./pet-models"
+import type { TerminalHistoryRow } from "./terminal-history"
+import type { UnattendedExecAuditRow } from "./terminal-audit"
 // Row types relocated out of this file but still wired into the table
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
@@ -1830,6 +1832,23 @@ export class CogniaDB extends Dexie {
       petModels: "&id, name, createdAt, source",
       petModelFiles: "&id, modelId, [modelId+path]",
     })
+
+    // ── v74 — Terminal: durable history + unattended-exec audit. ─────────────
+    //   • terminalHistory     — cross-session command history feeding the
+    //     autocomplete history provider (ADR-0039 phase 2). One row per
+    //     `(projectId, command)`; re-runs bump `ts`/`uses`. `command` indexes
+    //     the prefix query; `ts` drives LRU pruning (cap 5000). `projectId`
+    //     is `""` (never null) for project-less rows — IndexedDB compound
+    //     keys cannot contain null. See `lib/db/terminal-history.ts`.
+    //   • unattendedExecAudit — one row per unattended terminal execution
+    //     (or block), the durable trail for the consent-replacement policy.
+    //     `ts` newest-first; `runId` filters per workflow run. See
+    //     `lib/db/terminal-audit.ts`.
+    // Additive; no upgrade hook.
+    this.version(74).stores({
+      terminalHistory: "&id, ts, command, [projectId+command]",
+      unattendedExecAudit: "&id, ts, runId",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1862,6 +1881,9 @@ export class CogniaDB extends Dexie {
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>
+  // v74 — Terminal durable history + unattended-exec audit.
+  terminalHistory!: Table<TerminalHistoryRow, string>
+  unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -1881,6 +1903,8 @@ export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
+export type { TerminalHistoryRow } from "./terminal-history"
+export type { UnattendedExecAuditRow } from "./terminal-audit"
 
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null

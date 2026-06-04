@@ -187,16 +187,21 @@ export function wireSessionToStore(
         store.setSessionStatus(session.info.id, "running")
         capture.markCommandStart()
         break
-      case "command_end":
+      case "command_end": {
         store.setSessionStatus(session.info.id, "idle")
+        // `takeCapturedCommand()` is consume-once — capture exactly once and
+        // share between the in-memory ring and the durable history write.
+        const cmd = capture.takeCapturedCommand()
         store.pushCommand(session.info.id, {
-          cmd: capture.takeCapturedCommand(),
+          cmd,
           exitCode: event.exit_code,
           endedAt: Date.now(),
         })
         // exit_code here is the LAST command's exit, not the shell
         // process's exit; the row's exitCode is only set on session exit.
+        persistCommandHistory(session, store, cmd, event.exit_code)
         break
+      }
       case "cwd_changed":
         store.setSessionCwd(session.info.id, event.cwd)
         break
@@ -218,6 +223,47 @@ export function wireSessionToStore(
       extensionId: session.info.extensionId,
       exitCode: code,
     })
+  })
+}
+
+/**
+ * Persist one executed command to the durable history table (ADR-0039
+ * phase 2). Fire-and-forget: history must never break the terminal, so
+ * every failure path degrades to "not recorded".
+ *
+ * Gates, in order:
+ *   1. non-blank command,
+ *   2. `terminal.autocomplete.persistHistory` setting (default on),
+ *   3. PII check — lines that look like secrets are never persisted.
+ */
+function persistCommandHistory(
+  session: TerminalSession,
+  store: TerminalStoreLike,
+  cmd: string,
+  exitCode: number | null
+): void {
+  if (!cmd || cmd.trim().length === 0) return
+  void (async () => {
+    const [{ useSettingsStore }, { hasNoLeakingPii }, { recordTerminalHistory }] =
+      await Promise.all([
+        import("@/stores/settings/settings-store"),
+        import("@/lib/twin/ingest/redact"),
+        import("@/lib/db/terminal-history"),
+      ])
+    const persist =
+      useSettingsStore.getState().settings?.terminal?.autocomplete?.persistHistory !== false
+    if (!persist) return
+    if (!hasNoLeakingPii(cmd)) return
+    await recordTerminalHistory({
+      command: cmd,
+      shell: session.info.shell,
+      cwd: store.sessions[session.info.id]?.cwd ?? null,
+      exitCode,
+      sessionId: session.info.id,
+      projectId: session.info.projectId,
+    })
+  })().catch(() => {
+    // Best-effort — history persistence must never surface as a terminal error.
   })
 }
 
