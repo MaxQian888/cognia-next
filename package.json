@@ -239,7 +239,7 @@
     "@types/three": "^0.184.1",
     "cross-env": "^7.0.3",
     "eslint": "^9.39.4",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.2.7",
     "eslint-config-prettier": "^10.1.8",
     "express": "^5.2.1",
     "fake-indexeddb": "^6.2.5",
