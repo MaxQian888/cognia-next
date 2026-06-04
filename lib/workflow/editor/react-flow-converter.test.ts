@@ -4,7 +4,7 @@ import {
   type RFWorkflowEdge,
   type RFWorkflowNode,
 } from "./react-flow-converter"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
 
 function sample(): VisualWorkflow {
   return {
@@ -126,5 +126,51 @@ describe("workflowToReactFlow → reactFlowToWorkflow round-trip", () => {
     }))
     const back2 = reactFlowToWorkflow(base, broken, converted.edges, converted.viewport)
     expect(back2.nodes[0].width).toBeUndefined()
+  })
+})
+
+describe("parentId + authoredBy round-trip", () => {
+  function wf(): VisualWorkflow {
+    return {
+      id: "wf1",
+      schemaVersion: 2,
+      name: "n",
+      createdAt: 1,
+      updatedAt: 1,
+      settings: DEFAULT_WORKFLOW_SETTINGS,
+      edges: [],
+      nodes: [
+        {
+          id: "loop",
+          type: "flow.loop",
+          typeVersion: 2,
+          position: { x: 0, y: 0 },
+          data: { label: "Loop", params: { mode: "forEach" } },
+        },
+        {
+          id: "child",
+          type: "ai.prompt",
+          typeVersion: 1,
+          parentId: "loop",
+          position: { x: 10, y: 20 },
+          data: { label: "AI", params: {}, authoredBy: "ai" },
+        },
+      ],
+    }
+  }
+
+  it("carries parentId + extent into React Flow nodes", () => {
+    const rf = workflowToReactFlow(wf())
+    const child = rf.nodes.find((n) => n.id === "child")!
+    expect(child.parentId).toBe("loop")
+    expect(child.extent).toBe("parent")
+  })
+
+  it("restores parentId and authoredBy on the inverse trip", () => {
+    const rf = workflowToReactFlow(wf())
+    const back = reactFlowToWorkflow(wf(), rf.nodes, rf.edges, rf.viewport)
+    const child = back.nodes.find((n) => n.id === "child")!
+    expect(child.parentId).toBe("loop")
+    expect(child.data.authoredBy).toBe("ai")
   })
 })

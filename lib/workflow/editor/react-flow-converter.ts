@@ -49,18 +49,25 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 }
  * node renderer can dispatch on them without an extra lookup table.
  */
 export function workflowToReactFlow(wf: VisualWorkflow): ConvertedWorkflow {
-  const nodes: RFWorkflowNode[] = wf.nodes.map((n) => ({
-    id: n.id,
-    type: "workflowNode" as const,
-    position: { x: n.position.x, y: n.position.y },
-    data: {
-      ...n.data,
-      kind: n.type,
-      typeVersion: n.typeVersion,
-    },
-    width: n.width,
-    height: n.height,
-  }))
+  const nodes: RFWorkflowNode[] = wf.nodes.map((n) => {
+    const node: RFWorkflowNode = {
+      id: n.id,
+      type: "workflowNode" as const,
+      position: { x: n.position.x, y: n.position.y },
+      data: {
+        ...n.data,
+        kind: n.type,
+        typeVersion: n.typeVersion,
+      },
+      width: n.width,
+      height: n.height,
+    }
+    if (n.parentId !== undefined) {
+      node.parentId = n.parentId
+      node.extent = "parent"
+    }
+    return node
+  })
 
   const edges: RFWorkflowEdge[] = wf.edges.map((e) => {
     const edge: RFWorkflowEdge = {
@@ -101,7 +108,7 @@ export function reactFlowToWorkflow(
       kind: WorkflowNode["type"]
       typeVersion: number
     }
-    return {
+    const node: WorkflowNode = {
       id: n.id,
       type: kind,
       typeVersion,
@@ -112,10 +119,13 @@ export function reactFlowToWorkflow(
         notes: data.notes,
         credentialRefs: data.credentialRefs,
         disabled: data.disabled,
+        authoredBy: data.authoredBy,
       },
       width: typeof n.width === "number" ? n.width : undefined,
       height: typeof n.height === "number" ? n.height : undefined,
     }
+    if (typeof n.parentId === "string") node.parentId = n.parentId
+    return node
   })
 
   const newEdges: WorkflowEdge[] = edges.map((e) => ({
