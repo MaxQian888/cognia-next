@@ -27,7 +27,7 @@ export interface RFWorkflowData extends WorkflowNodeData {
   typeVersion: number
 }
 
-export type RFWorkflowNode = RFNode<RFWorkflowData, "workflowNode">
+export type RFWorkflowNode = RFNode<RFWorkflowData, "workflowNode" | "loopContainer">
 
 export interface RFWorkflowEdgeData extends Record<string, unknown> {
   workflowKind?: NonNullable<WorkflowEdge["data"]>["kind"]
@@ -49,10 +49,26 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 }
  * node renderer can dispatch on them without an extra lookup table.
  */
 export function workflowToReactFlow(wf: VisualWorkflow): ConvertedWorkflow {
-  const nodes: RFWorkflowNode[] = wf.nodes.map((n) => {
+  // React Flow v12 requires a parent to appear BEFORE its children in the
+  // nodes array. Sort by container depth (top-level first); the sort is
+  // stable, so authored order is preserved within each depth.
+  const byId = new Map(wf.nodes.map((n) => [n.id, n]))
+  const depthOf = (n: VisualWorkflow["nodes"][number]): number => {
+    let depth = 0
+    let cur = n
+    while (cur.parentId && byId.has(cur.parentId) && depth < wf.nodes.length) {
+      depth += 1
+      cur = byId.get(cur.parentId)!
+    }
+    return depth
+  }
+  const ordered = [...wf.nodes].sort((a, b) => depthOf(a) - depthOf(b))
+
+  const nodes: RFWorkflowNode[] = ordered.map((n) => {
     const node: RFWorkflowNode = {
       id: n.id,
-      type: "workflowNode" as const,
+      // Loop containers (typeVersion 2) render as a resizable sub-canvas.
+      type: n.type === "flow.loop" && n.typeVersion >= 2 ? "loopContainer" : "workflowNode",
       position: { x: n.position.x, y: n.position.y },
       data: {
         ...n.data,

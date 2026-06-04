@@ -1,4 +1,4 @@
-import { defaultTypeVersionFor, outputHandlesFor } from "./node-handles"
+import { defaultTypeVersionFor, outputHandlesFor, pickContainerTarget } from "./node-handles"
 
 describe("outputHandlesFor", () => {
   it("returns null for plain single-output kinds", () => {
@@ -51,6 +51,31 @@ describe("outputHandlesFor", () => {
       params: { cases: [{ id: "c_x", when: { combinator: "all", conditions: [] } }] },
     })
     expect(handles?.[0]).toEqual({ id: "c_x", kind: "case", label: undefined })
+  })
+})
+
+describe("pickContainerTarget", () => {
+  const all = [
+    { id: "outer", parentId: undefined },
+    { id: "inner", parentId: "outer" },
+    { id: "child", parentId: "inner" },
+    { id: "free", parentId: undefined },
+  ]
+  const outer = { id: "outer", width: 800, height: 600 }
+  const inner = { id: "inner", width: 300, height: 200 }
+
+  it("picks the smallest (innermost) intersecting container", () => {
+    expect(pickContainerTarget("free", [outer, inner], all)).toBe("inner")
+  })
+
+  it("never picks the node itself or its own descendants", () => {
+    // Dragging "outer" over its own nested container must not re-parent.
+    expect(pickContainerTarget("outer", [inner], all)).toBeNull()
+    expect(pickContainerTarget("outer", [outer], all)).toBeNull()
+  })
+
+  it("returns null when nothing intersects", () => {
+    expect(pickContainerTarget("free", [], all)).toBeNull()
   })
 })
 

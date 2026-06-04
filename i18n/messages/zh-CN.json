@@ -9705,6 +9705,15 @@
         "revert": "还原进行中——解决冲突后继续。"
       }
     },
+    "compare": {
+      "title": "对比引用",
+      "menuItem": "对比引用…",
+      "selectBase": "基准引用",
+      "selectTarget": "目标引用",
+      "pickBoth": "选择基准和目标引用以进行对比",
+      "empty": "所选引用之间没有更改",
+      "selectFile": "选择文件以查看差异"
+    },
     "commitDetail": {
       "createBranchHere": "从此提交创建分支…",
       "createBranchTitle": "从此提交创建分支",
@@ -15948,6 +15957,14 @@
         "false": "假",
         "default": "默认"
       },
+      "loopContainer": {
+        "mode": {
+          "forEach": "遍历",
+          "times": "循环次数",
+          "while": "条件循环"
+        },
+        "dropHint": "把节点拖进来组成循环体"
+      },
       "lastRun": {
         "succeeded": "{ago} 运行 · 用时 {duration}",
         "succeededNoDuration": "{ago} 运行",
@@ -17103,6 +17120,47 @@
           "label": "条件组",
           "hint": "条件组通过时走「真」端口，否则走「假」端口。"
         }
+      },
+      "loopV2": {
+        "intro": "容器循环：把节点拖进循环体内即可。每次迭代提供 $item 与 $loop；输出表达式决定收集到 items[] 的内容。",
+        "mode": {
+          "label": "模式",
+          "forEach": "遍历数组",
+          "times": "固定次数",
+          "while": "条件循环"
+        },
+        "source": {
+          "label": "数据源",
+          "hint": "解析为待遍历数组的表达式。",
+          "placeholder": "'{{ $node[''n1''].items }}'"
+        },
+        "times": {
+          "label": "迭代次数",
+          "hint": "数字或解析为数字的表达式。"
+        },
+        "whileExpression": {
+          "label": "循环条件",
+          "hint": "每轮开始前重新求值；为真则继续。可配合 $static 使用。",
+          "placeholder": "'{{ $static.keepGoing }}'"
+        },
+        "output": {
+          "label": "输出映射",
+          "hint": "每轮结束后求值，结果推入 items[]。缺省收集迭代序号。",
+          "placeholder": "'{{ $node[''n_body''].value }}'"
+        },
+        "iterationConcurrency": {
+          "label": "并行迭代数",
+          "hint": "同时执行的迭代上限（受全局 16 的闸门约束）。"
+        },
+        "maxIterations": {
+          "label": "最大迭代数",
+          "hint": "硬上限，防止循环失控。",
+          "placeholder": "1000"
+        }
+      },
+      "loopJump": {
+        "breakIntro": "在当前迭代结束后停止最内层循环。无需配置。",
+        "continueIntro": "跳过当前迭代的剩余部分。无需配置。"
       },
       "switchV2": {
         "cases": {

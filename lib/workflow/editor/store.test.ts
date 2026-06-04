@@ -71,6 +71,50 @@ describe("editor store — graph mutations", () => {
     expect(byId(aiId).data.typeVersion).toBe(1)
   })
 
+  it("setNodeParent re-parents with relative coordinates and clears on null", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const loopId = useStore.getState().addNode("flow.loop", { x: 100, y: 100 })
+    const childId = useStore.getState().addNode("flow.set", { x: 150, y: 160 })
+
+    useStore.getState().setNodeParent(childId, loopId)
+    let child = useStore.getState().nodes.find((n) => n.id === childId)!
+    expect(child.parentId).toBe(loopId)
+    expect(child.extent).toBe("parent")
+    // Absolute (150,160) inside a parent at (100,100) → relative (50,60).
+    expect(child.position).toEqual({ x: 50, y: 60 })
+
+    useStore.getState().setNodeParent(childId, null)
+    child = useStore.getState().nodes.find((n) => n.id === childId)!
+    expect(child.parentId).toBeUndefined()
+    expect(child.extent).toBeUndefined()
+    // Back to absolute coordinates.
+    expect(child.position).toEqual({ x: 150, y: 160 })
+  })
+
+  it("setNodeParent refuses self-parenting and parenting into a non-container", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const loopId = useStore.getState().addNode("flow.loop", { x: 0, y: 0 })
+    const aiId = useStore.getState().addNode("ai.prompt", { x: 10, y: 10 })
+    useStore.getState().setNodeParent(loopId, loopId)
+    expect(useStore.getState().nodes.find((n) => n.id === loopId)?.parentId).toBeUndefined()
+    useStore.getState().setNodeParent(loopId, aiId)
+    expect(useStore.getState().nodes.find((n) => n.id === loopId)?.parentId).toBeUndefined()
+  })
+
+  it("removing a loop container cascades to its children", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const loopId = useStore.getState().addNode("flow.loop", { x: 0, y: 0 })
+    const childId = useStore.getState().addNode("flow.set", { x: 10, y: 10 })
+    useStore.getState().setNodeParent(childId, loopId)
+    const outsideId = useStore.getState().addNode("ai.prompt", { x: 500, y: 0 })
+
+    useStore.getState().removeNodes([loopId])
+    const ids = useStore.getState().nodes.map((n) => n.id)
+    expect(ids).not.toContain(loopId)
+    expect(ids).not.toContain(childId)
+    expect(ids).toContain(outsideId)
+  })
+
   it("respects label/notes/params overrides at addNode time", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const id = useStore

@@ -6,7 +6,7 @@
  * this file guards the v2 dispatch and the case-list editor.
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { BranchConfig, SwitchConfig } from "./index"
+import { BranchConfig, BreakConfig, ContinueConfig, LoopConfig, SwitchConfig } from "./index"
 
 function lastParams(onChange: jest.Mock): Record<string, unknown> {
   return onChange.mock.calls[onChange.mock.calls.length - 1][0] as Record<string, unknown>
@@ -84,5 +84,60 @@ describe("SwitchConfig", () => {
     const next = lastParams(onChange)
     const cases = next.cases as Array<{ when: { conditions: unknown[] } }>
     expect(cases[0].when.conditions).toHaveLength(1)
+  })
+})
+
+describe("LoopConfig", () => {
+  it("renders the legacy form for typeVersion 1", () => {
+    const onChange = jest.fn()
+    render(
+      <LoopConfig
+        params={{ mode: "forEach", inputExpression: "x", bodyExpression: "y" }}
+        onChange={onChange}
+        typeVersion={1}
+      />
+    )
+    expect(screen.queryByTestId("loop-v2-mode")).toBeNull()
+  })
+
+  it("renders the v2 container form with the per-mode field", () => {
+    const onChange = jest.fn()
+    render(
+      <LoopConfig
+        params={{ mode: "forEach", source: "{{ $node['n1'].items }}" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.getByTestId("loop-v2-mode")).toBeInTheDocument()
+    expect(screen.getByTestId("loop-v2-concurrency")).toBeInTheDocument()
+  })
+
+  it("hides concurrency for while mode (sequential by definition)", () => {
+    const onChange = jest.fn()
+    render(
+      <LoopConfig
+        params={{ mode: "while", whileExpression: "{{ $static.go }}" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.queryByTestId("loop-v2-concurrency")).toBeNull()
+  })
+
+  it("patches iterationConcurrency as a number", () => {
+    const onChange = jest.fn()
+    render(<LoopConfig params={{ mode: "times", times: 3 }} onChange={onChange} typeVersion={2} />)
+    fireEvent.change(screen.getByTestId("loop-v2-concurrency"), { target: { value: "4" } })
+    expect(lastParams(onChange).iterationConcurrency).toBe(4)
+  })
+})
+
+describe("BreakConfig / ContinueConfig", () => {
+  it("render their info copy without params", () => {
+    render(<BreakConfig />)
+    render(<ContinueConfig />)
+    // Both are static info paragraphs; presence is enough.
+    expect(document.querySelectorAll("p").length).toBeGreaterThanOrEqual(2)
   })
 })

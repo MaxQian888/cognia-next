@@ -86,3 +86,33 @@ const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {
   return DEFAULT_TYPE_VERSIONS[kind] ?? 1
 }
+
+/**
+ * Decide which loop container a dropped node should re-parent into.
+ * `intersecting` is the set of loop-container nodes overlapping the drop
+ * (the canvas filters by node type); the SMALLEST one wins so a drop into a
+ * nested container picks the innermost. The dragged node itself and its own
+ * descendants are never valid targets (that would create a parent cycle).
+ * Returns the chosen container id, or `null` to leave the node top-level.
+ */
+export function pickContainerTarget(
+  droppedId: string,
+  intersecting: Array<{ id: string; width?: number | null; height?: number | null }>,
+  allNodes: Array<{ id: string; parentId?: string }>
+): string | null {
+  const parentOf = new Map(allNodes.map((n) => [n.id, n.parentId]))
+  const isSelfOrDescendantOfDropped = (id: string): boolean => {
+    let cur: string | undefined = id
+    let hops = 0
+    while (cur !== undefined && hops <= allNodes.length) {
+      if (cur === droppedId) return true
+      cur = parentOf.get(cur)
+      hops += 1
+    }
+    return false
+  }
+  const candidates = intersecting.filter((n) => !isSelfOrDescendantOfDropped(n.id))
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => (a.width ?? 0) * (a.height ?? 0) - (b.width ?? 0) * (b.height ?? 0))
+  return candidates[0].id
+}

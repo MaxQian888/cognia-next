@@ -230,6 +230,13 @@ export interface EditorState extends EditorStateSnapshot {
     overrides?: Partial<WorkflowNodeData>
   ) => string
   removeNodes: (ids: string[]) => void
+  /**
+   * Re-parent a node into (or out of, with `null`) a loop container's
+   * sub-canvas. Converts the node's position between absolute and
+   * parent-relative coordinates so it stays visually in place. No-ops on
+   * self-parenting or when the target is not a loop container.
+   */
+  setNodeParent: (nodeId: string, parentId: string | null) => void
   updateNodeData: (id: string, patch: Partial<WorkflowNodeData>) => void
   /**
    * Apply the same `data` patch to every node in `ids` in a single `set()`
@@ -543,13 +550,80 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         },
 
         removeNodes: (ids) => {
+          // Deleting a loop container cascades to its body children (the
+          // confirm dialog lives in the UI layer; the store just executes).
           const idSet = new Set(ids)
+          let grew = true
+          while (grew) {
+            grew = false
+            for (const n of get().nodes) {
+              if (n.parentId && idSet.has(n.parentId) && !idSet.has(n.id)) {
+                idSet.add(n.id)
+                grew = true
+              }
+            }
+          }
           set({
             nodes: get().nodes.filter((n) => !idSet.has(n.id)),
             edges: get().edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
             selectedNodeIds: get().selectedNodeIds.filter((id) => !idSet.has(id)),
             dirty: true,
           })
+        },
+
+        setNodeParent: (nodeId, parentId) => {
+          const nodes = get().nodes
+          const node = nodes.find((n) => n.id === nodeId)
+          if (!node) return
+          if (parentId === (node.parentId ?? null)) return
+          if (parentId !== null) {
+            if (parentId === nodeId) return
+            const parent = nodes.find((n) => n.id === parentId)
+            // Only loop containers host children; refuse cycles through the
+            // node's own descendants.
+            if (!parent || parent.data.kind !== "flow.loop" || parent.data.typeVersion < 2) return
+            let cur: typeof parent | undefined = parent
+            while (cur?.parentId) {
+              if (cur.parentId === nodeId) return
+              cur = nodes.find((n) => n.id === cur!.parentId)
+            }
+          }
+          // Convert coordinates so the node stays visually in place: child
+          // positions are parent-relative in React Flow v12.
+          const absOf = (id: string | undefined): { x: number; y: number } => {
+            let x = 0
+            let y = 0
+            let cur = id ? nodes.find((n) => n.id === id) : undefined
+            while (cur) {
+              x += cur.position.x
+              y += cur.position.y
+              cur = cur.parentId ? nodes.find((n) => n.id === cur!.parentId) : undefined
+            }
+            return { x, y }
+          }
+          const oldBase = absOf(node.parentId)
+          const abs = { x: oldBase.x + node.position.x, y: oldBase.y + node.position.y }
+          const newBase = parentId ? absOf(parentId) : { x: 0, y: 0 }
+          const position = { x: abs.x - newBase.x, y: abs.y - newBase.y }
+          let next = nodes.map((n) => {
+            if (n.id !== nodeId) return n
+            if (parentId === null) {
+              const { parentId: _drop, extent: _dropExtent, ...rest } = n
+              return { ...rest, position }
+            }
+            return { ...n, parentId, extent: "parent" as const, position }
+          })
+          // React Flow v12 requires parents BEFORE children in the array —
+          // move the re-parented node right after its container if needed.
+          if (parentId !== null) {
+            const childIdx = next.findIndex((n) => n.id === nodeId)
+            const parentIdx = next.findIndex((n) => n.id === parentId)
+            if (childIdx >= 0 && parentIdx > childIdx) {
+              const [child] = next.splice(childIdx, 1)
+              next = [...next.slice(0, parentIdx), child, ...next.slice(parentIdx)]
+            }
+          }
+          set({ nodes: next, dirty: true })
         },
 
         updateNodeData: (id, patch) => {

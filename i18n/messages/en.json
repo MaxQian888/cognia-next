@@ -9705,6 +9705,15 @@
         "revert": "Revert in progress — resolve conflicts, then continue."
       }
     },
+    "compare": {
+      "title": "Compare refs",
+      "menuItem": "Compare refs…",
+      "selectBase": "Base ref",
+      "selectTarget": "Target ref",
+      "pickBoth": "Pick a base and a target ref to compare",
+      "empty": "No changes between the selected refs",
+      "selectFile": "Select a file to view its diff"
+    },
     "commitDetail": {
       "createBranchHere": "Create branch from here…",
       "createBranchTitle": "Create branch from this commit",
@@ -15948,6 +15957,14 @@
         "false": "false",
         "default": "default"
       },
+      "loopContainer": {
+        "mode": {
+          "forEach": "for each",
+          "times": "times",
+          "while": "while"
+        },
+        "dropHint": "Drag nodes here to build the loop body"
+      },
       "lastRun": {
         "succeeded": "Ran {ago} · {duration}",
         "succeededNoDuration": "Ran {ago}",
@@ -17103,6 +17120,47 @@
           "label": "Conditions",
           "hint": "Routes to the true handle when the group passes, otherwise false."
         }
+      },
+      "loopV2": {
+        "intro": "Container loop: drag nodes inside to build the body. Each iteration exposes $item and $loop; the output expression decides what gets collected.",
+        "mode": {
+          "label": "Mode",
+          "forEach": "For each item",
+          "times": "Fixed count",
+          "while": "While condition"
+        },
+        "source": {
+          "label": "Source",
+          "hint": "Expression resolving to the array to iterate.",
+          "placeholder": "'{{ $node[''n1''].items }}'"
+        },
+        "times": {
+          "label": "Iterations",
+          "hint": "A number or an expression resolving to one."
+        },
+        "whileExpression": {
+          "label": "While condition",
+          "hint": "Re-evaluated before each round; runs while truthy. Combine with $static.",
+          "placeholder": "'{{ $static.keepGoing }}'"
+        },
+        "output": {
+          "label": "Output mapping",
+          "hint": "Evaluated after each iteration; the result is pushed into items[]. Defaults to the iteration index.",
+          "placeholder": "'{{ $node[''n_body''].value }}'"
+        },
+        "iterationConcurrency": {
+          "label": "Parallel iterations",
+          "hint": "Max iterations in flight (bounded by the global gate of 16)."
+        },
+        "maxIterations": {
+          "label": "Max iterations",
+          "hint": "Hard cap; guards against runaway loops.",
+          "placeholder": "1000"
+        }
+      },
+      "loopJump": {
+        "breakIntro": "Stops the innermost loop after the current iteration. No configuration needed.",
+        "continueIntro": "Skips the rest of the current iteration. No configuration needed."
       },
       "switchV2": {
         "cases": {

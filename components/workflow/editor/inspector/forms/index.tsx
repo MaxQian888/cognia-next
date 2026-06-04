@@ -2194,7 +2194,156 @@ export function JoinConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── flow.loop ─────────────────────────────────────────────────────────────
-export function LoopConfig({ params, onChange }: ConfigProps) {
+export function LoopConfig({ params, onChange, typeVersion }: ConfigProps) {
+  if ((typeVersion ?? 1) >= 2) {
+    return <LoopConfigV2 params={params} onChange={onChange} />
+  }
+  return <LoopConfigV1 params={params} onChange={onChange} />
+}
+
+/** typeVersion 2 — container sub-canvas (body nodes live inside the loop). */
+function LoopConfigV2({ params, onChange }: { params: Params; onChange: ChangeFn }) {
+  const t = useTranslations("workflows.forms.loopV2")
+  const mode = readString(params, "mode", "forEach")
+  const source = readString(params, "source")
+  // `times` may be a literal number or an expression string.
+  const times =
+    typeof params.times === "number" ? String(params.times) : readString(params, "times")
+  const whileExpression = readString(params, "whileExpression")
+  const output = readString(params, "output")
+  const iterationConcurrency = readNumber(params, "iterationConcurrency", 1)
+  const maxIterations = readNumber(params, "maxIterations", 0)
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      <Field label={t("mode.label")} htmlFor="lp2-mode" name="mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="lp2-mode" data-testid="loop-v2-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="forEach">{t("mode.forEach")}</SelectItem>
+            <SelectItem value="times">{t("mode.times")}</SelectItem>
+            <SelectItem value="while">{t("mode.while")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {mode === "forEach" ? (
+        <Field
+          label={t("source.label")}
+          htmlFor="lp2-source"
+          hint={t("source.hint")}
+          name="source"
+          required
+        >
+          <ExpressionField
+            id="lp2-source"
+            value={source}
+            onChange={(v) => onChange(patchParam(params, "source", v))}
+            placeholder={t("source.placeholder")}
+            aria-label={t("source.label")}
+          />
+        </Field>
+      ) : null}
+      {mode === "times" ? (
+        <Field
+          label={t("times.label")}
+          htmlFor="lp2-times"
+          hint={t("times.hint")}
+          name="times"
+          required
+        >
+          <ExpressionField
+            id="lp2-times"
+            value={times}
+            onChange={(v) => onChange(patchParam(params, "times", v))}
+            placeholder="10"
+            aria-label={t("times.label")}
+          />
+        </Field>
+      ) : null}
+      {mode === "while" ? (
+        <Field
+          label={t("whileExpression.label")}
+          htmlFor="lp2-while"
+          hint={t("whileExpression.hint")}
+          name="whileExpression"
+          required
+        >
+          <ExpressionField
+            id="lp2-while"
+            value={whileExpression}
+            onChange={(v) => onChange(patchParam(params, "whileExpression", v))}
+            placeholder={t("whileExpression.placeholder")}
+            aria-label={t("whileExpression.label")}
+          />
+        </Field>
+      ) : null}
+      <Field label={t("output.label")} htmlFor="lp2-output" hint={t("output.hint")} name="output">
+        <ExpressionField
+          id="lp2-output"
+          value={output}
+          onChange={(v) => onChange(patchParam(params, "output", v))}
+          placeholder={t("output.placeholder")}
+          aria-label={t("output.label")}
+        />
+      </Field>
+      {mode !== "while" ? (
+        <Field
+          label={t("iterationConcurrency.label")}
+          htmlFor="lp2-conc"
+          hint={t("iterationConcurrency.hint")}
+          name="iterationConcurrency"
+        >
+          <Input
+            id="lp2-conc"
+            type="number"
+            min={1}
+            max={64}
+            value={iterationConcurrency}
+            onChange={(e) =>
+              onChange(patchParam(params, "iterationConcurrency", Number(e.target.value) || 1))
+            }
+            data-testid="loop-v2-concurrency"
+          />
+        </Field>
+      ) : null}
+      <Field
+        label={t("maxIterations.label")}
+        htmlFor="lp2-max"
+        hint={t("maxIterations.hint")}
+        name="maxIterations"
+      >
+        <Input
+          id="lp2-max"
+          type="number"
+          min={1}
+          value={maxIterations || ""}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            onChange(
+              patchParam(params, "maxIterations", Number.isFinite(n) && n > 0 ? n : undefined)
+            )
+          }}
+          placeholder={t("maxIterations.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.break / flow.continue ────────────────────────────────────────────
+export function BreakConfig() {
+  const t = useTranslations("workflows.forms.loopJump")
+  return <p className="text-xs text-muted-foreground">{t("breakIntro")}</p>
+}
+
+export function ContinueConfig() {
+  const t = useTranslations("workflows.forms.loopJump")
+  return <p className="text-xs text-muted-foreground">{t("continueIntro")}</p>
+}
+
+function LoopConfigV1({ params, onChange }: { params: Params; onChange: ChangeFn }) {
   const t = useTranslations("workflows.forms.loop")
   const mode = readString(params, "mode", "forEach")
   const times = readNumber(params, "times", 1)

@@ -24,11 +24,6 @@ const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
   //   • the six `pattern.*` kinds — ultracode orchestration nodes emitted by
   //     `synthesize-ultracode.ts` (ADR-0022 addendum).
   "action.plan.step.dispatch",
-  // Loop-body jump markers (schemaVersion 2) — params are empty (label/notes
-  // live on node.data), so the generic fallback suffices. A dedicated
-  // info-only form lands with the loop-container phase.
-  "flow.break",
-  "flow.continue",
   "pattern.multi-modal-sweep",
   "pattern.loop-until-dry",
   "pattern.adversarial-verify",

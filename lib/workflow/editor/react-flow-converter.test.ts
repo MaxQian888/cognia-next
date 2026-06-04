@@ -184,6 +184,26 @@ describe("parentId + authoredBy round-trip", () => {
     expect(rf.edges[0].targetHandle).toBe("in")
   })
 
+  it("renders flow.loop v2 as the loopContainer node type (v1 stays workflowNode)", () => {
+    const rf = workflowToReactFlow(wf())
+    expect(rf.nodes.find((n) => n.id === "loop")?.type).toBe("loopContainer")
+
+    const v1 = wf()
+    v1.nodes[0] = { ...v1.nodes[0], typeVersion: 1 }
+    const rf1 = workflowToReactFlow(v1)
+    expect(rf1.nodes.find((n) => n.id === "loop")?.type).toBe("workflowNode")
+  })
+
+  it("orders parents before children regardless of authored order (React Flow v12 requirement)", () => {
+    const base = wf()
+    // Author the child FIRST — the converter must re-order.
+    base.nodes = [base.nodes[1], base.nodes[0]]
+    const rf = workflowToReactFlow(base)
+    const loopIdx = rf.nodes.findIndex((n) => n.id === "loop")
+    const childIdx = rf.nodes.findIndex((n) => n.id === "child")
+    expect(loopIdx).toBeLessThan(childIdx)
+  })
+
   it("tolerates a React Flow node with missing data on the inverse trip", () => {
     const rf = workflowToReactFlow(wf())
     const stripped = rf.nodes.map((n) =>

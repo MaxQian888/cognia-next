@@ -288,7 +288,9 @@ export function ExpressionField({
         params: {},
       })
       if (typeof resolved === "string") return resolved
-      return JSON.stringify(resolved, null, 0)
+      // JSON.stringify(undefined) yields `undefined` (not a string) — an
+      // unresolvable expression must not crash the preview row.
+      return JSON.stringify(resolved, null, 0) ?? null
     } catch (err) {
       return err instanceof Error ? `error: ${err.message}` : "error"
     }
