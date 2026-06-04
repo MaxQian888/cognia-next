@@ -107,6 +107,8 @@ export type WorkflowNodeKind =
   | "flow.wait"
   | "flow.set"
   | "flow.subworkflow"
+  | "flow.break"
+  | "flow.continue"
   // Data
   | "data.transform"
   | "data.code"
@@ -224,6 +226,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "flow.wait",
   "flow.set",
   "flow.subworkflow",
+  "flow.break",
+  "flow.continue",
   "data.transform",
   "data.code",
   "data.template",
@@ -251,7 +255,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
  * The optional `variables` map added alongside the Settings tab is additive
  * (every prior row stays valid) so it does NOT require a version bump.
  */
-export type VisualWorkflowSchemaVersion = 1
+export type VisualWorkflowSchemaVersion = 1 | 2
 
 /**
  * The visual workflow definition. Named `VisualWorkflow` (not
@@ -307,6 +311,12 @@ export interface WorkflowNode<TParams = Record<string, unknown>> {
   /** Graph-local unique id (e.g., "n_start"). Stable across renames. */
   id: string
   type: WorkflowNodeKind
+  /**
+   * Parent container node id (e.g. a `flow.loop` v2 container). Set on nodes
+   * that live inside another node's sub-canvas; React Flow renders these with
+   * `extent: 'parent'`. Undefined for top-level nodes. (schemaVersion 2)
+   */
+  parentId?: string
   /** Per-node-type schema version; nodes evolve their params shape via this. */
   typeVersion: number
   position: { x: number; y: number }
@@ -722,4 +732,61 @@ export interface SchemaRow {
   path: string
   type: SchemaRowType
   sample: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Two-level palette taxonomy (schemaVersion 2). The top-level
+// `WorkflowNodeCategory` is derived from the kind prefix; `subcategory` is
+// author-supplied catalog metadata (see `lib/workflow/nodes/catalog.ts`).
+// Kept as a string (not a closed union) so plugin-contributed nodes can
+// introduce their own subcategory without a type change. Known built-in
+// values are listed in `BUILTIN_NODE_SUBCATEGORIES`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type WorkflowNodeSubcategory = string
+
+export const BUILTIN_NODE_SUBCATEGORIES = [
+  "github",
+  "desktop",
+  "agent",
+  "connectors",
+  "logic",
+  "loops",
+  "parallel",
+  "data",
+  "io",
+  "ai",
+  "triggers",
+  "system",
+  "twin",
+  "skills",
+] as const
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Loop container params (flow.loop typeVersion 2). The legacy typeVersion 1
+// flat-transform params shape is untyped (Record<string, unknown>) and stays
+// valid — this type describes only the new container authoring.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LoopNodeParams {
+  mode: "forEach" | "times" | "while"
+  /** forEach: expression resolving to an array to iterate. */
+  source?: string
+  /** times: iteration count (literal or expression). */
+  times?: number | string
+  /** while: per-iteration boolean expression, re-evaluated each round. */
+  whileExpression?: string
+  /**
+   * Expression evaluated at the END of each iteration; its result is pushed
+   * into the loop's `items[]` output. `$item`/`$loop` are in scope. When
+   * omitted, the iteration index is collected instead.
+   */
+  output?: string
+  /**
+   * Max concurrent iterations for forEach/times. Default 1 (sequential).
+   * Bounded at run time by the shared global in-flight gate.
+   */
+  iterationConcurrency?: number
+  /** Hard cap on total iterations (defends against runaway while-loops). */
+  maxIterations?: number
 }

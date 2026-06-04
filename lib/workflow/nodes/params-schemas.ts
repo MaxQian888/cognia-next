@@ -468,6 +468,10 @@ export const PARAMS_SCHEMAS = {
   "flow.wait": WaitParams,
   "flow.set": SetVariableParams,
   "flow.subworkflow": SubworkflowParams,
+  // Loop-body jump markers (schemaVersion 2) — no params beyond label/notes,
+  // which live on node.data, not params.
+  "flow.break": z.object({}).passthrough(),
+  "flow.continue": z.object({}).passthrough(),
   // Data
   "data.transform": TransformParams,
   "data.code": CodeParams,

@@ -3,7 +3,10 @@ import {
   workflowNodeCategory,
   DEFAULT_WORKFLOW_SETTINGS,
   DEFAULT_RETRY_POLICY,
+  type LoopNodeParams,
+  type VisualWorkflowSchemaVersion,
   type WorkflowNodeKind,
+  type WorkflowNodeSubcategory,
 } from "./visual"
 
 describe("workflowNodeCategory", () => {
@@ -60,5 +63,32 @@ describe("default constants", () => {
     expect(DEFAULT_RETRY_POLICY.backoff).toBe("exponential")
     expect(DEFAULT_RETRY_POLICY.baseMs).toBeGreaterThan(0)
     expect(DEFAULT_RETRY_POLICY.maxMs).toBeGreaterThan(DEFAULT_RETRY_POLICY.baseMs)
+  })
+})
+
+describe("phase 0 additions", () => {
+  it("registers flow.break and flow.continue as flow-category kinds", () => {
+    expect(WORKFLOW_NODE_KINDS).toContain("flow.break")
+    expect(WORKFLOW_NODE_KINDS).toContain("flow.continue")
+    expect(workflowNodeCategory("flow.break")).toBe("flow")
+    expect(workflowNodeCategory("flow.continue")).toBe("flow")
+  })
+
+  it("accepts schemaVersion 2 and a loop-container param shape", () => {
+    const v: VisualWorkflowSchemaVersion = 2
+    const params: LoopNodeParams = {
+      mode: "forEach",
+      source: "{{ $node['n1'].items }}",
+      output: "{{ $item.id }}",
+      iterationConcurrency: 4,
+      maxIterations: 1000,
+    }
+    expect(v).toBe(2)
+    expect(params.mode).toBe("forEach")
+  })
+
+  it("exposes a subcategory type usable as a string tag", () => {
+    const sub: WorkflowNodeSubcategory = "github"
+    expect(sub).toBe("github")
   })
 })
