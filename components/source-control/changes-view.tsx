@@ -146,6 +146,7 @@ export function ChangesView({
                   onViewHistory={() => onViewHistory(c.path)}
                   onViewBlame={() => onViewBlame(c.path)}
                   onRestore={() => onRestore(c.path)}
+                  onAddToGitignore={() => void actions.ignoreAdd(c.path)}
                 />
               ))}
             </ChangeGroup>

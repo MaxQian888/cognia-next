@@ -40,6 +40,8 @@ function makeActions(): UseGitActionsResult {
     stashApply: jest.fn(),
     stashDrop: jest.fn(),
     resolveConflict: jest.fn(),
+    merge: jest.fn(),
+    ignoreAdd: jest.fn().mockResolvedValue(undefined),
     mergeAbort: jest.fn(),
     remoteAdd: jest.fn().mockResolvedValue(undefined),
     remoteRemove: jest.fn().mockResolvedValue(undefined),
@@ -101,6 +103,32 @@ describe("ChangesView", () => {
     )
     fireEvent.click(screen.getByTestId("group-action-changes-stage-all"))
     expect(actions.stage).toHaveBeenCalledWith(["work.ts"])
+  })
+
+  it("wires Add to .gitignore for untracked files in the changes group", async () => {
+    const actions = makeActions()
+    const withUntracked: GitStatus = {
+      ...status,
+      changes: [
+        { path: "tmp.log", origPath: null, status: "untracked", staged: false, group: "changes" },
+      ],
+    }
+    render(
+      <ChangesView
+        rootDir="/r"
+        status={withUntracked}
+        actions={actions}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={() => {}}
+        onViewHistory={() => {}}
+        onViewBlame={() => {}}
+        onRestore={() => {}}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("change-item-tmp.log"))
+    fireEvent.click(await screen.findByTestId("gitignore-tmp.log"))
+    expect(actions.ignoreAdd).toHaveBeenCalledWith("tmp.log")
   })
 
   it("selects a file with the correct staged flag", () => {

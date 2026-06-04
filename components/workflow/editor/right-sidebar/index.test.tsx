@@ -42,7 +42,9 @@ const MESSAGES = {
       tabs: {
         chat: "Chat",
         inspector: "Inspector",
+        runs: "Runs",
         templates: "Templates",
+        settings: "Settings",
         changelog: "Changelog",
       },
       chatLoading: "Loading…",
@@ -197,6 +199,32 @@ describe("RightSidebar", () => {
       })
       expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
       expect(screen.queryByTestId("mock-edge-inspector")).toBeNull()
+    })
+  })
+
+  describe("force-mounted chat panel layout", () => {
+    it("removes the chat panel from layout when another tab is active", async () => {
+      const user = userEvent.setup()
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_a", name: "Demo" },
+      })
+      harness(store)
+      // Chat starts active and lazy-mounts.
+      expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
+
+      await user.click(screen.getByTestId("workflow-right-sidebar-tab-templates"))
+
+      // The chat panel stays mounted (forceMount + Activity caching) …
+      const chatPanel = screen.getByTestId("workflow-right-sidebar-panel-chat")
+      expect(chatPanel).toHaveAttribute("data-state", "inactive")
+      expect(screen.getByTestId("mock-chat-tab")).toBeInTheDocument()
+      // … but MUST be display-noned while inactive. Radix never sets the
+      // `hidden` attr on force-mounted panels, so without this class the
+      // empty chat panel keeps its `flex-1` share of the column and the
+      // active tab's content gets squeezed into the bottom half.
+      expect(chatPanel.className).toMatch(/data-\[state=inactive\]:hidden/)
     })
   })
 

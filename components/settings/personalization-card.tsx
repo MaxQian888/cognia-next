@@ -27,7 +27,7 @@ export function PersonalizationCard() {
 
   const welcomeStyle: WelcomeStyle = settings?.welcomeStyle ?? "rich"
   const hidden = settings?.welcomeHidden ?? {}
-  const hasHidden = Boolean(hidden.quickStart || hidden.tryPrompt)
+  const hasHidden = Boolean(hidden.tryPrompt)
 
   // Name is edited locally and committed on blur so we don't write a settings
   // row on every keystroke.

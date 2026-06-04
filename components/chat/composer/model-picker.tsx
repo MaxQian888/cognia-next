@@ -16,6 +16,7 @@ import { CheckIcon, ChevronsUpDownIcon, CpuIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
 import type { ChatSession } from "@/lib/claude/types"
+import { PROVIDERS } from "@/types/provider/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -44,16 +45,40 @@ interface ModelPickerProps {
 }
 
 /**
+ * Curated fallback list for a provider the user enabled but never configured
+ * models for. Sourced from the static built-in `PROVIDERS` registry (a short
+ * hand-picked list per provider), NOT the models.dev catalog — see the
+ * comment inside `collectModelOptions` for why the latter is unsuitable.
+ */
+function catalogModelIds(providerId: string): string[] {
+  const cfg = PROVIDERS[providerId]
+  if (!cfg) return []
+  const ids = new Set<string>()
+  if (cfg.defaultModel) ids.add(cfg.defaultModel)
+  for (const m of cfg.models ?? []) ids.add(m.id)
+  return [...ids]
+}
+
+/**
  * Flatten the user's enabled providers + their model whitelists into a
  * single list the picker can render. Custom providers come last so the
  * built-ins lead the dropdown.
+ *
+ * Anthropic is always considered even without a `providerSettings` entry:
+ * the sidecar runtime authenticates via API key or subscription OAuth
+ * (ADR-0025) and needs no provider config, so subscription-reuse users must
+ * still get a model list. An explicit `enabled: false` entry opts out.
  */
 function collectModelOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
   customProviders: CustomProviderSettings[] | undefined
 ): ModelOption[] {
   const out: ModelOption[] = []
-  for (const [providerId, settings] of Object.entries(providerSettings ?? {})) {
+  const entries = Object.entries(providerSettings ?? {})
+  if (!entries.some(([id]) => id === "anthropic")) {
+    entries.unshift(["anthropic", { providerId: "anthropic" } as UserProviderSettings])
+  }
+  for (const [providerId, settings] of entries) {
     if (settings.enabled === false) continue
     // Selectable models = what the user has configured (enabledModels whitelist
     // + defaultModel) plus what live /v1/models discovery confirmed for *their*
@@ -66,7 +91,10 @@ function collectModelOptions(
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
     }
-    for (const modelId of allowed) {
+    // Nothing configured at all → fall back to the curated built-in catalog
+    // so an enabled provider never renders as an empty group.
+    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
+    for (const modelId of modelIds) {
       out.push({ providerId, providerName: providerId, modelId })
     }
   }
@@ -163,12 +191,15 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     return (
       <span
         className={cn(
-          "flex items-center gap-1.5 truncate text-[11px] text-muted-foreground",
+          // min-w-0 + max-w-full: as a flex item in the (wrapping) toolbar row
+          // the chip must shrink below its content size so the long font-mono
+          // model id truncates instead of overflowing a narrow sidebar.
+          "flex min-w-0 max-w-full items-center gap-1.5 truncate text-[11px] text-muted-foreground",
           className
         )}
       >
         <CpuIcon className="size-3.5 shrink-0" />
-        <span className="truncate font-mono">{activeModel}</span>
+        <span className="min-w-0 truncate font-mono">{activeModel}</span>
       </span>
     )
   }
@@ -181,13 +212,15 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           size="sm"
           disabled={disabled}
           className={cn(
-            "h-6 gap-1.5 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground",
+            // Same shrink-to-fit treatment as the static chip above — long
+            // model ids must ellipsize inside narrow composer containers.
+            "h-6 min-w-0 max-w-full gap-1.5 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground",
             className
           )}
           aria-label={t("switchModelAria")}
         >
           <CpuIcon className="size-3.5 shrink-0" />
-          <span className="truncate font-mono">{activeModel}</span>
+          <span className="min-w-0 truncate font-mono">{activeModel}</span>
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>

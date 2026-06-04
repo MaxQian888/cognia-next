@@ -68,4 +68,13 @@ describe("PetWidget", () => {
     })
     expect(screen.getByTestId("pet-handle")).toBeInTheDocument()
   })
+
+  it("keeps the restore icon centered — anchor alignment must not leak into the circle", () => {
+    withPet()
+    usePetStore.setState({ minimized: true })
+    render(<PetWidget settings={{ ...DEFAULT_PET_SETTINGS, anchor: "bottom-right" }} />)
+    const restore = screen.getByTestId("pet-restore")
+    expect(restore.className).toContain("items-center")
+    expect(restore.className).not.toMatch(/items-end|items-start/)
+  })
 })

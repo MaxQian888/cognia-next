@@ -1,0 +1,15 @@
+{
+  "title": "Agent Teams",
+  "pages": [
+    "index",
+    "data-model",
+    "lifecycle-and-synthesis",
+    "dispatch-and-shared-state",
+    "hitl-gates",
+    "consensus-delegation-memory",
+    "ultracode-and-patterns",
+    "capabilities-and-plugins",
+    "workspace-ui",
+    "workspace-chat"
+  ]
+}

@@ -30,6 +30,8 @@ export interface ChangeItemProps {
   onViewHistory?: () => void
   onViewBlame?: () => void
   onRestore?: () => void
+  /** Untracked files only: append the path to the repo-root .gitignore. */
+  onAddToGitignore?: () => void
 }
 
 export function ChangeItem({
@@ -43,10 +45,13 @@ export function ChangeItem({
   onViewHistory,
   onViewBlame,
   onRestore,
+  onAddToGitignore,
 }: ChangeItemProps) {
   const t = useTranslations("sourceControl")
   const deco = statusDecoration(change.status)
   const { dir, name } = splitPath(change.path)
+  // Renames carry the pre-rename path; surface it as "old → new".
+  const origName = change.origPath ? splitPath(change.origPath).name : null
 
   return (
     <ContextMenu>
@@ -68,7 +73,16 @@ export function ChangeItem({
             selected && "bg-accent"
           )}
         >
-          <span className="min-w-0 flex-1 truncate">
+          <span
+            className="min-w-0 flex-1 truncate"
+            title={change.origPath ? `${change.origPath} → ${change.path}` : undefined}
+          >
+            {origName && (
+              <span className="text-muted-foreground" data-testid={`orig-${change.path}`}>
+                {origName}
+                {" → "}
+              </span>
+            )}
             <span className="text-foreground">{name}</span>
             {dir && <span className="ml-1.5 text-[10px] text-muted-foreground">{dir}</span>}
           </span>
@@ -146,11 +160,21 @@ export function ChangeItem({
         )}
         {onRestore && (
           <ContextMenuItem
-            onSelect={onRestore}
+            // preventDefault: opening an overlay from a closing menu races
+            // Radix focus restore (sticky body[pointer-events:none]).
+            onSelect={(e) => {
+              e.preventDefault()
+              onRestore()
+            }}
             className="text-destructive"
             data-testid={`restore-${change.path}`}
           >
             {t("actions.restore")}
+          </ContextMenuItem>
+        )}
+        {onAddToGitignore && change.status === "untracked" && (
+          <ContextMenuItem onSelect={onAddToGitignore} data-testid={`gitignore-${change.path}`}>
+            {t("actions.addToGitignore")}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
@@ -158,10 +182,23 @@ export function ChangeItem({
           <ContextMenuItem onSelect={onCopyPath}>{t("actions.copyPath")}</ContextMenuItem>
         )}
         {onViewHistory && (
-          <ContextMenuItem onSelect={onViewHistory}>{t("actions.viewHistory")}</ContextMenuItem>
+          <ContextMenuItem
+            onSelect={(e) => {
+              e.preventDefault()
+              onViewHistory()
+            }}
+          >
+            {t("actions.viewHistory")}
+          </ContextMenuItem>
         )}
         {onViewBlame && (
-          <ContextMenuItem onSelect={onViewBlame} data-testid={`blame-${change.path}`}>
+          <ContextMenuItem
+            onSelect={(e) => {
+              e.preventDefault()
+              onViewBlame()
+            }}
+            data-testid={`blame-${change.path}`}
+          >
             {t("actions.viewBlame")}
           </ContextMenuItem>
         )}

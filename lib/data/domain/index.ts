@@ -237,7 +237,10 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
         `SNAPSHOT_DOMAIN_KEYS missing entry for ${module.key} — register it in domain/index.ts`
       )
     }
-    return makeSnapshotSpec(domainKey, module.labelKey, module)
+    // The module's own labelKey targets `settings.data.snapshots.*`; domain
+    // rows translate under `settings.data.domain.<labelKey>`, so reuse the
+    // domain key here.
+    return makeSnapshotSpec(domainKey, domainKey, module)
   }),
 ]
 

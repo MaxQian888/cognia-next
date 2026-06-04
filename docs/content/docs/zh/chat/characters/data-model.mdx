@@ -1,0 +1,240 @@
+---
+title: 数据模型
+description: Character 接口、Dexie characters 表、lib/db/characters.ts CRUD API、cognia-builtin-characters 植入契约，以及 SystemPromptPreset 配置模板。
+---
+
+# 数据模型
+
+本页是角色存储层的行级契约：`Character` 接口、持有它的 Dexie 表、读写它的 CRUD 模块、六个内置人格如何被植入，以及那个经常被误认为是角色、但其实并不是角色的独立 `SystemPromptPreset` 模板类型。
+
+<TLDR>
+  `Character` 定义在 `lib/claude/types.ts:2059-2317` —— 约 50 个对可选友好的字段，横跨
+  标识、提示词、路由、工具、权限、分身、能力开关以及 ADR-0030 包元数据。
+  它持久化在 Dexie `characters` 表中（`lib/db/schema.ts:127`，v3 索引
+  `"id, name, updatedAt, isBuiltIn"`）—— 纯增量，无升级钩子。CRUD 位于
+  `lib/db/characters.ts`（`listCharacters` 92-120, `duplicateCharacter` 276-329, `seedBuiltInCharacters`
+  497-560）。`SystemPromptPreset`（`types.ts:1943-1981`, `promptPresets` 表）是一个 *配置模板*，
+  而非人格 —— 12 个内置项由 `lib/db/preset-built-ins.ts:18-173` 植入。
+</TLDR>
+
+## `Character` 接口
+
+按关注点分组的逐字精简接口。
+
+```typescript
+// lib/claude/types.ts:2059-2317 (trimmed)
+export interface Character {
+  // Identity & display
+  id: string
+  name: string
+  description?: string
+  avatarColor: string            // CSS oklch/hex
+  avatarEmoji?: string
+  // System prompt & skills
+  systemPrompt: string           // REQUIRED persona prompt
+  skillIds?: string[]            // ordered chat skill ids (appended at send)
+  pluginSkillIds?: string[]      // plugin-contributed skill ids
+  // Model & provider routing
+  model?: string                 // beats AppSettings
+  providerId?: string            // beats AppSettings.defaultProvider
+  accountIdOverride?: string
+  // Tools & MCP
+  allowedTools?: string[]        // whitelist (union'd with skills)
+  disallowedTools?: string[]
+  mcpServerIds?: string[]        // MCP subset (undefined = all enabled)
+  toolFilter?: ToolFilterConfig
+  toolSearchRuntimeOverride?: ToolSearchRuntimeConfig
+  disablePluginTools?: boolean
+  // Permissions & modes
+  permissionMode?: SendOptions["permissionMode"]  // default|acceptEdits|bypassPermissions|plan
+  bareMode?: boolean
+  debugMode?: boolean
+  briefMode?: boolean
+  maxThinkingTokens?: number
+  // Twin (Employee Digital Twin)
+  twinId?: string
+  twinSettings?: {
+    enableRag?: boolean; ragTopK?: number
+    enableStyleFewShot?: boolean; styleSamplesK?: number
+    enableHybrid?: boolean; hybridKeywordWeight?: number
+  }
+  // Sandbox (ADR-0028)
+  sandboxEnabled?: boolean
+  sandboxTier?: "os" | "microvm"
+  // Computer Use (ADR-0020)
+  enableComputerUse?: boolean
+  computerUseSettings?: {
+    allowedToolIds?: string[]
+    requireConsent?: boolean
+    chatConsentMode?: "always-ask" | "session-grant" | "auto"
+    screenOffMode?: boolean
+  }
+  computerUseTarget?: ComputerUseTargetSetting
+  // OCR & A2UI
+  enableOcr?: boolean
+  a2uiEnabled?: boolean
+  a2uiCatalogId?: string
+  // Built-in skill tier (ADR-0026)
+  enableBuiltInSkills?: boolean
+  // v2 Character Pack fields (ADR-0030)
+  avatarImage?: PluginCharacterAvatarImage
+  persona?: PluginCharacterPersona            // tone + personality + openingMessage + exemplarPrompts
+  voiceProfile?: PluginCharacterVoiceProfile  // TTS overlay
+  // Pack attribution (ADR-0030)
+  sourcePluginId?: string
+  sourcePackId?: string
+  clonedFromPackCharacterId?: string
+  packVersionAtClone?: string
+  pristineSnapshot?: PackPristineSnapshot     // baseline for Apply Update diffing
+  // Platform & discovery
+  platformDefaults?: CharacterPlatformDefaults     // per-platform IM defaults
+  availableOnPlatforms?: PluginRuntimeProfile[]
+  // Metadata
+  isBuiltIn?: boolean
+  embeddingProviderId?: string
+  workingDir?: string
+  createdAt: number
+  updatedAt: number
+}
+```
+
+### 字段分组
+
+| 分组 | 字段 | 说明 |
+| --- | --- | --- |
+| 标识与显示 | `id`, `name`, `description`, `avatarColor`, `avatarEmoji` | `avatarColor` 必填；oklch/hex token |
+| 提示词与技能 | `systemPrompt`, `skillIds`, `pluginSkillIds` | `systemPrompt` 是唯一必填的提示词字段 |
+| 模型路由 | `model`, `providerId`, `accountIdOverride` | 各自胜过对应的 `AppSettings` 默认值 |
+| 工具与 MCP | `allowedTools`, `disallowedTools`, `mcpServerIds`, `toolFilter`, `toolSearchRuntimeOverride`, `disablePluginTools` | `mcpServerIds` 为 undefined 表示“全部已启用” |
+| 权限与模式 | `permissionMode`, `bareMode`, `debugMode`, `briefMode`, `maxThinkingTokens` | 模式取 `default` / `acceptEdits` / `bypassPermissions` / `plan` 之一 |
+| 分身 | `twinId`, `twinSettings` | 选择接入[分身运行时](../subsystems/employee-twin) |
+| 沙箱 (ADR-0028) | `sandboxEnabled`, `sandboxTier` | tier 为 `os` 或 `microvm` |
+| 计算机使用 (ADR-0020) | `enableComputerUse`, `computerUseSettings`, `computerUseTarget` | 在 IM 会话中默认关闭，除非被允许 |
+| OCR 与 A2UI | `enableOcr`, `a2uiEnabled`, `a2uiCatalogId` | 按角色切换能力面 |
+| 包 v2 (ADR-0030) | `avatarImage`, `persona`, `voiceProfile` | 图片头像、人格对象、TTS 覆盖层 |
+| 包归属 | `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, `packVersionAtClone`, `pristineSnapshot` | 驱动克隆隐藏覆盖层 + Apply Update 差异 |
+| 平台 | `platformDefaults`, `availableOnPlatforms` | 每平台 IM 默认值 + 可见性过滤 |
+| 元数据 | `isBuiltIn`, `embeddingProviderId`, `workingDir`, `createdAt`, `updatedAt` | `isBuiltIn` 标记被植入的行 |
+
+## Dexie 表
+
+该表声明在 `lib/db/schema.ts:127`：
+
+```typescript
+// lib/db/schema.ts:127 + v3 index (354-357)
+characters!: Table<Character, string>
+// indexed by: "id, name, updatedAt, isBuiltIn"
+```
+
+该 schema 是**纯增量的** —— `characters` 没有升级钩子。新的可选字段直接落在接口上，旧行只是省略它们；没有任何东西需要迁移。字符串主键是 `id`。
+
+## CRUD 模块 —— `lib/db/characters.ts`
+
+| 符号 | 行号 | 用途 |
+| --- | --- | --- |
+| `projectOverlayCharacter()` | 46-90 | 把 `PluginCharacterDef` 投射成带合成 `cognia-pack:` id 的临时 `Character` |
+| `listCharacters()` | 92-120 | Dexie ∪ 覆盖层；id 碰撞去重 + 克隆隐藏覆盖层 (108-118) |
+| `resolveCharacterById(id)` | 134-141 | 先 Dexie，再覆盖层注册表 |
+| `listCharactersByIds(ids)` | 143-171 | 批量解析；分离 Dexie 与覆盖层 id |
+| `createCharacter` / `updateCharacter` / `deleteCharacter` | — | 更新会阻止覆盖层行；删除会镜像一个墓碑 (v61 同步) |
+| `duplicateCharacter(id)` | 276-329 | 把覆盖层或 Dexie 行克隆成可编辑行 + 捕获 `pristineSnapshot` |
+| `dismissPackUpdate(id, version)` | 342-354 | 在不应用的情况下把 `packVersionAtClone` 前推 |
+| `applyPackUpdate(id)` | 385-403 | 对最新覆盖层做差异、打补丁、持久化 |
+| `previewPackUpdate(id)` | 411-421 | 为更新对话框做试运行差异 |
+| `applyPackUpdateForPack(packKey)` | 428-442 | 批量应用到某个包的每一个克隆 |
+| `seedBuiltInCharacters()` | 497-560 | v50 幂等植入 6 个内置人格并带包归属 |
+
+### 克隆隐藏覆盖层
+
+让被克隆的包角色不出现两次的去重规则：
+
+```typescript
+// lib/db/characters.ts:108-118 (trimmed)
+const hiddenOverlayIds = new Set<string>()
+for (const row of dexieRows) {
+  if (row.clonedFromPackCharacterId) {
+    hiddenOverlayIds.add(row.clonedFromPackCharacterId)
+  }
+}
+const overlayChars = listAllPackCharacters()
+  .map(projectOverlayCharacter)
+  .filter((c) => !hiddenOverlayIds.has(c.id) && !byId.has(c.id))
+```
+
+### Duplicate 捕获基线
+
+`duplicateCharacter`（`:276-329`）是从覆盖层到可写存储的桥梁。它深拷贝源（覆盖层投影或 Dexie 行），分配一个全新的 `char_*` id，打上 `clonedFromPackCharacterId` + `sourcePluginId` + `sourcePackId` + `packVersionAtClone`，并调用 `buildPristineSnapshot` 记录**克隆时刻**的包托管字段值。该快照就是 Apply Update 差异之后用来对比的基线，用以区分用户编辑与上游变更。
+
+## 内置植入故事
+
+六个默认人格是被**植入**的——而非内联——通过第一方插件包。
+
+- **源包** —— `plugins/cognia-builtin-characters/src/index.ts`：`BUILTIN_PACK`（第 32-100 行）定义了 6 个角色：**Coding**、**Writing**、**Research**、**Brainstorm**、**Translator**、**Goal Tracker**。`BUILTIN_PLUGIN_ID = "cognia-builtin-characters"`（第 117 行）。
+- **抬入并迁移契约** —— `BUILTIN_LEGACY_ID_TO_LOCAL_ID`（第 108-115 行）把旧版 `char_builtin_*` id 映射到 v50 包 `localId`。这个映射是承重的：更改某个 `localId` 会让用户从该内置项克隆出的任何定制变成孤儿，因此该表被当作仅追加的契约对待。
+- **植入器** —— `seedBuiltInCharacters`（`characters.ts:497-560`）在每次 `getDb()` 时运行。它 `bulkPut` 这 6 行，打上内置包归属和 `isBuiltIn: true`。由于它是幂等的，重新运行永远不会重复行，也永远不会覆盖用户创建的角色。
+
+因此内置项像任何克隆一样存在于 Dexie 中，但跑在 [ADR-0030 角色包](./character-packs)的覆盖与更新机制之上。
+
+## `SystemPromptPreset` —— 一个模板，而非人格
+
+`SystemPromptPreset` 经常被误认为是角色。它不是。预设是一个**可插拔的配置模板**——一段保存的系统提示词加上一部分聊天配置覆盖项——你把它应用 *到* 一个会话上。角色则是一个完整的、可选择的人格，带头像、分身绑定、语音和能力开关。预设为输入框的提示词字段填充种子；角色绑定到会话。
+
+```typescript
+// lib/claude/types.ts:1943-1981 (trimmed)
+export interface SystemPromptPreset {
+  id: string
+  name: string
+  content: string                // the system prompt body (named "content" for v2 back-compat)
+  createdAt: number
+  updatedAt: number
+  description?: string
+  icon?: string                  // single emoji glyph
+  color?: string                 // oklch / hex avatar background
+  category?: PresetCategory
+  // chat-config overrides (mirror ChatSession / Character fields)
+  model?: string
+  permissionMode?: SendOptions["permissionMode"]
+  effort?: SendOptions["effort"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  mcpServerIds?: string[]
+  skillIds?: string[]
+  agentModeId?: string
+  workingDir?: string
+  // organisation
+  isDefault?: boolean
+  isFavorite?: boolean
+  isBuiltIn?: boolean            // seeded built-ins are read-only; UI offers Duplicate
+  sortOrder?: number
+  // usage tracking
+  usageCount?: number
+  lastUsedAt?: number
+}
+```
+
+预设持久化在 `promptPresets` 表中。**12 个内置项**由 `lib/db/preset-built-ins.ts:18-173` 中的 `buildBuiltInPresets` 构造，并通过 `seedBuiltInPresets`（`lib/db/seed.ts`）幂等植入：
+
+| 预设 id | 名称 | 类别 |
+| --- | --- | --- |
+| `preset_builtin_general` | General Assistant | general |
+| `preset_builtin_code_expert` | Code Expert | coding |
+| `preset_builtin_code_reviewer` | Code Reviewer | coding |
+| `preset_builtin_writer` | Writer | writing |
+| `preset_builtin_writing_coach` | Writing Coach | writing |
+| `preset_builtin_researcher` | Researcher | research |
+| `preset_builtin_quick_helper` | Quick Helper | general |
+| `preset_builtin_tutor` | Tutor | general |
+| `preset_builtin_translator` | Translator | writing |
+| `preset_builtin_data_analyst` | Data Analyst | research |
+| `preset_builtin_summarizer` | Summarizer | general |
+| `preset_builtin_business_strategist` | Business Strategist | general |
+
+预设字段被刻意精简到 `SendOptions` 实际接线的范围 —— 没有 `temperature`、`maxTokens` 或网页搜索，因为 Agent SDK 并不暴露它们。
+
+## 相关
+
+<Cards>
+  <Card title="运行时消费" href="./runtime-consumption" description="resolveSendOptions 如何把这些字段读入一次发送，附完整的优先级链。" />
+  <Card title="角色包" href="./character-packs" description="本数据模型所馈送的 ADR-0030 覆盖层类型、原始快照，以及 Apply Update 差异。" />
+  <Card title="存储与数据" href="../data/storage" description="Dexie 数据库、增量 schema 约定，以及备份行为。" />
+</Cards>

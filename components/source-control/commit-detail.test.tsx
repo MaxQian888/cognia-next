@@ -127,4 +127,52 @@ describe("CommitDetail", () => {
     await user.click(await screen.findByTestId("reset-hard-confirm-action"))
     expect(reset).toHaveBeenCalledWith("hard", commit.hash)
   })
+
+  it("creates a branch from the commit via the dialog", async () => {
+    const user = userEvent.setup()
+    const createBranch = jest.fn().mockResolvedValue(undefined)
+    render(
+      <CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn(), createBranch }} />
+    )
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-create-branch"))
+    const input = await screen.findByTestId("create-branch-name")
+    // Empty name keeps confirm disabled.
+    expect(screen.getByTestId("create-branch-confirm")).toBeDisabled()
+    await user.type(input, "hotfix/from-commit")
+    await user.click(screen.getByTestId("create-branch-confirm"))
+    expect(createBranch).toHaveBeenCalledWith("hotfix/from-commit", true, commit.hash)
+  })
+
+  it("checks out the commit after the detached-HEAD confirm", async () => {
+    const user = userEvent.setup()
+    const checkout = jest.fn().mockResolvedValue(undefined)
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn(), checkout }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("commit-checkout"))
+    // Not checked out yet — confirmation dialog is shown.
+    expect(checkout).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("checkout-commit-confirm-action"))
+    expect(checkout).toHaveBeenCalledWith(commit.hash)
+  })
+
+  it("hides branch/checkout items when those actions are absent", async () => {
+    const user = userEvent.setup()
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn() }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await screen.findByTestId("reset-soft")
+    expect(screen.queryByTestId("commit-create-branch")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("commit-checkout")).not.toBeInTheDocument()
+  })
+
+  it("keeps the menu mounted while the hard-reset confirm opens (preventDefault)", async () => {
+    const user = userEvent.setup()
+    render(<CommitDetail rootDir="/r" commit={commit} actions={{ reset: jest.fn() }} />)
+    await user.click(screen.getByTestId("commit-reset"))
+    await user.click(await screen.findByTestId("reset-hard"))
+    // The overlay opened AND the menu item is still mounted — the select was
+    // preventDefault'ed so the dialog never races the menu's focus restore.
+    expect(await screen.findByTestId("reset-hard-confirm")).toBeInTheDocument()
+    expect(screen.getByTestId("reset-hard")).toBeInTheDocument()
+  })
 })

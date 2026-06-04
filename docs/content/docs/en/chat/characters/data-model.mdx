@@ -1,0 +1,240 @@
+---
+title: Data Model
+description: The Character interface, the Dexie characters table, the lib/db/characters.ts CRUD API, the cognia-builtin-characters seed contract, and the SystemPromptPreset config template.
+---
+
+# Data Model
+
+This page is the line-accurate contract for the Character storage layer: the `Character` interface, the Dexie table that holds it, the CRUD module that reads and writes it, how the six built-in personas are seeded, and the separate `SystemPromptPreset` template type that is often confused with a Character but is not one.
+
+<TLDR>
+  `Character` is defined in `lib/claude/types.ts:2059-2317` — ~50 optional-friendly fields across
+  identity, prompt, routing, tools, permissions, twin, capability gates, and ADR-0030 pack metadata.
+  It is persisted in the Dexie `characters` table (`lib/db/schema.ts:127`, v3 index
+  `"id, name, updatedAt, isBuiltIn"`) — purely additive, no upgrade hooks. CRUD lives in
+  `lib/db/characters.ts` (`listCharacters` 92-120, `duplicateCharacter` 276-329, `seedBuiltInCharacters`
+  497-560). `SystemPromptPreset` (`types.ts:1943-1981`, `promptPresets` table) is a *config template*,
+  not a persona — 12 built-ins seeded by `lib/db/preset-built-ins.ts:18-173`.
+</TLDR>
+
+## The `Character` Interface
+
+The verbatim trimmed interface, grouped by concern.
+
+```typescript
+// lib/claude/types.ts:2059-2317 (trimmed)
+export interface Character {
+  // Identity & display
+  id: string
+  name: string
+  description?: string
+  avatarColor: string            // CSS oklch/hex
+  avatarEmoji?: string
+  // System prompt & skills
+  systemPrompt: string           // REQUIRED persona prompt
+  skillIds?: string[]            // ordered chat skill ids (appended at send)
+  pluginSkillIds?: string[]      // plugin-contributed skill ids
+  // Model & provider routing
+  model?: string                 // beats AppSettings
+  providerId?: string            // beats AppSettings.defaultProvider
+  accountIdOverride?: string
+  // Tools & MCP
+  allowedTools?: string[]        // whitelist (union'd with skills)
+  disallowedTools?: string[]
+  mcpServerIds?: string[]        // MCP subset (undefined = all enabled)
+  toolFilter?: ToolFilterConfig
+  toolSearchRuntimeOverride?: ToolSearchRuntimeConfig
+  disablePluginTools?: boolean
+  // Permissions & modes
+  permissionMode?: SendOptions["permissionMode"]  // default|acceptEdits|bypassPermissions|plan
+  bareMode?: boolean
+  debugMode?: boolean
+  briefMode?: boolean
+  maxThinkingTokens?: number
+  // Twin (Employee Digital Twin)
+  twinId?: string
+  twinSettings?: {
+    enableRag?: boolean; ragTopK?: number
+    enableStyleFewShot?: boolean; styleSamplesK?: number
+    enableHybrid?: boolean; hybridKeywordWeight?: number
+  }
+  // Sandbox (ADR-0028)
+  sandboxEnabled?: boolean
+  sandboxTier?: "os" | "microvm"
+  // Computer Use (ADR-0020)
+  enableComputerUse?: boolean
+  computerUseSettings?: {
+    allowedToolIds?: string[]
+    requireConsent?: boolean
+    chatConsentMode?: "always-ask" | "session-grant" | "auto"
+    screenOffMode?: boolean
+  }
+  computerUseTarget?: ComputerUseTargetSetting
+  // OCR & A2UI
+  enableOcr?: boolean
+  a2uiEnabled?: boolean
+  a2uiCatalogId?: string
+  // Built-in skill tier (ADR-0026)
+  enableBuiltInSkills?: boolean
+  // v2 Character Pack fields (ADR-0030)
+  avatarImage?: PluginCharacterAvatarImage
+  persona?: PluginCharacterPersona            // tone + personality + openingMessage + exemplarPrompts
+  voiceProfile?: PluginCharacterVoiceProfile  // TTS overlay
+  // Pack attribution (ADR-0030)
+  sourcePluginId?: string
+  sourcePackId?: string
+  clonedFromPackCharacterId?: string
+  packVersionAtClone?: string
+  pristineSnapshot?: PackPristineSnapshot     // baseline for Apply Update diffing
+  // Platform & discovery
+  platformDefaults?: CharacterPlatformDefaults     // per-platform IM defaults
+  availableOnPlatforms?: PluginRuntimeProfile[]
+  // Metadata
+  isBuiltIn?: boolean
+  embeddingProviderId?: string
+  workingDir?: string
+  createdAt: number
+  updatedAt: number
+}
+```
+
+### Field Groups
+
+| Group | Fields | Notes |
+| --- | --- | --- |
+| Identity & display | `id`, `name`, `description`, `avatarColor`, `avatarEmoji` | `avatarColor` required; oklch/hex token |
+| Prompt & skills | `systemPrompt`, `skillIds`, `pluginSkillIds` | `systemPrompt` is the only required prompt field |
+| Model routing | `model`, `providerId`, `accountIdOverride` | each beats the matching `AppSettings` default |
+| Tools & MCP | `allowedTools`, `disallowedTools`, `mcpServerIds`, `toolFilter`, `toolSearchRuntimeOverride`, `disablePluginTools` | `mcpServerIds` undefined means "all enabled" |
+| Permissions & modes | `permissionMode`, `bareMode`, `debugMode`, `briefMode`, `maxThinkingTokens` | modes one of `default` / `acceptEdits` / `bypassPermissions` / `plan` |
+| Twin | `twinId`, `twinSettings` | opts into the [twin runtime](../subsystems/employee-twin) |
+| Sandbox (ADR-0028) | `sandboxEnabled`, `sandboxTier` | tier `os` or `microvm` |
+| Computer use (ADR-0020) | `enableComputerUse`, `computerUseSettings`, `computerUseTarget` | gated off in IM sessions unless allowed |
+| OCR & A2UI | `enableOcr`, `a2uiEnabled`, `a2uiCatalogId` | toggles per-character capability surfaces |
+| Pack v2 (ADR-0030) | `avatarImage`, `persona`, `voiceProfile` | image avatar, persona object, TTS overlay |
+| Pack attribution | `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, `packVersionAtClone`, `pristineSnapshot` | drive clone-hides-overlay + Apply Update diffing |
+| Platform | `platformDefaults`, `availableOnPlatforms` | per-platform IM defaults + visibility filter |
+| Metadata | `isBuiltIn`, `embeddingProviderId`, `workingDir`, `createdAt`, `updatedAt` | `isBuiltIn` marks seeded rows |
+
+## Dexie Table
+
+The table is declared in `lib/db/schema.ts:127`:
+
+```typescript
+// lib/db/schema.ts:127 + v3 index (354-357)
+characters!: Table<Character, string>
+// indexed by: "id, name, updatedAt, isBuiltIn"
+```
+
+The schema is **purely additive** — there are no upgrade hooks for `characters`. New optional fields land directly on the interface and legacy rows simply omit them; nothing migrates. The string primary key is `id`.
+
+## CRUD Module — `lib/db/characters.ts`
+
+| Symbol | Lines | Purpose |
+| --- | --- | --- |
+| `projectOverlayCharacter()` | 46-90 | Project a `PluginCharacterDef` into a transient `Character` with a synthetic `cognia-pack:` id |
+| `listCharacters()` | 92-120 | Dexie ∪ overlay; dedupe on id collision + clone-hides-overlay (108-118) |
+| `resolveCharacterById(id)` | 134-141 | Dexie first, then overlay registry |
+| `listCharactersByIds(ids)` | 143-171 | Bulk resolve; splits Dexie vs overlay ids |
+| `createCharacter` / `updateCharacter` / `deleteCharacter` | — | Update blocks overlay rows; delete mirrors a tombstone (v61 sync) |
+| `duplicateCharacter(id)` | 276-329 | Clone an overlay or Dexie row into an editable row + capture `pristineSnapshot` |
+| `dismissPackUpdate(id, version)` | 342-354 | Snap `packVersionAtClone` forward without applying |
+| `applyPackUpdate(id)` | 385-403 | Diff against latest overlay, patch, persist |
+| `previewPackUpdate(id)` | 411-421 | Dry-run diff for the update dialog |
+| `applyPackUpdateForPack(packKey)` | 428-442 | Batch-apply to every clone of one pack |
+| `seedBuiltInCharacters()` | 497-560 | v50 idempotent seed of the 6 built-in personas with pack attribution |
+
+### Clone-Hides-Overlay
+
+The dedupe rule that keeps a cloned pack character from appearing twice:
+
+```typescript
+// lib/db/characters.ts:108-118 (trimmed)
+const hiddenOverlayIds = new Set<string>()
+for (const row of dexieRows) {
+  if (row.clonedFromPackCharacterId) {
+    hiddenOverlayIds.add(row.clonedFromPackCharacterId)
+  }
+}
+const overlayChars = listAllPackCharacters()
+  .map(projectOverlayCharacter)
+  .filter((c) => !hiddenOverlayIds.has(c.id) && !byId.has(c.id))
+```
+
+### Duplicate Captures a Baseline
+
+`duplicateCharacter` (`:276-329`) is the bridge from overlay to writable storage. It deep-copies the source (overlay projection or Dexie row), assigns a fresh `char_*` id, stamps `clonedFromPackCharacterId` + `sourcePluginId` + `sourcePackId` + `packVersionAtClone`, and calls `buildPristineSnapshot` to record the pack-managed field values **as they were at clone time**. That snapshot is the baseline the Apply Update diff later compares against to tell user edits apart from upstream changes.
+
+## Built-in Seed Story
+
+The six default personas are seeded — not inlined — through the first-party plugin pack.
+
+- **Source pack** — `plugins/cognia-builtin-characters/src/index.ts`: `BUILTIN_PACK` (lines 32-100) defines 6 characters: **Coding**, **Writing**, **Research**, **Brainstorm**, **Translator**, **Goal Tracker**. `BUILTIN_PLUGIN_ID = "cognia-builtin-characters"` (line 117).
+- **Lift-and-shift contract** — `BUILTIN_LEGACY_ID_TO_LOCAL_ID` (lines 108-115) maps the legacy `char_builtin_*` ids to v50 pack `localId`s. This mapping is load-bearing: changing a `localId` orphans any customization a user cloned from that built-in, so the table is treated as an append-only contract.
+- **Seeder** — `seedBuiltInCharacters` (`characters.ts:497-560`) runs on every `getDb()`. It `bulkPut`s the 6 rows tagged with builtin-pack attribution and `isBuiltIn: true`. Because it is idempotent, re-running it never duplicates rows and never clobbers user-created characters.
+
+Built-ins therefore live in Dexie like any clone, but ride the overlay-and-update machinery of [ADR-0030 character packs](./character-packs).
+
+## `SystemPromptPreset` — a Template, Not a Persona
+
+A `SystemPromptPreset` is frequently mistaken for a Character. It is not. A preset is a **pluggable configuration template** — a saved system prompt plus a subset of chat-config overrides — that you apply *to* a session. A Character is a full, selectable persona with an avatar, twin binding, voice, and capability gates. Presets seed the prompt field of the composer; Characters bind to the session.
+
+```typescript
+// lib/claude/types.ts:1943-1981 (trimmed)
+export interface SystemPromptPreset {
+  id: string
+  name: string
+  content: string                // the system prompt body (named "content" for v2 back-compat)
+  createdAt: number
+  updatedAt: number
+  description?: string
+  icon?: string                  // single emoji glyph
+  color?: string                 // oklch / hex avatar background
+  category?: PresetCategory
+  // chat-config overrides (mirror ChatSession / Character fields)
+  model?: string
+  permissionMode?: SendOptions["permissionMode"]
+  effort?: SendOptions["effort"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  mcpServerIds?: string[]
+  skillIds?: string[]
+  agentModeId?: string
+  workingDir?: string
+  // organisation
+  isDefault?: boolean
+  isFavorite?: boolean
+  isBuiltIn?: boolean            // seeded built-ins are read-only; UI offers Duplicate
+  sortOrder?: number
+  // usage tracking
+  usageCount?: number
+  lastUsedAt?: number
+}
+```
+
+Presets persist in the `promptPresets` table. The **12 built-ins** are constructed by `buildBuiltInPresets` in `lib/db/preset-built-ins.ts:18-173` and seeded idempotently via `seedBuiltInPresets` (`lib/db/seed.ts`):
+
+| Preset id | Name | Category |
+| --- | --- | --- |
+| `preset_builtin_general` | General Assistant | general |
+| `preset_builtin_code_expert` | Code Expert | coding |
+| `preset_builtin_code_reviewer` | Code Reviewer | coding |
+| `preset_builtin_writer` | Writer | writing |
+| `preset_builtin_writing_coach` | Writing Coach | writing |
+| `preset_builtin_researcher` | Researcher | research |
+| `preset_builtin_quick_helper` | Quick Helper | general |
+| `preset_builtin_tutor` | Tutor | general |
+| `preset_builtin_translator` | Translator | writing |
+| `preset_builtin_data_analyst` | Data Analyst | research |
+| `preset_builtin_summarizer` | Summarizer | general |
+| `preset_builtin_business_strategist` | Business Strategist | general |
+
+The preset fields are deliberately trimmed to what `SendOptions` actually wires — no `temperature`, `maxTokens`, or web-search, because the Agent SDK does not expose them.
+
+## Related
+
+<Cards>
+  <Card title="Runtime consumption" href="./runtime-consumption" description="How resolveSendOptions reads these fields into one send, with the full precedence chains." />
+  <Card title="Character packs" href="./character-packs" description="The ADR-0030 overlay types, pristine snapshots, and the Apply Update diff this data model feeds." />
+  <Card title="Storage & data" href="../data/storage" description="The Dexie database, additive-schema convention, and backup behavior." />
+</Cards>

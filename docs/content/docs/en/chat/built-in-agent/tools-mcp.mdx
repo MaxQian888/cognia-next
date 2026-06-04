@@ -88,7 +88,7 @@ flowchart LR
 - **Managed skills** (`anthropic-managed`) resolve to a `containerSkillId` only; build-options forwards up to 8 (`MAX_CONTAINER_SKILLS`, `:126`) to the sidecar as `container.skill_id`.
 - **Body skills** have their markdown read by `resolveSkillMarkdown` (`skills-io.ts:273`) — inline / local-folder / local-bundle / archive — and folded into one `## Skill: <name>` section via `renderResolvedSkillsSection` (`:158`).
 
-Plugin skills win on id collision; everything is fail-soft (browser / fs failure → `undefined`, never throws). See the [Skills system](./skills-system) for authoring.
+Plugin skills win on id collision; everything is fail-soft (browser / fs failure → `undefined`, never throws). See the [Skills subsystem](../../subsystems/skills/authoring-and-workbench) for authoring.
 
 ## Computer-use native tools
 
@@ -120,7 +120,7 @@ Plugin skills win on id collision; everything is fail-soft (browser / fs failure
 
 <Cards>
   <Card title="Build-options pipeline" href="./build-options" description="Where every tool/MCP/skill field is assembled into the payload." />
-  <Card title="Skills system" href="./skills-system" description="Authoring chat skills and the SKILL.md format." />
+  <Card title="Skills subsystem" href="../../subsystems/skills" description="Authoring chat skills and the SKILL.md format." />
   <Card title="MCP System" href="../subsystems/mcp" description="The full MCP client/host/bridge section — config store, presets, built-in tools, and the a2ui-bridge." />
   <Card title="ADR-0020 Computer Use" href="../adr/0020-computer-use-completeness" description="The native computer-use gate and consent tiers." />
 </Cards>

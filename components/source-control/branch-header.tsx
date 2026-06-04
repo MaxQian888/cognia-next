@@ -18,7 +18,7 @@ interface BranchHeaderProps {
   branches: GitBranch[]
   actions: Pick<
     UseGitActionsResult,
-    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase"
+    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase" | "merge"
   >
 }
 

@@ -127,6 +127,78 @@ describe("NetworkDetectionTab", () => {
     })
   })
 
+  it("renders client badge, evidence subtitle, and secured hint for attributed candidates", async () => {
+    invokeMock.mockResolvedValue([
+      {
+        kind: "http",
+        host: "127.0.0.1",
+        port: 7897,
+        label: "Clash Verge Rev @ 127.0.0.1:7897",
+        client: "clash-verge-rev",
+        clientName: "Clash Verge Rev",
+        source: "config",
+        controllerSecured: true,
+      },
+    ])
+    render(<NetworkDetectionTab />)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("detection.button"))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Clash Verge Rev @ 127.0.0.1:7897")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Clash Verge Rev")).toBeInTheDocument()
+    expect(
+      screen.getByText(/detection\.source\.config · detection\.controllerSecured/)
+    ).toBeInTheDocument()
+  })
+
+  it("renders process-source subtitle without the secured hint", async () => {
+    invokeMock.mockResolvedValue([
+      {
+        kind: "clash",
+        host: "127.0.0.1",
+        port: 7890,
+        label: "FlClash @ 127.0.0.1:7890",
+        version: "1.18.0",
+        client: "flclash",
+        clientName: "FlClash",
+        source: "process",
+      },
+    ])
+    render(<NetworkDetectionTab />)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("detection.button"))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("FlClash")).toBeInTheDocument()
+    })
+    expect(screen.getByText("detection.source.process")).toBeInTheDocument()
+    expect(screen.queryByText(/detection\.controllerSecured/)).not.toBeInTheDocument()
+    expect(screen.getByText("v1.18.0")).toBeInTheDocument()
+  })
+
+  it("renders legacy candidates without client fields exactly as before", async () => {
+    invokeMock.mockResolvedValue([
+      { kind: "http", host: "127.0.0.1", port: 8080, label: "HTTP proxy @ 127.0.0.1:8080" },
+    ])
+    render(<NetworkDetectionTab />)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("detection.button"))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("HTTP proxy @ 127.0.0.1:8080")).toBeInTheDocument()
+    })
+    // No client badge, no evidence subtitle, no secured hint.
+    expect(screen.queryByText(/detection\.source\./)).not.toBeInTheDocument()
+    expect(screen.queryByText(/detection\.controllerSecured/)).not.toBeInTheDocument()
+    // Apply still works.
+    await act(async () => {
+      fireEvent.click(screen.getByText("detection.apply"))
+    })
+    expect(saveMock.mock.calls[0][0].networkProxy.port).toBe(8080)
+  })
+
   it("shows a web-unsupported notice and skips invoke when not in Tauri", async () => {
     isTauriMock.mockReturnValue(false)
     render(<NetworkDetectionTab />)

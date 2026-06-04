@@ -1,14 +1,15 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { SearchIcon, XIcon } from "lucide-react"
+import { ChevronRightIcon, SearchIcon, XIcon } from "lucide-react"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +32,7 @@ import {
   type SettingsSectionId,
 } from "./settings-nav-config"
 import { isTauri } from "@/lib/tauri"
+import { useSettingsSidebarCollapse } from "@/hooks/settings/use-settings-sidebar-collapse"
 
 interface Props {
   activeSection: SettingsSectionId
@@ -43,11 +45,31 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   const t = useTranslations()
   const { state, setOpenMobile } = useSidebar()
   const isCollapsed = state === "collapsed"
+  const { isGroupCollapsed, setGroupCollapsed, expandGroup } = useSettingsSidebarCollapse()
   const [desktopAvailable, setDesktopAvailable] = useState(false)
   useEffect(() => {
     const timer = setTimeout(() => setDesktopAvailable(isTauri()), 0)
     return () => clearTimeout(timer)
   }, [])
+
+  // While searching, collapse state is ignored: every group with a hit is
+  // forced open (the persisted state is left untouched).
+  const searching = searchQuery.trim().length > 0
+
+  // Deep links (`?section=`) and search-result clicks can land on a section
+  // inside a collapsed group — expand (and persist) that group so the active
+  // item stays visible. The ref keys on the section so a manual collapse of
+  // the active group right after isn't immediately undone.
+  const activeGroup = useMemo(
+    () => SETTINGS_NAV.find((item) => item.id === activeSection)?.group,
+    [activeSection]
+  )
+  const lastAutoExpandedRef = useRef<SettingsSectionId | null>(null)
+  useEffect(() => {
+    if (lastAutoExpandedRef.current === activeSection) return
+    lastAutoExpandedRef.current = activeSection
+    if (activeGroup && isGroupCollapsed(activeGroup)) void expandGroup(activeGroup)
+  }, [activeSection, activeGroup, isGroupCollapsed, expandGroup])
 
   const navItems = useMemo(
     () => SETTINGS_NAV.filter((item) => !item.desktopOnly || desktopAvailable),
@@ -116,39 +138,65 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
           SETTINGS_GROUP_ORDER.map((group) => {
             const items = grouped[group]
             if (items.length === 0) return null
+            // Icon-collapsed sidebar hides group labels entirely; keep the
+            // menu items visible regardless of the persisted collapse state.
+            const open = searching || isCollapsed || !isGroupCollapsed(group)
             return (
-              <SidebarGroup key={group} className="py-1">
-                <SidebarGroupLabel className="px-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider">
-                  {groupLabels[group]}
-                </SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {items.map((item) => {
-                      const Icon = item.icon
-                      return (
-                        <SidebarMenuItem key={item.id}>
-                          <SidebarMenuButton
-                            isActive={activeSection === item.id}
-                            onClick={() => {
-                              onSelect(item.id)
-                              setOpenMobile(false)
-                            }}
-                            tooltip={t(`settings.descriptions.${item.descriptionKey}` as never)}
-                            className="px-2.5 py-2 h-auto"
-                          >
-                            <Icon className="h-4 w-4" />
-                            <div className="flex flex-col gap-0.5 text-left leading-none flex-1 min-w-0">
-                              <span className="font-medium truncate">
-                                {t(`settings.tabs.${item.labelKey}` as never)}
-                              </span>
-                            </div>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      )
-                    })}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
+              <Collapsible
+                key={group}
+                open={open}
+                onOpenChange={(next) => {
+                  if (searching || isCollapsed) return
+                  void setGroupCollapsed(group, !next)
+                }}
+                className="group/collapsible"
+              >
+                <SidebarGroup className="py-1">
+                  <SidebarGroupLabel
+                    asChild
+                    className="px-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider"
+                  >
+                    <CollapsibleTrigger
+                      disabled={searching}
+                      className="w-full cursor-pointer hover:text-foreground/80 disabled:cursor-default"
+                    >
+                      {groupLabels[group]}
+                      {!searching && (
+                        <ChevronRightIcon className="ml-auto h-3 w-3 shrink-0 transition-transform duration-200 ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none" />
+                      )}
+                    </CollapsibleTrigger>
+                  </SidebarGroupLabel>
+                  <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {items.map((item) => {
+                          const Icon = item.icon
+                          return (
+                            <SidebarMenuItem key={item.id}>
+                              <SidebarMenuButton
+                                isActive={activeSection === item.id}
+                                onClick={() => {
+                                  onSelect(item.id)
+                                  setOpenMobile(false)
+                                }}
+                                tooltip={t(`settings.descriptions.${item.descriptionKey}` as never)}
+                                className="px-2.5 py-2 h-auto"
+                              >
+                                <Icon className="h-4 w-4" />
+                                <div className="flex flex-col gap-0.5 text-left leading-none flex-1 min-w-0">
+                                  <span className="font-medium truncate">
+                                    {t(`settings.tabs.${item.labelKey}` as never)}
+                                  </span>
+                                </div>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          )
+                        })}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </CollapsibleContent>
+                </SidebarGroup>
+              </Collapsible>
             )
           })
         ) : (

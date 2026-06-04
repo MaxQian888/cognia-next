@@ -23,6 +23,11 @@
 
 ---
 
+> [!WARNING]
+> **This project is undergoing a major refactoring.** APIs, data schemas, and features may change
+> or break without notice, and overall availability is **not guaranteed** at this stage. Pin a
+> known-good commit if you depend on it.
+
 ## Overview
 
 Cognia ships a single Next.js 16 static export to three shells — browser, Tauri 2 desktop, and
@@ -83,7 +88,7 @@ The full subsystem catalogue, with one ADR per topic, lives under
 ## Quick start
 
 ```bash
-git clone https://github.com/AstroAir/cognia-next
+git clone https://github.com/MaxQian888/cognia-next
 cd cognia-next
 pnpm install                   # workspace (main + docs + mobile + plugin-sdk)
 pnpm sidecar:install           # Node sidecar (separate lockfile)
@@ -295,4 +300,4 @@ placeholder backends so the dispatch table compiles everywhere.
 ## Support
 
 - Read the relevant ADR under [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
-- File an issue: <https://github.com/AstroAir/cognia-next/issues>.
+- File an issue: <https://github.com/MaxQian888/cognia-next/issues>.

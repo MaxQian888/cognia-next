@@ -234,7 +234,7 @@ const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
 
 // Sections that own a list+detail layout and manage their own internal scroll.
 // These bypass the outer ScrollArea so the frame stays fixed while inner panes scroll.
-const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>(["providers"])
+const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>(["providers", "ocr", "diagnostics"])
 
 function isSection(value: string | null): value is SettingsSectionId {
   return value !== null && VALID_SECTIONS.has(value as SettingsSectionId)

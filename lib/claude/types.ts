@@ -1318,12 +1318,13 @@ export interface AppSettings {
    *    (flat, compact). Toggled inline on the welcome page and from Settings →
    *    General. Mobile/narrow viewports force `"minimal"` regardless.
    *  - `welcomeHidden`: per-section dismissals. Once the user closes the
-   *    "Quick start" capability grid or the "Try a prompt" starters, the flag
-   *    keeps it hidden across reloads.
+   *    "Try a prompt" starters, the flag keeps it hidden across reloads.
+   *    (Stale `quickStart` flags from before the capability grid was removed
+   *    are ignored.)
    */
   userName?: string
   welcomeStyle?: "rich" | "minimal"
-  welcomeHidden?: { quickStart?: boolean; tryPrompt?: boolean }
+  welcomeHidden?: { tryPrompt?: boolean }
   /**
    * Persisted view preferences for the MCP servers management panel
    * (`/settings?section=mcp`). Lives in settings JSON (same pattern as
@@ -1341,6 +1342,13 @@ export interface AppSettings {
     groupBy: "none" | "transport" | "status"
     favorites: string[]
   }
+  /**
+   * Collapsed group ids in the settings sidebar (`/settings`). Lives in
+   * settings JSON (same pattern as `mcpPanel` / `goalConsoleView`) so the
+   * collapse state follows the user across devices without a Dexie migration.
+   * Absent / empty = all groups expanded. Unknown ids are ignored on read.
+   */
+  settingsSidebarCollapsedGroups?: string[]
   /**
    * Autonomous long-term memory configuration. Lives in settings JSON (same
    * pattern as `goalConsoleView` / `mcpPanel`) so it follows the user across

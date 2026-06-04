@@ -78,6 +78,45 @@ jest.mock("@/hooks/ui", () => ({
   useResizableLayout: (...args: unknown[]) => mockUseResizableLayout(...args),
 }))
 
+// ── Stub the resizable wrapper — the real Group measures the DOM, which jsdom
+// can't satisfy. Expose size props as data attributes for unit assertions.
+jest.mock("@/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode
+    className?: string
+  }) => (
+    <div data-testid="resizable-group" className={className}>
+      {children}
+    </div>
+  ),
+  ResizablePanel: ({
+    children,
+    id,
+    defaultSize,
+    minSize,
+    maxSize,
+  }: {
+    children: React.ReactNode
+    id?: string
+    defaultSize?: number | string
+    minSize?: number | string
+    maxSize?: number | string
+  }) => (
+    <div
+      data-testid={id ? `resizable-panel-${id}` : "resizable-panel"}
+      data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+      data-min-size={minSize === undefined ? undefined : String(minSize)}
+      data-max-size={maxSize === undefined ? undefined : String(maxSize)}
+    >
+      {children}
+    </div>
+  ),
+  ResizableHandle: () => <div data-slot="resizable-handle" />,
+}))
+
 const mockUseLogStream = jest.fn()
 const mockUseLogModules = jest.fn()
 const mockUseAgentTraceAsLogs = jest.fn()
@@ -449,6 +488,24 @@ describe("LogPanel — resizable detail panel", () => {
     expect(screen.getByTestId("log-panel-resizable-group")).toBeInTheDocument()
     expect(container.querySelector('[data-slot="resizable-handle"]')).toBeInTheDocument()
     expect(screen.getByTestId("stub-detail-panel")).toBeInTheDocument()
+  })
+
+  // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
+  // be percent strings or the main/detail split collapses to px-wide slivers.
+  it("passes percent-string sizes to the main and detail panels", () => {
+    const selected = { id: "l-1", message: "x", level: "info", module: "m", timestamp: "" } as never
+    mockUseLogPanelFilters.mockReturnValue(
+      defaultFilterState({ selectedLog: selected, showDetailPanel: true })
+    )
+    render(<LogPanel />)
+    const percent = /^\d+(\.\d+)?%$/
+    const main = screen.getByTestId("resizable-panel-log-panel-main")
+    const detail = screen.getByTestId("resizable-panel-log-panel-detail")
+    for (const panel of [main, detail]) {
+      expect(panel.dataset.defaultSize).toMatch(percent)
+      expect(panel.dataset.minSize).toMatch(percent)
+    }
+    expect(detail.dataset.maxSize).toMatch(percent)
   })
 
   it("renders main pane alone (no resizable group) when detail closed", () => {

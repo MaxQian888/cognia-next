@@ -17,8 +17,20 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = { current
 
 jest.mock("@xyflow/react", () => {
   const React = jest.requireActual("react")
+  // Stable instance shared across renders (mirrors the real useReactFlow,
+  // which memoizes) so the camera-sync effect doesn't re-run per render and
+  // tests can spy on setViewport. Exposed to tests as `__mockRf`.
+  const mockRf = {
+    getNode: () => ({ measured: { width: 240, height: 80 } }),
+    getNodes: () => [],
+    setViewport: jest.fn(),
+    fitView: () => undefined,
+    screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
+    getViewport: jest.fn(() => ({ x: 0, y: 0, zoom: 1 })),
+  }
   return {
     __esModule: true,
+    __mockRf: mockRf,
     ReactFlow: (
       props: {
         nodes: Array<{ id: string }>
@@ -51,14 +63,7 @@ jest.mock("@xyflow/react", () => {
       }),
     Handle: () => null,
     Position: { Left: "left", Right: "right" },
-    useReactFlow: () => ({
-      getNode: () => ({ measured: { width: 240, height: 80 } }),
-      getNodes: () => [],
-      setViewport: () => undefined,
-      fitView: () => undefined,
-      screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
-      getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
-    }),
+    useReactFlow: () => mockRf,
     useOnViewportChange: () => undefined,
     applyNodeChanges: (_c: unknown, n: unknown) => n,
     applyEdgeChanges: (_c: unknown, e: unknown) => e,
@@ -132,6 +137,14 @@ function renderCanvas(store: EditorStore) {
 }
 
 describe("FlowCanvas", () => {
+  beforeEach(() => {
+    const { __mockRf } = jest.requireMock("@xyflow/react") as {
+      __mockRf: { setViewport: jest.Mock; getViewport: jest.Mock }
+    }
+    __mockRf.getViewport.mockImplementation(() => ({ x: 0, y: 0, zoom: 1 }))
+    __mockRf.setViewport.mockClear()
+  })
+
   it("renders the wrapper, React Flow surface, nodes and the overlays slot", () => {
     const { store, trigger, ai } = seedStore()
     renderCanvas(store)
@@ -190,5 +203,52 @@ describe("FlowCanvas", () => {
     const { act } = jest.requireActual("@testing-library/react")
     act(() => onMoveEnd({}, { x: 10, y: 20, zoom: 1.5 }))
     expect(store.getState().viewport).toEqual({ x: 10, y: 20, zoom: 1.5 })
+  })
+
+  // ── Uncontrolled camera ────────────────────────────────────────────────────
+  // The viewport must NOT be passed as the controlled `viewport` prop: in
+  // controlled mode React Flow stops applying pan/zoom transforms internally
+  // and (without an onViewportChange round-trip) the canvas freezes during a
+  // drag — the "canvas doesn't follow the drag" regression.
+
+  function getMockRf() {
+    return (
+      jest.requireMock("@xyflow/react") as {
+        __mockRf: { setViewport: jest.Mock; getViewport: jest.Mock }
+      }
+    ).__mockRf
+  }
+
+  it("seeds the camera via defaultViewport and never passes the controlled viewport prop", () => {
+    const { store } = seedStore()
+    renderCanvas(store)
+    const props = reactFlowPropsRef.current!
+    expect(props.defaultViewport).toEqual({ x: 0, y: 0, zoom: 1 })
+    expect(props.viewport).toBeUndefined()
+  })
+
+  it("pushes a wholesale store viewport replace into the camera imperatively", () => {
+    const { store } = seedStore()
+    renderCanvas(store)
+    const rf = getMockRf()
+    rf.setViewport.mockClear()
+    const { act } = jest.requireActual("@testing-library/react")
+    // Simulates loadWorkflow / JSON import / workflow switch rewriting the
+    // persisted viewport out from under the mounted canvas.
+    act(() => store.getState().setViewport({ x: 40, y: 50, zoom: 2 }))
+    expect(rf.setViewport).toHaveBeenCalledWith({ x: 40, y: 50, zoom: 2 })
+  })
+
+  it("skips the camera write when the store value already matches the live camera (onMoveEnd echo)", () => {
+    const { store } = seedStore()
+    renderCanvas(store)
+    const rf = getMockRf()
+    rf.getViewport.mockReturnValue({ x: 10, y: 20, zoom: 1.5 })
+    rf.setViewport.mockClear()
+    const onMoveEnd = reactFlowPropsRef.current!.onMoveEnd as (e: unknown, v: unknown) => void
+    const { act } = jest.requireActual("@testing-library/react")
+    act(() => onMoveEnd({}, { x: 10, y: 20, zoom: 1.5 }))
+    expect(store.getState().viewport).toEqual({ x: 10, y: 20, zoom: 1.5 })
+    expect(rf.setViewport).not.toHaveBeenCalled()
   })
 })

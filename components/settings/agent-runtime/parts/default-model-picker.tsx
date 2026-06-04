@@ -24,6 +24,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { PROVIDERS } from "@/types/provider/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
 
 interface ModelOption {
@@ -32,20 +33,41 @@ interface ModelOption {
   modelId: string
 }
 
+/**
+ * Curated fallback for an enabled-but-unconfigured provider — the static
+ * built-in `PROVIDERS` registry, mirroring `composer/model-picker.tsx`.
+ */
+function catalogModelIds(providerId: string): string[] {
+  const cfg = PROVIDERS[providerId]
+  if (!cfg) return []
+  const ids = new Set<string>()
+  if (cfg.defaultModel) ids.add(cfg.defaultModel)
+  for (const m of cfg.models ?? []) ids.add(m.id)
+  return [...ids]
+}
+
 function collectOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
   customProviders: CustomProviderSettings[] | undefined
 ): ModelOption[] {
   const out: ModelOption[] = []
-  for (const [providerId, settings] of Object.entries(providerSettings ?? {})) {
+  // Anthropic is always considered even without a providerSettings entry:
+  // the sidecar runtime authenticates via API key or subscription OAuth and
+  // needs no provider config. An explicit `enabled: false` entry opts out.
+  const entries = Object.entries(providerSettings ?? {})
+  if (!entries.some(([id]) => id === "anthropic")) {
+    entries.unshift(["anthropic", { providerId: "anthropic" } as UserProviderSettings])
+  }
+  for (const [providerId, settings] of entries) {
     if (settings.enabled === false) continue
     const allowed = new Set<string>(settings.enabledModels ?? [])
     if (settings.defaultModel) allowed.add(settings.defaultModel)
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
     }
-    if (allowed.size === 0 && settings.defaultModel) allowed.add(settings.defaultModel)
-    for (const modelId of allowed) {
+    // Nothing configured at all → curated built-in catalog, never an empty group.
+    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
+    for (const modelId of modelIds) {
       out.push({ providerId, providerName: providerId, modelId })
     }
   }

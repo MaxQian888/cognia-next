@@ -299,7 +299,7 @@ frontmatter 支持的字段在 Rust 端 `SlashCommandFile` 与 TS 端 `SlashComm
 ## 关联子系统
 
 - [聊天、角色、技能 & 团队](./chat-and-skills) —— composer 的派发宿主；`SlashContext.openSettings` 直通设置面板。
-- [技能系统](./skills-system) —— `allowedTools` / `paths` 等字段在 send-time 与技能合并取并。
+- [技能子系统](../subsystems/skills/loading-and-injection) —— `allowedTools` / `paths` 等字段在 send-time 与技能合并取并。
 - [Agent 团队](./agent-teams) —— `/agents` 命令直接跳转角色/团队管理。
 - [插件系统](../subsystems/plugin-system) —— `unregisterCommandsByPlugin` 是 plugin disable 的标准清理路径。
 - [Sidecar & Claude SDK](../core/sidecar-and-claude-sdk) —— `/compact` 由 SDK 拦截、`permissionMode` 经 SDK 应用。

@@ -80,7 +80,10 @@ export const useInboxLayoutStore = create<InboxLayoutState>()(
     }),
     {
       name: "cognia-inbox-layout",
-      version: 1,
+      // v2: v1 layouts were persisted while `<InboxShell />` passed bare
+      // numbers to react-resizable-panels v4 (interpreted as pixels, not
+      // percent), so every drag stored clamped garbage — discard them.
+      version: 2,
       migrate: (_oldState: unknown, _oldVersion: number) => ({
         ...INBOX_LAYOUT_DEFAULTS,
       }),

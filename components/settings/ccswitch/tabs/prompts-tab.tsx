@@ -20,6 +20,11 @@ import { importCcswitchPrompts } from "@/lib/ccswitch/import"
 import type { CcswitchPrompt } from "@/types/ccswitch"
 import { isTauri } from "@/lib/tauri"
 
+// CCSwitch keys prompts by (id, app_type) — `id` alone repeats across apps
+// (e.g. claude/default + codex/default), so React keys and the selection set
+// must use the composite.
+const promptKey = (p: CcswitchPrompt) => `${p.kind ?? ""}:${p.id}`
+
 export function CcswitchPromptsTab() {
   const t = useTranslations("ccswitch")
   const tabReady = isTauri()
@@ -37,7 +42,7 @@ export function CcswitchPromptsTab() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- default-select all rows whenever the source data refreshes
-    setSelected(new Set(prompts?.map((p) => p.id) ?? []))
+    setSelected(new Set(prompts?.map(promptKey) ?? []))
   }, [prompts])
 
   const toggle = (id: string, checked: boolean) => {
@@ -51,7 +56,7 @@ export function CcswitchPromptsTab() {
 
   const onImport = async () => {
     if (!prompts) return
-    const picks = prompts.filter((p) => selected.has(p.id))
+    const picks = prompts.filter((p) => selected.has(promptKey(p)))
     setImporting(true)
     setResultText(null)
     try {
@@ -111,10 +116,10 @@ export function CcswitchPromptsTab() {
         <ul className="divide-y">
           {prompts.map((p) => (
             <PromptRow
-              key={p.id}
+              key={promptKey(p)}
               prompt={p}
-              checked={selected.has(p.id)}
-              onChange={(c) => toggle(p.id, c)}
+              checked={selected.has(promptKey(p))}
+              onChange={(c) => toggle(promptKey(p), c)}
             />
           ))}
         </ul>

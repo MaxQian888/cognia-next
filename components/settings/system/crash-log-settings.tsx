@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangle,
-  Bug,
+  ArrowLeft,
   ChevronRight,
   Circle,
   Copy,
@@ -22,13 +22,7 @@ import {
 } from "lucide-react"
 
 import { LogDetailPanel } from "@/components/logging/log-detail-panel"
-import {
-  SettingsCard,
-  SettingsEmptyState,
-  SettingsGrid,
-  SettingsGroup,
-  SettingsPageHeader,
-} from "@/components/settings/common/settings-section"
+import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -78,6 +73,7 @@ const LEVEL_BORDER: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   active: "text-emerald-500",
+  healthy: "text-emerald-500",
   degraded: "text-amber-500",
   inactive: "text-slate-400",
   error: "text-red-500",
@@ -236,6 +232,9 @@ export function CrashLogSettings() {
     summary,
   } = useCrashLogs()
   const [isBusy, setIsBusy] = useState(false)
+  // The hook auto-selects a fallback item, so `selectedItem` alone cannot
+  // drive the single-column (<md) list/detail switch — track it explicitly.
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
 
   const sourceOptions = useMemo<CrashLogSourceFilter[]>(
     () => ["all", "recent", "persisted", "diagnostic"],
@@ -262,236 +261,175 @@ export function CrashLogSettings() {
     }
   }
 
-  const levelCounts = useMemo(() => {
-    const counts = { fatal: 0, error: 0, warn: 0 }
-    for (const item of items) {
-      if (item.level === "fatal") counts.fatal++
-      else if (item.level === "error") counts.error++
-      else if (item.level === "warn") counts.warn++
-    }
-    return counts
-  }, [items])
-
   return (
-    <div className="space-y-4">
-      {/* ─── Header with streamlined actions ─── */}
-      <SettingsPageHeader
-        title={t("crash.title")}
-        description={t("crash.description")}
-        icon={<Bug className="h-5 w-5" />}
-        actions={
-          <div className="flex items-center gap-2">
-            {/* Refresh */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleAsyncAction(refresh)}
-                  disabled={isBusy}
-                >
-                  <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-                  {t("crash.actions.refresh")}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("crash.actions.refresh")}</TooltipContent>
-            </Tooltip>
-
-            {/* Auto-refresh toggle */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={autoRefresh ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                >
-                  {autoRefresh ? (
-                    <PauseCircle className="h-4 w-4" />
-                  ) : (
-                    <PlayCircle className="h-4 w-4" />
-                  )}
-                  {autoRefresh ? t("crash.actions.pauseRefresh") : t("crash.actions.resumeRefresh")}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {autoRefresh ? t("crash.actions.pauseRefresh") : t("crash.actions.resumeRefresh")}
-              </TooltipContent>
-            </Tooltip>
-
-            {/* Export dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={items.length === 0}>
-                  <Download className="h-4 w-4" />
-                  {t("crash.actions.export")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => exportBundle("bundle")}>
-                  <Package className="h-4 w-4 mr-2" />
-                  {t("crash.actions.exportBundle")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportBundle("json")}>
-                  <ScrollText className="h-4 w-4 mr-2" />
-                  {t("crash.actions.exportJson")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportBundle("text")}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  {t("crash.actions.exportText")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Clear dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={isBusy}>
-                  <Trash2 className="h-4 w-4" />
-                  {t("crash.actions.clear")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => clearRecent()}>
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  {t("crash.actions.clearRecent")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => void handleAsyncAction(clearPersisted)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {t("crash.actions.clearPersisted")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        }
-      />
-
-      {/* ─── Summary cards with level breakdown ─── */}
-      <SettingsGrid columns={3}>
-        {/* Total + level breakdown */}
-        <SettingsCard
-          title={t("crash.summary.total")}
-          description={t("crash.summary.totalDescription")}
-        >
-          <div className="flex items-end justify-between gap-3">
-            <div className="text-3xl font-bold tabular-nums">{summary.total}</div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              {levelCounts.fatal > 0 && (
-                <span className="flex items-center gap-1">
-                  <LevelDot level="fatal" /> {levelCounts.fatal} fatal
-                </span>
-              )}
-              {levelCounts.error > 0 && (
-                <span className="flex items-center gap-1">
-                  <LevelDot level="error" /> {levelCounts.error} error
-                </span>
-              )}
-              {levelCounts.warn > 0 && (
-                <span className="flex items-center gap-1">
-                  <LevelDot level="warn" /> {levelCounts.warn} warn
-                </span>
-              )}
-            </div>
-          </div>
-          {/* Severity bar */}
-          {summary.total > 0 && (
-            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted mt-2">
-              {levelCounts.fatal > 0 && (
-                <div
-                  className="bg-red-600 transition-all"
-                  style={{ width: `${(levelCounts.fatal / summary.total) * 100}%` }}
-                />
-              )}
-              {levelCounts.error > 0 && (
-                <div
-                  className="bg-red-500 transition-all"
-                  style={{ width: `${(levelCounts.error / summary.total) * 100}%` }}
-                />
-              )}
-              {levelCounts.warn > 0 && (
-                <div
-                  className="bg-amber-500 transition-all"
-                  style={{ width: `${(levelCounts.warn / summary.total) * 100}%` }}
-                />
-              )}
-            </div>
+    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="crash-log-settings">
+      {/* ─── Compact toolbar: stats strip + actions ─── */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2">
+        {/* Stats strip */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-lg font-bold tabular-nums text-foreground">{summary.total}</span>
+            {t("crash.summary.total")}
+          </span>
+          {(["fatal", "error", "warn"] as const).map((level) =>
+            summary.byLevel[level] > 0 ? (
+              <span key={level} className="flex items-center gap-1">
+                <LevelDot level={level} />
+                <span className="tabular-nums">{summary.byLevel[level]}</span>
+                {t(`levels.${level}`)}
+              </span>
+            ) : null
           )}
-        </SettingsCard>
-
-        {/* By source */}
-        <SettingsCard
-          title={t("crash.summary.bySource")}
-          description={t("crash.summary.bySourceDescription")}
-        >
-          <div className="flex items-center gap-4">
-            <div className="space-y-1.5 flex-1">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{t("crash.sources.recent")}</span>
-                <span className="font-semibold tabular-nums">{summary.bySource.recent}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{t("crash.sources.persisted")}</span>
-                <span className="font-semibold tabular-nums">{summary.bySource.persisted}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{t("crash.sources.diagnostic")}</span>
-                <span className="font-semibold tabular-nums">{summary.bySource.diagnostic}</span>
-              </div>
-            </div>
-          </div>
-        </SettingsCard>
-
-        {/* Native status */}
-        <SettingsCard
-          title={t("crash.summary.native")}
-          description={t("crash.summary.nativeDescription")}
-        >
-          <div className="flex items-center gap-3">
-            <Circle
-              className={cn(
-                "h-4 w-4 fill-current",
-                STATUS_COLOR[summary.nativeLoggingStatus] ?? STATUS_COLOR.unavailable
-              )}
-            />
-            <span className="text-lg font-semibold capitalize">{summary.nativeLoggingStatus}</span>
-          </div>
-          {summary.nativeLoggingStatus !== "healthy" &&
-            summary.nativeLoggingStatus !== "unavailable" && (
-              <p className="text-xs text-muted-foreground mt-1">{t("crash.native.statusHint")}</p>
-            )}
-        </SettingsCard>
-      </SettingsGrid>
-
-      {/* ─── Main two-panel layout ─── */}
-      <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-        {/* Left: log list */}
-        <SettingsCard title={t("crash.listTitle")} description={t("crash.listDescription")}>
-          <div className="space-y-3">
-            {/* Status bar */}
-            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <Tooltip>
+            <TooltipTrigger asChild>
               <span className="flex items-center gap-1.5">
-                {autoRefresh ? (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-slate-400" />
-                )}
-                {autoRefresh ? t("crash.autoRefreshOn") : t("crash.autoRefreshOff")}
+                <Circle
+                  className={cn(
+                    "h-2.5 w-2.5 fill-current",
+                    STATUS_COLOR[summary.nativeLoggingStatus] ?? STATUS_COLOR.unavailable
+                  )}
+                />
+                <span className="capitalize">{summary.nativeLoggingStatus}</span>
               </span>
-              <span>
-                {lastUpdatedAt
-                  ? new Date(lastUpdatedAt).toLocaleTimeString()
-                  : t("crash.notAvailable")}
+            </TooltipTrigger>
+            <TooltipContent>{t("crash.summary.native")}</TooltipContent>
+          </Tooltip>
+          <span className="flex items-center gap-1.5">
+            {autoRefresh ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
-            </div>
+            ) : (
+              <span className="h-2 w-2 rounded-full bg-slate-400" />
+            )}
+            {autoRefresh ? t("crash.autoRefreshOn") : t("crash.autoRefreshOff")}
+            <span>
+              {lastUpdatedAt
+                ? new Date(lastUpdatedAt).toLocaleTimeString()
+                : t("crash.notAvailable")}
+            </span>
+          </span>
+        </div>
 
-            {/* Filters */}
-            <div className="grid gap-2 sm:grid-cols-2">
+        {/* Actions */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleAsyncAction(refresh)}
+                disabled={isBusy}
+              >
+                <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+                {t("crash.actions.refresh")}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("crash.actions.refresh")}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={autoRefresh ? "default" : "outline"}
+                size="sm"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+              >
+                {autoRefresh ? (
+                  <PauseCircle className="h-4 w-4" />
+                ) : (
+                  <PlayCircle className="h-4 w-4" />
+                )}
+                {autoRefresh ? t("crash.actions.pauseRefresh") : t("crash.actions.resumeRefresh")}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {autoRefresh ? t("crash.actions.pauseRefresh") : t("crash.actions.resumeRefresh")}
+            </TooltipContent>
+          </Tooltip>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={items.length === 0}>
+                <Download className="h-4 w-4" />
+                {t("crash.actions.export")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => exportBundle("bundle")}>
+                <Package className="h-4 w-4 mr-2" />
+                {t("crash.actions.exportBundle")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportBundle("json")}>
+                <ScrollText className="h-4 w-4 mr-2" />
+                {t("crash.actions.exportJson")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportBundle("text")}>
+                <FileText className="h-4 w-4 mr-2" />
+                {t("crash.actions.exportText")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={isBusy}>
+                <Trash2 className="h-4 w-4" />
+                {t("crash.actions.clear")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => clearRecent()}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {t("crash.actions.clearRecent")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => void handleAsyncAction(clearPersisted)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t("crash.actions.clearPersisted")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label={t("crash.actions.notes")}
+              >
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80">
+              <div className="text-sm font-medium mb-2">{t("crash.notes.title")}</div>
+              <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                {notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
+
+      {/* ─── Fill-height two-pane layout ─── */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(300px,360px)_1fr]">
+        {/* Left: filters + log list */}
+        <div
+          data-testid="crash-list-pane"
+          className={cn(
+            "min-h-0 flex-col overflow-hidden rounded-lg border",
+            mobileDetailOpen ? "hidden md:flex" : "flex"
+          )}
+        >
+          <div className="shrink-0 space-y-2 border-b p-2">
+            <div className="grid gap-2 grid-cols-2">
               <Select
                 value={filters.source}
                 onValueChange={(value) => setSourceFilter(value as CrashLogSourceFilter)}
@@ -503,6 +441,7 @@ export function CrashLogSettings() {
                   {sourceOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       {t(`crash.sources.${option}`)}
+                      {option !== "all" ? ` (${summary.bySource[option]})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -529,200 +468,209 @@ export function CrashLogSettings() {
               placeholder={t("crash.searchPlaceholder")}
               className="h-8 text-xs"
             />
+          </div>
 
-            {/* Error state */}
-            {error ? (
-              <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                <div className="font-medium">{t("crash.errorTitle")}</div>
-                <div className="text-xs mt-0.5">{error.message}</div>
-              </div>
-            ) : null}
+          {error ? (
+            <div className="shrink-0 border-b border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <div className="font-medium">{t("crash.errorTitle")}</div>
+              <div className="text-xs mt-0.5">{error.message}</div>
+            </div>
+          ) : null}
 
-            {/* Log list */}
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-                <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                {t("crash.loading")}
-              </div>
-            ) : items.length === 0 ? (
+          {isLoading ? (
+            <div className="flex flex-1 items-center justify-center py-12 text-sm text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              {t("crash.loading")}
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center">
               <SettingsEmptyState
                 title={t("crash.emptyTitle")}
                 description={t("crash.emptyDescription")}
               />
-            ) : (
-              <ScrollArea className="h-130">
-                <div className="space-y-1.5 pr-2">
-                  {items.map((item) => (
-                    <CrashLogRow
-                      key={item.id}
-                      item={item}
-                      selected={selectedItem?.id === item.id}
-                      onSelect={() => selectItem(item.id)}
-                    />
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-          </div>
-        </SettingsCard>
-
-        {/* Right: detail panel */}
-        <SettingsCard
-          title={t("crash.detailTitle")}
-          description={selectedItem ? selectedItem.title : t("crash.detailDescription")}
-        >
-          {!selectedItem ? (
-            <SettingsEmptyState
-              title={t("crash.noSelectionTitle")}
-              description={t("crash.noSelectionDescription")}
-            />
+            </div>
           ) : (
-            <ScrollArea className="h-155">
-              <div className="space-y-4 pr-2">
-                {/* Header with inline actions */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-2 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge
-                        variant={
-                          selectedItem.level === "fatal" || selectedItem.level === "error"
-                            ? "destructive"
-                            : "outline"
-                        }
-                        className="uppercase"
-                      >
-                        {selectedItem.level}
-                      </Badge>
-                      <Badge variant="outline">{selectedItem.module}</Badge>
-                      {selectedItem.sources.map((source) => (
-                        <SourceBadge key={`${selectedItem.id}-detail-${source}`} source={source} />
-                      ))}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(selectedItem.timestamp).toLocaleString()}
-                      {selectedItem.traceId && (
-                        <span className="ml-2 font-mono">
-                          {t("panel.traceId")}: {selectedItem.traceId}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-muted-foreground">{selectedItem.summary}</div>
-                  </div>
-                  {/* Contextual actions */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() =>
-                            void handleAsyncAction(() => Promise.resolve(copySelected()))
-                          }
-                          disabled={isBusy}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("crash.actions.copySelected")}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => void handleAsyncAction(openNativeLogDirectory)}
-                          disabled={
-                            !selectedItem?.diagnostics?.logDirectoryPath &&
-                            summary.nativeLoggingStatus === "unavailable"
-                          }
-                        >
-                          <FolderOpen className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("crash.actions.openDirectory")}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-
-                {/* Log entry detail */}
-                {selectedItem.logEntry ? (
-                  <LogDetailPanel log={selectedItem.logEntry} relatedLogs={relatedLogs} />
-                ) : null}
-
-                {/* Native logging diagnostics */}
-                <div className="space-y-2 rounded-lg border p-3">
-                  <div className="flex items-center gap-2">
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t("crash.native.title")}</span>
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <DiagnosticsField label={t("crash.native.status")}>
-                      <div className="flex items-center gap-2">
-                        <Circle
-                          className={cn(
-                            "h-3 w-3 fill-current",
-                            STATUS_COLOR[
-                              selectedItem.diagnostics?.nativeLogging?.status ?? "unavailable"
-                            ]
-                          )}
-                        />
-                        <span className="font-medium capitalize">
-                          {selectedItem.diagnostics?.nativeLogging?.status ??
-                            t("crash.native.unavailable")}
-                        </span>
-                      </div>
-                    </DiagnosticsField>
-                    <DiagnosticsField label={t("crash.native.logDirectory")} mono>
-                      {selectedItem.diagnostics?.logDirectoryPath ?? t("crash.native.unavailable")}
-                    </DiagnosticsField>
-                  </div>
-                  {/* Detailed native logging info as collapsible */}
-                  {selectedItem.diagnostics?.nativeLogging && (
-                    <DiagnosticsSection
-                      title={t("crash.native.details")}
-                      data={selectedItem.diagnostics.nativeLogging}
-                    />
-                  )}
-                </div>
-
-                {/* Additional diagnostics */}
-                {(selectedItem.diagnostics?.windowDiagnostics ||
-                  selectedItem.diagnostics?.localRuntimeDiagnostics) && (
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">{t("crash.diagnostics.title")}</span>
-                    </div>
-                    <DiagnosticsSection
-                      title={t("crash.diagnostics.window")}
-                      data={selectedItem.diagnostics.windowDiagnostics}
-                    />
-                    <DiagnosticsSection
-                      title={t("crash.diagnostics.runtime")}
-                      data={selectedItem.diagnostics.localRuntimeDiagnostics}
-                    />
-                  </div>
-                )}
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-1.5 p-2">
+                {items.map((item) => (
+                  <CrashLogRow
+                    key={item.id}
+                    item={item}
+                    selected={selectedItem?.id === item.id}
+                    onSelect={() => {
+                      selectItem(item.id)
+                      setMobileDetailOpen(true)
+                    }}
+                  />
+                ))}
               </div>
             </ScrollArea>
           )}
-        </SettingsCard>
-      </div>
+        </div>
 
-      {/* ─── Notes (collapsed by default) ─── */}
-      <SettingsGroup
-        title={t("crash.notes.title")}
-        icon={<Info className="h-4 w-4" />}
-        defaultOpen={false}
-      >
-        <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-          {notes.map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-        </ul>
-      </SettingsGroup>
+        {/* Right: detail panel */}
+        <div
+          data-testid="crash-detail-pane"
+          className={cn(
+            "min-h-0 flex-col overflow-hidden rounded-lg border",
+            mobileDetailOpen ? "flex" : "hidden md:flex"
+          )}
+        >
+          {!selectedItem ? (
+            <div className="flex flex-1 items-center justify-center">
+              <SettingsEmptyState
+                title={t("crash.noSelectionTitle")}
+                description={t("crash.noSelectionDescription")}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Detail header with inline actions */}
+              <div className="flex shrink-0 items-start gap-2 border-b p-3">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 md:hidden"
+                  onClick={() => setMobileDetailOpen(false)}
+                  aria-label={t("crash.actions.back")}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge
+                      variant={
+                        selectedItem.level === "fatal" || selectedItem.level === "error"
+                          ? "destructive"
+                          : "outline"
+                      }
+                      className="uppercase"
+                    >
+                      {selectedItem.level}
+                    </Badge>
+                    <Badge variant="outline">{selectedItem.module}</Badge>
+                    {selectedItem.sources.map((source) => (
+                      <SourceBadge key={`${selectedItem.id}-detail-${source}`} source={source} />
+                    ))}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(selectedItem.timestamp).toLocaleString()}
+                    {selectedItem.traceId && (
+                      <span className="ml-2 font-mono">
+                        {t("panel.traceId")}: {selectedItem.traceId}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() =>
+                          void handleAsyncAction(() => Promise.resolve(copySelected()))
+                        }
+                        disabled={isBusy}
+                        aria-label={t("crash.actions.copySelected")}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("crash.actions.copySelected")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => void handleAsyncAction(openNativeLogDirectory)}
+                        disabled={
+                          !selectedItem?.diagnostics?.logDirectoryPath &&
+                          summary.nativeLoggingStatus === "unavailable"
+                        }
+                        aria-label={t("crash.actions.openDirectory")}
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("crash.actions.openDirectory")}</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="space-y-4 p-3">
+                  <div className="text-sm text-muted-foreground">{selectedItem.summary}</div>
+
+                  {/* Log entry detail */}
+                  {selectedItem.logEntry ? (
+                    <LogDetailPanel log={selectedItem.logEntry} relatedLogs={relatedLogs} />
+                  ) : null}
+
+                  {/* Native logging diagnostics */}
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{t("crash.native.title")}</span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <DiagnosticsField label={t("crash.native.status")}>
+                        <div className="flex items-center gap-2">
+                          <Circle
+                            className={cn(
+                              "h-3 w-3 fill-current",
+                              STATUS_COLOR[
+                                selectedItem.diagnostics?.nativeLogging?.status ?? "unavailable"
+                              ]
+                            )}
+                          />
+                          <span className="font-medium capitalize">
+                            {selectedItem.diagnostics?.nativeLogging?.status ??
+                              t("crash.native.unavailable")}
+                          </span>
+                        </div>
+                      </DiagnosticsField>
+                      <DiagnosticsField label={t("crash.native.logDirectory")} mono>
+                        {selectedItem.diagnostics?.logDirectoryPath ??
+                          t("crash.native.unavailable")}
+                      </DiagnosticsField>
+                    </div>
+                    {/* Detailed native logging info as collapsible */}
+                    {selectedItem.diagnostics?.nativeLogging && (
+                      <DiagnosticsSection
+                        title={t("crash.native.details")}
+                        data={selectedItem.diagnostics.nativeLogging}
+                      />
+                    )}
+                  </div>
+
+                  {/* Additional diagnostics */}
+                  {(selectedItem.diagnostics?.windowDiagnostics ||
+                    selectedItem.diagnostics?.localRuntimeDiagnostics) && (
+                    <div className="space-y-2 rounded-lg border p-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{t("crash.diagnostics.title")}</span>
+                      </div>
+                      <DiagnosticsSection
+                        title={t("crash.diagnostics.window")}
+                        data={selectedItem.diagnostics.windowDiagnostics}
+                      />
+                      <DiagnosticsSection
+                        title={t("crash.diagnostics.runtime")}
+                        data={selectedItem.diagnostics.localRuntimeDiagnostics}
+                      />
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

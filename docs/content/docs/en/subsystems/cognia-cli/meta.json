@@ -1,0 +1,15 @@
+{
+  "title": "Cognia CLI",
+  "pages": [
+    "index",
+    "cli-core",
+    "scaffolding",
+    "lint",
+    "build-pipeline",
+    "signing-and-keys",
+    "bridge-client",
+    "bridge-server",
+    "detection-and-managed-install",
+    "devtools-ui"
+  ]
+}

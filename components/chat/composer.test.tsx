@@ -193,15 +193,27 @@ describe("Composer — mobile (Claude-style) layout", () => {
     const cls = pillClass()
     expect(cls).toContain("flex-wrap")
     expect(cls).not.toContain("flex-col")
+    // Mobile never picks up the container-query row layout — the textarea
+    // wrapper keeps its stacked w-full row regardless of container width.
+    const taWrapper = document.querySelector("textarea")?.parentElement
+    expect(taWrapper?.className ?? "").not.toContain("@sm/composer:flex-1")
   })
 
-  it("keeps the container-query responsive layout on web/desktop", () => {
+  it("wraps into the two-row stack below @sm and restores the row layout via container queries on web/desktop", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
     const cls = pillClass()
-    expect(cls).toContain("flex-col")
-    expect(cls).toContain("@sm/composer:flex-row")
-    expect(cls).not.toContain("flex-wrap")
+    // Narrow containers (e.g. the workflow-editor right sidebar) must get the
+    // same two-row wrap as mobile — textarea on its own full-width row, the
+    // attach cluster + send button sharing ONE bottom row. The old `flex-col`
+    // strategy put attach and send on separate rows (three rows total).
+    expect(cls).toContain("flex-wrap")
+    expect(cls).not.toContain("flex-col")
+    // At @sm/composer the children reset their order / width to re-form the
+    // single-row [attach | textarea (flex-1) | send] layout.
+    const taWrapper = document.querySelector("textarea")?.parentElement
+    expect(taWrapper?.className ?? "").toContain("@sm/composer:flex-1")
+    expect(taWrapper?.className ?? "").toContain("@sm/composer:w-auto")
   })
 })
 

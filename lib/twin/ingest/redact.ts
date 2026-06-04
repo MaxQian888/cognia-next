@@ -297,6 +297,86 @@ export function unredactText(text: string, map: Record<string, RedactionRecord>)
   )
 }
 
+// Placeholder counters are padStart(3)-formatted but can grow past three
+// digits on PII-heavy documents — hence `\d{3,}`.
+const PLACEHOLDER_SCAN_RE =
+  /<(?:EMAIL|PHONE|CN_ID|BANK_CARD|NAME|IP_ADDR|API_KEY|JWT|PEM_KEY|PASSPORT|DRIVER_LICENSE)_\d{3,}>/g
+
+/** A char range in pre-redaction text space. Extra fields (page numbers,
+ *  bounding boxes, …) pass through translation untouched via the generic. */
+export interface RedactableOffsetEntry {
+  charStart: number
+  charEnd: number
+}
+
+/**
+ * Translate char offsets from pre-redaction space into redacted space.
+ *
+ * Placeholders differ in length from the PII they replace, so offsets after
+ * the first redaction are shifted (see the T1.1 regression in
+ * `chunk-original-reconstruction.test.ts`). This walks the placeholders in
+ * the redacted text in order, derives each one's exact (originalSpan,
+ * redactedSpan) pair from the redaction map, and translates piecewise:
+ *
+ *   - offsets in identity segments shift by the accumulated delta;
+ *   - offsets that fall INSIDE a redacted span have no exact twin and clamp
+ *     to the placeholder's bounds;
+ *   - everything clamps to `[0, redacted.length]`.
+ *
+ * Pure; used by the twin ingest job runner to move the PDF `pageMap` into
+ * the same space as the chunker's `charStart`/`charEnd`.
+ */
+export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry>(
+  entries: T[],
+  redacted: string,
+  map: Record<string, RedactionRecord>
+): T[] {
+  interface Span {
+    origStart: number
+    origEnd: number
+    redStart: number
+    redEnd: number
+  }
+  const spans: Span[] = []
+  let redCursor = 0
+  let origCursor = 0
+  for (const match of redacted.matchAll(PLACEHOLDER_SCAN_RE)) {
+    const record = map[match[0]]
+    if (!record) continue // placeholder-shaped text that isn't ours
+    const redStart = match.index
+    const origStart = origCursor + (redStart - redCursor)
+    spans.push({
+      origStart,
+      origEnd: origStart + record.original.length,
+      redStart,
+      redEnd: redStart + match[0].length,
+    })
+    origCursor = origStart + record.original.length
+    redCursor = redStart + match[0].length
+  }
+
+  const translate = (offset: number): number => {
+    let result = offset
+    for (const span of spans) {
+      if (offset < span.origStart) break
+      if (offset < span.origEnd) {
+        // Inside a redacted span — clamp into the placeholder.
+        result = Math.min(span.redStart + (offset - span.origStart), span.redEnd)
+        return Math.max(0, Math.min(result, redacted.length))
+      }
+      // Past this span — accumulate its delta.
+      result = span.redEnd + (offset - span.origEnd)
+    }
+    return Math.max(0, Math.min(result, redacted.length))
+  }
+
+  return entries.map((entry) => ({
+    ...entry,
+    charStart: translate(entry.charStart),
+    charEnd: translate(entry.charEnd),
+  }))
+}
+
 /**
  * Static helper for tests + the no-leak gate. Returns true when no
  * recognised PII shape survives in `text`.

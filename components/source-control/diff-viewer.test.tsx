@@ -44,10 +44,14 @@ jest.mock("@/lib/canvas/themes/cognia-active-theme", () => ({
   COGNIA_ACTIVE_THEME_ID: "cognia-active",
   syncCogniaActiveTheme: jest.fn(),
 }))
+jest.mock("@/lib/canvas/monaco-diff-disposal", () => ({
+  guardDiffEditorModelDisposal: jest.fn(),
+}))
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { DiffViewer } from "./diff-viewer"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
+import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
 import type { GitDiff, GitHunk } from "@/types/git"
 
 const hunk: GitHunk = {
@@ -102,6 +106,13 @@ describe("DiffViewer", () => {
     )
     fireEvent.click(screen.getByTestId("hunk-stage-0"))
     expect(onClick).toHaveBeenCalledWith(hunk)
+  })
+
+  it("guards diff model disposal on mount (monaco-react dispose-order bug)", () => {
+    render(<DiffViewer diff={diff} staged={false} />)
+    expect(guardDiffEditorModelDisposal).toHaveBeenCalledWith(
+      expect.objectContaining({ getModifiedEditor: expect.any(Function) })
+    )
   })
 
   it("applies the cognia-active theme so light/dark matches the app", () => {

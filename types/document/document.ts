@@ -187,6 +187,19 @@ export interface PDFParseResult {
   metadata: PDFMetadata
   outline?: PDFOutlineItem[]
   annotations?: PDFAnnotation[]
+  /** Parser-level diagnostics (e.g. native-parse fallback) merged into
+   *  `ProcessedDocument.parseDiagnostics` by the document processor. */
+  diagnostics?: ParseDiagnostic[]
+}
+
+/** A positioned text run extracted by the native (PDFium) parser.
+ *  Coordinates are in PDF points with the page's own coordinate space. */
+export interface PdfTextItem {
+  text: string
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface PDFPage {
@@ -194,6 +207,10 @@ export interface PDFPage {
   text: string
   width: number
   height: number
+  /** Spatial text items — only present on the native (Tauri liteparse) path. */
+  items?: PdfTextItem[]
+  /** True when the per-page/document item cap dropped this page's items. */
+  itemsTruncated?: boolean
 }
 
 export interface PDFMetadata {
@@ -506,6 +523,8 @@ export type ParseDiagnosticCode =
   | "empty_content"
   | "content_truncated"
   | "unsupported_feature"
+  | "native_parse_fallback"
+  | "sparse_text_layer"
 
 export interface ParseDiagnostic {
   code: ParseDiagnosticCode

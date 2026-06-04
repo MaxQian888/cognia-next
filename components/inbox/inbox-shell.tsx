@@ -135,9 +135,9 @@ function DesktopInboxShell({
       >
         <ResizablePanel
           id="inbox-sidebar"
-          defaultSize={INBOX_LAYOUT_DEFAULTS.sidebarSize}
-          minSize={sidebarMin}
-          maxSize={sidebarMax}
+          defaultSize={`${INBOX_LAYOUT_DEFAULTS.sidebarSize}%`}
+          minSize={`${sidebarMin}%`}
+          maxSize={`${sidebarMax}%`}
           className="flex flex-col overflow-hidden border-e"
           data-testid="inbox-sidebar-pane"
         >
@@ -150,9 +150,9 @@ function DesktopInboxShell({
         <ResizableHandle withHandle aria-label={t("resize.sidebarHandle")} />
         <ResizablePanel
           id="inbox-list"
-          defaultSize={INBOX_LAYOUT_DEFAULTS.listSize}
-          minSize={listMin}
-          maxSize={listMax}
+          defaultSize={`${INBOX_LAYOUT_DEFAULTS.listSize}%`}
+          minSize={`${listMin}%`}
+          maxSize={`${listMax}%`}
           className="flex flex-col overflow-hidden border-e"
           data-testid="inbox-conversation-list-pane"
         >
@@ -165,8 +165,8 @@ function DesktopInboxShell({
         <ResizableHandle withHandle aria-label={t("resize.detailHandle")} />
         <ResizablePanel
           id="inbox-detail"
-          defaultSize={INBOX_LAYOUT_DEFAULTS.detailSize}
-          minSize={detailMin}
+          defaultSize={`${INBOX_LAYOUT_DEFAULTS.detailSize}%`}
+          minSize={`${detailMin}%`}
           className="flex min-w-0 flex-col overflow-hidden"
           data-testid="inbox-detail-pane"
           data-bg-target="chat"

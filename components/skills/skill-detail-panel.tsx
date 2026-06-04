@@ -10,22 +10,27 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { useSkillsStore } from "@/stores/skills"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { getSkill } from "@/lib/db/skills"
 import { SkillDetail } from "./skill-detail"
 
 /**
- * Sheet that holds the detail view. The trigger lives elsewhere (cards on
- * grid); the sheet itself reads `detailSkillId` from the store and closes by
- * calling `closeDetail()`.
+ * Mobile-only Sheet that holds the detail view. The trigger lives elsewhere
+ * (rows in the list pane); the sheet itself reads `detailSkillId` from the
+ * store and closes by calling `closeDetail()`. On desktop the detail renders
+ * inline in the master-detail right pane instead, so the Sheet never mounts.
  */
 export function SkillDetailPanel() {
   const t = useTranslations("skills")
+  const isMobile = useIsMobile()
   const detailSkillId = useSkillsStore((s) => s.detailSkillId)
   const closeDetail = useSkillsStore((s) => s.closeDetail)
   const skill = useLiveQuery(
     () => (detailSkillId ? getSkill(detailSkillId) : Promise.resolve(undefined)),
     [detailSkillId]
   )
+
+  if (!isMobile) return null
 
   return (
     <Sheet open={detailSkillId !== null} onOpenChange={(o) => !o && closeDetail()}>

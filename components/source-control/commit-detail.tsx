@@ -7,9 +7,17 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { HistoryIcon, ScanLineIcon } from "lucide-react"
+import { GitBranchPlusIcon, HistoryIcon, ScanLineIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +53,7 @@ interface CommitDetailProps {
   rootDir: string
   commit: GitCommit
   actions?: Pick<UseGitActionsResult, "reset"> &
-    Partial<Pick<UseGitActionsResult, "cherryPick" | "revert">>
+    Partial<Pick<UseGitActionsResult, "cherryPick" | "revert" | "createBranch" | "checkout">>
   /** Open blame for a file pinned to this commit. */
   onViewBlame?: (path: string, rev: string) => void
   /** Start an interactive rebase from this commit (base = this commit). */
@@ -61,6 +69,9 @@ export function CommitDetail({
 }: CommitDetailProps) {
   const t = useTranslations("sourceControl")
   const [confirmHardReset, setConfirmHardReset] = useState(false)
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false)
+  const [branchName, setBranchName] = useState("")
+  const [confirmCheckout, setConfirmCheckout] = useState(false)
   const [files, setFiles] = useState<GitFileChange[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [diff, setDiff] = useState<GitDiff | null>(null)
@@ -145,15 +156,44 @@ export function CommitDetail({
                 )}
                 {onInteractiveRebase && (
                   <DropdownMenuItem
-                    onSelect={() => onInteractiveRebase(commit.hash)}
+                    // preventDefault: opening an overlay from a closing menu races
+                    // Radix focus restore (sticky body[pointer-events:none]).
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      onInteractiveRebase(commit.hash)
+                    }}
                     data-testid="commit-interactive-rebase"
                   >
                     {t("irebase.fromHere")}
                   </DropdownMenuItem>
                 )}
-                {(actions.cherryPick || actions.revert || onInteractiveRebase) && (
-                  <DropdownMenuSeparator />
+                {actions.createBranch && (
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      setBranchDialogOpen(true)
+                    }}
+                    data-testid="commit-create-branch"
+                  >
+                    {t("commitDetail.createBranchHere")}
+                  </DropdownMenuItem>
                 )}
+                {actions.checkout && (
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      setConfirmCheckout(true)
+                    }}
+                    data-testid="commit-checkout"
+                  >
+                    {t("commitDetail.checkoutCommit")}
+                  </DropdownMenuItem>
+                )}
+                {(actions.cherryPick ||
+                  actions.revert ||
+                  actions.createBranch ||
+                  actions.checkout ||
+                  onInteractiveRebase) && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   onSelect={() => void actions.reset("soft", commit.hash)}
                   data-testid="reset-soft"
@@ -168,7 +208,10 @@ export function CommitDetail({
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="text-destructive"
-                  onSelect={() => setConfirmHardReset(true)}
+                  onSelect={(e) => {
+                    e.preventDefault()
+                    setConfirmHardReset(true)
+                  }}
                   data-testid="reset-hard"
                 >
                   {t("reset.hard")}
@@ -188,6 +231,68 @@ export function CommitDetail({
           <span>{commit.authorName}</span>
         </div>
       </header>
+
+      <Dialog
+        open={branchDialogOpen}
+        onOpenChange={(open) => {
+          setBranchDialogOpen(open)
+          if (!open) setBranchName("")
+        }}
+      >
+        <DialogContent className="sm:max-w-sm" data-testid="create-branch-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("commitDetail.createBranchTitle")}</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={branchName}
+            onChange={(e) => setBranchName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && branchName.trim()) {
+                e.preventDefault()
+                void actions?.createBranch?.(branchName.trim(), true, commit.hash)
+                setBranchDialogOpen(false)
+                setBranchName("")
+              }
+            }}
+            placeholder={t("commitDetail.branchNamePlaceholder")}
+            data-testid="create-branch-name"
+          />
+          <DialogFooter>
+            <Button
+              disabled={!branchName.trim()}
+              onClick={() => {
+                void actions?.createBranch?.(branchName.trim(), true, commit.hash)
+                setBranchDialogOpen(false)
+                setBranchName("")
+              }}
+              data-testid="create-branch-confirm"
+            >
+              <GitBranchPlusIcon className="size-3.5" />
+              {t("commitDetail.createBranchAction")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={confirmCheckout} onOpenChange={setConfirmCheckout}>
+        <AlertDialogContent data-testid="checkout-commit-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("commitDetail.checkoutCommitTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("commitDetail.checkoutCommitDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void actions?.checkout?.(commit.hash)}
+              data-testid="checkout-commit-confirm-action"
+            >
+              {t("commitDetail.checkoutAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmHardReset} onOpenChange={setConfirmHardReset}>
         <AlertDialogContent data-testid="reset-hard-confirm">

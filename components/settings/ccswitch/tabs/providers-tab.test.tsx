@@ -108,6 +108,31 @@ describe("CcswitchProvidersTab", () => {
     expect(lastCall.initialAgents).toEqual(["claude-code"])
   })
 
+  it("renders same-id providers from different apps without duplicate React keys", async () => {
+    // CCSwitch's providers table is keyed by (id, app_type) — the id alone
+    // repeats across apps (e.g. claude/default + codex/default).
+    useProvidersMock.mockReturnValue({
+      data: [
+        { id: "default", name: "Claude Default", kind: "claude" },
+        { id: "default", name: "Codex Default", kind: "codex" },
+      ],
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    })
+    detectMock.mockResolvedValue({ cognia: undefined, agents: {}, drift: false })
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<CcswitchProvidersTab />)
+      expect(await screen.findByText("Claude Default")).toBeInTheDocument()
+      expect(screen.getByText("Codex Default")).toBeInTheDocument()
+      const dupKeyError = errorSpy.mock.calls.find((call) => String(call[0]).includes("same key"))
+      expect(dupKeyError).toBeUndefined()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("renders empty state when there are no providers", () => {
     useProvidersMock.mockReturnValue({
       data: [],

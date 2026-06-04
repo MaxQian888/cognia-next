@@ -221,8 +221,8 @@ Sidecar 在 Unix 上用 SIGTERM、Windows 上用 `TerminateProcess` 杀掉；如
 
 1. **角色系统提示** —— 当前 `Character.systemPrompt`。
 2. **Agent Mode**（`lib/agent/`）—— 内置或自定义模式追加 system prompt、覆盖 model / temperature / maxTokens。
-3. **技能解析** —— `lib/skills/executor.ts` 把每个技能的 markdown、工具白名单实例化（详见
-   [skills-system](../chat/skills-system)）。
+3. **技能解析** —— 启用的技能 markdown 经 `renderSkillsSection` 追加进系统提示，工具白名单取并（详见
+   [技能子系统](../subsystems/skills/loading-and-injection)）。
 4. **A2UI** —— 当 `Character.a2uiEnabled` 时，注入 `A2UI_SYSTEM_PROMPT` 与 a2ui 工具白名单（`namespacedA2UIToolNames`）。
 5. **孪生上下文（可选）** —— 当活动角色设置了 `twinId` 且 `ctx.twinDeps` + `ctx.twinUserMessage` 提供时，
    `lib/twin/runtime/apply-twin-context.ts` 包装消息，附加召回片段 + 风格少样本。详见

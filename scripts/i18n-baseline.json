@@ -1,31 +1,6 @@
 {
-  "count": 528,
+  "count": 488,
   "samples": [
-    {
-      "file": "components/a2ui/a2ui-error-boundary.tsx",
-      "context": "jsx-text",
-      "text": "render error"
-    },
-    {
-      "file": "components/a2ui/a2ui-error-boundary.tsx",
-      "context": "jsx-text",
-      "text": "Retry"
-    },
-    {
-      "file": "components/a2ui/a2ui-surface.tsx",
-      "context": "jsx-text",
-      "text": "Error loading surface"
-    },
-    {
-      "file": "components/a2ui/a2ui-surface.tsx",
-      "context": "jsx-text",
-      "text": "No content to display"
-    },
-    {
-      "file": "components/a2ui/a2ui-surface.tsx",
-      "context": "jsx-text",
-      "text": "Rendering..."
-    },
     {
       "file": "components/a2ui/a2ui-tool-output.tsx",
       "context": "jsx-text",
@@ -187,11 +162,6 @@
       "text": "Unknown component:"
     },
     {
-      "file": "components/a2ui/layout/a2ui-stepper-shell.tsx",
-      "context": "jsx-text",
-      "text": "No steps are available yet."
-    },
-    {
       "file": "components/a2ui/quick-app-builder/template-card.tsx",
       "context": "jsx-text",
       "text": "Create"
@@ -247,9 +217,39 @@
       "text": "Latest"
     },
     {
-      "file": "components/agent/external-agent-manager.tsx",
+      "file": "components/agent/external-agent/manager.tsx",
       "context": "placeholder",
       "text": "Claude Code"
+    },
+    {
+      "file": "components/agent/external-agent/manager.tsx",
+      "context": "jsx-text",
+      "text": "ACP"
+    },
+    {
+      "file": "components/agent/external-agent/manager.tsx",
+      "context": "placeholder",
+      "text": "npx"
+    },
+    {
+      "file": "components/agent/external-agent/manager.tsx",
+      "context": "placeholder",
+      "text": "@anthropics/claude-code --stdio"
+    },
+    {
+      "file": "components/agent/external-agent/trace-health-badge.tsx",
+      "context": "jsx-text",
+      "text": "Health breakdown"
+    },
+    {
+      "file": "components/agent/external-agent/trace-health-badge.tsx",
+      "context": "jsx-text",
+      "text": "Success:"
+    },
+    {
+      "file": "components/agent/external-agent/trace-health-badge.tsx",
+      "context": "jsx-text",
+      "text": "Cost:"
     }
   ],
   "knownParityDrift": {

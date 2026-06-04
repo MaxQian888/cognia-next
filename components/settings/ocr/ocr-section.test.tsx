@@ -41,10 +41,12 @@ function renderSection(
 }
 
 describe("OcrSection", () => {
-  it("renders the OCR heading and section testid", () => {
+  it("renders the section testid without an in-page heading (shell breadcrumb owns the title)", () => {
     renderSection()
     expect(screen.getByTestId("ocr-section")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/OCR/i)
+    // Mirrors the provider settings page: the settings shell breadcrumb (and
+    // the mobile SubPageShell) render the section title, so no in-page <h1>.
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
   })
 
   it("defaults to the Auto-Router pseudo-entry", () => {

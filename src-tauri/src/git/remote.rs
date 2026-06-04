@@ -80,7 +80,29 @@ pub async fn pull(
     exec::run(&cwd(repo_path), args).await
 }
 
-/// `git push [origin branch] [--set-upstream] [--force-with-lease]`.
+/// Pick the remote `--set-upstream` should publish to when the caller did not
+/// name one: the sole remote if there is exactly one, otherwise `origin` when
+/// present, otherwise the first alphabetically.
+fn resolve_default_remote(repo: &Repository) -> Option<String> {
+    let remotes = repo.remotes().ok()?;
+    let mut names: Vec<String> = remotes.iter().flatten().map(str::to_string).collect();
+    if names.is_empty() {
+        return None;
+    }
+    if names.len() == 1 {
+        return names.pop();
+    }
+    if names.iter().any(|n| n == "origin") {
+        return Some("origin".to_string());
+    }
+    names.sort();
+    names.into_iter().next()
+}
+
+/// `git push [remote branch] [--set-upstream] [--force-with-lease]`.
+///
+/// Publishing (`set_upstream` without an explicit remote) resolves the target
+/// remote from the repo config instead of assuming `origin`.
 pub async fn push(
     repo_path: &str,
     remote: Option<&str>,
@@ -88,6 +110,11 @@ pub async fn push(
     set_upstream: bool,
     force_with_lease: bool,
 ) -> Result<()> {
+    let resolved = match remote {
+        Some(r) => Some(r.to_string()),
+        None if set_upstream => resolve_default_remote(&open_repo(repo_path)?),
+        None => None,
+    };
     let mut args = vec!["push".to_string()];
     if set_upstream {
         args.push("--set-upstream".into());
@@ -95,8 +122,8 @@ pub async fn push(
     if force_with_lease {
         args.push("--force-with-lease".into());
     }
-    if let Some(r) = remote {
-        args.push(r.to_string());
+    if let Some(r) = resolved {
+        args.push(r);
         if let Some(b) = branch {
             args.push(b.to_string());
         }
@@ -153,6 +180,39 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = Repository::init(tmp.path()).unwrap();
         assert!(list_for(&repo).unwrap().is_empty());
+    }
+
+    #[test]
+    fn default_remote_none_without_remotes() {
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        assert_eq!(resolve_default_remote(&repo), None);
+    }
+
+    #[test]
+    fn default_remote_uses_the_single_remote() {
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        repo.remote("upstream", "https://example.com/o/r.git").unwrap();
+        assert_eq!(resolve_default_remote(&repo).as_deref(), Some("upstream"));
+    }
+
+    #[test]
+    fn default_remote_prefers_origin_among_many() {
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        repo.remote("upstream", "https://example.com/o/r.git").unwrap();
+        repo.remote("origin", "https://example.com/o/r2.git").unwrap();
+        assert_eq!(resolve_default_remote(&repo).as_deref(), Some("origin"));
+    }
+
+    #[test]
+    fn default_remote_falls_back_to_first_alphabetical() {
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        repo.remote("zeta", "https://example.com/o/r.git").unwrap();
+        repo.remote("alpha", "https://example.com/o/r2.git").unwrap();
+        assert_eq!(resolve_default_remote(&repo).as_deref(), Some("alpha"));
     }
 
     fn git_on_path() -> bool {

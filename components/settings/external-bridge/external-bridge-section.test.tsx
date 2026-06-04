@@ -9,6 +9,9 @@
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
+import { ALL_BRIDGE_SCOPES } from "@/types/wiki"
 import { ExternalBridgeSection } from "./external-bridge-section"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -158,4 +161,28 @@ describe("ExternalBridgeSection", () => {
       expect(screen.getByText(/No calls yet/i)).toBeInTheDocument()
     })
   })
+})
+
+describe("scope description i18n parity", () => {
+  // Every scope in ALL_BRIDGE_SCOPES is rendered through
+  // t(`scopeDescriptions.${scope}`) — a missing key throws MISSING_MESSAGE
+  // at runtime, so pin the message files to the scope list here.
+  const locales = [
+    ["en", enMessages],
+    ["zh-CN", zhMessages],
+  ] as const
+
+  it.each(locales)(
+    "%s has a scopeDescriptions entry for every bridge scope",
+    (_locale, messages) => {
+      const descriptions = messages.settings.externalBridge.scopeDescriptions as Record<
+        string,
+        string
+      >
+      for (const scope of ALL_BRIDGE_SCOPES) {
+        expect(descriptions[scope]).toEqual(expect.any(String))
+        expect(descriptions[scope]).not.toBe("")
+      }
+    }
+  )
 })

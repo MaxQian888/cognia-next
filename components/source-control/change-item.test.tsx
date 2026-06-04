@@ -18,6 +18,20 @@ describe("ChangeItem", () => {
     expect(screen.getByText("M")).toBeInTheDocument()
   })
 
+  it("renders origName → newName for renamed files", () => {
+    const renamed: GitFileChange = {
+      path: "src/app/new-name.tsx",
+      origPath: "src/app/old-name.tsx",
+      status: "renamed",
+      staged: true,
+      group: "staged",
+    }
+    render(<ChangeItem change={renamed} selected={false} onSelect={() => {}} />)
+    expect(screen.getByTestId(`orig-${renamed.path}`)).toHaveTextContent("old-name.tsx →")
+    expect(screen.getByText("new-name.tsx")).toBeInTheDocument()
+    expect(screen.getByTitle("src/app/old-name.tsx → src/app/new-name.tsx")).toBeInTheDocument()
+  })
+
   it("selects on click", () => {
     const onSelect = jest.fn()
     render(<ChangeItem change={change} selected={false} onSelect={onSelect} />)
@@ -60,6 +74,49 @@ describe("ChangeItem", () => {
     fireEvent.contextMenu(screen.getByTestId(`change-item-${change.path}`))
     fireEvent.click(await screen.findByTestId(`restore-${change.path}`))
     expect(onRestore).toHaveBeenCalled()
+  })
+
+  it("keeps the context menu mounted when restore is selected (preventDefault)", async () => {
+    const onRestore = jest.fn()
+    render(
+      <ChangeItem change={change} selected={false} onSelect={() => {}} onRestore={onRestore} />
+    )
+    fireEvent.contextMenu(screen.getByTestId(`change-item-${change.path}`))
+    fireEvent.click(await screen.findByTestId(`restore-${change.path}`))
+    expect(onRestore).toHaveBeenCalled()
+    // preventDefault keeps the menu open so the dialog never races focus restore.
+    expect(screen.getByTestId(`restore-${change.path}`)).toBeInTheDocument()
+  })
+
+  it("offers Add to .gitignore only for untracked files", async () => {
+    const onAddToGitignore = jest.fn()
+    const untracked: GitFileChange = { ...change, status: "untracked" }
+    render(
+      <ChangeItem
+        change={untracked}
+        selected={false}
+        onSelect={() => {}}
+        onAddToGitignore={onAddToGitignore}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId(`change-item-${untracked.path}`))
+    fireEvent.click(await screen.findByTestId(`gitignore-${untracked.path}`))
+    expect(onAddToGitignore).toHaveBeenCalled()
+  })
+
+  it("hides Add to .gitignore for tracked files", async () => {
+    render(
+      <ChangeItem
+        change={change}
+        selected={false}
+        onSelect={() => {}}
+        onAddToGitignore={jest.fn()}
+        onViewBlame={() => {}}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId(`change-item-${change.path}`))
+    await screen.findByTestId(`blame-${change.path}`) // menu is open
+    expect(screen.queryByTestId(`gitignore-${change.path}`)).not.toBeInTheDocument()
   })
 
   it("offers View Blame from the context menu when provided", async () => {

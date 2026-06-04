@@ -7,7 +7,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { GitBranchIcon, GitMergeIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  GitBranchIcon,
+  GitCompareArrowsIcon,
+  GitMergeIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 import {
   Command,
   CommandEmpty,
@@ -26,7 +32,7 @@ interface BranchPickerProps {
   branches: GitBranch[]
   actions: Pick<
     UseGitActionsResult,
-    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase"
+    "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase" | "merge"
   >
   onPicked?: () => void
 }
@@ -77,6 +83,23 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                     variant="ghost"
                     size="icon"
                     className="size-5 text-muted-foreground"
+                    aria-label={t("sequencer.mergeInto")}
+                    title={t("sequencer.mergeInto")}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void actions.merge(branch.name)
+                      onPicked?.()
+                    }}
+                    data-testid={`branch-merge-${branch.name}`}
+                  >
+                    <GitMergeIcon className="size-3" />
+                  </Button>
+                )}
+                {!branch.isCurrent && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-5 text-muted-foreground"
                     aria-label={t("sequencer.rebaseOnto")}
                     title={t("sequencer.rebaseOnto")}
                     onClick={(e) => {
@@ -86,7 +109,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                     }}
                     data-testid={`branch-rebase-${branch.name}`}
                   >
-                    <GitMergeIcon className="size-3" />
+                    <GitCompareArrowsIcon className="size-3" />
                   </Button>
                 )}
                 {!branch.isRemote && !branch.isCurrent && (

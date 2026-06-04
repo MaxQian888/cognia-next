@@ -55,18 +55,14 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Welcome style (rich vs minimal) ───────────────────────────────────
-  it("renders the aurora backdrop + capability descriptions in the rich style", () => {
-    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
+  it("renders the aurora backdrop in the rich style", () => {
+    render(<EmptyChatState {...baseProps()} />)
     expect(screen.getByTestId("welcome-aurora")).toBeInTheDocument()
-    expect(screen.getByText("capabilitiesDesc.workflows")).toBeInTheDocument()
   })
 
-  it("drops the aurora + descriptions in the minimal style", () => {
-    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} welcomeStyle="minimal" />)
+  it("drops the aurora in the minimal style", () => {
+    render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
     expect(screen.queryByTestId("welcome-aurora")).not.toBeInTheDocument()
-    expect(screen.queryByText("capabilitiesDesc.workflows")).not.toBeInTheDocument()
-    // Capability cards themselves are still present in minimal.
-    expect(screen.getByRole("button", { name: "capabilities.workflows" })).toBeInTheDocument()
   })
 
   it("shows the style toggle only when onToggleStyle is provided and fires the opposite style", async () => {
@@ -128,39 +124,20 @@ describe("<EmptyChatState />", () => {
     expect(props.onUseSample).toHaveBeenCalledWith("samples.reviewPrompt")
   })
 
-  // ── Section dismissal (quickStart / tryPrompt) ────────────────────────
-  it("shows ✕ on Quick start + Try a prompt and fires onDismissSection", async () => {
+  // ── Section dismissal (tryPrompt) ─────────────────────────────────────
+  it("shows ✕ on Try a prompt and fires onDismissSection", async () => {
     const onDismissSection = jest.fn()
     const user = userEvent.setup()
-    render(
-      <EmptyChatState {...baseProps()} onNavigate={jest.fn()} onDismissSection={onDismissSection} />
-    )
+    render(<EmptyChatState {...baseProps()} onDismissSection={onDismissSection} />)
     const dismissers = screen.getAllByRole("button", { name: "dismiss" })
-    expect(dismissers).toHaveLength(2)
-    // Document order: Quick start precedes Try a prompt.
+    expect(dismissers).toHaveLength(1)
     await user.click(dismissers[0])
-    expect(onDismissSection).toHaveBeenCalledWith("quickStart")
-    await user.click(dismissers[1])
     expect(onDismissSection).toHaveBeenCalledWith("tryPrompt")
   })
 
   it("omits the ✕ affordance when onDismissSection is absent", () => {
-    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
+    render(<EmptyChatState {...baseProps()} />)
     expect(screen.queryByRole("button", { name: "dismiss" })).not.toBeInTheDocument()
-  })
-
-  it("hides Quick start when hiddenSections.quickStart is set", () => {
-    render(
-      <EmptyChatState
-        {...baseProps()}
-        onNavigate={jest.fn()}
-        hiddenSections={{ quickStart: true }}
-      />
-    )
-    expect(screen.queryByText("sections.quickStart")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "capabilities.workflows" })).not.toBeInTheDocument()
-    // Try a prompt is unaffected.
-    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
   })
 
   it("hides Try a prompt when hiddenSections.tryPrompt is set", () => {
@@ -243,35 +220,6 @@ describe("<EmptyChatState />", () => {
     expect(props.onUseSample).toHaveBeenCalledWith("Summarize this")
   })
 
-  // ── Capability entries ────────────────────────────────────────────────
-  it("hides the capability group when onNavigate is absent", () => {
-    render(<EmptyChatState {...baseProps()} />)
-    expect(screen.queryByText("sections.quickStart")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "capabilities.workflows" })).not.toBeInTheDocument()
-  })
-
-  it("renders capability cards and navigates to the deep-link on click", async () => {
-    const onNavigate = jest.fn()
-    const user = userEvent.setup()
-    render(<EmptyChatState {...baseProps()} onNavigate={onNavigate} />)
-    expect(screen.getByText("sections.quickStart")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "capabilities.workflows" }))
-    expect(onNavigate).toHaveBeenCalledWith("/settings?section=workflows&wfTab=templates")
-  })
-
-  it("activates a capability card via Enter, Space, and ignores other keys", async () => {
-    const onNavigate = jest.fn()
-    const user = userEvent.setup()
-    render(<EmptyChatState {...baseProps()} onNavigate={onNavigate} />)
-    const card = screen.getByRole("button", { name: "capabilities.connectors" })
-    card.focus()
-    await user.keyboard("{Enter}")
-    await user.keyboard(" ")
-    await user.keyboard("a")
-    expect(onNavigate).toHaveBeenCalledTimes(2)
-    expect(onNavigate).toHaveBeenCalledWith("/settings?section=connections")
-  })
-
   // ── Recent sessions ───────────────────────────────────────────────────
   it("renders recent sessions and resumes the picked one", async () => {
     const onResumeSession = jest.fn()
@@ -325,28 +273,6 @@ describe("<EmptyChatState />", () => {
     expect(screen.queryByText("sections.continue")).not.toBeInTheDocument()
   })
 
-  // ── composerSlot (centered-composer layout) ───────────────────────────
-  it("renders composerSlot between the greeting and the suggestion groups", () => {
-    render(
-      <EmptyChatState
-        {...baseProps()}
-        variant="inline"
-        composerSlot={<div data-testid="composer-slot" />}
-      />
-    )
-    const slot = screen.getByTestId("composer-slot")
-    const title = screen.getByRole("heading", { level: 2 })
-    const tryHeading = screen.getByText("sections.tryPrompt")
-    // greeting → composerSlot → suggestion groups
-    expect(title.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(slot.compareDocumentPosition(tryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  it("omits the composerSlot region when not provided", () => {
-    render(<EmptyChatState {...baseProps()} />)
-    expect(screen.queryByTestId("composer-slot")).not.toBeInTheDocument()
-  })
-
   // ── New chat button ───────────────────────────────────────────────────
   it("shows the New chat button on the fullscreen welcome and fires onCreate", async () => {
     const props = baseProps()
@@ -358,11 +284,6 @@ describe("<EmptyChatState />", () => {
 
   it("hides the New chat button in the inline variant", () => {
     render(<EmptyChatState {...baseProps()} variant="inline" />)
-    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
-  })
-
-  it("hides the New chat button when a composerSlot is present", () => {
-    render(<EmptyChatState {...baseProps()} variant="fullscreen" composerSlot={<div />} />)
     expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
   })
 
@@ -391,9 +312,8 @@ describe("<EmptyChatState />", () => {
   // ── Reduced motion ────────────────────────────────────────────────────
   it("renders all groups with reduced motion enabled", () => {
     mockUseReducedMotion.mockReturnValue(true)
-    render(<EmptyChatState {...baseProps()} onNavigate={jest.fn()} />)
+    render(<EmptyChatState {...baseProps()} />)
     expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
-    expect(screen.getByText("sections.quickStart")).toBeInTheDocument()
     expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
   })
 })

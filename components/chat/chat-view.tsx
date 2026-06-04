@@ -6,12 +6,18 @@ import { AlertTriangle, Loader2 } from "lucide-react"
 import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
-import { EmptyChatState, type EmptyStateOverride, type RecentSessionEntry } from "./empty-state"
+import {
+  EmptyChatState,
+  type EmptyStateOverride,
+  type RecentSessionEntry,
+  type WelcomeSection,
+} from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
 import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
 import { toast } from "sonner"
@@ -39,8 +45,6 @@ interface ChatPaneProps {
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
-  /** Navigate to a capability surface from the welcome page (settings deep-link). */
-  onNavigate?: (href: string) => void
   /** Recent sessions for the welcome page "Continue" group. */
   recentSessions?: readonly RecentSessionEntry[]
   /** Resume a recent session by id from the welcome page. */
@@ -96,7 +100,6 @@ export function ChatPane({
   onCreate,
   onUseSample,
   onOpenSettings,
-  onNavigate,
   recentSessions,
   onResumeSession,
   composerRef,
@@ -173,27 +176,37 @@ export function ChatPane({
     useChatStore.getState().requestMessagesReload()
   }, [])
 
+  // Welcome-section dismissals (`AppSettings.welcomeHidden`) — the ✕ on a
+  // section header persists the flag; Settings → General → Personalization
+  // offers the "restore hidden sections" escape hatch.
+  const welcomeHidden = useSettingsStore((s) => s.settings?.welcomeHidden)
+  const handleDismissSection = useCallback((section: WelcomeSection) => {
+    const { settings, save } = useSettingsStore.getState()
+    void save({ welcomeHidden: { ...settings?.welcomeHidden, [section]: true } })
+  }, [])
+
   if (!activeSession) {
     return (
       <EmptyChatState
         onCreate={onCreate}
         onUseSample={(text) => onUseSample(text)}
-        onNavigate={onNavigate}
         recentSessions={recentSessions}
         onResumeSession={onResumeSession}
         override={emptyState}
         hideSamples={welcomeExtras?.hideSamples}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
+        hiddenSections={welcomeHidden}
+        onDismissSection={handleDismissSection}
       />
     )
   }
 
-  // One composer instance, placed either centered inside the empty state
-  // (no messages yet) or docked at the bottom once the conversation starts.
-  // It remounts across that transition; `setComposerRef` re-attaches our ref
-  // (and the external one) to the new instance, and `onExitComplete` restores
-  // focus to it so the first send doesn't drop the keyboard.
+  // One composer instance, always docked at the bottom — below the welcome
+  // content (no messages yet) or below the message list once the conversation
+  // starts. It remounts across that branch swap; `setComposerRef` re-attaches
+  // our ref (and the external one) to the new instance, and `onExitComplete`
+  // restores focus to it so the first send doesn't drop the keyboard.
   const composerEl = (
     <Composer
       ref={setComposerRef}
@@ -282,15 +295,18 @@ export function ChatPane({
                 onCreate={onCreate}
                 onUseSample={(text) => onUseSample(text)}
                 variant="inline"
-                composerSlot={composerEl}
-                onNavigate={onNavigate}
                 recentSessions={recentSessions}
                 onResumeSession={onResumeSession}
                 characterSamples={characterSamples}
                 override={emptyState}
+                hiddenSections={welcomeHidden}
+                onDismissSection={handleDismissSection}
               />
             )}
             {errorAndFooter}
+            {/* Composer is hidden while history is loading / failed — same as
+                the previous layout, where it only mounted with the welcome. */}
+            {!messagesLoadError && !messagesLoading && composerEl}
           </motion.div>
         ) : (
           <motion.div

@@ -59,7 +59,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
-import { closeSession, hasApiKey } from "@/lib/claude/ipc"
+import { closeSession, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
 import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -183,20 +183,29 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
     setPresetId(resolvedId ?? "")
   }, [open, session, presets])
 
-  // Periodically check API key status (useful for the badge).
+  // Periodically check auth status (useful for the badge). "Configured"
+  // means EITHER a direct Anthropic API key OR a subscription OAuth bearer
+  // (ADR-0025 — `subscription_set_active` pushes the bearer, not an api key),
+  // so subscription-reuse users don't see a bogus "No API key" badge.
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
-    hasApiKey()
-      .then((ok) => {
-        if (!cancelled) setKeyOk(ok)
-      })
-      .catch((err) => {
+    Promise.all([
+      hasApiKey().catch((err) => {
         loggers.chat.warn("hasApiKey check failed", {
           err: err instanceof Error ? err.message : String(err),
         })
-        if (!cancelled) setKeyOk(false)
-      })
+        return false
+      }),
+      hasOauthBearer().catch((err) => {
+        loggers.chat.warn("hasOauthBearer check failed", {
+          err: err instanceof Error ? err.message : String(err),
+        })
+        return false
+      }),
+    ]).then(([key, bearer]) => {
+      if (!cancelled) setKeyOk(key || bearer)
+    })
     return () => {
       cancelled = true
     }

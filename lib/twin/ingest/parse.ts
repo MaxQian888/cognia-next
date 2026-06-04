@@ -13,7 +13,14 @@
  */
 
 import { processDocument, processDocumentAsync } from "@/lib/document/document-processor"
-import type { TwinChunkMetadata, TwinSourceFormat, TwinSourceKind } from "@/types/twin"
+import type { PDFParseResult } from "@/types/document"
+import type {
+  TwinBoundingBox,
+  TwinChunkMetadata,
+  TwinPageMapEntry,
+  TwinSourceFormat,
+  TwinSourceKind,
+} from "@/types/twin"
 import { dispatchSource } from "./dispatch"
 
 export interface RawSource {
@@ -48,10 +55,82 @@ export interface ParsedSource {
   baseMetadata: TwinChunkMetadata
   /** Original artefact size (for `twinSources.bytes`). */
   bytes: number
+  /**
+   * PDF only, native (liteparse) parses only — per-page char ranges within
+   * `embeddableText` + per-page bbox unions. The job runner translates the
+   * offsets into redacted space and threads them into the chunk stage so
+   * chunks carry `pageNumber` / `bboxUnion` provenance. Absent whenever the
+   * pdfjs path parsed the document (no spatial items).
+   */
+  pageMap?: TwinPageMapEntry[]
 }
 
 function bufferByteLength(input: ArrayBuffer | Uint8Array): number {
   return input instanceof Uint8Array ? input.byteLength : input.byteLength
+}
+
+function isPdfParseResult(value: unknown): value is PDFParseResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as PDFParseResult).pages) &&
+    typeof (value as PDFParseResult).text === "string"
+  )
+}
+
+function unionBoxes(items: PDFParseResult["pages"][number]["items"]): TwinBoundingBox | undefined {
+  if (!items?.length) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const item of items) {
+    minX = Math.min(minX, item.x)
+    minY = Math.min(minY, item.y)
+    maxX = Math.max(maxX, item.x + item.width)
+    maxY = Math.max(maxY, item.y + item.height)
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
+/**
+ * Locate each PDF page's char range within `embeddableText` (the text that
+ * gets redacted + chunked downstream) and union its native text-item boxes.
+ *
+ * Pure. Returns `undefined` — never throws — whenever the spatial mapping
+ * cannot be established: non-PDF formats, pdfjs parses (no `items`), or an
+ * embeddable text the joined page text can't be located in. `parsePDF`
+ * joins pages with "\n\n" on both the native and pdfjs paths, and
+ * `extractPDFEmbeddableContent` embeds `result.text` verbatim, so the
+ * `indexOf` base holds for unmodified pipelines.
+ */
+export function computePdfPageMap(
+  format: TwinSourceFormat,
+  parseResult: unknown,
+  embeddableText: string
+): TwinPageMapEntry[] | undefined {
+  if (format !== "pdf" || !isPdfParseResult(parseResult)) return undefined
+  const { pages, text } = parseResult
+  if (!text || pages.length === 0 || !pages.some((p) => p.items?.length)) return undefined
+
+  const base = embeddableText.indexOf(text)
+  if (base < 0) return undefined
+
+  const entries: TwinPageMapEntry[] = []
+  let cursor = base
+  for (const page of pages) {
+    const charStart = cursor
+    const charEnd = charStart + page.text.length
+    const bboxUnion = unionBoxes(page.items)
+    entries.push({
+      pageNumber: page.pageNumber,
+      charStart,
+      charEnd,
+      ...(bboxUnion ? { bboxUnion } : {}),
+    })
+    cursor = charEnd + 2 // pages are joined with "\n\n"
+  }
+  return entries
 }
 
 function bytesToString(input: ArrayBuffer | Uint8Array): string {
@@ -84,15 +163,18 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
       const processed = await processDocumentAsync(raw.id, filename, arrayBuffer, {
         extractEmbeddable: true,
       })
+      const embeddableText = processed.embeddableContent || processed.content
+      const pageMap = computePdfPageMap(raw.format, processed.parseResult, embeddableText)
       return {
         id: processed.id,
         kind: dispatch.kind,
         format: raw.format,
         title: processed.metadata.title || filename,
         originalText: processed.content,
-        embeddableText: processed.embeddableContent || processed.content,
+        embeddableText,
         baseMetadata,
         bytes: bufferByteLength(raw.binary),
+        ...(pageMap ? { pageMap } : {}),
       }
     }
 

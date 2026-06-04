@@ -3,6 +3,8 @@
   "pages": [
     "scheduler",
     "plugin-system",
+    "skills",
+    "cognia-cli",
     "visual-workflows",
     "platform-connectors",
     "external-bridge",

@@ -204,9 +204,12 @@ function isEmpty(v: unknown): boolean {
 }
 
 /**
- * Truthiness with the workflow convention that the literal strings "false"
- * and "0" are false (params arrive stringly-typed from expression concat).
- * Mirrors `isTruthy` in `lib/workflow/nodes/built-ins.ts`.
+ * Truthiness with the convention that the literal strings "false" and "0"
+ * are false (params arrive stringly-typed from expression concat). This is
+ * intentionally STRICTER than the legacy `isTruthy` in
+ * `lib/workflow/nodes/built-ins.ts` (which treats any non-empty string as
+ * true) — the v2 condition language fixes that footgun; v1 nodes keep the
+ * old behavior.
  */
 function isTruthy(v: unknown): boolean {
   if (typeof v === "string") {

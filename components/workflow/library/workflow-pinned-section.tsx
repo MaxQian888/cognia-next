@@ -14,9 +14,14 @@ import type { WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
 import { WorkflowCard } from "./workflow-card"
 import { WorkflowRow } from "./workflow-row"
 
+// Stable fallback — returning a fresh `[]` from the selector would make
+// `useSyncExternalStore` see a new snapshot every call and loop forever
+// ("Maximum update depth exceeded" on the whole /workflows route).
+const NO_PINNED: string[] = []
+
 export function WorkflowPinnedSection() {
   const t = useTranslations("workflows.library.pinned")
-  const pinnedIds = useSettingsStore((s) => s.settings?.pinnedWorkflowIds ?? [])
+  const pinnedIds = useSettingsStore((s) => s.settings?.pinnedWorkflowIds) ?? NO_PINNED
   const viewMode = useWorkflowLibraryStore((s) => s.viewMode)
 
   const rows = useLiveQuery(async () => {

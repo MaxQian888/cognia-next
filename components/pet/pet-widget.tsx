@@ -19,11 +19,20 @@ import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 import { PetInteractionPanel } from "./pet-interaction-panel"
 
-const ANCHOR_CLASS: Record<PetAnchor, string> = {
-  "bottom-right": "bottom-4 right-4 items-end",
-  "bottom-left": "bottom-4 left-4 items-start",
-  "top-right": "top-4 right-4 items-end",
-  "top-left": "top-4 left-4 items-start",
+const ANCHOR_POSITION: Record<PetAnchor, string> = {
+  "bottom-right": "bottom-4 right-4",
+  "bottom-left": "bottom-4 left-4",
+  "top-right": "top-4 right-4",
+  "top-left": "top-4 left-4",
+}
+
+// Horizontal alignment for the expanded flex-column stack only — must not leak
+// into the minimized circle button, where it would knock the icon off-center.
+const ANCHOR_ALIGN: Record<PetAnchor, string> = {
+  "bottom-right": "items-end",
+  "bottom-left": "items-start",
+  "top-right": "items-end",
+  "top-left": "items-start",
 }
 
 export interface PetWidgetProps {
@@ -57,7 +66,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
         aria-label={t("widget.restore")}
         className={cn(
           "fixed z-50 flex size-10 items-center justify-center rounded-full border bg-card shadow-md",
-          ANCHOR_CLASS[settings.anchor]
+          ANCHOR_POSITION[settings.anchor]
         )}
       >
         <PawPrintIcon className="size-5" />
@@ -66,7 +75,13 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   }
 
   return (
-    <div className={cn("fixed z-50 flex flex-col gap-2", ANCHOR_CLASS[settings.anchor])}>
+    <div
+      className={cn(
+        "fixed z-50 flex flex-col gap-2",
+        ANCHOR_POSITION[settings.anchor],
+        ANCHOR_ALIGN[settings.anchor]
+      )}
+    >
       {bubble && <PetBubbleView bubble={bubble} />}
       {open && (
         <div className="rounded-xl border bg-popover p-3 shadow-lg">

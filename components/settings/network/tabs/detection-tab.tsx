@@ -134,8 +134,17 @@ export function NetworkDetectionTab() {
                 <CardContent className="flex items-center justify-between p-3">
                   <div className="flex items-center gap-3">
                     <Badge variant="outline">{candidate.kind.toUpperCase()}</Badge>
+                    {candidate.clientName && (
+                      <Badge variant="secondary">{candidate.clientName}</Badge>
+                    )}
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">{candidate.label}</span>
+                      {candidate.source && (
+                        <span className="text-xs text-muted-foreground">
+                          {t(`detection.source.${candidate.source}`)}
+                          {candidate.controllerSecured && ` · ${t("detection.controllerSecured")}`}
+                        </span>
+                      )}
                       {candidate.version && (
                         <span className="text-xs text-muted-foreground">v{candidate.version}</span>
                       )}

@@ -19,6 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { FileQuestionIcon } from "lucide-react"
 import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
+import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
 import type { GitDiff, GitHunk } from "@/types/git"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
@@ -185,6 +186,7 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
             options={options}
             onMount={(editor, monaco) => {
               editorRef.current = editor
+              guardDiffEditorModelDisposal(editor)
               registerMonaco(monaco)
             }}
           />

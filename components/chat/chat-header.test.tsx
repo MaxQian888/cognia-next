@@ -9,9 +9,28 @@ jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: jest.fn(async () => null),
 }))
 
-// hasApiKey() is a Tauri IPC call — also conditional on isTauri(). Stubbed.
+// hasApiKey()/hasOauthBearer() are Tauri IPC calls — also conditional on
+// isTauri(). Controllable so the No-API-key badge cases can flip them.
+// jest.fn defined INSIDE the factory: modules call isTauri() at init time,
+// so an outer `const mock...` hits the TDZ before initialization.
 jest.mock("@/lib/claude/ipc", () => ({
   hasApiKey: jest.fn(async () => true),
+  hasOauthBearer: jest.fn(async () => false),
+  closeSession: jest.fn(async () => undefined),
+}))
+
+// isTauri() gates the key probe (and the working-dir picker). Default false
+// (jsdom); the badge tests flip it to true per-case.
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => false),
+}))
+
+// The header account switcher talks to the subscription transport when
+// isTauri() is true — irrelevant to header logic tests. Stubbed like the
+// other heavy children below.
+jest.mock("./header-account-switcher", () => ({
+  HeaderAccountSwitcher: () => null,
 }))
 
 // Single-export trigger pulls in lots of unrelated machinery (multiple
@@ -29,6 +48,12 @@ jest.mock("@/components/chat/session-cost-badge-live", () => ({
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
+import { hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { isTauri } from "@/lib/tauri"
+
+const mockHasApiKey = hasApiKey as unknown as jest.Mock
+const mockHasOauthBearer = hasOauthBearer as unknown as jest.Mock
+const mockIsTauri = isTauri as unknown as jest.Mock
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import type { ChatSession, Character, SystemPromptPreset, Skill } from "@/lib/claude/types"
@@ -84,6 +109,44 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
 })
 
 describe("ChatHeader", () => {
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(false)
+    mockHasApiKey.mockResolvedValue(true)
+    mockHasOauthBearer.mockResolvedValue(false)
+  })
+
+  it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockHasApiKey.mockResolvedValue(false)
+    mockHasOauthBearer.mockResolvedValue(false)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(await screen.findByText(/no api key/i)).toBeInTheDocument()
+  })
+
+  it("hides the No-API-key badge when a subscription OAuth bearer is active", async () => {
+    // Subscription-reuse users have no ANTHROPIC_API_KEY — auth flows through
+    // the OAuth bearer pushed by `subscription_set_active`. The badge must
+    // treat that as configured.
+    mockIsTauri.mockReturnValue(true)
+    mockHasApiKey.mockResolvedValue(false)
+    mockHasOauthBearer.mockResolvedValue(true)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    // Let the key probe resolve, then assert the badge stayed hidden.
+    await waitFor(() => expect(mockHasOauthBearer).toHaveBeenCalled())
+    await act(async () => {})
+    expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
+  })
+
   it("renders the session title (no character)", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(

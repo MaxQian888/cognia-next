@@ -22,7 +22,7 @@ jest.mock("@/lib/skills/marketplace-install", () => ({
   fetchMarketplaceContent: jest.fn(async () => ({ content: "# Readme" })),
 }))
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 
@@ -35,7 +35,7 @@ const item: MarketplaceItem = {
 }
 
 describe("SkillMarketplaceDetail", () => {
-  it("renders the install button when not installed", () => {
+  it("renders the install button when not installed", async () => {
     render(
       <SkillMarketplaceDetail
         item={item}
@@ -47,9 +47,10 @@ describe("SkillMarketplaceDetail", () => {
       />
     )
     expect(screen.getByText("install")).toBeInTheDocument()
+    await screen.findByTestId("streamdown")
   })
 
-  it("renders the uninstall button when installed", () => {
+  it("renders the uninstall button when installed", async () => {
     render(
       <SkillMarketplaceDetail
         item={item}
@@ -61,5 +62,23 @@ describe("SkillMarketplaceDetail", () => {
       />
     )
     expect(screen.getByText("uninstall")).toBeInTheDocument()
+    await screen.findByTestId("streamdown")
+  })
+
+  it("invokes onClose when the sheet is dismissed", async () => {
+    const onClose = jest.fn()
+    render(
+      <SkillMarketplaceDetail
+        item={item}
+        installed={false}
+        installing={false}
+        onClose={onClose}
+        onInstall={jest.fn()}
+        onUninstall={jest.fn()}
+      />
+    )
+    await screen.findByTestId("streamdown")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    expect(onClose).toHaveBeenCalled()
   })
 })

@@ -11,6 +11,7 @@ const actions = {
   deleteBranch: jest.fn(),
   renameBranch: jest.fn(),
   rebase: jest.fn(),
+  merge: jest.fn(),
 }
 
 describe("BranchHeader", () => {

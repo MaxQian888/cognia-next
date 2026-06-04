@@ -15,6 +15,7 @@ function makeActions() {
     deleteBranch: jest.fn().mockResolvedValue(undefined),
     renameBranch: jest.fn().mockResolvedValue(undefined),
     rebase: jest.fn().mockResolvedValue(undefined),
+    merge: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -45,6 +46,21 @@ describe("BranchPicker", () => {
     render(<BranchPicker branches={branches} actions={actions} />)
     fireEvent.click(screen.getByTestId("branch-rebase-feature"))
     expect(actions.rebase).toHaveBeenCalledWith("feature")
+  })
+
+  it("merges a chosen branch into the current branch", () => {
+    const actions = makeActions()
+    const onPicked = jest.fn()
+    render(<BranchPicker branches={branches} actions={actions} onPicked={onPicked} />)
+    fireEvent.click(screen.getByTestId("branch-merge-feature"))
+    expect(actions.merge).toHaveBeenCalledWith("feature")
+    expect(actions.checkout).not.toHaveBeenCalled()
+    expect(onPicked).toHaveBeenCalled()
+  })
+
+  it("does not offer merge for the current branch", () => {
+    render(<BranchPicker branches={branches} actions={makeActions()} />)
+    expect(screen.queryByTestId("branch-merge-main")).not.toBeInTheDocument()
   })
 
   it("creates a branch from the footer input", () => {

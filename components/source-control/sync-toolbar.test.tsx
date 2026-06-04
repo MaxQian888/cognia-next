@@ -12,7 +12,25 @@ function makeActions() {
     sync: jest.fn().mockResolvedValue(undefined),
     discardAll: jest.fn().mockResolvedValue(undefined),
     mergeAbort: jest.fn().mockResolvedValue(undefined),
+    reset: jest.fn().mockResolvedValue(undefined),
   }
+}
+
+function setStatus(overrides: Partial<import("@/types/git").GitStatus>) {
+  act(() =>
+    useGitStore.getState().setStatus({
+      branch: "main",
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      staged: [],
+      changes: [],
+      merge: [],
+      isRebasing: false,
+      isMerging: false,
+      ...overrides,
+    })
+  )
 }
 
 function renderToolbar(actions = makeActions(), handlers = {}) {
@@ -22,6 +40,7 @@ function renderToolbar(actions = makeActions(), handlers = {}) {
     onOpenTimeline: jest.fn(),
     onOpenRemotes: jest.fn(),
     onOpenTags: jest.fn(),
+    onOpenCompare: jest.fn(),
     onRefresh: jest.fn(),
     ...handlers,
   }
@@ -72,6 +91,70 @@ describe("SyncToolbar", () => {
     await user.click(screen.getByTestId("sync-more"))
     await user.click(await screen.findByTestId("more-remotes"))
     expect(props.onOpenRemotes).toHaveBeenCalled()
+  })
+
+  it("opens the compare-refs sheet from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const props = renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-compare"))
+    expect(props.onOpenCompare).toHaveBeenCalled()
+  })
+
+  it("keeps the overflow menu mounted when an overlay item is selected (preventDefault)", async () => {
+    const user = userEvent.setup()
+    const props = renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-stash"))
+    expect(props.onOpenStash).toHaveBeenCalled()
+    // preventDefault keeps the menu open so the Sheet never races focus restore.
+    expect(screen.getByTestId("more-stash")).toBeInTheDocument()
+  })
+
+  it("shows Publish Branch instead of Push when the branch has no upstream", () => {
+    setStatus({ upstream: null })
+    const actions = makeActions()
+    renderToolbar(actions)
+    expect(screen.queryByTestId("sync-push")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("sync-publish"))
+    expect(actions.push).toHaveBeenCalledWith(true)
+  })
+
+  it("shows the plain Push button when an upstream is configured", () => {
+    setStatus({})
+    renderToolbar()
+    expect(screen.getByTestId("sync-push")).toBeInTheDocument()
+    expect(screen.queryByTestId("sync-publish")).not.toBeInTheDocument()
+  })
+
+  it("undo last commit soft-resets to HEAD~1", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-undo-commit"))
+    expect(actions.reset).toHaveBeenCalledWith("soft", "HEAD~1")
+  })
+
+  it("disables undo last commit while a sequencer operation is in progress", async () => {
+    act(() =>
+      useGitStore.setState({
+        repoState: {
+          isRepo: true,
+          rootDir: "/r",
+          detachedHead: false,
+          operationInProgress: "merge",
+        },
+      })
+    )
+    const user = userEvent.setup()
+    const actions = makeActions()
+    renderToolbar(actions)
+    await user.click(screen.getByTestId("sync-more"))
+    const item = await screen.findByTestId("more-undo-commit")
+    expect(item).toHaveAttribute("data-disabled")
+    await user.click(item)
+    expect(actions.reset).not.toHaveBeenCalled()
   })
 
   it("hides Abort Merge unless a merge is in progress", async () => {

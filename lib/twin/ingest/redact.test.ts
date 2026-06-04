@@ -331,3 +331,107 @@ describe("hasNoLeakingPiiDeep", () => {
     expect(hasNoLeakingPiiDeep(cyclic)).toBe(false)
   })
 })
+
+describe("translateOffsetsThroughRedaction", () => {
+  const { redactText, translateOffsetsThroughRedaction } = jest.requireActual(
+    "@/lib/twin/ingest/redact"
+  )
+
+  function entry(charStart: number, charEnd: number, pageNumber = 1) {
+    return { pageNumber, charStart, charEnd }
+  }
+
+  it("is the identity when the text contains no PII", () => {
+    const original = "plain text with nothing sensitive at all"
+    const { redacted, map } = redactText(original)
+    expect(redacted).toBe(original)
+
+    const out = translateOffsetsThroughRedaction([entry(0, 10), entry(10, 40)], redacted, map)
+    expect(out).toEqual([entry(0, 10), entry(10, 40)])
+  })
+
+  it("translates offsets before, across, and after a placeholder exactly", () => {
+    const prefix = "Reach out to "
+    const email = "alice@example.com"
+    const suffix = " for the launch details."
+    const original = `${prefix}${email}${suffix}`
+    const { redacted, map } = redactText(original)
+    expect(redacted.length).not.toBe(original.length)
+
+    const placeholder = Object.keys(map)[0]
+    const redStart = redacted.indexOf(placeholder)
+    const redEnd = redStart + placeholder.length
+
+    const out = translateOffsetsThroughRedaction(
+      [
+        entry(0, prefix.length), // entirely before the PII — identity
+        entry(prefix.length, prefix.length + email.length), // exactly the PII span
+        entry(prefix.length + email.length, original.length), // after the PII — shifted
+      ],
+      redacted,
+      map
+    )
+
+    expect(out[0]).toEqual(entry(0, prefix.length))
+    expect(out[1].charStart).toBe(redStart)
+    expect(out[1].charEnd).toBe(redEnd)
+    expect(out[2].charStart).toBe(redEnd)
+    expect(out[2].charEnd).toBe(redacted.length)
+  })
+
+  it("clamps an offset that falls inside a redacted span to the placeholder bounds", () => {
+    const original = "x alice@example.com y"
+    const { redacted, map } = redactText(original)
+    const placeholder = Object.keys(map)[0]
+    const redStart = redacted.indexOf(placeholder)
+    const redEnd = redStart + placeholder.length
+
+    // Offset 10 is mid-email in original space — no exact redacted twin.
+    const [out] = translateOffsetsThroughRedaction([entry(10, 10)], redacted, map)
+    expect(out.charStart).toBeGreaterThanOrEqual(redStart)
+    expect(out.charStart).toBeLessThanOrEqual(redEnd)
+  })
+
+  it("accumulates shifts across multiple placeholders", () => {
+    const original =
+      "First alice@example.com then some middle text then bob@example.org at the end tail"
+    const { redacted, map } = redactText(original)
+    expect(Object.keys(map).length).toBe(2)
+
+    // The trailing " at the end tail" segment after BOTH placeholders.
+    const tail = " at the end tail"
+    const origTailStart = original.length - tail.length
+    const redTailStart = redacted.length - tail.length
+
+    const [out] = translateOffsetsThroughRedaction(
+      [entry(origTailStart, original.length)],
+      redacted,
+      map
+    )
+    expect(out.charStart).toBe(redTailStart)
+    expect(out.charEnd).toBe(redacted.length)
+    expect(redacted.slice(out.charStart, out.charEnd)).toBe(tail)
+  })
+
+  it("preserves extra entry fields (bboxUnion, pageNumber)", () => {
+    const original = "no pii here"
+    const { redacted, map } = redactText(original)
+    const bboxUnion = { x: 1, y: 2, width: 3, height: 4 }
+
+    const [out] = translateOffsetsThroughRedaction(
+      [{ pageNumber: 7, charStart: 0, charEnd: 5, bboxUnion }],
+      redacted,
+      map
+    )
+    expect(out.pageNumber).toBe(7)
+    expect(out.bboxUnion).toEqual(bboxUnion)
+  })
+
+  it("clamps out-of-range offsets to the redacted text bounds", () => {
+    const original = "short alice@example.com text"
+    const { redacted, map } = redactText(original)
+
+    const [out] = translateOffsetsThroughRedaction([entry(0, original.length + 50)], redacted, map)
+    expect(out.charEnd).toBe(redacted.length)
+  })
+})

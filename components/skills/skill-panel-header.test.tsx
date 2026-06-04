@@ -77,9 +77,28 @@ describe("SkillPanelHeader", () => {
     expect(useSkillsStore.getState().filterSheetOpen).toBe(true)
   })
 
-  it("writes the search query through to the store", () => {
+  it("hides the filters button when not on the My Skills tab", () => {
+    useSkillsStore.setState({ activeTab: "browse" } as never)
     render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
-    fireEvent.change(screen.getByPlaceholderText("filter.search"), { target: { value: "foo" } })
-    expect(useSkillsStore.getState().filters.query).toBe("foo")
+    expect(screen.queryByLabelText("filters")).not.toBeInTheDocument()
+  })
+
+  // The search input moved into SkillListPane (it owns [data-skill-search],
+  // which the `/` shortcut focuses).
+  it("does not render a search input", () => {
+    render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
+    expect(document.querySelector("[data-skill-search]")).toBeNull()
+    expect(screen.queryByPlaceholderText("filter.search")).not.toBeInTheDocument()
+  })
+
+  it("renders the tabsSlot content when provided", () => {
+    render(
+      <SkillPanelHeader
+        totalCount={1}
+        filteredCount={1}
+        tabsSlot={<div data-testid="tabs-slot" />}
+      />
+    )
+    expect(screen.getByTestId("tabs-slot")).toBeInTheDocument()
   })
 })

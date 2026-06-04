@@ -34,7 +34,7 @@ description: n8n-style visual orchestration layer — wire characters, teams, sk
   <Stat label="Rust backend" value="~2.3k LOC" hint="webhook_router 818 · run_mirror 432 · cron_daemon 351" />
 </StatGrid>
 
-cognia-next uses this layer to compose its mature runtime entities — [characters](../../chat/chat-and-skills), [agent teams](../../chat/agent-teams), [skills](../../chat/skills-system), [employee twins](../employee-twin), [platform connectors](../platform-connectors), MCP servers, and [plugins](../plugin-system) — into executable graphs. The design follows ADR 0011 (subsystem), ADR 0017 (plugin extension points), and ADR 0034 (editor completeness).
+cognia-next uses this layer to compose its mature runtime entities — [characters](../../chat/chat-and-skills), [agent teams](../../chat/agent-teams), [skills](../skills), [employee twins](../employee-twin), [platform connectors](../platform-connectors), MCP servers, and [plugins](../plugin-system) — into executable graphs. The design follows ADR 0011 (subsystem), ADR 0017 (plugin extension points), and ADR 0034 (editor completeness).
 
 ## The one load-bearing principle
 
@@ -154,7 +154,7 @@ See [Triggers & Rust backend](./triggers-rust) for the full plumbing.
 <Cards>
   <Card title="Platform Connectors" href="../platform-connectors" description="Source of trigger.connector.inbound + action.connector.send" />
   <Card title="Scheduler" href="../scheduler" description="The in-process cron daemon mirrors the scheduler's absolute-timestamp clock" />
-  <Card title="Skills System" href="../../chat/skills-system" description="Target of action.skill.invoke / action.skill.upsert" />
+  <Card title="Skills Subsystem" href="../skills/consumption-surfaces" description="Target of action.skill.invoke / action.skill.upsert" />
   <Card title="Agent Teams" href="../../chat/agent-teams" description="action.team.run drives runTeamLifecycle; pattern.* nodes are higher-order team dispatches" />
   <Card title="Employee Twin" href="../employee-twin" description="Entry point for action.twin.rag / action.twin.ingest" />
   <Card title="Plugin System" href="../plugin-system" description="workflow.node / workflow.trigger / workflow.task extension points" />

@@ -28,7 +28,7 @@ See [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
    ```
 3. **Add the upstream remote**:
    ```bash
-   git remote add upstream https://github.com/AstroAir/cognia-next.git
+   git remote add upstream https://github.com/MaxQian888/cognia-next.git
    ```
 
 ## Development Setup
@@ -287,7 +287,7 @@ describe('Button', () => {
 
 If you have questions, feel free to:
 
-1. Check existing [Issues](https://github.com/AstroAir/cognia-next/issues)
+1. Check existing [Issues](https://github.com/MaxQian888/cognia-next/issues)
 2. Open a new issue for discussion
 3. Reach out to maintainers
 

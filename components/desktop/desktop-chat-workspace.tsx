@@ -395,7 +395,6 @@ export function DesktopChatWorkspace() {
                   onCreate={handleNewDirect}
                   onUseSample={handleUseSample}
                   onOpenSettings={openSettings}
-                  onNavigate={(href) => router.push(href)}
                   recentSessions={recentSessions}
                   onResumeSession={handleSwitchToSession}
                   composerRef={composerRef}

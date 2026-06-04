@@ -15,7 +15,7 @@
  * Node config / structure mutations all flow through the shared editor store.
  */
 
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -123,6 +123,31 @@ export function MobileCanvas({
     [setViewport]
   )
 
+  // ── Uncontrolled camera (mirrors the desktop FlowCanvas) ─────────────────
+  // Passing the store viewport as the controlled `viewport` prop without an
+  // `onViewportChange` round-trip freezes the camera during pan/pinch — the
+  // canvas stops following the finger and only jumps at gesture end. Keep the
+  // camera uncontrolled (d3-internal, zero React work per frame), seed it from
+  // the mount-time store value, and push only wholesale store replaces
+  // (workflow switch / import) imperatively. Gesture-end `onMoveEnd` echoes
+  // are value-equal, so the guard skips them.
+  const [initialViewport] = useState(viewport)
+  const rfRef = useRef<WorkflowFlowInstance | null>(null)
+  const handleInit = useCallback(
+    (rf: WorkflowFlowInstance) => {
+      rfRef.current = rf
+      onInit(rf)
+    },
+    [onInit]
+  )
+  useEffect(() => {
+    const rf = rfRef.current
+    if (!rf) return
+    const cur = rf.getViewport()
+    if (cur.x === viewport.x && cur.y === viewport.y && cur.zoom === viewport.zoom) return
+    rf.setViewport(viewport)
+  }, [viewport])
+
   // Coalesce a drag into a single undo entry (mirrors the desktop canvas).
   const onNodeDragStart = useCallback(() => {
     useStore.getState().beginDragHistory()
@@ -152,7 +177,7 @@ export function MobileCanvas({
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        viewport={viewport}
+        defaultViewport={initialViewport}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onMoveEnd={onMoveEnd}
@@ -160,7 +185,7 @@ export function MobileCanvas({
         onNodeDragStop={onNodeDragStop}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
-        onInit={onInit}
+        onInit={handleInit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         minZoom={0.2}

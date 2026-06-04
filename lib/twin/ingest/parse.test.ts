@@ -11,7 +11,7 @@
  * lives in each importer's own test file.
  */
 
-import { parseSource, type RawSource } from "@/lib/twin/ingest/parse"
+import { computePdfPageMap, parseSource, type RawSource } from "@/lib/twin/ingest/parse"
 
 describe("parseSource — document family", () => {
   it("routes markdown through the document processor", async () => {
@@ -151,5 +151,79 @@ Single message body.
       text: "{this is not json",
     }
     await expect(parseSource(raw)).rejects.toThrow(/importer .* failed/)
+  })
+})
+
+describe("computePdfPageMap", () => {
+  function pdfResult(pages: Array<{ text: string; items?: object[] }>) {
+    return {
+      text: pages.map((p) => p.text).join("\n\n"),
+      pageCount: pages.length,
+      pages: pages.map((p, i) => ({
+        pageNumber: i + 1,
+        text: p.text,
+        width: 612,
+        height: 792,
+        ...(p.items ? { items: p.items } : {}),
+      })),
+      metadata: {},
+    }
+  }
+
+  const ITEM_A = { text: "alpha", x: 10, y: 20, width: 100, height: 12 }
+  const ITEM_B = { text: "beta", x: 50, y: 700, width: 80, height: 14 }
+
+  it("maps page char ranges with the embeddable prefix offset applied", () => {
+    const result = pdfResult([
+      { text: "page one body", items: [ITEM_A] },
+      { text: "page two body", items: [ITEM_B] },
+    ])
+    const embeddable = `Title: Doc\n\n${result.text}`
+
+    const map = computePdfPageMap("pdf", result, embeddable)
+
+    expect(map).toHaveLength(2)
+    const base = embeddable.indexOf(result.text)
+    expect(map![0]).toMatchObject({ pageNumber: 1, charStart: base })
+    expect(embeddable.slice(map![0].charStart, map![0].charEnd)).toBe("page one body")
+    expect(embeddable.slice(map![1].charStart, map![1].charEnd)).toBe("page two body")
+  })
+
+  it("computes bboxUnion across a page's items", () => {
+    const result = pdfResult([{ text: "body", items: [ITEM_A, ITEM_B] }])
+
+    const map = computePdfPageMap("pdf", result, result.text)
+
+    // Union of (10,20,100x12) and (50,700,80x14): x 10..130, y 20..714.
+    expect(map![0].bboxUnion).toEqual({ x: 10, y: 20, width: 120, height: 694 })
+  })
+
+  it("omits bboxUnion for a page without items", () => {
+    const result = pdfResult([{ text: "with items", items: [ITEM_A] }, { text: "without items" }])
+
+    const map = computePdfPageMap("pdf", result, result.text)
+
+    expect(map![0].bboxUnion).toBeDefined()
+    expect(map![1].bboxUnion).toBeUndefined()
+  })
+
+  it("returns undefined when no page carries items (pdfjs path)", () => {
+    const result = pdfResult([{ text: "plain" }, { text: "pages" }])
+    expect(computePdfPageMap("pdf", result, result.text)).toBeUndefined()
+  })
+
+  it("returns undefined for non-pdf formats", () => {
+    const result = pdfResult([{ text: "body", items: [ITEM_A] }])
+    expect(computePdfPageMap("markdown", result, result.text)).toBeUndefined()
+  })
+
+  it("returns undefined when parseResult is missing or not PDF-shaped", () => {
+    expect(computePdfPageMap("pdf", undefined, "text")).toBeUndefined()
+    expect(computePdfPageMap("pdf", { html: "<p/>" }, "text")).toBeUndefined()
+  })
+
+  it("returns undefined when the page text cannot be located in the embeddable text", () => {
+    const result = pdfResult([{ text: "needle", items: [ITEM_A] }])
+    expect(computePdfPageMap("pdf", result, "completely different haystack")).toBeUndefined()
   })
 })

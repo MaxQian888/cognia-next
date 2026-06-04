@@ -13,7 +13,13 @@ import {
   type ChunkingOptions,
   type ChunkingStrategy,
 } from "@/lib/ai/embedding/chunking"
-import type { ChunkingStrategyId, TwinChunkMetadata, TwinSourceFormat } from "@/types/twin"
+import type {
+  ChunkingStrategyId,
+  TwinBoundingBox,
+  TwinChunkMetadata,
+  TwinPageMapEntry,
+  TwinSourceFormat,
+} from "@/types/twin"
 
 export interface PreparedChunk {
   /** Strategy actually used (after the format-based picker). */
@@ -85,6 +91,50 @@ export interface ChunkInput {
   /** Override the strategy picker. */
   strategy?: ChunkingStrategy
   options?: Partial<ChunkingOptions>
+  /**
+   * PDF page char ranges in REDACTED space (already translated through
+   * `translateOffsetsThroughRedaction`). When present, each chunk gets
+   * stamped with `pageNumber` / `pageEnd` / `bboxUnion` provenance.
+   */
+  pageMap?: TwinPageMapEntry[]
+}
+
+function unionBoundingBoxes(boxes: TwinBoundingBox[]): TwinBoundingBox | undefined {
+  if (boxes.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x)
+    minY = Math.min(minY, box.y)
+    maxX = Math.max(maxX, box.x + box.width)
+    maxY = Math.max(maxY, box.y + box.height)
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
+/** Stamp page provenance onto a chunk's metadata from the overlapping
+ *  pageMap entries. Mutates `metadata` (a per-chunk copy). */
+function stampPageMetadata(
+  metadata: TwinChunkMetadata,
+  pageMap: TwinPageMapEntry[],
+  charStart: number,
+  charEnd: number
+): void {
+  const overlapping = pageMap.filter((page) => page.charStart < charEnd && page.charEnd > charStart)
+  if (overlapping.length === 0) return
+  metadata.pageNumber = overlapping[0].pageNumber
+  const last = overlapping[overlapping.length - 1].pageNumber
+  if (last > overlapping[0].pageNumber) {
+    metadata.pageEnd = last
+  }
+  const bboxUnion = unionBoundingBoxes(
+    overlapping.flatMap((page) => (page.bboxUnion ? [page.bboxUnion] : []))
+  )
+  if (bboxUnion) {
+    metadata.bboxUnion = bboxUnion
+  }
 }
 
 export function prepareChunks(input: ChunkInput): PreparedChunk[] {
@@ -98,6 +148,9 @@ export function prepareChunks(input: ChunkInput): PreparedChunk[] {
     if (strategy === "heading") {
       const path = inferHeadingPath(c.content)
       if (path) metadata.headingPath = path
+    }
+    if (input.pageMap?.length) {
+      stampPageMetadata(metadata, input.pageMap, c.startOffset, c.endOffset)
     }
     return {
       strategy: strategy as ChunkingStrategyId,

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { BarChart3Icon, PencilIcon, ShoppingBagIcon, SparklesIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 import { useSkillsStore, type SkillPanelTab } from "@/stores/skills"
 
 const TAB_DEFS: {
@@ -18,7 +19,7 @@ const TAB_DEFS: {
   { id: "analytics", labelKey: "analytics", icon: BarChart3Icon },
 ]
 
-export function SkillPanelTabs() {
+export function SkillPanelTabs({ className }: { className?: string }) {
   const t = useTranslations("skills.tabs")
   const activeTab = useSkillsStore((s) => s.activeTab)
   const setActiveTab = useSkillsStore((s) => s.setActiveTab)
@@ -30,7 +31,7 @@ export function SkillPanelTabs() {
     <Tabs
       value={activeTab}
       onValueChange={(v) => setActiveTab(v as SkillPanelTab)}
-      className="border-b"
+      className={cn("border-b", className)}
     >
       <div className="mx-2 my-2 overflow-x-auto sm:mx-4">
         <TabsList className="self-start">

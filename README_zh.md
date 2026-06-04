@@ -23,6 +23,10 @@
 
 ---
 
+> [!WARNING]
+> **当前项目正在经历重大重构。** API、数据结构与各项功能随时可能变更或损坏，现阶段**不保障可用性**。
+> 如有依赖，请固定到一个已知可用的提交。
+
 ## 总览
 
 Cognia 用同一份 Next.js 16 静态导出驱动三种外壳 —— 浏览器、Tauri 2 桌面与 Capacitor 8 移动端 ——
@@ -80,7 +84,7 @@ monorepo 旁有两个独立服务：
 ## 快速开始
 
 ```bash
-git clone https://github.com/AstroAir/cognia-next
+git clone https://github.com/MaxQian888/cognia-next
 cd cognia-next
 pnpm install                   # workspace（主应用 + docs + mobile + plugin-sdk）
 pnpm sidecar:install           # Node sidecar（独立 lockfile）
@@ -291,4 +295,4 @@ pnpm docs:build
 ## 支持
 
 - 阅读 [`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/) 下对应 ADR。
-- 提交 issue：<https://github.com/AstroAir/cognia-next/issues>。
+- 提交 issue：<https://github.com/MaxQian888/cognia-next/issues>。

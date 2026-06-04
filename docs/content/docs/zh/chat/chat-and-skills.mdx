@@ -65,7 +65,7 @@ sequenceDiagram
 
 ## 角色（Characters）
 
-`Character` 定义在 `lib/claude/types.ts:1055`：
+`Character` 定义在 `lib/claude/types.ts`。本页只给概念视图 —— 逐字段数据模型、插件角色包 overlay、编辑器以及各运行时消费面，见专门的[角色](./characters)章节。
 
 <TypeTable
   type={{
@@ -172,11 +172,9 @@ sequenceDiagram
   `lib/data/migrate-envelope.ts` 自动迁移。
 </Callout>
 
-内置角色作为种子数据（`lib/db/seed.ts`、`lib/db/preset-built-ins.ts`）。用户角色由用户创建。两者位于同一张
-`characters` 表。
+内置角色现在以第一方插件角色包 `cognia-builtin-characters` 形式发布（ADR-0030）；`lib/db/characters.ts:seedBuiltInCharacters` 给 6 个历史行打上包归属标记。用户角色由用户创建。两者位于同一张 `characters` 表，读取时与插件包 overlay 取并集 —— 见[角色 · 数据模型](./characters/data-model)。
 
-角色编辑器在 `components/settings/...` 加上专门的工作台 tab。头像走共享的 `lib/avatar.ts`（渐变、首字母、
-图片或 `@rive-app/react-webgl2` 提供的 3D Rive 场景）。
+角色编辑器在 `components/settings/characters-section.tsx`。头像为 emoji + 颜色（`avatarColor` / `avatarGlyph` 辅助函数），可选包提供的 `avatarImage` —— 见[编辑器、选择器与发现页](./characters/editor-and-discover)。
 
 ### 孪生绑定
 
@@ -192,7 +190,7 @@ sequenceDiagram
 ## 技能（Skills）
 
 `Skill` 是一个 markdown 提示片段加可选工具白名单，按角色或会话启用。深度细节见
-[skills-system](./skills-system)。
+[技能子系统](../subsystems/skills)。
 
 <TypeTable
   type={{
@@ -210,7 +208,7 @@ sequenceDiagram
     },
     tags: { description: "搜索 / 分类标签。", type: "string[]" },
     source: {
-      description: "来源（builtin / custom / marketplace / sync）。",
+      description: "来源（builtin / custom / imported / generated / marketplace）。",
       type: "SkillSource",
     },
     status: {
@@ -230,19 +228,19 @@ sequenceDiagram
   }}
 />
 
-技能执行器（`lib/skills/executor.ts`）接收一组技能 ID，产出：
-
-- 合并后的提示片段。
-- 合并后的工具白名单（与角色 / Agent Mode 取并集）。
+发送时 `resolveSendOptions`（`lib/claude/build-options.ts`）取启用子集，经
+`renderSkillsSection`（`lib/db/skills.ts:339`）逐条追加正文，并把每个技能的 `allowedTools`
+与角色白名单**取并集** —— 完整机制见[加载与注入](../subsystems/skills/loading-and-injection)。
 
 技能管理路径：
 
-- **技能工作台**（`app/skills/`、`components/skills/`）—— 编写、编辑、校验。
-- **市场**（`lib/skills/marketplace-*.ts`）—— 安装社区技能并校验签名。
+- **技能工作台**（`app/skills/`、`components/skills/`）—— 编写、编辑、校验、批量操作（[工作台](../subsystems/skills/authoring-and-workbench)）。
+- **Bundle 导入**（`lib/skills/bundle/`）—— zip / 文件夹 / OpenAI-Codex 布局（[Bundle 导入](../subsystems/skills/bundle-import)）。
+- **市场**（`lib/skills/marketplace-*.ts`）—— 内置 registry + 可选 SkillsMP API（[市场](../subsystems/skills/marketplace)）。
 - **校验**（`lib/skills/validate.ts`）—— 保存/导入时一律校验。
-- **同步**（`lib/skills/sync.ts`）—— 与 Claude Code 技能格式同步。
+- **原生同步**（`lib/skills/sync.ts`）—— 与 `~/.claude/skills/` 双向同步并镜像 Codex（[原生同步与安全](../subsystems/skills/native-sync-and-security)）。
 
-内置技能在首次运行时种子化（`lib/db/seed.ts`）。用户技能可通过 `lib/skills/sync.ts` 导出到磁盘外部编辑后再导入。
+内置提示技能在首次运行时种子化（`lib/db/skills.ts:344`）。另有一层 ADR-0026 的**类型化内置工具技能**（Lark CLI 桥），见[内置技能](../subsystems/skills/built-in-skills)。
 
 ## Agent Mode
 
@@ -412,7 +410,7 @@ HTML 形式使用 `lib/themes/` 渲染当前主题；用户也可以加载自定
 
 <Cards>
   <Card title="Sidecar & Claude Agent SDK" href="../core/sidecar-and-claude-sdk" description="处理 claude_send 的 Node 主机。" />
-  <Card title="技能系统" href="./skills-system" description="技能生命周期、market、sync 细节。" />
+  <Card title="技能子系统" href="../subsystems/skills" description="技能生命周期、marketplace、native sync 细节。" />
   <Card title="Agent Teams" href="./agent-teams" description="团队 orchestration / mention / streamer。" />
   <Card title="斜杠命令" href="./slash-commands" description="统一 registry 与三类来源。" />
   <Card title="Provider 系统" href="./provider-system" description="alias 解析 + fallback chain。" />

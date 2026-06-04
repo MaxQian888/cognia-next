@@ -88,3 +88,99 @@ describe("prepareChunks", () => {
     expect(chunks[0].metadata.headingPath).toBeUndefined()
   })
 })
+
+describe("prepareChunks — pageMap stamping", () => {
+  const BOX_1 = { x: 10, y: 10, width: 100, height: 50 }
+  const BOX_2 = { x: 200, y: 300, width: 60, height: 40 }
+
+  it("stamps pageNumber and the page bboxUnion for a within-page chunk", () => {
+    const pageOne = "first page paragraph body"
+    const pageTwo = "second page paragraph body"
+    const text = `${pageOne}\n\n${pageTwo}`
+    const chunks = prepareChunks({
+      redactedText: text,
+      originalText: text,
+      format: "pdf",
+      strategy: "paragraph",
+      // Small chunk size so each paragraph (= page) becomes its own chunk.
+      options: { chunkSize: 30, chunkOverlap: 0 },
+      pageMap: [
+        { pageNumber: 1, charStart: 0, charEnd: pageOne.length, bboxUnion: BOX_1 },
+        { pageNumber: 2, charStart: pageOne.length + 2, charEnd: text.length, bboxUnion: BOX_2 },
+      ],
+    })
+
+    expect(chunks.length).toBeGreaterThanOrEqual(2)
+    expect(chunks[0].metadata.pageNumber).toBe(1)
+    expect(chunks[0].metadata.pageEnd).toBeUndefined()
+    expect(chunks[0].metadata.bboxUnion).toEqual(BOX_1)
+    const last = chunks[chunks.length - 1]
+    expect(last.metadata.pageNumber).toBe(2)
+    expect(last.metadata.bboxUnion).toEqual(BOX_2)
+  })
+
+  it("stamps pageEnd and the cross-page bbox union for a spanning chunk", () => {
+    // One unbroken paragraph that the page boundary cuts through the middle
+    // of — the single chunk overlaps both pages.
+    const text = "an unbroken run of words that crosses the synthetic page boundary midway"
+    const mid = Math.floor(text.length / 2)
+    const chunks = prepareChunks({
+      redactedText: text,
+      originalText: text,
+      format: "pdf",
+      strategy: "paragraph",
+      pageMap: [
+        { pageNumber: 1, charStart: 0, charEnd: mid, bboxUnion: BOX_1 },
+        { pageNumber: 2, charStart: mid, charEnd: text.length, bboxUnion: BOX_2 },
+      ],
+    })
+
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0].metadata.pageNumber).toBe(1)
+    expect(chunks[0].metadata.pageEnd).toBe(2)
+    // Union of BOX_1 (10..110, 10..60) and BOX_2 (200..260, 300..340).
+    expect(chunks[0].metadata.bboxUnion).toEqual({ x: 10, y: 10, width: 250, height: 330 })
+  })
+
+  it("omits bboxUnion when no overlapped page carries one", () => {
+    const text = "page text without any spatial information at all"
+    const chunks = prepareChunks({
+      redactedText: text,
+      originalText: text,
+      format: "pdf",
+      strategy: "paragraph",
+      pageMap: [{ pageNumber: 3, charStart: 0, charEnd: text.length }],
+    })
+
+    expect(chunks[0].metadata.pageNumber).toBe(3)
+    expect(chunks[0].metadata.bboxUnion).toBeUndefined()
+  })
+
+  it("leaves metadata untouched when no pageMap is provided", () => {
+    const text = "pdf text chunked without a native pageMap"
+    const chunks = prepareChunks({
+      redactedText: text,
+      originalText: text,
+      format: "pdf",
+    })
+
+    expect(chunks[0].metadata.pageNumber).toBeUndefined()
+    expect(chunks[0].metadata.pageEnd).toBeUndefined()
+    expect(chunks[0].metadata.bboxUnion).toBeUndefined()
+  })
+
+  it("stamps nothing for a chunk that overlaps no page range", () => {
+    const text = "short"
+    const chunks = prepareChunks({
+      redactedText: text,
+      originalText: text,
+      format: "pdf",
+      strategy: "paragraph",
+      // Page ranges entirely after the text — nothing overlaps.
+      pageMap: [{ pageNumber: 9, charStart: 100, charEnd: 200, bboxUnion: BOX_1 }],
+    })
+
+    expect(chunks[0].metadata.pageNumber).toBeUndefined()
+    expect(chunks[0].metadata.bboxUnion).toBeUndefined()
+  })
+})

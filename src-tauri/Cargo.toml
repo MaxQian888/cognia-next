@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "cognia-next — AI-powered desktop application built with Next.js 16 + Tauri 2"
 authors = ["AstroAir <astro_air@126.com>"]
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/AstroAir/cognia-next"
+repository = "https://github.com/MaxQian888/cognia-next"
 edition = "2021"
 # 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
 # (`metrique 0.1.25` is the highest). `clap_lex 1.1.0` needs 1.85
@@ -313,6 +313,13 @@ ort            = { version = "=2.0.0-rc.12", optional = true, default-features =
 # doesn't get pulled into default builds.
 image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
+# Native PDF parsing with per-item bounding boxes (PDFium via pdfium-sys,
+# which downloads a prebuilt PDFium at build time and loads it through
+# `libloading` at runtime). `default-features = false` drops liteparse's
+# bundled Tesseract build — scanned PDFs go through the ADR-0024 OCR
+# subsystem instead.
+liteparse      = { version = "2", default-features = false, optional = true }
+
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
 tauri-plugin-global-shortcut = "2"
@@ -412,6 +419,11 @@ ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
 # ships an onnxruntime DLL alongside the executable (handled by `ort`'s
 # `copy-dylibs` feature).
 ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
+# Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
+# network at build time (pdfium-sys downloads a prebuilt PDFium); the
+# PDFium dynamic library must ship next to the executable — see
+# `src/parse/mod.rs`. Default builds compile an `unsupported` stub.
+parse-liteparse = ["dep:liteparse"]
 
 # RTen is mandatory `--release` per upstream README — without opt-level=3
 # even smoke tests crawl. The override now lives in the workspace root

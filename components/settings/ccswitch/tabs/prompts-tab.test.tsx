@@ -64,6 +64,43 @@ describe("CcswitchPromptsTab", () => {
     expect(importMock.mock.calls[0][0]).toHaveLength(1)
   })
 
+  it("treats same-id prompts from different apps as independent rows", async () => {
+    // CCSwitch's prompts table is keyed by (id, app_type) — the id alone
+    // repeats across apps, so keys and selection must not collide.
+    usePromptsMock.mockReturnValue({
+      data: [
+        { id: "default", name: "Claude Prompt", content: "a", kind: "claude" },
+        { id: "default", name: "Codex Prompt", content: "b", kind: "codex" },
+      ],
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    })
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<CcswitchPromptsTab />)
+      await screen.findByText("Claude Prompt")
+
+      const dupKeyError = errorSpy.mock.calls.find((call) => String(call[0]).includes("same key"))
+      expect(dupKeyError).toBeUndefined()
+
+      // Both rows start selected; unchecking the first must not uncheck the second.
+      const boxes = screen.getAllByRole("checkbox")
+      expect(boxes).toHaveLength(2)
+      fireEvent.click(boxes[0])
+      await waitFor(() => expect(boxes[0]).not.toBeChecked())
+      expect(boxes[1]).toBeChecked()
+
+      // Import only sends the prompt that stayed selected.
+      fireEvent.click(screen.getByRole("button", { name: /prompts\.importBtn/ }))
+      await waitFor(() => expect(importMock).toHaveBeenCalled())
+      expect(importMock.mock.calls[0][0]).toHaveLength(1)
+      expect(importMock.mock.calls[0][0][0].name).toBe("Codex Prompt")
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("renders empty state when CCSwitch has no prompts", () => {
     usePromptsMock.mockReturnValue({
       data: [],

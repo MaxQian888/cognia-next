@@ -47,6 +47,28 @@ describe("dock layout state", () => {
     useTerminalStore.getState().setPanelHeight(0)
     expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMinPct)
   })
+
+  it("does not persist panelOpen — the dock starts closed on every launch", () => {
+    const { partialize } = useTerminalStore.persist.getOptions()
+    const persisted = partialize?.({ ...useTerminalStore.getState(), panelOpen: true })
+    expect(persisted).toEqual({ panelHeightPct: useTerminalStore.getState().panelHeightPct })
+  })
+
+  it("migrate drops a v1 persisted panelOpen but keeps the tuned height", () => {
+    const { migrate } = useTerminalStore.persist.getOptions()
+    const migrated = migrate?.({ panelOpen: true, panelHeightPct: 40 }, 1) as {
+      panelOpen: boolean
+      panelHeightPct: number
+    }
+    expect(migrated.panelOpen).toBe(false)
+    expect(migrated.panelHeightPct).toBe(40)
+  })
+
+  it("migrate falls back to the default height when the old value is invalid", () => {
+    const { migrate } = useTerminalStore.persist.getOptions()
+    const migrated = migrate?.({ panelHeightPct: "junk" }, 1) as { panelHeightPct: number }
+    expect(migrated.panelHeightPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelHeightPct)
+  })
 })
 
 describe("session registry", () => {

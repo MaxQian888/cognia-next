@@ -39,11 +39,35 @@ fn for_provider<R>(
 // Bootstrap
 // ---------------------------------------------------------------------------
 
-/// Run v1 → v2 migration for every provider. Idempotent. Called once on app
+/// Run v1 → v2 migration for every provider, then rebuild the in-process
+/// active projection from the persisted vaults. Idempotent. Called once on app
 /// boot from the renderer (`lib/subscription/core/migration.ts::subscriptionInit`).
+///
+/// The rebuild fulfils the `active.rs:13-15` contract: `ActiveAccountState`
+/// and the Anthropic OAuth bearer in `ApiKeyState` are in-memory caches of the
+/// vault, so without this step a subscription-only user loses their auth on
+/// every app restart until they manually re-activate an account (and the chat
+/// header shows a bogus "No API key" badge).
 #[tauri::command]
-pub async fn subscription_init() -> Result<Vec<MigrationOutcome>, String> {
-    Ok(migration::migrate_all())
+pub async fn subscription_init(
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+) -> Result<Vec<MigrationOutcome>, String> {
+    let outcomes = migration::migrate_all();
+    for id in [ProviderId::Anthropic, ProviderId::Codex, ProviderId::Opencode] {
+        match vault::load(id) {
+            Ok(Some(vault)) => {
+                apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                // Never block app boot on a keyring hiccup — the user can
+                // still re-activate manually from Settings → Subscription.
+                log::warn!("subscription boot rebuild: {} vault load failed: {err}", id.as_str());
+            }
+        }
+    }
+    Ok(outcomes)
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +170,60 @@ pub async fn subscription_rename_account(
 // Active pointer
 // ---------------------------------------------------------------------------
 
+/// Build the in-process projection for one provider's active account from an
+/// already-loaded vault: the `ActiveSnapshot` plus, for Anthropic, the OAuth
+/// bearer to mirror into `ApiKeyState`. Returns `None` when the account id is
+/// not in the vault. Pure — no keyring / process I/O.
+fn build_active_projection(
+    id: ProviderId,
+    vault: &ProviderVault,
+    account_id: &str,
+) -> Option<(ActiveSnapshot, Option<String>)> {
+    let account = vault.find_account(account_id)?;
+    let env = for_provider(id, |p| p.env_for_sidecar(account, vault.resolve_preset(account)));
+    let bearer = if id == ProviderId::Anthropic {
+        env.iter()
+            .find(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN")
+            .map(|(_, v)| v.clone())
+    } else {
+        None
+    };
+    Some((
+        ActiveSnapshot {
+            active_account_id: Some(account_id.to_string()),
+            env,
+        },
+        bearer,
+    ))
+}
+
+/// Re-apply one provider's persisted active pointer to the in-process caches.
+/// No-op when the vault has no active pointer or the pointer is stale (the
+/// referenced account was deleted). Used by the boot rebuild in
+/// `subscription_init`; intentionally does NOT touch the sidecar — at boot
+/// nothing has spawned yet.
+async fn apply_active_projection(
+    id: ProviderId,
+    vault: &ProviderVault,
+    active_state: &ActiveAccountState,
+    api_key_state: &ApiKeyState,
+) {
+    let Some(account_id) = vault.active_account_id.as_deref() else {
+        return;
+    };
+    let Some((snapshot, bearer)) = build_active_projection(id, vault, account_id) else {
+        log::warn!(
+            "subscription boot rebuild: active account {account_id:?} missing from {} vault; skipping",
+            id.as_str()
+        );
+        return;
+    };
+    active_state.set(id, snapshot).await;
+    if id == ProviderId::Anthropic {
+        api_key_state.set_oauth_bearer(bearer).await;
+    }
+}
+
 /// Set (or clear) the active account for a provider.
 ///
 /// For Anthropic specifically: also pushes the resolved OAuth bearer into
@@ -165,37 +243,11 @@ pub async fn subscription_set_active(
     let id = ProviderId::parse(&provider)?;
     let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
 
-    let (snapshot, must_restart_sidecar, anthropic_bearer) = match &account_id {
-        Some(target_id) => {
-            let account = vault
-                .find_account(target_id)
-                .ok_or_else(|| format!("no account {target_id:?} in {provider} vault"))?
-                .clone();
-            let env = for_provider(id, |p| {
-                p.env_for_sidecar(&account, vault.resolve_preset(&account))
-            });
-            let restart = for_provider(id, |p| p.requires_sidecar_restart_on_active_switch());
-            let bearer = if id == ProviderId::Anthropic {
-                env.iter()
-                    .find(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN")
-                    .map(|(_, v)| v.clone())
-            } else {
-                None
-            };
-            (
-                ActiveSnapshot {
-                    active_account_id: Some(target_id.clone()),
-                    env,
-                },
-                restart,
-                bearer,
-            )
-        }
-        None => (
-            ActiveSnapshot::default(),
-            for_provider(id, |p| p.requires_sidecar_restart_on_active_switch()),
-            None,
-        ),
+    let must_restart_sidecar = for_provider(id, |p| p.requires_sidecar_restart_on_active_switch());
+    let (snapshot, anthropic_bearer) = match &account_id {
+        Some(target_id) => build_active_projection(id, &vault, target_id)
+            .ok_or_else(|| format!("no account {target_id:?} in {provider} vault"))?,
+        None => (ActiveSnapshot::default(), None),
     };
 
     vault.active_account_id = account_id.clone();
@@ -468,6 +520,86 @@ mod tests {
             .await
             .expect_err("should reject");
         assert!(err.contains("provider mismatch"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Boot-time projection rebuild (active.rs:13-15 contract) — pure, no keyring.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_active_projection_anthropic_extracts_bearer() {
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account.clone());
+        let (snapshot, bearer) =
+            build_active_projection(ProviderId::Anthropic, &vault, &account.id)
+                .expect("account exists in vault");
+        assert_eq!(snapshot.active_account_id.as_deref(), Some(account.id.as_str()));
+        assert!(snapshot
+            .env
+            .iter()
+            .any(|(k, v)| k == "CLAUDE_CODE_OAUTH_TOKEN" && v == "oat01-cmd"));
+        assert_eq!(bearer.as_deref(), Some("oat01-cmd"));
+    }
+
+    #[test]
+    fn build_active_projection_unknown_account_returns_none() {
+        let vault = ProviderVault::empty();
+        assert!(build_active_projection(ProviderId::Anthropic, &vault, "missing").is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_active_projection_rehydrates_states_from_vault() {
+        // App restart scenario: the vault persists the active pointer but the
+        // in-process caches start empty. Applying the projection must restore
+        // both the ActiveAccountState snapshot and the Anthropic bearer.
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account.clone());
+        vault.active_account_id = Some(account.id.clone());
+
+        let active_state = ActiveAccountState::new();
+        let api_key_state = ApiKeyState::new();
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
+            .await;
+
+        let snap = active_state.get(ProviderId::Anthropic).await;
+        assert_eq!(snap.active_account_id.as_deref(), Some(account.id.as_str()));
+        assert!(snap.env.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"));
+        assert_eq!(api_key_state.get_oauth_bearer().await.as_deref(), Some("oat01-cmd"));
+    }
+
+    #[tokio::test]
+    async fn apply_active_projection_noops_without_active_pointer() {
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(account);
+        // active_account_id stays None — user cleared the active selection.
+
+        let active_state = ActiveAccountState::new();
+        let api_key_state = ApiKeyState::new();
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
+            .await;
+
+        assert!(active_state.get(ProviderId::Anthropic).await.active_account_id.is_none());
+        assert!(api_key_state.get_oauth_bearer().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_active_projection_noops_on_stale_account_id() {
+        // The persisted pointer references an account that no longer exists
+        // (e.g. deleted on another machine before a sync) — must not panic
+        // and must leave the caches untouched.
+        let mut vault = ProviderVault::empty();
+        vault.active_account_id = Some("gone".into());
+
+        let active_state = ActiveAccountState::new();
+        let api_key_state = ApiKeyState::new();
+        apply_active_projection(ProviderId::Anthropic, &vault, &active_state, &api_key_state)
+            .await;
+
+        assert!(active_state.get(ProviderId::Anthropic).await.active_account_id.is_none());
+        assert!(api_key_state.get_oauth_bearer().await.is_none());
     }
 
     #[tokio::test]

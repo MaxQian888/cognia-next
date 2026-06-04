@@ -7,21 +7,14 @@ import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
-  ArrowRightIcon,
-  BrainCircuitIcon,
-  CableIcon,
   CodeIcon,
   FileTextIcon,
   FolderTreeIcon,
   MessageSquareTextIcon,
-  MonitorIcon,
   PlusIcon,
-  ScanTextIcon,
   SparklesIcon,
   Settings2Icon,
   TerminalIcon,
-  UsersRoundIcon,
-  WorkflowIcon,
   XIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -55,7 +48,7 @@ export interface EmptyStateOverride {
 /** Visual density of the welcome page. */
 export type WelcomeStyle = "rich" | "minimal"
 /** Dismissable welcome sections (persisted in `AppSettings.welcomeHidden`). */
-export type WelcomeSection = "quickStart" | "tryPrompt"
+export type WelcomeSection = "tryPrompt"
 
 interface SampleId {
   id: "explore" | "review" | "draft" | "tests"
@@ -67,66 +60,6 @@ const SAMPLE_IDS: SampleId[] = [
   { id: "review", icon: CodeIcon },
   { id: "draft", icon: FileTextIcon },
   { id: "tests", icon: TerminalIcon },
-]
-
-type CapabilityId = "workflows" | "agentTeams" | "connectors" | "twin" | "computerUse" | "ocr"
-
-interface CapabilityEntry {
-  id: CapabilityId
-  icon: LucideIcon
-  href: string
-  /** Tailwind classes for the icon chip (mirrors `scheduler/stat-card`). */
-  iconBg: string
-  /** Gradient start color for the bottom accent bar. */
-  gradient: string
-}
-
-/** Deep-links mirror the registry used by the onboarding tour
- *  (`components/shell/onboarding-dialog.tsx`) and the desktop shell. The
- *  per-entry chart colors give the rich Bento grid its variety. */
-const CAPABILITIES: CapabilityEntry[] = [
-  {
-    id: "workflows",
-    icon: WorkflowIcon,
-    href: "/settings?section=workflows&wfTab=templates",
-    iconBg: "bg-chart-1/15 text-chart-1",
-    gradient: "from-chart-1/60",
-  },
-  {
-    id: "agentTeams",
-    icon: UsersRoundIcon,
-    href: "/settings?section=teams",
-    iconBg: "bg-chart-2/15 text-chart-2",
-    gradient: "from-chart-2/60",
-  },
-  {
-    id: "connectors",
-    icon: CableIcon,
-    href: "/settings?section=connections",
-    iconBg: "bg-chart-3/15 text-chart-3",
-    gradient: "from-chart-3/60",
-  },
-  {
-    id: "twin",
-    icon: BrainCircuitIcon,
-    href: "/settings?section=twin",
-    iconBg: "bg-chart-4/15 text-chart-4",
-    gradient: "from-chart-4/60",
-  },
-  {
-    id: "computerUse",
-    icon: MonitorIcon,
-    href: "/settings?section=automation",
-    iconBg: "bg-chart-5/15 text-chart-5",
-    gradient: "from-chart-5/60",
-  },
-  {
-    id: "ocr",
-    icon: ScanTextIcon,
-    href: "/settings?section=ocr",
-    iconBg: "bg-primary/15 text-primary",
-    gradient: "from-primary/50",
-  },
 ]
 
 const MAX_RECENT = 4
@@ -142,15 +75,6 @@ interface Props {
   onUseSample: (prompt: string) => void
   /** When `inline` is true, render without the full-screen frame. */
   variant?: "fullscreen" | "inline"
-  /**
-   * Rendered between the greeting and the suggestion groups. The chat pane
-   * passes the live `<Composer>` here for the centered-composer layout used
-   * when an active session has no messages yet.
-   */
-  composerSlot?: ReactNode
-  /** Navigate to a capability surface (a settings deep-link). When omitted,
-   *  the capability group is hidden. */
-  onNavigate?: (href: string) => void
   /** Recent sessions for the "Continue" group. Hidden when empty/omitted. */
   recentSessions?: readonly RecentSessionEntry[]
   /** Resume a recent session by id. Required for the "Continue" group. */
@@ -198,11 +122,11 @@ interface Props {
   /** Optional display name woven into the time-of-day greeting. */
   userName?: string
   /** Persisted per-section dismissals. A truthy flag hides that section. */
-  hiddenSections?: { quickStart?: boolean; tryPrompt?: boolean }
+  hiddenSections?: { tryPrompt?: boolean }
   /**
-   * When provided, the "Quick start" and "Try a prompt" section headers show a
-   * ✕ that calls this. The chat pane persists the dismissal so the section
-   * stays hidden across reloads.
+   * When provided, the "Try a prompt" section header shows a ✕ that calls
+   * this. The chat pane persists the dismissal so the section stays hidden
+   * across reloads.
    */
   onDismissSection?: (section: WelcomeSection) => void
 }
@@ -251,8 +175,6 @@ export function EmptyChatState({
   onCreate,
   onUseSample,
   variant = "fullscreen",
-  composerSlot,
-  onNavigate,
   recentSessions,
   onResumeSession,
   characterSamples,
@@ -276,7 +198,6 @@ export function EmptyChatState({
   const rich = welcomeStyle === "rich"
 
   const recents = (recentSessions ?? []).slice(0, MAX_RECENT)
-  const showCapabilities = typeof onNavigate === "function" && !hiddenSections?.quickStart
   const showRecents = recents.length > 0 && typeof onResumeSession === "function"
   const charPrompts = (characterSamples ?? []).filter((p) => p.trim().length > 0)
 
@@ -373,13 +294,6 @@ export function EmptyChatState({
           <p className="max-w-md text-sm text-muted-foreground">{subheading}</p>
         </motion.div>
 
-        {/* Centered composer (empty active session) — reuses the live <Composer>. */}
-        {composerSlot ? (
-          <motion.div className="w-full" variants={STAGGER_CHILD}>
-            {composerSlot}
-          </motion.div>
-        ) : null}
-
         {/* Mobile home customizable quick-action grid. */}
         {quickActionsSlot ? (
           <motion.div className="w-full" variants={STAGGER_CHILD}>
@@ -414,112 +328,6 @@ export function EmptyChatState({
                 </motion.div>
               ))}
             </motion.div>
-          </motion.div>
-        ) : null}
-
-        {/* Quick start — platform capabilities (dismissable, Bento in rich) */}
-        {showCapabilities ? (
-          <motion.div className="w-full" variants={STAGGER_CHILD}>
-            <SectionHeading
-              label={t("sections.quickStart")}
-              dismissLabel={t("dismiss")}
-              onDismiss={onDismissSection ? () => onDismissSection("quickStart") : undefined}
-            />
-            {rich ? (
-              <motion.div
-                className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3"
-                variants={STAGGER_CONTAINER}
-              >
-                {CAPABILITIES.map(({ id, icon: Icon, href, iconBg, gradient }, i) => {
-                  const label = t(`capabilities.${id}`)
-                  const featured = i === 0
-                  return (
-                    <motion.div
-                      key={id}
-                      variants={STAGGER_CHILD}
-                      className={featured ? "sm:col-span-2 sm:row-span-2" : undefined}
-                    >
-                      <Card
-                        role="button"
-                        tabIndex={0}
-                        aria-label={label}
-                        onClick={() => onNavigate?.(href)}
-                        onKeyDown={onActivate(() => onNavigate?.(href))}
-                        className={cn(
-                          "group relative flex h-full cursor-pointer flex-col gap-2 overflow-hidden p-4",
-                          featured && "justify-between",
-                          INTERACTIVE_CARD_CLASS
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "flex items-center justify-center rounded-xl",
-                            featured ? "size-12" : "size-10",
-                            iconBg
-                          )}
-                        >
-                          <Icon className={featured ? "size-6" : "size-5"} aria-hidden />
-                        </div>
-                        <div className="min-w-0">
-                          <div
-                            className={cn(
-                              "truncate font-semibold",
-                              featured ? "text-base" : "text-sm"
-                            )}
-                          >
-                            {label}
-                          </div>
-                          <p
-                            className={cn(
-                              "mt-0.5 text-muted-foreground",
-                              featured ? "text-sm line-clamp-3" : "text-xs line-clamp-2"
-                            )}
-                          >
-                            {t(`capabilitiesDesc.${id}`)}
-                          </p>
-                        </div>
-                        <ArrowRightIcon
-                          className="absolute right-3 top-3 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                          aria-hidden
-                        />
-                        <span
-                          className={cn(
-                            "absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r to-transparent",
-                            gradient
-                          )}
-                        />
-                      </Card>
-                    </motion.div>
-                  )
-                })}
-              </motion.div>
-            ) : (
-              <motion.div
-                className="grid grid-cols-2 gap-2 sm:grid-cols-3"
-                variants={STAGGER_CONTAINER}
-              >
-                {CAPABILITIES.map(({ id, icon: Icon, href }) => (
-                  <motion.div key={id} variants={STAGGER_CHILD}>
-                    <Card
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t(`capabilities.${id}`)}
-                      onClick={() => onNavigate?.(href)}
-                      onKeyDown={onActivate(() => onNavigate?.(href))}
-                      className={cn(
-                        "flex h-full cursor-pointer flex-row items-center gap-2 p-3",
-                        INTERACTIVE_CARD_CLASS
-                      )}
-                    >
-                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="truncate text-sm font-medium">
-                        {t(`capabilities.${id}`)}
-                      </span>
-                    </Card>
-                  </motion.div>
-                ))}
-              </motion.div>
-            )}
           </motion.div>
         ) : null}
 
@@ -591,8 +399,9 @@ export function EmptyChatState({
           </motion.div>
         ) : null}
 
-        {/* New chat — only on the no-session welcome (no centered composer) */}
-        {variant === "fullscreen" && !composerSlot ? (
+        {/* New chat — only on the no-session welcome (the inline variant has
+            the live composer docked right below). */}
+        {variant === "fullscreen" ? (
           <motion.div variants={STAGGER_CHILD}>
             <Button onClick={onCreate} variant={rich ? "default" : "outline"} className="gap-2">
               <PlusIcon className="size-4" aria-hidden />

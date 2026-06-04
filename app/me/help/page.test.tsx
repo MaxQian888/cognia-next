@@ -16,7 +16,7 @@ describe("MobileHelpPage", () => {
     expect(screen.getByTestId("help-row-docs")).toHaveAttribute("href", "https://docs.cognia.app")
     expect(screen.getByTestId("help-row-github")).toHaveAttribute(
       "href",
-      "https://github.com/AstroAir/cognia-next"
+      "https://github.com/MaxQian888/cognia-next"
     )
   })
 

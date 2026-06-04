@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
+import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
 import {
   COGNIA_ACTIVE_THEME_ID,
   syncCogniaActiveTheme,
@@ -151,6 +152,7 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
             options={options}
             onMount={(editor, monaco) => {
               editorRef.current = editor
+              guardDiffEditorModelDisposal(editor)
               monacoRef.current = monaco
               applyActiveTheme(monaco)
             }}

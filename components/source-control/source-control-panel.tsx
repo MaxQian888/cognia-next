@@ -9,18 +9,20 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon, GitBranchIcon } from "lucide-react"
+import { FolderOpenIcon, GitBranchIcon, SparklesIcon } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { gitInit } from "@/lib/git/commands"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitStore } from "@/stores/git/git-store"
 import { BranchHeader } from "./branch-header"
 import { ChangesView } from "./changes-view"
 import { CommitDetail } from "./commit-detail"
+import { CompareRefsSheet } from "./compare-refs-sheet"
 import { ConflictResolver } from "./conflict-resolver"
 import { BlameView } from "./blame-view"
 import { DiffPane } from "./diff-pane"
@@ -53,6 +55,7 @@ export function SourceControlPanel() {
   const [stashOpen, setStashOpen] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
   const [blameTarget, setBlameTarget] = useState<{ path: string; rev?: string } | null>(null)
   const [restorePath, setRestorePath] = useState<string | null>(null)
   const [rebaseBase, setRebaseBase] = useState<string | null>(null)
@@ -99,13 +102,26 @@ export function SourceControlPanel() {
           </EmptyMedia>
           <EmptyDescription>{t("emptyState.notARepo")}</EmptyDescription>
         </EmptyHeader>
-        <Button
-          variant="outline"
-          onClick={() => void openFolder()}
-          data-testid="open-folder-button"
-        >
-          {t("emptyState.openFolder")}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => {
+              // Direct call (not via actions.run): rootDir is bound but not a
+              // repo yet; refresh flips the panel once init lands.
+              void gitInit(rootDir).then(() => refresh())
+            }}
+            data-testid="init-repo-button"
+          >
+            <SparklesIcon className="size-3.5" />
+            {t("emptyState.initRepo")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void openFolder()}
+            data-testid="open-folder-button"
+          >
+            {t("emptyState.openFolder")}
+          </Button>
+        </div>
       </Empty>
     )
   }
@@ -136,6 +152,7 @@ export function SourceControlPanel() {
           onOpenTimeline={() => openTimelineFor(null)}
           onOpenRemotes={() => setRemoteOpen(true)}
           onOpenTags={() => setTagOpen(true)}
+          onOpenCompare={() => setCompareOpen(true)}
           onRefresh={() => void refresh()}
         />
       </header>
@@ -175,7 +192,7 @@ export function SourceControlPanel() {
         onLayoutChanged={layout.onLayoutChanged}
         className="min-h-0 flex-1"
       >
-        <ResizablePanel id="sc-changes" defaultSize={32} minSize={20}>
+        <ResizablePanel id="sc-changes" defaultSize="32%" minSize="20%">
           {status ? (
             <ChangesView
               rootDir={rootDir}
@@ -191,7 +208,7 @@ export function SourceControlPanel() {
           ) : null}
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel id="sc-diff" defaultSize={68} minSize={30}>
+        <ResizablePanel id="sc-diff" defaultSize="68%" minSize="30%">
           {selectedCommit ? (
             <CommitDetail
               rootDir={rootDir}
@@ -234,6 +251,7 @@ export function SourceControlPanel() {
         actions={actions}
       />
       <TagPanel open={tagOpen} onOpenChange={setTagOpen} rootDir={rootDir} actions={actions} />
+      <CompareRefsSheet open={compareOpen} onOpenChange={setCompareOpen} rootDir={rootDir} />
       <RestoreDialog
         rootDir={rootDir}
         path={restorePath}

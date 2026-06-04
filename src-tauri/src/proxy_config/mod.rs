@@ -9,6 +9,7 @@
 //! Companion of `lib/network/proxy-config.ts` on the TS side. The two
 //! representations stay in sync because the frontend is the only writer and
 //! pushes whenever it commits a settings change.
+pub mod clients;
 pub mod commands;
 pub mod detect;
 pub mod wsproxy;

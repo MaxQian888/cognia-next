@@ -21,6 +21,7 @@ pub mod interactive_rebase;
 pub mod merge;
 pub mod read;
 pub mod remote;
+pub mod repo;
 pub mod reset;
 pub mod restore;
 pub mod sequencer;

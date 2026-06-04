@@ -31,15 +31,18 @@ export type GitOp =
   | "fetch"
   | "sync"
   | "stage"
+  | "unstage"
   | "checkout"
   | "stash"
   | "discard"
+  | "restore"
   | "resolve"
   | "branch"
   | "remote"
   | "tag"
   | "reset"
   | "sequence"
+  | "ignore"
 
 export type TimelineScope = "repo" | "file"
 
@@ -67,15 +70,18 @@ function emptyOps(): Record<GitOp, boolean> {
     fetch: false,
     sync: false,
     stage: false,
+    unstage: false,
     checkout: false,
     stash: false,
     discard: false,
+    restore: false,
     resolve: false,
     branch: false,
     remote: false,
     tag: false,
     reset: false,
     sequence: false,
+    ignore: false,
   }
 }
 

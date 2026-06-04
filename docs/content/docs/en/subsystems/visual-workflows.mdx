@@ -29,7 +29,7 @@ description: n8n-style visual orchestration layer — wire characters, teams, sk
   />
 </StatGrid>
 
-cognia-next uses this layer to compose its mature runtime entities — [characters](../chat/chat-and-skills), [agent teams](../chat/agent-teams), [skills](../chat/skills-system), [employee twins](./employee-twin), [platform connectors](./platform-connectors), MCP servers, and [plugins](./plugin-system) — into executable graphs. Design goals align with ADR 0011 and ADR 0017:
+cognia-next uses this layer to compose its mature runtime entities — [characters](../chat/chat-and-skills), [agent teams](../chat/agent-teams), [skills](./skills), [employee twins](./employee-twin), [platform connectors](./platform-connectors), MCP servers, and [plugins](./plugin-system) — into executable graphs. Design goals align with ADR 0011 and ADR 0017:
 
 - Visual graph editor: drag from left sidebar → drop on canvas → connect handles → configure in right inspector → Ctrl+S save → zundo undo/redo → elkjs auto-layout.
 - Execution engine: end-to-end graph execution, persistent event log per step, retry / timeout / idempotency support, recovery from webview crashes via log replay.
@@ -301,8 +301,8 @@ Permission gate: `extension:workflow`. Auditing via `auditPluginPointContracts`.
     description="Cron triggers reuse the Rust scheduling abstraction"
   />
   <Card
-    title="Skills System"
-    href="../chat/skills-system"
+    title="Skills Subsystem"
+    href="./skills"
     description="Target of action.skill.invoke / action.skill.upsert"
   />
   <Card

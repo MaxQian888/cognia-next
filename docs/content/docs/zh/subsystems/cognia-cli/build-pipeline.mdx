@@ -1,0 +1,156 @@
+---
+title: 构建流水线
+description: cognia 插件构建 —— 强制 lint、工具链预检、按 manifest.type 在 cargo-component 与 esbuild 之间分发、手写的 cognia:api-version LEB128 自定义段，以及两条路径共用的 deflate 压缩 zip bundle 布局。
+---
+
+# 构建流水线 —— `cognia plugin build`
+
+<TLDR>
+  `cmd_build::run()` 先做 lint（出现 error 即中止 —— `cmd_build.rs:44-71`），再按
+  `manifest.type` 分发（`cmd_build.rs:94-104`）：**wasm** → 工具链预检 → `cargo component
+  build --release` → 在 `target/wasm32-wasip{2,1}/release` 下定位产物 → 剥离并
+  重新嵌入 `cognia:api-version` 自定义段（手写 LEB128，`packaging.rs:30-65`）→
+  打包成 zip；**frontend** → 解析 TS 入口 → 以 13 个固定参数调用 `npx --no-install esbuild`
+  （`build_ts.rs:116-132`）→ 打包成 zip。两种 bundle 都落在 `target/cognia/<id>-<version>.zip`，
+  布局相同：先是漂亮打印的 `plugin.json`，然后是产物，再是去重后的
+  `bundle_include[]` 附加文件，全部经 Deflate 压缩。
+</TLDR>
+
+## Flags
+
+`cognia plugin build [--path .] [--out <zip>] [--skip-build]` —— `--skip-build` 跳过
+编译器/打包器步骤，直接把磁盘上已有的内容重新打包（在外部构建之后很有用）。
+
+## 端到端流程
+
+```mermaid
+flowchart TD
+  RUN[cmd_build::run] --> LINT[cmd_lint::validate_at<br/>cmd_build.rs:44]
+  LINT -- errors --> ABORT[bail → run cognia plugin lint]
+  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:94-104}
+  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:228-275]
+  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:215-222]
+  CARGO --> FIND[locate .wasm<br/>target/wasm32-wasip2|1/release<br/>packaging.rs:165-189]
+  FIND --> EMBED[embed_api_version<br/>strip + append custom section<br/>packaging.rs:30-51]
+  EMBED --> ZIPW[write_bundle<br/>packaging.rs:209-251]
+  TYPE -- frontend --> ENTRY[resolve_ts_entry<br/>tsEntry → src/index.ts|tsx → src/main.ts<br/>build_ts.rs:70-93]
+  ENTRY --> ESB[npx --no-install esbuild …<br/>build_ts.rs:116-132]
+  ESB --> CHECK[verify manifest.main exists<br/>build_ts.rs:44-48]
+  CHECK --> ZIPF[pack_frontend_bundle<br/>build_ts.rs:145-199]
+  ZIPW --> OUT[target/cognia/&lt;id&gt;-&lt;version&gt;.zip]
+  ZIPF --> OUT
+  TYPE -- other --> NOPE[bail: supported wasm, frontend]
+```
+
+## WASM 路径
+
+### 工具链预检（`cmd_build.rs:228-275`）
+
+两项检查，都附带可直接复制粘贴的补救命令：
+
+```text
+cargo-component is required to build WASM plugins but was not found.
+Install it with:
+    cargo install --locked cargo-component
+then re-run `cognia plugin build`.
+```
+
+```text
+the wasm32-wasip2 compilation target is not installed.
+Add it with:
+    rustup target add wasm32-wasip2
+then re-run `cognia plugin build`.
+```
+
+target 检查运行 `rustup target list --installed` 并寻找完全匹配的行；当
+rustup 本身缺失时（例如发行版打包的 Rust），该检查会被跳过而非失败。
+
+### `cognia:api-version` 自定义段
+
+host 通过读取一个名为 `cognia:api-version` 的自定义段，把 WASM bundle 路由到匹配的 WIT linker，
+其载荷是来自 `manifest.wasm.apiVersion` 的原样版本字符串。嵌入用的是一个从零写起的编码器
+—— 不依赖 `wasm-encoder`：
+
+```rust
+// crates/cognia-cli/src/packaging.rs:30-50
+pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
+    if wasm.len() < 8 || &wasm[..4] != b"\0asm" {
+        bail!("input is not a wasm module (bad magic)");
+    }
+    let stripped = strip_section(wasm, API_VERSION_SECTION)?;  // wasmparser walk
+    let mut out = stripped;
+    let name = API_VERSION_SECTION.as_bytes();
+    let payload = version.as_bytes();
+    let mut body = Vec::with_capacity(5 + name.len() + payload.len());
+    write_leb128(&mut body, name.len() as u64);
+    body.extend_from_slice(name);
+    body.extend_from_slice(payload);
+    out.push(0);                          // section id 0 = custom
+    write_leb128(&mut out, body.len() as u64);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+```
+
+`strip_section`（`packaging.rs:67-106`）用 `wasmparser` 丢弃任何已存在的副本，因此
+重新构建和手动重新嵌入都是幂等的。独立的应急出口是
+`cognia plugin embed-version <wasm> <ver> [--out]`（`main.rs:348-362`），它用
+`looks_like_semver` 校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。
+
+<Callout type="info" title="一句话说清契约版本管理">
+  CLI 把 WIT 契约版本（当前为 0.1.0）写入每一个 WASM bundle；没有匹配 linker 的 host
+  会以 `no linker registered for v0.N.x` 拒绝加载 —— host 一侧见
+  [插件系统文档](../plugin-system)。
+</Callout>
+
+## Frontend 路径
+
+`resolve_ts_entry`（`build_ts.rs:70-93`）优先采用 `manifest.tsEntry`（若它指向不存在的
+文件则报错），然后依次尝试 `src/index.ts`、`src/index.tsx`、`src/main.ts`。打包器调用
+被完全固定：
+
+```rust
+// crates/cognia-cli/src/build_ts.rs:111-132
+let npx_program = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
+cmd.current_dir(crate_root)
+    .arg("--no-install")
+    .arg("esbuild")
+    .arg(entry…)
+    .arg("--bundle")
+    .arg("--format=cjs")
+    .arg("--platform=neutral")
+    .arg("--target=es2022")
+    .arg(format!("--outfile={}", outfile.display()))   // = manifest.main
+    .arg("--external:@/types/plugin")
+    .arg("--external:@/lib/*")
+    .arg("--external:react")
+    .arg("--external:react-dom")
+    .arg("--log-level=warning");
+```
+
+两个有意为之的选择：
+
+- **`--no-install`** —— CLI 拒绝背着作者全局安装 esbuild；以插件自己 `package.json`
+  里的版本为准。失败提示会指明正确方向：
+  `esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
+  <crate_root> first.`（`build_ts.rs:134-138`）
+- **host 模块用 `--external`** —— `@/types/plugin`、`@/lib/*`、`react`、`react-dom` 由
+  host 在加载时提供；把它们打进去会重复打包 React 并破坏 shim。
+
+## Bundle 布局（两种类型）
+
+| 顺序 | 条目 | 来源 |
+| --- | --- | --- |
+| 1 | `plugin.json` | 漂亮打印（`serde_json::to_vec_pretty`），这样 `unzip -p bundle.zip plugin.json \| jq` 能正常工作 |
+| 2 | 产物 | wasm：`manifest.wasmMain` 名称；frontend：`manifest.main` 路径（分隔符归一化为 `/`） |
+| 3… | `bundle_include[]` 附加文件 | 相对于 crate 根的路径，去重，缺失文件 = 硬错误 |
+
+各处压缩一律为 `zip::CompressionMethod::Deflated`（`packaging.rs:217`、
+`build_ts.rs:156`）。输出约定 `target/cognia/<id>-<version>.zip` 也正是
+[`dev`](./bridge-client) 在每次重建后计算出来、用以找到应当热重载的 bundle 的路径。
+
+<Callout type="warn" title="近似确定，但非逐字节可复现">
+  写入器注释（`packaging.rs:12-14`）指出，bundle 字节只在 `bundle_include[]` 的
+  文件系统排序这一层面上是确定的 —— 条目按 manifest 顺序写入，但不做任何
+  时间戳归一化。请签署你**自己构建**的 bundle，而非你复现出来的 bundle。
+</Callout>

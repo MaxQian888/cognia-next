@@ -3,7 +3,9 @@
 //! shutdown. If it survives into the next launch, the previous session ended
 //! abnormally (crash, OOM-kill, power loss) and we surface the most recent
 //! report. Presence of a *report* alone is not enough — recoverable worker
-//! panics write reports yet exit cleanly.
+//! panics write reports yet exit cleanly. Markers written by debug builds are
+//! consumed silently: the dev workflow hard-kills the process routinely, so a
+//! stale dev marker would raise a false crash dialog on every relaunch.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -17,6 +19,11 @@ struct SessionMarker {
     pid: u32,
     version: String,
     started_at: String,
+    /// Whether the session that wrote this marker was a debug build. Markers
+    /// written by older versions lack the field and default to `false`
+    /// (treated as release), so real production crashes keep surfacing.
+    #[serde(default)]
+    debug: bool,
 }
 
 /// Info about an abnormal previous exit, surfaced to the renderer once.
@@ -63,6 +70,10 @@ fn sentinel_path() -> Option<PathBuf> {
 
 /// Write the marker for the current session. Best-effort.
 pub fn mark_start() {
+    write_marker(cfg!(debug_assertions));
+}
+
+fn write_marker(debug: bool) {
     let Some(path) = sentinel_path() else {
         return;
     };
@@ -70,6 +81,7 @@ pub fn mark_start() {
         pid: std::process::id(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         started_at: chrono::Utc::now().to_rfc3339(),
+        debug,
     };
     if let Ok(json) = serde_json::to_string_pretty(&marker) {
         let _ = fs::write(&path, json);
@@ -92,6 +104,15 @@ pub fn take_pending() -> Option<PendingCrash> {
     let _ = fs::remove_file(&path);
 
     let marker: SessionMarker = serde_json::from_str(&raw).ok()?;
+    // The dev workflow (`tauri dev` rebuild restarts, Ctrl-C) hard-kills debug
+    // builds without ever reaching the graceful-exit path, so a surviving
+    // debug-session marker is almost never a real crash. Suppress the
+    // next-launch dialog for those; any reports written by an actual panic
+    // stay on disk and remain visible in Settings.
+    if marker.debug {
+        log::info!("crash sentinel: previous session was a debug build; skipping crash dialog");
+        return None;
+    }
     let (latest_report_stem, report_count) = scan_reports();
 
     Some(PendingCrash {
@@ -158,6 +179,7 @@ mod tests {
             pid: 1234,
             version: "0.1.0".to_string(),
             started_at: "2026-05-25T00:00:00+00:00".to_string(),
+            debug: false,
         };
         let json = serde_json::to_string(&marker).unwrap();
         assert!(json.contains("\"pid\":1234"));
@@ -174,9 +196,9 @@ mod tests {
     }
 
     #[test]
-    fn mark_start_then_take_pending_reports_abnormal_exit() {
+    fn release_marker_then_take_pending_reports_abnormal_exit() {
         let _guard = with_isolated_reports_dir();
-        mark_start();
+        write_marker(false);
         let pending = take_pending();
         assert!(pending.is_some());
         let pending = pending.unwrap();
@@ -186,9 +208,40 @@ mod tests {
     }
 
     #[test]
-    fn mark_clean_exit_clears_marker() {
+    fn debug_marker_is_consumed_without_surfacing_a_crash() {
+        let _guard = with_isolated_reports_dir();
+        // Dev workflow kills the process without a graceful exit; the stale
+        // debug marker must not raise the crash dialog on the next launch.
+        write_marker(true);
+        assert!(take_pending().is_none());
+        // The stale marker was still consumed, not left to accumulate.
+        assert!(!sentinel_path().unwrap().exists());
+    }
+
+    #[test]
+    fn mark_start_records_current_build_profile() {
         let _guard = with_isolated_reports_dir();
         mark_start();
+        let raw = fs::read_to_string(sentinel_path().unwrap()).unwrap();
+        let marker: SessionMarker = serde_json::from_str(&raw).unwrap();
+        assert_eq!(marker.debug, cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn legacy_marker_without_debug_field_is_treated_as_release() {
+        let _guard = with_isolated_reports_dir();
+        // Markers written before the `debug` field existed must keep surfacing
+        // real production crashes.
+        let legacy = r#"{"pid":1,"version":"0.1.0","startedAt":"2026-05-25T00:00:00+00:00"}"#;
+        fs::write(sentinel_path().unwrap(), legacy).unwrap();
+        let pending = take_pending().expect("legacy marker surfaces a crash");
+        assert_eq!(pending.version, "0.1.0");
+    }
+
+    #[test]
+    fn mark_clean_exit_clears_marker() {
+        let _guard = with_isolated_reports_dir();
+        write_marker(false);
         mark_clean_exit();
         assert!(take_pending().is_none());
     }

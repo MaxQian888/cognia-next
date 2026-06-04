@@ -10,9 +10,18 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 
 // Stub React Flow — we only verify the mobile-canvas wires touch props +
 // tap handlers; the real surface needs a layout engine jsdom doesn't provide.
-jest.mock("@xyflow/react", () => ({
-  ReactFlow: ({
+jest.mock("@xyflow/react", () => {
+  const React = jest.requireActual("react") as typeof import("react")
+  // Fake instance handed to onInit so the uncontrolled-camera sync effect has
+  // something to read/write; exposed to tests as `__mockRf`.
+  const mockRf = {
+    setViewport: jest.fn(),
+    getViewport: jest.fn(() => ({ x: 0, y: 0, zoom: 1 })),
+  }
+  const propsRef: { current: Record<string, unknown> | null } = { current: null }
+  function ReactFlow({
     children,
+    onInit,
     onNodeClick,
     onPaneClick,
     nodesDraggable,
@@ -20,32 +29,46 @@ jest.mock("@xyflow/react", () => ({
     nodesConnectable,
     panOnScroll,
     selectionOnDrag,
-  }: Record<string, unknown> & { children?: React.ReactNode }) => (
-    <div
-      data-testid="rf"
-      data-draggable={String(nodesDraggable)}
-      data-selectable={String(elementsSelectable)}
-      data-connectable={String(nodesConnectable)}
-      data-panonscroll={String(panOnScroll)}
-      data-selectiondrag={String(selectionOnDrag)}
-    >
-      <button
-        data-testid="rf-node"
-        onClick={(e) => (onNodeClick as (e: unknown, n: { id: string }) => void)?.(e, { id: "n1" })}
+    ...rest
+  }: Record<string, unknown> & { children?: React.ReactNode }) {
+    propsRef.current = { nodesDraggable, panOnScroll, selectionOnDrag, ...rest }
+    React.useEffect(() => {
+      ;(onInit as ((rf: unknown) => void) | undefined)?.(mockRf)
+    }, [onInit])
+    return (
+      <div
+        data-testid="rf"
+        data-draggable={String(nodesDraggable)}
+        data-selectable={String(elementsSelectable)}
+        data-connectable={String(nodesConnectable)}
+        data-panonscroll={String(panOnScroll)}
+        data-selectiondrag={String(selectionOnDrag)}
       >
-        node
-      </button>
-      <button data-testid="rf-pane" onClick={() => (onPaneClick as () => void)?.()}>
-        pane
-      </button>
-      {children}
-    </div>
-  ),
-  Background: () => <div data-testid="rf-bg" />,
-  BackgroundVariant: { Dots: "dots", Lines: "lines" },
-  applyNodeChanges: (_c: unknown, n: unknown) => n,
-  applyEdgeChanges: (_c: unknown, e: unknown) => e,
-}))
+        <button
+          data-testid="rf-node"
+          onClick={(e) =>
+            (onNodeClick as (e: unknown, n: { id: string }) => void)?.(e, { id: "n1" })
+          }
+        >
+          node
+        </button>
+        <button data-testid="rf-pane" onClick={() => (onPaneClick as () => void)?.()}>
+          pane
+        </button>
+        {children}
+      </div>
+    )
+  }
+  return {
+    __mockRf: mockRf,
+    __propsRef: propsRef,
+    ReactFlow,
+    Background: () => <div data-testid="rf-bg" />,
+    BackgroundVariant: { Dots: "dots", Lines: "lines" },
+    applyNodeChanges: (_c: unknown, n: unknown) => n,
+    applyEdgeChanges: (_c: unknown, e: unknown) => e,
+  }
+})
 
 jest.mock("@/lib/workflow/runtime/run-status-bridge", () => ({ useRunStatusBridge: () => {} }))
 jest.mock("@/lib/workflow/runtime/last-run-summary", () => ({ useLastRunSummaryByStep: () => ({}) }))
@@ -90,6 +113,7 @@ function renderCanvas(mode: "read" | "edit", connectActive = false) {
   const store = createEditorStore(buildWorkflow())
   const onNodeTap = jest.fn()
   const onPaneTap = jest.fn()
+  const onInit = jest.fn()
   render(
     <MobileCanvas
       store={store}
@@ -97,13 +121,27 @@ function renderCanvas(mode: "read" | "edit", connectActive = false) {
       connectActive={connectActive}
       onNodeTap={onNodeTap}
       onPaneTap={onPaneTap}
-      onInit={() => {}}
+      onInit={onInit}
     />
   )
-  return { onNodeTap, onPaneTap }
+  return { store, onNodeTap, onPaneTap, onInit }
+}
+
+function getMockRf() {
+  return (
+    jest.requireMock("@xyflow/react") as {
+      __mockRf: { setViewport: jest.Mock; getViewport: jest.Mock }
+    }
+  ).__mockRf
 }
 
 describe("<MobileCanvas />", () => {
+  beforeEach(() => {
+    const rf = getMockRf()
+    rf.getViewport.mockImplementation(() => ({ x: 0, y: 0, zoom: 1 }))
+    rf.setViewport.mockClear()
+  })
+
   it("locks structural interaction in read mode", () => {
     renderCanvas("read")
     const rf = screen.getByTestId("rf")
@@ -146,5 +184,38 @@ describe("<MobileCanvas />", () => {
   it("hides the connect-target banner when not connecting", () => {
     renderCanvas("edit", false)
     expect(screen.queryByTestId("mobile-connect-banner")).toBeNull()
+  })
+
+  // ── Uncontrolled camera (regression: canvas must follow pan/pinch) ────────
+  // Passing the store viewport as the controlled `viewport` prop without an
+  // onViewportChange round-trip froze the camera during gestures.
+
+  it("seeds the camera via defaultViewport and never passes the controlled viewport prop", () => {
+    renderCanvas("read")
+    const { __propsRef } = jest.requireMock("@xyflow/react") as {
+      __propsRef: { current: Record<string, unknown> | null }
+    }
+    expect(__propsRef.current?.defaultViewport).toEqual({ x: 0, y: 0, zoom: 1 })
+    expect(__propsRef.current?.viewport).toBeUndefined()
+  })
+
+  it("forwards the instance to onInit and pushes wholesale viewport replaces imperatively", () => {
+    const { store, onInit } = renderCanvas("edit")
+    const rf = getMockRf()
+    expect(onInit).toHaveBeenCalledWith(rf)
+    rf.setViewport.mockClear()
+    const { act } = jest.requireActual("@testing-library/react") as typeof import("@testing-library/react")
+    act(() => store.getState().setViewport({ x: 12, y: 34, zoom: 1.25 }))
+    expect(rf.setViewport).toHaveBeenCalledWith({ x: 12, y: 34, zoom: 1.25 })
+  })
+
+  it("skips the camera write when the store value already matches the live camera", () => {
+    const { store } = renderCanvas("edit")
+    const rf = getMockRf()
+    rf.getViewport.mockReturnValue({ x: 5, y: 6, zoom: 1 })
+    rf.setViewport.mockClear()
+    const { act } = jest.requireActual("@testing-library/react") as typeof import("@testing-library/react")
+    act(() => store.getState().setViewport({ x: 5, y: 6, zoom: 1 }))
+    expect(rf.setViewport).not.toHaveBeenCalled()
   })
 })

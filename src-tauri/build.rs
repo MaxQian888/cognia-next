@@ -29,6 +29,64 @@ fn main() {
     }
 
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
+
+    #[cfg(feature = "parse-liteparse")]
+    copy_pdfium_next_to_binary();
+}
+
+/// `parse-liteparse` only — stage the PDFium shared library next to the
+/// build outputs, mirroring `ort`'s `copy-dylibs` behavior for the
+/// `ocr-paddle` feature. `liteparse-pdfium-sys`'s build script copies the
+/// library into `target/<profile>/deps/`; we lift it one level up to
+/// `target/<profile>/` so `cargo run` / `tauri dev` / packaged bundles find
+/// it next to the executable (runtime search order: PDFIUM_LIB_PATH env →
+/// compile-time cache path (build machine only) → exe-adjacent → PATH).
+/// Best-effort: on a cold build the deps copy may land after this script
+/// runs — the next build picks it up, and dev/test still work through the
+/// compile-time cache path.
+#[cfg(feature = "parse-liteparse")]
+fn copy_pdfium_next_to_binary() {
+    let dylib = if cfg!(target_os = "windows") {
+        "pdfium.dll"
+    } else if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else {
+        "libpdfium.so"
+    };
+
+    // OUT_DIR = target/<profile>/build/<pkg>-<hash>/out → profile dir is 3 up.
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+    let Some(profile_dir) = out_dir
+        .ancestors()
+        .nth(3)
+        .map(std::path::Path::to_path_buf)
+    else {
+        println!("cargo:warning=parse-liteparse: cannot locate profile dir from OUT_DIR");
+        return;
+    };
+
+    let src = profile_dir.join("deps").join(dylib);
+    let dst = profile_dir.join(dylib);
+    if dst.exists() {
+        return;
+    }
+    if !src.exists() {
+        println!(
+            "cargo:warning=parse-liteparse: {} not found yet at {} — it is copied by \
+             liteparse-pdfium-sys on first build; rebuild once or ship it next to the \
+             executable when packaging",
+            dylib,
+            src.display()
+        );
+        return;
+    }
+    if let Err(e) = std::fs::copy(&src, &dst) {
+        println!(
+            "cargo:warning=parse-liteparse: failed to copy {} to {}: {e}",
+            src.display(),
+            dst.display()
+        );
+    }
 }
 
 #[cfg(windows)]

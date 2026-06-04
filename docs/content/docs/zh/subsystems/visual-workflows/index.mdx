@@ -33,7 +33,7 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
   <Stat label="Rust 后端" value="~2.3k 行" hint="webhook_router 818 · run_mirror 432 · cron_daemon 351" />
 </StatGrid>
 
-cognia-next 用这一层把它成熟的运行时实体 —— [角色](../../chat/chat-and-skills)、[智能体团队](../../chat/agent-teams)、[技能](../../chat/skills-system)、[员工数字分身](../employee-twin)、[平台连接器](../platform-connectors)、MCP 服务器以及[插件](../plugin-system) —— 编排成可执行图。设计遵循 ADR 0011（子系统）、ADR 0017（插件扩展点）与 ADR 0034（编辑器完备性）。
+cognia-next 用这一层把它成熟的运行时实体 —— [角色](../../chat/chat-and-skills)、[智能体团队](../../chat/agent-teams)、[技能](../skills)、[员工数字分身](../employee-twin)、[平台连接器](../platform-connectors)、MCP 服务器以及[插件](../plugin-system) —— 编排成可执行图。设计遵循 ADR 0011（子系统）、ADR 0017（插件扩展点）与 ADR 0034（编辑器完备性）。
 
 ## 唯一的承重原则
 
@@ -153,7 +153,7 @@ flowchart TB
 <Cards>
   <Card title="平台连接器" href="../platform-connectors" description="trigger.connector.inbound 与 action.connector.send 的来源" />
   <Card title="调度器" href="../scheduler" description="进程内 cron 守护进程复用调度器的绝对时间戳时钟" />
-  <Card title="技能系统" href="../../chat/skills-system" description="action.skill.invoke / action.skill.upsert 的目标" />
+  <Card title="技能子系统" href="../skills/consumption-surfaces" description="action.skill.invoke / action.skill.upsert 的目标" />
   <Card title="智能体团队" href="../../chat/agent-teams" description="action.team.run 驱动 runTeamLifecycle；pattern.* 节点是高阶团队派发" />
   <Card title="员工数字分身" href="../employee-twin" description="action.twin.rag / action.twin.ingest 的入口" />
   <Card title="插件系统" href="../plugin-system" description="workflow.node / workflow.trigger / workflow.task 扩展点" />

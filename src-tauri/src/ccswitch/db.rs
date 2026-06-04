@@ -78,6 +78,10 @@ pub struct CcswitchPrompt {
     pub id: String,
     pub name: String,
     pub content: String,
+    /// App the prompt belongs to ("claude" | "codex" | …). CCSwitch keys
+    /// prompts by (id, app_type), so `id` alone is not unique.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,6 +194,105 @@ fn pick_json(row: &Row, available: &HashSet<String>, names: &[&str]) -> Option<s
     serde_json::from_str(&raw).ok()
 }
 
+/// Read a non-empty string field off a JSON object, trying `keys` in order.
+fn json_pick(obj: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| {
+        obj.get(*k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    })
+}
+
+/// Extract apiKey/baseUrl/model out of CCSwitch v3's per-app `settings_config`
+/// JSON. Shape-driven (not app_type-driven) so unknown app types degrade
+/// gracefully; the known shapes are:
+///   - `{"env": {...}}`                  → claude / claude-desktop / gemini env vars
+///   - `{"auth": {...}, "config": "…"}`  → codex auth.json + config.toml string
+///   - `{"options": {...}}`              → opencode provider options
+/// Flat columns win — only fields still `None` are filled. Invalid JSON is
+/// tolerated and leaves the provider untouched.
+fn enrich_from_settings_config(p: &mut CcswitchProvider, raw: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+
+    if let Some(env) = v.get("env").filter(|e| e.is_object()) {
+        if p.api_key.is_none() {
+            p.api_key = json_pick(
+                env,
+                &[
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "ANTHROPIC_API_KEY",
+                    "GEMINI_API_KEY",
+                    "GOOGLE_API_KEY",
+                    "OPENROUTER_API_KEY",
+                ],
+            );
+        }
+        if p.base_url.is_none() {
+            p.base_url = json_pick(env, &["ANTHROPIC_BASE_URL", "GOOGLE_GEMINI_BASE_URL"]);
+        }
+        if p.model.is_none() {
+            p.model = json_pick(env, &["ANTHROPIC_MODEL", "GEMINI_MODEL"]);
+        }
+    }
+
+    if let Some(auth) = v.get("auth").filter(|a| a.is_object()) {
+        if p.api_key.is_none() {
+            p.api_key = json_pick(auth, &["OPENAI_API_KEY"]);
+        }
+    }
+    // Codex stores model/base_url in a config.toml string next to `auth`.
+    if let Some(config) = v.get("config").and_then(serde_json::Value::as_str) {
+        enrich_from_codex_toml(p, config);
+    }
+
+    if let Some(options) = v.get("options").filter(|o| o.is_object()) {
+        if p.api_key.is_none() {
+            p.api_key = json_pick(options, &["apiKey"]);
+        }
+        if p.base_url.is_none() {
+            p.base_url = json_pick(options, &["baseURL", "baseUrl"]);
+        }
+    }
+}
+
+/// Pull `model` (top-level) and `base_url` (from the `[model_providers.<id>]`
+/// table named by `model_provider`, falling back to the first entry) out of a
+/// codex config.toml string.
+fn enrich_from_codex_toml(p: &mut CcswitchProvider, raw: &str) {
+    if p.model.is_some() && p.base_url.is_some() {
+        return;
+    }
+    let Ok(doc) = raw.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
+
+    let non_empty = |s: &str| {
+        let t = s.trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+
+    if p.model.is_none() {
+        p.model = doc.get("model").and_then(|i| i.as_str()).and_then(non_empty);
+    }
+    if p.base_url.is_none() {
+        let active = doc.get("model_provider").and_then(|i| i.as_str());
+        if let Some(providers) = doc.get("model_providers").and_then(|i| i.as_table_like()) {
+            let entry = active
+                .and_then(|id| providers.get(id))
+                .or_else(|| providers.iter().next().map(|(_, item)| item));
+            p.base_url = entry
+                .and_then(|e| e.as_table_like())
+                .and_then(|t| t.get("base_url"))
+                .and_then(|i| i.as_str())
+                .and_then(non_empty);
+        }
+    }
+}
+
 /// List providers from whichever table CCSwitch is using. Tolerant: missing
 /// table → empty Vec; partial columns → the absent fields are `None`.
 pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, CcswitchError> {
@@ -205,10 +308,17 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
             .unwrap_or_else(|| String::from(""));
         let name = pick_str(row, &cols, &["name", "title", "label", "id"])
             .unwrap_or_else(|| String::from(""));
-        Ok(CcswitchProvider {
+        let mut provider = CcswitchProvider {
             id,
             name,
-            kind: pick_str(row, &cols, &["kind", "provider", "type", "providerType"]),
+            // `app_type` is CCSwitch v3's app column — part of the table's
+            // (id, app_type) primary key, so it must surface for consumers
+            // to disambiguate duplicate ids.
+            kind: pick_str(
+                row,
+                &cols,
+                &["kind", "app_type", "appType", "app", "provider", "type", "providerType"],
+            ),
             api_key: pick_str(row, &cols, &["api_key", "apiKey", "key"]),
             base_url: pick_str(row, &cols, &["base_url", "baseUrl", "endpoint", "url"]),
             model: pick_str(row, &cols, &["model", "default_model", "defaultModel"]),
@@ -218,7 +328,13 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
                 &["shared_config", "sharedConfig", "config", "extra", "meta"],
             ),
             notes: pick_str(row, &cols, &["notes", "note", "description"]),
-        })
+        };
+        // CCSwitch v3 keeps credentials inside the per-app `settings_config`
+        // JSON rather than flat columns — fill whatever is still missing.
+        if let Some(raw) = pick_str(row, &cols, &["settings_config", "settingsConfig"]) {
+            enrich_from_settings_config(&mut provider, &raw);
+        }
+        Ok(provider)
     })?;
     let mut out = Vec::new();
     for row in mapped {
@@ -289,6 +405,7 @@ pub fn list_prompts(conn: &Connection) -> Result<Vec<CcswitchPrompt>, CcswitchEr
             id,
             name,
             content,
+            kind: pick_str(row, &cols, &["kind", "app_type", "appType", "app"]),
             description: pick_str(row, &cols, &["description", "summary", "notes"]),
             tags,
         })
@@ -561,6 +678,127 @@ mod tests {
         let provs = list_providers(&conn).unwrap();
         assert_eq!(provs.len(), 1);
         assert_eq!(provs[0].id, "valid");
+    }
+
+    #[test]
+    fn modern_schema_maps_app_type_to_kind() {
+        // CCSwitch v3 keys providers/prompts by (id, app_type) — the same id
+        // (e.g. "default") repeats across apps. The app column must surface
+        // as `kind` so consumers can disambiguate duplicate ids.
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (
+                id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL,
+                settings_config TEXT NOT NULL,
+                PRIMARY KEY (id, app_type)
+            );
+            INSERT INTO providers VALUES
+                ('default', 'claude', 'default', '{}'),
+                ('default', 'codex',  'default', '{}');
+            CREATE TABLE prompts (
+                id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL,
+                PRIMARY KEY (id, app_type)
+            );
+            INSERT INTO prompts VALUES
+                ('default', 'claude', 'Claude Prompt', 'c1'),
+                ('default', 'codex',  'Codex Prompt',  'c2');
+            "#,
+        )
+        .unwrap();
+
+        let provs = list_providers(&conn).unwrap();
+        assert_eq!(provs.len(), 2);
+        let kinds: Vec<_> = provs.iter().filter_map(|p| p.kind.as_deref()).collect();
+        assert!(kinds.contains(&"claude"));
+        assert!(kinds.contains(&"codex"));
+
+        let prompts = list_prompts(&conn).unwrap();
+        assert_eq!(prompts.len(), 2);
+        let prompt_kinds: Vec<_> = prompts.iter().filter_map(|p| p.kind.as_deref()).collect();
+        assert!(prompt_kinds.contains(&"claude"));
+        assert!(prompt_kinds.contains(&"codex"));
+    }
+
+    #[test]
+    fn settings_config_json_is_extracted_per_app_shape() {
+        // CCSwitch v3 stores credentials inside the per-app `settings_config`
+        // JSON column instead of flat apiKey/baseUrl/model columns:
+        //   claude / claude-desktop / gemini → {"env": {...}}
+        //   codex                            → {"auth": {...}, "config": "<TOML>"}
+        //   opencode                         → {"options": {...}}
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (
+                id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL,
+                settings_config TEXT NOT NULL,
+                PRIMARY KEY (id, app_type)
+            );
+            INSERT INTO providers VALUES
+                ('c1', 'claude', 'Claude Relay',
+                 '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-ant-relay","ANTHROPIC_BASE_URL":"https://relay.example/anthropic","ANTHROPIC_MODEL":"claude-opus-4-8"}}'),
+                ('x1', 'codex', 'Codex Relay',
+                 '{"auth":{"OPENAI_API_KEY":"sk-codex"},"config":"model_provider = \"custom\"\nmodel = \"gpt-5.5\"\n\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"https://relay.example/v1\"\n"}'),
+                ('g1', 'gemini', 'Gemini Relay',
+                 '{"env":{"GEMINI_API_KEY":"sk-gem","GOOGLE_GEMINI_BASE_URL":"https://relay.example/gemini","GEMINI_MODEL":"gemini-3-pro"},"config":{}}'),
+                ('o1', 'opencode', 'OpenCode Relay',
+                 '{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://relay.example/oc","apiKey":"sk-oc","setCacheKey":true}}'),
+                ('e1', 'claude', 'Empty Official', '{"env":{}}'),
+                ('b1', 'claude', 'Broken', 'not json');
+            "#,
+        )
+        .unwrap();
+
+        let provs = list_providers(&conn).unwrap();
+        assert_eq!(provs.len(), 6);
+        let by_id = |id: &str| provs.iter().find(|p| p.id == id).unwrap();
+
+        let c1 = by_id("c1");
+        assert_eq!(c1.api_key.as_deref(), Some("sk-ant-relay"));
+        assert_eq!(c1.base_url.as_deref(), Some("https://relay.example/anthropic"));
+        assert_eq!(c1.model.as_deref(), Some("claude-opus-4-8"));
+
+        let x1 = by_id("x1");
+        assert_eq!(x1.api_key.as_deref(), Some("sk-codex"));
+        assert_eq!(x1.base_url.as_deref(), Some("https://relay.example/v1"));
+        assert_eq!(x1.model.as_deref(), Some("gpt-5.5"));
+
+        let g1 = by_id("g1");
+        assert_eq!(g1.api_key.as_deref(), Some("sk-gem"));
+        assert_eq!(g1.base_url.as_deref(), Some("https://relay.example/gemini"));
+        assert_eq!(g1.model.as_deref(), Some("gemini-3-pro"));
+
+        let o1 = by_id("o1");
+        assert_eq!(o1.api_key.as_deref(), Some("sk-oc"));
+        assert_eq!(o1.base_url.as_deref(), Some("https://relay.example/oc"));
+        assert!(o1.model.is_none());
+
+        // Empty env and invalid JSON degrade to None — never an error.
+        let e1 = by_id("e1");
+        assert!(e1.api_key.is_none() && e1.base_url.is_none() && e1.model.is_none());
+        let b1 = by_id("b1");
+        assert!(b1.api_key.is_none() && b1.base_url.is_none() && b1.model.is_none());
+    }
+
+    #[test]
+    fn flat_columns_take_precedence_over_settings_config() {
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (id TEXT, name TEXT, apiKey TEXT, settings_config TEXT);
+            INSERT INTO providers VALUES
+                ('p1', 'Mixed', 'flat-key',
+                 '{"env":{"ANTHROPIC_API_KEY":"json-key","ANTHROPIC_BASE_URL":"https://json.example"}}');
+            "#,
+        )
+        .unwrap();
+
+        let provs = list_providers(&conn).unwrap();
+        assert_eq!(provs.len(), 1);
+        // Flat column wins; fields the flat schema lacks still fill from JSON.
+        assert_eq!(provs[0].api_key.as_deref(), Some("flat-key"));
+        assert_eq!(provs[0].base_url.as_deref(), Some("https://json.example"));
     }
 
     #[test]

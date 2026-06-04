@@ -92,6 +92,13 @@ pub async fn resolve_side(repo_path: &str, path: &str, side: ConflictSide) -> Re
     exec::run(&c, ["add", "--", path]).await
 }
 
+/// `git merge <branch>` — integrate a branch into the current one. A conflict
+/// fails the command and leaves the repo in merge state; the renderer then
+/// drives the existing conflict resolver and sequencer continue/abort.
+pub async fn merge(repo_path: &str, branch: &str) -> Result<()> {
+    exec::run(&cwd(repo_path), ["merge", branch]).await
+}
+
 /// `git merge --abort`.
 pub async fn merge_abort(repo_path: &str) -> Result<()> {
     exec::run(&cwd(repo_path), ["merge", "--abort"]).await
@@ -155,6 +162,60 @@ mod tests {
             .status()
             .unwrap();
         tmp
+    }
+
+    #[tokio::test]
+    async fn merge_fast_forwards_a_clean_branch() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "t@e.com"]);
+        git(p, &["config", "user.name", "T"]);
+        std::fs::write(p.join("a.txt"), "base\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("b.txt"), "feature\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "add b"]);
+        git(p, &["checkout", "-q", "main"]);
+
+        let rp = p.to_string_lossy().into_owned();
+        merge(&rp, "feature").await.unwrap();
+        assert!(p.join("b.txt").exists());
+        assert!(list_conflicts(&rp).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn merge_conflict_errors_and_enters_merge_state() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "t@e.com"]);
+        git(p, &["config", "user.name", "T"]);
+        git(p, &["config", "core.autocrlf", "false"]);
+        std::fs::write(p.join("a.txt"), "base\n").unwrap();
+        git(p, &["add", "."]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("a.txt"), "theirs\n").unwrap();
+        git(p, &["commit", "-aqm", "theirs"]);
+        git(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("a.txt"), "ours\n").unwrap();
+        git(p, &["commit", "-aqm", "ours"]);
+
+        let rp = p.to_string_lossy().into_owned();
+        assert!(merge(&rp, "feature").await.is_err());
+        // The repo is mid-merge with the conflict listed — the UI flow's input.
+        assert_eq!(list_conflicts(&rp).unwrap().len(), 1);
+        merge_abort(&rp).await.unwrap();
+        assert!(list_conflicts(&rp).unwrap().is_empty());
     }
 
     #[test]

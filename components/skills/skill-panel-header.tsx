@@ -1,22 +1,22 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, FilterIcon, LayersIcon, SearchIcon } from "lucide-react"
+import { ArrowLeftIcon, FilterIcon, LayersIcon } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillPanelToolbar } from "./skill-panel-toolbar"
 
 interface Props {
   totalCount: number
   filteredCount: number
+  /** Tabs rendered inline in the header row at lg+ (second row below lg). */
+  tabsSlot?: ReactNode
 }
 
-export function SkillPanelHeader({ totalCount, filteredCount }: Props) {
+export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot }: Props) {
   const t = useTranslations("skills")
-  const filters = useSkillsStore((s) => s.filters)
-  const setQuery = useSkillsStore((s) => s.setQuery)
   const setFilterSheetOpen = useSkillsStore((s) => s.setFilterSheetOpen)
   const setCategorySheetOpen = useSkillsStore((s) => s.setCategorySheetOpen)
   const activeTab = useSkillsStore((s) => s.activeTab)
@@ -39,7 +39,7 @@ export function SkillPanelHeader({ totalCount, filteredCount }: Props) {
           <LayersIcon className="size-4" />
         </Button>
       )}
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 shrink-0">
         <h1 className="truncate text-base font-semibold">{t("panel.headerTitle")}</h1>
         <p className="text-[11px] text-muted-foreground">
           {filteredCount === totalCount
@@ -47,26 +47,20 @@ export function SkillPanelHeader({ totalCount, filteredCount }: Props) {
             : `${filteredCount}/${totalCount}`}
         </p>
       </div>
-      <div className="relative order-last w-full sm:order-none sm:w-56 md:w-64 lg:w-72">
-        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          data-skill-search
-          value={filters.query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("filter.search")}
-          className="h-9 pl-8 text-xs"
-        />
-      </div>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => setFilterSheetOpen(true)}
-        className="shrink-0"
-        aria-label={t("filters")}
-      >
-        <FilterIcon className="size-3.5 sm:mr-1.5" />
-        <span className="hidden sm:inline">{t("filters")}</span>
-      </Button>
+      {tabsSlot && <div className="hidden min-w-0 lg:flex lg:items-center">{tabsSlot}</div>}
+      <div className="flex-1" />
+      {activeTab === "my-skills" && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setFilterSheetOpen(true)}
+          className="shrink-0"
+          aria-label={t("filters")}
+        >
+          <FilterIcon className="size-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{t("filters")}</span>
+        </Button>
+      )}
       <SkillPanelToolbar />
     </div>
   )

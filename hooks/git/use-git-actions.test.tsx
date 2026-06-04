@@ -17,7 +17,22 @@ jest.mock("@/lib/git/commands", () => ({
   gitStashApply: jest.fn(),
   gitStashDrop: jest.fn(),
   gitResolveConflict: jest.fn(),
+  gitIgnoreAdd: jest.fn(),
+  gitMerge: jest.fn(),
   gitMergeAbort: jest.fn(),
+  gitRestore: jest.fn(),
+  gitCreateTag: jest.fn(),
+  gitDeleteTag: jest.fn(),
+  gitPushTag: jest.fn(),
+  gitRemoteAdd: jest.fn(),
+  gitRemoteRemove: jest.fn(),
+  gitReset: jest.fn(),
+  gitRebase: jest.fn(),
+  gitCherryPick: jest.fn(),
+  gitRevert: jest.fn(),
+  gitSequencerContinue: jest.fn(),
+  gitSequencerAbort: jest.fn(),
+  gitInteractiveRebase: jest.fn(),
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
@@ -67,6 +82,32 @@ describe("useGitActions", () => {
     expect(useGitStore.getState().ops.stage).toBe(false)
   })
 
+  it("unstage sets its own op flag, not 'stage'", async () => {
+    commands.gitUnstage.mockImplementation(async () => {
+      expect(useGitStore.getState().ops.unstage).toBe(true)
+      expect(useGitStore.getState().ops.stage).toBe(false)
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.unstage(["a.ts"])
+    })
+    expect(commands.gitUnstage).toHaveBeenCalledWith("/repo", ["a.ts"], undefined)
+    expect(useGitStore.getState().ops.unstage).toBe(false)
+  })
+
+  it("restore sets its own op flag, not 'discard'", async () => {
+    commands.gitRestore.mockImplementation(async () => {
+      expect(useGitStore.getState().ops.restore).toBe(true)
+      expect(useGitStore.getState().ops.discard).toBe(false)
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.restore(["a.ts"], false, "HEAD~1")
+    })
+    expect(commands.gitRestore).toHaveBeenCalledWith("/repo", ["a.ts"], false, "HEAD~1")
+    expect(useGitStore.getState().ops.restore).toBe(false)
+  })
+
   it("commit forwards flags", async () => {
     const { result } = renderHook(() => useGitActions(refresh))
     await act(async () => {
@@ -75,7 +116,7 @@ describe("useGitActions", () => {
     expect(commands.gitCommit).toHaveBeenCalledWith("/repo", "msg", true, true)
   })
 
-  it("push with setUpstream targets origin + current branch", async () => {
+  it("push with setUpstream sends the current branch and lets the backend resolve the remote", async () => {
     const { result } = renderHook(() => useGitActions(refresh))
     await act(async () => {
       await result.current.push(true)
@@ -83,7 +124,6 @@ describe("useGitActions", () => {
     expect(commands.gitPush).toHaveBeenCalledWith("/repo", {
       setUpstream: true,
       branch: "main",
-      remote: "origin",
     })
   })
 
@@ -98,13 +138,39 @@ describe("useGitActions", () => {
     expect(useGitStore.getState().ops.push).toBe(false)
   })
 
-  it("no-ops when no repo is bound", async () => {
+  it("toasts instead of silently no-opping when no repo is bound", async () => {
     act(() => useGitStore.setState({ rootDir: null }))
     const { result } = renderHook(() => useGitActions(refresh))
     await act(async () => {
       await result.current.fetch()
     })
     expect(commands.gitFetch).not.toHaveBeenCalled()
+    expect(toastErrorMock).toHaveBeenCalled()
+  })
+
+  it("merge runs under the sequence op and forwards the branch", async () => {
+    commands.gitMerge.mockImplementation(async () => {
+      expect(useGitStore.getState().ops.sequence).toBe(true)
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.merge("feature")
+    })
+    expect(commands.gitMerge).toHaveBeenCalledWith("/repo", "feature")
+    expect(refresh).toHaveBeenCalled()
+    expect(useGitStore.getState().ops.sequence).toBe(false)
+  })
+
+  it("ignoreAdd runs under the ignore op and forwards the pattern", async () => {
+    commands.gitIgnoreAdd.mockImplementation(async () => {
+      expect(useGitStore.getState().ops.ignore).toBe(true)
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.ignoreAdd("dist/")
+    })
+    expect(commands.gitIgnoreAdd).toHaveBeenCalledWith("/repo", "dist/")
+    expect(useGitStore.getState().ops.ignore).toBe(false)
   })
 
   it("resolveConflict forwards resolution", async () => {
@@ -113,5 +179,61 @@ describe("useGitActions", () => {
       await result.current.resolveConflict("a", { side: "ours" })
     })
     expect(commands.gitResolveConflict).toHaveBeenCalledWith("/repo", "a", { side: "ours" })
+  })
+
+  it("forwards the remaining thin wrappers to their commands", async () => {
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.discard(["a.ts"])
+      await result.current.discardAll(true)
+      await result.current.checkout("dev")
+      await result.current.createBranch("b", true, "abc")
+      await result.current.deleteBranch("b", false)
+      await result.current.renameBranch("b2", "b")
+      await result.current.pull()
+      await result.current.sync()
+      await result.current.stashPush({ message: "wip" })
+      await result.current.stashPop(0)
+      await result.current.stashApply(1)
+      await result.current.stashDrop(2)
+      await result.current.mergeAbort()
+      await result.current.remoteAdd("origin", "https://e.com/r.git")
+      await result.current.remoteRemove("origin")
+      await result.current.createTag("v1", "msg", "abc")
+      await result.current.deleteTag("v1")
+      await result.current.pushTag("v1")
+      await result.current.reset("soft", "HEAD~1")
+      await result.current.rebase("main")
+      await result.current.cherryPick("abc")
+      await result.current.revert("abc")
+      await result.current.sequencerContinue()
+      await result.current.sequencerAbort()
+      await result.current.interactiveRebase("base", [])
+    })
+    expect(commands.gitDiscard).toHaveBeenCalledWith("/repo", ["a.ts"], undefined)
+    expect(commands.gitDiscardAll).toHaveBeenCalledWith("/repo", true)
+    expect(commands.gitCheckoutBranch).toHaveBeenCalledWith("/repo", "dev")
+    expect(commands.gitCreateBranch).toHaveBeenCalledWith("/repo", "b", true, "abc")
+    expect(commands.gitDeleteBranch).toHaveBeenCalledWith("/repo", "b", false)
+    expect(commands.gitRenameBranch).toHaveBeenCalledWith("/repo", "b2", "b")
+    expect(commands.gitPull).toHaveBeenCalledWith("/repo")
+    expect(commands.gitSync).toHaveBeenCalledWith("/repo")
+    expect(commands.gitStashPush).toHaveBeenCalledWith("/repo", { message: "wip" })
+    expect(commands.gitStashPop).toHaveBeenCalledWith("/repo", 0)
+    expect(commands.gitStashApply).toHaveBeenCalledWith("/repo", 1)
+    expect(commands.gitStashDrop).toHaveBeenCalledWith("/repo", 2)
+    expect(commands.gitMergeAbort).toHaveBeenCalledWith("/repo")
+    expect(commands.gitRemoteAdd).toHaveBeenCalledWith("/repo", "origin", "https://e.com/r.git")
+    expect(commands.gitRemoteRemove).toHaveBeenCalledWith("/repo", "origin")
+    expect(commands.gitCreateTag).toHaveBeenCalledWith("/repo", "v1", "msg", "abc")
+    expect(commands.gitDeleteTag).toHaveBeenCalledWith("/repo", "v1")
+    expect(commands.gitPushTag).toHaveBeenCalledWith("/repo", "v1", undefined)
+    expect(commands.gitReset).toHaveBeenCalledWith("/repo", "soft", "HEAD~1")
+    expect(commands.gitRebase).toHaveBeenCalledWith("/repo", "main")
+    expect(commands.gitCherryPick).toHaveBeenCalledWith("/repo", "abc")
+    expect(commands.gitRevert).toHaveBeenCalledWith("/repo", "abc")
+    expect(commands.gitSequencerContinue).toHaveBeenCalledWith("/repo")
+    expect(commands.gitSequencerAbort).toHaveBeenCalledWith("/repo")
+    expect(commands.gitInteractiveRebase).toHaveBeenCalledWith("/repo", "base", [])
   })
 })

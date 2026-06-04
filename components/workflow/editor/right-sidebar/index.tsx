@@ -164,7 +164,16 @@ function RightSidebarInner({
       {/* Together they (a) cache the heavy Suspense fallback so the user */}
       {/* doesn't see the loading spinner on every tab switch and (b) */}
       {/* preserve scroll position + composer draft state. */}
-      <TabsContent value="chat" className="flex-1 m-0 overflow-hidden" forceMount>
+      {/* Radix never sets the `hidden` attr on force-mounted panels, so */}
+      {/* `data-[state=inactive]:hidden` is required: without it the empty */}
+      {/* chat panel keeps its `flex-1` share of the column while another */}
+      {/* tab is active and squeezes that tab's content into the bottom half. */}
+      <TabsContent
+        value="chat"
+        className="flex-1 m-0 overflow-hidden data-[state=inactive]:hidden"
+        forceMount
+        data-testid="workflow-right-sidebar-panel-chat"
+      >
         <Activity mode={tab === "chat" ? "visible" : "hidden"}>
           <Suspense
             fallback={

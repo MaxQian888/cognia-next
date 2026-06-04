@@ -139,6 +139,25 @@ describe("useInboxLayoutStore", () => {
     })
   })
 
+  describe("migration", () => {
+    // v1 layouts were persisted while the shell passed bare numbers to
+    // react-resizable-panels v4 (interpreted as pixels), so every drag stored
+    // clamped garbage. v2 discards them and starts from defaults.
+    it("resets v1 layouts to defaults on rehydrate", async () => {
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({ state: { sidebarSize: 12, listSize: 18, detailSize: 70 }, version: 1 })
+      )
+      await act(async () => {
+        await useInboxLayoutStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useInboxLayoutStore())
+      expect(result.current.sidebarSize).toBe(INBOX_LAYOUT_DEFAULTS.sidebarSize)
+      expect(result.current.listSize).toBe(INBOX_LAYOUT_DEFAULTS.listSize)
+      expect(result.current.detailSize).toBe(INBOX_LAYOUT_DEFAULTS.detailSize)
+    })
+  })
+
   describe("reset", () => {
     it("returns the store to defaults", () => {
       const { result } = renderHook(() => useInboxLayoutStore())

@@ -48,6 +48,20 @@ export const DEFAULT_NETWORK_PROXY_SETTINGS: NetworkProxySettings = {
 }
 
 /**
+ * Known proxy clients the Rust client registry can attribute a candidate to.
+ * Mirrors `src-tauri/src/proxy_config/clients.rs:ClientId` exactly.
+ */
+export type ProxyClientId = "flclash" | "clash-verge-rev" | "mihomo" | "v2rayn"
+
+/**
+ * Which evidence layer discovered a candidate:
+ * `config` — the client's config file declared the port (then TCP-verified);
+ * `process` — the client process is running, port is its known default;
+ * `port` — generic open-port probe only.
+ */
+export type ProxyCandidateSource = "config" | "process" | "port"
+
+/**
  * Result row returned by the `proxy_detect` Tauri command. Each candidate is
  * a host:port pair we successfully connected to (port probe) plus, when the
  * candidate is a Clash/Mihomo controller, an identifying version string.
@@ -60,6 +74,14 @@ export interface ProxyCandidate {
   label: string
   /** Optional Clash/Mihomo version when the controller API responded. */
   version?: string
+  /** Owning client when discovery attributed the port to a known client. */
+  client?: ProxyClientId
+  /** Display name matching `client` (e.g. "FlClash"). */
+  clientName?: string
+  /** Evidence layer that produced this candidate. */
+  source?: ProxyCandidateSource
+  /** True when the controller answered 401/403 — present but secret-guarded. */
+  controllerSecured?: boolean
 }
 
 /**

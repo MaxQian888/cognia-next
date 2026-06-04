@@ -140,7 +140,9 @@ export function CcswitchProvidersTab() {
           const isActive = active?.cognia === p.id
           return (
             <SettingsCard
-              key={p.id}
+              // CCSwitch keys providers by (id, app_type) — id alone repeats
+              // across apps (e.g. claude/default + codex/default).
+              key={`${p.kind ?? ""}:${p.id}`}
               variant={isActive ? "bordered" : "default"}
               icon={isActive ? <ZapIcon className="size-4 text-green-600" /> : null}
               title={p.name}

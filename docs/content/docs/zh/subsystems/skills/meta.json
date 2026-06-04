@@ -1,0 +1,14 @@
+{
+  "title": "技能",
+  "pages": [
+    "index",
+    "data-model",
+    "authoring-and-workbench",
+    "bundle-import",
+    "native-sync-and-security",
+    "marketplace",
+    "built-in-skills",
+    "loading-and-injection",
+    "consumption-surfaces"
+  ]
+}

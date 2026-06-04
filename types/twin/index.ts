@@ -127,9 +127,35 @@ export type VectorBackend = "qdrant" | "pinecone" | "milvus" | "weaviate" | "chr
  * underlying source kind populated them; downstream UI uses the present
  * fields to render provenance breadcrumbs.
  */
+/** Axis-aligned bounding box in PDF viewport points (top-left origin),
+ *  as produced by the native liteparse parser's text items. */
+export interface TwinBoundingBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * One PDF page's char range within the text that gets redacted + chunked,
+ * plus the union of the page's native text-item boxes. Produced by
+ * `computePdfPageMap` (lib/twin/ingest/parse.ts); offsets are translated
+ * into redacted space before chunking.
+ */
+export interface TwinPageMapEntry {
+  pageNumber: number
+  charStart: number
+  charEnd: number
+  bboxUnion?: TwinBoundingBox
+}
+
 export interface TwinChunkMetadata {
   // PDF
   pageNumber?: number
+  /** Last page a chunk spans — present only when it differs from `pageNumber`. */
+  pageEnd?: number
+  /** Union of the native text-item boxes for the chunk's page span. */
+  bboxUnion?: TwinBoundingBox
   // Markdown / docx
   headingPath?: string[]
   // Chat / IM exports

@@ -2,8 +2,8 @@
   "title": "Chat & Agents",
   "pages": [
     "chat-and-skills",
+    "characters",
     "built-in-agent",
-    "skills-system",
     "agent-teams",
     "external-agents",
     "slash-commands",

@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📖 Documentation
-    url: https://github.com/AstroAir/cognia-next#readme
+    url: https://github.com/MaxQian888/cognia-next#readme
     about: Check the README for setup and usage instructions
   - name: 💬 Discussions
-    url: https://github.com/AstroAir/cognia-next/discussions
+    url: https://github.com/MaxQian888/cognia-next/discussions
     about: Ask questions and discuss ideas
   - name: 🔍 Search Issues
-    url: https://github.com/AstroAir/cognia-next/issues
+    url: https://github.com/MaxQian888/cognia-next/issues
     about: Search existing issues before creating a new one

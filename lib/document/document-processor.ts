@@ -268,6 +268,9 @@ export async function processDocumentAsync(
       }
       parseResult = parsed
       parseSummary = normalizePDFSummary(parsed)
+      if (parsed.diagnostics?.length) {
+        parseDiagnostics = [...parsed.diagnostics]
+      }
       break
     }
 

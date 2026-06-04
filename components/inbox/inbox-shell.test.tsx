@@ -60,13 +60,25 @@ jest.mock("@/components/ui/resizable", () => ({
   ResizablePanel: ({
     children,
     className,
+    defaultSize,
+    minSize,
+    maxSize,
     ...rest
   }: {
     children: React.ReactNode
     className?: string
+    defaultSize?: number | string
+    minSize?: number | string
+    maxSize?: number | string
     [k: string]: unknown
   }) => (
-    <div className={className} data-testid={rest["data-testid"] as string}>
+    <div
+      className={className}
+      data-testid={rest["data-testid"] as string}
+      data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+      data-min-size={minSize === undefined ? undefined : String(minSize)}
+      data-max-size={maxSize === undefined ? undefined : String(maxSize)}
+    >
       {children}
     </div>
   ),
@@ -130,6 +142,22 @@ describe("InboxShell", () => {
       expect(screen.getByTestId("inbox-sidebar-pane")).toBeInTheDocument()
       expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
       expect(screen.getByTestId("inbox-detail-pane")).toBeInTheDocument()
+    })
+
+    // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
+    // be percent strings or the three panes collapse to px-wide slivers.
+    it("passes percent-string sizes to every resizable panel", () => {
+      render(<InboxShell view="all" />)
+      const percent = /^\d+(\.\d+)?%$/
+      const sidebar = screen.getByTestId("inbox-sidebar-pane")
+      const list = screen.getByTestId("inbox-conversation-list-pane")
+      const detail = screen.getByTestId("inbox-detail-pane")
+      for (const pane of [sidebar, list, detail]) {
+        expect(pane.dataset.defaultSize).toMatch(percent)
+        expect(pane.dataset.minSize).toMatch(percent)
+      }
+      expect(sidebar.dataset.maxSize).toMatch(percent)
+      expect(list.dataset.maxSize).toMatch(percent)
     })
 
     it("renders children in the detail pane", () => {

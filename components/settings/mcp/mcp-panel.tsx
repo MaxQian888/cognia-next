@@ -197,13 +197,27 @@ function McpEditorHost() {
   const closeEditor = useMcpPanelStore((s) => s.closeEditor)
   const open = editorTarget !== null
 
-  const existing = useLiveQuery(
+  // The row loads async (undefined on first render, and useLiveQuery retains
+  // the *previous* row while re-querying after a target switch). Tag the result
+  // with the id it was loaded for so loading/stale states are distinguishable —
+  // the editor seeds its form state once at mount, so it must never mount with
+  // a blank or stale `initial`.
+  const existingQuery = useLiveQuery(
     () =>
       editorTarget?.mode === "edit"
-        ? getMcpServer(editorTarget.serverId)
+        ? getMcpServer(editorTarget.serverId).then((row) => ({
+            forId: editorTarget.serverId,
+            row,
+          }))
         : Promise.resolve(undefined),
     [editorTarget]
   )
+  const existing =
+    editorTarget?.mode === "edit" && existingQuery?.forId === editorTarget.serverId
+      ? existingQuery.row
+      : undefined
+  const editorReady =
+    editorTarget?.mode !== "edit" || existingQuery?.forId === editorTarget.serverId
 
   const initial: McpEditorInitial =
     editorTarget?.mode === "edit"
@@ -255,13 +269,17 @@ function McpEditorHost() {
           <SheetDescription>{t("config")}</SheetDescription>
         </SheetHeader>
         <div className="px-5 py-4">
-          {/* Key by target so the form re-seeds when switching rows. */}
-          <McpServerEditor
-            key={editorTarget?.mode === "edit" ? editorTarget.serverId : "create"}
-            initial={initial}
-            onCancel={closeEditor}
-            onSave={onSave}
-          />
+          {/* Key by target so the form re-seeds when switching rows; hold off
+              mounting until the edited row has loaded so the one-shot seed
+              never captures a blank/stale `initial`. */}
+          {editorReady && (
+            <McpServerEditor
+              key={editorTarget?.mode === "edit" ? editorTarget.serverId : "create"}
+              initial={initial}
+              onCancel={closeEditor}
+              onSave={onSave}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

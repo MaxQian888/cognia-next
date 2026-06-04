@@ -9,7 +9,10 @@ import { Badge } from "@/components/ui/badge"
 export function HelperHints() {
   const t = useTranslations("chat.composer.helperHints")
   return (
-    <div className="mt-1.5 hidden sm:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
+    // Stacked media + container variant: show only when BOTH the viewport is
+    // ≥sm (keyboard hints are useless on touch) AND the composer container is
+    // ≥@sm (a narrow right-sidebar shouldn't burn rows on hint chips).
+    <div className="mt-1.5 hidden sm:@sm/composer:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
       <Hint>{t("send")}</Hint>
       <Hint>{t("dropImages")}</Hint>
       <Hint>

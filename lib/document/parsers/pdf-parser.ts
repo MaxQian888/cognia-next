@@ -4,6 +4,15 @@
  * Enhanced with layout-aware extraction, password support, outline & annotation extraction
  */
 
+import { isTauri } from "@/lib/tauri"
+import type { ParseDiagnostic, PdfTextItem } from "@/types/document"
+
+export type { PdfTextItem }
+
+/** Below this many trimmed chars the text layer is considered sparse
+ *  (mirrors the 16-char heuristic in `lib/ocr/pdf-router`). */
+const SPARSE_TEXT_THRESHOLD = 16
+
 export interface PDFParseResult {
   text: string
   pageCount: number
@@ -11,6 +20,9 @@ export interface PDFParseResult {
   metadata: PDFMetadata
   outline?: PDFOutlineItem[]
   annotations?: PDFAnnotation[]
+  /** Parser-level diagnostics (e.g. native-parse fallback) merged into
+   *  `ProcessedDocument.parseDiagnostics` by the document processor. */
+  diagnostics?: ParseDiagnostic[]
 }
 
 export interface PDFPage {
@@ -18,6 +30,10 @@ export interface PDFPage {
   text: string
   width: number
   height: number
+  /** Spatial text items — only present on the native (Tauri liteparse) path. */
+  items?: PdfTextItem[]
+  /** True when the per-page/document item cap dropped this page's items. */
+  itemsTruncated?: boolean
 }
 
 export interface PDFMetadata {
@@ -53,12 +69,59 @@ export interface PDFAnnotation {
 }
 
 /**
- * Parse PDF from ArrayBuffer
+ * Parse PDF from ArrayBuffer.
+ *
+ * Desktop (Tauri) tries the native liteparse backend first — it adds
+ * per-item bounding boxes (`PDFPage.items`) the pdfjs path cannot produce.
+ * ANY native failure falls through to the unchanged pdfjs path below, so
+ * parsing never fails because the native path failed. The fallback lives
+ * here because `document-processor.ts` calls `parsePDF` without try/catch.
  */
 export async function parsePDF(
   data: ArrayBuffer,
   options: PDFParseOptions = {}
 ): Promise<PDFParseResult> {
+  // The native path parses whole documents only; page ranges and
+  // outline/annotation extraction are pdfjs-specific features.
+  const nativeEligible =
+    options.startPage === undefined &&
+    options.endPage === undefined &&
+    !options.extractOutline &&
+    !options.extractAnnotations
+  let fallbackDiagnostic: ParseDiagnostic | undefined
+
+  if (nativeEligible && isTauri()) {
+    try {
+      const { parsePdfNative } = await import("./native-pdf")
+      const native = await parsePdfNative(new Uint8Array(data), {
+        ...(options.password !== undefined ? { password: options.password } : {}),
+      })
+      if (native.text.trim().length < SPARSE_TEXT_THRESHOLD) {
+        native.diagnostics = [
+          ...(native.diagnostics ?? []),
+          {
+            code: "sparse_text_layer",
+            severity: "info",
+            message:
+              "Native parser found little or no text layer — the PDF is likely scanned; OCR may be required.",
+          },
+        ]
+      }
+      return native
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // `unsupported` = the parse-liteparse feature isn't compiled in.
+      // That's an expected capability gap, not a failure — stay silent.
+      if (!message.startsWith("unsupported")) {
+        fallbackDiagnostic = {
+          code: "native_parse_fallback",
+          severity: "info",
+          message: `Native PDF parser failed; fell back to pdfjs: ${message}`,
+        }
+      }
+    }
+  }
+
   // Dynamic import to avoid SSR issues
   const pdfjsLib = await import("pdfjs-dist")
 
@@ -140,6 +203,9 @@ export async function parsePDF(
   }
   if (allAnnotations.length > 0) {
     result.annotations = allAnnotations
+  }
+  if (fallbackDiagnostic) {
+    result.diagnostics = [fallbackDiagnostic]
   }
 
   return result

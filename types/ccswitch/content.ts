@@ -14,6 +14,8 @@ export interface CcswitchPrompt {
   id: string
   name: string
   content: string
+  /** App the prompt belongs to ("claude" | "codex" | …). CCSwitch keys prompts by (id, app_type), so `id` alone is not unique. */
+  kind?: string
   description?: string
   tags?: string[]
 }

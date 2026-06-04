@@ -21,6 +21,7 @@ mod keyring_secrets;
 mod logging;
 mod mcp_server;
 mod ocr;
+mod parse;
 mod perf;
 mod plugin_api;
 mod plugins;
@@ -724,6 +725,8 @@ pub fn run() {
             git::commands::git_diff_file,
             git::commands::git_diff_commit,
             git::commands::git_commit_files,
+            git::commands::git_diff_refs_files,
+            git::commands::git_diff_refs_file,
             git::commands::git_diff_staged_all,
             git::commands::git_log,
             git::commands::git_file_history,
@@ -766,6 +769,9 @@ pub fn run() {
             git::commands::git_stash_apply,
             git::commands::git_stash_drop,
             git::commands::git_resolve_conflict,
+            git::commands::git_init,
+            git::commands::git_ignore_add,
+            git::commands::git_merge,
             git::commands::git_merge_abort,
             git::commands::git_watch_start,
             git::commands::git_watch_stop,
@@ -774,6 +780,9 @@ pub fn run() {
             ocr::ocr_model_status,
             ocr::ocr_download_model,
             ocr::msix::ocr_msix_status,
+            // Native document parsing (liteparse / PDFium) — feature-gated;
+            // the default build answers `unsupported` and TS falls back.
+            parse::parse_document_native,
             // Performance panel — process/runtime/span sampling + hotspots.
             perf::commands::perf_snapshot,
             perf::commands::perf_start_sampling,

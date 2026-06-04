@@ -204,7 +204,11 @@ pub fn commit_files(repo_path: &str, sha: &str) -> Result<Vec<GitFileChange>> {
         Some(commit.parent(0)?.tree()?)
     };
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&new_tree), None)?;
+    Ok(deltas_to_changes(&diff))
+}
 
+/// Map a diff's deltas to the panel's `GitFileChange` rows.
+fn deltas_to_changes(diff: &Diff<'_>) -> Vec<GitFileChange> {
     let mut out = Vec::new();
     for delta in diff.deltas() {
         let path = delta
@@ -231,7 +235,57 @@ pub fn commit_files(repo_path: &str, sha: &str) -> Result<Vec<GitFileChange>> {
             group: GitStatusGroup::Changes,
         });
     }
-    Ok(out)
+    out
+}
+
+/// Resolve any rev (branch, tag, sha, `HEAD~1`, …) to a commit.
+fn resolve_to_commit<'r>(repo: &'r Repository, rev: &str) -> Result<Commit<'r>> {
+    repo.revparse_single(rev)
+        .and_then(|obj| obj.peel_to_commit())
+        .map_err(|_| GitError::InvalidArgument(format!("cannot resolve ref: {rev}")))
+}
+
+/// The two trees a `base...target` comparison spans: the merge-base tree (old)
+/// and the target tree (new) — branch-compare semantics, like a PR diff.
+fn merge_base_trees<'r>(
+    repo: &'r Repository,
+    base: &str,
+    target: &str,
+) -> Result<(Tree<'r>, Tree<'r>)> {
+    let base_commit = resolve_to_commit(repo, base)?;
+    let target_commit = resolve_to_commit(repo, target)?;
+    let merge_base = repo.merge_base(base_commit.id(), target_commit.id())?;
+    let old_tree = repo.find_commit(merge_base)?.tree()?;
+    let new_tree = target_commit.tree()?;
+    Ok((old_tree, new_tree))
+}
+
+/// Files changed between `base...target` (three-dot: merge-base vs target).
+pub fn diff_refs_files(repo_path: &str, base: &str, target: &str) -> Result<Vec<GitFileChange>> {
+    let repo = open_repo(repo_path)?;
+    let (old_tree, new_tree) = merge_base_trees(&repo, base, target)?;
+    let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
+    Ok(deltas_to_changes(&diff))
+}
+
+/// Diff of one `path` between `base...target` (merge-base vs target).
+pub fn diff_refs_file(repo_path: &str, base: &str, target: &str, path: &str) -> Result<GitDiff> {
+    let repo = open_repo(repo_path)?;
+    let (old_tree, new_tree) = merge_base_trees(&repo, base, target)?;
+    let mut opts = base_opts(path);
+    let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut opts))?;
+    let (_, hunks, is_binary) = extract_hunks(&diff)?;
+
+    let old_content = tree_blob_text(&repo, &old_tree, path).unwrap_or_default();
+    let new_content = tree_blob_text(&repo, &new_tree, path).unwrap_or_default();
+
+    Ok(GitDiff {
+        path: norm(path),
+        old_content: if is_binary { String::new() } else { old_content },
+        new_content: if is_binary { String::new() } else { new_content },
+        hunks: if is_binary { Vec::new() } else { hunks },
+        is_binary,
+    })
 }
 
 fn tree_blob_text(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<String> {
@@ -374,6 +428,63 @@ mod tests {
     fn invalid_sha_errors() {
         let (tmp, _repo) = init_committed();
         let err = commit_files(&tmp.path().to_string_lossy(), "not-a-sha").unwrap_err();
+        assert!(matches!(err, GitError::InvalidArgument(_)));
+    }
+
+    /// The default branch and `feature` diverge: feature edits a.txt + adds
+    /// f.txt; the default branch adds m.txt after the fork. Three-dot
+    /// semantics must show only feature's side. Returns the default branch name
+    /// (libgit2's default varies with `init.defaultBranch`).
+    fn two_branch_fixture() -> (TempDir, Repository, String) {
+        let (tmp, repo) = init_committed();
+        let default_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        // Fork point is the init commit. Build feature first.
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &head, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        fs::write(tmp.path().join("a.txt"), "line1\nFEATURE\nline3\n").unwrap();
+        fs::write(tmp.path().join("f.txt"), "feature-only\n").unwrap();
+        commit_all(&repo, "feature work");
+        // Advance the default branch independently.
+        repo.set_head(&format!("refs/heads/{default_branch}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        fs::write(tmp.path().join("m.txt"), "main-only\n").unwrap();
+        commit_all(&repo, "main work");
+        (tmp, repo, default_branch)
+    }
+
+    #[test]
+    fn diff_refs_files_shows_only_target_side_changes() {
+        let (tmp, _repo, default_branch) = two_branch_fixture();
+        let rp = tmp.path().to_string_lossy().into_owned();
+        let files = diff_refs_files(&rp, &default_branch, "feature").unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"a.txt"));
+        assert!(paths.contains(&"f.txt"));
+        // The default branch's post-fork commit must NOT appear (three-dot).
+        assert!(!paths.contains(&"m.txt"));
+    }
+
+    #[test]
+    fn diff_refs_file_diffs_against_the_merge_base() {
+        let (tmp, _repo, default_branch) = two_branch_fixture();
+        let rp = tmp.path().to_string_lossy().into_owned();
+        let d = diff_refs_file(&rp, &default_branch, "feature", "a.txt").unwrap();
+        assert_eq!(d.old_content, "line1\nline2\nline3\n");
+        assert_eq!(d.new_content, "line1\nFEATURE\nline3\n");
+        assert_eq!(d.hunks.len(), 1);
+    }
+
+    #[test]
+    fn diff_refs_unresolvable_ref_errors() {
+        let (tmp, _repo) = init_committed();
+        let rp = tmp.path().to_string_lossy().into_owned();
+        let err = diff_refs_files(&rp, "no-such-branch", "HEAD").unwrap_err();
         assert!(matches!(err, GitError::InvalidArgument(_)));
     }
 

@@ -789,13 +789,14 @@ function ComposerInner(props: InnerProps) {
       <GoalStatusPill sessionId={sessionId} />
       <div
         className={cn(
-          "relative flex gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
-          // Mobile (Capacitor): Claude-style stack — textarea fills the first
-          // row (w-full forces the wrap), the attach + send clusters share the
-          // bottom row. Web/desktop keep the container-query responsive layout.
-          isMobile
-            ? "flex-wrap items-end"
-            : "flex-col @sm/composer:flex-row @sm/composer:items-end",
+          // Claude-style stack on every platform when the container is narrow:
+          // the textarea fills the first row (w-full forces the wrap), the
+          // attach + send clusters share ONE bottom row. On web/desktop the
+          // children's @sm/composer:* classes reset order/width so the box
+          // re-forms the single-row [attach | textarea | send] layout; the
+          // flex-1 textarea (basis-0) then prevents any further wrapping.
+          // Mobile (Capacitor) keeps the stack at every width.
+          "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
         )}
         onDragEnter={onDragEnter}

@@ -10,7 +10,7 @@ jest.mock("./composer", () => {
     // forwardRef so the callback ref ChatPane now attaches doesn't warn.
     Composer: react.forwardRef(function Composer(_props: unknown, ref: React.Ref<unknown>) {
       react.useImperativeHandle(ref, () => ({ insertMention: () => {}, focus: () => {} }), [])
-      return null
+      return react.createElement("div", { "data-testid": "composer" })
     }),
   }
 })
@@ -43,6 +43,18 @@ const storeState = {
 jest.mock("@/stores/chat", () => ({
   useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
 }))
+
+// Welcome-section dismissal persistence (AppSettings.welcomeHidden).
+jest.mock("@/stores/settings", () => {
+  const state = {
+    settings: null as { welcomeHidden?: { tryPrompt?: boolean } } | null,
+    save: jest.fn(),
+  }
+  const useSettingsStore = Object.assign((sel: (s: typeof state) => unknown) => sel(state), {
+    getState: () => state,
+  })
+  return { useSettingsStore, __settingsState: state }
+})
 
 // ChatPane resolves the active character to surface its exemplar prompts.
 jest.mock("@/lib/data-hooks/context", () => ({
@@ -199,20 +211,30 @@ describe("ChatPane", () => {
     })
   })
 
-  describe("centered-composer layout", () => {
+  describe("welcome layout (no messages)", () => {
     const { EmptyChatState } = jest.requireMock("./empty-state") as {
       EmptyChatState: jest.Mock
     }
 
-    it("passes the composer to the empty state via composerSlot when there are no messages", () => {
+    it("docks the composer below the empty state instead of centering it inside", () => {
       const saved = storeState.messages
       storeState.messages = []
       EmptyChatState.mockClear()
-      EmptyChatState.mockReturnValue(null)
+      EmptyChatState.mockReturnValue(
+        ReactForMocks.createElement("div", { "data-testid": "empty-state" })
+      )
       render(<ChatPane {...makeProps()} />)
       const props = EmptyChatState.mock.calls.at(-1)?.[0]
-      expect(props?.composerSlot).toBeTruthy()
+      expect(props?.composerSlot).toBeUndefined()
       expect(props?.variant).toBe("inline")
+      // Welcome content renders above, the live composer below it.
+      const empty = document.querySelector("[data-testid='empty-state']")
+      const composer = document.querySelector("[data-testid='composer']")
+      expect(empty).toBeTruthy()
+      expect(composer).toBeTruthy()
+      expect(
+        empty!.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
       storeState.messages = saved
     })
 
@@ -225,24 +247,46 @@ describe("ChatPane", () => {
       expect(MockList).toHaveBeenCalled()
     })
 
-    it("forwards onNavigate / recentSessions / onResumeSession to the empty state", () => {
+    it("forwards welcomeHidden from settings and persists a section dismissal", () => {
+      const saved = storeState.messages
+      storeState.messages = []
+      const { __settingsState } = jest.requireMock("@/stores/settings") as {
+        __settingsState: {
+          settings: { welcomeHidden?: { tryPrompt?: boolean } } | null
+          save: jest.Mock
+        }
+      }
+      __settingsState.settings = { welcomeHidden: { tryPrompt: true } }
+      EmptyChatState.mockClear()
+      EmptyChatState.mockReturnValue(null)
+      render(<ChatPane {...makeProps()} />)
+      const props = EmptyChatState.mock.calls.at(-1)?.[0]
+      expect(props?.hiddenSections).toEqual({ tryPrompt: true })
+      // Dismissing persists the flag via settings.save (merging existing flags).
+      props?.onDismissSection?.("tryPrompt")
+      expect(__settingsState.save).toHaveBeenCalledWith({
+        welcomeHidden: { tryPrompt: true },
+      })
+      __settingsState.settings = null
+      __settingsState.save.mockClear()
+      storeState.messages = saved
+    })
+
+    it("forwards recentSessions / onResumeSession to the empty state", () => {
       const saved = storeState.messages
       storeState.messages = []
       EmptyChatState.mockClear()
       EmptyChatState.mockReturnValue(null)
-      const onNavigate = jest.fn()
       const onResumeSession = jest.fn()
       const recentSessions = [{ id: "a", title: "A", updatedAt: 1 }]
       render(
         <ChatPane
           {...makeProps()}
-          onNavigate={onNavigate}
           recentSessions={recentSessions}
           onResumeSession={onResumeSession}
         />
       )
       const props = EmptyChatState.mock.calls.at(-1)?.[0]
-      expect(props?.onNavigate).toBe(onNavigate)
       expect(props?.recentSessions).toBe(recentSessions)
       expect(props?.onResumeSession).toBe(onResumeSession)
       storeState.messages = saved

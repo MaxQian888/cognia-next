@@ -14,7 +14,9 @@
  *   * `panelOpen` / `panelHeightPct` — dock visibility + size.
  *
  * Persistence (via `zustand/middleware/persist`):
- *   * `panelOpen` and `panelHeightPct` survive reloads.
+ *   * Only `panelHeightPct` survives reloads — the dock always starts
+ *     closed (`panelOpen` is deliberately NOT persisted, so a dock left
+ *     open by the user or an agent tool doesn't reappear on next launch).
  *   * Sessions do NOT — every session is killed on window close
  *     (`PtySession::Drop` on the Rust side), and replay across reload
  *     is explicitly out of v1 scope (see plan §Out of scope).
@@ -528,16 +530,28 @@ export const useTerminalStore = create<TerminalStoreState>()(
     }),
     {
       name: "cognia-terminal-layout",
-      version: 1,
-      migrate: (_oldState: unknown, _oldVersion: number) => ({
-        ...TERMINAL_LAYOUT_DEFAULTS,
-        sessions: {},
-        activeSessionIdByProject: {},
-      }),
-      // Only persist the dock shell — session state is in-memory and
-      // gone after window reload (replay is out of v1 scope).
+      // v2 drops `panelOpen` from the persisted shell so the dock always
+      // starts closed; only the user-tuned height carries across launches.
+      version: 2,
+      migrate: (oldState: unknown, _oldVersion: number) => {
+        const prev = oldState as { panelHeightPct?: unknown } | null | undefined
+        return {
+          ...TERMINAL_LAYOUT_DEFAULTS,
+          panelHeightPct:
+            typeof prev?.panelHeightPct === "number"
+              ? clamp(
+                  prev.panelHeightPct,
+                  TERMINAL_LAYOUT_BOUNDS.panelMinPct,
+                  TERMINAL_LAYOUT_BOUNDS.panelMaxPct
+                )
+              : TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
+          sessions: {},
+          activeSessionIdByProject: {},
+        }
+      },
+      // Only persist the dock height — `panelOpen` intentionally resets to
+      // closed on every launch, and session state is in-memory only.
       partialize: (state) => ({
-        panelOpen: state.panelOpen,
         panelHeightPct: state.panelHeightPct,
       }),
     }

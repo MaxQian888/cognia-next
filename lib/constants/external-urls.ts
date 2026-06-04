@@ -11,7 +11,7 @@
 export const DOCS_URL = "https://docs.cognia.app"
 
 /** Public source repository (matches `src-tauri/Cargo.toml` `repository`). */
-export const GITHUB_URL = "https://github.com/AstroAir/cognia-next"
+export const GITHUB_URL = "https://github.com/MaxQian888/cognia-next"
 
 /** Issue tracker — used by the About "Report an issue" link. */
 export const ISSUES_URL = `${GITHUB_URL}/issues`

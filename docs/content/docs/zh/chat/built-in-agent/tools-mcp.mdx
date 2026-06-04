@@ -86,7 +86,7 @@ flowchart LR
 - **Managed 技能**（`anthropic-managed`）只解析成 `containerSkillId`；build-options 把至多 8 个（`MAX_CONTAINER_SKILLS`，`:126`）作为 `container.skill_id` 转发给 sidecar。
 - **Body 技能**的 markdown 由 `resolveSkillMarkdown`（`skills-io.ts:273`）读取——inline / local-folder / local-bundle / archive——并经 `renderResolvedSkillsSection`（`:158`）折成一段 `## Skill: <name>`。
 
-插件技能在 id 冲突时胜出；一切 fail-soft（浏览器 / fs 失败 → `undefined`，绝不抛）。撰写见[技能系统](./skills-system)。
+插件技能在 id 冲突时胜出；一切 fail-soft（浏览器 / fs 失败 → `undefined`，绝不抛）。撰写见[技能子系统](../../subsystems/skills/authoring-and-workbench)。
 
 ## Computer-use 原生工具
 
@@ -118,7 +118,7 @@ flowchart LR
 
 <Cards>
   <Card title="Build-options 管线" href="./build-options" description="每个工具/MCP/技能字段在哪里装配进负载。" />
-  <Card title="技能系统" href="./skills-system" description="撰写聊天技能与 SKILL.md 格式。" />
+  <Card title="技能子系统" href="../../subsystems/skills" description="撰写聊天技能与 SKILL.md 格式。" />
   <Card title="MCP 系统" href="../subsystems/mcp" description="完整的 MCP 客户端/宿主/桥接章节——配置存储、预设、内置工具与 a2ui-bridge。" />
   <Card title="ADR-0020 Computer Use" href="../adr/0020-computer-use-completeness" description="原生 computer-use 门与 consent 层级。" />
 </Cards>

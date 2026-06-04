@@ -15,8 +15,8 @@ use super::types::{
 };
 use super::watcher::GitWatcherState;
 use super::{
-    blame, branch, commit, diff, history, interactive_rebase, merge, read, remote, reset, restore,
-    sequencer, stage, stash, status, tag,
+    blame, branch, commit, diff, history, interactive_rebase, merge, read, remote, repo, reset,
+    restore, sequencer, stage, stash, status, tag,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -78,6 +78,31 @@ pub async fn git_commit_files(
 ) -> Result<Vec<GitFileChange>, GitError> {
     blocking("git_commit_files", move || {
         diff::commit_files(&repo_path, &sha)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_refs_files(
+    repo_path: String,
+    base: String,
+    target: String,
+) -> Result<Vec<GitFileChange>, GitError> {
+    blocking("git_diff_refs_files", move || {
+        diff::diff_refs_files(&repo_path, &base, &target)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_refs_file(
+    repo_path: String,
+    base: String,
+    target: String,
+    path: String,
+) -> Result<GitDiff, GitError> {
+    blocking("git_diff_refs_file", move || {
+        diff::diff_refs_file(&repo_path, &base, &target, &path)
     })
     .await
 }
@@ -417,6 +442,21 @@ pub async fn git_resolve_conflict(
             "git_resolve_conflict needs mergedContent or side".into(),
         ))
     }
+}
+
+#[tauri::command]
+pub async fn git_init(path: String) -> Result<(), GitError> {
+    repo::init(&path).await
+}
+
+#[tauri::command]
+pub async fn git_ignore_add(repo_path: String, pattern: String) -> Result<(), GitError> {
+    repo::ignore_add(&repo_path, &pattern).await
+}
+
+#[tauri::command]
+pub async fn git_merge(repo_path: String, branch: String) -> Result<(), GitError> {
+    merge::merge(&repo_path, &branch).await
 }
 
 #[tauri::command]

@@ -39,6 +39,15 @@ describe("WorkflowPinnedSection", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it("renders without looping when settings lack pinnedWorkflowIds entirely", () => {
+    // Regression: the selector used to default to a fresh `[]` per snapshot,
+    // which useSyncExternalStore treats as a changed store value — infinite
+    // re-render ("Maximum update depth exceeded") crashing /workflows.
+    useSettingsStore.setState({ settings: {} as never })
+    const { container } = render(<WorkflowPinnedSection />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it("renders pinned workflows as cards in grid mode", async () => {
     const wf = await createWorkflow({ name: "Pinned one" })
     useSettingsStore.setState({ settings: { pinnedWorkflowIds: [wf.id] } as never })

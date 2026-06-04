@@ -121,7 +121,7 @@ export function TerminalPaneGroup({
       {panes.map((id, idx) => (
         <Fragment key={id}>
           {idx > 0 ? <ResizableHandle /> : null}
-          <ResizablePanel id={id} defaultSize={100 / panes.length} minSize={10}>
+          <ResizablePanel id={id} defaultSize={`${100 / panes.length}%`} minSize="10%">
             <PaneBox
               sessionId={id}
               focused={id === focused}

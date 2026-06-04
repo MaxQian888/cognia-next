@@ -10,8 +10,28 @@ jest.mock("next-intl", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 jest.mock("@/lib/logging", () => ({ loggers: { mcp: { info: jest.fn(), error: jest.fn() } } }))
 
-let mockEditTarget: unknown = undefined
-jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockEditTarget }))
+// Faithful useLiveQuery stand-in: returns undefined on first render, resolves
+// the querier async, and retains the stale previous value across dep changes —
+// exactly the real dexie-react-hooks semantics the editor-host race depends on.
+jest.mock("dexie-react-hooks", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  return {
+    useLiveQuery: (querier: () => unknown, deps: unknown[]) => {
+      const [value, setValue] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let active = true
+        Promise.resolve(querier()).then((v) => {
+          if (active) setValue(v)
+        })
+        return () => {
+          active = false
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, deps)
+      return value
+    },
+  }
+})
 
 jest.mock("@/lib/db/mcp-servers", () => ({
   createMcpServer: jest.fn().mockResolvedValue(undefined),
@@ -50,43 +70,57 @@ jest.mock("@/components/settings/common/related-sections-strip", () => ({
   RelatedSectionsStrip: () => <div />,
   CLAUDE_CODE_RELATED: [],
 }))
-jest.mock("./mcp-server-editor", () => ({
-  McpServerEditor: ({
-    onSave,
-    onCancel,
-  }: {
-    onSave: (d: unknown) => void
-    onCancel: () => void
-  }) => (
-    <div data-testid="server-editor">
-      <button
-        onClick={() =>
-          onSave({
-            name: "new",
-            transport: "stdio",
-            config: { command: "c" },
-            enabled: true,
-            appsEnabled: {},
-          })
-        }
-      >
-        do-save
-      </button>
-      <button onClick={onCancel}>do-cancel</button>
-    </div>
-  ),
-}))
+jest.mock("./mcp-server-editor", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  return {
+    McpServerEditor: ({
+      initial,
+      onSave,
+      onCancel,
+    }: {
+      initial: { config: Record<string, unknown> }
+      onSave: (d: unknown) => void
+      onCancel: () => void
+    }) => {
+      // Mirror the real editor: fields are seeded from `initial` ONCE at mount.
+      const [seeded] = React.useState(initial)
+      return (
+        <div data-testid="server-editor" data-seeded={JSON.stringify(seeded.config)}>
+          <button
+            onClick={() =>
+              onSave({
+                name: "new",
+                transport: "stdio",
+                config: { command: "c" },
+                enabled: true,
+                appsEnabled: {},
+              })
+            }
+          >
+            do-save
+          </button>
+          <button onClick={onCancel}>do-cancel</button>
+        </div>
+      )
+    },
+  }
+})
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { McpPanel } from "./mcp-panel"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
-import { createMcpServer, updateMcpServer, deleteMcpServer } from "@/lib/db/mcp-servers"
+import {
+  createMcpServer,
+  updateMcpServer,
+  deleteMcpServer,
+  getMcpServer,
+} from "@/lib/db/mcp-servers"
 
 beforeEach(() => {
-  mockEditTarget = undefined
   ;(createMcpServer as jest.Mock).mockClear()
   ;(updateMcpServer as jest.Mock).mockClear()
   ;(deleteMcpServer as jest.Mock).mockClear()
+  ;(getMcpServer as jest.Mock).mockReset().mockResolvedValue(undefined)
   useMcpPanelStore.setState({
     activeTab: "my-servers",
     editorTarget: null,
@@ -161,20 +195,65 @@ describe("McpPanel", () => {
   })
 
   it("updates a server when the editor host saves in edit mode", async () => {
-    mockEditTarget = {
+    ;(getMcpServer as jest.Mock).mockResolvedValue({
       id: "srv1",
       name: "old",
       transport: "stdio",
       config: { command: "c" },
       enabled: true,
       appsEnabled: {},
-    }
+    })
     useMcpPanelStore.setState({ editorTarget: { mode: "edit", serverId: "srv1" } })
     render(<McpPanel />)
-    fireEvent.click(screen.getByText("do-save"))
+    fireEvent.click(await screen.findByText("do-save"))
     await waitFor(() =>
       expect(updateMcpServer as jest.Mock).toHaveBeenCalledWith("srv1", expect.any(Object))
     )
+  })
+
+  it("does not mount the editor before the edited row resolves", () => {
+    // Never-resolving load: the editor must stay unmounted instead of seeding blanks.
+    ;(getMcpServer as jest.Mock).mockReturnValue(new Promise(() => {}))
+    useMcpPanelStore.setState({ editorTarget: { mode: "edit", serverId: "srv1" } })
+    render(<McpPanel />)
+    expect(screen.queryByTestId("server-editor")).not.toBeInTheDocument()
+  })
+
+  it("seeds the editor with the loaded row config in edit mode", async () => {
+    ;(getMcpServer as jest.Mock).mockResolvedValue({
+      id: "srv1",
+      name: "fs",
+      transport: "stdio",
+      config: { command: "npx", args: ["-y", "pkg"] },
+      enabled: true,
+      appsEnabled: {},
+    })
+    useMcpPanelStore.setState({ editorTarget: { mode: "edit", serverId: "srv1" } })
+    render(<McpPanel />)
+    const editor = await screen.findByTestId("server-editor")
+    expect(JSON.parse(editor.dataset.seeded ?? "{}")).toEqual({
+      command: "npx",
+      args: ["-y", "pkg"],
+    })
+  })
+
+  it("re-seeds from the new row (not the stale one) when switching edited servers", async () => {
+    const rows: Record<string, unknown> = {
+      srv1: { id: "srv1", name: "a", transport: "stdio", config: { command: "aaa" } },
+      srv2: { id: "srv2", name: "b", transport: "stdio", config: { command: "bbb" } },
+    }
+    ;(getMcpServer as jest.Mock).mockImplementation((id: string) => Promise.resolve(rows[id]))
+    useMcpPanelStore.setState({ editorTarget: { mode: "edit", serverId: "srv1" } })
+    render(<McpPanel />)
+    await screen.findByTestId("server-editor")
+
+    act(() => {
+      useMcpPanelStore.setState({ editorTarget: { mode: "edit", serverId: "srv2" } })
+    })
+    await waitFor(() => {
+      const editor = screen.getByTestId("server-editor")
+      expect(JSON.parse(editor.dataset.seeded ?? "{}")).toEqual({ command: "bbb" })
+    })
   })
 
   it("deletes a server when the delete dialog confirms", async () => {

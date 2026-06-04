@@ -1,11 +1,59 @@
-import { __testing__ } from "./model-picker"
+/**
+ * @jest-environment jsdom
+ */
+import { render, screen } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
+import { ModelPicker, __testing__ } from "./model-picker"
+import { PROVIDERS } from "@/types/provider/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@/types/provider/provider"
+import type { ChatSession } from "@/lib/claude/types"
+
+// The picker persists model switches through the Dexie sessions table —
+// irrelevant for trigger-rendering assertions.
+jest.mock("@/lib/db/sessions", () => ({
+  updateSession: jest.fn(async () => undefined),
+}))
 
 const { collectModelOptions, groupByProvider } = __testing__
 
 describe("collectModelOptions", () => {
-  it("returns an empty list when nothing is configured", () => {
-    expect(collectModelOptions(undefined, undefined)).toEqual([])
+  it("falls back to the built-in anthropic catalog when nothing is configured", () => {
+    // Subscription-reuse users never touch providerSettings — the sidecar
+    // runtime needs no provider config, so the picker must still offer the
+    // curated Claude models instead of rendering an empty list.
+    const opts = collectModelOptions(undefined, undefined)
+    expect(opts.length).toBeGreaterThan(0)
+    expect(opts.every((o) => o.providerId === "anthropic")).toBe(true)
+    expect(opts.map((o) => o.modelId)).toContain(PROVIDERS.anthropic.defaultModel)
+  })
+
+  it("falls back to the curated catalog for an enabled provider with no configured models", () => {
+    const providerSettings: Record<string, UserProviderSettings> = {
+      openai: { enabled: true } as unknown as UserProviderSettings,
+    }
+    const opts = collectModelOptions(providerSettings, undefined)
+    const openai = opts.filter((o) => o.providerId === "openai")
+    expect(openai.map((o) => o.modelId)).toContain(PROVIDERS.openai.defaultModel)
+  })
+
+  it("prefers user-configured models over the catalog fallback", () => {
+    const providerSettings: Record<string, UserProviderSettings> = {
+      anthropic: {
+        enabled: true,
+        defaultModel: "claude-custom-model",
+      } as unknown as UserProviderSettings,
+    }
+    const opts = collectModelOptions(providerSettings, undefined)
+    expect(opts).toEqual([
+      { providerId: "anthropic", providerName: "anthropic", modelId: "claude-custom-model" },
+    ])
+  })
+
+  it("omits the anthropic fallback when the user explicitly disabled anthropic", () => {
+    const providerSettings: Record<string, UserProviderSettings> = {
+      anthropic: { enabled: false } as unknown as UserProviderSettings,
+    }
+    expect(collectModelOptions(providerSettings, undefined)).toEqual([])
   })
 
   it("skips disabled built-in providers", () => {
@@ -49,7 +97,10 @@ describe("collectModelOptions", () => {
       } as unknown as UserProviderSettings,
     }
     const opts = collectModelOptions(providerSettings, undefined)
-    const ids = opts.map((o) => o.modelId).sort()
+    const ids = opts
+      .filter((o) => o.providerId === "openai")
+      .map((o) => o.modelId)
+      .sort()
     expect(ids).toEqual(["gpt-4o", "gpt-4o-mini", "o1-preview"])
   })
 
@@ -86,7 +137,7 @@ describe("collectModelOptions", () => {
       } as unknown as CustomProviderSettings,
     ]
     const opts = collectModelOptions(undefined, customProviders)
-    expect(opts).toEqual([])
+    expect(opts.filter((o) => o.providerId === "self-hosted")).toEqual([])
   })
 
   it("falls back to provider id when custom provider has no name", () => {
@@ -98,7 +149,8 @@ describe("collectModelOptions", () => {
       } as unknown as CustomProviderSettings,
     ]
     const opts = collectModelOptions(undefined, customProviders)
-    expect(opts[0].providerName).toBe("raw-id")
+    const raw = opts.find((o) => o.providerId === "raw-id")
+    expect(raw?.providerName).toBe("raw-id")
   })
 })
 
@@ -125,5 +177,47 @@ describe("groupByProvider", () => {
       { providerId: "openai", providerName: "openai", modelId: "gpt-4o" },
     ])
     expect(groups[0].models).toEqual(["gpt-4o"])
+  })
+})
+
+describe("trigger rendering (narrow-container truncation)", () => {
+  function renderPicker(session: ChatSession | null) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  const session: ChatSession = {
+    id: "ses_1",
+    title: "t",
+    kind: "direct",
+    model: "claude-sonnet-4-5-20250929-very-long-id",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  it("caps the popover trigger width so long model ids truncate instead of overflowing", () => {
+    renderPicker(session)
+    const trigger = screen.getByRole("button")
+    // In a flex-wrap toolbar row a flex item's min-width defaults to its
+    // content size — without min-w-0 + max-w-full a long font-mono model id
+    // pushes the row wider than a narrow sidebar and overflows the composer.
+    expect(trigger.className).toContain("min-w-0")
+    expect(trigger.className).toContain("max-w-full")
+    const label = trigger.querySelector("span.truncate") as HTMLElement
+    expect(label).not.toBeNull()
+    expect(label.className).toContain("min-w-0")
+  })
+
+  it("caps the static (no-session) chip the same way", () => {
+    const { container } = renderPicker(null)
+    const chip = container.firstChild as HTMLElement
+    expect(chip.className).toContain("min-w-0")
+    expect(chip.className).toContain("max-w-full")
+    const label = chip.querySelector("span.truncate") as HTMLElement
+    expect(label).not.toBeNull()
+    expect(label.className).toContain("min-w-0")
   })
 })

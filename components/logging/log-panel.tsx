@@ -1104,11 +1104,11 @@ function MainContent({
             defaultLayout={resizableLayout.defaultLayout}
             onLayoutChanged={resizableLayout.onLayoutChanged}
           >
-            <ResizablePanel id="log-panel-main" defaultSize={70} minSize={50}>
+            <ResizablePanel id="log-panel-main" defaultSize="70%" minSize="50%">
               {renderMain()}
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id="log-panel-detail" defaultSize={30} minSize={20} maxSize={50}>
+            <ResizablePanel id="log-panel-detail" defaultSize="30%" minSize="20%" maxSize="50%">
               {renderDetailPanel("h-full border-0")}
             </ResizablePanel>
           </ResizablePanelGroup>

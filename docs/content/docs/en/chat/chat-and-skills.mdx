@@ -59,7 +59,7 @@ The chat store lives in `lib/chat/`; UI in `components/chat/`. The store is inte
 
 ## Characters
 
-A `Character` is defined in `lib/claude/types.ts`:
+A `Character` is defined in `lib/claude/types.ts`. This page gives the concept view — the full field-by-field model, the plugin character-pack overlay, the editor, and every runtime consumption surface are documented in the dedicated [Characters](./characters) section.
 
 <TypeTable
   type={{
@@ -83,10 +83,18 @@ A `Character` is defined in `lib/claude/types.ts`:
       description: "Sampling temperature (0–1).",
       type: "number",
     },
-    defaultSkillIds: {
-      description: "Skills auto-enabled when this character is selected.",
+    skillIds: {
+      description: "Skills auto-enabled when this character is selected (ordered).",
       type: "string[]",
-      required: true,
+    },
+    pluginSkillIds: {
+      description:
+        "Plugin-contributed skills resolved through the overlay registry at send time.",
+      type: "string[]",
+    },
+    allowedTools: {
+      description: "Tool whitelist — unioned with each active skill's `allowedTools`.",
+      type: "string[]",
     },
     twinId: {
       description: "Optional twin binding — opts into the twin runtime path.",
@@ -108,9 +116,9 @@ A `Character` is defined in `lib/claude/types.ts`:
   }}
 />
 
-Built-in characters ship as seed data (`lib/db/seed.ts`, `lib/db/preset-built-ins.ts`). User characters are user-created. Both live in the same `characters` table.
+Built-in characters now ship as the first-party `cognia-builtin-characters` plugin character pack (ADR-0030); `lib/db/characters.ts:seedBuiltInCharacters` tags the six legacy rows with pack attribution. User characters are user-created. Both live in the same `characters` table, unioned at read time with plugin pack overlays — see [Characters · Data Model](./characters/data-model).
 
-The character editor is `components/settings/...` plus dedicated workbench tabs. Avatars use the shared `lib/avatar.ts` helpers (gradient, initials, image, or 3D Rive scene from `@rive-app/react-webgl2`).
+The character editor is `components/settings/characters-section.tsx`. Avatars are emoji + color (`avatarColor` / `avatarGlyph` helpers) with an optional pack-provided `avatarImage` — see [Editor, Picker & Discover](./characters/editor-and-discover).
 
 ### Twin binding
 
@@ -125,35 +133,38 @@ Tunable via `Character.twinSettings` — `enableRag`, `ragTopK`, `enableStyleFew
 
 ## Skills
 
-A `Skill` is a packaged capability that can be enabled per-character or per-session.
+A `Skill` is a Markdown prompt fragment plus an optional tool whitelist, enabled per-character or
+per-session. The deep dive lives in the [Skills subsystem](../subsystems/skills) section.
 
 <TypeTable
   type={{
     id: { description: "Stable unique identifier.", type: "string", required: true },
     name: { description: "Display name.", type: "string", required: true },
-    description: { description: "User-facing summary.", type: "string", required: true },
-    promptFragment: {
-      description: "Prompt snippet appended to the system prompt when active.",
-      type: "string",
-    },
-    mcpServerIds: {
-      description: "MCP servers to include when this skill is active.",
-      type: "string[]",
-    },
-    toolAllowList: {
+    description: { description: "User-facing summary.", type: "string" },
+    content: {
       description:
-        "Restrict tool calls to this allowlist (intersection if multiple skills set it).",
-      type: "string[]",
-    },
-    resources: {
-      description: "Referenceable assets (files, URLs); materialised at send time.",
-      type: "SkillResource[]",
-    },
-    category: {
-      description: "Group label used by the workbench sidebar.",
+        "Markdown body, appended verbatim to the system prompt under a `## <name>` heading at send time.",
       type: "string",
       required: true,
     },
+    allowedTools: {
+      description: "Tools this skill expects to call — *unioned* with the character's whitelist.",
+      type: "string[]",
+    },
+    tags: { description: "Search / grouping tags.", type: "string[]" },
+    source: {
+      description: "Provenance (builtin / custom / imported / generated / marketplace).",
+      type: "SkillSource",
+    },
+    status: {
+      description: "Lifecycle (enabled / disabled); disabled skills never reach the system prompt.",
+      type: "SkillStatus",
+    },
+    category: {
+      description: "One of 8 preset categories driving the workbench sidebar.",
+      type: "SkillCategory",
+    },
+    version: { description: "Optional semver string.", type: "string" },
     isBuiltIn: {
       description: "Marks built-in skills; protected from backup wipe.",
       type: "boolean",
@@ -162,21 +173,22 @@ A `Skill` is a packaged capability that can be enabled per-character or per-sess
   }}
 />
 
-The skill executor (`lib/skills/executor.ts`) takes a list of skill IDs and produces:
-
-- A merged prompt fragment.
-- A merged MCP server list (deduplicated).
-- A merged tool allow-list (intersection if multiple skills declare lists).
-- Materialised resource paths.
+At send time `resolveSendOptions` (`lib/claude/build-options.ts`) fetches the enabled subset,
+appends each body via `renderSkillsSection` (`lib/db/skills.ts:339`), and **unions** every skill's
+`allowedTools` with the character's whitelist — full mechanics in
+[Loading & injection](../subsystems/skills/loading-and-injection).
 
 Skills are managed via:
 
-- **The skill workbench** (`app/skills/`, `components/skills/`) — author, edit, validate.
-- **Marketplace** (`lib/skills/marketplace-*.ts`) — install community skills with signature checks.
+- **The skill workbench** (`app/skills/`, `components/skills/`) — author, edit, validate, batch-edit ([Authoring & workbench](../subsystems/skills/authoring-and-workbench)).
+- **Bundle import** (`lib/skills/bundle/`) — zip / folder / OpenAI-Codex layouts ([Bundle import](../subsystems/skills/bundle-import)).
+- **Marketplace** (`lib/skills/marketplace-*.ts`) — bundled registry + optional SkillsMP API ([Marketplace](../subsystems/skills/marketplace)).
 - **Validation** (`lib/skills/validate.ts`) — every skill is validated on save / import.
-- **Sync** (`lib/skills/sync.ts`) — keep skills in sync with the Claude Code skill format.
+- **Native sync** (`lib/skills/sync.ts`) — bidirectional Claude Code format sync to `~/.claude/skills/` plus Codex mirror ([Native sync & security](../subsystems/skills/native-sync-and-security)).
 
-Built-in skills seed at first run (`lib/db/seed.ts`). User skills can be exported to disk via `lib/skills/sync.ts`, edited externally, and re-imported.
+Built-in prompt skills seed at first run (`lib/db/skills.ts:344`). A separate ADR-0026 tier of
+**typed built-in tool skills** (Lark CLI bridge) is documented in
+[Built-in skills](../subsystems/skills/built-in-skills).
 
 ## Teams
 
@@ -192,7 +204,7 @@ interface Team {
 }
 ```
 
-`lib/claude/team-router.ts` decides which character handles the next turn based on the strategy. The agent-teams workspace (`app/agent-teams/`, `components/agent/`) is the UI for designing and running teams.
+`lib/claude/team-router.ts` decides which character handles the next turn based on the strategy. Note this chat-side `Team` (a routing reference in the `teams` Dexie table) is distinct from the heavier **Agent Teams** workbench (`app/agent-teams/`, lead + teammates + workflow-synthesized execution) — the latter has its own dedicated [Agent Teams](./agent-teams) section.
 
 ## MCP servers
 
@@ -271,7 +283,7 @@ Each surface has a renderer in `components/chat/` that consumes events from its 
 | ---------------------------- | -------------------------------------------------------------- |
 | Add a new chat-input action  | `components/chat/`, `lib/chat/`, `lib/claude/build-options.ts` |
 | Add a new built-in character | `lib/db/preset-built-ins.ts`                                   |
-| Add a new built-in skill     | `lib/db/preset-built-ins.ts`, `lib/skills/`                    |
+| Add a new built-in skill     | `lib/db/skills.ts` (seedBuiltInSkills), `lib/skills/`          |
 | Add a new MCP preset         | `lib/claude/mcp-presets.ts`                                    |
 | Add a new export format      | `lib/export/`, `components/chat/dialogs/`                      |
 | Tweak twin behaviour         | See [Employee Digital Twin](../subsystems/employee-twin)       |

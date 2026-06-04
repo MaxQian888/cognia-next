@@ -305,7 +305,7 @@ Frontmatter-supported fields are manually aligned between Rust `SlashCommandFile
 ## Related Subsystems
 
 - [Chat, Characters, Skills & Teams](./chat-and-skills) — composer dispatch host; `SlashContext.openSettings` routes directly to the settings panel.
-- [Skills System](./skills-system) — `allowedTools` / `paths` and other fields merge with skills at send-time via union.
+- [Skills subsystem](../subsystems/skills/loading-and-injection) — `allowedTools` / `paths` and other fields merge with skills at send-time via union.
 - [Agent Teams](./agent-teams) — `/agents` command jumps directly to character/team management.
 - [Plugin System](../subsystems/plugin-system) — `unregisterCommandsByPlugin` is the standard cleanup path on plugin disable.
 - [Sidecar & Claude SDK](../core/sidecar-and-claude-sdk) — `/compact` is intercepted by the SDK; `permissionMode` is applied through the SDK.

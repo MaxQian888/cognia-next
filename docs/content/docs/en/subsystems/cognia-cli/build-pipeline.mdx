@@ -1,0 +1,157 @@
+---
+title: Build pipeline
+description: cognia plugin build — mandatory lint, toolchain preflight, cargo-component vs esbuild dispatch on manifest.type, the hand-rolled cognia:api-version LEB128 custom section, and the deflated zip bundle layout shared by both paths.
+---
+
+# Build pipeline — `cognia plugin build`
+
+<TLDR>
+  `cmd_build::run()` lints first (errors abort — `cmd_build.rs:44-71`), then dispatches on
+  `manifest.type` (`cmd_build.rs:94-104`): **wasm** → toolchain preflight → `cargo component
+  build --release` → locate the artifact under `target/wasm32-wasip{2,1}/release` → strip and
+  re-embed the `cognia:api-version` custom section (hand-rolled LEB128, `packaging.rs:30-65`) →
+  zip; **frontend** → resolve the TS entry → `npx --no-install esbuild` with 13 pinned args
+  (`build_ts.rs:116-132`) → zip. Both bundles land at `target/cognia/<id>-<version>.zip` with the
+  same layout: pretty-printed `plugin.json` first, the artifact, then deduplicated
+  `bundle_include[]` extras, all Deflate-compressed.
+</TLDR>
+
+## Flags
+
+`cognia plugin build [--path .] [--out <zip>] [--skip-build]` — `--skip-build` skips the
+compiler/bundler step and re-packs whatever is already on disk (useful after an external build).
+
+## End-to-end flow
+
+```mermaid
+flowchart TD
+  RUN[cmd_build::run] --> LINT[cmd_lint::validate_at<br/>cmd_build.rs:44]
+  LINT -- errors --> ABORT[bail → run cognia plugin lint]
+  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:94-104}
+  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:228-275]
+  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:215-222]
+  CARGO --> FIND[locate .wasm<br/>target/wasm32-wasip2|1/release<br/>packaging.rs:165-189]
+  FIND --> EMBED[embed_api_version<br/>strip + append custom section<br/>packaging.rs:30-51]
+  EMBED --> ZIPW[write_bundle<br/>packaging.rs:209-251]
+  TYPE -- frontend --> ENTRY[resolve_ts_entry<br/>tsEntry → src/index.ts|tsx → src/main.ts<br/>build_ts.rs:70-93]
+  ENTRY --> ESB[npx --no-install esbuild …<br/>build_ts.rs:116-132]
+  ESB --> CHECK[verify manifest.main exists<br/>build_ts.rs:44-48]
+  CHECK --> ZIPF[pack_frontend_bundle<br/>build_ts.rs:145-199]
+  ZIPW --> OUT[target/cognia/&lt;id&gt;-&lt;version&gt;.zip]
+  ZIPF --> OUT
+  TYPE -- other --> NOPE[bail: supported wasm, frontend]
+```
+
+## WASM path
+
+### Toolchain preflight (`cmd_build.rs:228-275`)
+
+Two checks, both with copy-pasteable remediation:
+
+```text
+cargo-component is required to build WASM plugins but was not found.
+Install it with:
+    cargo install --locked cargo-component
+then re-run `cognia plugin build`.
+```
+
+```text
+the wasm32-wasip2 compilation target is not installed.
+Add it with:
+    rustup target add wasm32-wasip2
+then re-run `cognia plugin build`.
+```
+
+The target check runs `rustup target list --installed` and looks for an exact line match; when
+rustup itself is absent (e.g. distro-packaged Rust) the check is skipped rather than failing.
+
+### The `cognia:api-version` custom section
+
+The host routes a WASM bundle to the matching WIT linker by reading a custom section named
+`cognia:api-version` whose payload is the verbatim version string from
+`manifest.wasm.apiVersion`. The embed is a from-scratch encoder — no `wasm-encoder` dependency:
+
+```rust
+// crates/cognia-cli/src/packaging.rs:30-50
+pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
+    if wasm.len() < 8 || &wasm[..4] != b"\0asm" {
+        bail!("input is not a wasm module (bad magic)");
+    }
+    let stripped = strip_section(wasm, API_VERSION_SECTION)?;  // wasmparser walk
+    let mut out = stripped;
+    let name = API_VERSION_SECTION.as_bytes();
+    let payload = version.as_bytes();
+    let mut body = Vec::with_capacity(5 + name.len() + payload.len());
+    write_leb128(&mut body, name.len() as u64);
+    body.extend_from_slice(name);
+    body.extend_from_slice(payload);
+    out.push(0);                          // section id 0 = custom
+    write_leb128(&mut out, body.len() as u64);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+```
+
+`strip_section` (`packaging.rs:67-106`) uses `wasmparser` to drop any pre-existing copy, so
+re-builds and manual re-embeds are idempotent. The standalone escape hatch is
+`cognia plugin embed-version <wasm> <ver> [--out]` (`main.rs:348-362`), which validates the
+version with `looks_like_semver` (`--version must be MAJOR.MINOR.PATCH`) and defaults to
+overwriting the input in place.
+
+<Callout type="info" title="Contract versioning in one sentence">
+  The CLI writes the WIT contract version (currently 0.1.0) into every WASM bundle; a host
+  without a matching linker refuses the load with `no linker registered for v0.N.x` — see the
+  [plugin system docs](../plugin-system) for the host side.
+</Callout>
+
+## Frontend path
+
+`resolve_ts_entry` (`build_ts.rs:70-93`) honors `manifest.tsEntry` (erroring if it points at a
+missing file), then tries `src/index.ts`, `src/index.tsx`, `src/main.ts`. The bundler invocation
+is fully pinned:
+
+```rust
+// crates/cognia-cli/src/build_ts.rs:111-132
+let npx_program = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
+cmd.current_dir(crate_root)
+    .arg("--no-install")
+    .arg("esbuild")
+    .arg(entry…)
+    .arg("--bundle")
+    .arg("--format=cjs")
+    .arg("--platform=neutral")
+    .arg("--target=es2022")
+    .arg(format!("--outfile={}", outfile.display()))   // = manifest.main
+    .arg("--external:@/types/plugin")
+    .arg("--external:@/lib/*")
+    .arg("--external:react")
+    .arg("--external:react-dom")
+    .arg("--log-level=warning");
+```
+
+Two deliberate choices:
+
+- **`--no-install`** — the CLI refuses to globally install esbuild behind the author's back; the
+  version in the plugin's own `package.json` wins. Failure text points the right way:
+  `esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
+  <crate_root> first.` (`build_ts.rs:134-138`)
+- **`--external` for host modules** — `@/types/plugin`, `@/lib/*`, `react`, `react-dom` are
+  provided by the host at load time; bundling them would duplicate React and break the shims.
+
+## Bundle layout (both kinds)
+
+| Order | Entry | Source |
+| --- | --- | --- |
+| 1 | `plugin.json` | pretty-printed (`serde_json::to_vec_pretty`) so `unzip -p bundle.zip plugin.json \| jq` works |
+| 2 | artifact | wasm: `manifest.wasmMain` name; frontend: `manifest.main` path (separators normalized to `/`) |
+| 3… | `bundle_include[]` extras | relative paths from the crate root, deduplicated, missing file = hard error |
+
+Compression is `zip::CompressionMethod::Deflated` everywhere (`packaging.rs:217`,
+`build_ts.rs:156`). The output convention `target/cognia/<id>-<version>.zip` is also what
+[`dev`](./bridge-client) computes after each rebuild to find the bundle it should hot-reload.
+
+<Callout type="warn" title="Deterministic-ish, not byte-reproducible">
+  The writer notes (`packaging.rs:12-14`) that bundle bytes are deterministic only up to
+  filesystem ordering of `bundle_include[]` — entries are written in manifest order, but no
+  timestamp normalization is performed. Sign bundles you built, not bundles you reproduced.
+</Callout>

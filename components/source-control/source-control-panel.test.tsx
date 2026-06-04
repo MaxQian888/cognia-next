@@ -15,8 +15,49 @@ jest.mock("@/hooks/git/use-git-repo", () => ({
 jest.mock("@/hooks/git/use-git-actions", () => ({
   useGitActions: () => ({ resolveConflict: jest.fn() }),
 }))
+jest.mock("@/lib/git/commands", () => ({
+  gitInit: jest.fn().mockResolvedValue(undefined),
+}))
 jest.mock("@/hooks/ui/use-resizable-layout", () => ({
   useResizableLayout: () => ({ defaultLayout: undefined, onLayoutChanged: jest.fn() }),
+}))
+// Stub the resizable wrapper — the real Group measures the DOM, which jsdom
+// can't satisfy. Expose size props as data attributes for unit assertions.
+jest.mock("@/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode
+    className?: string
+  }) => (
+    <div data-testid="resizable-group" className={className}>
+      {children}
+    </div>
+  ),
+  ResizablePanel: ({
+    children,
+    id,
+    defaultSize,
+    minSize,
+    maxSize,
+  }: {
+    children: React.ReactNode
+    id?: string
+    defaultSize?: number | string
+    minSize?: number | string
+    maxSize?: number | string
+  }) => (
+    <div
+      data-testid={id ? `resizable-panel-${id}` : "resizable-panel"}
+      data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+      data-min-size={minSize === undefined ? undefined : String(minSize)}
+      data-max-size={maxSize === undefined ? undefined : String(maxSize)}
+    >
+      {children}
+    </div>
+  ),
+  ResizableHandle: () => <div data-slot="resizable-handle" />,
 }))
 jest.mock("./changes-view", () => ({ ChangesView: () => <div data-testid="changes-view-stub" /> }))
 jest.mock("./diff-pane", () => ({ DiffPane: () => <div data-testid="diff-pane-stub" /> }))
@@ -34,9 +75,12 @@ jest.mock("./branch-header", () => ({
 jest.mock("./sync-toolbar", () => ({ SyncToolbar: () => <div data-testid="sync-toolbar-stub" /> }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { gitInit } from "@/lib/git/commands"
 import { SourceControlPanel } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitStatus } from "@/types/git"
+
+const gitInitMock = gitInit as jest.Mock
 
 const status: GitStatus = {
   branch: "main",
@@ -95,10 +139,40 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("sc-not-a-repo")).toBeInTheDocument()
   })
 
+  it("initializes a repository from the not-a-repo state", async () => {
+    gitInitMock.mockClear()
+    act(() =>
+      useGitStore.getState().setRepoState({
+        isRepo: false,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: null,
+      })
+    )
+    render(<SourceControlPanel />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("init-repo-button"))
+    })
+    expect(gitInitMock).toHaveBeenCalledWith("/repo")
+  })
+
   it("renders the changes view + empty diff pane by default", () => {
     render(<SourceControlPanel />)
     expect(screen.getByTestId("changes-view-stub")).toBeInTheDocument()
     expect(screen.getByTestId("diff-pane-empty")).toBeInTheDocument()
+  })
+
+  // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
+  // be percent strings or the changes/diff split collapses to px-wide slivers.
+  it("passes percent-string sizes to the changes and diff panels", () => {
+    render(<SourceControlPanel />)
+    const percent = /^\d+(\.\d+)?%$/
+    const changes = screen.getByTestId("resizable-panel-sc-changes")
+    const diff = screen.getByTestId("resizable-panel-sc-diff")
+    for (const panel of [changes, diff]) {
+      expect(panel.dataset.defaultSize).toMatch(percent)
+      expect(panel.dataset.minSize).toMatch(percent)
+    }
   })
 
   it("shows the sequencer banner when an operation is in progress", () => {

@@ -18,12 +18,17 @@ import {
   gitCreateBranch,
   gitDeleteBranch,
   gitDiffFile,
+  gitDiffRefsFile,
+  gitDiffRefsFiles,
   gitDiscard,
   gitDiscardAll,
   gitFetch,
   gitFileHistory,
+  gitIgnoreAdd,
+  gitInit,
   gitIsRepo,
   gitLog,
+  gitMerge,
   gitMergeAbort,
   gitPull,
   gitPush,
@@ -248,6 +253,33 @@ describe("when in Tauri", () => {
       mergedContent: "merged",
       side: null,
     })
+    await gitInit("/dir")
+    expect(callMock).toHaveBeenCalledWith("git_init", { path: "/dir" })
+    callMock.mockResolvedValueOnce([])
+    await gitDiffRefsFiles("/r", "main", "feature")
+    expect(callMock).toHaveBeenCalledWith("git_diff_refs_files", {
+      repoPath: "/r",
+      base: "main",
+      target: "feature",
+    })
+    callMock.mockResolvedValueOnce({
+      path: "a.ts",
+      oldContent: "",
+      newContent: "",
+      hunks: [],
+      isBinary: false,
+    })
+    await gitDiffRefsFile("/r", "main", "feature", "a.ts")
+    expect(callMock).toHaveBeenCalledWith("git_diff_refs_file", {
+      repoPath: "/r",
+      base: "main",
+      target: "feature",
+      path: "a.ts",
+    })
+    await gitIgnoreAdd("/r", "dist/")
+    expect(callMock).toHaveBeenCalledWith("git_ignore_add", { repoPath: "/r", pattern: "dist/" })
+    await gitMerge("/r", "feature")
+    expect(callMock).toHaveBeenCalledWith("git_merge", { repoPath: "/r", branch: "feature" })
     await gitMergeAbort("/r")
     expect(callMock).toHaveBeenCalledWith("git_merge_abort", { repoPath: "/r" })
     await gitWatchStart("/r")

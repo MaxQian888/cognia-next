@@ -5,7 +5,7 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
 
 # 可视化工作流
 cognia-next 借这层把已经成熟的运行时实体 —— [角色](../chat/chat-and-skills)、[Agent
-团队](../chat/agent-teams)、[技能](../chat/skills-system)、[员工孪生](./employee-twin)、
+团队](../chat/agent-teams)、[技能](./skills)、[员工孪生](./employee-twin)、
 [平台连接器](./platform-connectors)、MCP 服务器、[插件](./plugin-system)
 —— 拼成可执行图。设计目标对齐 ADR 0011 与 0017：
 
@@ -275,8 +275,8 @@ stateDiagram-v2
   />
   <Card title="调度器" href="./scheduler" description="cron 触发器复用 Rust 调度抽象" />
   <Card
-    title="技能系统"
-    href="../chat/skills-system"
+    title="技能子系统"
+    href="./skills"
     description="action.skill.invoke / action.skill.upsert 的目标"
   />
   <Card

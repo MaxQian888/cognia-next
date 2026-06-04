@@ -26,7 +26,7 @@ import { parseSource, type RawSource } from "./parse"
 import { runTwinPdfOcr } from "./ocr-fallback"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
-import { redactText, unredactText } from "./redact"
+import { redactText, translateOffsetsThroughRedaction, unredactText } from "./redact"
 
 export interface RunIngestInput {
   job: TwinJob
@@ -138,7 +138,10 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
       // router and use that text for redaction + chunking. Best-effort.
       const ocrText = await runTwinPdfOcr(raw, parsed).catch(() => null)
       if (ocrText) {
-        parsed = { ...parsed, embeddableText: ocrText, originalText: ocrText }
+        // OCR replaced the text wholesale — the native pageMap's char
+        // offsets index the abandoned text layer, so spatial provenance
+        // is invalid and must be dropped.
+        parsed = { ...parsed, embeddableText: ocrText, originalText: ocrText, pageMap: undefined }
       }
 
       // Stage 3 — redact PII.
@@ -153,13 +156,19 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
       })
       row = (await getTwinSource(row.id)) as TwinSource
 
-      // Stage 4 — chunk.
+      // Stage 4 — chunk. The PDF pageMap (when the native parser produced
+      // one) is translated from embeddable space into redacted space first
+      // — chunk offsets index the redacted text (see T1.1 below).
       await progress(job.id, `chunking:${raw.filename}`, (stageBase + 3) / TOTAL_STAGES)
+      const pageMap = parsed.pageMap
+        ? translateOffsetsThroughRedaction(parsed.pageMap, redaction.redacted, redaction.map)
+        : undefined
       const chunks = prepareChunks({
         redactedText: redaction.redacted,
         originalText: parsed.originalText,
         format: parsed.format,
         baseMetadata: parsed.baseMetadata,
+        ...(pageMap ? { pageMap } : {}),
       })
       if (chunks.length === 0) {
         await updateTwinSource(row.id, { status: "parsed", chunkCount: 0, parsedAt: Date.now() })

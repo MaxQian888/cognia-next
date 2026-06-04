@@ -63,7 +63,7 @@ describe("PersonalizationCard", () => {
       screen.queryByRole("button", { name: "personalization.restoreSections" })
     ).not.toBeInTheDocument()
 
-    storeState.settings = { welcomeHidden: { quickStart: true } }
+    storeState.settings = { welcomeHidden: { tryPrompt: true } }
     rerender(<PersonalizationCard />)
     await user.click(screen.getByRole("button", { name: "personalization.restoreSections" }))
     expect(save).toHaveBeenCalledWith({ welcomeHidden: {} })

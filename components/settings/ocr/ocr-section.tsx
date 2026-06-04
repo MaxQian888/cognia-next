@@ -431,11 +431,6 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4" data-testid="ocr-section">
-      <header>
-        <h1 className="text-2xl font-semibold">{t("settings.tabs.ocr")}</h1>
-        <p className="text-sm text-muted-foreground">{t("settings.descriptions.ocr")}</p>
-      </header>
-
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[360px_1fr]">
         {/* Desktop sidebar */}
         <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">

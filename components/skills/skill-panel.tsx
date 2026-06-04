@@ -1,19 +1,21 @@
 "use client"
 
+import { useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { SparklesIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
 import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
 import { useSkills, useSkillShortcuts } from "@/hooks/skills"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { SkillPanelHeader } from "./skill-panel-header"
 import { SkillPanelTabs } from "./skill-panel-tabs"
-import { SkillPanelGrid } from "./skill-panel-grid"
-import { SkillCategorySidebar } from "./skill-category-sidebar"
+import { SkillListPane } from "./skill-list-pane"
+import { SkillDetail } from "./skill-detail"
 import { SkillCategorySheet } from "./skill-category-sheet"
 import { SkillFilterSheet } from "./skill-filter-sheet"
 import { SkillBatchActionsBar } from "./skill-batch-actions-bar"
@@ -43,17 +45,46 @@ interface Props {
 export function SkillPanel({ className }: Props) {
   const view = useSkills()
   const activeTab = useSkillsStore((s) => s.activeTab)
+  const detailSkillId = useSkillsStore((s) => s.detailSkillId)
+  const openDetail = useSkillsStore((s) => s.openDetail)
+  const closeDetail = useSkillsStore((s) => s.closeDetail)
+  const openCreate = useSkillsStore((s) => s.openCreate)
+  const isMobile = useIsMobile()
   const reduce = useReducedMotion()
   useSkillShortcuts(view.filtered)
   const fadeTransition = reduce
     ? { duration: 0 }
     : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
 
+  const enabledCount = useMemo(
+    () => view.all.filter((s) => (s.status ?? "enabled") === "enabled").length,
+    [view.all]
+  )
+
+  // Desktop master-detail: keep the detail pane pointed at a row that is
+  // actually visible. A still-filtered selection is left alone; otherwise the
+  // first filtered skill is selected (or the selection cleared when the list
+  // is empty). Skipped on mobile so the detail Sheet never opens unprompted.
+  useEffect(() => {
+    if (isMobile || activeTab !== "my-skills") return
+    const ids = view.filtered.map((s) => s.id)
+    if (detailSkillId && ids.includes(detailSkillId)) return
+    if (ids.length > 0) openDetail(ids[0])
+    else closeDetail()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `detailSkillId` is read but deliberately not a dep: re-running on selection writes would fight user clicks (mirrors provider-settings).
+  }, [view.filtered, isMobile, activeTab])
+
   return (
     <SkillPanelProvider className={className}>
       <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden", className)}>
-        <SkillPanelHeader totalCount={view.all.length} filteredCount={view.filtered.length} />
-        <SkillPanelTabs />
+        <SkillPanelHeader
+          totalCount={view.all.length}
+          filteredCount={view.filtered.length}
+          tabsSlot={<SkillPanelTabs className="border-0" />}
+        />
+        <div className="lg:hidden">
+          <SkillPanelTabs />
+        </div>
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <AnimatePresence mode="wait" initial={false}>
@@ -66,16 +97,23 @@ export function SkillPanel({ className }: Props) {
               className="flex flex-1 min-h-0 overflow-hidden"
             >
               {activeTab === "my-skills" && (
-                <>
-                  <SkillCategorySidebar
-                    total={view.all.length}
-                    countsByCategory={view.countsByCategory}
-                    countsBySource={view.countsBySource}
-                  />
-                  <ScrollArea className="flex-1">
-                    <SkillPanelGrid skills={view.filtered} />
-                  </ScrollArea>
-                </>
+                <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-3 p-3 sm:gap-4 sm:p-4 md:grid-cols-[320px_1fr]">
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+                    <SkillListPane
+                      skills={view.filtered}
+                      total={view.all.length}
+                      enabledCount={enabledCount}
+                      countsBySource={view.countsBySource}
+                      countsByCategory={view.countsByCategory}
+                      onCreate={() => openCreate()}
+                    />
+                  </div>
+                  {!isMobile && (
+                    <div className="hidden min-h-0 flex-col overflow-hidden rounded-lg border md:flex">
+                      <MySkillsDetailPane />
+                    </div>
+                  )}
+                </div>
               )}
               {activeTab === "browse" && <SkillMarketplace />}
               {activeTab === "editor" && <SkillEditorWorkspace />}
@@ -98,6 +136,37 @@ export function SkillPanel({ className }: Props) {
       </div>
     </SkillPanelProvider>
   )
+}
+
+/**
+ * Right pane of the desktop master-detail layout: loads the selected skill
+ * via live query and renders the (Sheet-agnostic) `SkillDetail` inline.
+ */
+function MySkillsDetailPane() {
+  const t = useTranslations("skills")
+  const detailSkillId = useSkillsStore((s) => s.detailSkillId)
+  const skill = useLiveQuery(
+    () => (detailSkillId ? getSkill(detailSkillId) : Promise.resolve(undefined)),
+    [detailSkillId]
+  )
+
+  if (!detailSkillId) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
+        <SparklesIcon className="size-8 text-muted-foreground/40" />
+        <p className="text-sm font-medium">{t("panel.selectSkillTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("panel.selectSkillHint")}</p>
+      </div>
+    )
+  }
+  if (!skill) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        {t("loading")}
+      </div>
+    )
+  }
+  return <SkillDetail skill={skill} />
 }
 
 /**

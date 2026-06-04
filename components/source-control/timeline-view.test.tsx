@@ -59,4 +59,31 @@ describe("TimelineView", () => {
     render(<TimelineView open={false} onOpenChange={() => {}} rootDir="/r" filePath={null} />)
     expect(gitLogMock).not.toHaveBeenCalled()
   })
+
+  it("filters loaded commits by summary substring", async () => {
+    render(<TimelineView open onOpenChange={() => {}} rootDir="/r" filePath={null} />)
+    await screen.findByText("first")
+    fireEvent.change(screen.getByTestId("timeline-filter"), { target: { value: "SECOND" } })
+    expect(screen.queryByText("first")).not.toBeInTheDocument()
+    expect(screen.getByText("second")).toBeInTheDocument()
+  })
+
+  it("filters by author name case-insensitively", async () => {
+    render(<TimelineView open onOpenChange={() => {}} rootDir="/r" filePath={null} />)
+    await screen.findByText("first")
+    fireEvent.change(screen.getByTestId("timeline-filter"), { target: { value: "tester" } })
+    // Both commits share the author — both stay visible.
+    expect(screen.getByText("first")).toBeInTheDocument()
+    expect(screen.getByText("second")).toBeInTheDocument()
+  })
+
+  it("filters by hash prefix and shows empty state on no match", async () => {
+    render(<TimelineView open onOpenChange={() => {}} rootDir="/r" filePath={null} />)
+    await screen.findByText("first")
+    fireEvent.change(screen.getByTestId("timeline-filter"), { target: { value: "bbbb" } })
+    expect(screen.queryByText("first")).not.toBeInTheDocument()
+    expect(screen.getByText("second")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("timeline-filter"), { target: { value: "zzzz" } })
+    expect(screen.queryByText("second")).not.toBeInTheDocument()
+  })
 })

@@ -48,7 +48,23 @@ jest.mock("@/components/ui/resizable", () => ({
       {children}
     </div>
   ),
-  ResizablePanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ResizablePanel: ({
+    children,
+    defaultSize,
+    minSize,
+  }: {
+    children: React.ReactNode
+    defaultSize?: number | string
+    minSize?: number | string
+  }) => (
+    <div
+      data-testid="resizable-panel"
+      data-default-size={defaultSize === undefined ? undefined : String(defaultSize)}
+      data-min-size={minSize === undefined ? undefined : String(minSize)}
+    >
+      {children}
+    </div>
+  ),
   ResizableHandle: () => <div data-testid="resizable-handle" />,
 }))
 
@@ -94,6 +110,22 @@ describe("TerminalPaneGroup", () => {
     const panes = screen.getAllByTestId("terminal-pane")
     expect(panes.map((p) => p.getAttribute("data-session-id"))).toEqual(["a", "b"])
     expect(screen.getAllByTestId("terminal-pane-close")).toHaveLength(2)
+  })
+
+  // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
+  // be percent strings or split panes collapse to px-wide slivers.
+  it("passes percent-string sizes to split panes", () => {
+    useTerminalStore.getState().registerSession(info("a"))
+    useTerminalStore.getState().registerSession(info("b"))
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    render(<TerminalPaneGroup anchorId="a" onFocusedChange={jest.fn()} onClosePane={jest.fn()} />)
+    const percent = /^\d+(\.\d+)?%$/
+    const panels = screen.getAllByTestId("resizable-panel")
+    expect(panels).toHaveLength(2)
+    for (const panel of panels) {
+      expect(panel.dataset.defaultSize).toMatch(percent)
+      expect(panel.dataset.minSize).toMatch(percent)
+    }
   })
 
   it("focuses a pane on mouse-down and reports it upward", () => {

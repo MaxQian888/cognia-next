@@ -70,6 +70,35 @@ export async function gitCommitFiles(repoPath: string, sha: string): Promise<Git
   return transport.call<GitFileChange[]>("git_commit_files", { repoPath, sha })
 }
 
+/** Files changed between `base...target` (merge-base vs target). */
+export async function gitDiffRefsFiles(
+  repoPath: string,
+  base: string,
+  target: string
+): Promise<GitFileChange[]> {
+  if (!isTauri()) return []
+  return transport.call<GitFileChange[]>("git_diff_refs_files", { repoPath, base, target })
+}
+
+/** Diff of one path between `base...target` (merge-base vs target). */
+export async function gitDiffRefsFile(
+  repoPath: string,
+  base: string,
+  target: string,
+  path: string
+): Promise<GitDiff> {
+  if (!isTauri()) {
+    return { path, oldContent: "", newContent: "", hunks: [], isBinary: false, language: null }
+  }
+  const diff = await transport.call<GitDiff>("git_diff_refs_file", {
+    repoPath,
+    base,
+    target,
+    path,
+  })
+  return { ...diff, language: languageFromPath(diff.path) }
+}
+
 /** Aggregate staged diff (`git diff --cached`) — input for AI commit messages. */
 export async function gitDiffStagedAll(repoPath: string): Promise<string> {
   if (!isTauri()) return ""
@@ -346,6 +375,23 @@ export async function gitResolveConflict(
     mergedContent: resolution.mergedContent ?? null,
     side: resolution.side ?? null,
   })
+}
+
+/** `git init` — turn a plain directory into a repository. */
+export async function gitInit(path: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_init", { path })
+}
+
+/** Append a pattern to the repo-root `.gitignore` (no-op when already present). */
+export async function gitIgnoreAdd(repoPath: string, pattern: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_ignore_add", { repoPath, pattern })
+}
+
+export async function gitMerge(repoPath: string, branch: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_merge", { repoPath, branch })
 }
 
 export async function gitMergeAbort(repoPath: string): Promise<void> {

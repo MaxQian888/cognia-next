@@ -62,6 +62,23 @@ describe("DOMAIN_TRANSFERS", () => {
   it("getDomain returns undefined for unknown keys", () => {
     expect(getDomain("does-not-exist" as never)).toBeUndefined()
   })
+
+  it("every spec's labelKey resolves under settings.data.domain in en.json", () => {
+    // DomainRow renders `settings.data.domain.<labelKey>.title/.body`; a
+    // labelKey without messages throws MISSING_MESSAGE at runtime. Snapshot
+    // modules carry their own labelKey for the *snapshots* namespace, so this
+    // guards against leaking it into the domain namespace.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const enMessages = require("@/i18n/messages/en.json") as {
+      settings: { data: { domain: Record<string, unknown> } }
+    }
+    const domainMessages = enMessages.settings.data.domain
+    const missing = DOMAIN_TRANSFERS.filter((spec) => {
+      const entry = domainMessages[spec.labelKey] as Record<string, string> | undefined
+      return !entry?.title || !entry?.body
+    }).map((spec) => spec.labelKey)
+    expect(missing).toEqual([])
+  })
 })
 
 // ============================================================================

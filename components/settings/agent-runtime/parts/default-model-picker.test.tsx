@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DefaultModelPicker, __testing__ } from "./default-model-picker"
+import { PROVIDERS } from "@/types/provider/provider"
 
 const save = jest.fn()
 type AnySettings = Record<string, unknown>
@@ -60,6 +61,36 @@ describe("__testing__.collectOptions", () => {
     const opts = __testing__.collectOptions(
       {
         openai: { providerId: "openai", enabled: false } as never,
+      },
+      []
+    )
+    expect(opts.filter((o) => o.providerId === "openai")).toEqual([])
+  })
+
+  it("falls back to the built-in anthropic catalog when nothing is configured", () => {
+    // Subscription-reuse users never touch providerSettings — anthropic must
+    // still be offered because the sidecar runtime needs no provider config.
+    const opts = __testing__.collectOptions(undefined, [])
+    expect(opts.length).toBeGreaterThan(0)
+    expect(opts.every((o) => o.providerId === "anthropic")).toBe(true)
+    expect(opts.map((o) => o.modelId)).toContain(PROVIDERS.anthropic.defaultModel)
+  })
+
+  it("falls back to the curated catalog for an enabled provider with no configured models", () => {
+    const opts = __testing__.collectOptions(
+      {
+        openai: { providerId: "openai", enabled: true } as never,
+      },
+      []
+    )
+    const openai = opts.filter((o) => o.providerId === "openai")
+    expect(openai.map((o) => o.modelId)).toContain(PROVIDERS.openai.defaultModel)
+  })
+
+  it("omits the anthropic fallback when the user explicitly disabled anthropic", () => {
+    const opts = __testing__.collectOptions(
+      {
+        anthropic: { providerId: "anthropic", enabled: false } as never,
       },
       []
     )
@@ -176,10 +207,25 @@ describe("DefaultModelPicker", () => {
     })
   })
 
-  it("renders the empty CommandEmpty when no providers are configured", async () => {
+  it("offers the anthropic catalog when no providers are configured", async () => {
     stateRef.current = {
       settings: {
         providerSettings: {},
+        customProviders: [],
+        defaultModel: undefined,
+        defaultProvider: undefined,
+      },
+    }
+    const user = userEvent.setup()
+    render(<DefaultModelPicker />)
+    await user.click(screen.getByRole("button", { name: "modelLabel" }))
+    expect(screen.getByText(PROVIDERS.anthropic.defaultModel)).toBeInTheDocument()
+  })
+
+  it("renders the empty CommandEmpty when every provider is explicitly disabled", async () => {
+    stateRef.current = {
+      settings: {
+        providerSettings: { anthropic: { providerId: "anthropic", enabled: false } },
         customProviders: [],
         defaultModel: undefined,
         defaultProvider: undefined,

@@ -11,6 +11,7 @@ import { ListIcon, NetworkIcon } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { gitFileHistory, gitLog, gitRefs } from "@/lib/git/commands"
@@ -44,6 +45,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
   const [viewMode, setViewMode] = useState<TimelineViewMode>("list")
   const [refs, setRefs] = useState<GitRef[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
+  const [filter, setFilter] = useState("")
 
   const effectiveScope: TimelineScope = filePath ? scope : "repo"
   // The graph only makes sense for the full repo history; a single file's
@@ -74,6 +76,20 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
   }, [open, showGraph, rootDir])
 
   const commits = effectiveScope === "file" ? fileCommits : repoCommits
+
+  // Client-side filter over the loaded pages: summary/body, author, or hash
+  // prefix, case-insensitive. Load-more keeps fetching unfiltered pages.
+  const query = filter.trim().toLowerCase()
+  const visibleCommits = query
+    ? commits.filter(
+        (c) =>
+          c.summary.toLowerCase().includes(query) ||
+          c.body.toLowerCase().includes(query) ||
+          c.authorName.toLowerCase().includes(query) ||
+          c.authorEmail.toLowerCase().includes(query) ||
+          c.hash.toLowerCase().startsWith(query)
+      )
+    : commits
 
   // Repo history paginates on demand. A full page back implies more may exist.
   const canLoadMore = effectiveScope === "repo" && commits.length > 0 && commits.length % PAGE === 0
@@ -140,6 +156,18 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
           </Tabs>
         )}
 
+        {!showGraph && (
+          <div className="px-4 pt-2">
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t("timeline.filterPlaceholder")}
+              className="h-7 text-xs"
+              data-testid="timeline-filter"
+            />
+          </div>
+        )}
+
         <ScrollArea className="mt-2 min-h-0 flex-1">
           {showGraph ? (
             <CommitGraphView
@@ -150,7 +178,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
             />
           ) : (
             <ul className="flex flex-col p-2">
-              {commits.map((c) => (
+              {visibleCommits.map((c) => (
                 <li key={c.hash}>
                   <button
                     type="button"
@@ -169,7 +197,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
                   </button>
                 </li>
               ))}
-              {commits.length === 0 && (
+              {visibleCommits.length === 0 && (
                 <li className="px-2 py-3 text-sm text-muted-foreground">{t("timeline.empty")}</li>
               )}
             </ul>

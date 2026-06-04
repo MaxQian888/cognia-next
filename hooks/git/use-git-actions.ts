@@ -24,6 +24,8 @@ import {
   gitDiscard,
   gitDiscardAll,
   gitFetch,
+  gitIgnoreAdd,
+  gitMerge,
   gitMergeAbort,
   gitPull,
   gitPush,
@@ -82,6 +84,10 @@ export interface UseGitActionsResult {
     path: string,
     resolution: { mergedContent?: string; side?: ConflictSide }
   ) => Promise<void>
+  /** `git merge <branch>` into the current branch. */
+  merge: (branch: string) => Promise<void>
+  /** Append a pattern to the repo-root `.gitignore`. */
+  ignoreAdd: (pattern: string) => Promise<void>
   mergeAbort: () => Promise<void>
   remoteAdd: (name: string, url: string) => Promise<void>
   remoteRemove: (name: string) => Promise<void>
@@ -108,7 +114,11 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
 
   const run = useCallback(
     async (op: GitOp, fn: (rp: string) => Promise<unknown>): Promise<void> => {
-      if (!rootDir) return
+      if (!rootDir) {
+        // A click must never be silent: surface why nothing will happen.
+        toast.error(t("errors.noRepo"))
+        return
+      }
       setOp(op, true)
       clearError()
       try {
@@ -130,7 +140,7 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
   return useMemo<UseGitActionsResult>(
     () => ({
       stage: (paths, hunkPatch) => run("stage", (rp) => gitStage(rp, paths, hunkPatch)),
-      unstage: (paths, hunkPatch) => run("stage", (rp) => gitUnstage(rp, paths, hunkPatch)),
+      unstage: (paths, hunkPatch) => run("unstage", (rp) => gitUnstage(rp, paths, hunkPatch)),
       discard: (paths, hunkPatch) => run("discard", (rp) => gitDiscard(rp, paths, hunkPatch)),
       discardAll: (includeUntracked) => run("discard", (rp) => gitDiscardAll(rp, includeUntracked)),
       commit: (message, options) =>
@@ -149,7 +159,8 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
           gitPush(rp, {
             setUpstream,
             branch: setUpstream ? (currentBranch ?? undefined) : undefined,
-            remote: setUpstream ? "origin" : undefined,
+            // No remote: the backend resolves the publish target from the
+            // repo's configured remotes instead of assuming "origin".
           })
         ),
       sync: () => run("sync", (rp) => gitSync(rp)),
@@ -159,6 +170,8 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       stashDrop: (index) => run("stash", (rp) => gitStashDrop(rp, index)),
       resolveConflict: (path, resolution) =>
         run("resolve", (rp) => gitResolveConflict(rp, path, resolution)),
+      merge: (branch) => run("sequence", (rp) => gitMerge(rp, branch)),
+      ignoreAdd: (pattern) => run("ignore", (rp) => gitIgnoreAdd(rp, pattern)),
       mergeAbort: () => run("resolve", (rp) => gitMergeAbort(rp)),
       remoteAdd: (name, url) => run("remote", (rp) => gitRemoteAdd(rp, name, url)),
       remoteRemove: (name) => run("remote", (rp) => gitRemoteRemove(rp, name)),
@@ -168,7 +181,7 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       pushTag: (name, remote) => run("tag", (rp) => gitPushTag(rp, name, remote)),
       reset: (mode, target) => run("reset", (rp) => gitReset(rp, mode, target)),
       restore: (paths, staged, source) =>
-        run("discard", (rp) => gitRestore(rp, paths, staged, source)),
+        run("restore", (rp) => gitRestore(rp, paths, staged, source)),
       rebase: (onto) => run("sequence", (rp) => gitRebase(rp, onto)),
       cherryPick: (sha) => run("sequence", (rp) => gitCherryPick(rp, sha)),
       revert: (sha) => run("sequence", (rp) => gitRevert(rp, sha)),

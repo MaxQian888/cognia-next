@@ -76,6 +76,14 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
 }))
 
+jest.mock("@/stores/settings", () => {
+  const state = { settings: null, save: jest.fn() }
+  const useSettingsStore = Object.assign((sel: (s: typeof state) => unknown) => sel(state), {
+    getState: () => state,
+  })
+  return { useSettingsStore }
+})
+
 import { ChatPane } from "./chat-view"
 import type { ChatSession, SendContent } from "@/lib/claude/types"
 

@@ -16,30 +16,9 @@ interface Props {
 }
 
 /**
- * Left rail under the My Skills tab (≥ lg). Below lg the same content is
- * mounted inside `SkillCategorySheet` via the shared `SkillCategoryButtonList`.
- *
- * Selecting a bucket sets either `filters.source` or `filters.category` (and
- * resets the other to "all") so the cells in the panel grid narrow
- * predictably.
- */
-export function SkillCategorySidebar({ total, countsByCategory, countsBySource, onSelect }: Props) {
-  return (
-    <aside className="hidden w-52 shrink-0 border-r bg-muted/20 px-2 py-3 text-sm lg:block">
-      <SkillCategoryButtonList
-        total={total}
-        countsByCategory={countsByCategory}
-        countsBySource={countsBySource}
-        onSelect={onSelect}
-      />
-    </aside>
-  )
-}
-
-/**
- * Shared button-list rendering used by both the desktop sidebar and the
- * mobile category sheet. Pure presentation — selection writes through
- * `useSkillsStore.setFilters`.
+ * Button-list rendering mounted inside the mobile `SkillCategorySheet`
+ * (desktop filtering lives in `SkillListPane`'s selects). Pure
+ * presentation — selection writes through `useSkillsStore.setFilters`.
  */
 export function SkillCategoryButtonList({
   total,
