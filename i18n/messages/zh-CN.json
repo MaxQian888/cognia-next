@@ -9929,6 +9929,9 @@
       "deterministicOnly": "未配置评审 provider——仅运行确定性评分器。",
       "failed": "运行失败：{error}",
       "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
+      "progress": "{done} / {total} · {passing} 通过",
+      "progressLabel": "运行进度",
+      "cancelRun": "取消运行",
       "run": "运行评估",
       "running": "运行中…"
     },

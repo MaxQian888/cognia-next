@@ -8,14 +8,14 @@
  * each falls back to a free-text id input when its list is empty.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { AppSettings } from "@/lib/claude/types"
 import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
-import { runConfiguredEval } from "@/lib/ai/eval/run-config"
+import { runEvalService, type EvalProgress } from "@/lib/ai/eval/service"
 import type { EvalRunConfig, TargetKind, TargetSpec } from "@/types/eval/run-config"
 
 /** The scorer ids the engine can produce (deterministic + llm tiers). */
@@ -94,6 +94,8 @@ export function RunConfigDialog({
   const [capabilities, setCapabilities] = useState("")
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<EvalProgress | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const { deterministicOnly } = useMemo(
     () => buildConfiguredRunDeps({ appSettings }),
@@ -112,6 +114,7 @@ export function RunConfigDialog({
   const handleRun = useCallback(async () => {
     setRunning(true)
     setError(null)
+    setProgress(null)
     try {
       const config: EvalRunConfig = {
         targets: targets.filter((d) => d.ref.trim()).map(draftToSpec),
@@ -130,14 +133,22 @@ export function RunConfigDialog({
         setError(t("runConfig.noTargets"))
         return
       }
-      const { deps } = buildConfiguredRunDeps({ appSettings })
-      const reports = await runConfiguredEval(datasetId, config, deps)
+      const controller = new AbortController()
+      abortRef.current = controller
+      const { reports } = await runEvalService({
+        datasetId,
+        config,
+        appSettings,
+        signal: controller.signal,
+        onProgress: (p) => setProgress(p),
+      })
       onComplete?.(reports.length)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setRunning(false)
+      abortRef.current = null
     }
   }, [targets, scorerIds, k, split, capabilities, appSettings, datasetId, onClose, onComplete, t])
 
@@ -270,6 +281,26 @@ export function RunConfigDialog({
 
       {deterministicOnly && (
         <p className="text-muted-foreground text-xs">{t("runConfig.deterministicOnly")}</p>
+      )}
+      {running && progress && (
+        <div className="flex items-center gap-2" data-testid="run-progress">
+          <progress
+            className="h-2 min-w-0 flex-1"
+            value={progress.done}
+            max={progress.total}
+            aria-label={t("runConfig.progressLabel")}
+          />
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {t("runConfig.progress", {
+              done: progress.done,
+              total: progress.total,
+              passing: progress.passing,
+            })}
+          </span>
+          <Button size="sm" variant="outline" onClick={() => abortRef.current?.abort()}>
+            {t("runConfig.cancelRun")}
+          </Button>
+        </div>
       )}
       {error && (
         <p className="text-destructive text-sm" role="alert">

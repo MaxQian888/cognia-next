@@ -9929,6 +9929,9 @@
       "deterministicOnly": "No judge provider configured — running deterministic scorers only.",
       "failed": "Run failed: {error}",
       "noTargets": "Add at least one target with a model / team / workflow id.",
+      "progress": "{done} / {total} · {passing} passing",
+      "progressLabel": "Run progress",
+      "cancelRun": "Cancel run",
       "run": "Run evaluation",
       "running": "Running…"
     },

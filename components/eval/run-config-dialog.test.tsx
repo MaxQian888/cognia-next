@@ -17,19 +17,25 @@ const buildConfiguredRunDeps = jest.fn(() => ({
 jest.mock("@/lib/ai/eval/browser-deps", () => ({
   buildConfiguredRunDeps: (...a: unknown[]) => buildConfiguredRunDeps(...(a as [])),
 }))
-const runConfiguredEval = jest.fn(async (_datasetId: string, _config: EvalRunConfig) => [
-  { runId: "r1" },
-  { runId: "r2" },
-])
-jest.mock("@/lib/ai/eval/run-config", () => ({
-  runConfiguredEval: (...a: unknown[]) => runConfiguredEval(...(a as [string, EvalRunConfig])),
+interface ServiceInput {
+  datasetId: string
+  config: EvalRunConfig
+  signal?: AbortSignal
+  onProgress?: (p: { done: number; total: number; passing: number }) => void
+}
+const runEvalService = jest.fn(async (_input: ServiceInput) => ({
+  reports: [{ runId: "r1" }, { runId: "r2" }],
+  deterministicOnly: false,
+}))
+jest.mock("@/lib/ai/eval/service", () => ({
+  runEvalService: (...a: unknown[]) => runEvalService(...(a as [ServiceInput])),
 }))
 
 import { RunConfigDialog } from "./run-config-dialog"
 
 beforeEach(() => {
   buildConfiguredRunDeps.mockClear()
-  runConfiguredEval.mockClear()
+  runEvalService.mockClear()
 })
 
 describe("RunConfigDialog", () => {
@@ -45,8 +51,8 @@ describe("RunConfigDialog", () => {
       />
     )
     fireEvent.click(screen.getByText("runConfig.run"))
-    await waitFor(() => expect(runConfiguredEval).toHaveBeenCalled())
-    const [datasetId, config] = runConfiguredEval.mock.calls[0]
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    const { datasetId, config } = runEvalService.mock.calls[0][0]
     expect(datasetId).toBe("d")
     expect(config.targets).toHaveLength(1)
     expect(config.targets[0]).toMatchObject({ kind: "chat", model: "claude-sonnet-4-6" })
@@ -61,8 +67,8 @@ describe("RunConfigDialog", () => {
     expect(refs).toHaveLength(2)
     fireEvent.change(refs[1], { target: { value: "claude-opus-4-8" } })
     fireEvent.click(screen.getByText("runConfig.run"))
-    await waitFor(() => expect(runConfiguredEval).toHaveBeenCalled())
-    expect(runConfiguredEval.mock.calls[0][1].targets).toHaveLength(2)
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    expect(runEvalService.mock.calls[0][0].config.targets).toHaveLength(2)
   })
 
   it("errors when every target ref is blank", async () => {
@@ -71,7 +77,7 @@ describe("RunConfigDialog", () => {
     fireEvent.change(ref, { target: { value: "" } })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-    expect(runConfiguredEval).not.toHaveBeenCalled()
+    expect(runEvalService).not.toHaveBeenCalled()
   })
 
   it("passes a scorer subset when some scorers are unchecked", async () => {
@@ -79,8 +85,8 @@ describe("RunConfigDialog", () => {
     fireEvent.click(screen.getByLabelText("cost")) // uncheck one
     fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m" } })
     fireEvent.click(screen.getByText("runConfig.run"))
-    await waitFor(() => expect(runConfiguredEval).toHaveBeenCalled())
-    const config = runConfiguredEval.mock.calls[0][1]
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    const config = runEvalService.mock.calls[0][0].config
     expect(config.scorerIds).not.toContain("cost")
     expect(config.scorerIds.length).toBeGreaterThan(0)
   })
@@ -106,11 +112,33 @@ describe("RunConfigDialog", () => {
     fireEvent.change(screen.getByLabelText("runConfig.split"), { target: { value: "test" } })
     fireEvent.change(screen.getByLabelText("runConfig.capabilities"), { target: { value: "a, b" } })
     fireEvent.click(screen.getByText("runConfig.run"))
-    await waitFor(() => expect(runConfiguredEval).toHaveBeenCalled())
-    const config = runConfiguredEval.mock.calls[0][1]
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    const config = runEvalService.mock.calls[0][0].config
     expect(config.targets[0]).toMatchObject({ kind: "chat", model: "m2", characterId: "char-1" })
     expect(config.k).toBe(3)
     expect(config.subset).toEqual({ split: "test", capabilities: ["a", "b"] })
+  })
+
+  it("shows progress while running and supports cancel", async () => {
+    let capturedSignal: AbortSignal | undefined
+    let release: () => void = () => {}
+    runEvalService.mockImplementationOnce(async ({ onProgress, signal }: ServiceInput) => {
+      capturedSignal = signal
+      onProgress?.({ done: 1, total: 4, passing: 1 })
+      await new Promise<void>((r) => {
+        release = r
+      })
+      return { reports: [{ runId: "r1" }], deterministicOnly: false }
+    })
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.click(screen.getByText("runConfig.run"))
+    expect(await screen.findByTestId("run-progress")).toBeInTheDocument()
+    expect(
+      screen.getByText('runConfig.progress:{"done":1,"total":4,"passing":1}')
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByText("runConfig.cancelRun"))
+    expect(capturedSignal?.aborted).toBe(true)
+    release()
   })
 
   it("removes an added target row", () => {
