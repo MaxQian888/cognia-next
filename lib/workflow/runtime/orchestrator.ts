@@ -43,6 +43,7 @@ import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { runLoopContainer } from "./loop-container"
+import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
@@ -449,6 +450,37 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         getPluginEventHooks().dispatchWorkflowNodeError(workflow.id, stepId, errorObj)
         const policy = validated.settings.errorPolicy
         const outgoing = validated.edges.filter((e) => e.source === stepId)
+
+        // Per-node error handling (data.errorHandling.onError) wins over the
+        // workflow-level policy. mode null → legacy behavior below.
+        const nodeFailure = resolveNodeFailure(node)
+        if (nodeFailure.mode === "continue") {
+          // n8n semantics: downstream RUNS with an error-shaped output —
+          // NOT the legacy workflow-level "continue" (which skips downstream).
+          stepOutputs.set(stepId, buildErrorOutput(errorObj))
+          completed.add(stepId)
+          return
+        }
+        if (nodeFailure.mode === "defaultValue") {
+          stepOutputs.set(stepId, nodeFailure.defaultValue)
+          completed.add(stepId)
+          return
+        }
+        if (nodeFailure.mode === "errorBranch") {
+          const errorEdges = outgoing.filter(isErrorEdge)
+          if (errorEdges.length > 0) {
+            stepOutputs.set(stepId, buildErrorOutput(errorObj))
+            completed.add(stepId)
+            for (const edge of outgoing) {
+              if (!isErrorEdge(edge)) {
+                propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+              }
+            }
+            return
+          }
+          // errorBranch chosen but no error edge drawn → fall through to the
+          // legacy policy so the failure is never silently swallowed.
+        }
 
         // errorPolicy: "branch" — when the failed node has dedicated error
         // edges, treat the failure as handled: expose the error to the error

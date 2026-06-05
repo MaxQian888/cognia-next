@@ -1109,6 +1109,152 @@ describe("runWorkflow — errorPolicy", () => {
   })
 })
 
+// ── per-node errorHandling.onError (overrides the workflow-level policy) ─────
+describe("runWorkflow — per-node errorHandling", () => {
+  beforeEach(() => {
+    // Kind must belong to a supportsErrorHandling family ("data.*") — the
+    // per-node modes are deliberately ignored on triggers/flow/annotations.
+    registerNodeExecutor({
+      kind: "data.failtest" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("boom")
+      },
+    })
+  })
+
+  function buildNodeFailWorkflow(opts: {
+    errorHandling: NonNullable<VisualWorkflow["nodes"][number]["data"]["errorHandling"]>
+    withErrorEdge?: boolean
+    successValue?: string
+  }): VisualWorkflow {
+    const edges: VisualWorkflow["edges"] = [
+      { id: "e1", source: "n_start", target: "n_fail" },
+      { id: "e2", source: "n_fail", target: "n_success" },
+    ]
+    if (opts.withErrorEdge) {
+      edges.push({ id: "e3", source: "n_fail", target: "n_recover", sourceHandle: "error" })
+    }
+    const nodes: VisualWorkflow["nodes"] = [
+      {
+        id: "n_start",
+        type: "trigger.manual",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: { label: "start", params: {} },
+      },
+      {
+        id: "n_fail",
+        type: "data.failtest" as never,
+        typeVersion: 1,
+        position: { x: 200, y: 0 },
+        data: { label: "boom", params: {}, errorHandling: opts.errorHandling },
+      },
+      {
+        id: "n_success",
+        type: "flow.set",
+        typeVersion: 1,
+        position: { x: 400, y: 0 },
+        data: {
+          label: "ok",
+          params: { variable: "ok", value: opts.successValue ?? "success_path" },
+        },
+      },
+    ]
+    if (opts.withErrorEdge) {
+      nodes.push({
+        id: "n_recover",
+        type: "flow.set",
+        typeVersion: 1,
+        position: { x: 400, y: 120 },
+        data: { label: "recover", params: { variable: "rec", value: "recovered" } },
+      })
+    }
+    return {
+      id: "wf_x",
+      schemaVersion: 1,
+      name: "Per-node fail workflow",
+      createdAt: 0,
+      updatedAt: 0,
+      nodes,
+      edges,
+      // Workflow-level policy stays "stop" — the per-node setting must win.
+      settings: {
+        errorPolicy: "stop",
+        timeoutMs: 60_000,
+        concurrency: 1,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+      },
+    }
+  }
+
+  it('"continue" RUNS downstream with an error-shaped output (n8n semantics)', async () => {
+    const r = await runWorkflow({
+      workflow: buildNodeFailWorkflow({
+        errorHandling: { onError: "continue" },
+        successValue: "{{ $node['n_fail'].error }}",
+      }),
+      trigger,
+    })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    // Downstream COMPLETED (legacy workflow-level continue would skip it)…
+    const success = events.find((e) => e.type === "step_completed" && e.stepId === "n_success")
+    expect(success).toBeDefined()
+    // …and could read the failed node's error through the expression engine.
+    expect((success?.payload as { output?: { value?: unknown } })?.output?.value).toBe("boom")
+    // The failure itself is still on record.
+    expect(events.find((e) => e.type === "step_failed" && e.stepId === "n_fail")).toBeDefined()
+  })
+
+  it('"defaultValue" substitutes the static output and runs downstream', async () => {
+    const r = await runWorkflow({
+      workflow: buildNodeFailWorkflow({
+        errorHandling: { onError: "defaultValue", defaultValue: { completion: "fallback" } },
+        successValue: "{{ $node['n_fail'].completion }}",
+      }),
+      trigger,
+    })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    const success = events.find((e) => e.type === "step_completed" && e.stepId === "n_success")
+    expect((success?.payload as { output?: { value?: unknown } })?.output?.value).toBe("fallback")
+  })
+
+  it('"errorBranch" routes to the error edge even when the workflow policy is stop', async () => {
+    const r = await runWorkflow({
+      workflow: buildNodeFailWorkflow({
+        errorHandling: { onError: "errorBranch" },
+        withErrorEdge: true,
+      }),
+      trigger,
+    })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    expect(
+      events.find((e) => e.type === "step_completed" && e.stepId === "n_recover")
+    ).toBeDefined()
+    expect(events.find((e) => e.type === "step_skipped" && e.stepId === "n_success")).toBeDefined()
+  })
+
+  it('"errorBranch" without an error edge falls back to the workflow policy (stop)', async () => {
+    const r = await runWorkflow({
+      workflow: buildNodeFailWorkflow({ errorHandling: { onError: "errorBranch" } }),
+      trigger,
+    })
+    expect(r.status).toBe("failed")
+    expect(r.error?.nodeId).toBe("n_fail")
+  })
+
+  it('"fail" (explicit) keeps legacy stop semantics', async () => {
+    const r = await runWorkflow({
+      workflow: buildNodeFailWorkflow({ errorHandling: { onError: "fail" } }),
+      trigger,
+    })
+    expect(r.status).toBe("failed")
+  })
+})
+
 // ───────────────────────────────────────────────────────────────────────────
 // Editor debugging options: seedOutputs / restrictToStepIds / honorPinData.
 // ───────────────────────────────────────────────────────────────────────────

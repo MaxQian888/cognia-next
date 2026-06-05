@@ -336,6 +336,61 @@ describe("failure / abort / cache", () => {
     await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
   })
 
+  it("per-node onError=continue inside the body keeps the iteration alive", async () => {
+    registerNodeExecutor({
+      kind: "data.loopfail" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("body boom")
+      },
+    })
+    const failing = node("bad", "data.loopfail" as never, {}, "loop1")
+    failing.data.errorHandling = { onError: "continue" }
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        output: "{{ $node['after'].value }}",
+      },
+      [
+        failing,
+        node("after", "flow.set", { variable: "v", value: "{{ $node['bad'].error }}" }, "loop1"),
+      ],
+      [{ id: "be1", source: "bad", target: "after" }]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as { items: unknown[]; count: number }
+    // Every iteration completed; downstream saw the error-shaped output.
+    expect(out.count).toBe(3)
+    expect(out.items).toEqual(["body boom", "body boom", "body boom"])
+  })
+
+  it("per-node onError=defaultValue inside the body substitutes the output", async () => {
+    registerNodeExecutor({
+      kind: "data.loopfail2" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("nope")
+      },
+    })
+    const failing = node("bad", "data.loopfail2" as never, {}, "loop1")
+    failing.data.errorHandling = { onError: "defaultValue", defaultValue: { value: "fallback" } }
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        output: "{{ $node['bad'].value }}",
+      },
+      [failing]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual([
+      "fallback",
+      "fallback",
+      "fallback",
+    ])
+  })
+
   it("rejects a non-array forEach source with a clear error", async () => {
     const { workflow, loopNode } = loopWorkflow(
       { mode: "forEach", source: "{{ $trigger.payload.missing }}" },

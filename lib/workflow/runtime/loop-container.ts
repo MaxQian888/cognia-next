@@ -48,6 +48,7 @@ import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
 import { runStep } from "./step-executor"
 import { getGlobalRunGate } from "./run-concurrency-gate"
+import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 
 /** Hard ceiling on iterations regardless of params (runaway-while backstop). */
 const LOOP_HARD_CAP = 100_000
@@ -413,6 +414,37 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         }
       }
     } catch (err) {
+      // Per-node error handling mirrors the top-level orchestrator catch.
+      // "errorBranch" routes within the body subgraph; "continue" /
+      // "defaultValue" substitute an output and let body downstream run.
+      const failure = resolveNodeFailure(child)
+      if (failure.mode === "continue") {
+        outputs[child.id] = buildErrorOutput(err)
+        completed.add(child.id)
+        return
+      }
+      if (failure.mode === "defaultValue") {
+        outputs[child.id] = failure.defaultValue
+        completed.add(child.id)
+        return
+      }
+      if (failure.mode === "errorBranch") {
+        const outgoing = childEdges.filter((e) => e.source === child.id)
+        const errorEdges = outgoing.filter(
+          (e) => e.sourceHandle === "error" || e.data?.kind === "error"
+        )
+        if (errorEdges.length > 0) {
+          outputs[child.id] = buildErrorOutput(err)
+          completed.add(child.id)
+          for (const e of outgoing) {
+            if (!(e.sourceHandle === "error" || e.data?.kind === "error")) {
+              skipDownstream(e.target)
+            }
+          }
+          return
+        }
+        // No error edge inside the body → fall through to fail the iteration.
+      }
       if (!firstError) firstError = err
     } finally {
       release()
