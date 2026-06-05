@@ -8,13 +8,23 @@ Protocol (NDJSON over stdio, driven by src-tauri/src/plugin_api/python/):
   request   {"id": <int>, "method": <str>, "params": <object>}
   response  {"id": <int>, "ok": true, "result": <json>}
           | {"id": <int>, "ok": false, "error": <str>}
+  event     {"type": "event", "event": <str>, "call_id"?: <int>, "data": <json>}
+            (un-correlated notification: "progress" | "chunk" | "chunk_end";
+             "log" and "exit" are synthesized Rust-side)
 
-Methods: ping, import_main, get_tools, call_tool, call, get_info.
+Methods: ping, import_main, get_tools, call_tool, call, call_hook,
+push_config, get_info, shutdown.
+
+Lifecycle conventions (module-level, all optional): on_startup() runs after
+import; on_config_updated(config) runs on push_config; on_shutdown() runs
+on graceful shutdown. Tools returning an iterator/generator stream each
+chunk as an event before the terminal reply.
 
 stdout is the protocol channel: plugin print() output is redirected to
 stderr, which the Rust side forwards into the app log. Stdlib only.
 """
 
+import collections.abc
 import importlib
 import importlib.util
 import inspect
@@ -29,6 +39,9 @@ sys.stdout = sys.stderr  # plugin print() must never corrupt the protocol
 _TOOLS = {}  # name -> {"fn": callable, "definition": {name, description, parameters}}
 _HOOKS = []  # (event, callable)
 _MAIN_MODULE = None
+_CONFIG = {}  # persisted plugin config, pushed by the host app
+_CURRENT_CALL_ID = None  # request id while a handler runs (serial main loop)
+_SHUTDOWN = False
 
 _TYPE_MAP = {
     str: "string",
@@ -116,10 +129,36 @@ def _hook(event):
     return wrapper
 
 
+def _emit_event(event, data=None, call_id=None):
+    """Write one un-correlated notification frame to the protocol channel."""
+    payload = {"type": "event", "event": event, "data": data}
+    if call_id is not None:
+        payload["call_id"] = call_id
+    _RPC_OUT.write(json.dumps(payload) + "\n")
+    _RPC_OUT.flush()
+
+
+def _progress(pct=None, message=None):
+    """cognia.progress(...) — report progress for the in-flight call."""
+    data = {}
+    if pct is not None:
+        data["pct"] = pct
+    if message is not None:
+        data["message"] = message
+    _emit_event("progress", data, _CURRENT_CALL_ID)
+
+
+def _get_config():
+    """cognia.get_config() — the plugin's persisted config object."""
+    return _CONFIG
+
+
 def _install_cognia_shim():
     shim = types.ModuleType("cognia")
     shim.tool = _tool
     shim.hook = _hook
+    shim.progress = _progress
+    shim.get_config = _get_config
     sys.modules["cognia"] = shim
 
 
@@ -152,8 +191,13 @@ def _module_name_from(main_module):
     return name.replace("/", ".")
 
 
+def _lifecycle_fn(name):
+    fn = getattr(_MAIN_MODULE, name, None) if _MAIN_MODULE is not None else None
+    return fn if callable(fn) else None
+
+
 def _handle_import_main(params):
-    global _MAIN_MODULE
+    global _MAIN_MODULE, _CONFIG
     plugin_path = params["plugin_path"]
     main_module = params["main_module"]
     missing = _check_dependencies(params.get("dependencies"))
@@ -164,11 +208,17 @@ def _handle_import_main(params):
             + " — install them with: pip install "
             + " ".join(missing)
         )
+    _CONFIG = dict(params.get("config") or {})
     if plugin_path not in sys.path:
         sys.path.insert(0, plugin_path)
     _install_cognia_shim()
     _MAIN_MODULE = importlib.import_module(_module_name_from(main_module))
-    return _info()
+    startup = _lifecycle_fn("on_startup")
+    if startup is not None:
+        startup()
+    info = _info()
+    info["hooks"] = [{"event": event, "name": fn.__name__} for event, fn in _HOOKS]
+    return info
 
 
 def _info():
@@ -198,6 +248,19 @@ def _handle_call_tool(params):
     if entry is None:
         raise RuntimeError(f"unknown tool: {name}")
     result = entry["fn"](**(params.get("args") or {}))
+    if isinstance(result, collections.abc.Iterator):
+        # Streaming tool: each chunk goes out as an event frame before the
+        # terminal reply (str is Iterable but not Iterator, so plain string
+        # results never land here).
+        chunks = []
+        for chunk in result:
+            _ensure_serializable(chunk, f"tool '{name}' stream chunk")
+            _emit_event("chunk", chunk, _CURRENT_CALL_ID)
+            chunks.append(chunk)
+        _emit_event("chunk_end", None, _CURRENT_CALL_ID)
+        if chunks and all(isinstance(c, str) for c in chunks):
+            return "".join(chunks)
+        return chunks
     return _ensure_serializable(result, f"tool '{name}'")
 
 
@@ -213,13 +276,45 @@ def _handle_call(params):
     return _ensure_serializable(result, f"function '{function_name}'")
 
 
+def _handle_call_hook(params):
+    _require_loaded()
+    event = params["event"]
+    name = params["name"]
+    for hook_event, fn in _HOOKS:
+        if hook_event == event and fn.__name__ == name:
+            result = fn(params.get("payload"))
+            return _ensure_serializable(result, f"hook '{name}' for '{event}'")
+    raise RuntimeError(f"no hook named '{name}' registered for event '{event}'")
+
+
+def _handle_push_config(params):
+    global _CONFIG
+    _CONFIG = dict(params.get("config") or {})
+    updated = _lifecycle_fn("on_config_updated")
+    if updated is not None:
+        updated(_CONFIG)
+    return None
+
+
+def _handle_shutdown(params):
+    global _SHUTDOWN
+    shutdown = _lifecycle_fn("on_shutdown")
+    if shutdown is not None:
+        shutdown()
+    _SHUTDOWN = True
+    return "bye"
+
+
 _METHODS = {
     "ping": lambda params: "pong",
     "import_main": _handle_import_main,
     "get_tools": lambda params: [entry["definition"] for entry in _TOOLS.values()],
     "call_tool": _handle_call_tool,
     "call": _handle_call,
+    "call_hook": _handle_call_hook,
+    "push_config": _handle_push_config,
     "get_info": lambda params: _info(),
+    "shutdown": _handle_shutdown,
 }
 
 
@@ -229,6 +324,7 @@ def _respond(payload):
 
 
 def main():
+    global _CURRENT_CALL_ID
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -244,6 +340,7 @@ def main():
         if handler is None:
             _respond({"id": request_id, "ok": False, "error": f"unknown method: {method}"})
             continue
+        _CURRENT_CALL_ID = request_id
         try:
             result = handler(request.get("params") or {})
             _respond({"id": request_id, "ok": True, "result": result})
@@ -251,6 +348,10 @@ def main():
             _respond(
                 {"id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
             )
+        finally:
+            _CURRENT_CALL_ID = None
+        if _SHUTDOWN:
+            break  # graceful exit after the shutdown reply was flushed
 
 
 if __name__ == "__main__":
