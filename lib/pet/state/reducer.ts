@@ -42,6 +42,7 @@ export function reducePetVisualState(event: PetEvent, needs: PetNeeds): PetVisua
     case "goalComplete":
     case "levelUp":
     case "evolved":
+    case "achievementUnlocked":
       return "happy"
     case "greeting":
     case "hatched":

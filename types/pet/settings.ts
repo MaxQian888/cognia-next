@@ -48,6 +48,26 @@ export interface PetDesktopOverlaySettings {
   wander?: PetWanderSettings
 }
 
+/** Frequency tier for proactive speech (maps to gap/cap/idle tunings). */
+export type PetProactiveTier = "quiet" | "normal" | "chatty"
+
+/**
+ * Proactive speech preferences (the pet speaks unprompted). Default OFF —
+ * requires `llmSpeak.enabled` too, since utterances ride the same side channel.
+ */
+export interface PetProactiveSettings {
+  /** Master proactive switch. */
+  enabled: boolean
+  /** How chatty: quiet / normal / chatty. */
+  tier: PetProactiveTier
+  /** Comment on milestones (level-up, evolution, goals, achievements, workflows). */
+  eventComments: boolean
+  /** Speak up after long user inactivity. */
+  idleChatter: boolean
+  /** Morning greeting + late-night rest reminder. */
+  timeGreetings: boolean
+}
+
 export interface PetSettings {
   /** Master switch — when false the widget never mounts. */
   enabled: boolean
@@ -83,6 +103,13 @@ export interface PetSettings {
    * optional provider/model override, resolved by `buildUtilityLlmClient`.
    */
   llmSpeak?: UtilityModelConfig
+  /** Proactive speech preferences. Absent = defaults (disabled). */
+  proactive?: PetProactiveSettings
+  /**
+   * Pet conversation memory (rolling history fed back into the prompt).
+   * Absent = enabled — turning it off stops recording AND injecting history.
+   */
+  petMemory?: { enabled: boolean }
 }
 
 export const DEFAULT_PET_WANDER: PetWanderSettings = {
@@ -98,6 +125,14 @@ export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
   size: 128,
   position: null,
   wander: DEFAULT_PET_WANDER,
+}
+
+export const DEFAULT_PET_PROACTIVE: PetProactiveSettings = {
+  enabled: false,
+  tier: "normal",
+  eventComments: true,
+  idleChatter: true,
+  timeGreetings: true,
 }
 
 export const DEFAULT_PET_SETTINGS: PetSettings = {

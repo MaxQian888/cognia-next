@@ -9,25 +9,47 @@
 // rate-limited, no client, PII trip, model error — it falls back to a template
 // acknowledgement so talk never feels dead. `usePetBubbles` stays silent for
 // `talked` (the kind is absent from its VARIANTS table), so no double bubble.
+//
+// Prompt layers: live nurture state, rolling history (when pet memory is on),
+// read-only recall from lib/memory, the inline [tag] emotion protocol, and the
+// user's UI language. Replies are tag-parsed — the emotion plays as a one-shot
+// and the clean text persists to `petConversation` (talk path ONLY; proactive
+// speech is skip-memory by design).
 
 "use client"
 
 import { useEffect, useRef } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { pickTalkedBubbleKey } from "@/lib/pet/bubbles/templates"
 import { speakAsPet } from "@/lib/pet/bubbles/speak"
 import { getSpeakLimiter } from "@/lib/pet/bubbles/speak-limiter"
+import { EMOTION_TO_ONESHOT, parseEmotion } from "@/lib/pet/llm/emotion-tags"
+import {
+  formatHistoryLines,
+  loadHistoryForPrompt,
+  recordTurn,
+  type PetHistoryDeps,
+} from "@/lib/pet/llm/history"
+import { recallAboutUser } from "@/lib/pet/llm/recall"
+import { appendPetTurn, listRecentPetTurns } from "@/lib/db/pet-conversation"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { usePetStore, type PetBubble } from "@/stores/pet/pet-store"
 import { useSettingsStore } from "@/stores/settings"
 import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
+import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 
 /** Template acknowledgements clear like normal bubbles; LLM replies linger. */
 const TEMPLATE_BUBBLE_MS = 4000
 const LLM_BUBBLE_MS = 7000
+
+const HISTORY_DEPS: PetHistoryDeps = {
+  append: appendPetTurn,
+  listRecent: listRecentPetTurns,
+}
 
 export interface UsePetSpeakArgs {
   profile: PetProfile | undefined
@@ -38,16 +60,20 @@ export interface UsePetSpeakArgs {
 
 export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
   const t = useTranslations("pet")
+  const locale = useLocale()
   const setBubble = usePetStore((s) => s.setBubble)
+  const enqueueOneShot = usePetStore((s) => s.enqueueOneShot)
   const appSettings = useSettingsStore((s) => s.settings)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inFlight = useRef(false)
+  /** Lazily-built memory retriever deps, cached after the first talk. */
+  const memoryDeps = useRef<ApplyMemoryContextDeps | null | undefined>(undefined)
 
   // The bus subscription is long-lived; read the freshest props through a ref
   // so a profile/settings change doesn't churn the subscription.
-  const latest = useRef({ profile, view, appSettings })
+  const latest = useRef({ profile, view, appSettings, locale })
   useEffect(() => {
-    latest.current = { profile, view, appSettings }
+    latest.current = { profile, view, appSettings, locale }
   })
 
   useEffect(() => {
@@ -89,15 +115,59 @@ export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
         return
       }
 
+      const memoryOn = current.appSettings?.petSettings?.petMemory?.enabled !== false
+      const view = current.view
+      const profileRow = current.profile
+
       inFlight.current = true
-      void speakAsPet(client, {
-        soul,
-        bones: current.view.effectiveBones,
-        userText,
-      })
-        .then((reply) => {
-          if (reply) show(reply, "llm", LLM_BUBBLE_MS)
-          else fallback()
+      void (async () => {
+        // Assemble the optional prompt layers; each degrades independently.
+        const historyText = memoryOn
+          ? formatHistoryLines(await loadHistoryForPrompt(HISTORY_DEPS))
+          : ""
+        if (memoryDeps.current === undefined) {
+          // Dynamic import keeps the twin/vector stack out of the widget's
+          // module graph (same pattern as lib/claude/build-options.ts).
+          memoryDeps.current =
+            (await import("@/lib/memory/runtime/build-deps")
+              .then((m) => m.tryBuildMemoryDeps(resolveMemoryConfig(current.appSettings?.memory)))
+              .catch(() => null)) ?? null
+        }
+        const recallText = await recallAboutUser(memoryDeps.current ?? undefined, {
+          queryText: userText,
+        })
+
+        return speakAsPet(client, {
+          soul,
+          bones: view.effectiveBones,
+          userText,
+          state: {
+            mood: view.mood,
+            energy: Math.round(view.needs.energy),
+            bond: Math.round(view.needs.bond),
+            level: profileRow?.level ?? 1,
+          },
+          historyText: historyText || undefined,
+          recallText: recallText || undefined,
+          emotionInstruction: true,
+          locale: current.locale,
+        })
+      })()
+        .then(async (raw) => {
+          const parsed = raw ? parseEmotion(raw) : null
+          if (!parsed || !parsed.cleanText) {
+            fallback()
+            return
+          }
+          show(parsed.cleanText, "llm", LLM_BUBBLE_MS)
+          if (parsed.emotion) enqueueOneShot(EMOTION_TO_ONESHOT[parsed.emotion])
+          if (memoryOn) {
+            await recordTurn(HISTORY_DEPS, {
+              userText,
+              reply: parsed.cleanText,
+              at: event.at,
+            })
+          }
         })
         .catch(() => fallback())
         .finally(() => {
@@ -108,5 +178,5 @@ export function usePetSpeak({ profile, view, enabled }: UsePetSpeakArgs): void {
       off()
       if (timer.current) clearTimeout(timer.current)
     }
-  }, [enabled, t, setBubble])
+  }, [enabled, t, setBubble, enqueueOneShot])
 }

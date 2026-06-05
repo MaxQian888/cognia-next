@@ -13,6 +13,17 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...a: unknown[]) => buildUtilityLlmClient(...a),
 }))
 
+// Hermetic storage + memory mocks: no IndexedDB / vector stack in this test.
+const appendPetTurn = jest.fn()
+const listRecentPetTurns = jest.fn()
+jest.mock("@/lib/db/pet-conversation", () => ({
+  appendPetTurn: (...a: unknown[]) => appendPetTurn(...a),
+  listRecentPetTurns: (...a: unknown[]) => listRecentPetTurns(...a),
+}))
+jest.mock("@/lib/memory/runtime/build-deps", () => ({
+  tryBuildMemoryDeps: jest.fn().mockResolvedValue(undefined),
+}))
+
 const stateRef: { current: { settings: Partial<AppSettings> | null } } = {
   current: { settings: null },
 }
@@ -23,12 +34,15 @@ jest.mock("@/stores/settings", () => ({
 const profile = {
   soul: { name: "Boba", personality: "curious and playful" },
   stage: "adult",
+  level: 3,
 } as unknown as PetProfile
 const view = {
   effectiveBones: { species: "cat", rarity: "common" },
+  mood: "content",
+  needs: { energy: 80, mood: 70, bond: 40, lastTickAt: "" },
 } as unknown as PetView
 
-function setLlmSpeak(enabled: boolean) {
+function setLlmSpeak(enabled: boolean, petMemory?: { enabled: boolean }) {
   stateRef.current = {
     settings: {
       petSettings: {
@@ -38,6 +52,7 @@ function setLlmSpeak(enabled: boolean) {
         mutedBubbles: false,
         size: 96,
         llmSpeak: { enabled },
+        ...(petMemory ? { petMemory } : {}),
       },
     } as Partial<AppSettings>,
   }
@@ -50,19 +65,21 @@ async function emitTalk(userText?: string) {
       kind: "talked",
       meta: userText ? { userText } : undefined,
     })
-    // Let the speakAsPet promise chain settle.
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    // Let the async pipeline (history → recall → speak → record) settle: a
+    // macrotask flush drains all chained microtasks.
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
   })
 }
 
 beforeEach(() => {
   __resetPetEventBusForTesting()
   __resetSpeakLimiterForTesting()
-  usePetStore.setState({ bubble: null })
+  usePetStore.setState({ bubble: null, oneShotQueue: [] })
   complete.mockReset().mockResolvedValue("Hehe, hello friend!")
   buildUtilityLlmClient.mockReset().mockReturnValue({ complete })
+  appendPetTurn.mockReset().mockResolvedValue(1)
+  listRecentPetTurns.mockReset().mockResolvedValue([])
   setLlmSpeak(true)
 })
 
@@ -129,6 +146,44 @@ describe("usePetSpeak", () => {
     renderHook(() => usePetSpeak({ profile, view, enabled: true }))
     await emitTalk("hello")
     expect(usePetStore.getState().bubble?.origin).toBe("template")
+  })
+
+  it("strips a leading emotion tag and plays the mapped one-shot", async () => {
+    complete.mockResolvedValue("[love] You are the best!")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("do you like me?")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.text).toBe("You are the best!")
+    expect(bubble?.origin).toBe("llm")
+    expect(usePetStore.getState().oneShotQueue).toContain("love")
+  })
+
+  it("layers live state + history into the system prompt", async () => {
+    listRecentPetTurns.mockResolvedValue([{ at: 1, userText: "hi", reply: "hey!" }])
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).toContain("mood: content")
+    expect(system).toContain("level: 3")
+    expect(system).toContain("Recent things you said together:")
+    expect(system).toContain("emotion tag in square brackets")
+  })
+
+  it("persists the turn when pet memory is on (default)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("remember this chat")
+    expect(appendPetTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ userText: "remember this chat", reply: "Hehe, hello friend!" })
+    )
+  })
+
+  it("neither reads nor writes history when pet memory is off", async () => {
+    setLlmSpeak(true, { enabled: false })
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("do not remember")
+    expect(usePetStore.getState().bubble?.origin).toBe("llm")
+    expect(listRecentPetTurns).not.toHaveBeenCalled()
+    expect(appendPetTurn).not.toHaveBeenCalled()
   })
 
   it("ignores non-talked events and does nothing when disabled", async () => {

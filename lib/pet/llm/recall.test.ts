@@ -12,7 +12,7 @@ function memory(id: string, text: string): Memory {
     importance: 5,
     createdAt: 1,
     updatedAt: 1,
-  } as Memory
+  } as unknown as Memory
 }
 
 function deps(candidates: Memory[]): MemoryRetrieverDeps {
