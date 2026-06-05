@@ -16448,7 +16448,8 @@
       "dragHint": "Drag into an expression field to insert a reference",
       "valueLabel": "value",
       "emptyObject": "Empty object",
-      "schemaEmpty": "No fields to map."
+      "schemaEmpty": "No fields to map.",
+      "streaming": "Live output"
     },
     "shortcuts": {
       "title": "Keyboard shortcuts",
@@ -16905,6 +16906,8 @@
         "running": "Running…",
         "rerunning": "Re-running…",
         "rerun": "Re-run",
+        "totalTokens": "{tokens} tok",
+        "totalCost": "{cost} est.",
         "sparkline": {
           "title": "Duration trend"
         }
@@ -16916,6 +16919,11 @@
         "statusLabel": "Status",
         "started": "Started",
         "ended": "Ended",
+        "tokens": "Tokens (in / out)",
+        "cost": "Cost",
+        "costEstimateSuffix": "est.",
+        "servedBy": "Served by",
+        "streaming": "Live output",
         "error": "Error",
         "nonRetryable": "This error is marked non-retryable; retries were skipped.",
         "skipReason": "Skip reason",

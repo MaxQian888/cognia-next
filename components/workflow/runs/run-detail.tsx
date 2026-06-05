@@ -27,6 +27,7 @@ import { RunTimeline } from "./run-timeline"
 import { RunStepDetail } from "./run-step-detail"
 import { RunDurationSparkline } from "./run-duration-sparkline"
 import { formatDurationMs, formatRunStartedAt } from "./format"
+import { aggregateRunUsage, formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 
 export function RunDetail({ workflowId, runId }: { workflowId: string; runId: string }) {
   const t = useTranslations("workflows.runs.detail")
@@ -118,6 +119,8 @@ function RunDetailInner({
     () => (run.completedAt ? formatDurationMs(run.completedAt - run.startedAt) : t("running")),
     [run.startedAt, run.completedAt, t]
   )
+  // Run-level token/cost rollup from step_usage events (LLM-backed steps).
+  const usageSummary = useMemo(() => aggregateRunUsage(events), [events])
 
   const handleReRun = async () => {
     if (busy) return
@@ -168,6 +171,15 @@ function RunDetailInner({
           </div>
           <p className="text-xs text-muted-foreground">
             {formatRunStartedAt(run.startedAt)} · {totalDuration} · {run.triggerKind}
+            {usageSummary.totalTokens > 0 ? (
+              <span data-testid="run-usage-pill">
+                {" · "}
+                {t("totalTokens", { tokens: formatTokens(usageSummary.totalTokens) })}
+                {usageSummary.totalCostUsd !== undefined
+                  ? ` · ${t("totalCost", { cost: formatCostUsd(usageSummary.totalCostUsd) })}${usageSummary.hasUnknownCost ? "+" : ""}`
+                  : ""}
+              </span>
+            ) : null}
           </p>
         </div>
         <div className="hidden sm:block">

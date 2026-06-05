@@ -27,6 +27,8 @@ import {
 } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { reduceStepStream } from "@/hooks/workflow/use-step-stream"
+import { formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 import { formatDurationMs } from "./format"
 
 const CATEGORY_BADGE = {
@@ -83,6 +85,24 @@ export function RunStepDetail({
   }, [stepId, workflow.nodes, events])
 
   const logEvents = useMemo(() => stepEvents.filter((e) => e.type === "run_log"), [stepEvents])
+
+  // Live streaming output (step_stream events) + the step's token/cost usage.
+  const stream = useMemo(() => reduceStepStream(stepEvents, stepId), [stepEvents, stepId])
+  const usage = useMemo(() => {
+    const usageEv = [...stepEvents].reverse().find((e) => e.type === "step_usage")
+    return (
+      (usageEv?.payload as
+        | {
+            inputTokens?: number
+            outputTokens?: number
+            totalTokens?: number
+            costUsd?: number
+            providerId?: string
+            modelId?: string
+          }
+        | undefined) ?? null
+    )
+  }, [stepEvents])
 
   const filteredLogs = useMemo(() => {
     const q = logQuery.trim().toLowerCase()
@@ -152,7 +172,41 @@ export function RunStepDetail({
                 value={new Date((completedEv ?? failedEv ?? skippedEv)!.ts).toLocaleTimeString()}
               />
             ) : null}
+            {usage ? (
+              <>
+                <Stat
+                  label={t("tokens")}
+                  value={`${formatTokens(usage.totalTokens ?? 0)} (${formatTokens(usage.inputTokens ?? 0)} / ${formatTokens(usage.outputTokens ?? 0)})`}
+                />
+                <Stat
+                  label={t("cost")}
+                  value={
+                    usage.costUsd !== undefined
+                      ? `${formatCostUsd(usage.costUsd)} ${t("costEstimateSuffix")}`
+                      : "—"
+                  }
+                />
+                {usage.providerId ? (
+                  <Stat
+                    label={t("servedBy")}
+                    value={`${usage.providerId}${usage.modelId ? ` · ${usage.modelId}` : ""}`}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </div>
+        ) : null}
+
+        {stream.isStreaming ? (
+          <Section title={t("streaming")}>
+            <pre
+              className="whitespace-pre-wrap rounded-md border border-wf-status-running/40 bg-wf-status-running/5 p-3 text-xs"
+              data-testid="step-streaming-output"
+            >
+              {stream.text}
+              <span className="animate-pulse">▌</span>
+            </pre>
+          </Section>
         ) : null}
 
         {failedError ? (

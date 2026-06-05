@@ -16448,7 +16448,8 @@
       "dragHint": "拖拽到表达式输入框以插入引用",
       "valueLabel": "值",
       "emptyObject": "空对象",
-      "schemaEmpty": "没有可映射的字段。"
+      "schemaEmpty": "没有可映射的字段。",
+      "streaming": "实时输出"
     },
     "shortcuts": {
       "title": "键盘快捷键",
@@ -16905,6 +16906,8 @@
         "running": "运行中…",
         "rerunning": "正在重跑…",
         "rerun": "重跑",
+        "totalTokens": "{tokens} tok",
+        "totalCost": "{cost} 估算",
         "sparkline": {
           "title": "时长趋势"
         }
@@ -16916,6 +16919,11 @@
         "statusLabel": "状态",
         "started": "开始",
         "ended": "结束",
+        "tokens": "Token（入 / 出）",
+        "cost": "费用",
+        "costEstimateSuffix": "估算",
+        "servedBy": "实际提供方",
+        "streaming": "实时输出",
         "error": "错误",
         "nonRetryable": "该错误被标记为不可重试；已跳过重试。",
         "skipReason": "跳过原因",
