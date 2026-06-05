@@ -72,6 +72,39 @@ describe("ModelAliasEditor", () => {
     )
   })
 
+  it("switches distribution to weighted (weight inputs appear) and saves it", async () => {
+    const user = userEvent.setup()
+    render(<ModelAliasEditor open onOpenChange={jest.fn()} mapping={existing} />)
+    await user.click(screen.getByRole("combobox", { name: "Distribution" }))
+    await user.click(await screen.findByRole("option", { name: "Weighted" }))
+    expect(screen.getByLabelText("Weight")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(upsertModelMapping).toHaveBeenCalledWith(
+      expect.objectContaining({ distribution: "weighted" })
+    )
+  })
+
+  it("reorders entries with move down / move up and removes one", async () => {
+    const user = userEvent.setup()
+    const twoEntries = {
+      ...existing,
+      providers: [
+        { providerId: "openai", modelId: "gpt-4o-mini" },
+        { providerId: "openai", modelId: "gpt-4o-mini" },
+      ],
+    }
+    render(<ModelAliasEditor open onOpenChange={jest.fn()} mapping={twoEntries} />)
+    // Move the first entry down (swap), then remove the (now-second) one.
+    await user.click(screen.getAllByRole("button", { name: "Move down" })[0])
+    await user.click(screen.getAllByRole("button", { name: "Remove entry" })[1])
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(upsertModelMapping).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: [{ providerId: "openai", modelId: "gpt-4o-mini" }],
+      })
+    )
+  })
+
   it("toggles the enabled switch into the draft", async () => {
     const user = userEvent.setup()
     render(<ModelAliasEditor open onOpenChange={jest.fn()} mapping={existing} />)

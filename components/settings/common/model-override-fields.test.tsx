@@ -45,6 +45,22 @@ describe("ModelOverrideFields", () => {
     expect(onChange).toHaveBeenCalledWith({ providerOverride: "openai" })
   })
 
+  it("clears an explicit override back to the chat default", async () => {
+    const user = userEvent.setup()
+    const onChange = jest.fn()
+    render(
+      <ModelOverrideFields
+        value={{ enabled: true, providerOverride: "openai" }}
+        providers={[{ id: "openai", name: "openai" }]}
+        onChange={onChange}
+        labels={labels}
+      />
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Use chat default" }))
+    expect(onChange).toHaveBeenCalledWith({ providerOverride: undefined })
+  })
+
   it("propagates model edits, mapping empty back to undefined", async () => {
     const user = userEvent.setup()
     const onChange = jest.fn()

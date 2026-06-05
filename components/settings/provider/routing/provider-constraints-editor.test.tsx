@@ -77,4 +77,38 @@ describe("ProviderConstraintsEditor", () => {
     await user.click(screen.getByRole("button", { name: "Remove constraint" }))
     expect(setRoutingConfig).toHaveBeenCalledWith({ providerConstraints: [] })
   })
+
+  it("clearing a numeric field maps it back to undefined", async () => {
+    const user = userEvent.setup()
+    setConstraints([{ providerId: "openai", enabled: true, dailyCostBudget: 5 }])
+    render(<ProviderConstraintsEditor />)
+    await user.clear(screen.getByLabelText("Daily budget ($)"))
+    expect(setRoutingConfig).toHaveBeenCalledWith({
+      providerConstraints: [{ providerId: "openai", enabled: true, dailyCostBudget: undefined }],
+    })
+  })
+
+  it("changes the constrained provider through the select", async () => {
+    const user = userEvent.setup()
+    setConstraints([{ providerId: "openai", enabled: true }])
+    render(<ProviderConstraintsEditor />)
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "anthropic" }))
+    expect(setRoutingConfig).toHaveBeenCalledWith({
+      providerConstraints: [{ providerId: "anthropic", enabled: true }],
+    })
+  })
+
+  it("add picks the first provider not already constrained", async () => {
+    const user = userEvent.setup()
+    setConstraints([{ providerId: "anthropic", enabled: true }])
+    render(<ProviderConstraintsEditor />)
+    await user.click(screen.getByRole("button", { name: /Add constraint/ }))
+    expect(setRoutingConfig).toHaveBeenCalledWith({
+      providerConstraints: [
+        { providerId: "anthropic", enabled: true },
+        { providerId: "openai", enabled: true },
+      ],
+    })
+  })
 })

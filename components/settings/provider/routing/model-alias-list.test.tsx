@@ -61,6 +61,16 @@ describe("ModelAliasList", () => {
     expect(removeModelMapping).toHaveBeenCalledWith("m1")
   })
 
+  it("opens the editor pre-seeded from the edit button", async () => {
+    const user = userEvent.setup()
+    setSettings([mapping("m1", "fast")])
+    render(<ModelAliasList />)
+    await user.click(screen.getByRole("button", { name: "Edit alias" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByLabelText("Alias")).toHaveValue("fast")
+  })
+
   it("opens the editor dialog from the add button", async () => {
     const user = userEvent.setup()
     setSettings([])

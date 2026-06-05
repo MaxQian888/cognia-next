@@ -104,4 +104,61 @@ describe("buildRoutingEngineDeps", () => {
     const deps = buildRoutingEngineDeps({})
     expect(deps.getHealthMetrics("never-seen")).toBeUndefined()
   })
+
+  it("returns real health metrics once a provider has recorded requests", () => {
+    useHealthMetricsStore.getState().record({
+      providerId: "openai",
+      success: true,
+      latencyMs: 120,
+    })
+    const deps = buildRoutingEngineDeps({})
+    expect(deps.getHealthMetrics("openai")?.totalRequests).toBe(1)
+  })
+
+  it("treats an OPEN circuit breaker as unavailable regardless of settings", () => {
+    useCircuitBreakerStore.getState().setEnabled(true)
+    useCircuitBreakerStore.getState().setSettings({ failureThreshold: 1 })
+    useCircuitBreakerStore.getState().recordFailure("openai")
+    const deps = buildRoutingEngineDeps({ providerSettings: { openai: ps("openai") } })
+    expect(deps.getCircuitBreakerState("openai")).toBe("open")
+    expect(deps.isProviderAvailable("openai")).toBe(false)
+    useCircuitBreakerStore.getState().setEnabled(false)
+  })
+
+  it("treats a disabled custom provider as unavailable", () => {
+    const deps = buildRoutingEngineDeps({
+      providerSettings: { off: ps("off", false) },
+      customProviders: [
+        { id: "off", providerId: "off", enabled: false, defaultModel: "" },
+      ] as never,
+    })
+    expect(deps.isProviderAvailable("off")).toBe(false)
+  })
+
+  it("uses the catalog maxOutputTokens as the reserve when smaller than the heuristic", () => {
+    const deps = buildRoutingEngineDeps({})
+    // Unknown model id → heuristic window (100k default minus 2k reserve).
+    const win = deps.getContextWindow?.("custom", "totally-unknown-model")
+    expect(win).toBe(98_000)
+  })
+
+  it("returns zero spend/rate for fresh stores", () => {
+    const deps = buildRoutingEngineDeps({})
+    expect(deps.getTodaySpend?.("nobody")).toBe(0)
+    expect(deps.getRate?.("nobody")).toEqual({ rpm: 0, tpm: 0 })
+  })
+
+  it("builds an engine from completely empty settings (no mappings, no config)", () => {
+    const engine = buildRoutingEngine({})
+    expect(engine.selectProvider({ model: "anything" })).toBeNull()
+  })
+
+  it("falls back to DEFAULT_ROUTING_CONFIG when settings carry none", () => {
+    const engine = buildRoutingEngine({
+      modelMappings: [mapping("fast", [{ providerId: "groq", modelId: "llama" }])],
+      providerSettings: { groq: ps("groq") },
+    })
+    // balanced (the default strategy) still resolves the single entry.
+    expect(engine.selectProvider({ model: "fast" })?.providerId).toBe("groq")
+  })
 })
