@@ -772,6 +772,40 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // Declarative CLI wrapper tools (`manifest.cliTools[]`): each entry
+    // wraps an external binary as an agent tool with zero plugin code —
+    // JSON-schema params, injection-proof argv token templates, output
+    // parsing, and exit-code policy. Execution is gated by the DANGEROUS
+    // `cli:execute` permission (confirm tier), binaries resolve through
+    // `requires.binaries`/detect_binary or the plugin-dir trust policy,
+    // and every invocation is audited. Registered tools flow through the
+    // standard registry so both the in-process and sidecar dispatch paths
+    // pick them up unchanged.
+    id: "cli-tools",
+    // Host runtime is fully wired (validation + exec pipeline + registry
+    // dispatch), but the capability is manifest-declarative only — the SDK
+    // packages ship no `defineCliTool()` helper yet. Same posture as
+    // `lsp-server`: experimental until a typed SDK helper exists; the host
+    // contract is unaffected.
+    support: "experimental",
+    manifestFields: ["cliTools"],
+    runtimeBinding:
+      "manager.registerPluginContributions cliTools → registry.registerTool(executeCliTool)",
+    hostBindings: [
+      "lib/plugin/cli-tools/execute-cli-tool.ts",
+      "lib/plugin/cli-tools/cli-binary-policy.ts",
+      "lib/plugin/cli-tools/binary-status.ts",
+      "src-tauri/src/plugin_api/cli_exec.rs",
+    ],
+    typescriptSdk: [],
+    pythonSdk: [],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/cli-tools/execute-cli-tool.test.ts",
+      "lib/plugin/cli-tools/cli-binary-policy.test.ts",
+    ],
+  },
+  {
     // System tray items. Registered imperatively at activation via
     // `ctx.tray.register` (no manifest field); desktop-only. Experimental
     // pending a declarative manifest surface + SDK helper.

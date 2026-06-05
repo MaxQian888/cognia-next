@@ -172,6 +172,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "companion:read": "List paired devices and their remote-control grants",
   "companion:control": "Grant or revoke a paired device's remote-control capability",
   "companion:goal-control": "Pause, resume, or stop your running goal loops",
+  "cli:execute": "Run an external command-line tool this plugin declares (e.g. ripgrep, ffmpeg)",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
@@ -218,6 +219,10 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // (`companion:goal-control` is NOT dangerous: it is a strict subset of the
   // non-dangerous `goal:write` — pause/resume/stop only.)
   "companion:control",
+  // Running a declared external CLI executes a real process with the user's
+  // privileges — argv templating prevents injection but the binary itself can
+  // do anything (`shell:execute` risk tier).
+  "cli:execute",
 ]
 
 // =============================================================================

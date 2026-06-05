@@ -28,6 +28,7 @@ import type { PluginAiProviderDef } from "./plugin-ai-provider"
 import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
+import type { PluginCliToolDef } from "./plugin-cli-tool"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
 // the runtime parser in lockstep — historically a local alias was used to
@@ -90,6 +91,7 @@ export type PluginCapability =
   | "automation" // Drives the desktop via Computer Use (screenshot/click/type/…) — gates ctx.automation
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
+  | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
 
 /**
  * Plugin status in the lifecycle
@@ -315,6 +317,7 @@ export type PluginPermission =
   // Companion remote-control management (host-side). read is sensitive, control is DANGEROUS.
   | "companion:read" // List paired devices, read remote-control grants + inbound activity
   | "companion:control" // Grant / revoke a device's remote-control capability
+  | "cli:execute" // Run an allowlisted external CLI declared via manifest.cliTools — DANGEROUS
   | "companion:goal-control" // Pause / resume / stop a host goal loop
 
 export type PluginPermissionDecision = "allow" | "deny"
@@ -528,6 +531,13 @@ export interface PluginManifest {
   // Agent Integration
   /** Agent tools provided */
   tools?: PluginToolDef[]
+
+  /**
+   * Declarative CLI wrapper tools — external binaries exposed as agent
+   * tools with zero plugin code. Requires the `"cli-tools"` capability and
+   * the `"cli:execute"` permission (DANGEROUS, confirm-tier).
+   */
+  cliTools?: PluginCliToolDef[]
 
   /** Agent modes provided */
   modes?: PluginModeDef[]

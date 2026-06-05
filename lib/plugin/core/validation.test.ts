@@ -1150,3 +1150,155 @@ describe("Plugin Validation", () => {
     })
   })
 })
+
+describe("validatePluginManifest cliTools", () => {
+  const cliManifest = (overrides: Record<string, unknown> = {}): PluginManifest =>
+    ({
+      id: "cli-demo",
+      name: "CLI Demo",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["cli-tools"],
+      main: "index.js",
+      permissions: ["cli:execute"],
+      requires: { binaries: [{ name: "rg" }] },
+      cliTools: [
+        {
+          name: "ripgrep_search",
+          description: "Search files",
+          parameters: {
+            type: "object",
+            properties: {
+              pattern: { type: "string" },
+              globs: { type: "array", items: { type: "string" } },
+              path: { type: "string" },
+            },
+          },
+          binary: { kind: "requires", name: "rg" },
+          argv: [
+            { literal: "--json" },
+            { param: "globs", eachPrefixedBy: "--glob", omitWhenEmpty: true },
+            { param: "pattern" },
+            { param: "path", omitWhenEmpty: true },
+          ],
+          outputParse: "lines",
+          successExitCodes: [0, 1],
+          timeoutMs: 30000,
+          maxOutputBytes: 500000,
+        },
+      ],
+      ...overrides,
+    }) as unknown as PluginManifest
+
+  const codesOf = (result: ReturnType<typeof validatePluginManifest>) =>
+    (result.diagnostics ?? []).map((d) => d.code)
+
+  it("accepts a fully-specified valid cliTool", () => {
+    const result = validatePluginManifest(cliManifest())
+    expect(result.errors).toHaveLength(0)
+    expect(result.valid).toBe(true)
+  })
+
+  it("requires the cli:execute permission when cliTools is non-empty", () => {
+    const result = validatePluginManifest(cliManifest({ permissions: [] }))
+    expect(result.valid).toBe(false)
+    expect(codesOf(result)).toContain("manifest.cliTools.permission.missing")
+  })
+
+  it("rejects a requires binary not declared in requires.binaries", () => {
+    const manifest = cliManifest()
+    ;(manifest.cliTools![0].binary as { name: string }).name = "ffmpeg"
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.binary.name.undeclared")
+  })
+
+  it("rejects plugin-dir binaries with traversal or absolute paths", () => {
+    for (const relPath of ["../evil.exe", "/usr/bin/evil", "C:\\evil.exe", "a/../../b"]) {
+      const manifest = cliManifest()
+      manifest.cliTools![0].binary = { kind: "plugin-dir", relPath }
+      const result = validatePluginManifest(manifest)
+      expect(codesOf(result)).toContain("manifest.cliTools.binary.relPath.invalid")
+    }
+    // A safe nested relative path passes.
+    const manifest = cliManifest()
+    manifest.cliTools![0].binary = { kind: "plugin-dir", relPath: "bin/tool.exe" }
+    expect(validatePluginManifest(manifest).valid).toBe(true)
+  })
+
+  it("rejects argv tokens referencing undeclared params", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].argv.push({ param: "ghost" })
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.argv.param.undeclared")
+  })
+
+  it("rejects argv tokens with both or neither of literal/param", () => {
+    const manifest = cliManifest()
+    ;(manifest.cliTools![0].argv as unknown[]).push({ literal: "-x", param: "pattern" }, {})
+    const result = validatePluginManifest(manifest)
+    expect(
+      codesOf(result).filter((c) => c === "manifest.cliTools.argv.token.invalid")
+    ).toHaveLength(2)
+  })
+
+  it("rejects stdin/cwd referencing undeclared params and bad cwd kinds", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].stdin = { param: "ghost" }
+    manifest.cliTools![0].cwd = { kind: "param", param: "ghost" } as never
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.stdin.invalid")
+    expect(codesOf(result)).toContain("manifest.cliTools.cwd.param.undeclared")
+
+    const manifest2 = cliManifest()
+    manifest2.cliTools![0].cwd = { kind: "anywhere" } as never
+    expect(codesOf(validatePluginManifest(manifest2))).toContain("manifest.cliTools.cwd.invalid")
+  })
+
+  it("rejects non-string env values and bad numeric knobs", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].env = { GOOD: "1", BAD: 2 } as never
+    manifest.cliTools![0].timeoutMs = -5
+    manifest.cliTools![0].maxOutputBytes = 1.5
+    const result = validatePluginManifest(manifest)
+    const codes = codesOf(result)
+    expect(codes).toContain("manifest.cliTools.env.invalid")
+    expect(codes).toContain("manifest.cliTools.timeoutMs.invalid")
+    expect(codes).toContain("manifest.cliTools.maxOutputBytes.invalid")
+  })
+
+  it("rejects bad outputParse, non-integer exit codes, duplicate names, bad parameters shape", () => {
+    const manifest = cliManifest()
+    manifest.cliTools!.push({
+      ...manifest.cliTools![0],
+      name: "ripgrep_search", // duplicate
+      outputParse: "yaml" as never,
+      successExitCodes: [0, "ok"] as never,
+      parameters: { type: "string" } as never,
+    })
+    const result = validatePluginManifest(manifest)
+    const codes = codesOf(result)
+    expect(codes).toContain("manifest.cliTools.name.duplicate")
+    expect(codes).toContain("manifest.cliTools.outputParse.invalid")
+    expect(codes).toContain("manifest.cliTools.successExitCodes.invalid")
+    expect(codes).toContain("manifest.cliTools.parameters.invalid")
+  })
+
+  it("rejects a non-array cliTools and non-object entries", () => {
+    const bad = cliManifest({ cliTools: "nope" })
+    expect(codesOf(validatePluginManifest(bad))).toContain("manifest.cliTools.invalid")
+    const badEntry = cliManifest({ cliTools: [42] })
+    expect(codesOf(validatePluginManifest(badEntry))).toContain("manifest.cliTools.entry.invalid")
+  })
+
+  it("warns (not errors) when capability is declared but cliTools is empty", () => {
+    const manifest = cliManifest({ cliTools: [] })
+    const result = validatePluginManifest(manifest)
+    expect(result.valid).toBe(true)
+    expect(
+      (result.diagnostics ?? []).some(
+        (d) => d.code === "manifest.capability.field_missing" && d.severity === "warning"
+      )
+    ).toBe(true)
+  })
+})

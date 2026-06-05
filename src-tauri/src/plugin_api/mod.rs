@@ -26,6 +26,7 @@
 
 pub mod api_bridge;
 pub mod backup;
+pub mod cli_exec;
 pub mod commands;
 pub mod context_menu;
 pub mod devtools;

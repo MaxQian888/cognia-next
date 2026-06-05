@@ -1830,6 +1830,108 @@ describe("PluginManager", () => {
     })
   })
 
+  describe("cliTools contributions", () => {
+    const createCliPlugin = (): Plugin => ({
+      manifest: {
+        ...createManifest("ripgrep-tools"),
+        capabilities: ["cli-tools"],
+        permissions: ["cli:execute"],
+        author: { name: "cognia", publicKey: "FP-KEY" },
+        requires: { binaries: [{ name: "rg", documentation: "https://example.com/rg" }] },
+        cliTools: [
+          {
+            name: "ripgrep_search",
+            description: "Search files",
+            parameters: { type: "object", properties: { pattern: { type: "string" } } },
+            binary: { kind: "requires", name: "rg" },
+            argv: [{ param: "pattern" }],
+          },
+        ],
+      } as Plugin["manifest"],
+      status: "loaded",
+      source: "local",
+      path: "/plugins/ripgrep-tools",
+      config: {},
+    })
+
+    it("enable materializes cliTools into registry tools wired to executeCliTool", async () => {
+      const store = {
+        plugins: { "ripgrep-tools": createCliPlugin() } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginTool: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("ripgrep-tools", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+
+      await manager.enablePlugin("ripgrep-tools")
+
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "ripgrep-tools",
+        expect.objectContaining({
+          name: "ripgrep-tools:ripgrep_search",
+          pluginId: "ripgrep-tools",
+          definition: expect.objectContaining({ name: "ripgrep_search" }),
+        })
+      )
+
+      // The materialized execute() routes through the cli-tools pipeline
+      // with the plugin's install path + binary declarations + fingerprint.
+      const registered = (store.registerPluginTool as jest.Mock).mock.calls[0][1] as {
+        execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown>
+      }
+      const { __setCliToolDepsForTesting } = await import("@/lib/plugin/cli-tools/execute-cli-tool")
+      const invokeExec = jest.fn(async () => ({
+        stdout: "hit\n",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        truncated: false,
+      }))
+      __setCliToolDepsForTesting({
+        checkPermission: jest.fn(async () => true),
+        requestBinaryConsent: jest.fn(async () => true),
+        detect: jest.fn(async () => ({
+          available: true,
+          version: "14.0.0",
+          path: "C:/bin/rg.exe",
+          error: null,
+        })),
+        satisfiesMin: () => true,
+        evaluatePluginDirBinary: jest.fn(async () => ({
+          allowed: true,
+          requiresPrompt: false,
+          reason: "trusted",
+        })),
+        invokeExec,
+        appendAudit: jest.fn(async () => undefined),
+        getWorkspaceRoot: () => undefined,
+        now: () => 1,
+      })
+      try {
+        const result = (await registered.execute({ pattern: "needle" }, {})) as {
+          output: unknown
+        }
+        expect(result.output).toBe("hit")
+        expect(invokeExec).toHaveBeenCalledWith(
+          expect.objectContaining({
+            pluginId: "ripgrep-tools",
+            program: "C:/bin/rg.exe",
+            args: ["needle"],
+          })
+        )
+      } finally {
+        __setCliToolDepsForTesting(null)
+      }
+    })
+  })
+
   describe("plugin slash command integration", () => {
     const createCommandPlugin = (status: Plugin["status"] = "loaded"): Plugin => ({
       manifest: {

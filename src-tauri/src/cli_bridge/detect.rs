@@ -72,6 +72,14 @@ pub fn invalidate(name: &str) {
     cache().lock().retain(|(n, _), _| n != name);
 }
 
+/// Renderer-facing invalidation — the "re-probe" action on a plugin's
+/// missing-binary badge calls this so a just-installed CLI shows up
+/// without waiting out the 300s TTL.
+#[tauri::command]
+pub fn detect_binary_invalidate(name: String) {
+    invalidate(&name);
+}
+
 /// Snapshot of the registered app-managed directories (locations of
 /// CLIs the app downloaded itself), most-recently-registered first.
 ///

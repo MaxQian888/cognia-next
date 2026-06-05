@@ -2619,6 +2619,39 @@ export class PluginManager {
       }
     }
 
+    // Declarative CLI wrapper tools (`manifest.cliTools`) — materialized
+    // into ordinary registry tools whose execute() runs the safety pipeline
+    // in `lib/plugin/cli-tools/execute-cli-tool.ts` (consent → binary
+    // trust → injection-proof argv → audit). Registered through the same
+    // registry + store as runtime tools, so both the in-process and the
+    // sidecar dispatch paths pick them up, and the disable-side
+    // `plugin.tools` cleanup loop unregisters them for free.
+    if (plugin.manifest.cliTools?.length) {
+      const requiresBinaries = plugin.manifest.requires?.binaries ?? []
+      const publisherFingerprint = plugin.manifest.author?.publicKey
+      for (const def of plugin.manifest.cliTools) {
+        const cliTool: PluginTool = {
+          name: `${pluginId}:${def.name}`,
+          pluginId,
+          definition: {
+            name: def.name,
+            description: def.description,
+            parametersSchema: def.parameters,
+          },
+          execute: async (toolArgs: Record<string, unknown>, _context: PluginToolContext) => {
+            const { executeCliTool } = await import("@/lib/plugin/cli-tools/execute-cli-tool")
+            return executeCliTool(pluginId, def, toolArgs, {
+              pluginPath: plugin.path ?? "",
+              requiresBinaries,
+              publisherFingerprint,
+            })
+          },
+        }
+        this.registry.registerTool(pluginId, cliTool)
+        store.registerPluginTool(pluginId, cliTool)
+      }
+    }
+
     // Skills carry an additional post-enable hook: attach skill ids
     // to opted-in characters' `pluginSkillIds`. The map's
     // `registerEntry` only handles the registry write; this hook

@@ -71,6 +71,7 @@ const VALID_PERMISSIONS: &[&str] = &[
     "companion:read",
     "companion:control",
     "companion:goal-control",
+    "cli:execute",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with
@@ -114,6 +115,7 @@ const VALID_CAPABILITIES: &[&str] = &[
     "theme-pack",
     "fonts",
     "wallpapers",
+    "cli-tools",
 ];
 
 const VALID_PLUGIN_TYPES: &[&str] =
@@ -149,6 +151,7 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("theme-pack", &["themePacks"]),
     ("fonts", &["fonts"]),
     ("wallpapers", &["wallpapers"]),
+    ("cli-tools", &["cliTools"]),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -602,6 +605,10 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
         }
     }
 
+    // ── cliTools[]: declarative CLI wrappers (parity with validateCliTools
+    //    in lib/plugin/core/validation.ts — keep rule-for-rule in lockstep) ─
+    lint_cli_tools(obj, &mut out);
+
     // ── commands[]: each must have id + name ────────────────────────────
     if let Some(arr) = obj.get("commands").and_then(Value::as_array) {
         for (i, cmd) in arr.iter().enumerate() {
@@ -844,6 +851,405 @@ fn validate_dexie_block(block: &Value, out: &mut Vec<Diagnostic>) {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Parity arm for `validateCliTools` in `lib/plugin/core/validation.ts` —
+/// the structural rules the executor's safety model relies on. Keep
+/// rule-for-rule in lockstep with the TS validator.
+fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
+    let Some(cli_tools) = obj.get("cliTools") else {
+        return;
+    };
+    let Some(arr) = cli_tools.as_array() else {
+        out.push(Diagnostic {
+            severity: Severity::Error,
+            field: "cliTools".into(),
+            code: "manifest.cliTools.invalid".into(),
+            message: "\"cliTools\" must be an array".into(),
+            hint: None,
+        });
+        return;
+    };
+
+    let has_cli_execute = obj
+        .get("permissions")
+        .and_then(Value::as_array)
+        .map(|perms| perms.iter().any(|p| p.as_str() == Some("cli:execute")))
+        .unwrap_or(false);
+    if !arr.is_empty() && !has_cli_execute {
+        out.push(Diagnostic {
+            severity: Severity::Error,
+            field: "permissions".into(),
+            code: "manifest.cliTools.permission.missing".into(),
+            message: "cliTools entries require the \"cli:execute\" permission".into(),
+            hint: Some("Add \"cli:execute\" to \"permissions\".".into()),
+        });
+    }
+
+    let required_binaries: Vec<&str> = obj
+        .get("requires")
+        .and_then(|r| r.get("binaries"))
+        .and_then(Value::as_array)
+        .map(|bins| {
+            bins.iter()
+                .filter_map(|b| b.get("name").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut seen_names: Vec<&str> = Vec::new();
+
+    for (i, entry) in arr.iter().enumerate() {
+        let field = format!("cliTools[{i}]");
+        let Some(tool) = entry.as_object() else {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: field.clone(),
+                code: "manifest.cliTools.entry.invalid".into(),
+                message: format!("{field} must be an object"),
+                hint: None,
+            });
+            continue;
+        };
+
+        match tool.get("name").and_then(Value::as_str) {
+            Some(name) if is_cli_tool_name(name) => {
+                if seen_names.contains(&name) {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.name"),
+                        code: "manifest.cliTools.name.duplicate".into(),
+                        message: format!("{field}.name \"{name}\" is declared more than once"),
+                        hint: None,
+                    });
+                } else {
+                    seen_names.push(name);
+                }
+            }
+            _ => out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.name"),
+                code: "manifest.cliTools.name.invalid".into(),
+                message: format!("{field}.name must be snake_case ([a-z][a-z0-9_]*)"),
+                hint: None,
+            }),
+        }
+
+        if !tool
+            .get("description")
+            .and_then(Value::as_str)
+            .map(|d| !d.is_empty())
+            .unwrap_or(false)
+        {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.description"),
+                code: "manifest.cliTools.description.missing".into(),
+                message: format!("{field} requires a non-empty \"description\" string"),
+                hint: None,
+            });
+        }
+
+        // parameters → declared param names (JSON-schema object form)
+        let declared_params: Option<Vec<&str>> = cli_declared_params(tool.get("parameters"));
+        if declared_params.is_none() {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.parameters"),
+                code: "manifest.cliTools.parameters.invalid".into(),
+                message: format!(
+                    "{field}.parameters must be a JSON-schema object: {{\"type\":\"object\",\"properties\":{{…}}}}"
+                ),
+                hint: None,
+            });
+        }
+        let has_param = |name: &str| {
+            declared_params
+                .as_ref()
+                .map(|params| params.contains(&name))
+                .unwrap_or(false)
+        };
+
+        // binary ref
+        match tool.get("binary").and_then(Value::as_object) {
+            None => out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.binary"),
+                code: "manifest.cliTools.binary.missing".into(),
+                message: format!("{field} requires a \"binary\" reference object"),
+                hint: None,
+            }),
+            Some(binary) => match binary.get("kind").and_then(Value::as_str) {
+                Some("requires") => match binary.get("name").and_then(Value::as_str) {
+                    Some(name) if !name.is_empty() => {
+                        if !required_binaries.contains(&name) {
+                            out.push(Diagnostic {
+                                severity: Severity::Error,
+                                field: format!("{field}.binary.name"),
+                                code: "manifest.cliTools.binary.name.undeclared".into(),
+                                message: format!(
+                                    "{field}.binary.name \"{name}\" is not declared in requires.binaries"
+                                ),
+                                hint: Some(
+                                    "Add the binary to manifest.requires.binaries so the install/enable chain can probe it.".into(),
+                                ),
+                            });
+                        }
+                    }
+                    _ => out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.binary.name"),
+                        code: "manifest.cliTools.binary.name.missing".into(),
+                        message: format!("{field}.binary requires a non-empty \"name\""),
+                        hint: None,
+                    }),
+                },
+                Some("plugin-dir") => {
+                    let rel_ok = binary
+                        .get("relPath")
+                        .and_then(Value::as_str)
+                        .map(|p| !cli_has_path_traversal(p))
+                        .unwrap_or(false);
+                    if !rel_ok {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.binary.relPath"),
+                            code: "manifest.cliTools.binary.relPath.invalid".into(),
+                            message: format!(
+                                "{field}.binary.relPath must be a relative path inside the plugin directory (no \"..\", no absolute paths)"
+                            ),
+                            hint: None,
+                        });
+                    }
+                }
+                _ => out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.binary.kind"),
+                    code: "manifest.cliTools.binary.kind.invalid".into(),
+                    message: format!("{field}.binary.kind must be \"requires\" or \"plugin-dir\""),
+                    hint: None,
+                }),
+            },
+        }
+
+        // argv tokens
+        match tool.get("argv").and_then(Value::as_array) {
+            None => out.push(Diagnostic {
+                severity: Severity::Error,
+                field: format!("{field}.argv"),
+                code: "manifest.cliTools.argv.missing".into(),
+                message: format!("{field} requires an \"argv\" token array (may be empty)"),
+                hint: None,
+            }),
+            Some(tokens) => {
+                for (j, token) in tokens.iter().enumerate() {
+                    let token_field = format!("{field}.argv[{j}]");
+                    let Some(tk) = token.as_object() else {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: token_field.clone(),
+                            code: "manifest.cliTools.argv.token.invalid".into(),
+                            message: format!("{token_field} must be a {{ literal }} or {{ param }} object"),
+                            hint: None,
+                        });
+                        continue;
+                    };
+                    let is_literal = tk.get("literal").map(Value::is_string).unwrap_or(false);
+                    let is_param = tk.get("param").map(Value::is_string).unwrap_or(false);
+                    if is_literal == is_param {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: token_field.clone(),
+                            code: "manifest.cliTools.argv.token.invalid".into(),
+                            message: format!(
+                                "{token_field} must have exactly one of \"literal\" (string) or \"param\" (string)"
+                            ),
+                            hint: None,
+                        });
+                        continue;
+                    }
+                    if is_param {
+                        let param = tk.get("param").and_then(Value::as_str).unwrap_or("");
+                        if !has_param(param) {
+                            out.push(Diagnostic {
+                                severity: Severity::Error,
+                                field: format!("{token_field}.param"),
+                                code: "manifest.cliTools.argv.param.undeclared".into(),
+                                message: format!(
+                                    "{token_field} references undeclared parameter \"{param}\""
+                                ),
+                                hint: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // stdin.param must be declared
+        if let Some(stdin) = tool.get("stdin") {
+            let ok = stdin
+                .get("param")
+                .and_then(Value::as_str)
+                .map(has_param)
+                .unwrap_or(false);
+            if !ok {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.stdin"),
+                    code: "manifest.cliTools.stdin.invalid".into(),
+                    message: format!("{field}.stdin must be {{ \"param\": <declared parameter name> }}"),
+                    hint: None,
+                });
+            }
+        }
+
+        // cwd policy
+        if let Some(cwd) = tool.get("cwd") {
+            match cwd.get("kind").and_then(Value::as_str) {
+                Some("plugin-dir") | Some("workspace") | Some("none") => {}
+                Some("param") => {
+                    let ok = cwd
+                        .get("param")
+                        .and_then(Value::as_str)
+                        .map(has_param)
+                        .unwrap_or(false);
+                    if !ok {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.cwd.param"),
+                            code: "manifest.cliTools.cwd.param.undeclared".into(),
+                            message: format!("{field}.cwd references an undeclared parameter"),
+                            hint: None,
+                        });
+                    }
+                }
+                _ => out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.cwd"),
+                    code: "manifest.cliTools.cwd.invalid".into(),
+                    message: format!(
+                        "{field}.cwd.kind must be one of: plugin-dir, workspace, param, none"
+                    ),
+                    hint: None,
+                }),
+            }
+        }
+
+        // env: flat string map
+        if let Some(env) = tool.get("env") {
+            let ok = env
+                .as_object()
+                .map(|map| map.values().all(Value::is_string))
+                .unwrap_or(false);
+            if !ok {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.env"),
+                    code: "manifest.cliTools.env.invalid".into(),
+                    message: format!("{field}.env must be a flat map of string values"),
+                    hint: None,
+                });
+            }
+        }
+
+        // numeric knobs + outputParse + successExitCodes + versionArg
+        if let Some(timeout) = tool.get("timeoutMs") {
+            if !timeout.as_f64().map(|t| t > 0.0).unwrap_or(false) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.timeoutMs"),
+                    code: "manifest.cliTools.timeoutMs.invalid".into(),
+                    message: format!("{field}.timeoutMs must be a positive number of milliseconds"),
+                    hint: None,
+                });
+            }
+        }
+        if let Some(max) = tool.get("maxOutputBytes") {
+            if !max.as_i64().map(|m| m > 0).unwrap_or(false) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.maxOutputBytes"),
+                    code: "manifest.cliTools.maxOutputBytes.invalid".into(),
+                    message: format!("{field}.maxOutputBytes must be a positive integer"),
+                    hint: None,
+                });
+            }
+        }
+        if let Some(parse) = tool.get("outputParse") {
+            if !matches!(parse.as_str(), Some("text") | Some("json") | Some("lines")) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.outputParse"),
+                    code: "manifest.cliTools.outputParse.invalid".into(),
+                    message: format!("{field}.outputParse must be one of: text, json, lines"),
+                    hint: None,
+                });
+            }
+        }
+        if let Some(codes) = tool.get("successExitCodes") {
+            let ok = codes
+                .as_array()
+                .map(|arr| arr.iter().all(|c| c.as_i64().is_some()))
+                .unwrap_or(false);
+            if !ok {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.successExitCodes"),
+                    code: "manifest.cliTools.successExitCodes.invalid".into(),
+                    message: format!("{field}.successExitCodes must be an array of integers"),
+                    hint: None,
+                });
+            }
+        }
+        if let Some(version_arg) = tool.get("versionArg") {
+            if !version_arg.is_string() {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.versionArg"),
+                    code: "manifest.cliTools.versionArg.invalid".into(),
+                    message: format!("{field}.versionArg must be a string"),
+                    hint: None,
+                });
+            }
+        }
+    }
+}
+
+/// `[a-z][a-z0-9_]*` — same rule as the TS validator.
+fn is_cli_tool_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Declared parameter names from the JSON-schema `parameters` object.
+fn cli_declared_params(parameters: Option<&Value>) -> Option<Vec<&str>> {
+    let schema = parameters?.as_object()?;
+    if let Some(ty) = schema.get("type") {
+        if ty.as_str() != Some("object") {
+            return None;
+        }
+    }
+    let properties = schema.get("properties")?.as_object()?;
+    Some(properties.keys().map(String::as_str).collect())
+}
+
+/// Absolute paths and `..` segments can escape the plugin dir.
+fn cli_has_path_traversal(rel_path: &str) -> bool {
+    if rel_path.is_empty() || rel_path.starts_with('/') || rel_path.starts_with('\\') {
+        return true;
+    }
+    let bytes = rel_path.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return true;
+    }
+    rel_path
+        .split(['/', '\\'])
+        .any(|segment| segment == "..")
+}
+
 fn require_string(
     obj: &serde_json::Map<String, Value>,
     field: &str,
@@ -978,6 +1384,121 @@ mod tests {
             "capabilities": ["tools"],
             "main": "dist/index.js"
         })
+    }
+
+    fn cli_manifest() -> Value {
+        json!({
+            "id": "cli-demo",
+            "name": "CLI Demo",
+            "version": "0.1.0",
+            "description": "demo",
+            "type": "frontend",
+            "capabilities": ["cli-tools"],
+            "main": "dist/index.js",
+            "permissions": ["cli:execute"],
+            "requires": { "binaries": [{ "name": "rg" }] },
+            "cliTools": [{
+                "name": "ripgrep_search",
+                "description": "Search files",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string" },
+                        "globs": { "type": "array" }
+                    }
+                },
+                "binary": { "kind": "requires", "name": "rg" },
+                "argv": [
+                    { "literal": "--json" },
+                    { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
+                    { "param": "pattern" }
+                ],
+                "outputParse": "lines",
+                "successExitCodes": [0, 1]
+            }]
+        })
+    }
+
+    #[test]
+    fn cli_tools_valid_manifest_is_clean() {
+        assert_clean(cli_manifest());
+    }
+
+    #[test]
+    fn cli_tools_require_cli_execute_permission() {
+        let mut m = cli_manifest();
+        m["permissions"] = json!([]);
+        assert_has_error_code(m, "manifest.cliTools.permission.missing");
+    }
+
+    #[test]
+    fn cli_tools_reject_undeclared_requires_binary() {
+        let mut m = cli_manifest();
+        m["cliTools"][0]["binary"]["name"] = json!("ffmpeg");
+        assert_has_error_code(m, "manifest.cliTools.binary.name.undeclared");
+    }
+
+    #[test]
+    fn cli_tools_reject_plugin_dir_traversal() {
+        for bad in ["../evil.exe", "/usr/bin/evil", "C:\\evil.exe", "a/../../b"] {
+            let mut m = cli_manifest();
+            m["cliTools"][0]["binary"] = json!({ "kind": "plugin-dir", "relPath": bad });
+            assert_has_error_code(m, "manifest.cliTools.binary.relPath.invalid");
+        }
+        let mut m = cli_manifest();
+        m["cliTools"][0]["binary"] = json!({ "kind": "plugin-dir", "relPath": "bin/tool.exe" });
+        assert_clean(m);
+    }
+
+    #[test]
+    fn cli_tools_reject_undeclared_argv_param_and_bad_tokens() {
+        let mut m = cli_manifest();
+        m["cliTools"][0]["argv"] = json!([
+            { "param": "ghost" },
+            { "literal": "-x", "param": "pattern" },
+            {}
+        ]);
+        assert_has_error_code(m.clone(), "manifest.cliTools.argv.param.undeclared");
+        assert_has_error_code(m, "manifest.cliTools.argv.token.invalid");
+    }
+
+    #[test]
+    fn cli_tools_reject_bad_stdin_cwd_env_and_knobs() {
+        let mut m = cli_manifest();
+        m["cliTools"][0]["stdin"] = json!({ "param": "ghost" });
+        m["cliTools"][0]["cwd"] = json!({ "kind": "anywhere" });
+        m["cliTools"][0]["env"] = json!({ "GOOD": "1", "BAD": 2 });
+        m["cliTools"][0]["timeoutMs"] = json!(-5);
+        m["cliTools"][0]["maxOutputBytes"] = json!(1.5);
+        m["cliTools"][0]["outputParse"] = json!("yaml");
+        m["cliTools"][0]["successExitCodes"] = json!([0, "ok"]);
+        for code in [
+            "manifest.cliTools.stdin.invalid",
+            "manifest.cliTools.cwd.invalid",
+            "manifest.cliTools.env.invalid",
+            "manifest.cliTools.timeoutMs.invalid",
+            "manifest.cliTools.maxOutputBytes.invalid",
+            "manifest.cliTools.outputParse.invalid",
+            "manifest.cliTools.successExitCodes.invalid",
+        ] {
+            assert_has_error_code(m.clone(), code);
+        }
+    }
+
+    #[test]
+    fn cli_tools_reject_duplicates_bad_name_and_parameters_shape() {
+        let mut m = cli_manifest();
+        let dup = m["cliTools"][0].clone();
+        m["cliTools"].as_array_mut().unwrap().push(dup);
+        assert_has_error_code(m, "manifest.cliTools.name.duplicate");
+
+        let mut m = cli_manifest();
+        m["cliTools"][0]["name"] = json!("Bad-Name");
+        assert_has_error_code(m, "manifest.cliTools.name.invalid");
+
+        let mut m = cli_manifest();
+        m["cliTools"][0]["parameters"] = json!({ "type": "string" });
+        assert_has_error_code(m, "manifest.cliTools.parameters.invalid");
     }
 
     fn minimal_wasm() -> Value {

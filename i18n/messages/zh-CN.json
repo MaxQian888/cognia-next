@@ -7644,6 +7644,14 @@
         "exited": "宿主进程已退出",
         "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用"
       },
+      "cliTools": {
+        "title": "CLI 工具",
+        "reprobe": "重新检测",
+        "available": "可用 {version}",
+        "belowMin": "低于要求的 {min}",
+        "missing": "未安装",
+        "installHelp": "安装指引"
+      },
       "pythonHost": {
         "title": "Python 宿主设置",
         "description": "该插件宿主进程的运行时参数,下次加载时生效。",

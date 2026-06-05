@@ -39,14 +39,17 @@ pub struct TerminalExecResult {
 ///
 /// `cwd` sets the working directory; `env` entries are layered onto the
 /// inherited environment; `timeout_ms` bounds the run (clamped to
-/// [`MAX_TIMEOUT_MS`]). Returns an `Err(String)` only when the child cannot be
-/// spawned at all — a non-zero exit is a successful RPC with `exit_code` set.
+/// [`MAX_TIMEOUT_MS`]); `stdin_data`, when set, is piped into the child's
+/// stdin (then closed). Returns an `Err(String)` only when the child cannot
+/// be spawned at all — a non-zero exit is a successful RPC with `exit_code`
+/// set.
 pub async fn terminal_exec_inner(
     cwd: Option<String>,
     command: String,
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
     timeout_ms: Option<u64>,
+    stdin_data: Option<String>,
 ) -> Result<TerminalExecResult, String> {
     if command.trim().is_empty() {
         return Err("terminal_exec.command must not be empty".to_string());
@@ -56,10 +59,22 @@ pub async fn terminal_exec_inner(
 
     let mut cmd = Command::new(&command);
     cmd.args(&args)
-        .stdin(Stdio::null())
+        .stdin(if stdin_data.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    // No console flash in release builds (same flag every other spawn in the
+    // codebase applies — sidecar, python host, hooks).
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     if let Some(dir) = cwd.as_ref() {
         cmd.current_dir(dir);
@@ -70,9 +85,19 @@ pub async fn terminal_exec_inner(
         }
     }
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn '{command}': {e}"))?;
+
+    if let Some(data) = stdin_data {
+        use tokio::io::AsyncWriteExt;
+        if let Some(mut stdin) = child.stdin.take() {
+            // Write-then-drop closes the pipe so line-readers see EOF.
+            if let Err(e) = stdin.write_all(data.as_bytes()).await {
+                return Err(format!("stdin write '{command}': {e}"));
+            }
+        }
+    }
 
     match tokio::time::timeout(Duration::from_millis(budget), child.wait_with_output()).await {
         Ok(Ok(output)) => Ok(TerminalExecResult {
@@ -102,7 +127,7 @@ pub async fn terminal_exec(
     env: Option<HashMap<String, String>>,
     timeout_ms: Option<u64>,
 ) -> Result<TerminalExecResult, String> {
-    terminal_exec_inner(cwd, command, args.unwrap_or_default(), env, timeout_ms).await
+    terminal_exec_inner(cwd, command, args.unwrap_or_default(), env, timeout_ms, None).await
 }
 
 #[cfg(test)]
@@ -120,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn runs_a_command_and_captures_stdout() {
         let (cmd, args) = echo();
-        let res = terminal_exec_inner(None, cmd, args, None, None)
+        let res = terminal_exec_inner(None, cmd, args, None, None, None)
             .await
             .expect("exec ok");
         assert!(res.stdout.contains("hello"));
@@ -130,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_command_is_rejected() {
-        let err = terminal_exec_inner(None, "  ".to_string(), vec![], None, None)
+        let err = terminal_exec_inner(None, "  ".to_string(), vec![], None, None, None)
             .await
             .unwrap_err();
         assert!(err.contains("must not be empty"));
@@ -142,6 +167,7 @@ mod tests {
             None,
             "definitely_not_a_real_binary_xyz".to_string(),
             vec![],
+            None,
             None,
             None,
         )
@@ -160,9 +186,24 @@ mod tests {
         };
         let mut env = HashMap::new();
         env.insert("COGNIA_EXEC_TEST".to_string(), "marker42".to_string());
-        let res = terminal_exec_inner(None, cmd, args, Some(env), None)
+        let res = terminal_exec_inner(None, cmd, args, Some(env), None, None)
             .await
             .expect("exec ok");
         assert!(res.stdout.contains("marker42"));
+    }
+
+    #[tokio::test]
+    async fn pipes_stdin_data_into_the_child() {
+        // `more` (Windows) / `cat` (Unix) echo stdin to stdout.
+        let (cmd, args) = if cfg!(windows) {
+            ("cmd".to_string(), vec!["/C".into(), "more".into()])
+        } else {
+            ("cat".to_string(), vec![])
+        };
+        let res = terminal_exec_inner(None, cmd, args, None, None, Some("ping-pong\n".into()))
+            .await
+            .expect("exec ok");
+        assert!(res.stdout.contains("ping-pong"));
+        assert_eq!(res.exit_code, Some(0));
     }
 }

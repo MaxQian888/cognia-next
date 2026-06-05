@@ -1600,7 +1600,7 @@ pub(super) async fn dispatch(
             let cwd: Option<String> = optional(&args, "cwd")?;
             let env: Option<std::collections::HashMap<String, String>> = optional(&args, "env")?;
             let timeout_ms: Option<u64> = optional(&args, "timeoutMs")?;
-            crate::terminal::exec::terminal_exec_inner(cwd, command, exec_args, env, timeout_ms)
+            crate::terminal::exec::terminal_exec_inner(cwd, command, exec_args, env, timeout_ms, None)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)

@@ -108,6 +108,7 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "companion:read",
   "companion:control",
   "companion:goal-control",
+  "cli:execute",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [
@@ -705,6 +706,14 @@ export function validatePluginManifest(
         )
       }
     }
+  }
+
+  // cliTools[] — declarative CLI wrappers. Strict by design: a malformed
+  // entry could otherwise turn into an argv-injection or path-escape hole,
+  // so every structural rule the executor relies on is enforced at author
+  // time (argv params declared, binary refs resolvable, no traversal).
+  if (m.cliTools !== undefined) {
+    validateCliTools(m as unknown as PluginManifest, pushError)
   }
 
   if (m.modes && Array.isArray(m.modes)) {
@@ -1327,4 +1336,305 @@ export function parseManifest(content: string): PluginManifest | null {
     loggers.manager.error("Failed to parse plugin manifest:", error)
     return null
   }
+}
+
+// =============================================================================
+// cliTools validation (declarative CLI wrappers)
+// =============================================================================
+
+const CLI_TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*$/
+const CLI_OUTPUT_PARSE_VALUES = new Set(["text", "json", "lines"])
+const CLI_CWD_KINDS = new Set(["plugin-dir", "workspace", "param", "none"])
+const CLI_BINARY_KINDS = new Set(["requires", "plugin-dir"])
+
+/**
+ * Declared parameter names from a cliTool's JSON-schema `parameters`
+ * object. The executor builds zod from the same shape, so validation
+ * insists on the canonical `{ type?: "object", properties: { … } }` form.
+ * Returns null when the shape is unusable.
+ */
+function cliDeclaredParams(parameters: unknown): Set<string> | null {
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
+    return null
+  }
+  const schema = parameters as Record<string, unknown>
+  if (schema.type !== undefined && schema.type !== "object") {
+    return null
+  }
+  const properties = schema.properties
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    return null
+  }
+  return new Set(Object.keys(properties))
+}
+
+/** Absolute paths and `..` segments can escape the plugin dir. */
+function cliHasPathTraversal(relPath: string): boolean {
+  if (relPath.length === 0) return true
+  if (relPath.startsWith("/") || relPath.startsWith("\\")) return true
+  if (/^[A-Za-z]:/.test(relPath)) return true
+  return relPath.split(/[\\/]+/).some((segment) => segment === "..")
+}
+
+type PushDiagnostic = (field: string, code: string, message: string, hint?: string) => void
+
+/**
+ * Structural validation for `manifest.cliTools[]`. Strict on purpose —
+ * every rule here is one the executor's safety model relies on (argv
+ * params declared, binary refs resolvable, no path traversal).
+ */
+function validateCliTools(m: PluginManifest, pushError: PushDiagnostic): void {
+  const cliTools = m.cliTools as unknown
+  if (!Array.isArray(cliTools)) {
+    pushError("cliTools", "manifest.cliTools.invalid", '"cliTools" must be an array')
+    return
+  }
+  if (cliTools.length > 0 && !(m.permissions ?? []).includes("cli:execute")) {
+    pushError(
+      "permissions",
+      "manifest.cliTools.permission.missing",
+      'cliTools entries require the "cli:execute" permission',
+      'Add "cli:execute" to "permissions".'
+    )
+  }
+
+  const requiredBinaryNames = new Set(
+    (Array.isArray(m.requires?.binaries) ? m.requires.binaries : [])
+      .map((entry) => (entry as { name?: unknown } | null | undefined)?.name)
+      .filter((name): name is string => typeof name === "string")
+  )
+  const seenNames = new Set<string>()
+
+  cliTools.forEach((entry, i) => {
+    const field = `cliTools[${i}]`
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      pushError(field, "manifest.cliTools.entry.invalid", `${field} must be an object`)
+      return
+    }
+    const tool = entry as Record<string, unknown>
+
+    if (typeof tool.name !== "string" || !CLI_TOOL_NAME_PATTERN.test(tool.name)) {
+      pushError(
+        `${field}.name`,
+        "manifest.cliTools.name.invalid",
+        `${field}.name must match ${CLI_TOOL_NAME_PATTERN} (snake_case)`
+      )
+    } else if (seenNames.has(tool.name)) {
+      pushError(
+        `${field}.name`,
+        "manifest.cliTools.name.duplicate",
+        `${field}.name "${tool.name}" is declared more than once`
+      )
+    } else {
+      seenNames.add(tool.name)
+    }
+
+    if (!tool.description || typeof tool.description !== "string") {
+      pushError(
+        `${field}.description`,
+        "manifest.cliTools.description.missing",
+        `${field} requires a non-empty "description" string`
+      )
+    }
+
+    const declaredParams = cliDeclaredParams(tool.parameters)
+    if (declaredParams === null) {
+      pushError(
+        `${field}.parameters`,
+        "manifest.cliTools.parameters.invalid",
+        `${field}.parameters must be a JSON-schema object: { "type": "object", "properties": { … } }`
+      )
+    }
+    const hasParam = (name: string): boolean => declaredParams?.has(name) ?? false
+
+    const binary = tool.binary as Record<string, unknown> | undefined
+    if (!binary || typeof binary !== "object" || Array.isArray(binary)) {
+      pushError(
+        `${field}.binary`,
+        "manifest.cliTools.binary.missing",
+        `${field} requires a "binary" reference object`
+      )
+    } else if (!CLI_BINARY_KINDS.has(binary.kind as string)) {
+      pushError(
+        `${field}.binary.kind`,
+        "manifest.cliTools.binary.kind.invalid",
+        `${field}.binary.kind must be "requires" or "plugin-dir"`
+      )
+    } else if (binary.kind === "requires") {
+      if (typeof binary.name !== "string" || binary.name.length === 0) {
+        pushError(
+          `${field}.binary.name`,
+          "manifest.cliTools.binary.name.missing",
+          `${field}.binary requires a non-empty "name"`
+        )
+      } else if (!requiredBinaryNames.has(binary.name)) {
+        pushError(
+          `${field}.binary.name`,
+          "manifest.cliTools.binary.name.undeclared",
+          `${field}.binary.name "${binary.name}" is not declared in requires.binaries`,
+          "Add the binary to manifest.requires.binaries so the install/enable chain can probe it."
+        )
+      }
+    } else if (binary.kind === "plugin-dir") {
+      if (typeof binary.relPath !== "string" || cliHasPathTraversal(binary.relPath)) {
+        pushError(
+          `${field}.binary.relPath`,
+          "manifest.cliTools.binary.relPath.invalid",
+          `${field}.binary.relPath must be a relative path inside the plugin directory (no "..", no absolute paths)`
+        )
+      }
+    }
+
+    if (!Array.isArray(tool.argv)) {
+      pushError(
+        `${field}.argv`,
+        "manifest.cliTools.argv.missing",
+        `${field} requires an "argv" token array (may be empty)`
+      )
+    } else {
+      tool.argv.forEach((token, j) => {
+        const tokenField = `${field}.argv[${j}]`
+        if (!token || typeof token !== "object" || Array.isArray(token)) {
+          pushError(
+            tokenField,
+            "manifest.cliTools.argv.token.invalid",
+            `${tokenField} must be a { literal } or { param } object`
+          )
+          return
+        }
+        const tk = token as Record<string, unknown>
+        const isLiteral = typeof tk.literal === "string"
+        const isParam = typeof tk.param === "string"
+        if (isLiteral === isParam) {
+          pushError(
+            tokenField,
+            "manifest.cliTools.argv.token.invalid",
+            `${tokenField} must have exactly one of "literal" (string) or "param" (string)`
+          )
+          return
+        }
+        if (isParam && !hasParam(tk.param as string)) {
+          pushError(
+            `${tokenField}.param`,
+            "manifest.cliTools.argv.param.undeclared",
+            `${tokenField} references undeclared parameter "${tk.param}"`
+          )
+        }
+        if (tk.eachPrefixedBy !== undefined && typeof tk.eachPrefixedBy !== "string") {
+          pushError(
+            `${tokenField}.eachPrefixedBy`,
+            "manifest.cliTools.argv.eachPrefixedBy.invalid",
+            `${tokenField}.eachPrefixedBy must be a string`
+          )
+        }
+      })
+    }
+
+    if (tool.stdin !== undefined) {
+      const stdin = tool.stdin as Record<string, unknown> | null
+      if (
+        !stdin ||
+        typeof stdin !== "object" ||
+        Array.isArray(stdin) ||
+        typeof stdin.param !== "string" ||
+        !hasParam(stdin.param)
+      ) {
+        pushError(
+          `${field}.stdin`,
+          "manifest.cliTools.stdin.invalid",
+          `${field}.stdin must be { "param": <declared parameter name> }`
+        )
+      }
+    }
+
+    if (tool.cwd !== undefined) {
+      const cwd = tool.cwd as Record<string, unknown> | null
+      if (!cwd || typeof cwd !== "object" || !CLI_CWD_KINDS.has(cwd.kind as string)) {
+        pushError(
+          `${field}.cwd`,
+          "manifest.cliTools.cwd.invalid",
+          `${field}.cwd.kind must be one of: plugin-dir, workspace, param, none`
+        )
+      } else if (cwd.kind === "param" && (typeof cwd.param !== "string" || !hasParam(cwd.param))) {
+        pushError(
+          `${field}.cwd.param`,
+          "manifest.cliTools.cwd.param.undeclared",
+          `${field}.cwd references an undeclared parameter`
+        )
+      }
+    }
+
+    if (tool.env !== undefined) {
+      const env = tool.env
+      const isStringMap =
+        env !== null &&
+        typeof env === "object" &&
+        !Array.isArray(env) &&
+        Object.values(env as Record<string, unknown>).every((value) => typeof value === "string")
+      if (!isStringMap) {
+        pushError(
+          `${field}.env`,
+          "manifest.cliTools.env.invalid",
+          `${field}.env must be a flat map of string values`
+        )
+      }
+    }
+
+    if (
+      tool.timeoutMs !== undefined &&
+      (typeof tool.timeoutMs !== "number" ||
+        !Number.isFinite(tool.timeoutMs) ||
+        tool.timeoutMs <= 0)
+    ) {
+      pushError(
+        `${field}.timeoutMs`,
+        "manifest.cliTools.timeoutMs.invalid",
+        `${field}.timeoutMs must be a positive number of milliseconds`
+      )
+    }
+
+    if (
+      tool.maxOutputBytes !== undefined &&
+      (typeof tool.maxOutputBytes !== "number" ||
+        !Number.isInteger(tool.maxOutputBytes) ||
+        tool.maxOutputBytes <= 0)
+    ) {
+      pushError(
+        `${field}.maxOutputBytes`,
+        "manifest.cliTools.maxOutputBytes.invalid",
+        `${field}.maxOutputBytes must be a positive integer`
+      )
+    }
+
+    if (
+      tool.outputParse !== undefined &&
+      !CLI_OUTPUT_PARSE_VALUES.has(tool.outputParse as string)
+    ) {
+      pushError(
+        `${field}.outputParse`,
+        "manifest.cliTools.outputParse.invalid",
+        `${field}.outputParse must be one of: text, json, lines`
+      )
+    }
+
+    if (
+      tool.successExitCodes !== undefined &&
+      (!Array.isArray(tool.successExitCodes) ||
+        tool.successExitCodes.some((code) => !Number.isInteger(code)))
+    ) {
+      pushError(
+        `${field}.successExitCodes`,
+        "manifest.cliTools.successExitCodes.invalid",
+        `${field}.successExitCodes must be an array of integers`
+      )
+    }
+
+    if (tool.versionArg !== undefined && typeof tool.versionArg !== "string") {
+      pushError(
+        `${field}.versionArg`,
+        "manifest.cliTools.versionArg.invalid",
+        `${field}.versionArg must be a string`
+      )
+    }
+  })
 }

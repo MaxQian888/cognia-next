@@ -7644,6 +7644,14 @@
         "exited": "Host process exited",
         "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls"
       },
+      "cliTools": {
+        "title": "CLI tools",
+        "reprobe": "Re-check",
+        "available": "Available {version}",
+        "belowMin": "Below required {min}",
+        "missing": "Not installed",
+        "installHelp": "Install help"
+      },
       "pythonHost": {
         "title": "Python host settings",
         "description": "Runtime knobs for this plugin's host process. Applied on the next load.",

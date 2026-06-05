@@ -3,6 +3,7 @@
  */
 
 export * from "./plugin"
+export * from "./plugin-cli-tool"
 export * from "./plugin-extended"
 export * from "./plugin-hooks"
 export * from "./plugin-mcp-preset"
