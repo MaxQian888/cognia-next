@@ -54,6 +54,9 @@ export type WorkflowNodeKind =
   | "action.skill.upsert"
   | "action.twin.rag"
   | "action.twin.ingest"
+  // Autonomous long-term memory (lib/memory): hybrid recall + explicit store.
+  | "action.memory.recall"
+  | "action.memory.store"
   | "action.connector.send"
   | "action.connector.draft"
   | "action.mcp.invokeTool"
@@ -210,6 +213,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.skill.upsert",
   "action.twin.rag",
   "action.twin.ingest",
+  "action.memory.recall",
+  "action.memory.store",
   "action.connector.send",
   "action.connector.draft",
   "action.mcp.invokeTool",

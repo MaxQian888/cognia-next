@@ -180,6 +180,19 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Brain",
     keywords: ["twin", "ingest", "import", "embed"],
   },
+  "action.memory.recall": {
+    label: "Recall memory",
+    description: "Hybrid-search the long-term memory store (BM25 + vectors when configured).",
+    iconName: "Brain",
+    keywords: ["memory", "recall", "remember", "search", "long-term"],
+  },
+  "action.memory.store": {
+    label: "Store memory",
+    description:
+      "Store one durable fact into long-term memory via the shared consolidator (PII-gated).",
+    iconName: "Save",
+    keywords: ["memory", "store", "remember", "save", "long-term"],
+  },
   "action.connector.send": {
     label: "Send via connector",
     description: "Pushes a message through the outbound queue of a connected adapter.",

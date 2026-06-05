@@ -16614,6 +16614,16 @@
             "description": "为数字分身的导入流水线排队新的数据源。"
           }
         },
+        "memory": {
+          "recall": {
+            "label": "记忆召回",
+            "description": "对长期记忆库做混合检索（BM25 + 已配置时的向量检索）。"
+          },
+          "store": {
+            "label": "写入记忆",
+            "description": "经共享整合器把一条持久事实写入长期记忆（强制 PII 防护）。"
+          }
+        },
         "connector": {
           "send": {
             "label": "通过连接器发送",
@@ -17623,6 +17633,46 @@
         "goal": {
           "label": "目标 / 简介",
           "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。"
+        }
+      },
+      "memoryRecall": {
+        "query": {
+          "label": "查询"
+        },
+        "scope": {
+          "label": "作用域",
+          "global": "全局",
+          "character": "角色"
+        },
+        "topK": {
+          "label": "Top K"
+        },
+        "characterId": {
+          "label": "角色"
+        }
+      },
+      "memoryStore": {
+        "text": {
+          "label": "事实",
+          "hint": "一条自洽的陈述。会经整合器与既有记忆去重。"
+        },
+        "scope": {
+          "label": "作用域",
+          "global": "全局",
+          "character": "角色"
+        },
+        "importance": {
+          "label": "重要度（1–10）",
+          "hint": "这条事实有多关键。/remember 使用 7。"
+        },
+        "characterId": {
+          "label": "角色"
+        },
+        "piiGate": {
+          "label": "PII 防护",
+          "hint": "记忆会持久保存——拦截（含 PII 即失败）或脱敏占位符。不可关闭。",
+          "block": "拦截（步骤失败）",
+          "redact": "脱敏占位符"
         }
       },
       "agentTurn": {

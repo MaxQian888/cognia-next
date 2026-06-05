@@ -77,6 +77,8 @@ import {
   ContinueConfig,
   ManualTriggerConfig,
   McpInvokeToolConfig,
+  MemoryRecallConfig,
+  MemoryStoreConfig,
   NoteConfig,
   PluginInvokeConfig,
   SetVariableConfig,
@@ -141,6 +143,9 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Actions: twins
   "action.twin.rag": TwinRagConfig,
   "action.twin.ingest": TwinIngestConfig,
+  // Actions: memory
+  "action.memory.recall": MemoryRecallConfig,
+  "action.memory.store": MemoryStoreConfig,
   // Actions: connectors
   "action.connector.send": ConnectorSendConfig,
   "action.connector.draft": ConnectorDraftConfig,

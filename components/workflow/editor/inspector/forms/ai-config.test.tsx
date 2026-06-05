@@ -49,7 +49,14 @@ jest.mock("./shared/entity-picker", () => ({
   ),
 }))
 
-import { AgentTurnConfig, AiPromptConfig, AiExtractConfig, AiEmbedConfig } from "./index"
+import {
+  AgentTurnConfig,
+  AiPromptConfig,
+  AiExtractConfig,
+  AiEmbedConfig,
+  MemoryRecallConfig,
+  MemoryStoreConfig,
+} from "./index"
 
 function wrap(ui: React.ReactElement) {
   return render(
@@ -160,6 +167,42 @@ describe("AgentTurnConfig", () => {
       </NextIntlClientProvider>
     )
     expect(screen.queryByLabelText("Require tools")).toBeNull()
+  })
+})
+
+describe("MemoryRecallConfig", () => {
+  it("edits the query and shows the character picker only for character scope", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<MemoryRecallConfig params={{}} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText(/^Query/), { target: { value: "ship day" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ query: "ship day" }))
+    expect(screen.queryByLabelText(/^Character\b/)).toBeNull()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MemoryRecallConfig params={{ scope: "character" }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByLabelText(/^Character\b/)).toBeInTheDocument()
+  })
+})
+
+describe("MemoryStoreConfig", () => {
+  it("edits the fact text and importance", () => {
+    const onChange = jest.fn()
+    wrap(<MemoryStoreConfig params={{}} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText(/^Fact/), { target: { value: "User ships Fridays" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ text: "User ships Fridays" }))
+
+    fireEvent.change(screen.getByLabelText("Importance (1–10)"), { target: { value: "9" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ importance: 9 }))
+  })
+
+  it("defaults the PII gate select to block", () => {
+    wrap(<MemoryStoreConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByLabelText("PII gate")).toHaveTextContent("Block (fail the step)")
   })
 })
 

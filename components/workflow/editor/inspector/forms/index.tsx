@@ -1639,6 +1639,133 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.memory.recall ──────────────────────────────────────────────────
+export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.memoryRecall")
+  const query = readString(params, "query")
+  const scope = readString(params, "scope", "global")
+  const characterId = readString(params, "characterId")
+  const topK = readNumber(params, "topK", 6)
+  return (
+    <FieldGroup>
+      <Field label={t("query.label")} htmlFor="mr-query" name="query" required>
+        <ExpressionField
+          id="mr-query"
+          value={query}
+          onChange={(v) => onChange(patchParam(params, "query", v))}
+          multiline
+          rows={2}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("scope.label")} htmlFor="mr-scope" name="scope">
+          <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
+            <SelectTrigger id="mr-scope">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="global">{t("scope.global")}</SelectItem>
+              <SelectItem value="character">{t("scope.character")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t("topK.label")} htmlFor="mr-topk" name="topK">
+          <Input
+            id="mr-topk"
+            type="number"
+            min={1}
+            max={50}
+            value={topK}
+            onChange={(e) => onChange(patchParam(params, "topK", Number(e.target.value) || 1))}
+          />
+        </Field>
+      </div>
+      {scope === "character" ? (
+        <Field label={t("characterId.label")} htmlFor="mr-char" name="characterId" required>
+          <CharacterPicker
+            id="mr-char"
+            value={characterId}
+            onChange={(v) => onChange(patchParam(params, "characterId", v))}
+          />
+        </Field>
+      ) : null}
+    </FieldGroup>
+  )
+}
+
+// ── action.memory.store ───────────────────────────────────────────────────
+export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.memoryStore")
+  const text = readString(params, "text")
+  const scope = readString(params, "scope", "global")
+  const characterId = readString(params, "characterId")
+  const importance = readNumber(params, "importance", 7)
+  const piiGate = readString(params, "piiGate", "block")
+  return (
+    <FieldGroup>
+      <Field label={t("text.label")} htmlFor="ms-text" hint={t("text.hint")} name="text" required>
+        <ExpressionField
+          id="ms-text"
+          value={text}
+          onChange={(v) => onChange(patchParam(params, "text", v))}
+          multiline
+          rows={3}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("scope.label")} htmlFor="ms-scope" name="scope">
+          <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
+            <SelectTrigger id="ms-scope">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="global">{t("scope.global")}</SelectItem>
+              <SelectItem value="character">{t("scope.character")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("importance.label")}
+          htmlFor="ms-imp"
+          hint={t("importance.hint")}
+          name="importance"
+        >
+          <Input
+            id="ms-imp"
+            type="number"
+            min={1}
+            max={10}
+            value={importance}
+            onChange={(e) =>
+              onChange(patchParam(params, "importance", Number(e.target.value) || 1))
+            }
+          />
+        </Field>
+      </div>
+      {scope === "character" ? (
+        <Field label={t("characterId.label")} htmlFor="ms-char" name="characterId" required>
+          <CharacterPicker
+            id="ms-char"
+            value={characterId}
+            onChange={(v) => onChange(patchParam(params, "characterId", v))}
+          />
+        </Field>
+      ) : null}
+      <Field label={t("piiGate.label")} htmlFor="ms-pii" hint={t("piiGate.hint")} name="piiGate">
+        <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
+          <SelectTrigger id="ms-pii">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="block">{t("piiGate.block")}</SelectItem>
+            <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // ── action.mcp.invokeTool ─────────────────────────────────────────────────
 export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.mcpInvokeTool")

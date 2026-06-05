@@ -55,6 +55,8 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "action.skill.upsert": SparklesIcon,
   "action.twin.rag": BrainIcon,
   "action.twin.ingest": BrainIcon,
+  "action.memory.recall": BrainIcon,
+  "action.memory.store": BrainIcon,
   "action.connector.send": SendIcon,
   "action.connector.draft": DraftIcon,
   "action.mcp.invokeTool": McpIcon,

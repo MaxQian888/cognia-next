@@ -1075,6 +1075,24 @@ registerNodeExecutor({
   execute: async (ctx) => (await import("./actions/agent-turn")).runAgentTurn(ctx),
 })
 
+// ── action.memory.recall / action.memory.store ───────────────────────────
+// Long-term memory access (lib/memory). Recall is read-only and best-effort
+// (degrades, never throws on a missing backend); store mirrors /remember's
+// explicit-capture path through the shared consolidator with a mandatory
+// PII gate. Store is not retryable (it writes).
+registerNodeExecutor({
+  kind: "action.memory.recall",
+  typeVersion: 1,
+  retryable: true,
+  execute: async (ctx) => (await import("./actions/memory-recall")).runMemoryRecall(ctx),
+})
+registerNodeExecutor({
+  kind: "action.memory.store",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/memory-store")).runMemoryStore(ctx),
+})
+
 // ── ai.classify ───────────────────────────────────────────────────────────
 // Reuses the `ai.prompt` executor under the hood with a constrained system
 // prompt. The output is normalized to the matched label so downstream

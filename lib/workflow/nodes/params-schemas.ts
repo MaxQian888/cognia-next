@@ -129,6 +129,26 @@ const TeamRunParams = z.object({
   goal: requiredString("required"),
 })
 
+const MemoryRecallParams = z.object({
+  query: requiredString("required"),
+  topK: numberRange(1, 50).optional(),
+  scope: z.enum(["global", "character"]).optional(),
+  characterId: optionalString,
+  relevanceFloor: numberRange(0, 1).optional(),
+  types: z.array(z.enum(["semantic", "episodic", "procedural"])).optional(),
+})
+
+const MemoryStoreParams = z.object({
+  text: requiredString("required"),
+  scope: z.enum(["global", "character"]).optional(),
+  characterId: optionalString,
+  type: z.enum(["semantic", "episodic", "procedural"]).optional(),
+  key: optionalString,
+  importance: numberRange(1, 10).optional(),
+  provenance: z.enum(["explicit", "system"]).optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
+})
+
 const TeamCreateParams = z.object({
   name: requiredString("required"),
   description: optionalString,
@@ -605,6 +625,9 @@ export const PARAMS_SCHEMAS = {
   // Actions: twins
   "action.twin.rag": TwinRagParams,
   "action.twin.ingest": TwinIngestParams,
+  // Actions: memory
+  "action.memory.recall": MemoryRecallParams,
+  "action.memory.store": MemoryStoreParams,
   // Actions: connectors
   "action.connector.send": ConnectorSendParams,
   "action.connector.draft": ConnectorDraftParams,

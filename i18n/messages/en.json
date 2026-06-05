@@ -16614,6 +16614,16 @@
             "description": "Queues a new source for the twin's ingest pipeline."
           }
         },
+        "memory": {
+          "recall": {
+            "label": "Recall memory",
+            "description": "Hybrid-search the long-term memory store (BM25 + vectors when configured)."
+          },
+          "store": {
+            "label": "Store memory",
+            "description": "Store one durable fact into long-term memory via the shared consolidator (PII-gated)."
+          }
+        },
         "connector": {
           "send": {
             "label": "Send via connector",
@@ -17623,6 +17633,46 @@
         "goal": {
           "label": "Goal / brief",
           "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase."
+        }
+      },
+      "memoryRecall": {
+        "query": {
+          "label": "Query"
+        },
+        "scope": {
+          "label": "Scope",
+          "global": "Global",
+          "character": "Character"
+        },
+        "topK": {
+          "label": "Top K"
+        },
+        "characterId": {
+          "label": "Character"
+        }
+      },
+      "memoryStore": {
+        "text": {
+          "label": "Fact",
+          "hint": "One self-contained statement. Deduped against existing memories via the consolidator."
+        },
+        "scope": {
+          "label": "Scope",
+          "global": "Global",
+          "character": "Character"
+        },
+        "importance": {
+          "label": "Importance (1–10)",
+          "hint": "How defining this fact is. /remember uses 7."
+        },
+        "characterId": {
+          "label": "Character"
+        },
+        "piiGate": {
+          "label": "PII gate",
+          "hint": "Memories persist durably — block (fail on PII) or redact placeholders. Cannot be disabled.",
+          "block": "Block (fail the step)",
+          "redact": "Redact placeholders"
         }
       },
       "agentTurn": {
