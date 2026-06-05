@@ -28,6 +28,10 @@ export type PetBridgeMessage =
   | { v: 1; t: "bubble"; bubble: PetBridgeBubble | null }
   | { v: 1; t: "interaction"; kind: PetBridgeInteractionKind; text?: string }
   | { v: 1; t: "request-state" }
+  // Throttled main-window user-activity ping (Smart-Moving). `at` is epoch ms
+  // for ordering only — receivers stamp their OWN clock (the overlay's wander
+  // gate runs on performance.now(), a different clock domain).
+  | { v: 1; t: "activity"; at: number }
 
 /** The `BroadcastChannel` name shared by both window sides. */
 export const PET_BRIDGE_CHANNEL = "cognia-pet-bridge"
@@ -130,6 +134,10 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
     }
     case "request-state":
       return { v: 1, t: "request-state" }
+    case "activity":
+      return typeof raw.at === "number" && Number.isFinite(raw.at)
+        ? { v: 1, t: "activity", at: raw.at }
+        : null
     default:
       return null
   }

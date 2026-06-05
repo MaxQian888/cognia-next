@@ -117,6 +117,12 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
 export interface OverlayPetBridgeDeps {
   channel?: BroadcastChannelLike
   store?: PetStoreApi
+  /**
+   * Main-window user-activity ping (Smart-Moving). The wire `at` is epoch ms;
+   * callers should stamp their own clock on receipt — the wander gate runs on
+   * `performance.now()`, a different clock domain.
+   */
+  onActivity?: (at: number) => void
 }
 
 export interface OverlayPetBridge {
@@ -155,6 +161,9 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
         api.setBubble(next)
         break
       }
+      case "activity":
+        deps.onActivity?.(msg.at)
+        break
       // interaction / request-state are main-side concerns; ignore here.
     }
   }

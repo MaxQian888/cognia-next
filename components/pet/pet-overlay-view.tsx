@@ -114,7 +114,14 @@ export function PetOverlayView() {
     (kind: "fed" | "played" | "petted" | "talked", text?: string) => void
   >(() => {})
   useEffect(() => {
-    const bridge = startOverlayPetBridge()
+    const bridge = startOverlayPetBridge({
+      // Smart-Moving: main-window activity counts as "interaction" for the
+      // wander gate. Stamp OUR clock — the gate runs on performance.now(),
+      // not the epoch ms carried on the wire.
+      onActivity: () => {
+        lastInteractionRef.current = performance.now()
+      },
+    })
     sendInteractionRef.current = (kind, text) => {
       lastInteractionRef.current = performance.now()
       if (text === undefined) bridge.sendInteraction(kind)

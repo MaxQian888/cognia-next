@@ -235,6 +235,20 @@ describe("startOverlayPetBridge", () => {
     expect(store.__state.setBubble).toHaveBeenCalledWith(null)
   })
 
+  it("forwards activity pings to onActivity (and tolerates its absence)", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const onActivity = jest.fn()
+    startOverlayPetBridge({ channel, store: store as never, onActivity })
+    channel.deliver({ v: 1, t: "activity", at: 12345 })
+    expect(onActivity).toHaveBeenCalledWith(12345)
+
+    // No handler installed → message is simply ignored.
+    const channel2 = new FakeChannel()
+    startOverlayPetBridge({ channel: channel2, store: store as never })
+    expect(() => channel2.deliver({ v: 1, t: "activity", at: 1 })).not.toThrow()
+  })
+
   it("ignores main-side-only and malformed messages", () => {
     const channel = new FakeChannel()
     const store = makeStore()

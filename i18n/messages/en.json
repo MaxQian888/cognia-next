@@ -6732,8 +6732,8 @@
             }
           },
           "onlyAfterInteraction": {
-            "label": "Only move after interaction",
-            "description": "Walks start only within a few minutes of you petting, feeding, or playing."
+            "label": "Only move while you're active",
+            "description": "Walks start only within a few minutes of any computer activity — petting the pet, typing, or moving the mouse. When you step away, the pet rests too."
           }
         }
       },

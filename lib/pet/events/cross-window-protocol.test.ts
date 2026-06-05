@@ -19,6 +19,7 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "interaction", kind: "fed" },
     { v: 1, t: "interaction", kind: "talked", text: "hello pet" },
     { v: 1, t: "request-state" },
+    { v: 1, t: "activity", at: 1717575600000 },
   ]
 
   it("exposes the shared channel name", () => {
@@ -74,6 +75,8 @@ describe("cross-window-protocol", () => {
       ["bubble with non-string text", { v: 1, t: "bubble", bubble: { text: 5 } }],
       ["interaction with bad kind", { v: 1, t: "interaction", kind: "sneezed" }],
       ["interaction with non-string kind", { v: 1, t: "interaction", kind: 1 }],
+      ["activity with non-number at", { v: 1, t: "activity", at: "now" }],
+      ["activity with non-finite at", { v: 1, t: "activity", at: Number.NaN }],
     ]
 
     it.each(rejected)("rejects %s → null", (_label, raw) => {
