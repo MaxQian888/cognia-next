@@ -1,6 +1,8 @@
 import { render } from "@testing-library/react"
 import { svgSkin } from "./svg-skin"
+import { useSettingsStore } from "@/stores/settings"
 import type { PetBones, PetSkinRenderProps } from "@/types/pet"
+import type { AppSettings } from "@/lib/claude/types"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -30,6 +32,27 @@ function props(overrides: Partial<PetSkinRenderProps> = {}): PetSkinRenderProps 
 }
 
 describe("svgSkin", () => {
+  it("halves the looping cadence under low power (settings-driven)", () => {
+    const before = useSettingsStore.getState().settings
+    const baseline = render(<>{svgSkin.render(props())}</>)
+    const normalSec = Number(
+      baseline.container.querySelector('[data-pet-skin="svg"]')?.getAttribute("data-pet-loop-sec")
+    )
+    baseline.unmount()
+    try {
+      useSettingsStore.setState({
+        settings: { petSettings: { lowPower: true } } as unknown as AppSettings,
+      })
+      const { container } = render(<>{svgSkin.render(props())}</>)
+      const slowSec = Number(
+        container.querySelector('[data-pet-skin="svg"]')?.getAttribute("data-pet-loop-sec")
+      )
+      expect(slowSec).toBe(normalSec * 2)
+    } finally {
+      useSettingsStore.setState({ settings: before })
+    }
+  })
+
   it("renders an svg root carrying the visual state", () => {
     const { container } = render(<>{svgSkin.render(props({ state: "thinking" }))}</>)
     const root = container.querySelector('[data-pet-skin-root="svg"]')

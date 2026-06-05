@@ -6,6 +6,7 @@
 import { motion } from "motion/react"
 import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
 import { resolvePetMotion } from "@/lib/pet/animation/motion-spec"
+import { useSettingsStore } from "@/stores/settings"
 import { resolveWalkMotion } from "@/lib/pet/animation/walk-spec"
 import { stageScale, isEggStage } from "@/lib/pet/skins/stage-visual"
 import { PetBody } from "./svg/pet-body"
@@ -24,7 +25,9 @@ function PetSvgContent({
   // `paused` renders the same still frame as reduced motion (the face still
   // expresses the emotion) — used while the window is hidden / minimized.
   const still = reducedMotion || Boolean(paused)
-  const baseSpec = resolvePetMotion(state, oneShot, still, bones.eyes)
+  // Low power halves the looping cadence (same settings read as live2d-skin).
+  const lowPower = useSettingsStore((s) => Boolean(s.settings?.petSettings?.lowPower))
+  const baseSpec = resolvePetMotion(state, oneShot, still, bones.eyes, { lowPower })
   // Walking overlays a brisk bob over the resting spec; one-shots keep priority.
   const walking = locomotion?.mode === "walking" && oneShot === null && !still
   const spec = walking ? resolveWalkMotion(baseSpec, still) : baseSpec
@@ -49,7 +52,12 @@ function PetSvgContent({
       }
 
   return (
-    <g data-pet-skin="svg" data-pet-state={state} data-pet-oneshot={oneShot ?? "none"}>
+    <g
+      data-pet-skin="svg"
+      data-pet-state={state}
+      data-pet-oneshot={oneShot ?? "none"}
+      data-pet-loop-sec={spec.durationSec}
+    >
       {/* Ground shadow — squashes slightly as the body bobs. */}
       <motion.ellipse
         data-pet-part="shadow"

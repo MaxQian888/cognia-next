@@ -87,4 +87,19 @@ describe("resolvePetMotion", () => {
     expect(spec.loop).toBe(false)
     expect(spec.body.y).toEqual([0])
   })
+
+  it("low power halves the cadence of LOOPING specs only", () => {
+    const normal = resolvePetMotion("idle", null, false, "dot")
+    const slowed = resolvePetMotion("idle", null, false, "dot", { lowPower: true })
+    expect(slowed.durationSec).toBe(normal.durationSec * 2)
+    expect(slowed.loop).toBe(true)
+
+    // One-shots play at full speed (loop=false) — feedback must stay snappy.
+    const shot = resolvePetMotion("idle", "happy", false, "dot", { lowPower: true })
+    expect(shot.durationSec).toBe(resolvePetMotion("idle", "happy", false, "dot").durationSec)
+
+    // Reduced motion already stills everything; low power adds nothing there.
+    const still = resolvePetMotion("idle", null, true, "dot", { lowPower: true })
+    expect(still.loop).toBe(false)
+  })
 })

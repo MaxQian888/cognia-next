@@ -220,6 +220,15 @@ function oneShotSpec(shot: PetOneShot, base: PetMotionSpec): PetMotionSpec {
   }
 }
 
+export interface ResolvePetMotionOptions {
+  /**
+   * Low-power mode: halve the cadence of LOOPING specs (idle breathing etc.)
+   * so the always-on widget animates at half rate. One-shots keep full speed —
+   * interaction feedback must stay snappy.
+   */
+  lowPower?: boolean
+}
+
 /**
  * Resolve the full motion spec. When `reducedMotion` is set, all keyframes
  * collapse to their resting value and looping is disabled — the face still
@@ -229,10 +238,14 @@ export function resolvePetMotion(
   state: PetVisualState,
   oneShot: PetOneShot | null,
   reducedMotion: boolean,
-  bonesEyes: PetEyes
+  bonesEyes: PetEyes,
+  options: ResolvePetMotionOptions = {}
 ): PetMotionSpec {
   const base = baseSpec(state, bonesEyes)
-  const spec = oneShot ? oneShotSpec(oneShot, base) : base
+  let spec = oneShot ? oneShotSpec(oneShot, base) : base
+  if (options.lowPower && spec.loop) {
+    spec = { ...spec, durationSec: spec.durationSec * 2 }
+  }
   if (!reducedMotion) return spec
   return {
     ...spec,
