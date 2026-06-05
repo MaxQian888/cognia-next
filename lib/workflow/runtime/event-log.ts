@@ -157,6 +157,18 @@ export function createRunLogger(runId: string) {
         stepId,
         payload: usage,
       }),
+    /** Emitted before each retry backoff wait (attempt = the one that failed). */
+    stepRetrying: (
+      stepId: string,
+      payload: { attempt: number; maxAttempts: number; delayMs: number; error: string }
+    ) =>
+      appendEvent({
+        runId,
+        type: "step_retrying",
+        level: "warn",
+        stepId,
+        payload,
+      }),
     log: (level: RunEventLogLevel, message: string, payload?: unknown, stepId?: string) =>
       appendEvent({
         runId,

@@ -3,7 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { runStep, type RunStepInput } from "./step-executor"
+import { resolveStepRetryPolicy, runStep, type RunStepInput } from "./step-executor"
 import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { IdempotencyCache } from "./idempotency"
 import { createRunLogger, listRunEvents } from "./event-log"
@@ -103,5 +103,92 @@ describe("runStep pin short-circuit", () => {
 
     expect(execSpy).toHaveBeenCalledTimes(1)
     expect(result.output).toEqual({ real: true })
+  })
+})
+
+describe("resolveStepRetryPolicy", () => {
+  const workflowDefault = {
+    attempts: 3,
+    backoff: "exponential" as const,
+    baseMs: 1000,
+    maxMs: 30_000,
+  }
+
+  it("falls back to the workflow default without node errorHandling", () => {
+    expect(resolveStepRetryPolicy(node, workflowDefault)).toBe(workflowDefault)
+  })
+
+  it("maps node retry settings (maxRetries = extra attempts)", () => {
+    const withRetry: WorkflowNode = {
+      ...node,
+      data: {
+        ...node.data,
+        errorHandling: {
+          retry: { maxRetries: 2, retryIntervalMs: 500, backoff: "fixed", maxIntervalMs: 4000 },
+        },
+      },
+    }
+    expect(resolveStepRetryPolicy(withRetry, workflowDefault)).toEqual({
+      attempts: 3,
+      backoff: "fixed",
+      baseMs: 500,
+      maxMs: 4000,
+    })
+  })
+
+  it("maxRetries 0 disables retries even when the workflow default retries", () => {
+    const noRetry: WorkflowNode = {
+      ...node,
+      data: {
+        ...node.data,
+        errorHandling: { retry: { maxRetries: 0, retryIntervalMs: 0, backoff: "fixed" } },
+      },
+    }
+    expect(resolveStepRetryPolicy(noRetry, workflowDefault).attempts).toBe(1)
+  })
+})
+
+describe("per-node retry runtime", () => {
+  it("honors the node retry policy and emits step_retrying before each wait", async () => {
+    const flaky = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("transient 1"))
+      .mockResolvedValueOnce({ output: { ok: true } })
+    registerNodeExecutor({ kind: "data.template", typeVersion: 1, execute: flaky })
+
+    const retryNode: WorkflowNode = {
+      id: "n_retry",
+      type: "data.template",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: {
+        label: "flaky",
+        params: {},
+        errorHandling: { retry: { maxRetries: 1, retryIntervalMs: 0, backoff: "fixed" } },
+      },
+    }
+    const runId = "run_retry"
+    const result = await runStep({
+      workflow: { ...makeWorkflow(), nodes: [retryNode] },
+      node: retryNode,
+      trigger,
+      upstream: {},
+      runId,
+      signal: new AbortController().signal,
+      cache: await IdempotencyCache.hydrate(runId),
+      // Workflow default says NO retries — the node's own policy must win.
+      retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+      secretResolver: NoopSecretResolver,
+      logger: createRunLogger(runId),
+    })
+
+    expect(result.output).toEqual({ ok: true })
+    expect(flaky).toHaveBeenCalledTimes(2)
+    const events = await listRunEvents(runId)
+    const retrying = events.filter((e) => e.type === "step_retrying")
+    expect(retrying).toHaveLength(1)
+    expect(retrying[0].payload).toEqual(
+      expect.objectContaining({ attempt: 1, maxAttempts: 2, error: "transient 1" })
+    )
   })
 })

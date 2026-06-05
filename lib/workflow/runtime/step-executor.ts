@@ -74,8 +74,28 @@ export interface StepExecution {
  * via the IdempotencyCache. Retries respect the per-workflow retry policy
  * unless the executor returned a non-retryable error.
  */
+/**
+ * Effective retry policy for one step: the node's own
+ * `data.errorHandling.retry` (n8n-style per-node setting; maxRetries = extra
+ * attempts after the first) wins over the workflow-level `retryDefaults`.
+ */
+export function resolveStepRetryPolicy(
+  node: WorkflowNode,
+  workflowDefault: WorkflowRetryPolicy
+): WorkflowRetryPolicy {
+  const nodeRetry = node.data.errorHandling?.retry
+  if (!nodeRetry) return workflowDefault
+  return {
+    attempts: Math.max(1, nodeRetry.maxRetries + 1),
+    backoff: nodeRetry.backoff,
+    baseMs: Math.max(0, nodeRetry.retryIntervalMs),
+    ...(typeof nodeRetry.maxIntervalMs === "number" ? { maxMs: nodeRetry.maxIntervalMs } : {}),
+  }
+}
+
 export async function runStep(input: RunStepInput): Promise<StepExecution> {
-  const { node, runId, cache, signal, logger, retryPolicy } = input
+  const { node, runId, cache, signal, logger } = input
+  const retryPolicy = resolveStepRetryPolicy(node, input.retryPolicy)
   const cacheKey = input.cacheKey ?? node.id
 
   if (cache.has(cacheKey)) {
@@ -185,6 +205,12 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       }
 
       const delay = computeBackoffMs(retryPolicy, attempt)
+      await logger.stepRetrying(node.id, {
+        attempt,
+        maxAttempts: retryPolicy.attempts,
+        delayMs: delay,
+        error: message,
+      })
       await logger.log(
         "warn",
         `step ${node.id} failed (attempt ${attempt}/${retryPolicy.attempts}); retrying in ${delay}ms`,
