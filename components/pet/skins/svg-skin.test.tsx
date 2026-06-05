@@ -62,4 +62,39 @@ describe("svgSkin", () => {
     const { container } = render(<>{svgSkin.render(props({ oneShot: "wave" }))}</>)
     expect(container.querySelector('[data-pet-oneshot="wave"]')).not.toBeNull()
   })
+
+  it("defaults to facing right with resting locomotion", () => {
+    const { container } = render(<>{svgSkin.render(props())}</>)
+    const root = container.querySelector('[data-pet-skin-root="svg"]') as SVGElement
+    expect(root.getAttribute("data-pet-facing")).toBe("right")
+    expect(root.getAttribute("data-pet-locomotion")).toBe("resting")
+    expect(root.style.transform).toBe("")
+  })
+
+  it("mirrors the svg and tags the walk while walking left", () => {
+    const { container } = render(
+      <>{svgSkin.render(props({ locomotion: { mode: "walking", facing: "left" } }))}</>
+    )
+    const root = container.querySelector('[data-pet-skin-root="svg"]') as SVGElement
+    expect(root.getAttribute("data-pet-facing")).toBe("left")
+    expect(root.getAttribute("data-pet-locomotion")).toBe("walking")
+    expect(root.style.transform).toBe("scaleX(-1)")
+  })
+
+  it("renders a still frame when paused (vfx suppressed like reduced motion)", () => {
+    const { container } = render(<>{svgSkin.render(props({ paused: true, state: "happy" }))}</>)
+    expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
+    expect(container.querySelector('[data-pet-part="vfx"]')).toBeNull()
+  })
+
+  it("one-shots take precedence over the walking overlay", () => {
+    const { container } = render(
+      <>
+        {svgSkin.render(
+          props({ oneShot: "wave", locomotion: { mode: "walking", facing: "right" } })
+        )}
+      </>
+    )
+    expect(container.querySelector('[data-pet-oneshot="wave"]')).not.toBeNull()
+  })
 })

@@ -20,6 +20,8 @@ import { useLive2dMotion, type Live2dModelLike } from "./use-live2d-motion"
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
+  /** Low-power mode: 30fps ticker cap + antialias off (init-time). */
+  lowPower?: boolean
   /** Reports a typed failure so the boundary can degrade to the SVG skin. */
   onError?: (code: string) => void
 }
@@ -30,16 +32,20 @@ interface PixiModelLike extends Live2dModelLike {
   height: number
   anchor?: { set: (x: number, y: number) => void }
   position?: { set: (x: number, y: number) => void }
-  scale?: { set: (v: number) => void }
+  scale?: { set: (x: number, y?: number) => void }
 }
 
 interface PixiAppLike {
   stage: { addChild: (child: unknown) => void }
   renderer: { resize: (w: number, h: number) => void }
-  ticker: { stop: () => void; start: () => void }
+  ticker: { stop: () => void; start: () => void; maxFPS?: number }
   init: (opts: Record<string, unknown>) => Promise<void>
   destroy: (removeView?: boolean, opts?: Record<string, unknown>) => void
 }
+
+/** Ticker caps: 60fps default, 30fps in low-power mode. */
+const MAX_FPS_DEFAULT = 60
+const MAX_FPS_LOW_POWER = 30
 
 const useStrictModeSafeInit = () => {
   const [ready, setReady] = useState(false)
@@ -53,13 +59,19 @@ const useStrictModeSafeInit = () => {
   return ready
 }
 
-/** Fit a model into a square box of `size` px, centered. */
-function fitModel(model: PixiModelLike, size: number): void {
+/**
+ * Fit a model into a square box of `size` px, centered. Facing left mirrors
+ * the model by negating the X scale (the canvas buffer stays untouched).
+ * NOTE: `model.width/height` reflect the CURRENT scale, so the fit scale must
+ * be derived from the unscaled bounds — read them with scale reset to 1.
+ */
+function fitModel(model: PixiModelLike, size: number, facing: "left" | "right" = "right"): void {
   model.anchor?.set(0.5, 0.5)
   model.position?.set(size / 2, size / 2)
+  model.scale?.set(1, 1)
   const largest = Math.max(model.width, model.height)
   const scale = largest > 0 ? size / largest : 1
-  model.scale?.set(scale)
+  model.scale?.set(facing === "left" ? -scale : scale, scale)
 }
 
 export default function Live2dCanvas({
@@ -68,6 +80,9 @@ export default function Live2dCanvas({
   oneShot,
   reducedMotion,
   size,
+  locomotion,
+  paused,
+  lowPower = false,
   onError,
 }: Live2dCanvasProps) {
   const ready = useStrictModeSafeInit()
@@ -82,6 +97,12 @@ export default function Live2dCanvas({
   useEffect(() => {
     onErrorRef.current = onError
   }, [onError])
+
+  // Same ref treatment for the antialias knob: only the value at init matters.
+  const lowPowerRef = useRef(lowPower)
+  useEffect(() => {
+    lowPowerRef.current = lowPower
+  }, [lowPower])
 
   useEffect(() => {
     if (!ready) return
@@ -106,7 +127,18 @@ export default function Live2dCanvas({
         }
         if (cancelled) return
         app = new Application()
-        await app.init({ canvas, width: size, height: size, backgroundAlpha: 0, antialias: true })
+        // High-DPI: render at the device pixel ratio with autoDensity keeping
+        // the CSS size logical. Antialias is an init-time-only knob — low-power
+        // mode trades it away (a runtime toggle would rebuild the WebGL context).
+        await app.init({
+          canvas,
+          width: size,
+          height: size,
+          backgroundAlpha: 0,
+          antialias: !lowPowerRef.current,
+          resolution: typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+          autoDensity: true,
+        })
         if (cancelled) return
         appRef.current = app
 
@@ -169,23 +201,32 @@ export default function Live2dCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, modelId])
 
-  // Resize + re-fit on size change without rebuilding the model.
+  const facing = locomotion?.facing ?? "right"
+
+  // Resize + re-fit on size/facing change without rebuilding the model.
   useEffect(() => {
     const app = appRef.current
     if (!app || !model) return
     app.renderer.resize(size, size)
-    fitModel(model, size)
-  }, [size, model])
+    fitModel(model, size, facing)
+  }, [size, model, facing])
 
-  // Reduced motion pauses/resumes the pixi ticker.
+  // Reduced motion / paused (hidden window, minimized widget) stops the ticker.
   useEffect(() => {
     const app = appRef.current
     if (!app) return
-    if (reducedMotion) app.ticker.stop()
+    if (reducedMotion || paused) app.ticker.stop()
     else app.ticker.start()
-  }, [reducedMotion, model])
+  }, [reducedMotion, paused, model])
 
-  useLive2dMotion(model, state, oneShot, caps, reducedMotion)
+  // FPS cap follows the low-power setting live (unlike antialias).
+  useEffect(() => {
+    const app = appRef.current
+    if (!app) return
+    app.ticker.maxFPS = lowPower ? MAX_FPS_LOW_POWER : MAX_FPS_DEFAULT
+  }, [lowPower, model])
+
+  useLive2dMotion(model, state, oneShot, caps, reducedMotion, locomotion?.mode === "walking")
 
   return (
     <canvas ref={canvasRef} data-pet-skin-root="live2d" style={{ width: size, height: size }} />

@@ -6700,7 +6700,38 @@
         "clickThroughHint": "While click-through is on, the desktop pet ignores the mouse. Turn it back off here or from the tray menu's \"Disable click-through\".",
         "size": {
           "label": "Desktop pet size ({size}px)"
+        },
+        "wander": {
+          "title": "Wandering",
+          "description": "Let the desktop pet stroll along the bottom of your screen on its own.",
+          "enabled": {
+            "label": "Enable wandering",
+            "description": "The pet occasionally walks to a new spot. Throwing it with a quick drag always works."
+          },
+          "frequency": {
+            "label": "Activity level",
+            "options": {
+              "calm": "Calm",
+              "normal": "Normal",
+              "lively": "Lively"
+            }
+          },
+          "range": {
+            "label": "Movement range",
+            "options": {
+              "full": "Whole screen",
+              "near": "Stay nearby"
+            }
+          },
+          "onlyAfterInteraction": {
+            "label": "Only move after interaction",
+            "description": "Walks start only within a few minutes of you petting, feeding, or playing."
+          }
         }
+      },
+      "lowPower": {
+        "label": "Low-power mode",
+        "description": "Cap the Live2D frame rate at 30 fps and make wandering rest longer."
       },
       "live2d": {
         "title": "Live2D models",

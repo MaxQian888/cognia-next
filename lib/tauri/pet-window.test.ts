@@ -19,6 +19,7 @@ import {
   setPetClickThrough,
   setPetWindowPosition,
   getPetWindowPosition,
+  getPetWorkArea,
   resizePetWindow,
   isPetWindowOpen,
   showMainWindow,
@@ -74,6 +75,18 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_position")
   })
 
+  it("getPetWorkArea returns the work-area DTO", async () => {
+    const area = { x: 0, y: 0, width: 2560, height: 1400, scaleFactor: 1.25 }
+    mockInvoke.mockResolvedValue(area)
+    await expect(getPetWorkArea()).resolves.toEqual(area)
+    expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_work_area")
+  })
+
+  it("getPetWorkArea passes through a null (headless) result", async () => {
+    mockInvoke.mockResolvedValue(null)
+    await expect(getPetWorkArea()).resolves.toBeNull()
+  })
+
   it("resizePetWindow passes width/height", async () => {
     mockInvoke.mockResolvedValue(undefined)
     await expect(resizePetWindow(200, 240)).resolves.toBe(true)
@@ -105,6 +118,7 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(setPetClickThrough(true)).resolves.toBe(false)
     await expect(setPetWindowPosition(1, 1)).resolves.toBe(false)
     await expect(getPetWindowPosition()).resolves.toBeNull()
+    await expect(getPetWorkArea()).resolves.toBeNull()
     await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
@@ -121,9 +135,10 @@ describe("lib/tauri/pet-window — command rejection is swallowed", () => {
     await expect(setPetClickThrough(true)).resolves.toBe(false)
     await expect(setPetWindowPosition(1, 1)).resolves.toBe(false)
     await expect(getPetWindowPosition()).resolves.toBeNull()
+    await expect(getPetWorkArea()).resolves.toBeNull()
     await expect(resizePetWindow(1, 1)).resolves.toBe(false)
     await expect(isPetWindowOpen()).resolves.toBe(false)
     await expect(showMainWindow()).resolves.toBe(false)
-    expect(warnSpy).toHaveBeenCalledTimes(9)
+    expect(warnSpy).toHaveBeenCalledTimes(10)
   })
 })

@@ -17,14 +17,21 @@
 
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
+import {
+  DEFAULT_PET_DESKTOP_OVERLAY,
+  DEFAULT_PET_SETTINGS,
+  DEFAULT_PET_WANDER,
+  type PetSettings,
+} from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
+import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { startOverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import {
@@ -35,12 +42,21 @@ import {
   setPetWindowPosition,
   showMainWindow,
 } from "@/lib/tauri/pet-window"
+import {
+  MIN_THROW_SPEED,
+  overlayWindowSize,
+  releaseVelocityFromSamples,
+  type PointerSample,
+} from "@/lib/pet/overlay-geometry"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 import { PetQuickMenu } from "./pet-quick-menu"
 
 const DRAG_THRESHOLD_PX = 4
+
+/** Pointer samples kept for the release-velocity estimate. */
+const MAX_DRAG_SAMPLES = 8
 
 // Extra vertical room the window grows by while the (upward-opening) quick menu
 // is visible, restored to the resting box on close.
@@ -69,6 +85,14 @@ export function PetOverlayView() {
   const { profile, view } = usePet(undefined)
   const { state, oneShot } = usePetAnimationState(reduced)
   const bubble = usePetStore((s) => s.bubble)
+  const hidden = useDocumentHidden()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [dragging, setDragging] = useState(false)
+
+  // Last user-interaction timestamp (perf clock — same one the locomotion io
+  // uses) feeding the "only move after interaction" wander gate. Stamped by
+  // the bridge `sendInteraction` wrapper below.
+  const lastInteractionRef = useRef<number | null>(null)
 
   // Paint through to the desktop while this window is mounted.
   useEffect(() => {
@@ -88,7 +112,10 @@ export function PetOverlayView() {
   )
   useEffect(() => {
     const bridge = startOverlayPetBridge()
-    sendInteractionRef.current = (kind) => bridge.sendInteraction(kind)
+    sendInteractionRef.current = (kind) => {
+      lastInteractionRef.current = performance.now()
+      bridge.sendInteraction(kind)
+    }
     return () => {
       sendInteractionRef.current = () => {}
       bridge.dispose()
@@ -104,20 +131,67 @@ export function PetOverlayView() {
     })
   }
 
-  // Grow the window upward while the menu is open so it isn't clipped by the
-  // small resting box, and restore the resting size on close.
+  // Grow the window UPWARD while the menu is open (resize extends the bottom,
+  // so the window is shifted up by the same amount — the bottom-anchored pet
+  // never moves on screen) and restore the chrome-inclusive resting box on
+  // close. (Restoring to the bare pet size used to shed the chrome margins
+  // after the first open, clipping the bubble — always go through
+  // `overlayWindowSize`.)
   const handleMenuOpenChange = (open: boolean) => {
-    if (open) {
-      void resizePetWindow(size, size + MENU_GROW_H)
-    } else {
-      void resizePetWindow(size, size)
-    }
+    setMenuOpen(open)
+    const resting = overlayWindowSize(size)
+    const growPhys = Math.round(MENU_GROW_H * scaleFactor)
+    void (async () => {
+      const pos = await getPetWindowPosition()
+      if (open) {
+        await resizePetWindow(resting.width, resting.height + MENU_GROW_H)
+        if (pos) await setPetWindowPosition(pos.x, pos.y - growPhys)
+      } else {
+        await resizePetWindow(resting.width, resting.height)
+        if (pos) await setPetWindowPosition(pos.x, pos.y + growPhys)
+      }
+    })()
   }
+
+  // Persist the resting position back into PetSettings. `save` is a shallow
+  // top-level merge, so the whole `petSettings` (with the nested desktopPet)
+  // must be passed. Read the latest snapshot at call time — wander settles
+  // long after the closure that scheduled them was rendered.
+  const persistOverlayPosition = async (x: number, y: number) => {
+    const latest = useSettingsStore.getState().settings?.petSettings ?? pet
+    const latestDesktop = latest.desktopPet ?? desktopPet
+    await save({
+      petSettings: {
+        ...latest,
+        desktopPet: { ...latestDesktop, position: { x, y } },
+      },
+    })
+  }
+  const persistRef = useRef(persistOverlayPosition)
+  useEffect(() => {
+    persistRef.current = persistOverlayPosition
+  })
+
+  // Autonomous wandering + drag-throw physics. Pauses while the user drags,
+  // the quick menu is open, a bubble is showing, the window is hidden, or
+  // click-through is on (a wandering pet you cannot grab is disorienting).
+  const wander = desktopPet.wander ?? DEFAULT_PET_WANDER
+  const locomotionPaused =
+    dragging || menuOpen || Boolean(bubble) || hidden || desktopPet.clickThrough
+  const { locomotion, scaleFactor, beginThrow } = usePetLocomotion({
+    enabled: !reduced,
+    paused: locomotionPaused,
+    wander,
+    lowPower: pet.lowPower ?? false,
+    petSize: size,
+    lastInteractionAtMs: () => lastInteractionRef.current,
+    onSettle: (x, y) => void persistRef.current(x, y),
+  })
 
   // Drag the OS window. We capture the pointer's screen origin + the window's
   // origin on pointerdown, then drive `setPetWindowPosition` (rAF-throttled)
   // once movement crosses the threshold. A sequence that never crosses the
-  // threshold is a click → "pet" interaction.
+  // threshold is a click → "pet" interaction; a fast release is a throw.
   const dragRef = useRef<{
     pointerId: number
     startScreenX: number
@@ -128,6 +202,8 @@ export function PetOverlayView() {
     dragging: boolean
     rafId: number | null
     pending: { x: number; y: number } | null
+    /** Recent window positions for the release-velocity estimate. */
+    samples: PointerSample[]
   } | null>(null)
 
   useEffect(() => {
@@ -163,6 +239,7 @@ export function PetOverlayView() {
       dragging: false,
       rafId: null,
       pending: null,
+      samples: [],
     }
     const id = e.pointerId
     void (async () => {
@@ -185,22 +262,17 @@ export function PetOverlayView() {
     if (!d.dragging && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) {
       return
     }
-    d.dragging = true
+    if (!d.dragging) {
+      d.dragging = true
+      setDragging(true) // pause wandering while the user holds the pet
+    }
     if (d.winX == null || d.winY == null) return // window origin not known yet
-    d.pending = { x: d.winX + dx, y: d.winY + dy }
+    const x = d.winX + dx
+    const y = d.winY + dy
+    d.samples.push({ x, y, tMs: performance.now() })
+    if (d.samples.length > MAX_DRAG_SAMPLES) d.samples.shift()
+    d.pending = { x, y }
     if (d.rafId == null) d.rafId = requestAnimationFrame(flushMove)
-  }
-
-  // Persist the resting position back into PetSettings. `save` is a shallow
-  // top-level merge, so the whole `petSettings` (with the nested desktopPet)
-  // must be passed.
-  const persistOverlayPosition = async (x: number, y: number) => {
-    await save({
-      petSettings: {
-        ...pet,
-        desktopPet: { ...desktopPet, position: { x, y } },
-      },
-    })
   }
 
   const endPointer = (e: React.PointerEvent, sendInteraction: () => void) => {
@@ -216,9 +288,19 @@ export function PetOverlayView() {
     const wasDrag = d.dragging
     const winX = d.winX
     const winY = d.winY
+    const samples = d.samples
     dragRef.current = null
+    if (wasDrag) setDragging(false)
     if (wasDrag && winX != null && winY != null) {
-      void persistOverlayPosition(winX + dx, winY + dy)
+      const x = winX + dx
+      const y = winY + dy
+      const { vx, vy } = releaseVelocityFromSamples(samples)
+      if (!reduced && Math.hypot(vx, vy) >= MIN_THROW_SPEED) {
+        // A flick → ballistic fall; the landing persists the position.
+        beginThrow(x, y, vx, vy)
+      } else {
+        void persistOverlayPosition(x, y)
+      }
     } else if (!wasDrag) {
       sendInteraction()
     }
@@ -230,6 +312,7 @@ export function PetOverlayView() {
     const d = dragRef.current
     if (!d || d.pointerId !== e.pointerId) return
     if (d.rafId != null) cancelAnimationFrame(d.rafId)
+    if (d.dragging) setDragging(false)
     dragRef.current = null
   }
 
@@ -252,7 +335,9 @@ export function PetOverlayView() {
       <div
         data-testid="pet-overlay-root"
         data-pet-overlay-root
-        className="flex h-screen w-screen select-none flex-col items-center justify-center overflow-hidden bg-transparent"
+        // Bottom-anchored so the pet's feet sit on the window bottom — the
+        // wander ground math rests the window bottom on the work-area bottom.
+        className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
       >
         {bubble && <PetBubbleView bubble={bubble} className="mb-2" />}
         {profile && view ? (
@@ -275,6 +360,8 @@ export function PetOverlayView() {
               reducedMotion={reduced}
               size={size}
               skinId={skinId}
+              locomotion={locomotion}
+              paused={hidden}
             />
           </div>
         ) : null}

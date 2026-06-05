@@ -393,6 +393,7 @@ pub fn run() {
             pet_window::pet_window_set_position,
             pet_window::pet_window_get_position,
             pet_window::pet_window_resize,
+            pet_window::pet_window_get_work_area,
             pet_window::is_pet_window_open,
             pet_window::show_main_window,
             tray::commands::tray_set_menu,

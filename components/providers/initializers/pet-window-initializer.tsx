@@ -7,14 +7,10 @@ import { DEFAULT_PET_DESKTOP_OVERLAY } from "@/types/pet"
 import { isTauri } from "@/lib/platform/detect"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { openPetWindow } from "@/lib/tauri/pet-window"
+import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { loggers } from "@/lib/logging"
 
 const log = loggers.shell
-
-// Window chrome margins added around the overlay pet so its quick menu / bubble
-// have room — kept in lockstep with the widget toggle + settings open path.
-const OVERLAY_CHROME_W = 96
-const OVERLAY_CHROME_H = 160
 
 /**
  * Boot-time initializer that re-opens the transparent desktop-pet overlay
@@ -44,8 +40,7 @@ export function PetWindowInitializer() {
       hasOpened.current = true
       const size = desktop.size ?? DEFAULT_PET_DESKTOP_OVERLAY.size
       void openPetWindow({
-        width: size + OVERLAY_CHROME_W,
-        height: size + OVERLAY_CHROME_H,
+        ...overlayWindowSize(size),
         x: desktop.position?.x,
         y: desktop.position?.y,
         clickThrough: desktop.clickThrough ?? false,

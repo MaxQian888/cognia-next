@@ -66,6 +66,34 @@ const ONE_SHOT_INTENT: Record<PetOneShot, Intent> = {
 /** Resting states that should play at idle priority rather than normal. */
 const IDLE_PRIORITY_STATES: ReadonlySet<PetVisualState> = new Set(["idle", "sleeping", "sad"])
 
+/** Candidate motion groups for desktop-overlay locomotion (walking). */
+const WALK_GROUPS = ["Walk", "Walking", "Move", "Run", "Idle"]
+
+/**
+ * Plan for the wandering walk. Prefers a real walk-ish motion group when the
+ * model ships one, else falls back to Idle / engine breathing — the window
+ * movement itself carries the locomotion. Idle priority so any emotion or
+ * one-shot motion preempts it.
+ */
+export function resolveLive2dWalkPlan(
+  caps: Live2dCapabilities,
+  reducedMotion: boolean
+): MotionPlan {
+  if (reducedMotion) {
+    return { priority: "idle", parameterFallback: false }
+  }
+  const motionGroup = firstMatch(WALK_GROUPS, caps.motionGroups)
+  const plan: MotionPlan = {
+    priority: "idle",
+    parameterFallback: motionGroup === undefined,
+  }
+  if (motionGroup !== undefined) {
+    plan.motionGroup = motionGroup
+    plan.motionIndex = 0
+  }
+  return plan
+}
+
 /**
  * Resolve the motion plan for the current state. `reducedMotion` collapses to a
  * still plan (idle priority, no group, no expression) so the model rests on its

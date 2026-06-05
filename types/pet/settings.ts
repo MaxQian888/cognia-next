@@ -7,6 +7,27 @@ export type PetAnchor = "bottom-right" | "bottom-left" | "top-right" | "top-left
 /** Motion preference: follow the OS, or force on/off regardless. */
 export type PetMotionPreference = "auto" | "full" | "reduced"
 
+/** How often the overlay pet starts a wander walk on its own. */
+export type PetWanderFrequency = "calm" | "normal" | "lively"
+
+/** How far a single wander walk may travel. */
+export type PetWanderRange = "full" | "near"
+
+/**
+ * Autonomous wandering preferences for the desktop overlay pet (VPet-style
+ * "smart move"). The in-app widget never wanders — it stays anchored.
+ */
+export interface PetWanderSettings {
+  /** Master wander switch. Reduced motion always wins over this. */
+  enabled: boolean
+  /** Rest-interval bucket between walks. */
+  frequency: PetWanderFrequency
+  /** Only start a walk within a short window after a user interaction. */
+  onlyAfterInteraction: boolean
+  /** Walk targets span the whole work area, or stay near the current spot. */
+  range: PetWanderRange
+}
+
 /**
  * Transparent always-on-top desktop-pet overlay window settings (Tauri only).
  * The overlay window's screen position is the single source of truth here —
@@ -21,6 +42,8 @@ export interface PetDesktopOverlaySettings {
   size: number
   /** Persisted absolute screen position, or null to center on first open. */
   position?: { x: number; y: number } | null
+  /** Autonomous wandering preferences. Absent = defaults (disabled). */
+  wander?: PetWanderSettings
 }
 
 export interface PetSettings {
@@ -46,6 +69,18 @@ export interface PetSettings {
   activeLive2dModelId?: string
   /** Transparent desktop-pet overlay window settings (Tauri only). */
   desktopPet?: PetDesktopOverlaySettings
+  /**
+   * Low-power mode: caps the Live2D ticker at 30 fps, disables canvas
+   * antialiasing at init, and lengthens wander rest intervals.
+   */
+  lowPower?: boolean
+}
+
+export const DEFAULT_PET_WANDER: PetWanderSettings = {
+  enabled: false,
+  frequency: "normal",
+  onlyAfterInteraction: false,
+  range: "full",
 }
 
 export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
@@ -53,6 +88,7 @@ export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
   clickThrough: false,
   size: 128,
   position: null,
+  wander: DEFAULT_PET_WANDER,
 }
 
 export const DEFAULT_PET_SETTINGS: PetSettings = {
@@ -62,4 +98,5 @@ export const DEFAULT_PET_SETTINGS: PetSettings = {
   mutedBubbles: false,
   size: 96,
   skinId: "svg",
+  lowPower: false,
 }

@@ -10,7 +10,7 @@
 
 import { useEffect, useRef } from "react"
 import type { PetOneShot, PetVisualState } from "@/types/pet"
-import { resolveLive2dPlan } from "@/lib/pet/live2d/state-mapping"
+import { resolveLive2dPlan, resolveLive2dWalkPlan } from "@/lib/pet/live2d/state-mapping"
 import type { Live2dCapabilities, MotionPlan } from "@/lib/pet/live2d/types"
 
 /** Structural slice of a loaded Live2D model the motion driver needs. */
@@ -50,6 +50,8 @@ function applyPlan(model: Live2dModelLike, plan: MotionPlan): void {
  * - State changes apply a fresh plan (idle/normal priority).
  * - One-shots are edge-triggered: a plan fires only on the transition into a
  *   non-null shot (so a re-render with the same active shot doesn't replay it).
+ * - `walking` (overlay wandering) plays the model's walk-ish group at idle
+ *   priority while it lasts; one-shots and reduced motion still win.
  * - `reducedMotion` stops all motions once on entering reduced mode, then no
  *   further motions are applied while it stays on.
  */
@@ -58,11 +60,13 @@ export function useLive2dMotion(
   state: PetVisualState,
   oneShot: PetOneShot | null,
   caps: Live2dCapabilities,
-  reducedMotion: boolean
+  reducedMotion: boolean,
+  walking = false
 ): void {
   const prevState = useRef<PetVisualState | null>(null)
   const prevOneShot = useRef<PetOneShot | null>(null)
   const prevReduced = useRef<boolean | null>(null)
+  const prevWalking = useRef<boolean>(false)
 
   useEffect(() => {
     if (!model) {
@@ -70,6 +74,7 @@ export function useLive2dMotion(
       prevState.current = null
       prevOneShot.current = null
       prevReduced.current = null
+      prevWalking.current = false
       return
     }
 
@@ -83,6 +88,7 @@ export function useLive2dMotion(
       // Hold the resting frame; refresh diff refs so leaving reduced re-applies.
       prevState.current = state
       prevOneShot.current = oneShot
+      prevWalking.current = walking
       return
     }
 
@@ -90,18 +96,29 @@ export function useLive2dMotion(
     const oneShotEntered = oneShot !== null && oneShot !== prevOneShot.current
     const stateChanged = state !== prevState.current
     const leftReduced = enteringReduced === false && prevReduced.current === false
+    const walkingChanged = walking !== prevWalking.current
 
     prevState.current = state
     prevOneShot.current = oneShot
+    prevWalking.current = walking
 
     if (oneShotEntered) {
       applyPlan(model, resolveLive2dPlan(state, oneShot, caps, false))
       return
     }
+    // While walking, the walk plan replaces the resting plan (edge-triggered the
+    // same way); a finished one-shot falls back into the walk loop too.
+    if (walking && oneShot === null) {
+      if (walkingChanged || stateChanged || leftReduced) {
+        applyPlan(model, resolveLive2dWalkPlan(caps, false))
+      }
+      return
+    }
     // Only re-apply the resting plan when the state actually changed (or we just
-    // left reduced mode) — avoids replaying the same idle motion every render.
-    if (oneShot === null && (stateChanged || leftReduced)) {
+    // left reduced mode / stopped walking) — avoids replaying the same idle
+    // motion every render.
+    if (oneShot === null && (stateChanged || leftReduced || walkingChanged)) {
       applyPlan(model, resolveLive2dPlan(state, null, caps, false))
     }
-  }, [model, state, oneShot, caps, reducedMotion])
+  }, [model, state, oneShot, caps, reducedMotion, walking])
 }

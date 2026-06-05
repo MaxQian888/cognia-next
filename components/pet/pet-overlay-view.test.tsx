@@ -72,6 +72,22 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   setPetClickThrough: (v: boolean) => setPetClickThrough(v),
   closePetWindow: () => closePetWindow(),
   showMainWindow: () => showMainWindow(),
+  getPetWorkArea: () => Promise.resolve(null),
+}))
+
+// Locomotion hook — deep-tested on its own; here we record the wiring args and
+// surface a controllable beginThrow.
+const locomotionArgs = jest.fn()
+const beginThrowMock = jest.fn()
+jest.mock("@/hooks/pet/use-pet-locomotion", () => ({
+  usePetLocomotion: (args: unknown) => {
+    locomotionArgs(args)
+    return {
+      locomotion: { mode: "resting", facing: "right" },
+      scaleFactor: 1,
+      beginThrow: beginThrowMock,
+    }
+  },
 }))
 
 // Pet store bubble selector.
@@ -80,13 +96,16 @@ jest.mock("@/stores/pet/pet-store", () => ({
   usePetStore: (selector: (s: { bubble: unknown }) => unknown) => selector({ bubble: bubbleValue }),
 }))
 
-// Settings store.
+// Settings store — both the hook selector form and the imperative getState()
+// snapshot (used by the settle-persist path).
 const saveMock = jest.fn().mockResolvedValue(undefined)
 let settingsValue: unknown = {}
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (s: { settings: unknown; save: unknown }) => unknown) =>
-    selector({ settings: settingsValue, save: saveMock }),
-}))
+jest.mock("@/stores/settings", () => {
+  const useSettingsStore = (selector: (s: { settings: unknown; save: unknown }) => unknown) =>
+    selector({ settings: settingsValue, save: saveMock })
+  useSettingsStore.getState = () => ({ settings: settingsValue, save: saveMock })
+  return { useSettingsStore }
+})
 
 import { PetOverlayView } from "./pet-overlay-view"
 
@@ -527,19 +546,104 @@ describe("PetOverlayView", () => {
       expect(showMainWindow).toHaveBeenCalledTimes(1)
     })
 
-    it("grows the window on open and restores it on close", async () => {
+    it("grows the window upward on open and restores the chrome-inclusive box on close", async () => {
       withPet()
       render(<PetOverlayView />)
-      // size 160 from the default beforeEach settings.
-      act(() => openMenu())
-      expect(resizePetWindow).toHaveBeenCalledWith(160, 160 + 240)
+      // size 160 from the default beforeEach settings; the resting window box
+      // always carries the chrome margins (96 / 160) — restoring to the bare
+      // pet size used to shed them after the first menu open (regression).
+      // The grow is asynchronous (reads the position first to compensate).
+      await act(async () => {
+        openMenu()
+        await Promise.resolve()
+      })
+      expect(resizePetWindow).toHaveBeenCalledWith(160 + 96, 160 + 160 + 240)
+      // Upward growth: window shifted up by the grow so the pet stays put.
+      expect(setPetWindowPosition).toHaveBeenCalledWith(100, 200 - 240)
 
-      // Close (Escape) → restore to the resting box.
+      // Close (Escape) → restore to the chrome-inclusive resting box + shift back.
+      setPetWindowPosition.mockClear()
       await act(async () => {
         fireEvent.keyDown(document.activeElement || document.body, { key: "Escape" })
         await Promise.resolve()
+        await Promise.resolve()
       })
-      expect(resizePetWindow).toHaveBeenCalledWith(160, 160)
+      expect(resizePetWindow).toHaveBeenCalledWith(160 + 96, 160 + 160)
+      expect(setPetWindowPosition).toHaveBeenCalledWith(100, 200 + 240)
+    })
+
+    it("a fast flick release hands off to beginThrow instead of persisting", async () => {
+      withPet()
+      render(<PetOverlayView />)
+      const pet = screen.getByTestId("pet-overlay-pet")
+      await act(async () => {
+        fireEvent.pointerDown(pet, { button: 0, pointerId: 21, screenX: 0, screenY: 0 })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      // Space the two move samples 100ms apart on the perf clock. React's
+      // scheduler also reads performance.now(), so a fixed implementation per
+      // phase (not mockReturnValueOnce) keeps the sample stamps deterministic.
+      const nowSpy = jest.spyOn(performance, "now").mockImplementation(() => 1000)
+      act(() => {
+        fireEvent.pointerMove(pet, { pointerId: 21, screenX: 100, screenY: 0 })
+      })
+      nowSpy.mockImplementation(() => 1100)
+      act(() => {
+        fireEvent.pointerMove(pet, { pointerId: 21, screenX: 2100, screenY: 40 })
+        flushRaf()
+      })
+      nowSpy.mockRestore()
+      await act(async () => {
+        fireEvent.pointerUp(pet, { pointerId: 21, screenX: 2100, screenY: 40 })
+        await Promise.resolve()
+      })
+      // 2000px in 100ms → capped at MAX_RELEASE_SPEED ≥ MIN_THROW_SPEED → throw.
+      expect(beginThrowMock).toHaveBeenCalledTimes(1)
+      const [x, y, vx] = beginThrowMock.mock.calls[0] as [number, number, number, number]
+      expect(x).toBe(100 + 2100)
+      expect(y).toBe(200 + 40)
+      expect(vx).toBeGreaterThan(0)
+      expect(saveMock).not.toHaveBeenCalled()
+    })
+
+    it("wires pause signals + settle persistence into the locomotion hook", async () => {
+      withPet()
+      bubbleValue = { text: "hi", origin: "system" }
+      render(<PetOverlayView />)
+      const args = locomotionArgs.mock.calls.at(-1)![0] as {
+        paused: boolean
+        enabled: boolean
+        petSize: number
+        onSettle: (x: number, y: number) => void
+      }
+      // A visible bubble pauses wandering.
+      expect(args.paused).toBe(true)
+      expect(args.enabled).toBe(true)
+      expect(args.petSize).toBe(160)
+      // Settling persists through the live settings snapshot.
+      await act(async () => {
+        args.onSettle(111, 222)
+        await Promise.resolve()
+      })
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          petSettings: expect.objectContaining({
+            desktopPet: expect.objectContaining({ position: { x: 111, y: 222 } }),
+          }),
+        })
+      )
+    })
+
+    it("passes locomotion + hidden-paused to the renderer", () => {
+      withPet()
+      render(<PetOverlayView />)
+      expect(rendererProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          locomotion: { mode: "resting", facing: "right" },
+          paused: false,
+        })
+      )
     })
   })
 })

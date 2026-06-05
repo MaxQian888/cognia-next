@@ -22,11 +22,16 @@ export type {
   PetAchievement,
   PetAchievementRecord,
 } from "./achievements"
-export type { PetSkin, PetSkinRenderProps } from "./skin"
+export type { PetSkin, PetSkinRenderProps, PetFacing, PetLocomotion } from "./skin"
 export type {
   PetAnchor,
   PetMotionPreference,
   PetSettings,
   PetDesktopOverlaySettings,
+  PetWanderFrequency,
+  PetWanderRange,
+  PetWanderSettings,
 } from "./settings"
-export { DEFAULT_PET_SETTINGS, DEFAULT_PET_DESKTOP_OVERLAY } from "./settings"
+export { DEFAULT_PET_SETTINGS, DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_WANDER } from "./settings"
+export type { Live2dTransform, Live2dMotionOverride, Live2dMotionOverrides } from "./live2d"
+export { DEFAULT_LIVE2D_TRANSFORM } from "./live2d"

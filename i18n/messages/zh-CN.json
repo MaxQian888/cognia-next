@@ -6700,7 +6700,38 @@
         "clickThroughHint": "开启鼠标穿透后，桌宠将忽略鼠标。只能通过此处或托盘菜单的“关闭鼠标穿透”恢复。",
         "size": {
           "label": "桌宠大小（{size}px）"
+        },
+        "wander": {
+          "title": "自主漫游",
+          "description": "让桌宠沿屏幕底部自行散步。",
+          "enabled": {
+            "label": "启用漫游",
+            "description": "桌宠会不时走到新位置。快速拖拽甩出始终可用。"
+          },
+          "frequency": {
+            "label": "活跃程度",
+            "options": {
+              "calm": "安静",
+              "normal": "普通",
+              "lively": "活泼"
+            }
+          },
+          "range": {
+            "label": "移动范围",
+            "options": {
+              "full": "整个屏幕",
+              "near": "就近活动"
+            }
+          },
+          "onlyAfterInteraction": {
+            "label": "仅互动后移动",
+            "description": "只有在你抚摸、喂食或玩耍后的几分钟内才会开始散步。"
+          }
         }
+      },
+      "lowPower": {
+        "label": "低功耗模式",
+        "description": "将 Live2D 帧率限制为 30 fps，并让漫游休息更久。"
       },
       "live2d": {
         "title": "Live2D 模型",

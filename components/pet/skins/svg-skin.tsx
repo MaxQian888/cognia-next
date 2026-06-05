@@ -6,17 +6,32 @@
 import { motion } from "motion/react"
 import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
 import { resolvePetMotion } from "@/lib/pet/animation/motion-spec"
+import { resolveWalkMotion } from "@/lib/pet/animation/walk-spec"
 import { stageScale, isEggStage } from "@/lib/pet/skins/stage-visual"
 import { PetBody } from "./svg/pet-body"
 import { PetEyesGroup, PetMouth } from "./svg/pet-face"
 import { PetVfx } from "./svg/pet-vfx"
 
-function PetSvgContent({ bones, stage, state, oneShot, reducedMotion }: PetSkinRenderProps) {
-  const spec = resolvePetMotion(state, oneShot, reducedMotion, bones.eyes)
+function PetSvgContent({
+  bones,
+  stage,
+  state,
+  oneShot,
+  reducedMotion,
+  locomotion,
+  paused,
+}: PetSkinRenderProps) {
+  // `paused` renders the same still frame as reduced motion (the face still
+  // expresses the emotion) — used while the window is hidden / minimized.
+  const still = reducedMotion || Boolean(paused)
+  const baseSpec = resolvePetMotion(state, oneShot, still, bones.eyes)
+  // Walking overlays a brisk bob over the resting spec; one-shots keep priority.
+  const walking = locomotion?.mode === "walking" && oneShot === null && !still
+  const spec = walking ? resolveWalkMotion(baseSpec, still) : baseSpec
   const scale = stageScale(stage)
   const egg = isEggStage(stage)
 
-  const bodyAnimate = reducedMotion
+  const bodyAnimate = still
     ? { scale: spec.body.scale[0] * scale }
     : {
         scale: spec.body.scale.map((s) => s * scale),
@@ -25,7 +40,7 @@ function PetSvgContent({ bones, stage, state, oneShot, reducedMotion }: PetSkinR
         rotate: spec.body.rotate,
       }
 
-  const bodyTransition = reducedMotion
+  const bodyTransition = still
     ? { duration: 0 }
     : {
         duration: spec.durationSec,
@@ -43,9 +58,9 @@ function PetSvgContent({ bones, stage, state, oneShot, reducedMotion }: PetSkinR
         rx={22}
         ry={5}
         fill="#00000022"
-        animate={reducedMotion ? { scaleX: 1 } : { scaleX: [1, 0.9, 1] }}
+        animate={still ? { scaleX: 1 } : { scaleX: [1, 0.9, 1] }}
         transition={
-          reducedMotion
+          still
             ? { duration: 0 }
             : { duration: spec.durationSec, repeat: spec.loop ? Infinity : 0, ease: "easeInOut" }
         }
@@ -76,9 +91,7 @@ function PetSvgContent({ bones, stage, state, oneShot, reducedMotion }: PetSkinR
         )}
       </motion.g>
 
-      {!egg && (
-        <PetVfx state={state} oneShot={oneShot} shiny={bones.shiny} reducedMotion={reducedMotion} />
-      )}
+      {!egg && <PetVfx state={state} oneShot={oneShot} shiny={bones.shiny} reducedMotion={still} />}
     </g>
   )
 }
@@ -86,6 +99,7 @@ function PetSvgContent({ bones, stage, state, oneShot, reducedMotion }: PetSkinR
 export const svgSkin: PetSkin = {
   id: "svg",
   render(props: PetSkinRenderProps) {
+    const facing = props.locomotion?.facing ?? "right"
     return (
       <svg
         viewBox="0 0 100 100"
@@ -93,7 +107,10 @@ export const svgSkin: PetSkin = {
         height={props.size}
         role="img"
         data-pet-skin-root="svg"
-        style={{ overflow: "visible" }}
+        data-pet-facing={facing}
+        data-pet-locomotion={props.locomotion?.mode ?? "resting"}
+        // The art faces right by default; walking left mirrors the whole svg.
+        style={{ overflow: "visible", transform: facing === "left" ? "scaleX(-1)" : undefined }}
       >
         <PetSvgContent {...props} />
       </svg>

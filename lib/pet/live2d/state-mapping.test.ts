@@ -1,5 +1,5 @@
 import type { PetOneShot, PetVisualState } from "@/types/pet"
-import { resolveLive2dPlan } from "./state-mapping"
+import { resolveLive2dPlan, resolveLive2dWalkPlan } from "./state-mapping"
 import type { Live2dCapabilities } from "./types"
 
 const ALL_STATES: PetVisualState[] = [
@@ -147,5 +147,41 @@ describe("resolveLive2dPlan — reduced motion", () => {
       expect(plan.motionGroup).toBeUndefined()
       expect(plan.expressionId).toBeUndefined()
     }
+  })
+})
+
+describe("resolveLive2dWalkPlan", () => {
+  it("prefers a real walk-ish group at idle priority", () => {
+    const caps: Live2dCapabilities = { motionGroups: ["Idle", "Walk"], expressionIds: [] }
+    expect(resolveLive2dWalkPlan(caps, false)).toEqual({
+      priority: "idle",
+      parameterFallback: false,
+      motionGroup: "Walk",
+      motionIndex: 0,
+    })
+  })
+
+  it("matches walk-ish names canonically (walking / move / run)", () => {
+    const caps: Live2dCapabilities = { motionGroups: ["walking"], expressionIds: [] }
+    expect(resolveLive2dWalkPlan(caps, false).motionGroup).toBe("walking")
+    const move: Live2dCapabilities = { motionGroups: ["Move"], expressionIds: [] }
+    expect(resolveLive2dWalkPlan(move, false).motionGroup).toBe("Move")
+  })
+
+  it("falls back to Idle when no walk group exists", () => {
+    expect(resolveLive2dWalkPlan(RICH, false).motionGroup).toBe("Idle")
+  })
+
+  it("parameter-falls-back when the model exposes nothing usable", () => {
+    const plan = resolveLive2dWalkPlan(EMPTY, false)
+    expect(plan.motionGroup).toBeUndefined()
+    expect(plan.parameterFallback).toBe(true)
+  })
+
+  it("collapses under reduced motion", () => {
+    expect(resolveLive2dWalkPlan(RICH, true)).toEqual({
+      priority: "idle",
+      parameterFallback: false,
+    })
   })
 })

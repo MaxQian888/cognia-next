@@ -8,6 +8,7 @@ import {
   deletePetModel,
   getPetModelEntries,
   getPetModelStorageUsage,
+  updatePetModelCustomization,
 } from "./pet-models"
 import type { PetModelRow } from "./pet-models"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -125,6 +126,35 @@ describe("pet-models CRUD", () => {
 
   it("deleting a missing model is a no-op", async () => {
     await expect(deletePetModel("nope")).resolves.toBeUndefined()
+  })
+
+  it("patches customization fields without touching the rest of the row", async () => {
+    const row = await addPetModel(meta(), [file("a.json", "{}")])
+    await updatePetModelCustomization(row.id, {
+      transform: { scale: 1.4, offsetX: 0.1, offsetY: -0.2 },
+    })
+    let stored = await getPetModel(row.id)
+    expect(stored?.transform).toEqual({ scale: 1.4, offsetX: 0.1, offsetY: -0.2 })
+    expect(stored?.name).toBe("Hiyori")
+    expect(stored?.motionGroups).toEqual(["Idle", "TapBody"])
+
+    // A second patch of the other field leaves the first in place.
+    await updatePetModelCustomization(row.id, {
+      motionOverrides: { happy: { motionGroup: "TapBody", expressionId: "smile" }, sleeping: {} },
+    })
+    stored = await getPetModel(row.id)
+    expect(stored?.transform).toEqual({ scale: 1.4, offsetX: 0.1, offsetY: -0.2 })
+    expect(stored?.motionOverrides).toEqual({
+      happy: { motionGroup: "TapBody", expressionId: "smile" },
+      sleeping: {},
+    })
+  })
+
+  it("customization patch on a missing id is a no-op", async () => {
+    await expect(
+      updatePetModelCustomization("nope", { transform: { scale: 1, offsetX: 0, offsetY: 0 } })
+    ).resolves.toBeUndefined()
+    expect(await getPetModel("nope")).toBeUndefined()
   })
 
   it("reports storage usage (model count + summed totalBytes)", async () => {

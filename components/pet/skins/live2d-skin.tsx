@@ -62,7 +62,7 @@ function Live2dSkinBoundary(props: PetSkinRenderProps) {
   return (
     <Live2dErrorBoundary fallback={fallback}>
       <Suspense fallback={fallback}>
-        <Live2dCanvas {...props} modelId={modelId} />
+        <Live2dCanvas {...props} modelId={modelId} lowPower={pet.lowPower ?? false} />
       </Suspense>
     </Live2dErrorBoundary>
   )

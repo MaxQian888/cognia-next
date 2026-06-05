@@ -17,7 +17,7 @@
 //! Only the pure position math and the DTO serde shape are unit-tested; the
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
 
 /// Default overlay size used when the tray opens the pet with no renderer
@@ -228,14 +228,25 @@ pub async fn pet_window_set_position(app: AppHandle, x: f64, y: f64) -> Result<(
     Ok(())
 }
 
+/// Named position DTO — a bare Rust tuple would serialize as a JSON array,
+/// which the TS wrapper (typed `{ x, y }`) silently read as `undefined`s and
+/// broke overlay dragging. Keep this a struct.
+#[derive(Debug, Clone, Serialize)]
+pub struct PetWindowPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Read the pet window's current outer position. `None` when the window is
 /// absent (so the renderer can fall back to its persisted coordinates).
 #[tauri::command]
-pub async fn pet_window_get_position(app: AppHandle) -> Result<Option<(i32, i32)>, String> {
+pub async fn pet_window_get_position(
+    app: AppHandle,
+) -> Result<Option<PetWindowPosition>, String> {
     match app.get_webview_window("pet") {
         Some(window) => {
             let pos = window.outer_position().map_err(|e| e.to_string())?;
-            Ok(Some((pos.x, pos.y)))
+            Ok(Some(PetWindowPosition { x: pos.x, y: pos.y }))
         }
         None => Ok(None),
     }
@@ -256,6 +267,49 @@ pub async fn pet_window_resize(app: AppHandle, width: f64, height: f64) -> Resul
 #[tauri::command]
 pub async fn is_pet_window_open(app: AppHandle) -> bool {
     is_pet_window_open_inner(&app)
+}
+
+/// Work area of one monitor in physical pixels (taskbar excluded), plus its
+/// scale factor so the renderer can convert logical window sizes. Mirrors the
+/// TS `PetWorkArea` in `lib/tauri/pet-window.ts`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetWorkArea {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub scale_factor: f64,
+}
+
+/// Pure DTO assembly from raw monitor numbers (unit-tested without a window).
+fn work_area_dto(pos: (i32, i32), size: (u32, u32), scale_factor: f64) -> PetWorkArea {
+    PetWorkArea {
+        x: pos.0 as f64,
+        y: pos.1 as f64,
+        width: size.0 as f64,
+        height: size.1 as f64,
+        scale_factor,
+    }
+}
+
+/// Work area of the monitor the pet window currently sits on (falls back to
+/// the primary monitor, then `None` when neither resolves — headless). The
+/// wander loop keeps the pet inside this rectangle.
+#[tauri::command]
+pub async fn pet_window_get_work_area(app: AppHandle) -> Result<Option<PetWorkArea>, String> {
+    let monitor = app
+        .get_webview_window("pet")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    Ok(monitor.map(|m| {
+        let rect = m.work_area();
+        work_area_dto(
+            (rect.position.x, rect.position.y),
+            (rect.size.width, rect.size.height),
+            m.scale_factor(),
+        )
+    }))
 }
 
 /// Surface the main window (used by the overlay's "show main window" menu
@@ -336,6 +390,37 @@ mod tests {
         let area = (0.0, 0.0, 200.0, 200.0);
         let (x, y) = resolve_initial_position(Some((50.0, 50.0)), area, WIN);
         assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn position_serializes_as_named_object_not_tuple() {
+        // Regression: a tuple here became a JSON array and broke the `{x, y}`
+        // contract of the TS wrapper (drag read undefined coordinates).
+        let json = serde_json::to_value(PetWindowPosition { x: 120, y: -45 }).unwrap();
+        assert_eq!(json["x"], 120);
+        assert_eq!(json["y"], -45);
+        assert!(json.as_object().is_some());
+    }
+
+    #[test]
+    fn work_area_dto_maps_raw_monitor_numbers() {
+        let dto = work_area_dto((-1920, 50), (1920, 1040), 1.5);
+        assert_eq!(dto.x, -1920.0);
+        assert_eq!(dto.y, 50.0);
+        assert_eq!(dto.width, 1920.0);
+        assert_eq!(dto.height, 1040.0);
+        assert_eq!(dto.scale_factor, 1.5);
+    }
+
+    #[test]
+    fn work_area_serializes_camel_case() {
+        let dto = work_area_dto((0, 0), (2560, 1400), 1.25);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["x"], 0.0);
+        assert_eq!(json["width"], 2560.0);
+        assert_eq!(json["height"], 1400.0);
+        assert_eq!(json["scaleFactor"], 1.25);
+        assert!(json.get("scale_factor").is_none());
     }
 
     #[test]

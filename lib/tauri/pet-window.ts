@@ -104,6 +104,29 @@ export async function resizePetWindow(width: number, height: number): Promise<bo
   }
 }
 
+/**
+ * Work area of the monitor the pet window sits on (physical px + scale
+ * factor). Mirrors the Rust `PetWorkArea` DTO. `null` off Tauri / headless.
+ */
+export interface PetWorkArea {
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+}
+
+/** Read the work area of the monitor hosting the overlay window. */
+export async function getPetWorkArea(): Promise<PetWorkArea | null> {
+  if (!isTauri()) return null
+  try {
+    return await invoke<PetWorkArea | null>("pet_window_get_work_area")
+  } catch (err) {
+    console.warn("getPetWorkArea failed", err)
+    return null
+  }
+}
+
 /** Whether the overlay window currently exists. */
 export async function isPetWindowOpen(): Promise<boolean> {
   if (!isTauri()) return false

@@ -203,4 +203,99 @@ describe("PetSection", () => {
       })
     })
   })
+
+  it("toggles low-power mode through save()", () => {
+    render(<PetSection />)
+    fireEvent.click(document.getElementById("pet-low-power") as HTMLButtonElement)
+    expect(save).toHaveBeenCalledWith({
+      petSettings: expect.objectContaining({ lowPower: true }),
+    })
+  })
+
+  describe("wander block", () => {
+    const withDesktopEnabled = (wander?: unknown) => {
+      settingsValue = {
+        petSettings: {
+          enabled: true,
+          anchor: "bottom-right",
+          motion: "auto",
+          mutedBubbles: false,
+          size: 96,
+          skinId: "svg",
+          desktopPet: { enabled: true, clickThrough: false, size: 128, position: null, wander },
+        },
+      }
+    }
+
+    it("is hidden while the desktop pet is disabled", () => {
+      render(<PetSection />)
+      expect(screen.queryByTestId("pet-wander-block")).toBeNull()
+    })
+
+    it("enables wandering (defaults applied for legacy settings without a wander block)", () => {
+      withDesktopEnabled(undefined)
+      render(<PetSection />)
+      fireEvent.click(document.getElementById("pet-wander-enabled") as HTMLButtonElement)
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          desktopPet: expect.objectContaining({
+            wander: expect.objectContaining({
+              enabled: true,
+              frequency: "normal",
+              range: "full",
+              onlyAfterInteraction: false,
+            }),
+          }),
+        }),
+      })
+    })
+
+    it("changes the frequency and range", () => {
+      withDesktopEnabled({
+        enabled: true,
+        frequency: "normal",
+        onlyAfterInteraction: false,
+        range: "full",
+      })
+      render(<PetSection />)
+      fireEvent.change(document.getElementById("pet-wander-frequency") as HTMLSelectElement, {
+        target: { value: "lively" },
+      })
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          desktopPet: expect.objectContaining({
+            wander: expect.objectContaining({ frequency: "lively" }),
+          }),
+        }),
+      })
+      fireEvent.change(document.getElementById("pet-wander-range") as HTMLSelectElement, {
+        target: { value: "near" },
+      })
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          desktopPet: expect.objectContaining({
+            wander: expect.objectContaining({ range: "near" }),
+          }),
+        }),
+      })
+    })
+
+    it("toggles only-after-interaction", () => {
+      withDesktopEnabled({
+        enabled: true,
+        frequency: "normal",
+        onlyAfterInteraction: false,
+        range: "full",
+      })
+      render(<PetSection />)
+      fireEvent.click(document.getElementById("pet-wander-after-interaction") as HTMLButtonElement)
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          desktopPet: expect.objectContaining({
+            wander: expect.objectContaining({ onlyAfterInteraction: true }),
+          }),
+        }),
+      })
+    })
+  })
 })

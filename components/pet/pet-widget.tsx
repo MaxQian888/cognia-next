@@ -16,20 +16,17 @@ import { usePet } from "@/hooks/pet/use-pet"
 import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { usePetBubbles } from "@/hooks/pet/use-pet-bubbles"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { useSettingsStore } from "@/stores/settings"
 import { closePetWindow, isPetWindowOpen, openPetWindow } from "@/lib/tauri/pet-window"
+import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { DEFAULT_PET_DESKTOP_OVERLAY, type PetAnchor, type PetSettings } from "@/types/pet"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 import { PetInteractionPanel } from "./pet-interaction-panel"
 import { PetQuickMenu } from "./pet-quick-menu"
-
-// Window chrome margins added around the overlay pet so its quick menu / bubble
-// have room. Mirrors the initializer + settings open path.
-const OVERLAY_CHROME_W = 96
-const OVERLAY_CHROME_H = 160
 
 const ANCHOR_POSITION: Record<PetAnchor, string> = {
   "bottom-right": "bottom-4 right-4",
@@ -74,6 +71,9 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const minimized = usePetStore((s) => s.minimized)
   const setMinimized = usePetStore((s) => s.setMinimized)
   const [open, setOpen] = useState(false)
+  // Stop the looping animations (framer-motion + pixi ticker) while the app
+  // window is hidden/minimized — the pet still renders its resting frame.
+  const docHidden = useDocumentHidden()
 
   // Quick-menu wiring. Navigation reuses the app router (settings live at
   // `/settings?section=pet`, the pet console at `/pet`). Desktop-pet toggling is
@@ -95,8 +95,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
         return
       }
       await openPetWindow({
-        width: desktop.size + OVERLAY_CHROME_W,
-        height: desktop.size + OVERLAY_CHROME_H,
+        ...overlayWindowSize(desktop.size),
         x: desktop.position?.x,
         y: desktop.position?.y,
         clickThrough: desktop.clickThrough,
@@ -186,6 +185,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
               reducedMotion={reduced}
               size={settings.size}
               skinId={effectiveSkin}
+              paused={docHidden}
             />
           </motion.button>
         </PetQuickMenu>

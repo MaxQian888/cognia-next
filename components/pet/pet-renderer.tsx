@@ -6,7 +6,7 @@
 "use client"
 
 import { useReducedMotion } from "motion/react"
-import type { PetBones, PetOneShot, PetStage, PetVisualState } from "@/types/pet"
+import type { PetBones, PetLocomotion, PetOneShot, PetStage, PetVisualState } from "@/types/pet"
 import { getSkin } from "./skins/registry"
 
 export interface PetRendererProps {
@@ -18,6 +18,10 @@ export interface PetRendererProps {
   reducedMotion?: boolean
   size?: number
   skinId?: string
+  /** Overlay-only locomotion (walk/fall + facing). Absent = resting. */
+  locomotion?: PetLocomotion | null
+  /** Render a still frame (window hidden / widget minimized). */
+  paused?: boolean
 }
 
 export function PetRenderer({
@@ -28,9 +32,24 @@ export function PetRenderer({
   reducedMotion,
   size = 96,
   skinId,
+  locomotion,
+  paused,
 }: PetRendererProps) {
   const osReduced = useReducedMotion()
   const reduced = reducedMotion ?? osReduced ?? false
   const skin = getSkin(skinId)
-  return <>{skin.render({ bones, stage, state, oneShot, reducedMotion: reduced, size })}</>
+  return (
+    <>
+      {skin.render({
+        bones,
+        stage,
+        state,
+        oneShot,
+        reducedMotion: reduced,
+        size,
+        locomotion: locomotion ?? undefined,
+        paused,
+      })}
+    </>
+  )
 }

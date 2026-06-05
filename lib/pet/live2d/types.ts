@@ -38,6 +38,12 @@ export interface Live2DManifest {
 export interface Live2dCapabilities {
   motionGroups: string[]
   expressionIds: string[]
+  /**
+   * Motion count per group, when known (populated by the canvas from the
+   * model's settings). Lets the motion hook draw a random index for override
+   * entries that leave `motionIndex` unset.
+   */
+  motionGroupCounts?: Record<string, number>
 }
 
 /** A render-agnostic plan describing which motion/expression to play. */

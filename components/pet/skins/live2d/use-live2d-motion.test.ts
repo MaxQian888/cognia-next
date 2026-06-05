@@ -25,11 +25,12 @@ interface Args {
   oneShot: PetOneShot | null
   caps: Live2dCapabilities
   reducedMotion: boolean
+  walking?: boolean
 }
 
 function setup(initial: Args) {
   return renderHook(
-    (p: Args) => useLive2dMotion(p.model, p.state, p.oneShot, p.caps, p.reducedMotion),
+    (p: Args) => useLive2dMotion(p.model, p.state, p.oneShot, p.caps, p.reducedMotion, p.walking),
     {
       initialProps: initial,
     }
@@ -133,5 +134,135 @@ describe("useLive2dMotion", () => {
     expect(() =>
       view.rerender({ model, state: "idle", oneShot: null, caps, reducedMotion: true })
     ).not.toThrow()
+  })
+
+  describe("walking (overlay wandering)", () => {
+    const walkCaps: Live2dCapabilities = {
+      motionGroups: ["Idle", "Walk", "Tap"],
+      expressionIds: [],
+    }
+
+    it("plays the model's walk group at idle priority on the walking edge", () => {
+      const { model } = makeModel()
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      expect(model.motion).toHaveBeenCalledWith("Walk", 0, 1)
+    })
+
+    it("falls back to Idle when the model has no walk-ish group", () => {
+      const { model } = makeModel()
+      const view = setup({ model, state: "happy", oneShot: null, caps, reducedMotion: false })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "happy",
+        oneShot: null,
+        caps,
+        reducedMotion: false,
+        walking: true,
+      })
+      expect(model.motion).toHaveBeenCalledWith("Idle", 0, 1)
+    })
+
+    it("does not replay the walk plan on re-renders while walking persists", () => {
+      const { model } = makeModel()
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      expect(model.motion).not.toHaveBeenCalled()
+    })
+
+    it("re-applies the resting plan when walking stops", () => {
+      const { model } = makeModel()
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: false,
+      })
+      expect(model.motion).toHaveBeenCalledWith("Idle", 0, 1)
+    })
+
+    it("one-shots preempt the walk plan at force priority", () => {
+      const { model } = makeModel()
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: "wave",
+        caps: walkCaps,
+        reducedMotion: false,
+        walking: true,
+      })
+      expect(model.motion).toHaveBeenCalledWith("Tap", 0, 3)
+    })
+
+    it("reduced motion suppresses the walk plan", () => {
+      const { model } = makeModel()
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: true,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: walkCaps,
+        reducedMotion: true,
+        walking: true,
+      })
+      expect(model.motion).not.toHaveBeenCalled()
+    })
   })
 })

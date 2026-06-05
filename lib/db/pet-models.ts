@@ -15,6 +15,7 @@
  */
 
 import { getDb } from "./schema"
+import type { Live2dMotionOverrides, Live2dTransform } from "@/types/pet"
 
 /** Metadata row for one stored Live2D model. */
 export interface PetModelRow {
@@ -36,6 +37,16 @@ export interface PetModelRow {
   totalBytes: number
   /** Epoch ms when the model was added. */
   createdAt: number
+  /**
+   * Per-model render transform (additive, non-indexed — absent on legacy rows;
+   * normalized to defaults on read via `normalizeTransform`).
+   */
+  transform?: Live2dTransform
+  /**
+   * Per-model state→motion/expression overrides (additive, non-indexed —
+   * absent = naming-convention mapping only).
+   */
+  motionOverrides?: Live2dMotionOverrides
 }
 
 /** Blob row for one Live2D model asset. */
@@ -104,6 +115,18 @@ export async function deletePetModel(id: string): Promise<void> {
     await db.petModels.delete(id)
     await db.petModelFiles.where("modelId").equals(id).delete()
   })
+}
+
+/**
+ * Patch the customization fields of a model row (shallow Dexie merge over
+ * non-indexed fields — no schema version bump). A missing id is a no-op,
+ * matching the read-miss convention.
+ */
+export async function updatePetModelCustomization(
+  id: string,
+  patch: { transform?: Live2dTransform; motionOverrides?: Live2dMotionOverrides }
+): Promise<void> {
+  await getDb().petModels.update(id, patch)
 }
 
 /** All asset blobs for a model as `{ path, blob }` pairs (empty if absent). */

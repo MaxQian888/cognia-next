@@ -11,11 +11,12 @@ const tickerStart = jest.fn()
 const appDestroy = jest.fn()
 const appInit = jest.fn(() => Promise.resolve())
 
+const tickerState: { maxFPS?: number } = {}
 jest.mock("pixi.js", () => ({
   Application: class {
     stage = { addChild }
     renderer = { resize }
-    ticker = { stop: tickerStop, start: tickerStart }
+    ticker = Object.assign(tickerState, { stop: tickerStop, start: tickerStart })
     init = appInit
     destroy = appDestroy
   },
@@ -64,6 +65,7 @@ const row = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  tickerState.maxFPS = undefined
   getPetModel.mockResolvedValue(row)
   getPetModelEntries.mockResolvedValue([{ path: "Hiyori.model3.json", blob: new Blob(["{}"]) }])
 })
@@ -90,10 +92,10 @@ describe("Live2dCanvas", () => {
     renderCanvas()
     await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
     expect(appInit).toHaveBeenCalled()
-    // fitModel centers + scales the model.
+    // fitModel centers + scales the model (after a reset-to-1 measurement pass).
     expect(loaded.anchor.set).toHaveBeenCalledWith(0.5, 0.5)
     expect(loaded.position.set).toHaveBeenCalledWith(48, 48)
-    expect(loaded.scale.set).toHaveBeenCalledWith(96 / 400)
+    expect(loaded.scale.set).toHaveBeenCalledWith(96 / 400, 96 / 400)
   })
 
   it("falls back to scale 1 for a zero-sized model", async () => {
@@ -102,7 +104,37 @@ describe("Live2dCanvas", () => {
     loaded.height = 0
     load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
     renderCanvas()
-    await waitFor(() => expect(loaded.scale.set).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(loaded.scale.set).toHaveBeenCalledWith(1, 1))
+  })
+
+  it("mirrors the model horizontally when facing left", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ locomotion: { mode: "walking", facing: "left" } })
+    await waitFor(() => expect(loaded.scale.set).toHaveBeenCalledWith(-(96 / 400), 96 / 400))
+  })
+
+  it("stops the ticker when paused (hidden window)", async () => {
+    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+    renderCanvas({ paused: true })
+    await waitFor(() => expect(tickerStop).toHaveBeenCalled())
+  })
+
+  it("initializes high-DPI aware with antialias on and a 60fps cap by default", async () => {
+    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+    renderCanvas()
+    // The FPS effect lands once the model state commits — wait for the value.
+    await waitFor(() => expect(tickerState.maxFPS).toBe(60))
+    expect(appInit).toHaveBeenCalledWith(
+      expect.objectContaining({ antialias: true, autoDensity: true, resolution: 1 })
+    )
+  })
+
+  it("low-power mode disables antialias at init and caps the ticker at 30fps", async () => {
+    load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
+    renderCanvas({ lowPower: true })
+    await waitFor(() => expect(tickerState.maxFPS).toBe(30))
+    expect(appInit).toHaveBeenCalledWith(expect.objectContaining({ antialias: false }))
   })
 
   it("tolerates a loaded model that lacks anchor/position/scale setters", async () => {
