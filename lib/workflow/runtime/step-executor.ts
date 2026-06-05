@@ -16,6 +16,7 @@ import { resolveDeep } from "./expression"
 import { IdempotencyCache } from "./idempotency"
 import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
+import { createStreamSink } from "./stream-sink"
 
 export interface RunStepInput {
   workflow: VisualWorkflow
@@ -144,12 +145,19 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     }
 
     await logger.stepStarted(node.id, { attempt }, input.iterationMeta)
+    // Fresh sink per attempt so a failed attempt's partial stream never
+    // interleaves with the retry's output. The sink throttles `step_stream`
+    // writes; usage lands as one `step_usage` event.
+    const sink = createStreamSink({ stepId: node.id, logger })
+    ctx.emitStream = (delta) => sink.push(delta)
+    ctx.reportUsage = (usage) => void logger.stepUsage(node.id, usage)
     try {
       const result = await runWithTimeout(
         reg.timeoutMs ?? input.workflow.settings.timeoutMs,
         signal,
         () => reg.execute(ctx)
       )
+      sink.final()
       const exec: StepExecution = {
         output: result.output,
         decision: result.decision,
@@ -166,6 +174,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       await logger.stepCompleted(node.id, result.output, input.iterationMeta)
       return exec
     } catch (err) {
+      sink.final()
       const message = err instanceof Error ? err.message : String(err)
       const retryable = isRetryableError(err)
       const lastAttempt = attempt >= retryPolicy.attempts

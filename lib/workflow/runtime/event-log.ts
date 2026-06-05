@@ -7,7 +7,12 @@
 
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
-import type { RunEventLogLevel, RunEventType, WorkflowRunEventRow } from "@/types/workflow/visual"
+import type {
+  RunEventLogLevel,
+  RunEventType,
+  StepUsage,
+  WorkflowRunEventRow,
+} from "@/types/workflow/visual"
 
 export interface AppendEventInput {
   runId: string
@@ -131,6 +136,26 @@ export function createRunLogger(runId: string) {
         type: "step_skipped",
         stepId,
         payload: { reason },
+      }),
+    /**
+     * One throttled chunk of streaming LLM output. `seq` is the sink's
+     * monotonic flush counter so the UI can order chunks deterministically
+     * even when several land in the same millisecond.
+     */
+    stepStream: (stepId: string, delta: string, seq: number) =>
+      appendEvent({
+        runId,
+        type: "step_stream",
+        stepId,
+        payload: { delta, seq },
+      }),
+    /** Token/cost usage snapshot for one step (payload = StepUsage). */
+    stepUsage: (stepId: string, usage: StepUsage) =>
+      appendEvent({
+        runId,
+        type: "step_usage",
+        stepId,
+        payload: usage,
       }),
     log: (level: RunEventLogLevel, message: string, payload?: unknown, stepId?: string) =>
       appendEvent({

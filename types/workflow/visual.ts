@@ -561,6 +561,12 @@ export type RunEventType =
   | "run_cancelled"
   | "step.long_running.checkpoint"
   | "step.long_running.progress"
+  // Streaming LLM output chunks (throttled via stream-sink; payload
+  // `{ delta, seq }`). Presentation-only — resume reads the final output
+  // from `step_completed`, never reassembles chunks.
+  | "step_stream"
+  // Token/cost usage snapshot for one step (payload = StepUsage).
+  | "step_usage"
 
 export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 
@@ -596,6 +602,21 @@ export interface WorkflowTriggerRow {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Token/cost usage reported by an LLM-backed step. Persisted as the payload
+ * of a `step_usage` event; aggregated per-run by the Runs UI.
+ */
+export interface StepUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  /** Provider that actually served the call (post-routing/fallback). */
+  providerId?: string
+  modelId?: string
+  /** Estimated USD cost; undefined when no pricing is known for the model. */
+  costUsd?: number
+}
+
+/**
  * Per-step execution context. The runtime constructs one of these per
  * `(runId, stepId)` pair and passes it to the registered NodeExecutor.
  */
@@ -624,6 +645,18 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   log: (level: RunEventLogLevel, message: string, payload?: unknown) => void
   /** Resolves a credential ref id to its keychain value. */
   resolveSecret: (refId: string) => Promise<string | undefined>
+  /**
+   * Push one streaming output delta (LLM token chunk). Buffered/throttled by
+   * the runtime's stream sink before landing as `step_stream` events, so
+   * executors may call this per token without write amplification. Absent
+   * when the run surface doesn't render live output.
+   */
+  emitStream?: (delta: string) => void
+  /**
+   * Report token/cost usage for this step. Lands as a `step_usage` event;
+   * call at most once, after the LLM call settles.
+   */
+  reportUsage?: (usage: StepUsage) => void
 }
 
 /**
@@ -698,6 +731,10 @@ export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   errorPolicy: "stop",
   timeoutMs: 600_000,
   concurrency: 1,
+  // In-run ready-set parallelism for NEW workflows. Persisted workflows
+  // without the field keep the legacy sequential behavior (`?? 1` in
+  // runWorkflow) — only the seed for newly created workflows changed.
+  maxConcurrency: 4,
   retryDefaults: { attempts: 3, backoff: "exponential", baseMs: 1000, maxMs: 30_000 },
 }
 

@@ -59,6 +59,13 @@ describe("default constants", () => {
     expect(DEFAULT_WORKFLOW_SETTINGS.retryDefaults.attempts).toBeGreaterThanOrEqual(1)
   })
 
+  it("defaults new workflows to parallel ready-set scheduling", () => {
+    // New workflows get in-run parallelism; persisted workflows WITHOUT the
+    // field stay sequential via the orchestrator's `?? 1` fallback (covered
+    // by orchestrator.test.ts "maxConcurrency=1 default serializes").
+    expect(DEFAULT_WORKFLOW_SETTINGS.maxConcurrency).toBe(4)
+  })
+
   it("retry policy default uses exponential backoff with a cap", () => {
     expect(DEFAULT_RETRY_POLICY.backoff).toBe("exponential")
     expect(DEFAULT_RETRY_POLICY.baseMs).toBeGreaterThan(0)
