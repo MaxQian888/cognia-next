@@ -278,6 +278,97 @@ describe("ProviderRoutingEngine", () => {
     })
   })
 
+  describe("entry condition filtering (maxCostPer1M / maxLatencyMs)", () => {
+    it("filters an entry whose price exceeds its maxCostPer1M condition", () => {
+      const reg = registry([
+        mapping("alias", [
+          entry("openai", "gpt-4o", { conditions: { maxCostPer1M: 5 } }),
+          entry("groq", "llama"),
+        ]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ pricing: { "openai:gpt-4o": 10, "groq:llama": 1 } })
+      )
+      const result = engine.selectProvider({ model: "alias" })
+      expect(result?.providerId).toBe("groq")
+    })
+
+    it("keeps an entry whose price is within its maxCostPer1M condition", () => {
+      const reg = registry([
+        mapping("alias", [
+          entry("openai", "gpt-4o", { conditions: { maxCostPer1M: 5 } }),
+          entry("groq", "llama"),
+        ]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ pricing: { "openai:gpt-4o": 3 } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("filters an entry whose recent p50 latency exceeds maxLatencyMs", () => {
+      const reg = registry([
+        mapping("alias", [
+          entry("openai", "gpt-4o", { conditions: { maxLatencyMs: 1000 } }),
+          entry("groq", "llama"),
+        ]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ metrics: { openai: metric("openai", { latencyP50: 2000 }) } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("groq")
+    })
+
+    it("keeps a latency-conditioned entry when no latency data exists (no-info passthrough)", () => {
+      const reg = registry([
+        mapping("alias", [
+          entry("openai", "gpt-4o", { conditions: { maxLatencyMs: 1000 } }),
+          entry("groq", "llama"),
+        ]),
+      ])
+      // latencyP50: 0 means "no data yet" — the condition must not fire.
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ metrics: { openai: metric("openai", { latencyP50: 0 }) } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("keeps a cost-conditioned entry when pricing is unknown (no-info passthrough)", () => {
+      const reg = registry([
+        mapping("alias", [entry("openai", "gpt-4o", { conditions: { maxCostPer1M: 5 } })]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps()
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("returns null when conditions filter out every entry and no direct fallthrough exists", () => {
+      const reg = registry([
+        mapping("alias", [
+          entry("openai", "gpt-4o", { conditions: { maxCostPer1M: 1 } }),
+          entry("anthropic", "claude", { conditions: { maxCostPer1M: 1 } }),
+        ]),
+      ])
+      const engine = new ProviderRoutingEngine(
+        reg,
+        DEFAULT_ROUTING_CONFIG,
+        makeDeps({ pricing: { "openai:gpt-4o": 10, "anthropic:claude": 10 } })
+      )
+      expect(engine.selectProvider({ model: "alias" })).toBeNull()
+    })
+  })
+
   describe("provider constraints", () => {
     const entries = [entry("openai", "gpt-4o"), entry("anthropic", "claude")]
     const reg = registry([mapping("alias", entries)])

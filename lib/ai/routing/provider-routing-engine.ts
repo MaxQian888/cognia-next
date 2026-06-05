@@ -18,7 +18,7 @@ import type { RoutingStrategy, RequestRoutingOverride } from "@/types/provider/a
 import type { ProviderHealthMetrics } from "@/types/provider/health-metrics"
 import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
 import type { ProviderName } from "@/types/provider"
-import { resolveModelAlias } from "./alias-resolver"
+import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
 
 /** Provider info needed for routing decisions */
 export interface ProviderRoutingInfo {
@@ -109,7 +109,7 @@ export class ProviderRoutingEngine {
     // Check for model alias (from override or direct model string)
     const alias = override?.modelAlias || options.model
     if (alias && this.registry.enabled) {
-      const resolution = resolveModelAlias(alias, this.registry)
+      const resolution = resolveModelAlias(alias, this.registry, this.buildLiteMetricsMap(alias))
       if (resolution.found && resolution.entries.length > 0) {
         return this.selectFromEntries(
           resolution.entries,
@@ -133,6 +133,34 @@ export class ProviderRoutingEngine {
     }
 
     return null
+  }
+
+  /**
+   * Build the per-entry lite metrics map the alias resolver needs to evaluate
+   * ModelMappingConditions (maxCostPer1M / maxLatencyMs). Cost comes from the
+   * static pricing catalog (a price ceiling check); latency comes from recent
+   * health metrics. Missing info is left undefined so the resolver treats the
+   * condition as "no info -> pass".
+   */
+  private buildLiteMetricsMap(
+    alias: string
+  ): Record<string, ProviderHealthMetricsLite> | undefined {
+    const normalizedAlias = alias.toLowerCase()
+    const mapping = this.registry.mappings.find(
+      (m) => m.enabled && m.alias.toLowerCase() === normalizedAlias
+    )
+    if (!mapping) return undefined
+
+    const map: Record<string, ProviderHealthMetricsLite> = {}
+    for (const entry of mapping.providers) {
+      const p50 = this.deps.getHealthMetrics(entry.providerId)?.latencyP50
+      map[`${entry.providerId}:${entry.modelId}`] = {
+        costPer1M: this.deps.getPricing(entry.providerId, entry.modelId),
+        // latencyP50 of 0 means "no data yet" — never trip a latency condition on it.
+        latencyMs: p50 && p50 > 0 ? p50 : undefined,
+      }
+    }
+    return map
   }
 
   /**
