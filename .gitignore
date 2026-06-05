@@ -38,6 +38,10 @@ junit.xml
 .DS_Store
 *.pem
 
+# python bytecode (plugin runtime imports plugins/*/main.py)
+__pycache__/
+*.pyc
+
 # debug
 npm-debug.log*
 yarn-debug.log*
