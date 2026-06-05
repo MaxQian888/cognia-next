@@ -48,6 +48,7 @@ import {
 } from "@/lib/ai/providers/model-pricing"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
+import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
@@ -503,6 +504,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           providerSettings: appSettings.providerSettings,
           customProviders: appSettings.customProviders,
         } as PriceLookupSettings),
+      // Durable today-spend mirror (hydrated from Dexie at boot, incremented
+      // per turn) — makes `dailyCostBudget` survive reloads.
+      getTodaySpend: (id) => useProviderCostMirrorStore.getState().getTodaySpend(id),
     }
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
     const result = engine.selectProvider({ model })
@@ -521,6 +525,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.routingDecision = {
         strategy: result.strategy,
         reason: result.reason,
+        ...(result.overBudgetWarning ? { overBudgetWarning: result.overBudgetWarning } : {}),
       }
     }
   }

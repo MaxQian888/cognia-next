@@ -9,6 +9,7 @@
 
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
+import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 
 export interface ProviderOutcome {
   providerId: string
@@ -16,10 +17,14 @@ export interface ProviderOutcome {
   latencyMs: number
   errorMessage?: string
   estimatedCostUsd?: number
+  /** Model that served the turn — required for the durable cost rollup. */
+  modelId?: string
+  /** Total tokens used by the turn (input+output) when the SDK reports usage. */
+  tokensUsed?: number
 }
 
 export function recordProviderOutcome(outcome: ProviderOutcome): void {
-  const { providerId, ok, latencyMs, errorMessage, estimatedCostUsd } = outcome
+  const { providerId, ok, latencyMs, errorMessage, estimatedCostUsd, modelId } = outcome
   if (!providerId) return
   try {
     useHealthMetricsStore.getState().record({
@@ -32,6 +37,16 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     const cb = useCircuitBreakerStore.getState()
     if (ok) cb.recordSuccess(providerId)
     else cb.recordFailure(providerId)
+
+    // Durable daily cost rollup (only successful turns carry real cost).
+    // Mirror update is synchronous so the routing engine's budget check sees
+    // it immediately; the Dexie write is fire-and-forget off the send path.
+    if (ok && typeof estimatedCostUsd === "number" && estimatedCostUsd > 0 && modelId) {
+      useProviderCostMirrorStore.getState().addCost(providerId, estimatedCostUsd)
+      void import("@/lib/db/provider-cost-daily")
+        .then((m) => m.incrementProviderCost({ providerId, modelId, costUsd: estimatedCostUsd }))
+        .catch(() => {})
+    }
   } catch {
     // Telemetry must never break a send.
   }

@@ -43,6 +43,7 @@ interface DepsState {
   metrics?: Record<string, ProviderHealthMetrics>
   cb?: Record<string, CircuitBreakerStateValue>
   unavailable?: Set<string>
+  todaySpend?: Record<string, number>
 }
 
 function makeDeps(state: DepsState = {}): RoutingEngineDeps {
@@ -51,6 +52,7 @@ function makeDeps(state: DepsState = {}): RoutingEngineDeps {
     getCircuitBreakerState: (id) => state.cb?.[id] ?? "closed",
     isProviderAvailable: (id) => !state.unavailable?.has(id),
     getPricing: (pid, mid) => state.pricing?.[`${pid}:${mid}`],
+    ...(state.todaySpend ? { getTodaySpend: (id) => state.todaySpend?.[id] ?? 0 } : {}),
   }
 }
 
@@ -455,6 +457,59 @@ describe("ProviderRoutingEngine", () => {
       // Both blown the budget, so the engine must keep the original list rather than
       // returning null.
       expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("prefers the durable today-spend mirror over health metrics for budgets", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", dailyCostBudget: 5, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        reg,
+        config,
+        makeDeps({
+          // Mirror says 10 USD today (over budget) even though the in-memory
+          // session metrics saw nothing — e.g. right after a reload.
+          todaySpend: { openai: 10 },
+          metrics: { openai: metric("openai", { totalCost: 0 }) },
+        })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("anthropic")
+    })
+
+    it("flags overBudgetWarning when the sole candidate is over budget", () => {
+      const solo = registry([mapping("solo", [entry("openai", "gpt-4o")])])
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", dailyCostBudget: 5, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        solo,
+        config,
+        makeDeps({ todaySpend: { openai: 7.5 } })
+      )
+      const result = engine.selectProvider({ model: "solo" })
+      // Advisory semantics: still selected, but the warning rides along.
+      expect(result?.providerId).toBe("openai")
+      expect(result?.overBudgetWarning).toEqual({ providerId: "openai", spend: 7.5, budget: 5 })
+    })
+
+    it("does not flag a warning when an under-budget alternative was chosen", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", dailyCostBudget: 5, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        reg,
+        config,
+        makeDeps({ todaySpend: { openai: 10 } })
+      )
+      const result = engine.selectProvider({ model: "alias" })
+      expect(result?.providerId).toBe("anthropic")
+      expect(result?.overBudgetWarning).toBeUndefined()
     })
   })
 })

@@ -1,6 +1,7 @@
 "use client"
 
 import { startTransition, useCallback, useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
   applySdkEvent,
@@ -21,6 +22,7 @@ import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
   approveTool,
@@ -389,6 +391,7 @@ function renderGoalExitCard(resultingStatus: GoalStatus, reason: string): string
  */
 export function useClaudeChat() {
   const store = useChatStore
+  const tRouting = useTranslations("providers.routingView")
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -616,6 +619,13 @@ export function useClaudeChat() {
         }
         useChatStore.getState().setPendingCommandOverrides(null)
       }
+
+      // Advisory daily-budget overage — the routing engine selected a provider
+      // that is past its dailyCostBudget because nothing under budget was
+      // available. Surface once per provider per local day; never blocks.
+      notifyOverBudgetOnce(sendOptions.routingDecision?.overBudgetWarning, (v) =>
+        tRouting("overBudgetToast", v)
+      )
 
       // Plugin opt-in — fire `onUserPromptSubmit` before the network call.
       // Block / modify / proceed semantics:
@@ -867,7 +877,7 @@ export function useClaudeChat() {
         }
       }
     },
-    [store]
+    [store, tRouting]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -1215,14 +1225,15 @@ async function handleEvent(
           // ADR-0043 Phase 4 — record the failure against the provider that
           // errored BEFORE any fallback re-issues against the next chain entry
           // (which overwrites the cached send). Trips its breaker after repeats.
-          const failedProvider =
-            useChatStore.getState().lastSendBySession[evt.sessionId]?.options.provider
+          const failedSend = useChatStore.getState().lastSendBySession[evt.sessionId]
+          const failedProvider = failedSend?.options.provider
           if (failedProvider) {
             recordProviderOutcome({
               providerId: failedProvider,
               ok: false,
               latencyMs: 0,
               errorMessage: evt.error,
+              modelId: failedSend?.options.model,
             })
           }
           // P4 routing-fallback: re-issue against the next entry in the
@@ -1524,6 +1535,7 @@ async function handleEvent(
         // turn (drives the health-metrics + circuit-breaker stores the routing
         // engine reads). Best-effort; recordProviderOutcome never throws.
         const telemetryProvider = lastSendForSpan?.options.provider
+        const turnUsage = extractUsage(sdkResult)
         if (telemetryProvider) {
           const r = sdkResult as unknown as { duration_ms?: number; total_cost_usd?: number }
           recordProviderOutcome({
@@ -1531,12 +1543,15 @@ async function handleEvent(
             ok: true,
             latencyMs: typeof r.duration_ms === "number" ? r.duration_ms : 0,
             estimatedCostUsd: typeof r.total_cost_usd === "number" ? r.total_cost_usd : undefined,
+            modelId: lastSendForSpan?.options.model,
+            tokensUsed: turnUsage
+              ? (turnUsage.inputTokens ?? 0) + (turnUsage.outputTokens ?? 0)
+              : undefined,
           })
         }
         // Plugin token-usage observability (System-A onTokenUsage) — previously
         // dormant on the built-in chat path. Fail-open + no-op when no plugin
         // registered the hook; fires regardless of whether a trace span is open.
-        const turnUsage = extractUsage(sdkResult)
         if (turnUsage) {
           dispatchPluginTokenUsage(sessionId, {
             inputTokens: turnUsage.inputTokens ?? 0,

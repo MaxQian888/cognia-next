@@ -348,6 +348,12 @@ export interface SendOptions {
   routingDecision?: {
     strategy: RoutingStrategy
     reason: string
+    /**
+     * Advisory daily-budget overage: the selected provider is past its
+     * `dailyCostBudget` but was the only viable candidate. The renderer
+     * surfaces a once-per-day toast; the send proceeds regardless.
+     */
+    overBudgetWarning?: { providerId: string; spend: number; budget: number }
   }
 
   /**

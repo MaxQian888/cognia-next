@@ -38,6 +38,12 @@ export interface RoutingEngineDeps {
   isProviderAvailable: (providerId: string) => boolean
   /** Get pricing for a provider:model pair */
   getPricing: (providerId: string, modelId: string) => number | undefined
+  /**
+   * Today's spend for a provider in USD (durable mirror, survives reloads).
+   * Optional: when absent the budget check falls back to the in-memory health
+   * metrics' session-scoped totalCost.
+   */
+  getTodaySpend?: (providerId: string) => number
 }
 
 /** Result of the routing engine's provider selection */
@@ -58,6 +64,12 @@ export interface RoutingResult {
   parameterDefaults?: AliasResolutionResult["parameterDefaults"]
   /** Reason for the selection */
   reason: string
+  /**
+   * Set when the selected provider is over its daily cost budget but was the
+   * only viable candidate (advisory budgets never dead-end a send). The
+   * renderer surfaces this as a once-per-day toast.
+   */
+  overBudgetWarning?: { providerId: string; spend: number; budget: number }
 }
 
 /**
@@ -181,9 +193,11 @@ export class ProviderRoutingEngine {
 
     if (available.length === 0) return null
 
-    // Filter by provider constraints
-    const constrained = this.applyConstraints(available)
-    const candidates = constrained.length > 0 ? constrained : available
+    // Filter by provider constraints (advisory: when every candidate is over
+    // budget the original list survives, and the eventual selection carries an
+    // overBudgetWarning instead of dead-ending the send).
+    const { allowed, overBudget } = this.applyConstraints(available)
+    const candidates = allowed.length > 0 ? allowed : available
 
     // Apply strategy-based selection
     const selected = this.applyStrategy(candidates, strategy)
@@ -192,6 +206,11 @@ export class ProviderRoutingEngine {
     const fallbackEntries = candidates.filter(
       (e) => !(e.providerId === selected.providerId && e.modelId === selected.modelId)
     )
+
+    const overBudgetWarning =
+      allowed.length === 0
+        ? overBudget.find((w) => w.providerId === selected.providerId)
+        : undefined
 
     return {
       providerId: selected.providerId,
@@ -202,31 +221,53 @@ export class ProviderRoutingEngine {
       fallbackEntries,
       parameterDefaults,
       reason: `Selected via ${strategy} strategy from alias "${alias}"`,
+      ...(overBudgetWarning ? { overBudgetWarning } : {}),
     }
   }
 
   /**
-   * Apply provider constraints to filter entries
+   * Apply provider constraints. Over-budget entries are split out (not
+   * silently dropped) so the caller can fall back to them with a warning when
+   * nothing under budget remains.
    */
-  private applyConstraints(entries: ModelMappingEntry[]): ModelMappingEntry[] {
-    if (this.config.providerConstraints.length === 0) return entries
+  private applyConstraints(entries: ModelMappingEntry[]): {
+    allowed: ModelMappingEntry[]
+    overBudget: Array<{ providerId: string; spend: number; budget: number }>
+  } {
+    if (this.config.providerConstraints.length === 0) {
+      return { allowed: entries, overBudget: [] }
+    }
 
-    return entries.filter((entry) => {
+    const allowed: ModelMappingEntry[] = []
+    const overBudget: Array<{ providerId: string; spend: number; budget: number }> = []
+
+    for (const entry of entries) {
       const constraint = this.config.providerConstraints.find(
         (c) => c.providerId === entry.providerId && c.enabled
       )
-      if (!constraint) return true // No constraint = allowed
-
-      // Check cost budget (rough daily check)
-      if (constraint.dailyCostBudget !== undefined) {
-        const metrics = this.deps.getHealthMetrics(entry.providerId)
-        if (metrics && metrics.totalCost >= constraint.dailyCostBudget) {
-          return false
-        }
+      if (!constraint || constraint.dailyCostBudget === undefined) {
+        allowed.push(entry) // No constraint = allowed
+        continue
       }
 
-      return true
-    })
+      // Durable today-spend mirror first; fall back to the session-scoped
+      // health-metrics total when the mirror isn't wired (older call sites).
+      const spend =
+        this.deps.getTodaySpend?.(entry.providerId) ??
+        this.deps.getHealthMetrics(entry.providerId)?.totalCost ??
+        0
+      if (spend >= constraint.dailyCostBudget) {
+        overBudget.push({
+          providerId: entry.providerId,
+          spend,
+          budget: constraint.dailyCostBudget,
+        })
+      } else {
+        allowed.push(entry)
+      }
+    }
+
+    return { allowed, overBudget }
   }
 
   /**

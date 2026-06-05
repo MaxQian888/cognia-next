@@ -13406,6 +13406,7 @@
       "closeProviders": "关闭"
     },
     "routingView": {
+      "overBudgetToast": "服务商 {provider} 已超出每日预算（已花费 ${spend}/${budget}），但它是当前唯一可用选项，请求仍已发送。",
       "currentModeTitle": "当前路由模式",
       "currentModeDesc": "单服务商路由。所有对话请求发送到选中的服务商。如果主服务商失败，将使用全局默认服务商作为回退。",
       "modelMappingTitle": "模型路由映射",

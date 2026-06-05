@@ -13364,6 +13364,7 @@
       "closeProviders": "Close"
     },
     "routingView": {
+      "overBudgetToast": "Provider {provider} is over its daily budget (${spend} of ${budget}) but was the only available option. The request was sent anyway.",
       "currentModeTitle": "Current Routing Mode",
       "currentModeDesc": "Single provider routing. All chat requests are sent to the selected provider. If the primary provider fails, the global default is used as fallback.",
       "modelMappingTitle": "Model Routing Map",

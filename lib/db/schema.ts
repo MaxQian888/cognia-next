@@ -82,6 +82,7 @@ import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { PetModelRow, PetModelFileRow } from "./pet-models"
 import type { TerminalHistoryRow } from "./terminal-history"
+import type { ProviderCostDailyRow } from "./provider-cost-daily"
 import type { UnattendedExecAuditRow } from "./terminal-audit"
 // Row types relocated out of this file but still wired into the table
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
@@ -1849,6 +1850,15 @@ export class CogniaDB extends Dexie {
       terminalHistory: "&id, ts, command, [projectId+command]",
       unattendedExecAudit: "&id, ts, runId",
     })
+
+    // ── v75 — Persistent provider cost rollups (routing daily budgets). ──────
+    // One row per `(local day, providerId, modelId)`, upsert-incremented from
+    // `recordProviderOutcome`. `day` drives the boot hydration of the budget
+    // mirror + 90-day pruning; `[providerId+day]` serves per-provider history.
+    // Additive; no upgrade hook. See `lib/db/provider-cost-daily.ts`.
+    this.version(75).stores({
+      providerCostDaily: "&id, day, providerId, [providerId+day], updatedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1884,6 +1894,8 @@ export class CogniaDB extends Dexie {
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
+  // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
+  providerCostDaily!: Table<ProviderCostDailyRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -1904,6 +1916,7 @@ export type { EvalRunRow } from "./eval-runs"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
 export type { TerminalHistoryRow } from "./terminal-history"
+export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"
 
 let _db: CogniaDB | null = null
