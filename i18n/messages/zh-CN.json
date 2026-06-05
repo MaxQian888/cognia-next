@@ -16155,6 +16155,35 @@
       }
     },
     "editor": {
+      "errorHandling": {
+        "title": "错误处理",
+        "configuredBadge": "已配置",
+        "onError": {
+          "label": "出错时",
+          "hint": "该步骤最终失败（重试用尽后）的处理方式。",
+          "fail": "失败（按工作流策略）",
+          "continue": "携带错误输出继续",
+          "errorBranch": "走错误分支",
+          "defaultValue": "使用默认值"
+        },
+        "errorBranchHint": "从红色错误连接点拉一条边；失败时跳过成功路径。未画错误边时回退到工作流策略。",
+        "defaultValue": {
+          "label": "默认值（JSON）",
+          "hint": "失败时替代该步骤的输出，下游继续执行。",
+          "invalidJson": "JSON 无效——解析通过前不会保存。"
+        },
+        "retry": {
+          "toggle": "覆盖重试策略",
+          "toggleHint": "节点级重试。关闭 = 工作流默认。非幂等步骤（HTTP POST、git push、终端）请保持 0 次重试。",
+          "maxRetries": "重试次数",
+          "maxHint": "首次失败后的额外尝试次数。",
+          "intervalMs": "间隔（毫秒）",
+          "backoff": "退避",
+          "fixed": "固定",
+          "exponential": "指数",
+          "maxIntervalMs": "最大间隔（毫秒）"
+        }
+      },
       "performanceTier": {
         "title": "性能档位",
         "description": "按设备性能或工作流规模调整画布特性。",

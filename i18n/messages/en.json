@@ -16155,6 +16155,35 @@
       }
     },
     "editor": {
+      "errorHandling": {
+        "title": "Error handling",
+        "configuredBadge": "On",
+        "onError": {
+          "label": "On error",
+          "hint": "What happens when this step ultimately fails (after retries).",
+          "fail": "Fail (workflow policy)",
+          "continue": "Continue with error output",
+          "errorBranch": "Route to error branch",
+          "defaultValue": "Use default value"
+        },
+        "errorBranchHint": "Draw an edge from the red error handle; the success path is skipped on failure. Without an error edge the failure falls back to the workflow policy.",
+        "defaultValue": {
+          "label": "Default value (JSON)",
+          "hint": "Substituted as this step's output when it fails; downstream keeps running.",
+          "invalidJson": "Invalid JSON — the value is not saved until it parses."
+        },
+        "retry": {
+          "toggle": "Override retries",
+          "toggleHint": "Per-node retry policy. Off = workflow defaults. Keep 0 retries for non-idempotent steps (HTTP POST, git push, terminal).",
+          "maxRetries": "Retries",
+          "maxHint": "Extra attempts after the first failure.",
+          "intervalMs": "Interval (ms)",
+          "backoff": "Backoff",
+          "fixed": "Fixed",
+          "exponential": "Exponential",
+          "maxIntervalMs": "Max interval (ms)"
+        }
+      },
       "performanceTier": {
         "title": "Performance tier",
         "description": "Tune canvas effects to match your device and workflow size.",
