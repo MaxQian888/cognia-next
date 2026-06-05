@@ -17751,6 +17751,24 @@
         }
       },
       "aiPrompt": {
+        "mode": {
+          "label": "提供方模式",
+          "hint": "「智能路由」按路由映射自动选择提供方（含回退链）；「指定提供方」使用下方字段。",
+          "explicit": "指定提供方",
+          "routed": "智能路由（自动）"
+        },
+        "modelAlias": {
+          "label": "模型别名",
+          "hint": "来自「设置 → 路由」模型映射的别名（如 \"fast\"、\"smart\"）。留空使用默认路由策略。",
+          "placeholder": "fast"
+        },
+        "piiGate": {
+          "label": "PII 防护",
+          "hint": "在内容发送给模型前检查邮箱 / 手机号 / 证件号 / 密钥等隐私信息。",
+          "off": "关闭",
+          "block": "拦截（步骤失败）",
+          "redact": "脱敏占位符"
+        },
         "provider": {
           "label": "提供方",
           "placeholder": "（占位）"

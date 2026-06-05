@@ -49,6 +49,39 @@ describe("AiPromptConfig — structured output (B1)", () => {
   })
 })
 
+describe("AiPromptConfig — v2 routed mode + PII gate", () => {
+  it("hides v2 controls for typeVersion 1 nodes", () => {
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={1} />)
+    expect(screen.queryByLabelText("Provider mode")).toBeNull()
+    expect(screen.queryByLabelText("PII gate")).toBeNull()
+  })
+
+  it("shows mode + PII gate selects for typeVersion 2 and keeps explicit fields", () => {
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={2} />)
+    expect(screen.getByLabelText("Provider mode")).toBeInTheDocument()
+    expect(screen.getByLabelText("PII gate")).toBeInTheDocument()
+    // Default mode = explicit → provider/model/key fields stay visible.
+    expect(screen.getByLabelText("Provider")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Model alias")).toBeNull()
+  })
+
+  it("swaps explicit credential fields for the model alias in routed mode", () => {
+    const onChange = jest.fn()
+    wrap(
+      <AiPromptConfig
+        params={{ userPrompt: "x", mode: "routed" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.queryByLabelText("Provider")).toBeNull()
+    expect(screen.queryByLabelText("API key")).toBeNull()
+    const alias = screen.getByLabelText("Model alias")
+    fireEvent.change(alias, { target: { value: "fast" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ modelAlias: "fast" }))
+  })
+})
+
 describe("AiExtractConfig — required fields (B4)", () => {
   it("parses a comma-separated required list into an array", () => {
     const onChange = jest.fn()

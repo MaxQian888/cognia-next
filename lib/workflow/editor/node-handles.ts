@@ -81,6 +81,9 @@ const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
   // New loops author as container sub-canvases; legacy flat-transform loops
   // (typeVersion 1) keep running unchanged.
   "flow.loop": 2,
+  // v2 adds routed mode (provider-routing engine), the PII gate, streaming,
+  // and usage reporting; explicit mode stays wire-compatible with v1.
+  "ai.prompt": 2,
 }
 
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {

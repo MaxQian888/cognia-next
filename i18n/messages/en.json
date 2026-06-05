@@ -17751,6 +17751,24 @@
         }
       },
       "aiPrompt": {
+        "mode": {
+          "label": "Provider mode",
+          "hint": "Routed picks the provider via your routing mappings (with fallback chains); explicit uses the fields below.",
+          "explicit": "Explicit provider",
+          "routed": "Routed (auto)"
+        },
+        "modelAlias": {
+          "label": "Model alias",
+          "hint": "Alias from Settings → Routing model mappings (e.g. \"fast\", \"smart\"). Empty uses the default routing strategy.",
+          "placeholder": "fast"
+        },
+        "piiGate": {
+          "label": "PII gate",
+          "hint": "Checks prompts for emails / phone numbers / ids / keys before anything is sent to the model.",
+          "off": "Off",
+          "block": "Block (fail the step)",
+          "redact": "Redact placeholders"
+        },
         "provider": {
           "label": "Provider",
           "placeholder": "(stub)"

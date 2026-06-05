@@ -399,8 +399,13 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
-export function AiPromptConfig({ params, onChange }: ConfigProps) {
+export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiPrompt")
+  const v2 = (typeVersion ?? 1) >= 2
+  const mode = (readString(params, "mode") || "explicit") as "explicit" | "routed"
+  const routed = v2 && mode === "routed"
+  const modelAlias = readString(params, "modelAlias")
+  const piiGate = readString(params, "piiGate") || "off"
   const provider = readString(params, "provider")
   const model = readString(params, "model")
   const apiKey = readString(params, "apiKey")
@@ -412,49 +417,99 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
   const jsonSchema = readString(params, "jsonSchema")
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={t("provider.label")} htmlFor="ai-provider" name="provider">
-          <Select
-            value={provider || undefined}
-            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
-          >
-            <SelectTrigger id="ai-provider">
-              <SelectValue placeholder={t("provider.placeholder")} />
+      {v2 ? (
+        <Field label={t("mode.label")} htmlFor="ai-mode" hint={t("mode.hint")} name="mode">
+          <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+            <SelectTrigger id="ai-mode">
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="anthropic">Anthropic</SelectItem>
-              <SelectItem value="openai">OpenAI</SelectItem>
-              <SelectItem value="google">Google</SelectItem>
-              <SelectItem value="mistral">Mistral</SelectItem>
-              <SelectItem value="cohere">Cohere</SelectItem>
+              <SelectItem value="explicit">{t("mode.explicit")}</SelectItem>
+              <SelectItem value="routed">{t("mode.routed")}</SelectItem>
             </SelectContent>
           </Select>
         </Field>
-        <Field label={t("model.label")} htmlFor="ai-model" hint={t("model.hint")} name="model">
+      ) : null}
+      {routed ? (
+        <Field
+          label={t("modelAlias.label")}
+          htmlFor="ai-alias"
+          hint={t("modelAlias.hint")}
+          name="modelAlias"
+        >
           <Input
-            id="ai-model"
-            value={model}
-            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-            placeholder={t("model.placeholder")}
+            id="ai-alias"
+            value={modelAlias}
+            onChange={(e) => onChange(patchParam(params, "modelAlias", e.target.value))}
+            placeholder={t("modelAlias.placeholder")}
           />
         </Field>
-      </div>
-      <Field label={t("apiKey.label")} htmlFor="ai-key" hint={t("apiKey.hint")} name="apiKey">
-        <Input
-          id="ai-key"
-          type="password"
-          value={apiKey}
-          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
-        />
-      </Field>
-      <Field label={t("baseURL.label")} htmlFor="ai-base" hint={t("baseURL.hint")} name="baseURL">
-        <Input
-          id="ai-base"
-          value={baseURL}
-          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
-          placeholder={t("baseURL.placeholder")}
-        />
-      </Field>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("provider.label")} htmlFor="ai-provider" name="provider">
+              <Select
+                value={provider || undefined}
+                onValueChange={(v) => onChange(patchParam(params, "provider", v))}
+              >
+                <SelectTrigger id="ai-provider">
+                  <SelectValue placeholder={t("provider.placeholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anthropic">Anthropic</SelectItem>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="google">Google</SelectItem>
+                  <SelectItem value="mistral">Mistral</SelectItem>
+                  <SelectItem value="cohere">Cohere</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t("model.label")} htmlFor="ai-model" hint={t("model.hint")} name="model">
+              <Input
+                id="ai-model"
+                value={model}
+                onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+                placeholder={t("model.placeholder")}
+              />
+            </Field>
+          </div>
+          <Field label={t("apiKey.label")} htmlFor="ai-key" hint={t("apiKey.hint")} name="apiKey">
+            <Input
+              id="ai-key"
+              type="password"
+              value={apiKey}
+              onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+            />
+          </Field>
+          <Field
+            label={t("baseURL.label")}
+            htmlFor="ai-base"
+            hint={t("baseURL.hint")}
+            name="baseURL"
+          >
+            <Input
+              id="ai-base"
+              value={baseURL}
+              onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
+              placeholder={t("baseURL.placeholder")}
+            />
+          </Field>
+        </>
+      )}
+      {v2 ? (
+        <Field label={t("piiGate.label")} htmlFor="ai-pii" hint={t("piiGate.hint")} name="piiGate">
+          <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
+            <SelectTrigger id="ai-pii">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">{t("piiGate.off")}</SelectItem>
+              <SelectItem value="block">{t("piiGate.block")}</SelectItem>
+              <SelectItem value="redact">{t("piiGate.redact")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
       <Field label={t("systemPrompt.label")} htmlFor="ai-system" name="systemPrompt">
         <ExpressionField
           id="ai-system"

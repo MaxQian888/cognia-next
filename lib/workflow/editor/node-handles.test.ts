@@ -80,14 +80,14 @@ describe("pickContainerTarget", () => {
 })
 
 describe("defaultTypeVersionFor", () => {
-  it("new branch/switch/loop nodes author at typeVersion 2", () => {
+  it("new branch/switch/loop/ai.prompt nodes author at typeVersion 2", () => {
     expect(defaultTypeVersionFor("flow.branch")).toBe(2)
     expect(defaultTypeVersionFor("flow.switch")).toBe(2)
     expect(defaultTypeVersionFor("flow.loop")).toBe(2)
+    expect(defaultTypeVersionFor("ai.prompt")).toBe(2)
   })
 
   it("everything else stays at 1", () => {
-    expect(defaultTypeVersionFor("ai.prompt")).toBe(1)
     expect(defaultTypeVersionFor("flow.set")).toBe(1)
   })
 })

@@ -34,7 +34,6 @@ import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
 import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
-import { extractJson } from "@/lib/twin/distill/llm"
 // Side-effect import — registers the 12 desktop UI-automation executors at
 // module load time. Keeps the catalog and the registry in sync without any
 // cross-module wiring.
@@ -63,26 +62,9 @@ import "./terminal-script"
 import "./git"
 
 // ── AI structured-output helpers (shared by ai.prompt / ai.extract) ─────────
-
-/**
- * Non-throwing JSON extraction from an LLM completion. Reuses the robust
- * `extractJson` (handles fenced blocks + leading/trailing prose) and converts
- * its throw into a `{ value, error }` result so node executors can surface a
- * `parseError` downstream instead of failing the whole run.
- */
-function parseStructured(completion: string): { value: unknown; error?: string } {
-  try {
-    return { value: extractJson<unknown>(completion) }
-  } catch (err) {
-    return { value: null, error: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-/** Build the JSON-only system instruction appended in `responseFormat: "json"`. */
-function buildJsonInstruction(schema?: string): string {
-  const base = "Respond with ONLY a single valid JSON value — no prose, no markdown code fences."
-  return schema && schema.trim() ? `${base}\nMatch this shape:\n${schema.trim()}` : base
-}
+// parseStructured / buildJsonInstruction moved to ./ai/structured so the
+// ai.prompt v2 module can share them without a circular import.
+import { buildJsonInstruction, parseStructured } from "./ai/structured"
 
 /** Coerce an extracted value to a declared type hint (best-effort). */
 function coerceToType(value: unknown, typeHint: string): unknown {
@@ -397,6 +379,17 @@ registerNodeExecutor({
       stub: false,
     })
   },
+})
+
+// ── ai.prompt v2 ──────────────────────────────────────────────────────────
+// Adds routed mode (ADR-0043 provider-routing engine + fallback chains),
+// the PII gate, live output streaming, and per-step usage/cost reporting.
+// Explicit mode stays wire-compatible with v1 (including the echo stub).
+// Full logic lives in ./ai/ai-prompt-v2 so it's independently testable.
+registerNodeExecutor({
+  kind: "ai.prompt",
+  typeVersion: 2,
+  execute: async (ctx) => (await import("./ai/ai-prompt-v2")).executeAiPromptV2(ctx),
 })
 
 // ── flow.switch ───────────────────────────────────────────────────────────
@@ -1087,6 +1080,9 @@ registerNodeExecutor({
       input?: string
       labels?: string[]
       hint?: string
+      mode?: "explicit" | "routed"
+      modelAlias?: string
+      piiGate?: "off" | "block" | "redact"
     }
     const labels = (params.labels ?? []).map((l) => l.trim()).filter(Boolean)
     if (labels.length === 0) {
@@ -1099,8 +1095,10 @@ registerNodeExecutor({
       `You are a strict text classifier. ` +
       `Return EXACTLY ONE of the following labels with no extra text:\n${labelList}` +
       (params.hint ? `\n\nGuidance: ${params.hint}` : "")
-    // Delegate to ai.prompt — same provider routing + stub fallback.
-    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 1)
+    // Delegate to ai.prompt v2 — explicit mode is wire-compatible with v1
+    // (same provider handling + stub fallback) and inherits routed mode +
+    // the PII gate when those params are set on the classify node.
+    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 2)
     if (!aiPrompt) throw new Error("ai.classify: ai.prompt executor unavailable")
     const inner = await aiPrompt.execute({
       ...ctx,
@@ -1112,6 +1110,9 @@ registerNodeExecutor({
         systemPrompt,
         userPrompt: input,
         temperature: 0,
+        mode: params.mode,
+        modelAlias: params.modelAlias,
+        piiGate: params.piiGate,
       } as Record<string, unknown>,
     })
     const completion = String(
@@ -1154,6 +1155,9 @@ registerNodeExecutor({
       /** Field names that must be present + non-null for `valid` to be true. */
       required?: string[]
       hint?: string
+      mode?: "explicit" | "routed"
+      modelAlias?: string
+      piiGate?: "off" | "block" | "redact"
     }
     const input = params.input ?? ""
     if (!input) throw nonRetryable("ai.extract requires non-empty 'input'")
@@ -1165,7 +1169,8 @@ registerNodeExecutor({
       `Extract data from the user message. Reply with ONLY a JSON object ` +
       `matching this shape:\n{\n${fieldList}\n}` +
       (params.hint ? `\n\nGuidance: ${params.hint}` : "")
-    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 1)
+    // Delegate to ai.prompt v2 (see ai.classify above for the rationale).
+    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 2)
     if (!aiPrompt) throw new Error("ai.extract: ai.prompt executor unavailable")
     const inner = await aiPrompt.execute({
       ...ctx,
@@ -1177,6 +1182,9 @@ registerNodeExecutor({
         systemPrompt,
         userPrompt: input,
         temperature: 0,
+        mode: params.mode,
+        modelAlias: params.modelAlias,
+        piiGate: params.piiGate,
       } as Record<string, unknown>,
     })
     const completion = String(

@@ -15,7 +15,7 @@
  * its own configured client.
  */
 
-import { generateText, type LanguageModel } from "ai"
+import { generateText, streamText, type LanguageModel } from "ai"
 import type { ProviderName } from "@/types/provider/provider"
 
 export interface LlmClientCallOptions {
@@ -27,6 +27,8 @@ export interface LlmClientCallOptions {
   temperature?: number
   /** Stop sequences passed verbatim to the provider. */
   stopSequences?: string[]
+  /** Abort the in-flight call (forwarded to the AI SDK). */
+  abortSignal?: AbortSignal
 }
 
 /**
@@ -50,6 +52,12 @@ export interface LlmClient {
    * caller.
    */
   complete(prompt: string, options?: LlmClientCallOptions): Promise<string>
+  /**
+   * Streaming variant — yields text deltas as the provider produces them.
+   * Usage accumulates into the same snapshot once the stream settles.
+   * Optional so existing mocks stay valid; production clients implement it.
+   */
+  stream?(prompt: string, options?: LlmClientCallOptions): AsyncIterable<string>
   /**
    * Cumulative tokens consumed by this client since construction. Optional
    * so test mocks can ignore it; production clients (`createLlmClient`)
@@ -146,6 +154,12 @@ export function createLlmClient(config: LlmConfig): LlmClient {
   // values to 0 rather than NaN-poisoning the running total.
   const usage: LlmUsageSnapshot = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
 
+  const addUsage = (u: { inputTokens?: unknown; outputTokens?: unknown } | undefined) => {
+    usage.inputTokens += Number(u?.inputTokens ?? 0) || 0
+    usage.outputTokens += Number(u?.outputTokens ?? 0) || 0
+    usage.totalTokens = usage.inputTokens + usage.outputTokens
+  }
+
   return {
     async complete(prompt, options) {
       const model = await getModel()
@@ -155,13 +169,27 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         prompt,
         temperature: options?.temperature ?? config.defaultTemperature ?? 0,
         stopSequences: options?.stopSequences,
+        abortSignal: options?.abortSignal,
       })
-      const inputTokens = Number(result.usage?.inputTokens ?? 0) || 0
-      const outputTokens = Number(result.usage?.outputTokens ?? 0) || 0
-      usage.inputTokens += inputTokens
-      usage.outputTokens += outputTokens
-      usage.totalTokens = usage.inputTokens + usage.outputTokens
+      addUsage(result.usage)
       return result.text
+    },
+    async *stream(prompt, options) {
+      const model = await getModel()
+      const result = streamText({
+        model,
+        system: options?.system,
+        prompt,
+        temperature: options?.temperature ?? config.defaultTemperature ?? 0,
+        stopSequences: options?.stopSequences,
+        abortSignal: options?.abortSignal,
+      })
+      for await (const delta of result.textStream) {
+        yield delta
+      }
+      // Usage settles only after the stream finishes; awaiting it here keeps
+      // the cumulative snapshot correct for getUsageSnapshot() callers.
+      addUsage(await result.usage.catch(() => undefined))
     },
     getUsageSnapshot() {
       return { ...usage }

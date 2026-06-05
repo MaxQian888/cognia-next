@@ -226,7 +226,19 @@ const PluginInvokeParams = z.object({
 
 // ── AI primitives ──────────────────────────────────────────────────────────
 
+// ai.prompt v2 additions, also accepted by the classify/extract delegators.
+// All optional — v1 nodes validate against the same (superset) schema.
+const aiRoutedFields = {
+  /** "routed" consults the provider-routing engine instead of explicit creds. */
+  mode: z.enum(["explicit", "routed"]).optional(),
+  /** Routed mode: model alias resolved through the mapping registry. */
+  modelAlias: optionalString,
+  /** PII gate applied before any text egress. */
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
+}
+
 const AiPromptParams = z.object({
+  ...aiRoutedFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -240,6 +252,7 @@ const AiPromptParams = z.object({
 })
 
 const AiClassifyParams = z.object({
+  ...aiRoutedFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -251,6 +264,7 @@ const AiClassifyParams = z.object({
 })
 
 const AiExtractParams = z.object({
+  ...aiRoutedFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
