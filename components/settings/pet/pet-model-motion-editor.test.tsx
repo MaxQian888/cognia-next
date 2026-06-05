@@ -28,11 +28,12 @@ const expressionSelect = (key: string) =>
   screen.getByTestId(`pet-mapping-expression-${key}`) as HTMLSelectElement
 
 describe("PetModelMotionEditor", () => {
-  it("renders one row per state + namespaced one-shot (17 total)", () => {
+  it("renders one row per state + namespaced one-shot (21 total)", () => {
     setup()
-    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(17)
+    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(21)
     expect(screen.getByTestId("pet-mapping-row-happy")).toBeInTheDocument()
     expect(screen.getByTestId("pet-mapping-row-shot:happy")).toBeInTheDocument()
+    expect(screen.getByTestId("pet-mapping-row-shot:love")).toBeInTheDocument()
   })
 
   it("picking a real group emits an entry with that group (index random)", () => {

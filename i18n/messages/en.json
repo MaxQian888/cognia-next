@@ -6810,7 +6810,11 @@
           "fed": "Fed",
           "petted": "Petted",
           "evolving": "Evolution",
-          "levelUp": "Level up"
+          "levelUp": "Level up",
+          "sad": "Sad",
+          "surprised": "Surprised",
+          "love": "Love",
+          "sleepy": "Sleepy"
         }
       }
     }

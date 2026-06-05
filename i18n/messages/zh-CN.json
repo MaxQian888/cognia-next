@@ -6810,7 +6810,11 @@
           "fed": "进食",
           "petted": "被抚摸",
           "evolving": "进化",
-          "levelUp": "升级"
+          "levelUp": "升级",
+          "sad": "难过",
+          "surprised": "惊讶",
+          "love": "爱心",
+          "sleepy": "困倦"
         }
       }
     }

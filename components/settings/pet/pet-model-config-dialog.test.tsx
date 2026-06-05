@@ -164,6 +164,6 @@ describe("PetModelConfigDialog", () => {
     const user = userEvent.setup()
     await renderDialog()
     await user.click(screen.getByRole("tab", { name: "tabMotion" }))
-    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(17)
+    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(21)
   })
 })

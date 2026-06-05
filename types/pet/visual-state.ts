@@ -18,7 +18,18 @@ export type PetVisualState =
   | "interacting" // being fed/played-with/petted/talked-to
 
 /** One-shot animations that play once then return to the resting state. */
-export type PetOneShot = "wave" | "happy" | "fed" | "petted" | "evolving" | "levelUp"
+export type PetOneShot =
+  | "wave"
+  | "happy"
+  | "fed"
+  | "petted"
+  | "evolving"
+  | "levelUp"
+  // emotion flourishes (LLM reply tags → `lib/pet/llm/emotion-tags.ts`)
+  | "sad"
+  | "surprised"
+  | "love"
+  | "sleepy"
 
 /** Coarse mood bucket derived from needs — picks idle flavour + bubble tone. */
 export type PetMood = "content" | "happy" | "tired" | "lonely" | "grumpy"

@@ -8,10 +8,10 @@ import {
 } from "./state-keys"
 
 describe("state-keys", () => {
-  it("covers all 11 states and 6 one-shots", () => {
+  it("covers all 11 states and 10 one-shots", () => {
     expect(STATE_KEYS).toHaveLength(11)
-    expect(ONE_SHOT_KEYS).toHaveLength(6)
-    expect(ALL_MAPPING_ROWS).toHaveLength(17)
+    expect(ONE_SHOT_KEYS).toHaveLength(10)
+    expect(ALL_MAPPING_ROWS).toHaveLength(21)
   })
 
   it("namespaces one-shots so 'happy'/'evolving' never collide with the states", () => {

@@ -59,7 +59,7 @@ const STATE_INTENT: Record<PetVisualState, Intent> = {
   interacting: { groups: ["Tap", "TapBody", "Idle"] },
 }
 
-/** One-shot intent table (6 shots). One-shot present always wins at force. */
+/** One-shot intent table (10 shots). One-shot present always wins at force. */
 const ONE_SHOT_INTENT: Record<PetOneShot, Intent> = {
   wave: { groups: ["Tap", "TapBody", "Greeting"] },
   happy: { groups: ["TapBody", "Tap@Body", "TapHead", "Tap"] },
@@ -67,6 +67,11 @@ const ONE_SHOT_INTENT: Record<PetOneShot, Intent> = {
   petted: { groups: ["TapBody", "Tap@Body", "TapHead", "Tap"] },
   evolving: { groups: ["Special", "TapHead", "TapBody"] },
   levelUp: { groups: ["Special", "TapHead", "TapBody"] },
+  // emotion flourishes from LLM reply tags
+  sad: { groups: ["Flick", "Flick@Body", "Idle"], expressions: ["sad", "f03"] },
+  surprised: { groups: ["Flick", "FlickUp", "Tap"], expressions: ["surprised", "f02"] },
+  love: { groups: ["TapHead", "TapBody", "Tap"], expressions: ["love", "heart", "happy", "f01"] },
+  sleepy: { groups: ["Idle"], expressions: ["sleepy", "blank"] },
 }
 
 /** Resting states that should play at idle priority rather than normal. */

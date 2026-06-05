@@ -181,6 +181,42 @@ function oneShotSpec(shot: PetOneShot, base: PetMotionSpec): PetMotionSpec {
         durationSec: 1,
         loop: false,
       }
+    case "sad":
+      return {
+        ...base,
+        eyes: "sleepy",
+        mouth: "frown",
+        body: { scale: [1, 0.96, 0.98], y: [0, 4, 3], x: [0], rotate: [0] },
+        durationSec: 1.4,
+        loop: false,
+      }
+    case "surprised":
+      return {
+        ...base,
+        eyes: "wide",
+        mouth: "o",
+        body: { scale: [1, 1.15, 1], y: [0, -12, 0], x: [0], rotate: [0] },
+        durationSec: 0.5,
+        loop: false,
+      }
+    case "love":
+      return {
+        ...base,
+        eyes: "star",
+        mouth: "smile",
+        body: { scale: [1, 1.06, 1], y: [0, -4, 0], x: [0], rotate: [0, -6, 6, -4, 0] },
+        durationSec: 1,
+        loop: false,
+      }
+    case "sleepy":
+      return {
+        ...base,
+        eyes: "sleepy",
+        mouth: "neutral",
+        body: { scale: [1, 1.02, 1], y: [0, 2, 4], x: [0], rotate: [0] },
+        durationSec: 1.8,
+        loop: false,
+      }
   }
 }
 

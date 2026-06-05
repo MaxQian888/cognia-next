@@ -26,6 +26,10 @@ export const ONE_SHOT_KEYS: readonly PetOneShot[] = [
   "petted",
   "evolving",
   "levelUp",
+  "sad",
+  "surprised",
+  "love",
+  "sleepy",
 ] as const
 
 /**

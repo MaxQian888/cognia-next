@@ -14,7 +14,18 @@ const STATES: PetVisualState[] = [
   "evolving",
   "interacting",
 ]
-const SHOTS: PetOneShot[] = ["wave", "happy", "fed", "petted", "evolving", "levelUp"]
+const SHOTS: PetOneShot[] = [
+  "wave",
+  "happy",
+  "fed",
+  "petted",
+  "evolving",
+  "levelUp",
+  "sad",
+  "surprised",
+  "love",
+  "sleepy",
+]
 
 describe("resolvePetMotion", () => {
   it("returns a well-formed spec for every visual state", () => {
@@ -40,6 +51,24 @@ describe("resolvePetMotion", () => {
       expect(spec.durationSec).toBeGreaterThan(0)
     }
     expect(resolvePetMotion("idle", "evolving", false, "dot").body.rotate).toContain(360)
+  })
+
+  it("gives each emotion one-shot a distinct silhouette", () => {
+    const sad = resolvePetMotion("idle", "sad", false, "dot")
+    expect(sad.mouth).toBe("frown")
+    expect(Math.max(...sad.body.y)).toBeGreaterThan(0) // droops down
+
+    const surprised = resolvePetMotion("idle", "surprised", false, "dot")
+    expect(surprised.eyes).toBe("wide")
+    expect(Math.max(...surprised.body.scale)).toBeGreaterThan(1) // pops
+
+    const love = resolvePetMotion("idle", "love", false, "dot")
+    expect(love.eyes).toBe("star")
+    expect(love.body.rotate.some((r) => r !== 0)).toBe(true) // sways
+
+    const sleepy = resolvePetMotion("idle", "sleepy", false, "dot")
+    expect(sleepy.eyes).toBe("sleepy")
+    expect(sleepy.durationSec).toBeGreaterThan(1) // slow sink
   })
 
   it("collapses all motion to resting values when reducedMotion is set", () => {

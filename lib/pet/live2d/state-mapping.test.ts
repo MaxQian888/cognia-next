@@ -16,7 +16,18 @@ const ALL_STATES: PetVisualState[] = [
   "interacting",
 ]
 
-const ALL_SHOTS: PetOneShot[] = ["wave", "happy", "fed", "petted", "evolving", "levelUp"]
+const ALL_SHOTS: PetOneShot[] = [
+  "wave",
+  "happy",
+  "fed",
+  "petted",
+  "evolving",
+  "levelUp",
+  "sad",
+  "surprised",
+  "love",
+  "sleepy",
+]
 
 const RICH: Live2dCapabilities = {
   motionGroups: ["Idle", "Tap", "TapBody", "Tap@Body", "Flick", "TapHead", "Special", "Greeting"],

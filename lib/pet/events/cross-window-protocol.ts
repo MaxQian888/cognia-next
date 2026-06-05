@@ -53,6 +53,10 @@ const ONE_SHOTS: ReadonlySet<string> = new Set<PetOneShot>([
   "petted",
   "evolving",
   "levelUp",
+  "sad",
+  "surprised",
+  "love",
+  "sleepy",
 ])
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<PetBridgeInteractionKind>([

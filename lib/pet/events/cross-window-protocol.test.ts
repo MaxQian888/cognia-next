@@ -9,6 +9,10 @@ describe("cross-window-protocol", () => {
   const valid: PetBridgeMessage[] = [
     { v: 1, t: "visual-state", state: "thinking" },
     { v: 1, t: "one-shot", shot: "levelUp" },
+    { v: 1, t: "one-shot", shot: "sad" },
+    { v: 1, t: "one-shot", shot: "surprised" },
+    { v: 1, t: "one-shot", shot: "love" },
+    { v: 1, t: "one-shot", shot: "sleepy" },
     { v: 1, t: "bubble", bubble: { text: "hi" } },
     { v: 1, t: "bubble", bubble: { text: "hi", origin: "llm" } },
     { v: 1, t: "bubble", bubble: null },
