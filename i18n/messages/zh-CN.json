@@ -6679,6 +6679,40 @@
         "model": "模型",
         "useDefault": "使用聊天默认值"
       },
+      "proactive": {
+        "title": "主动说话",
+        "description": "宠物会自己开口——庆祝里程碑、空闲时闲聊、按时间问候。始终遵守勿扰时段。",
+        "enabled": {
+          "label": "允许宠物主动开口",
+          "description": "默认关闭。与「AI 对话」使用同一个模型，有每日上限和最小间隔。"
+        },
+        "tier": {
+          "label": "话多程度",
+          "options": {
+            "quiet": "安静",
+            "normal": "适中",
+            "chatty": "话多"
+          }
+        },
+        "eventComments": {
+          "label": "评论里程碑",
+          "description": "升级、进化、目标完成、成就解锁和工作流运行。"
+        },
+        "idleChatter": {
+          "label": "空闲闲聊",
+          "description": "你离开电脑一段时间后，宠物会说说话。"
+        },
+        "timeGreetings": {
+          "label": "时间问候",
+          "description": "早间问好和深夜提醒休息，每天各一次。"
+        }
+      },
+      "memory": {
+        "label": "对话记忆",
+        "description": "记住最近的对话并融入回复。仅存本地，上限 200 条。",
+        "clearDescription": "清除宠物记住的所有对话内容。",
+        "clearAction": "清空宠物记忆"
+      },
       "size": {
         "label": "大小（{size}px）"
       },

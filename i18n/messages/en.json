@@ -6679,6 +6679,40 @@
         "model": "Model",
         "useDefault": "Use chat default"
       },
+      "proactive": {
+        "title": "Proactive speech",
+        "description": "The pet speaks up on its own — celebrating milestones, chatting when idle, greeting by time of day. Quiet hours are always respected.",
+        "enabled": {
+          "label": "Let the pet speak up",
+          "description": "Off by default. Uses the same model as Talk with AI, with a daily cap and minimum gap."
+        },
+        "tier": {
+          "label": "How chatty",
+          "options": {
+            "quiet": "Quiet",
+            "normal": "Normal",
+            "chatty": "Chatty"
+          }
+        },
+        "eventComments": {
+          "label": "Comment on milestones",
+          "description": "Level-ups, evolutions, completed goals, achievements, and workflow runs."
+        },
+        "idleChatter": {
+          "label": "Idle chatter",
+          "description": "Speak up after you've been away from the computer for a while."
+        },
+        "timeGreetings": {
+          "label": "Time greetings",
+          "description": "A morning hello and a late-night reminder to rest, once per day each."
+        }
+      },
+      "memory": {
+        "label": "Conversation memory",
+        "description": "Remember recent talk exchanges and weave them into replies. Stored locally, capped at 200 turns.",
+        "clearDescription": "Forget everything the pet remembers from your talks.",
+        "clearAction": "Clear pet memory"
+      },
       "size": {
         "label": "Size ({size}px)"
       },

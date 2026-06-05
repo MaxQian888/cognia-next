@@ -33,7 +33,14 @@ export type {
   PetWanderFrequency,
   PetWanderRange,
   PetWanderSettings,
+  PetProactiveTier,
+  PetProactiveSettings,
 } from "./settings"
-export { DEFAULT_PET_SETTINGS, DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_WANDER } from "./settings"
+export {
+  DEFAULT_PET_SETTINGS,
+  DEFAULT_PET_DESKTOP_OVERLAY,
+  DEFAULT_PET_WANDER,
+  DEFAULT_PET_PROACTIVE,
+} from "./settings"
 export type { Live2dTransform, Live2dMotionOverride, Live2dMotionOverrides } from "./live2d"
 export { DEFAULT_LIVE2D_TRANSFORM } from "./live2d"

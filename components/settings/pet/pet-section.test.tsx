@@ -8,6 +8,10 @@ jest.mock("@/stores/settings", () => ({
 }))
 const resetPet = jest.fn()
 jest.mock("@/lib/db/pet", () => ({ resetPet: () => resetPet() }))
+const clearPetConversation = jest.fn()
+jest.mock("@/lib/db/pet-conversation", () => ({
+  clearPetConversation: () => clearPetConversation(),
+}))
 
 let coreAvailable: boolean | undefined = true
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
@@ -43,6 +47,7 @@ import { PetSection } from "./pet-section"
 beforeEach(() => {
   save.mockClear()
   resetPet.mockClear()
+  clearPetConversation.mockClear()
   openPetWindow.mockClear()
   destroyPetWindow.mockClear()
   setPetClickThrough.mockClear()
@@ -296,6 +301,80 @@ describe("PetSection", () => {
           }),
         }),
       })
+    })
+  })
+
+  describe("proactive speech + memory", () => {
+    const withLlmSpeak = (extra: Record<string, unknown> = {}) => {
+      settingsValue = {
+        petSettings: {
+          enabled: true,
+          anchor: "bottom-right",
+          motion: "auto",
+          mutedBubbles: false,
+          size: 96,
+          skinId: "svg",
+          llmSpeak: { enabled: true },
+          ...extra,
+        },
+      }
+    }
+
+    it("is hidden while LLM speak is off", () => {
+      render(<PetSection />)
+      expect(document.getElementById("pet-proactive-enabled")).toBeNull()
+      expect(document.getElementById("pet-memory-enabled")).toBeNull()
+    })
+
+    it("enables proactive speech (defaults applied, master OFF by default)", () => {
+      withLlmSpeak()
+      render(<PetSection />)
+      // Tier/trigger controls hidden until the master switch is on.
+      expect(document.getElementById("pet-proactive-tier")).toBeNull()
+      fireEvent.click(document.getElementById("pet-proactive-enabled") as HTMLButtonElement)
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          proactive: expect.objectContaining({ enabled: true, tier: "normal" }),
+        }),
+      })
+    })
+
+    it("changes the tier and per-trigger toggles", () => {
+      withLlmSpeak({
+        proactive: {
+          enabled: true,
+          tier: "normal",
+          eventComments: true,
+          idleChatter: true,
+          timeGreetings: true,
+        },
+      })
+      render(<PetSection />)
+      fireEvent.change(document.getElementById("pet-proactive-tier") as HTMLSelectElement, {
+        target: { value: "quiet" },
+      })
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          proactive: expect.objectContaining({ tier: "quiet" }),
+        }),
+      })
+      fireEvent.click(document.getElementById("pet-proactive-idle") as HTMLButtonElement)
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({
+          proactive: expect.objectContaining({ idleChatter: false }),
+        }),
+      })
+    })
+
+    it("toggles conversation memory off and clears it", () => {
+      withLlmSpeak()
+      render(<PetSection />)
+      fireEvent.click(document.getElementById("pet-memory-enabled") as HTMLButtonElement)
+      expect(save).toHaveBeenCalledWith({
+        petSettings: expect.objectContaining({ petMemory: { enabled: false } }),
+      })
+      fireEvent.click(screen.getByRole("button", { name: /clear pet memory/i }))
+      expect(clearPetConversation).toHaveBeenCalled()
     })
   })
 })

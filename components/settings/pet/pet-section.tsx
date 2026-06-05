@@ -12,17 +12,21 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { useSettingsStore } from "@/stores/settings"
 import { resetPet } from "@/lib/db/pet"
+import { clearPetConversation } from "@/lib/db/pet-conversation"
 import { isTauri } from "@/lib/platform/detect"
 import { destroyPetWindow, openPetWindow, setPetClickThrough } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
 import {
   DEFAULT_PET_DESKTOP_OVERLAY,
+  DEFAULT_PET_PROACTIVE,
   DEFAULT_PET_SETTINGS,
   DEFAULT_PET_WANDER,
   type PetAnchor,
   type PetDesktopOverlaySettings,
   type PetMotionPreference,
+  type PetProactiveSettings,
+  type PetProactiveTier,
   type PetSettings,
   type PetWanderFrequency,
   type PetWanderRange,
@@ -38,6 +42,7 @@ const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
 const SKINS: string[] = ["svg", "live2d"]
 const WANDER_FREQUENCIES: PetWanderFrequency[] = ["calm", "normal", "lively"]
 const WANDER_RANGES: PetWanderRange[] = ["full", "near"]
+const PROACTIVE_TIERS: PetProactiveTier[] = ["quiet", "normal", "chatty"]
 
 export function PetSection() {
   const t = useTranslations("settings.pet")
@@ -55,6 +60,11 @@ export function PetSection() {
   const providers = useUtilityProviderOptions()
   const patchLlmSpeak = (next: Partial<UtilityModelConfig>) =>
     patch({ llmSpeak: { ...pet.llmSpeak, ...next } })
+
+  // Patch the nested proactive-speech block (legacy settings may lack it).
+  const proactive: PetProactiveSettings = pet.proactive ?? DEFAULT_PET_PROACTIVE
+  const patchProactive = (next: Partial<PetProactiveSettings>) =>
+    patch({ proactive: { ...proactive, ...next } })
 
   // Patch the nested desktop-pet overlay block.
   const patchDesktop = (next: Partial<PetDesktopOverlaySettings>) =>
@@ -197,6 +207,110 @@ export function PetSection() {
               useDefault: t("llmSpeak.useDefault"),
             }}
           />
+        </div>
+      )}
+
+      {/* Proactive speech + conversation memory ride the same LLM side channel. */}
+      {!!pet.llmSpeak?.enabled && (
+        <div className="space-y-4 border-t pt-4">
+          <div className="space-y-0.5">
+            <Label>{t("proactive.title")}</Label>
+            <p className="text-sm text-muted-foreground">{t("proactive.description")}</p>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="pet-proactive-enabled">{t("proactive.enabled.label")}</Label>
+              <p className="text-sm text-muted-foreground">{t("proactive.enabled.description")}</p>
+            </div>
+            <Switch
+              id="pet-proactive-enabled"
+              checked={proactive.enabled}
+              onCheckedChange={(v) => patchProactive({ enabled: v })}
+            />
+          </div>
+
+          {proactive.enabled && (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="pet-proactive-tier">{t("proactive.tier.label")}</Label>
+                <select
+                  id="pet-proactive-tier"
+                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                  value={proactive.tier}
+                  onChange={(e) => patchProactive({ tier: e.target.value as PetProactiveTier })}
+                >
+                  {PROACTIVE_TIERS.map((tier) => (
+                    <option key={tier} value={tier}>
+                      {t(`proactive.tier.options.${tier}`)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="pet-proactive-events">{t("proactive.eventComments.label")}</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("proactive.eventComments.description")}
+                  </p>
+                </div>
+                <Switch
+                  id="pet-proactive-events"
+                  checked={proactive.eventComments}
+                  onCheckedChange={(v) => patchProactive({ eventComments: v })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="pet-proactive-idle">{t("proactive.idleChatter.label")}</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("proactive.idleChatter.description")}
+                  </p>
+                </div>
+                <Switch
+                  id="pet-proactive-idle"
+                  checked={proactive.idleChatter}
+                  onCheckedChange={(v) => patchProactive({ idleChatter: v })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="pet-proactive-greetings">
+                    {t("proactive.timeGreetings.label")}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("proactive.timeGreetings.description")}
+                  </p>
+                </div>
+                <Switch
+                  id="pet-proactive-greetings"
+                  checked={proactive.timeGreetings}
+                  onCheckedChange={(v) => patchProactive({ timeGreetings: v })}
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="pet-memory-enabled">{t("memory.label")}</Label>
+              <p className="text-sm text-muted-foreground">{t("memory.description")}</p>
+            </div>
+            <Switch
+              id="pet-memory-enabled"
+              checked={pet.petMemory?.enabled !== false}
+              onCheckedChange={(v) => patch({ petMemory: { enabled: v } })}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-muted-foreground">{t("memory.clearDescription")}</p>
+            <Button variant="outline" size="sm" onClick={() => void clearPetConversation()}>
+              {t("memory.clearAction")}
+            </Button>
+          </div>
         </div>
       )}
 
