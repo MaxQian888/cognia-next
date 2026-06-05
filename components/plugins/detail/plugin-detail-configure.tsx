@@ -11,11 +11,23 @@
 // change up on next activation, and the live-query in the body reflects
 // the new persisted state.
 
+import { usePluginRow } from "@/hooks/plugins"
 import { PluginConfigFormContent } from "./plugin-config-form"
+import { PluginPythonHostSettings } from "./plugin-python-host-settings"
 
 export function PluginDetailConfigure({ pluginId }: { pluginId: string }) {
+  const rowState = usePluginRow(pluginId)
+  const row = rowState.state === "ready" ? rowState.row : null
+  const hasPythonHost = row?.type === "python" || row?.type === "hybrid"
+  const pythonDependencies = Array.isArray(row?.manifest?.pythonDependencies)
+    ? (row.manifest.pythonDependencies as string[])
+    : []
+
   return (
     <div className="space-y-3">
+      {hasPythonHost && (
+        <PluginPythonHostSettings pluginId={pluginId} pythonDependencies={pythonDependencies} />
+      )}
       <PluginConfigFormContent pluginId={pluginId} onClose={() => undefined} variant="inline" />
     </div>
   )

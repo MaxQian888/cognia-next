@@ -23,6 +23,7 @@ import { PluginDetailCapabilities } from "./plugin-detail-capabilities"
 import { PluginDetailConfigure } from "./plugin-detail-configure"
 import { PluginDetailPermissions } from "./plugin-detail-permissions"
 import { PluginDetailData } from "./plugin-detail-data"
+import { PluginDetailLogs } from "./plugin-detail-logs"
 
 export function PluginDetailPane() {
   const detailPluginId = usePluginsStore((s) => s.detailPluginId)
@@ -68,7 +69,7 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
     <div className="flex h-full min-h-0 flex-col">
       <PluginDetailHeader plugin={plugin} />
 
-      <PluginDetailTabs />
+      <PluginDetailTabs pluginType={plugin.type} />
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {subTab === "overview" && <PluginDetailOverview pluginId={pluginId} />}
@@ -76,6 +77,7 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
         {subTab === "configure" && <PluginDetailConfigure pluginId={pluginId} />}
         {subTab === "permissions" && <PluginDetailPermissions pluginId={pluginId} />}
         {subTab === "data" && <PluginDetailData pluginId={pluginId} />}
+        {subTab === "logs" && <PluginDetailLogs pluginId={pluginId} />}
       </div>
     </div>
   )

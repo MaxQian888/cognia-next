@@ -30,6 +30,9 @@ import type {
   PluginVerificationDiagnostic,
   PluginVerificationSnapshot,
   PluginVerificationStage,
+  PythonHookDeclaration,
+  PythonHostSettings,
+  PythonLoadResult,
 } from "@/types/plugin"
 import { PluginLoader } from "@/lib/plugin/core/loader"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
@@ -44,7 +47,8 @@ import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/mess
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getDb } from "@/lib/db/schema"
-import { updatePlugin } from "@/lib/db/plugins"
+import { updatePlugin, getPythonHostSettings, setPythonHostSettings } from "@/lib/db/plugins"
+import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
@@ -227,6 +231,8 @@ export interface PythonRuntimeInfo {
   available: boolean
   version: string | null
   plugin_count: number
+  /** Loaded plugins currently demoted to a dormant lazy slot. */
+  lazy_hosts: number
   total_calls: number
   total_execution_time_ms: number
   failed_calls: number
@@ -390,6 +396,8 @@ export class PluginManager {
   private pluginPointGovernanceMode: PluginPointGovernanceMode
   private compatibilityRuntime: CompatibilityRuntime
   private runtimeProfile: PluginRuntimeProfile
+  /** `plugin:python` Tauri event unlisten — set once by subscribePythonEvents. */
+  private pythonEventsUnlisten: (() => void) | null = null
 
   constructor(config: PluginManagerConfig) {
     this.config = config
@@ -708,6 +716,7 @@ export class PluginManager {
       await invoke("plugin_python_initialize", {
         pythonPath: this.config.pythonPath,
       })
+      await this.subscribePythonEvents()
       const runtime = await this.getPythonRuntimeInfo().catch(() => null)
       if (runtime && !runtime.available) {
         // Supported configuration, not an error: the backend probed and
@@ -725,6 +734,34 @@ export class PluginManager {
       // transport's data slot, hiding the actual failure.
       loggers.manager.error("Failed to initialize Python runtime:", String(error))
       // Continue without Python support
+    }
+  }
+
+  /**
+   * Route `plugin:python` notifications (host logs, pip progress, streaming
+   * chunks, exits) into the per-plugin log ring buffer consumed by the
+   * detail Logs tab. Idempotent — subscribed once per manager lifetime.
+   */
+  private async subscribePythonEvents(): Promise<void> {
+    if (this.pythonEventsUnlisten) {
+      return
+    }
+    try {
+      const { listen } = await import("@tauri-apps/api/event")
+      this.pythonEventsUnlisten = await listen<PythonPluginEvent>("plugin:python", (event) => {
+        appendPythonEvent(event.payload)
+      })
+    } catch (error) {
+      // Web mode (no Tauri event bridge) — logs surface is desktop-only.
+      recordSilentFailure(
+        "python-runtime",
+        {
+          site: "manager.subscribePythonEvents",
+          message: "Failed to subscribe to plugin:python events",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
     }
   }
 
@@ -2880,12 +2917,19 @@ export class PluginManager {
     }
 
     try {
-      // Load Python plugin via Tauri/PyO3
-      await invoke("plugin_python_load", {
+      // Host-level settings are user state on the Dexie row; absent in
+      // tests/web mode is fine (backend defaults apply).
+      const hostSettings = await getPythonHostSettings(pluginId).catch(() => undefined)
+
+      // Load Python plugin via the subprocess host. The reply surfaces the
+      // plugin's declared @hook handlers for TS-side dispatch.
+      const loadResult = await invoke<PythonLoadResult | null>("plugin_python_load", {
         pluginId,
         pluginPath: plugin.path,
         mainModule: plugin.manifest.pythonMain,
         dependencies: plugin.manifest.pythonDependencies,
+        config: plugin.config ?? null,
+        hostSettings: hostSettings ?? null,
       })
 
       // Get registered tools from Python
@@ -2918,9 +2962,116 @@ export class PluginManager {
         this.registry.registerTool(pluginId, tool)
         store.registerPluginTool(pluginId, tool)
       }
+
+      // Register python @hook handlers into the hooks system so host-side
+      // dispatch reaches the interpreter.
+      this.registerPythonHooks(pluginId, loadResult?.hooks ?? [])
     } catch (error) {
       store.setPluginError(pluginId, String(error))
       throw error
+    }
+  }
+
+  /**
+   * Bridge python `@hook` declarations into the JS hooks system: each
+   * declared (event, name) pair becomes a `PluginHooks` entry whose
+   * implementation RPCs `plugin_python_call_hook`. For hybrid plugins the
+   * JS-side hooks win on name collision (python fills the gaps) — the JS
+   * module is the richer runtime and already registered at activation.
+   */
+  private registerPythonHooks(pluginId: string, declarations: PythonHookDeclaration[]): void {
+    if (declarations.length === 0) {
+      return
+    }
+    const pythonHooks: Record<string, (...args: unknown[]) => Promise<unknown>> = {}
+    for (const { event, name } of declarations) {
+      if (typeof event !== "string" || event.length === 0 || typeof name !== "string") {
+        continue
+      }
+      pythonHooks[event] = async (...args: unknown[]) =>
+        invoke("plugin_python_call_hook", {
+          pluginId,
+          event,
+          name,
+          // call_hook carries one payload value; multi-arg hook signatures
+          // pack their args as an array.
+          payload: args.length <= 1 ? (args[0] ?? null) : args,
+        })
+    }
+    if (Object.keys(pythonHooks).length === 0) {
+      return
+    }
+    this.validateHookDeclarations(pluginId, pythonHooks as PluginHooks)
+
+    const store = usePluginStore.getState()
+    const existing = (store.plugins[pluginId]?.hooks ?? {}) as PluginHooks
+    const merged = { ...pythonHooks, ...existing } as PluginHooks
+    store.registerPluginHooks(pluginId, merged)
+    this.hooksManager.registerHooks(pluginId, merged)
+  }
+
+  /**
+   * Invoke one python `@hook` handler directly (used by hook dispatch and
+   * tests; regular dispatch flows through the hooks system registration).
+   */
+  async callPythonHook<T>(
+    pluginId: string,
+    event: string,
+    name: string,
+    payload: unknown
+  ): Promise<T> {
+    return invoke<T>("plugin_python_call_hook", { pluginId, event, name, payload: payload ?? null })
+  }
+
+  /**
+   * Deliver a plugin's persisted config to its live python host
+   * (`on_config_updated`). A demoted host picks it up at respawn.
+   */
+  async pushPythonConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
+    await invoke("plugin_python_push_config", { pluginId, config })
+  }
+
+  /**
+   * Create the plugin's venv (if missing) and pip-install its declared
+   * dependencies, streaming progress into the log buffer. Callers MUST
+   * obtain explicit user consent first (network + disk side effects).
+   */
+  async installPythonDeps(pluginId: string, dependencies: string[]): Promise<void> {
+    await invoke("plugin_python_install_deps", { pluginId, dependencies })
+  }
+
+  /** Host-level python settings (persisted on the Dexie plugins row). */
+  async getPythonHostSettings(pluginId: string): Promise<PythonHostSettings | undefined> {
+    return getPythonHostSettings(pluginId)
+  }
+
+  /**
+   * Persist host-level python settings. Applied on the next (re)load of the
+   * plugin's host — callers wanting them live immediately reload the plugin.
+   */
+  async setPythonHostSettings(pluginId: string, settings: PythonHostSettings): Promise<void> {
+    await setPythonHostSettings(pluginId, settings)
+  }
+
+  /**
+   * Config-change fan-out: dispatch the JS `onConfigChange` hook and push
+   * the new config into a python/hybrid plugin's host. Call after
+   * persisting via `setPluginConfig`.
+   */
+  async notifyPluginConfigChanged(
+    pluginId: string,
+    config: Record<string, unknown>
+  ): Promise<void> {
+    this.hooksManager.dispatchOnConfigChange(pluginId, config)
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    const type = plugin?.manifest.type
+    if (type === "python" || type === "hybrid") {
+      try {
+        await this.pushPythonConfig(pluginId, config)
+      } catch (error) {
+        // Not loaded / web mode — config still lands via import at next load.
+        loggers.manager.warn(`[manager] python config push failed for ${pluginId}:`, String(error))
+      }
     }
   }
 

@@ -1183,6 +1183,82 @@ def rewrite(payload):
         unload_inner(&state, "demo").await.unwrap();
     }
 
+    /// The shipped first-party demo plugin (plugins/cognia-python-demo)
+    /// must load and run against the real host — keeps the reference
+    /// implementation from bit-rotting.
+    #[tokio::test]
+    async fn first_party_python_demo_plugin_loads_and_runs() {
+        let Some(interp) = super::super::discover::discover_interpreter(None) else {
+            eprintln!("skipping demo plugin test: no python interpreter found");
+            return;
+        };
+
+        let demo_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("plugins")
+            .join("cognia-python-demo");
+        assert!(demo_dir.join("main.py").is_file(), "demo plugin main.py missing");
+
+        let tmp = TempDir::new().unwrap();
+        let state = py_state(&tmp);
+        let plugins = plugins_state(&tmp);
+        grant_execute(&plugins, "cognia-python-demo");
+        apply_initialize(&state, Some(interp)).unwrap();
+
+        let info = load_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            demo_dir.to_string_lossy().into_owned(),
+            "main.py".into(),
+            None,
+            Some(json!({"greeting": "Hi", "shout": true})),
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(info["tool_count"], 4);
+        assert_eq!(info["hooks"][0]["event"], "onMessageSend");
+
+        // Config-aware tool.
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            "greet".into(),
+            json!({"name": "world"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, json!("HI, WORLD!"));
+
+        // Streaming generator tool joins its chunks.
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            "countdown".into(),
+            json!({"start": 2}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, json!("2... 1... liftoff!"));
+
+        // Transform hook round-trip.
+        let host = require_host(&state, "cognia-python-demo").unwrap();
+        let stamped = host
+            .request(
+                "call_hook",
+                json!({"event": "onMessageSend", "name": "stamp_outgoing", "payload": {"text": "x"}}),
+                CONTROL_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert_eq!(stamped["metadata"]["pythonDemo"], json!(true));
+
+        unload_inner(&state, "cognia-python-demo").await.unwrap();
+    }
+
     /// Missing pip dependencies must produce the actionable error message.
     #[tokio::test]
     async fn load_with_missing_dependency_reports_pip_install_hint() {

@@ -2570,6 +2570,43 @@ export interface PythonHookRegistration {
 }
 
 /**
+ * Host-level per-plugin runtime settings (user state persisted on the
+ * Dexie plugins row — NOT a manifest field). Wire-exact counterpart of
+ * `PythonHostSettings` in `src-tauri/src/plugin_api/python/commands.rs`.
+ *
+ * There is deliberately no `lazySpawn` knob: the first load is always
+ * eager (dependency validation + tool/hook collection); the perf win
+ * comes from `idleShutdownMin` demotion + transparent respawn.
+ */
+export interface PythonHostSettings {
+  /** Absolute interpreter override for this plugin (beats venv + global). */
+  interpreterPath?: string
+  /** Extra environment variables for the host process. */
+  env?: Record<string, string>
+  /** Per-plugin override of the default 120s call timeout (clamped 1s–1h). */
+  callTimeoutMs?: number
+  /** `false` opts out of an existing venv (default: use it when present). */
+  useVenv?: boolean
+  /** Idle minutes before the host is demoted to a lazy slot; 0 = never. */
+  idleShutdownMin?: number
+  /** In-flight request cap per host (default 4). */
+  maxConcurrentCalls?: number
+}
+
+/** One `@hook` declared by a python plugin, from `import_main`'s reply. */
+export interface PythonHookDeclaration {
+  event: string
+  name: string
+}
+
+/** Reply of `plugin_python_load` (the host's `import_main` info). */
+export interface PythonLoadResult {
+  tool_count: number
+  hook_count: number
+  hooks?: PythonHookDeclaration[]
+}
+
+/**
  * IPC message types for Python communication
  */
 export type PythonIPCMessage =

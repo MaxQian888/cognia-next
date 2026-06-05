@@ -2246,11 +2246,113 @@ describe("PluginManager", () => {
         pluginPath: "/plugins/py-plugin",
         mainModule: "main.py",
         dependencies: undefined,
+        config: {},
+        hostSettings: null,
       })
       expect(store.registerPluginTool).toHaveBeenCalledWith(
         "py-plugin",
         expect.objectContaining({ name: "py-plugin:double" })
       )
+    })
+
+    it("loadPythonPlugin registers declared @hook handlers as call_hook RPCs", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") {
+          return {
+            tool_count: 0,
+            hook_count: 1,
+            hooks: [{ event: "onMessageSend", name: "rewrite" }],
+          }
+        }
+        if (cmd === "plugin_python_get_tools") return []
+        if (cmd === "plugin_python_call_hook") return { text: "HI" }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+
+      expect(store.registerPluginHooks).toHaveBeenCalledWith(
+        "py-plugin",
+        expect.objectContaining({ onMessageSend: expect.any(Function) })
+      )
+      // The bridged hook RPCs into the host and returns the transformed value.
+      const hooks = (store.registerPluginHooks as jest.Mock).mock.calls[0][1] as Record<
+        string,
+        (payload: unknown) => Promise<unknown>
+      >
+      const result = await hooks.onMessageSend({ text: "hi" })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
+        pluginId: "py-plugin",
+        event: "onMessageSend",
+        name: "rewrite",
+        payload: { text: "hi" },
+      })
+      expect(result).toEqual({ text: "HI" })
+    })
+
+    it("loadPythonPlugin skips hook registration when none are declared", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") return { tool_count: 0, hook_count: 0, hooks: [] }
+        if (cmd === "plugin_python_get_tools") return []
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+      expect(store.registerPluginHooks).not.toHaveBeenCalled()
+    })
+
+    it("notifyPluginConfigChanged pushes config into python hosts only", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+
+      await manager.notifyPluginConfigChanged("py-plugin", { greeting: "yo" })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_push_config", {
+        pluginId: "py-plugin",
+        config: { greeting: "yo" },
+      })
+
+      // Frontend plugins never reach the python host.
+      mockInvoke.mockClear()
+      const frontend = createTypedPlugin("js-plugin", "frontend")
+      mockGetState.mockReturnValue(createLoadStore(frontend))
+      await manager.notifyPluginConfigChanged("js-plugin", { a: 1 })
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_push_config", expect.anything())
+    })
+
+    it("notifyPluginConfigChanged tolerates a failing python push", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      mockInvoke.mockRejectedValue(new Error("not loaded"))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await expect(
+        manager.notifyPluginConfigChanged("py-plugin", { a: 1 })
+      ).resolves.toBeUndefined()
+    })
+
+    it("installPythonDeps and pushPythonConfig delegate to the backend commands", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.installPythonDeps("py-plugin", ["requests>=2"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_install_deps", {
+        pluginId: "py-plugin",
+        dependencies: ["requests>=2"],
+      })
+      await manager.callPythonHook("py-plugin", "onMessageSend", "rewrite", null)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
+        pluginId: "py-plugin",
+        event: "onMessageSend",
+        name: "rewrite",
+        payload: null,
+      })
     })
 
     it("loadPlugin routes python plugins through the Python host", async () => {

@@ -6,7 +6,14 @@
 // `openConfigure` shortcut both stay in sync.
 
 import { useTranslations } from "next-intl"
-import { InfoIcon, BlocksIcon, SettingsIcon, ShieldCheckIcon, DatabaseIcon } from "lucide-react"
+import {
+  InfoIcon,
+  BlocksIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  DatabaseIcon,
+  ScrollTextIcon,
+} from "lucide-react"
 import type { ComponentType } from "react"
 import { ScrollShadowRow } from "../scroll-shadow-row"
 import { usePluginsStore } from "@/stores/plugins"
@@ -25,16 +32,20 @@ const TABS: ReadonlyArray<TabConfig> = [
   { value: "configure", labelKey: "subtab.configure", icon: SettingsIcon },
   { value: "permissions", labelKey: "subtab.permissions", icon: ShieldCheckIcon },
   { value: "data", labelKey: "subtab.data", icon: DatabaseIcon },
+  // Logs is python/hybrid-only (the host subprocess is the log source).
+  { value: "logs", labelKey: "subtab.logs", icon: ScrollTextIcon },
 ]
 
-export function PluginDetailTabs() {
+export function PluginDetailTabs({ pluginType }: { pluginType?: string }) {
   const t = useTranslations("plugins.detail")
   const subTab = usePluginsStore((s) => s.detailSubTab)
   const setSubTab = usePluginsStore((s) => s.setDetailSubTab)
+  const hasPythonHost = pluginType === "python" || pluginType === "hybrid"
+  const tabs = hasPythonHost ? TABS : TABS.filter(({ value }) => value !== "logs")
   return (
     <ScrollShadowRow className="shrink-0 border-b">
       <div role="tablist" aria-label={t("subtabAria")} className="flex items-center gap-1 px-2">
-        {TABS.map(({ value, labelKey, icon: Icon }) => {
+        {tabs.map(({ value, labelKey, icon: Icon }) => {
           const active = subTab === value
           return (
             <button

@@ -116,6 +116,21 @@ export async function setPluginConfig(id: string, config: Record<string, unknown
   await updatePlugin(id, { config })
 }
 
+/** Host-level python runtime settings (python/hybrid plugins only). */
+export async function getPythonHostSettings(
+  id: string
+): Promise<PluginRow["pythonHostSettings"] | undefined> {
+  const row = await getPlugin(id)
+  return row?.pythonHostSettings
+}
+
+export async function setPythonHostSettings(
+  id: string,
+  settings: PluginRow["pythonHostSettings"]
+): Promise<void> {
+  await updatePlugin(id, { pythonHostSettings: settings })
+}
+
 export async function recordPluginUsage(id: string): Promise<void> {
   await updatePlugin(id, { lastUsedAt: Date.now() })
 }

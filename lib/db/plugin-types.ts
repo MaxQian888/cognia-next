@@ -46,6 +46,19 @@ export interface PluginRow {
   /** Persisted plugin configuration (the user's settings). */
   config?: Record<string, unknown>
   /**
+   * Host-level python runtime settings (python/hybrid plugins only).
+   * Structurally identical to `types/plugin/plugin.ts:PythonHostSettings`
+   * (kept dependency-free here per this file's convention). Non-indexed.
+   */
+  pythonHostSettings?: {
+    interpreterPath?: string
+    env?: Record<string, string>
+    callTimeoutMs?: number
+    useVenv?: boolean
+    idleShutdownMin?: number
+    maxConcurrentCalls?: number
+  }
+  /**
    * Raw README markdown captured at install time (GitHub installs read the
    * repo's `README.md`). Rendered in the detail view. Non-indexed.
    */

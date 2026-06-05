@@ -48,7 +48,13 @@ export type PluginLibrarySubFilter = "all" | "enabled" | "updates" | "configurab
 
 export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "audit"
 
-export type PluginDetailSubTab = "overview" | "capabilities" | "configure" | "permissions" | "data"
+export type PluginDetailSubTab =
+  | "overview"
+  | "capabilities"
+  | "configure"
+  | "permissions"
+  | "data"
+  | "logs"
 
 export type PluginListViewMode = "list" | "card"
 

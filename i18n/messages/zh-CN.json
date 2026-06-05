@@ -7624,9 +7624,44 @@
         "capabilities": "能力",
         "configure": "配置",
         "permissions": "权限",
-        "data": "数据"
+        "data": "数据",
+        "logs": "日志"
       },
       "subtabAria": "插件详情分节",
+      "logs": {
+        "aria": "Python 宿主日志条目",
+        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+        "clear": "清空",
+        "streamEnd": "— 流式输出结束 —",
+        "exited": "宿主进程已退出",
+        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用"
+      },
+      "pythonHost": {
+        "title": "Python 宿主设置",
+        "description": "该插件宿主进程的运行时参数,下次加载时生效。",
+        "interpreterPath": "解释器路径覆盖",
+        "interpreterPathPlaceholder": "留空则使用 venv 或全局解释器",
+        "env": "环境变量",
+        "envHint": "每行一个 KEY=VALUE,会传给宿主进程。",
+        "envInvalid": "每个非空行必须是 KEY=VALUE 格式。",
+        "callTimeoutMs": "调用超时(毫秒)",
+        "idleShutdownMin": "闲置关闭(分钟,0 表示从不)",
+        "maxConcurrentCalls": "最大并发调用数",
+        "useVenv": "存在 venv 时使用它",
+        "applyHint": "更改会在插件下次加载时生效。",
+        "save": "保存",
+        "saved": "已保存",
+        "deps": {
+          "summary": "该插件声明了 {count} 个 Python 依赖。",
+          "install": "安装依赖",
+          "installing": "安装中…",
+          "confirmTitle": "安装 Python 依赖?",
+          "confirmBody": "将为该插件创建隔离的虚拟环境,并从 PyPI 下载 {count} 个包。安装进度会显示在“日志”标签页。",
+          "cancel": "取消",
+          "confirm": "安装",
+          "error": "安装失败:{message}"
+        }
+      },
       "rawManifest": "查看原始 manifest",
       "rawManifestTitle": "原始 manifest",
       "emptyTitle": "选择一个插件",

@@ -1,0 +1,42 @@
+{
+  "id": "cognia-python-demo",
+  "name": "Python Demo",
+  "version": "0.1.0",
+  "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, and config.",
+  "type": "python",
+  "capabilities": ["tools"],
+  "pythonMain": "main.py",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0",
+    "python": ">=3.9"
+  },
+  "permissions": ["python:execute"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "greeting": {
+        "type": "string",
+        "title": "Greeting",
+        "description": "Prefix used by the greet tool.",
+        "default": "Hello"
+      },
+      "shout": {
+        "type": "boolean",
+        "title": "Shout",
+        "description": "Uppercase every greeting.",
+        "default": false
+      }
+    }
+  },
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host."
+    }
+  }
+}

@@ -18,11 +18,24 @@ describe("PluginDetailTabs", () => {
     usePluginsStore.setState({ detailSubTab: "overview" })
   })
 
-  it("renders all 5 sub-tab triggers", () => {
+  it("renders all 5 sub-tab triggers (no logs without a python host)", () => {
     render(<PluginDetailTabs />)
     for (const value of TABS) {
       expect(screen.getByTestId(`plugin-detail-subtab-${value}`)).toBeInTheDocument()
     }
+    expect(screen.queryByTestId("plugin-detail-subtab-logs")).not.toBeInTheDocument()
+  })
+
+  it.each(["python", "hybrid"])("shows the logs tab for %s plugins", (type) => {
+    render(<PluginDetailTabs pluginType={type} />)
+    expect(screen.getByTestId("plugin-detail-subtab-logs")).toBeInTheDocument()
+  })
+
+  it("hides the logs tab for frontend and wasm plugins", () => {
+    const { rerender } = render(<PluginDetailTabs pluginType="frontend" />)
+    expect(screen.queryByTestId("plugin-detail-subtab-logs")).not.toBeInTheDocument()
+    rerender(<PluginDetailTabs pluginType="wasm" />)
+    expect(screen.queryByTestId("plugin-detail-subtab-logs")).not.toBeInTheDocument()
   })
 
   it("marks the active tab via aria-selected based on the store", () => {

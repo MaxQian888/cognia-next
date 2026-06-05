@@ -7624,9 +7624,44 @@
         "capabilities": "Capabilities",
         "configure": "Configure",
         "permissions": "Permissions",
-        "data": "Data"
+        "data": "Data",
+        "logs": "Logs"
       },
       "subtabAria": "Plugin detail sections",
+      "logs": {
+        "aria": "Python host log entries",
+        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
+        "clear": "Clear",
+        "streamEnd": "— stream ended —",
+        "exited": "Host process exited",
+        "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls"
+      },
+      "pythonHost": {
+        "title": "Python host settings",
+        "description": "Runtime knobs for this plugin's host process. Applied on the next load.",
+        "interpreterPath": "Interpreter path override",
+        "interpreterPathPlaceholder": "Leave empty to use the venv or global interpreter",
+        "env": "Environment variables",
+        "envHint": "One KEY=VALUE per line, forwarded to the host process.",
+        "envInvalid": "Each non-empty line must look like KEY=VALUE.",
+        "callTimeoutMs": "Call timeout (ms)",
+        "idleShutdownMin": "Idle shutdown (minutes, 0 = never)",
+        "maxConcurrentCalls": "Max concurrent calls",
+        "useVenv": "Use plugin venv when present",
+        "applyHint": "Changes apply the next time the plugin loads.",
+        "save": "Save",
+        "saved": "Saved",
+        "deps": {
+          "summary": "This plugin declares {count, plural, one {# Python dependency} other {# Python dependencies}}.",
+          "install": "Install dependencies",
+          "installing": "Installing…",
+          "confirmTitle": "Install Python dependencies?",
+          "confirmBody": "This creates an isolated virtual environment for the plugin and downloads {count, plural, one {# package} other {# packages}} from PyPI. Progress streams into the Logs tab.",
+          "cancel": "Cancel",
+          "confirm": "Install",
+          "error": "Install failed: {message}"
+        }
+      },
       "rawManifest": "View raw manifest",
       "rawManifestTitle": "Raw manifest",
       "emptyTitle": "Select a plugin",

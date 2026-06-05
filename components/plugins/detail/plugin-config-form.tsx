@@ -50,6 +50,20 @@ import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePluginsStore } from "@/stores/plugins"
 
+/**
+ * Best-effort config-change fan-out (JS onConfigChange hook + python host
+ * push). Persisting via setPluginConfig stays the source of truth — a
+ * missing/uninitialized manager (web mode, tests) must never fail the save.
+ */
+async function notifyConfigChanged(pluginId: string, config: Record<string, unknown>) {
+  try {
+    const { getPluginManager } = await import("@/lib/plugin/core/manager")
+    await getPluginManager().notifyPluginConfigChanged(pluginId, config)
+  } catch {
+    // Manager not initialized — config still applies on next plugin load.
+  }
+}
+
 type FieldType =
   | "string"
   | "number"
@@ -458,6 +472,7 @@ function SchemaConfigBody({
     setSaving(true)
     try {
       await setPluginConfig(pluginId, values)
+      await notifyConfigChanged(pluginId, values)
       onClose()
     } finally {
       setSaving(false)
@@ -575,6 +590,7 @@ function CustomConfigBody({
   const handleSave = useCallback(
     async (next: Record<string, unknown>) => {
       await setPluginConfig(pluginId, next)
+      await notifyConfigChanged(pluginId, next)
       onClose()
     },
     [pluginId, onClose]
