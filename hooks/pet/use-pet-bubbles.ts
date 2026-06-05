@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { pickBubbleKey } from "@/lib/pet/bubbles/templates"
+import { isClaimed } from "@/lib/pet/llm/proactive/claim-registry"
 import { usePetStore } from "@/stores/pet/pet-store"
 
 const BUBBLE_VISIBLE_MS = 4000
@@ -21,6 +22,9 @@ export function usePetBubbles(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return
     const off = getPetEventBus().subscribe((event) => {
+      // While proactive speak is enabled it claims its milestone kinds — the
+      // LLM hook owns those bubbles (with template fallback on failure).
+      if (isClaimed(event.kind)) return
       const key = pickBubbleKey(event.kind, event.at)
       if (!key) return
       setBubble({ text: t(key), origin: "template" })

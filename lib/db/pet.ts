@@ -129,5 +129,6 @@ export async function resetPet(): Promise<void> {
     db.petCharacterBindings.clear(),
     db.petActivityLog.clear(),
     db.petAchievements.clear(),
+    db.petConversation.clear(),
   ])
 }

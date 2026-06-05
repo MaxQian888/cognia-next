@@ -4,6 +4,7 @@
 // account id and merged over the soul-derived view at load time.
 
 import type { PetNeeds } from "./needs"
+import type { ProactiveState } from "./proactive"
 import type { PetSoul } from "./soul"
 
 /** Growth stages, unlocked by level thresholds. Drives the evolution morph. */
@@ -28,6 +29,11 @@ export interface PetProfile {
    * rather than silently swap identities.
    */
   accountFingerprint: string
+  /**
+   * Proactive-speak counters (non-indexed; absent until the engine first
+   * speaks). Advanced via `lib/pet/llm/proactive/scheduler-state.ts`.
+   */
+  proactiveState?: ProactiveState
   createdAt: string
   updatedAt: string
 }

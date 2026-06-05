@@ -108,6 +108,7 @@ import type {
   PetActivityRow,
   PetCharacterBinding,
   PetAchievementRecord,
+  PetConversationRow,
 } from "@/types/pet"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 
@@ -1869,6 +1870,14 @@ export class CogniaDB extends Dexie {
     this.version(76).stores({
       toolRoutes: "&id, refId, kind, enabled, pluginId",
     })
+
+    // ── v77 — Pet rolling conversation history (talked LLM side channel). ────
+    // One row per completed talk turn; pruned to the newest 200 on append.
+    // Proactive utterances are skip-memory and never stored. Additive; no
+    // upgrade hook. See `lib/db/pet-conversation.ts`.
+    this.version(77).stores({
+      petConversation: "++id, at",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1908,6 +1917,8 @@ export class CogniaDB extends Dexie {
   providerCostDaily!: Table<ProviderCostDailyRow, string>
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
   toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
+  // v77 — Pet conversation history. See `lib/db/pet-conversation.ts`.
+  petConversation!: Table<PetConversationRow, number>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
