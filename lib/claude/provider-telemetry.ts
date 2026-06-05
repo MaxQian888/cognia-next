@@ -10,6 +10,7 @@
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
+import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 
 export interface ProviderOutcome {
   providerId: string
@@ -24,9 +25,12 @@ export interface ProviderOutcome {
 }
 
 export function recordProviderOutcome(outcome: ProviderOutcome): void {
-  const { providerId, ok, latencyMs, errorMessage, estimatedCostUsd, modelId } = outcome
+  const { providerId, ok, latencyMs, errorMessage, estimatedCostUsd, modelId, tokensUsed } = outcome
   if (!providerId) return
   try {
+    // Trailing-minute RPM/TPM window — success and failure both count as a
+    // request against the provider's rate ceiling.
+    useRateLimitStore.getState().record(providerId, tokensUsed ?? 0)
     useHealthMetricsStore.getState().record({
       providerId,
       success: ok,

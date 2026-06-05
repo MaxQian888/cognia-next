@@ -90,6 +90,8 @@ export interface ProviderConstraint {
   providerId: string
   /** Maximum requests per minute (rate limit) */
   maxRequestsPerMinute?: number
+  /** Maximum tokens per minute (rate limit) */
+  maxTokensPerMinute?: number
   /** Daily cost budget in USD */
   dailyCostBudget?: number
   /** Priority level (lower = higher priority) */

@@ -51,6 +51,11 @@ export interface RoutingEngineDeps {
    * skipped entirely.
    */
   getContextWindow?: (providerId: string, modelId: string) => number
+  /**
+   * Trailing-minute request/token rate for a provider (reactive, post-turn).
+   * Optional: when absent the RPM/TPM pre-check is skipped entirely.
+   */
+  getRate?: (providerId: string) => { rpm: number; tpm: number }
 }
 
 /** Result of the routing engine's provider selection */
@@ -285,8 +290,31 @@ export class ProviderRoutingEngine {
       const constraint = this.config.providerConstraints.find(
         (c) => c.providerId === entry.providerId && c.enabled
       )
-      if (!constraint || constraint.dailyCostBudget === undefined) {
+      if (!constraint) {
         allowed.push(entry) // No constraint = allowed
+        continue
+      }
+
+      // RPM/TPM ceiling (trailing-minute window, reactive). A provider at its
+      // configured rate is deprioritized — recovery is automatic within a
+      // minute, so no warning rides along (unlike budgets).
+      if (
+        this.deps.getRate &&
+        (constraint.maxRequestsPerMinute !== undefined ||
+          constraint.maxTokensPerMinute !== undefined)
+      ) {
+        const rate = this.deps.getRate(entry.providerId)
+        if (
+          (constraint.maxRequestsPerMinute !== undefined &&
+            rate.rpm >= constraint.maxRequestsPerMinute) ||
+          (constraint.maxTokensPerMinute !== undefined && rate.tpm >= constraint.maxTokensPerMinute)
+        ) {
+          continue
+        }
+      }
+
+      if (constraint.dailyCostBudget === undefined) {
+        allowed.push(entry)
         continue
       }
 

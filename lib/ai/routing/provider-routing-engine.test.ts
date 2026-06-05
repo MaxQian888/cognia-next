@@ -45,6 +45,7 @@ interface DepsState {
   unavailable?: Set<string>
   todaySpend?: Record<string, number>
   contextWindow?: Record<string, number>
+  rate?: Record<string, { rpm: number; tpm: number }>
 }
 
 function makeDeps(state: DepsState = {}): RoutingEngineDeps {
@@ -57,6 +58,7 @@ function makeDeps(state: DepsState = {}): RoutingEngineDeps {
     ...(state.contextWindow
       ? { getContextWindow: (pid, mid) => state.contextWindow?.[`${pid}:${mid}`] ?? 100000 }
       : {}),
+    ...(state.rate ? { getRate: (id) => state.rate?.[id] ?? { rpm: 0, tpm: 0 } } : {}),
   }
 }
 
@@ -555,6 +557,83 @@ describe("ProviderRoutingEngine", () => {
       // Advisory semantics: still selected, but the warning rides along.
       expect(result?.providerId).toBe("openai")
       expect(result?.overBudgetWarning).toEqual({ providerId: "openai", spend: 7.5, budget: 5 })
+    })
+
+    it("deprioritizes a provider at its RPM ceiling", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", maxRequestsPerMinute: 10, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        reg,
+        config,
+        makeDeps({ rate: { openai: { rpm: 10, tpm: 0 } } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("anthropic")
+    })
+
+    it("deprioritizes a provider at its TPM ceiling", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", maxTokensPerMinute: 50_000, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        reg,
+        config,
+        makeDeps({ rate: { openai: { rpm: 1, tpm: 60_000 } } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("anthropic")
+    })
+
+    it("keeps a provider under its rate ceiling", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [
+          {
+            providerId: "openai",
+            maxRequestsPerMinute: 10,
+            maxTokensPerMinute: 50_000,
+            enabled: true,
+          },
+        ],
+      }
+      const engine = new ProviderRoutingEngine(
+        reg,
+        config,
+        makeDeps({ rate: { openai: { rpm: 3, tpm: 1000 } } })
+      )
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+    })
+
+    it("still selects a rate-limited provider when it is the only candidate (advisory)", () => {
+      const solo = registry([mapping("solo", [entry("openai", "gpt-4o")])])
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", maxRequestsPerMinute: 5, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(
+        solo,
+        config,
+        makeDeps({ rate: { openai: { rpm: 99, tpm: 0 } } })
+      )
+      const result = engine.selectProvider({ model: "solo" })
+      expect(result?.providerId).toBe("openai")
+      // Rate limiting carries no warning (recovers within a minute).
+      expect(result?.overBudgetWarning).toBeUndefined()
+    })
+
+    it("skips the rate check when the getRate dep is absent", () => {
+      const config: RoutingConfig = {
+        ...DEFAULT_ROUTING_CONFIG,
+        strategy: "quality",
+        providerConstraints: [{ providerId: "openai", maxRequestsPerMinute: 1, enabled: true }],
+      }
+      const engine = new ProviderRoutingEngine(reg, config, makeDeps())
+      expect(engine.selectProvider({ model: "alias" })?.providerId).toBe("openai")
     })
 
     it("does not flag a warning when an under-budget alternative was chosen", () => {
