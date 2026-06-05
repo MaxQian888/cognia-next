@@ -49,3 +49,36 @@ export {
   getBuiltInPreset,
   adaptPresetToEnabledProviders,
 } from "./built-in-presets"
+
+export {
+  classifyProviderError,
+  isTransientErrorClass,
+  type ProviderErrorClass,
+} from "./error-classifier"
+
+export {
+  getRoutingStrategy,
+  registerRoutingStrategy,
+  unregisterRoutingStrategy,
+  unregisterRoutingStrategiesByPlugin,
+  listRoutingStrategies,
+} from "./strategy-registry"
+
+export {
+  scoreDifficulty,
+  createDifficultySelector,
+  ensureDifficultyStrategyRegistered,
+} from "./difficulty-router"
+
+export { pruneToolsSemantica, DEFAULT_SEMANTIC_EMBEDDING } from "./semantic-tool-router"
+
+export {
+  BUILT_IN_ROUTING_SELECTORS,
+  makeTelemetrySnapshot,
+  qualitySelector,
+  costSelector,
+  speedSelector,
+  balancedSelector,
+  adaptiveSelector,
+  leastBusySelector,
+} from "./strategies/built-in"

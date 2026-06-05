@@ -48,7 +48,10 @@ import {
   createMappingRegistry,
   type RoutingEngineDeps,
 } from "@/lib/ai/routing"
-import { buildRoutingEngineDeps } from "@/lib/ai/routing/build-preview-engine"
+import {
+  applyCircuitConfigOverrides,
+  buildRoutingEngineDeps,
+} from "@/lib/ai/routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 import { estimateCJKTokenCount } from "@/lib/ai/rag/cjk-tokenizer"
 
@@ -482,6 +485,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (model && appSettings?.modelMappings && appSettings.modelMappings.length > 0) {
     const registry = createMappingRegistry(appSettings.modelMappings)
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
+    // Per-provider circuit overrides (allowed_fails / cooldown_time) apply
+    // before the engine consults breaker state. Idempotent merge.
+    applyCircuitConfigOverrides(routingConfig.providerConstraints)
     // Live-store-backed deps shared with the routing-tab preview panel —
     // health metrics, circuit breaker, today-spend mirror, rate window,
     // pricing, and the context-window resolver all live in
@@ -494,7 +500,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
-    const result = engine.selectProvider({ model, estimatedInputTokens })
+    const result = engine.selectProvider({ model, estimatedInputTokens, promptText })
     if (result?.fromAlias && result.alias) {
       model = result.modelId
       providerId = result.providerId
@@ -506,6 +512,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // opaque map the SendOptions wire shape carries. The renderer + Rust
         // struct treat this as metadata only; the sidecar ignores it.
         parameterDefaults: result.parameterDefaults as Record<string, unknown> | undefined,
+        // Error-class routing metadata: the renderer retry path acts on
+        // these without a registry lookup.
+        ...(result.specialFallbacks ? { specialFallbacks: result.specialFallbacks } : {}),
+        ...(result.retryPolicy ? { retryPolicy: result.retryPolicy } : {}),
       }
       opts.routingDecision = {
         strategy: result.strategy,
@@ -1080,6 +1090,43 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
       if (!ocrAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-ocr")
+      }
+      // Semantic tool routing (opt-in, default OFF): when MORE plugin tools
+      // than the activation threshold are exposed, keep only the top-K
+      // semantic matches for the current prompt plus pinned tools. Only the
+      // PLUGIN manifest is pruned — built-in skills below ride along
+      // untouched — and any matcher failure (embedding engine unavailable,
+      // no query text) skips pruning entirely. Never blocks a send.
+      const semanticSettings = appSettings?.semanticToolRouting
+      if (
+        semanticSettings?.enabled === true &&
+        manifest.length > Math.max(1, semanticSettings.activationToolCount ?? 24)
+      ) {
+        const semanticQuery = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage ?? ""
+        if (semanticQuery.trim()) {
+          try {
+            const { pruneToolsSemantica } = await import("@/lib/ai/routing/semantic-tool-router")
+            const pruned = await pruneToolsSemantica({
+              query: semanticQuery,
+              candidates: manifest.map((entry) => ({
+                name: entry.name,
+                description: entry.description,
+                pluginId: entry.pluginId,
+              })),
+              settings: semanticSettings,
+            })
+            if (pruned) {
+              const keep = new Set(pruned.kept.map((candidate) => candidate.name))
+              manifest = manifest.filter((entry) => keep.has(entry.name))
+              loggers.app.info("semantic tool routing pruned plugin tools", {
+                kept: manifest.length,
+                pruned: pruned.prunedCount,
+              })
+            }
+          } catch (err) {
+            loggers.app.warn("semantic tool routing skipped", { error: String(err) })
+          }
+        }
       }
       // ADR-0026 — fold built-in skill manifest entries into the same
       // pluginTools stream the sidecar consumes. The two streams share

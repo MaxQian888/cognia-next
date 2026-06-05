@@ -6,7 +6,7 @@
 // tab renders inside a per-provider dialog — hence the banner.
 
 import { useTranslations } from "next-intl"
-import { FlaskConical, GitMerge, Globe, Layers, Shield, Sparkles } from "lucide-react"
+import { FlaskConical, Gauge, GitMerge, Globe, Layers, Shield, Sparkles, Wand2 } from "lucide-react"
 
 import {
   SettingsAlert,
@@ -18,6 +18,8 @@ import { RoutingPresetCards } from "./routing-preset-cards"
 import { ModelAliasList } from "./model-alias-list"
 import { ProviderConstraintsEditor } from "./provider-constraints-editor"
 import { RoutingTestPanel } from "./routing-test-panel"
+import { SemanticRoutingSection } from "./semantic-routing-section"
+import { DifficultyRoutingSection } from "./difficulty-routing-section"
 
 export function RoutingConfigPanel() {
   const t = useTranslations("providers.routingView")
@@ -64,6 +66,30 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <ProviderConstraintsEditor />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Wand2 className="h-4 w-4" />}
+        title={t("semantic.title")}
+        description={t("semantic.desc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <SemanticRoutingSection />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Gauge className="h-4 w-4" />}
+        title={t("difficulty.title")}
+        description={t("difficulty.desc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <DifficultyRoutingSection />
       </SettingsCard>
 
       <SettingsDivider />

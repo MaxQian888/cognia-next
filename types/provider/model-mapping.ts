@@ -4,6 +4,8 @@
  */
 
 import type { RoutingStrategy } from "./auto-router"
+import type { CircuitBreakerConfig } from "./circuit-breaker"
+import type { ProviderErrorClass } from "./error-class"
 
 /** A single entry in a model mapping's fallback chain */
 export interface ModelMappingEntry {
@@ -37,6 +39,28 @@ export interface ModelMappingParameterDefaults {
 /** Distribution strategy for entries in a mapping */
 export type MappingDistributionStrategy = "priority" | "weighted"
 
+/**
+ * Error-class-specific fallback chains (LiteLLM `context_window_fallbacks` /
+ * `content_policy_fallbacks` analog). When a turn fails with one of these
+ * classes the retry path routes through the dedicated chain instead of the
+ * main one — a same-sized model fails a context-window error the same way,
+ * so the dedicated chain points at larger-window / alternate-provider
+ * entries.
+ */
+export interface ModelMappingSpecialFallbacks {
+  /** Tried when the failure classifies as `context-window-exceeded`. */
+  contextWindowExceeded?: ModelMappingEntry[]
+  /** Tried when the failure classifies as `content-policy`. */
+  contentPolicy?: ModelMappingEntry[]
+}
+
+/**
+ * Per-error-class retry budget for the MAIN fallback chain. Absent classes
+ * keep the historical behavior (retry transient classes through the whole
+ * chain). `maxRetries: 0` disables retries for that class entirely.
+ */
+export type ModelMappingRetryPolicy = Partial<Record<ProviderErrorClass, { maxRetries: number }>>
+
 /** A complete model mapping: alias → provider:model chain */
 export interface ModelMapping {
   /** Unique identifier */
@@ -49,6 +73,10 @@ export interface ModelMapping {
   distribution: MappingDistributionStrategy
   /** Default generation parameters applied when this alias is used */
   parameterDefaults?: ModelMappingParameterDefaults
+  /** Error-class-specific fallback chains (context-window / content-policy). */
+  specialFallbacks?: ModelMappingSpecialFallbacks
+  /** Per-error-class retry budgets for the main chain. */
+  retryPolicy?: ModelMappingRetryPolicy
   /** Whether this mapping is enabled */
   enabled: boolean
   /** Whether this is a system-generated default mapping (vs user-created) */
@@ -96,6 +124,11 @@ export interface ProviderConstraint {
   dailyCostBudget?: number
   /** Priority level (lower = higher priority) */
   priority?: number
+  /**
+   * Per-provider circuit-breaker override (allowed_fails / cooldown_time
+   * analog) merged onto the global breaker defaults for this provider.
+   */
+  circuitConfig?: Partial<CircuitBreakerConfig>
   /** Whether this constraint is active */
   enabled: boolean
 }

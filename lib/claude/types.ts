@@ -336,6 +336,14 @@ export interface SendOptions {
     resolvedTo: { providerId: string; modelId: string }
     fallbackEntries: ModelMappingEntry[]
     parameterDefaults?: Record<string, unknown>
+    /**
+     * Error-class-specific fallback chains from the mapping — a
+     * context-window / content-policy failure retries through these
+     * instead of the main chain (`lib/claude/routing-fallback.ts`).
+     */
+    specialFallbacks?: import("@/types/provider/model-mapping").ModelMappingSpecialFallbacks
+    /** Per-error-class retry budgets for the main chain. */
+    retryPolicy?: import("@/types/provider/model-mapping").ModelMappingRetryPolicy
   }
 
   /**
@@ -346,7 +354,7 @@ export interface SendOptions {
    * this undefined.
    */
   routingDecision?: {
-    strategy: RoutingStrategy
+    strategy: RoutingStrategy | (string & {})
     reason: string
     /**
      * Advisory daily-budget overage: the selected provider is past its
@@ -1720,6 +1728,20 @@ export interface AppSettings {
    * 30s timeout, 3 fallback attempts).
    */
   routingConfig?: RoutingConfig
+  /**
+   * Opt-in semantic pruning of the exposed plugin-tool manifest (default
+   * OFF). When enabled and more plugin tools than `activationToolCount`
+   * are exposed, `resolveSendOptions` keeps only the top-K semantic
+   * matches for the current prompt plus pinned tools. Built-in tools are
+   * never pruned. See `lib/ai/routing/semantic-tool-router.ts`.
+   */
+  semanticToolRouting?: import("@/types/routing/tool-route").SemanticToolRoutingSettings
+  /**
+   * Opt-in heuristic strong/weak difficulty routing (default OFF) — a
+   * registered routing strategy (`"difficulty"`) usable as the routing
+   * strategy or per-request override once a model pair is configured.
+   */
+  difficultyRouting?: import("@/types/routing/tool-route").DifficultyRoutingSettings
   /**
    * When true, on a `session_ended.error` for a turn that resolved via an
    * alias with non-empty `aliasResolution.fallbackEntries`, the renderer

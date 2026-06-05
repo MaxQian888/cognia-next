@@ -29,6 +29,8 @@ import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-comp
 import type { PluginModalMountDef } from "./plugin-modal"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
+import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
+import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
 // the runtime parser in lockstep — historically a local alias was used to
@@ -796,6 +798,23 @@ export interface PluginManifest {
    * key (see ADR-0026 §4).
    */
   chatMiddlewares?: PluginChatMiddlewareDef[]
+
+  /**
+   * Plugin-contributed provider routing strategies (LiteLLM
+   * CustomRoutingStrategy analog). ADR-0026 lazy-factory entries
+   * registered into the routing strategy registry on enable under the
+   * namespaced id `${pluginId}:${id}` (synthetic module-bridge key —
+   * field-driven, no capability tag).
+   */
+  routingStrategies?: PluginRoutingStrategyDef[]
+
+  /**
+   * Semantic tool routes: example utterances attached to this plugin's
+   * tools, persisted into the `toolRoutes` table on enable and consumed
+   * by the opt-in semantic tool-routing matcher (synthetic module-bridge
+   * key — field-driven, no capability tag).
+   */
+  toolRoutes?: PluginToolRouteDef[]
 
   /**
    * Optional custom settings UI component. When present, the host renders

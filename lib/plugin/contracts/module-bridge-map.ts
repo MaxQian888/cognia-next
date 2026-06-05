@@ -75,6 +75,14 @@ import {
   registerDensityPresetsForPlugin,
   unregisterDensityPresetsByPlugin,
 } from "@/lib/appearance/density-preset-registry"
+import {
+  registerRoutingStrategiesForPlugin,
+  unregisterRoutingStrategiesForPlugin,
+} from "@/lib/plugin/bridge/routing-strategies-bridge"
+import {
+  registerToolRoutesForPlugin,
+  unregisterToolRoutesForPlugin,
+} from "@/lib/plugin/bridge/tool-routes-bridge"
 
 /**
  * Everything a module-bridge descriptor may need to register a plugin's
@@ -259,6 +267,37 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterTerminalCompletionProvidersForPlugin(pluginId)
+    },
+  },
+  "routing-strategy": {
+    // Synthetic key. Declarative `manifest.routingStrategies[]` (ADR-0026
+    // lazy factories) → the routing strategy registry under
+    // `${pluginId}:${id}`. The engine try-catches every selector call, so a
+    // broken custom strategy degrades to chain order instead of breaking
+    // dispatch. Field-driven gating.
+    key: "routing-strategy",
+    manifestField: "routingStrategies",
+    register: async (ctx) => {
+      await registerRoutingStrategiesForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterRoutingStrategiesForPlugin(pluginId)
+    },
+  },
+  "tool-route": {
+    // Synthetic key. Declarative `manifest.toolRoutes[]` (semantic routing
+    // utterances) → persisted Dexie `toolRoutes` rows (source "manifest").
+    // Data rows rather than lazy factories; disable deletes them — hence the
+    // async unregister. Field-driven gating.
+    key: "tool-route",
+    manifestField: "toolRoutes",
+    register: async (ctx) => {
+      await registerToolRoutesForPlugin(ctx.manifest, ctx.installRoot)
+    },
+    unregister: async (pluginId) => {
+      await unregisterToolRoutesForPlugin(pluginId)
     },
   },
   scheduler: {

@@ -8,6 +8,7 @@
 
 import type { ModelMappingEntry } from "@/types/provider/model-mapping"
 import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
+import { classifyProviderError, isTransientErrorClass } from "./error-classifier"
 
 /** Result of a provider attempt */
 export interface ProviderAttemptResult<T> {
@@ -175,31 +176,21 @@ function executeWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<
 }
 
 /**
- * Check if an error is retryable (should trigger fallback to next provider)
+ * Check if an error is retryable (should trigger fallback to next provider).
+ *
+ * Delegates to the shared provider-error classifier (one taxonomy across
+ * this executor and the renderer's routing-fallback path): transient
+ * classes (rate-limit / timeout / network / server-error) retry; the
+ * configured `retryableStatusCodes` remain an additional allowlist.
+ * Special classes (context-window / content-policy) and permanent classes
+ * (auth / invalid-request / unknown) do NOT retry here.
  */
 function isRetryableError(error: Error, retryableStatusCodes: number[]): boolean {
+  if (isTransientErrorClass(classifyProviderError(error.message))) return true
+
   const message = error.message.toLowerCase()
-
-  // Timeout is always retryable
-  if (message.includes("timed out") || message.includes("timeout")) return true
-
-  // Rate limit is retryable
-  if (message.includes("rate limit") || message.includes("too many requests")) return true
-
-  // Check for HTTP status codes in error message
   for (const code of retryableStatusCodes) {
     if (message.includes(String(code))) return true
   }
-
-  // Network errors are retryable
-  if (
-    message.includes("network") ||
-    message.includes("econnrefused") ||
-    message.includes("fetch failed")
-  ) {
-    return true
-  }
-
-  // Auth errors, invalid request errors etc. are NOT retryable
   return false
 }

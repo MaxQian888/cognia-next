@@ -1859,6 +1859,16 @@ export class CogniaDB extends Dexie {
     this.version(75).stores({
       providerCostDaily: "&id, day, providerId, [providerId+day], updatedAt",
     })
+
+    // ── v76 — Semantic tool routes (semantic-router analog). ─────────────────
+    // One row per route: example utterances (+ cached vectors) attached to a
+    // tool or a whole plugin, consumed by `lib/ai/routing/semantic-tool-router`
+    // to prune the exposed plugin-tool manifest when the opt-in setting is on.
+    // `refId` serves per-tool lookups; `pluginId` serves manifest-route cleanup
+    // on plugin disable. Additive; no upgrade hook. See `lib/db/tool-routes.ts`.
+    this.version(76).stores({
+      toolRoutes: "&id, refId, kind, enabled, pluginId",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1896,6 +1906,8 @@ export class CogniaDB extends Dexie {
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
   // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
   providerCostDaily!: Table<ProviderCostDailyRow, string>
+  // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
+  toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

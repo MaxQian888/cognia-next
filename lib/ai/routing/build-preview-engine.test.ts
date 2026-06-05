@@ -162,3 +162,37 @@ describe("buildRoutingEngineDeps", () => {
     expect(engine.selectProvider({ model: "fast" })?.providerId).toBe("groq")
   })
 })
+
+describe("applyCircuitConfigOverrides (P3.3)", () => {
+  it("merges per-provider circuit overrides into the breaker store, skipping disabled rows", async () => {
+    const { applyCircuitConfigOverrides } = await import("./build-preview-engine")
+    const updates: Array<[string, unknown]> = []
+    const original = useCircuitBreakerStore.getState().updateConfig
+    useCircuitBreakerStore.setState({
+      updateConfig: (providerId, config) => {
+        updates.push([providerId, config])
+      },
+    })
+    try {
+      applyCircuitConfigOverrides([
+        {
+          providerId: "openai",
+          enabled: true,
+          circuitConfig: { failureThreshold: 2, cooldownMs: 5000 },
+        },
+        { providerId: "no-config", enabled: true },
+        {
+          providerId: "disabled",
+          enabled: false,
+          circuitConfig: { failureThreshold: 1 },
+        },
+      ])
+      expect(updates).toEqual([["openai", { failureThreshold: 2, cooldownMs: 5000 }]])
+      // Empty list is a fast no-op.
+      applyCircuitConfigOverrides([])
+      expect(updates).toHaveLength(1)
+    } finally {
+      useCircuitBreakerStore.setState({ updateConfig: original })
+    }
+  })
+})

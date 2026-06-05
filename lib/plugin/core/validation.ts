@@ -1001,6 +1001,12 @@ export function validatePluginManifest(
   )
   validateLazyFactoryArray(m.modalMounts, { field: "modalMounts" }, pushError, pushWarning)
   validateLazyFactoryArray(
+    m.routingStrategies,
+    { field: "routingStrategies" },
+    pushError,
+    pushWarning
+  )
+  validateLazyFactoryArray(
     m.chatMiddlewares,
     {
       field: "chatMiddlewares",

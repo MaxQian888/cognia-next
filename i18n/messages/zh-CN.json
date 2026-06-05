@@ -13459,6 +13459,28 @@
     "routingView": {
       "overBudgetToast": "服务商 {provider} 已超出每日预算（已花费 ${spend}/${budget}），但它是当前唯一可用选项，请求仍已发送。",
       "globalScopeNote": "路由配置是全局的——别名、策略和约束对所有服务商生效，而不仅是当前弹窗对应的服务商。",
+      "semantic": {
+        "title": "语义工具路由",
+        "desc": "暴露的插件工具过多时,只保留与当前提示最相关的工具(本地嵌入,需手动开启)。",
+        "enabled": "启用语义工具裁剪",
+        "activationToolCount": "超过此数量时启用(工具数)",
+        "topK": "保留前 K 个",
+        "threshold": "相似度阈值",
+        "pinnedTools": "固定工具",
+        "pinnedToolsPlaceholder": "tool_one, tool_two",
+        "hint": "逗号分隔的工具名,这些工具始终保留。内置工具永不裁剪。"
+      },
+      "difficulty": {
+        "title": "难度路由",
+        "desc": "用本地启发式把简单提示路由到便宜模型,复杂提示路由到强模型(需手动开启)。",
+        "enabled": "启用难度路由",
+        "weakModel": "弱模型(简单提示)",
+        "strongModel": "强模型(复杂提示)",
+        "providerId": "服务商 ID",
+        "modelId": "模型 ID",
+        "threshold": "难度阈值(0–1)",
+        "hint": "当路由策略(或单次请求覆盖)选择 \"difficulty\" 且两个模型都已配置时生效。"
+      },
       "presetsTitle": "快速预设",
       "presetsDesc": "一键路由方案，自动适配你已启用的服务商。激活后可随时撤销。",
       "preset": {

@@ -23,6 +23,10 @@ import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
 import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
+import { useInFlightStore } from "@/stores/settings/in-flight-store"
+// Side-effect import: registers the "difficulty" strategy so every engine
+// (send path + preview panel) can resolve it by id.
+import "./difficulty-router"
 import type { AppSettings } from "@/lib/claude/types"
 
 /** The slice of AppSettings the engine deps actually read. */
@@ -77,6 +81,9 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
     // Trailing-minute RPM/TPM window (fed by recordProviderOutcome) — the
     // engine deprioritizes providers at their configured rate ceiling.
     getRate: (id) => useRateLimitStore.getState().getRate(id),
+    // Concurrent in-flight turns (begin/settle around each send) — the
+    // least-busy strategy's signal.
+    getInFlight: (id) => useInFlightStore.getState().getInFlight(id),
   }
 }
 
@@ -85,4 +92,23 @@ export function buildRoutingEngine(appSettings: RoutingEngineSettings): Provider
   const registry = createMappingRegistry(appSettings.modelMappings ?? [])
   const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
   return new ProviderRoutingEngine(registry, routingConfig, buildRoutingEngineDeps(appSettings))
+}
+
+/**
+ * Push per-provider circuit-breaker overrides (`ProviderConstraint.
+ * circuitConfig` — allowed_fails / cooldown_time analog) into the live
+ * breaker store. Idempotent merge; called from the send path right before
+ * the engine consults breaker state so settings changes apply without a
+ * dedicated subscription.
+ */
+export function applyCircuitConfigOverrides(
+  constraints: ReadonlyArray<import("@/types/provider/model-mapping").ProviderConstraint>
+): void {
+  if (constraints.length === 0) return
+  const store = useCircuitBreakerStore.getState()
+  for (const constraint of constraints) {
+    if (constraint.enabled && constraint.circuitConfig) {
+      store.updateConfig(constraint.providerId, constraint.circuitConfig)
+    }
+  }
 }

@@ -13417,6 +13417,28 @@
     "routingView": {
       "overBudgetToast": "Provider {provider} is over its daily budget (${spend} of ${budget}) but was the only available option. The request was sent anyway.",
       "globalScopeNote": "Routing configuration is global — aliases, strategy, and constraints apply to every provider, not just the one this dialog is open for.",
+      "semantic": {
+        "title": "Semantic Tool Routing",
+        "desc": "When many plugin tools are exposed, keep only the ones most relevant to the current prompt (local embeddings, opt-in).",
+        "enabled": "Enable semantic tool pruning",
+        "activationToolCount": "Activate above (tools)",
+        "topK": "Keep top K",
+        "threshold": "Similarity threshold",
+        "pinnedTools": "Pinned tools",
+        "pinnedToolsPlaceholder": "tool_one, tool_two",
+        "hint": "Comma-separated tool names that always stay exposed. Built-in tools are never pruned."
+      },
+      "difficulty": {
+        "title": "Difficulty Routing",
+        "desc": "Route easy prompts to a cheap model and hard ones to a capable model using a local heuristic (opt-in).",
+        "enabled": "Enable difficulty routing",
+        "weakModel": "Weak model (easy prompts)",
+        "strongModel": "Strong model (hard prompts)",
+        "providerId": "Provider ID",
+        "modelId": "Model ID",
+        "threshold": "Difficulty threshold (0–1)",
+        "hint": "Takes effect when \"difficulty\" is selected as the routing strategy (or per-request override) and both models are set."
+      },
       "presetsTitle": "Quick Presets",
       "presetsDesc": "One-click routing profiles adapted to your enabled providers. Activation can be reverted.",
       "preset": {

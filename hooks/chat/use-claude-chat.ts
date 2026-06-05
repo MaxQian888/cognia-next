@@ -74,6 +74,7 @@ import {
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { useInFlightStore } from "@/stores/settings/in-flight-store"
 import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
 import {
   clearToolSpansForSession,
@@ -862,6 +863,11 @@ export function useClaudeChat() {
           options: sendOptions,
           attemptIndex: 0,
         })
+        // Least-busy signal: this turn is now in flight against the resolved
+        // provider; `session_ended` (any flavor) settles it.
+        if (sendOptions.provider) {
+          useInFlightStore.getState().begin(sessionId, sendOptions.provider)
+        }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         store.getState().setError(error.message)
@@ -1215,8 +1221,12 @@ async function handleEvent(
       return
     }
     case "session_ended": {
-      // The turn is over — cancel any backstop deny still pending for a
-      // remote-routed approval on this session (Remote Session Control).
+      // The turn is over — settle the in-flight counter FIRST (idempotent;
+      // success, error, and abort all land here). A fallback retry below
+      // re-begins against the next provider in the chain.
+      useInFlightStore.getState().settle(evt.sessionId)
+      // Cancel any backstop deny still pending for a remote-routed approval
+      // on this session (Remote Session Control).
       clearApprovalBackstops(evt.sessionId)
       // Drop any open tool spans for this session — every tool_use should
       // have already paired with its tool_result, but cleanup keeps the

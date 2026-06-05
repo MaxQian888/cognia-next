@@ -23,6 +23,13 @@ export interface LastSendCacheEntry {
   content: SendContent
   options: SendOptions
   attemptIndex: number
+  /**
+   * Cursor into each error-class-specific fallback chain
+   * (`aliasResolution.specialFallbacks`) — independent of `attemptIndex`,
+   * which tracks the MAIN chain. Absent until a special-class failure
+   * routes through its dedicated chain.
+   */
+  specialAttempts?: Partial<Record<"contextWindowExceeded" | "contentPolicy", number>>
 }
 
 export interface FileReference {

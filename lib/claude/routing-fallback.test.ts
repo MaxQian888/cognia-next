@@ -198,3 +198,111 @@ describe("attemptRoutingFallback", () => {
     expect(useChatStore.getState().lastSendBySession.s1?.attemptIndex).toBe(1)
   })
 })
+
+describe("attemptRoutingFallback — error-class routing (P3.3)", () => {
+  const specialOptions = (overrides: Record<string, unknown> = {}): SendOptions =>
+    ({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      aliasResolution: {
+        alias: "fast",
+        resolvedTo: { providerId: "openai", modelId: "gpt-4o-mini" },
+        fallbackEntries: [
+          { providerId: "openai", modelId: "gpt-4o-mini" },
+          { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+        ],
+        specialFallbacks: {
+          contextWindowExceeded: [
+            { providerId: "google", modelId: "gemini-long-context" },
+            { providerId: "anthropic", modelId: "claude-sonnet-4-6" },
+          ],
+          contentPolicy: [{ providerId: "local", modelId: "uncensored-model" }],
+        },
+        ...overrides,
+      },
+    }) as SendOptions
+
+  beforeEach(() => {
+    sendPromptMock.mockReset()
+    sendPromptMock.mockResolvedValue(undefined)
+    useChatStore.getState().clear()
+    setRoutingEnabled(true)
+  })
+
+  it("routes a context-window failure through its dedicated chain, not the main one", async () => {
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: specialOptions(),
+      attemptIndex: 0,
+    })
+    const result = await attemptRoutingFallback(
+      "s1",
+      "prompt is too long: 224864 tokens > 200000 maximum"
+    )
+    expect(result).toBe(true)
+    const sent = sendPromptMock.mock.calls[0][2] as SendOptions
+    expect(sent.provider).toBe("google")
+    expect(sent.model).toBe("gemini-long-context")
+    // Main-chain cursor untouched; special cursor advanced.
+    const cached = useChatStore.getState().lastSendBySession.s1
+    expect(cached?.attemptIndex).toBe(0)
+    expect(cached?.specialAttempts?.contextWindowExceeded).toBe(1)
+  })
+
+  it("walks the special chain on repeated failures and exhausts it", async () => {
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: specialOptions(),
+      attemptIndex: 0,
+    })
+    await attemptRoutingFallback("s1", "maximum context length exceeded")
+    const second = await attemptRoutingFallback("s1", "maximum context length exceeded")
+    expect(second).toBe(true)
+    const sent = sendPromptMock.mock.calls[1][2] as SendOptions
+    expect(sent.provider).toBe("anthropic")
+    // Third failure: chain exhausted → no retry, cache cleared.
+    const third = await attemptRoutingFallback("s1", "maximum context length exceeded")
+    expect(third).toBe(false)
+    expect(useChatStore.getState().lastSendBySession.s1).toBeUndefined()
+  })
+
+  it("routes content-policy failures to the contentPolicy chain", async () => {
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: specialOptions(),
+      attemptIndex: 0,
+    })
+    const result = await attemptRoutingFallback("s1", "blocked by content_policy")
+    expect(result).toBe(true)
+    const sent = sendPromptMock.mock.calls[0][2] as SendOptions
+    expect(sent.provider).toBe("local")
+  })
+
+  it("a special-class failure with NO dedicated chain never grinds the main chain", async () => {
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: specialOptions({ specialFallbacks: undefined }),
+      attemptIndex: 0,
+    })
+    const result = await attemptRoutingFallback("s1", "prompt is too long")
+    expect(result).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("honors the per-class retry budget on the main chain", async () => {
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: specialOptions({
+        retryPolicy: { "rate-limit": { maxRetries: 0 } },
+      }),
+      attemptIndex: 0,
+    })
+    // rate-limit budget 0 → no retry even though the chain has entries.
+    const rateLimited = await attemptRoutingFallback("s1", "HTTPError 429: rate_limit_error")
+    expect(rateLimited).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    // A timeout (no budget configured) still retries through the chain.
+    const timedOut = await attemptRoutingFallback("s1", "Request timed out")
+    expect(timedOut).toBe(true)
+  })
+})

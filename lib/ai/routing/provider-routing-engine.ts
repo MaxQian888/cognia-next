@@ -11,14 +11,22 @@
 import type {
   ModelMappingEntry,
   ModelMappingRegistry,
+  ModelMappingRetryPolicy,
+  ModelMappingSpecialFallbacks,
   RoutingConfig,
   AliasResolutionResult,
 } from "@/types/provider/model-mapping"
 import type { RoutingStrategy, RequestRoutingOverride } from "@/types/provider/auto-router"
+import type {
+  RoutingDecisionContext,
+  RoutingStrategyId,
+  RoutingTelemetrySnapshot,
+} from "@/types/provider/routing-strategy"
 import type { ProviderHealthMetrics } from "@/types/provider/health-metrics"
 import type { CircuitBreakerStateValue } from "@/types/provider/circuit-breaker"
 import type { ProviderName } from "@/types/provider"
 import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
+import { getRoutingStrategy } from "./strategy-registry"
 
 /** Provider info needed for routing decisions */
 export interface ProviderRoutingInfo {
@@ -56,6 +64,14 @@ export interface RoutingEngineDeps {
    * Optional: when absent the RPM/TPM pre-check is skipped entirely.
    */
   getRate?: (providerId: string) => { rpm: number; tpm: number }
+  /**
+   * Concurrent in-flight requests per provider — the least-busy strategy's
+   * signal. Optional: when absent every provider reads 0 and least-busy
+   * degrades to chain order.
+   */
+  getInFlight?: (providerId: string) => number
+  /** Injectable clock for deterministic strategy tests. */
+  now?: () => number
 }
 
 /** Result of the routing engine's provider selection */
@@ -64,8 +80,8 @@ export interface RoutingResult {
   providerId: string
   /** Selected model ID */
   modelId: string
-  /** The strategy that was used */
-  strategy: RoutingStrategy
+  /** The strategy that was used (a built-in or a registered custom id) */
+  strategy: RoutingStrategyId
   /** Whether this was resolved from an alias */
   fromAlias: boolean
   /** The alias that was resolved (if any) */
@@ -74,6 +90,10 @@ export interface RoutingResult {
   fallbackEntries: ModelMappingEntry[]
   /** Parameter defaults from the mapping (if alias was used) */
   parameterDefaults?: AliasResolutionResult["parameterDefaults"]
+  /** Error-class-specific fallback chains declared on the mapping. */
+  specialFallbacks?: ModelMappingSpecialFallbacks
+  /** Per-error-class retry budgets declared on the mapping. */
+  retryPolicy?: ModelMappingRetryPolicy
   /** Reason for the selection */
   reason: string
   /**
@@ -121,6 +141,11 @@ export class ProviderRoutingEngine {
      * input are deprioritized — LiteLLM-style context-window pre-check.
      */
     estimatedInputTokens?: number
+    /**
+     * Last user prompt text, forwarded to context-aware custom selectors
+     * (e.g. the difficulty router). Built-in strategies ignore it.
+     */
+    promptText?: string
   }): RoutingResult | null {
     const override = options.override
 
@@ -141,13 +166,25 @@ export class ProviderRoutingEngine {
     if (alias && this.registry.enabled) {
       const resolution = resolveModelAlias(alias, this.registry, this.buildLiteMetricsMap(alias))
       if (resolution.found && resolution.entries.length > 0) {
-        return this.selectFromEntries(
+        const result = this.selectFromEntries(
           resolution.entries,
           override?.strategy || this.config.strategy,
           alias,
           resolution.parameterDefaults,
-          options.estimatedInputTokens
+          options.estimatedInputTokens,
+          options.promptText
         )
+        // Ride the mapping's error-class routing metadata along so the
+        // renderer's retry path can act on it without a registry lookup.
+        if (result && resolution.mapping) {
+          if (resolution.mapping.specialFallbacks) {
+            result.specialFallbacks = resolution.mapping.specialFallbacks
+          }
+          if (resolution.mapping.retryPolicy) {
+            result.retryPolicy = resolution.mapping.retryPolicy
+          }
+        }
+        return result
       }
     }
 
@@ -199,10 +236,11 @@ export class ProviderRoutingEngine {
    */
   private selectFromEntries(
     entries: ModelMappingEntry[],
-    strategy: RoutingStrategy,
+    strategy: RoutingStrategyId,
     alias: string,
     parameterDefaults?: AliasResolutionResult["parameterDefaults"],
-    estimatedInputTokens?: number
+    estimatedInputTokens?: number,
+    promptText?: string
   ): RoutingResult | null {
     // Filter by circuit breaker and provider availability
     const available = entries.filter((e) => {
@@ -243,7 +281,9 @@ export class ProviderRoutingEngine {
 
     // Apply strategy-based selection (window-fallback keeps the window-desc
     // order instead).
-    const selected = windowFallback ? candidates[0] : this.applyStrategy(candidates, strategy)
+    const selected = windowFallback
+      ? candidates[0]
+      : this.applyStrategy(candidates, strategy, { promptText, estimatedInputTokens })
     if (!selected) return null
 
     const fallbackEntries = candidates.filter(
@@ -339,116 +379,37 @@ export class ProviderRoutingEngine {
   }
 
   /**
-   * Select a single entry based on the routing strategy
+   * Select a single entry based on the routing strategy.
+   *
+   * Delegates to the strategy registry (built-ins + plugin-registered
+   * customs). Unknown ids and throwing selectors degrade to the first
+   * entry — the historical `default` arm — so a broken custom strategy
+   * can never break dispatch.
    */
   private applyStrategy(
     entries: ModelMappingEntry[],
-    strategy: RoutingStrategy
+    strategy: RoutingStrategyId,
+    ctx?: RoutingDecisionContext
   ): ModelMappingEntry | null {
     if (entries.length === 0) return null
     if (entries.length === 1) return entries[0]
 
-    switch (strategy) {
-      case "cost":
-        return this.selectByCost(entries)
-      case "speed":
-        return this.selectByLatency(entries)
-      case "quality":
-        // Quality = first in the chain (user-ordered priority)
-        return entries[0]
-      case "balanced":
-        return this.selectBalanced(entries)
-      case "adaptive":
-        return this.selectAdaptive(entries)
-      default:
-        return entries[0]
+    const selector = getRoutingStrategy(strategy)
+    if (!selector) return entries[0]
+    try {
+      return selector.select(entries, this.telemetrySnapshot(), ctx) ?? entries[0]
+    } catch {
+      return entries[0]
     }
   }
 
-  /** Select the cheapest provider */
-  private selectByCost(entries: ModelMappingEntry[]): ModelMappingEntry {
-    let cheapest = entries[0]
-    let cheapestPrice = Infinity
-
-    for (const entry of entries) {
-      const price = this.deps.getPricing(entry.providerId, entry.modelId)
-      if (price !== undefined && price < cheapestPrice) {
-        cheapestPrice = price
-        cheapest = entry
-      }
+  /** The read-only telemetry surface selectors score candidates with. */
+  private telemetrySnapshot(): RoutingTelemetrySnapshot {
+    return {
+      getHealthMetrics: this.deps.getHealthMetrics,
+      getPricing: this.deps.getPricing,
+      getInFlight: this.deps.getInFlight ?? (() => 0),
+      now: this.deps.now ?? (() => Date.now()),
     }
-    return cheapest
-  }
-
-  /** Select the fastest provider based on recent latency */
-  private selectByLatency(entries: ModelMappingEntry[]): ModelMappingEntry {
-    let fastest = entries[0]
-    let bestLatency = Infinity
-
-    for (const entry of entries) {
-      const metrics = this.deps.getHealthMetrics(entry.providerId)
-      if (metrics && metrics.latencyP50 > 0 && metrics.latencyP50 < bestLatency) {
-        bestLatency = metrics.latencyP50
-        fastest = entry
-      }
-    }
-    return fastest
-  }
-
-  /** Balanced selection: score by success rate + inverse latency + inverse cost */
-  private selectBalanced(entries: ModelMappingEntry[]): ModelMappingEntry {
-    let best = entries[0]
-    let bestScore = -Infinity
-
-    for (const entry of entries) {
-      const metrics = this.deps.getHealthMetrics(entry.providerId)
-      const price = this.deps.getPricing(entry.providerId, entry.modelId)
-
-      // Score components (normalized 0-1)
-      const successScore = metrics ? metrics.successRate : 0.5
-      const latencyScore =
-        metrics && metrics.latencyP50 > 0
-          ? Math.max(0, 1 - metrics.latencyP50 / 10000) // 10s = score 0
-          : 0.5
-      const costScore =
-        price !== undefined
-          ? Math.max(0, 1 - price / 50) // $50/1M = score 0
-          : 0.5
-
-      const score = successScore * 0.4 + latencyScore * 0.3 + costScore * 0.3
-      if (score > bestScore) {
-        bestScore = score
-        best = entry
-      }
-    }
-    return best
-  }
-
-  /** Adaptive: use health metrics to weight selection */
-  private selectAdaptive(entries: ModelMappingEntry[]): ModelMappingEntry {
-    // Adaptive is similar to balanced but penalizes recent errors more heavily
-    let best = entries[0]
-    let bestScore = -Infinity
-
-    for (const entry of entries) {
-      const metrics = this.deps.getHealthMetrics(entry.providerId)
-
-      // Heavily weight recent success rate
-      const successScore = metrics ? metrics.successRate : 0.5
-      const latencyScore =
-        metrics && metrics.latencyP50 > 0 ? Math.max(0, 1 - metrics.latencyP50 / 10000) : 0.5
-      // Penalize providers with recent errors
-      const recentErrorPenalty =
-        metrics && metrics.lastErrorAt
-          ? Math.max(0, 1 - (Date.now() - metrics.lastErrorAt) / 300000) // 5-min decay
-          : 0
-
-      const score = successScore * 0.5 + latencyScore * 0.3 - recentErrorPenalty * 0.2
-      if (score > bestScore) {
-        bestScore = score
-        best = entry
-      }
-    }
-    return best
   }
 }
