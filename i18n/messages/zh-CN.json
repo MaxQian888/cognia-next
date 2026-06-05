@@ -16568,6 +16568,12 @@
             "description": "更新现有角色的字段。"
           }
         },
+        "agent": {
+          "turn": {
+            "label": "智能体回合",
+            "description": "执行一次完整的智能体回合——桌面端经 sidecar 启用工具（受审批门控），Web 端降级为纯文本。"
+          }
+        },
         "team": {
           "run": {
             "label": "运行团队",
@@ -17617,6 +17623,44 @@
         "goal": {
           "label": "目标 / 简介",
           "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。"
+        }
+      },
+      "agentTurn": {
+        "prompt": {
+          "label": "提示词"
+        },
+        "characterId": {
+          "label": "角色（可选）",
+          "hint": "以现有角色身份运行——沿用其系统提示词、模型和工具白名单。"
+        },
+        "systemPrompt": {
+          "label": "系统提示词",
+          "hint": "未选择角色时使用。"
+        },
+        "model": {
+          "label": "模型（可选）",
+          "hint": "默认使用提供方配置的模型。"
+        },
+        "allowedTools": {
+          "label": "允许的工具（逗号分隔）",
+          "hint": "限制临时角色的工具面。留空 = 主机默认。",
+          "placeholder": "Bash, Read, Edit"
+        },
+        "maxTurns": {
+          "label": "最大回合数",
+          "hint": "智能体步骤的上限。"
+        },
+        "cwd": {
+          "label": "工作目录",
+          "hint": "工具调用的作用范围（仅桌面端）。"
+        },
+        "toolsEnabled": {
+          "label": "启用工具",
+          "hint": "使用桌面 sidecar 的工具管线。关闭 = 纯文本补全。"
+        },
+        "requireTools": {
+          "label": "必须有工具",
+          "hint": "sidecar 不可用时（Web/移动端）直接失败，而不是降级为纯文本。"
         }
       },
       "skillInvoke": {

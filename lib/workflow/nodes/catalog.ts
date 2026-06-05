@@ -124,6 +124,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "UserCog",
     keywords: ["update", "edit", "character", "patch"],
   },
+  "action.agent.turn": {
+    label: "Agent turn",
+    description:
+      "Run one full agent turn — tool-enabled via the desktop sidecar (approval-gated), text-only fallback on web.",
+    iconName: "Bot",
+    keywords: ["agent", "claude", "tools", "turn", "assistant", "llm"],
+  },
   "action.team.run": {
     label: "Run team",
     description: "Starts an agent team's lifecycle and waits for completion.",

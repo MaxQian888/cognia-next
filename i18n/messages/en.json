@@ -16568,6 +16568,12 @@
             "description": "Patches fields on an existing character."
           }
         },
+        "agent": {
+          "turn": {
+            "label": "Agent turn",
+            "description": "Run one full agent turn — tool-enabled via the desktop sidecar (approval-gated), text-only fallback on web."
+          }
+        },
         "team": {
           "run": {
             "label": "Run team",
@@ -17617,6 +17623,44 @@
         "goal": {
           "label": "Goal / brief",
           "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase."
+        }
+      },
+      "agentTurn": {
+        "prompt": {
+          "label": "Prompt"
+        },
+        "characterId": {
+          "label": "Character (optional)",
+          "hint": "Run as an existing persona — its system prompt, model, and tool allowlist apply."
+        },
+        "systemPrompt": {
+          "label": "System prompt",
+          "hint": "Used when no character is selected."
+        },
+        "model": {
+          "label": "Model (optional)",
+          "hint": "Defaults to the provider's configured model."
+        },
+        "allowedTools": {
+          "label": "Allowed tools (comma-separated)",
+          "hint": "Restrict the synthesised persona's tool surface. Empty = host defaults.",
+          "placeholder": "Bash, Read, Edit"
+        },
+        "maxTurns": {
+          "label": "Max turns",
+          "hint": "Upper bound on agent steps."
+        },
+        "cwd": {
+          "label": "Working directory",
+          "hint": "Scope for tool calls (desktop only)."
+        },
+        "toolsEnabled": {
+          "label": "Enable tools",
+          "hint": "Use the desktop sidecar's tool pipeline. Off = plain completion."
+        },
+        "requireTools": {
+          "label": "Require tools",
+          "hint": "Fail instead of degrading to text-only when the sidecar is unavailable (web/mobile)."
         }
       },
       "skillInvoke": {

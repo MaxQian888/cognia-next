@@ -98,6 +98,11 @@ export interface ExecuteAgentConfig {
   allowedTools?: string[]
   /** Wall-clock timeout (ms) for the tool-enabled run. Defaults to the runner's own default. */
   timeoutMs?: number
+  /**
+   * Live text deltas (text channel only — the sidecar stream is not
+   * re-chunked here). Lets workflow nodes surface streaming output.
+   */
+  onDelta?: (delta: string) => void
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -109,6 +114,11 @@ export interface ExecuteAgentResult {
   channel: ExecuteAgentChannel
   /** Whether the tool-enabled loop was used (true only on the sidecar channel). */
   toolsAvailable: boolean
+  /**
+   * Token usage when the channel reports it (text channel via the AI SDK;
+   * the sidecar pipeline does not surface usage here). Undefined otherwise.
+   */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
 }
 
 /**
@@ -239,12 +249,20 @@ export async function executeAgent(
   let text = ""
   for await (const chunk of result.textStream) {
     text += chunk
+    config.onDelta?.(chunk)
   }
   const finishReason = await result.finishReason
+  // `usage` is a promise on real streamText results; tolerate mocks that omit it.
+  const rawUsage = await Promise.resolve(result.usage).catch(() => undefined)
+  const inputTokens = Number(rawUsage?.inputTokens ?? 0) || 0
+  const outputTokens = Number(rawUsage?.outputTokens ?? 0) || 0
   return {
     text,
     finishReason: typeof finishReason === "string" ? finishReason : undefined,
     channel: "text",
     toolsAvailable: false,
+    ...(rawUsage
+      ? { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } }
+      : {}),
   }
 }

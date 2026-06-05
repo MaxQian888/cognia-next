@@ -1064,6 +1064,17 @@ registerNodeExecutor({
   },
 })
 
+// ── action.agent.turn ─────────────────────────────────────────────────────
+// Full tool-enabled agent turn (sidecar on desktop, honest text-only
+// degradation on web). Logic in ./actions/agent-turn for testability.
+// Not retryable — an agent turn can have side effects (tool calls).
+registerNodeExecutor({
+  kind: "action.agent.turn",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/agent-turn")).runAgentTurn(ctx),
+})
+
 // ── ai.classify ───────────────────────────────────────────────────────────
 // Reuses the `ai.prompt` executor under the hood with a constrained system
 // prompt. The output is normalized to the matched label so downstream

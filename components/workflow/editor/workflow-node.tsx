@@ -47,6 +47,7 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "action.character.send": SendIcon,
   "action.character.create": UsersIcon,
   "action.character.update": UsersIcon,
+  "action.agent.turn": BotIcon,
   "action.team.run": UsersIcon,
   "action.team.create": UsersIcon,
   "action.team.update": UsersIcon,

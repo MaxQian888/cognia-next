@@ -38,6 +38,9 @@ export type WorkflowNodeKind =
   | "action.character.send"
   | "action.character.create"
   | "action.character.update"
+  // Full tool-enabled agent turn (sidecar on desktop; text-only fallback on
+  // web). User-placeable — the workflow-native "ask an agent" primitive.
+  | "action.agent.turn"
   | "action.team.run"
   | "action.team.create"
   | "action.team.update"
@@ -197,6 +200,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.character.send",
   "action.character.create",
   "action.character.update",
+  "action.agent.turn",
   "action.team.run",
   "action.team.create",
   "action.team.update",

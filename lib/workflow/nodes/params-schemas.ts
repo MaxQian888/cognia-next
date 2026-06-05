@@ -110,6 +110,20 @@ const CharacterUpdateParams = z.object({
   patch: z.record(z.string(), z.unknown()).optional(),
 })
 
+const AgentTurnParams = z.object({
+  prompt: requiredString("required"),
+  characterId: optionalString,
+  systemPrompt: optionalString,
+  model: optionalString,
+  allowedTools: z.array(z.string()).optional(),
+  maxTurns: numberRange(1, 100).optional(),
+  temperature: numberRange(0, 2).optional(),
+  timeoutMs: numberRange(1000, 3_600_000).optional(),
+  toolsEnabled: z.boolean().optional(),
+  requireTools: z.boolean().optional(),
+  cwd: optionalString,
+})
+
 const TeamRunParams = z.object({
   teamId: requiredString("required"),
   goal: requiredString("required"),
@@ -577,6 +591,8 @@ export const PARAMS_SCHEMAS = {
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
   "action.character.update": CharacterUpdateParams,
+  // Actions: agent
+  "action.agent.turn": AgentTurnParams,
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,

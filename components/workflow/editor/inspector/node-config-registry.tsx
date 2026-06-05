@@ -51,6 +51,7 @@ import {
 } from "./forms/git-ocr-forms"
 import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import {
+  AgentTurnConfig,
   AiClassifyConfig,
   AiEmbedConfig,
   AiExtractConfig,
@@ -127,6 +128,8 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.character.send": CharacterSendConfig,
   "action.character.create": CharacterCreateConfig,
   "action.character.update": CharacterUpdateConfig,
+  // Actions: agent
+  "action.agent.turn": AgentTurnConfig,
   // Actions: teams
   "action.team.run": TeamRunConfig,
   "action.team.task.dispatch": TeamTaskDispatchConfig,

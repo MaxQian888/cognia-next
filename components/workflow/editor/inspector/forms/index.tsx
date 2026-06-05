@@ -295,6 +295,141 @@ export function TeamRunConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.agent.turn ─────────────────────────────────────────────────────
+export function AgentTurnConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.agentTurn")
+  const prompt = readString(params, "prompt")
+  const characterId = readString(params, "characterId")
+  const systemPrompt = readString(params, "systemPrompt")
+  const model = readString(params, "model")
+  const allowedTools = Array.isArray(params.allowedTools)
+    ? (params.allowedTools as string[]).join(", ")
+    : ""
+  const maxTurns = readNumber(params, "maxTurns", 10)
+  const toolsEnabled = readBoolean(params, "toolsEnabled", true)
+  const requireTools = readBoolean(params, "requireTools", false)
+  const cwd = readString(params, "cwd")
+  return (
+    <FieldGroup>
+      <Field label={t("prompt.label")} htmlFor="at-prompt" name="prompt" required>
+        <ExpressionField
+          id="at-prompt"
+          value={prompt}
+          onChange={(v) => onChange(patchParam(params, "prompt", v))}
+          multiline
+          rows={4}
+        />
+      </Field>
+      <Field
+        label={t("characterId.label")}
+        htmlFor="at-char"
+        hint={t("characterId.hint")}
+        name="characterId"
+      >
+        <CharacterPicker
+          id="at-char"
+          value={characterId}
+          onChange={(v) => onChange(patchParam(params, "characterId", v))}
+        />
+      </Field>
+      {!characterId ? (
+        <>
+          <Field
+            label={t("systemPrompt.label")}
+            htmlFor="at-system"
+            hint={t("systemPrompt.hint")}
+            name="systemPrompt"
+          >
+            <ExpressionField
+              id="at-system"
+              value={systemPrompt}
+              onChange={(v) => onChange(patchParam(params, "systemPrompt", v))}
+              multiline
+              rows={3}
+            />
+          </Field>
+          <Field label={t("model.label")} htmlFor="at-model" hint={t("model.hint")} name="model">
+            <Input
+              id="at-model"
+              value={model}
+              onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+            />
+          </Field>
+          <Field
+            label={t("allowedTools.label")}
+            htmlFor="at-tools"
+            hint={t("allowedTools.hint")}
+            name="allowedTools"
+          >
+            <Input
+              id="at-tools"
+              value={allowedTools}
+              onChange={(e) => {
+                const list = e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                onChange(patchParam(params, "allowedTools", list.length > 0 ? list : undefined))
+              }}
+              placeholder={t("allowedTools.placeholder")}
+            />
+          </Field>
+        </>
+      ) : null}
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("maxTurns.label")}
+          htmlFor="at-max"
+          hint={t("maxTurns.hint")}
+          name="maxTurns"
+        >
+          <Input
+            id="at-max"
+            type="number"
+            min={1}
+            max={100}
+            value={maxTurns}
+            onChange={(e) => onChange(patchParam(params, "maxTurns", Number(e.target.value) || 1))}
+          />
+        </Field>
+        <Field label={t("cwd.label")} htmlFor="at-cwd" hint={t("cwd.hint")} name="cwd">
+          <Input
+            id="at-cwd"
+            value={cwd}
+            onChange={(e) => onChange(patchParam(params, "cwd", e.target.value))}
+          />
+        </Field>
+      </div>
+      <Field
+        label={t("toolsEnabled.label")}
+        htmlFor="at-tools-on"
+        hint={t("toolsEnabled.hint")}
+        name="toolsEnabled"
+      >
+        <Switch
+          id="at-tools-on"
+          checked={toolsEnabled}
+          onCheckedChange={(v) => onChange(patchParam(params, "toolsEnabled", v))}
+        />
+      </Field>
+      {toolsEnabled ? (
+        <Field
+          label={t("requireTools.label")}
+          htmlFor="at-require"
+          hint={t("requireTools.hint")}
+          name="requireTools"
+        >
+          <Switch
+            id="at-require"
+            checked={requireTools}
+            onCheckedChange={(v) => onChange(patchParam(params, "requireTools", v))}
+          />
+        </Field>
+      ) : null}
+    </FieldGroup>
+  )
+}
+
 // ── action.skill.invoke ───────────────────────────────────────────────────
 export function SkillInvokeConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.skillInvoke")

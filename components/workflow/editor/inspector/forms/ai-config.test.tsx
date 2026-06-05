@@ -22,7 +22,34 @@ jest.mock("./shared/expression-field", () => ({
   }) => <textarea id={id} value={value} onChange={(e) => onChange(e.target.value)} />,
 }))
 
-import { AiPromptConfig, AiExtractConfig, AiEmbedConfig } from "./index"
+// Entity pickers hit Dexie live queries — swap for plain inputs.
+jest.mock("./shared/entity-picker", () => ({
+  ...Object.fromEntries(
+    [
+      "CharacterPicker",
+      "TeamPicker",
+      "SkillPicker",
+      "McpServerPicker",
+      "PluginPicker",
+      "SubworkflowPicker",
+      "TwinPicker",
+      "EntityPicker",
+    ].map((name) => [
+      name,
+      ({
+        value,
+        onChange,
+        id,
+      }: {
+        value?: string
+        onChange?: (v: string) => void
+        id?: string
+      }) => <input id={id} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} />,
+    ])
+  ),
+}))
+
+import { AgentTurnConfig, AiPromptConfig, AiExtractConfig, AiEmbedConfig } from "./index"
 
 function wrap(ui: React.ReactElement) {
   return render(
@@ -96,6 +123,43 @@ describe("AiExtractConfig — required fields (B4)", () => {
     expect((screen.getByLabelText("Required fields (optional)") as HTMLInputElement).value).toBe(
       "a, b"
     )
+  })
+})
+
+describe("AgentTurnConfig", () => {
+  it("edits the prompt and parses the allowed-tools list", () => {
+    const onChange = jest.fn()
+    wrap(<AgentTurnConfig params={{}} onChange={onChange} />)
+
+    // The required marker (*) is part of the label's text content.
+    fireEvent.change(screen.getByLabelText(/^Prompt/), { target: { value: "do the thing" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ prompt: "do the thing" }))
+
+    fireEvent.change(screen.getByLabelText("Allowed tools (comma-separated)"), {
+      target: { value: "Bash, Read ," },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedTools: ["Bash", "Read"] })
+    )
+  })
+
+  it("hides persona fields when a character is selected", () => {
+    wrap(<AgentTurnConfig params={{ characterId: "char_1" }} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText("System prompt")).toBeNull()
+    expect(screen.queryByLabelText("Allowed tools (comma-separated)")).toBeNull()
+  })
+
+  it("shows requireTools only while tools are enabled", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<AgentTurnConfig params={{}} onChange={onChange} />)
+    expect(screen.getByLabelText("Require tools")).toBeInTheDocument()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AgentTurnConfig params={{ toolsEnabled: false }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByLabelText("Require tools")).toBeNull()
   })
 })
 
