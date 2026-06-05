@@ -3163,6 +3163,302 @@ export function TerminalSessionCloseConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.terminal.script ──────────────────────────────────────────────────
+export function TerminalScriptConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalScript")
+  const scriptPath = readString(params, "scriptPath")
+  const interpreter = readString(params, "interpreter")
+  const cwd = readString(params, "cwd")
+  const timeoutSec = readNumber(params, "timeoutSec", 60)
+  const onFailure = readString(params, "onFailure", "throw")
+  const unattended = readBoolean(params, "unattended", false)
+  const onAskVerdict = readString(params, "onAskVerdict", "fail")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("scriptPath.label")}
+        htmlFor="tscript-path"
+        hint={t("scriptPath.hint")}
+        name="scriptPath"
+        required
+      >
+        <Input
+          id="tscript-path"
+          value={scriptPath}
+          onChange={(e) => onChange(patchParam(params, "scriptPath", e.target.value))}
+          placeholder={t("scriptPath.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("interpreter.label")}
+          htmlFor="tscript-interp"
+          hint={t("interpreter.hint")}
+          name="interpreter"
+        >
+          <Input
+            id="tscript-interp"
+            value={interpreter}
+            onChange={(e) => onChange(patchParam(params, "interpreter", e.target.value))}
+            placeholder={t("interpreter.placeholder")}
+          />
+        </Field>
+        <Field label={t("cwd.label")} htmlFor="tscript-cwd" hint={t("cwd.hint")} name="cwd">
+          <Input
+            id="tscript-cwd"
+            value={cwd}
+            onChange={(e) => onChange(patchParam(params, "cwd", e.target.value))}
+            placeholder={t("cwd.placeholder")}
+          />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("timeoutSec.label")}
+          htmlFor="tscript-timeout"
+          hint={t("timeoutSec.hint")}
+          name="timeoutSec"
+        >
+          <Input
+            id="tscript-timeout"
+            type="number"
+            min={5}
+            max={600}
+            value={timeoutSec}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "timeoutSec",
+                  Math.max(5, Math.min(600, Number(e.target.value) || 60))
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("onFailure.label")}
+          htmlFor="tscript-onfail"
+          hint={t("onFailure.hint")}
+          name="onFailure"
+        >
+          <Select
+            value={onFailure}
+            onValueChange={(v) => onChange(patchParam(params, "onFailure", v))}
+          >
+            <SelectTrigger id="tscript-onfail">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="throw">{t("onFailure.options.throw")}</SelectItem>
+              <SelectItem value="branch">{t("onFailure.options.branch")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <TerminalUnattendedFields
+        params={params}
+        onChange={onChange}
+        unattended={unattended}
+        onAskVerdict={onAskVerdict}
+        idPrefix="tscript"
+      />
+    </FieldGroup>
+  )
+}
+
+// ── action.terminal.readRecent ──────────────────────────────────────────────
+export function TerminalReadRecentConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalReadRecent")
+  const tabId = readString(params, "tabId")
+  const lineLimit = readNumber(params, "lineLimit", 10)
+  return (
+    <FieldGroup>
+      <Field
+        label={t("tabId.label")}
+        htmlFor="tread-tab"
+        hint={t("tabId.hint")}
+        name="tabId"
+        required
+      >
+        <Input
+          id="tread-tab"
+          value={tabId}
+          onChange={(e) => onChange(patchParam(params, "tabId", e.target.value))}
+          placeholder={t("tabId.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("lineLimit.label")}
+        htmlFor="tread-limit"
+        hint={t("lineLimit.hint")}
+        name="lineLimit"
+      >
+        <Input
+          id="tread-limit"
+          type="number"
+          min={1}
+          max={50}
+          value={lineLimit}
+          onChange={(e) =>
+            onChange(
+              patchParam(
+                params,
+                "lineLimit",
+                Math.max(1, Math.min(50, Number(e.target.value) || 10))
+              )
+            )
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.terminal.waitForExit ─────────────────────────────────────────────
+export function TerminalWaitForExitConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalWaitForExit")
+  const tabId = readString(params, "tabId")
+  const timeoutSec = readNumber(params, "timeoutSec", 60)
+  const onFailure = readString(params, "onFailure", "throw")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("tabId.label")}
+        htmlFor="twait-tab"
+        hint={t("tabId.hint")}
+        name="tabId"
+        required
+      >
+        <Input
+          id="twait-tab"
+          value={tabId}
+          onChange={(e) => onChange(patchParam(params, "tabId", e.target.value))}
+          placeholder={t("tabId.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("timeoutSec.label")}
+          htmlFor="twait-timeout"
+          hint={t("timeoutSec.hint")}
+          name="timeoutSec"
+        >
+          <Input
+            id="twait-timeout"
+            type="number"
+            min={5}
+            max={600}
+            value={timeoutSec}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "timeoutSec",
+                  Math.max(5, Math.min(600, Number(e.target.value) || 60))
+                )
+              )
+            }
+          />
+        </Field>
+        <Field
+          label={t("onFailure.label")}
+          htmlFor="twait-onfail"
+          hint={t("onFailure.hint")}
+          name="onFailure"
+        >
+          <Select
+            value={onFailure}
+            onValueChange={(v) => onChange(patchParam(params, "onFailure", v))}
+          >
+            <SelectTrigger id="twait-onfail">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="throw">{t("onFailure.options.throw")}</SelectItem>
+              <SelectItem value="branch">{t("onFailure.options.branch")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+// ── trigger.terminal.command ────────────────────────────────────────────────
+export function TerminalCommandTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.terminalCommandTrigger")
+  const sessionId = readString(params, "sessionId")
+  const projectId = readString(params, "projectId")
+  const status = readString(params, "status", "any")
+  const commandContains = readString(params, "commandContains")
+  return (
+    <FieldGroup>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label={t("sessionId.label")}
+          htmlFor="ttrig-session"
+          hint={t("sessionId.hint")}
+          name="sessionId"
+        >
+          <Input
+            id="ttrig-session"
+            value={sessionId}
+            onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+            placeholder={t("sessionId.placeholder")}
+            className="font-mono text-xs"
+          />
+        </Field>
+        <Field
+          label={t("projectId.label")}
+          htmlFor="ttrig-project"
+          hint={t("projectId.hint")}
+          name="projectId"
+        >
+          <Input
+            id="ttrig-project"
+            value={projectId}
+            onChange={(e) => onChange(patchParam(params, "projectId", e.target.value))}
+            placeholder={t("projectId.placeholder")}
+          />
+        </Field>
+      </div>
+      <Field label={t("status.label")} htmlFor="ttrig-status" hint={t("status.hint")} name="status">
+        <Select
+          value={status === "" ? "any" : status}
+          onValueChange={(v) => onChange(patchParam(params, "status", v === "any" ? "" : v))}
+        >
+          <SelectTrigger id="ttrig-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">{t("status.options.any")}</SelectItem>
+            <SelectItem value="success">{t("status.options.success")}</SelectItem>
+            <SelectItem value="failure">{t("status.options.failure")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("commandContains.label")}
+        htmlFor="ttrig-contains"
+        hint={t("commandContains.hint")}
+        name="commandContains"
+      >
+        <Input
+          id="ttrig-contains"
+          value={commandContains}
+          onChange={(e) => onChange(patchParam(params, "commandContains", e.target.value))}
+          placeholder={t("commandContains.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // Suppress unused-import warnings when only one of these helpers is exercised
 // in a given form's tests. They're real call sites in production.
 void listAdapterInstances

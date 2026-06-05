@@ -110,6 +110,49 @@ describe("trigger-subscriptions", () => {
     expect(otherStopped.map((m) => m.workflowId)).toEqual(["wf_any"])
   })
 
+  it("indexes terminal.command and matches by session / project / status / substring", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),
+      wf("wf_sess", [trigger("n", "trigger.terminal.command", { sessionId: "tab-1" })]),
+      wf("wf_proj", [trigger("n", "trigger.terminal.command", { projectId: "proj-1" })]),
+      wf("wf_fail", [trigger("n", "trigger.terminal.command", { status: "failure" })]),
+      wf("wf_sub", [trigger("n", "trigger.terminal.command", { commandContains: "pnpm test" })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.terminal.command")).toHaveLength(5)
+
+    const all = findMatchingWorkflows("trigger.terminal.command", {
+      sessionId: "tab-1",
+      projectId: "proj-1",
+      status: "failure",
+      command: "pnpm test -- --coverage",
+    })
+    expect(all.map((m) => m.workflowId)).toEqual(
+      expect.arrayContaining(["wf_any", "wf_sess", "wf_proj", "wf_fail", "wf_sub"])
+    )
+
+    // A successful command in another tab/project: only the unscoped node fires.
+    const other = findMatchingWorkflows("trigger.terminal.command", {
+      sessionId: "tab-2",
+      projectId: "proj-2",
+      status: "success",
+      command: "git status",
+    })
+    expect(other.map((m) => m.workflowId)).toEqual(["wf_any"])
+  })
+
+  it("a commandContains filter never matches a redacted (empty) command", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_sub", [trigger("n", "trigger.terminal.command", { commandContains: "deploy" })]),
+      wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),
+    ])
+    const matches = findMatchingWorkflows("trigger.terminal.command", {
+      sessionId: "tab-1",
+      status: "success",
+      command: "",
+    })
+    expect(matches.map((m) => m.workflowId)).toEqual(["wf_any"])
+  })
+
   it("returns an empty array when nothing matches or cache is empty", () => {
     expect(findMatchingWorkflows("trigger.chat.message", {})).toEqual([])
     _seedTriggerSubscriptionsForTest([])

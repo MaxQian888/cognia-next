@@ -13,6 +13,10 @@ import {
   TeamTaskDispatchConfig,
   DesktopEventTriggerConfig,
   GoalCompletedTriggerConfig,
+  TerminalScriptConfig,
+  TerminalReadRecentConfig,
+  TerminalWaitForExitConfig,
+  TerminalCommandTriggerConfig,
 } from "./index"
 
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
@@ -125,5 +129,93 @@ describe("GoalCompletedTriggerConfig", () => {
     const onChange = jest.fn()
     wrap(<GoalCompletedTriggerConfig params={{ status: "stopped" }} onChange={onChange} />)
     expect(screen.getByLabelText(/Terminal status/i)).toHaveValue("stopped")
+  })
+})
+
+/** The input element inside the `Field` wrapper with `data-field={name}`. */
+function fieldInput(container: HTMLElement, name: string): HTMLElement {
+  const wrapper = container.querySelector(`[data-field="${name}"]`)
+  if (!wrapper) throw new Error(`no field wrapper for "${name}"`)
+  const control = (wrapper as HTMLElement).querySelector("input, textarea, button")
+  if (!control) throw new Error(`no control inside field "${name}"`)
+  return control as HTMLElement
+}
+
+describe("TerminalScriptConfig", () => {
+  it("renders the script fields and propagates edits", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<TerminalScriptConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "scriptPath"), {
+      target: { value: "scripts/build.sh" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ scriptPath: "scripts/build.sh" })
+    )
+    fireEvent.change(fieldInput(container, "interpreter"), { target: { value: "deno" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ interpreter: "deno" }))
+    // onFailure select + unattended switch are present.
+    expect(container.querySelector('[data-field="onFailure"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-field="unattended"]')).toBeInTheDocument()
+  })
+
+  it("clamps the timeout into [5, 600] and reveals the ask-policy when unattended", () => {
+    const onChange = jest.fn()
+    const { container, rerender } = wrap(<TerminalScriptConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "timeoutSec"), { target: { value: "9999" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeoutSec: 600 }))
+    expect(container.querySelector('[data-field="onAskVerdict"]')).not.toBeInTheDocument()
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TerminalScriptConfig params={{ unattended: true }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    expect(container.querySelector('[data-field="onAskVerdict"]')).toBeInTheDocument()
+  })
+})
+
+describe("TerminalReadRecentConfig", () => {
+  it("edits tabId and clamps lineLimit into [1, 50]", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<TerminalReadRecentConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "tabId"), { target: { value: "tab-9" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tabId: "tab-9" }))
+    fireEvent.change(fieldInput(container, "lineLimit"), { target: { value: "500" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lineLimit: 50 }))
+  })
+})
+
+describe("TerminalWaitForExitConfig", () => {
+  it("edits tabId and renders timeout + onFailure", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<TerminalWaitForExitConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "tabId"), { target: { value: "tab-3" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tabId: "tab-3" }))
+    fireEvent.change(fieldInput(container, "timeoutSec"), { target: { value: "1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeoutSec: 5 }))
+    expect(container.querySelector('[data-field="onFailure"]')).toBeInTheDocument()
+  })
+})
+
+describe("TerminalCommandTriggerConfig", () => {
+  it("renders the scope fields and propagates edits", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<TerminalCommandTriggerConfig params={{}} onChange={onChange} />)
+    fireEvent.change(fieldInput(container, "sessionId"), { target: { value: "tab-1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "tab-1" }))
+    fireEvent.change(fieldInput(container, "projectId"), { target: { value: "proj-2" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ projectId: "proj-2" }))
+    fireEvent.change(fieldInput(container, "commandContains"), {
+      target: { value: "pnpm test" },
+    })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ commandContains: "pnpm test" }))
+    expect(container.querySelector('[data-field="status"]')).toBeInTheDocument()
+  })
+
+  it("reflects an existing status param ('' shows as Any)", () => {
+    const { container } = wrap(
+      <TerminalCommandTriggerConfig params={{ status: "" }} onChange={jest.fn()} />
+    )
+    // The Select trigger renders — '' maps to the 'any' option internally.
+    expect(fieldInput(container, "status")).toBeInTheDocument()
   })
 })

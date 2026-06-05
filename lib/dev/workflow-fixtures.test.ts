@@ -55,9 +55,11 @@ describe("workflow-fixtures", () => {
     // family specs through editor-level interaction only. The two `*.team.*`
     // kinds were added with the agent-teams workflow integration; they are
     // exercised through the agent-team-runtime tests rather than fixtures.
-    // `action.system.terminal` is exercised via terminal-dock E2E plus the
-    // `lib/workflow/nodes/terminal.test.ts` executor spec; no seed fixture
-    // yet because the integrated terminal needs a Tauri host.
+    // `action.system.terminal` — and the rest of the terminal family
+    // (`action.terminal.*`, `trigger.terminal.command`) — are exercised via
+    // terminal-dock E2E plus the executor specs in
+    // `lib/workflow/nodes/terminal{,-session,-script}.test.ts`; no seed
+    // fixture yet because the integrated terminal needs a Tauri host.
     //
     // The synthesizer-emitted-only kinds below are never placed by users in
     // the editor and carry no palette/catalog entry (see
@@ -74,6 +76,19 @@ describe("workflow-fixtures", () => {
       "trigger.team",
       "action.team.task.dispatch",
       "action.system.terminal",
+      "action.terminal.session.open",
+      "action.terminal.session.run",
+      "action.terminal.session.close",
+      "action.terminal.script",
+      "action.terminal.readRecent",
+      "action.terminal.waitForExit",
+      "trigger.terminal.command",
+      // Loop-control + eval kinds: exercised via their executor specs
+      // (`built-ins-flow-v2.test.ts`, `eval.test.ts`) rather than seeds.
+      "flow.break",
+      "flow.continue",
+      "eval.run",
+      "eval.gate",
       "action.plan.step.dispatch",
       "pattern.multi-modal-sweep",
       "pattern.loop-until-dry",

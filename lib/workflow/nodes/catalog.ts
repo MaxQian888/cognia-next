@@ -412,6 +412,38 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     keywords: ["terminal", "session", "close", "kill", "cleanup"],
     desktopOnly: true,
   },
+  "action.terminal.script": {
+    label: "Run script file",
+    description:
+      "Run a script file (.sh / .ps1 / .py / .js / …) under the right interpreter, detected from its extension or overridden explicitly.",
+    iconName: "Terminal",
+    keywords: ["terminal", "script", "file", "interpreter", "python", "bash", "powershell", "node"],
+    desktopOnly: true,
+  },
+  "action.terminal.readRecent": {
+    label: "Read terminal history",
+    description:
+      "Read the recent-commands ring (command, exit code, ended-at) of a terminal dock tab.",
+    iconName: "Terminal",
+    keywords: ["terminal", "read", "recent", "history", "commands", "ring"],
+    desktopOnly: true,
+  },
+  "action.terminal.waitForExit": {
+    label: "Wait for terminal exit",
+    description:
+      "Block until the command currently running in a terminal dock tab finishes, then route on its exit code.",
+    iconName: "Terminal",
+    keywords: ["terminal", "wait", "exit", "command", "finish", "long-running"],
+    desktopOnly: true,
+  },
+  "trigger.terminal.command": {
+    label: "On terminal command",
+    description:
+      "Fires when a command finishes in a user-spawned terminal dock tab. Scope by session, project, exit status, or a command substring.",
+    iconName: "Terminal",
+    keywords: ["terminal", "trigger", "command", "exit", "failed", "shell", "dock"],
+    desktopOnly: true,
+  },
   // ── AI primitives ─────────────────────────────────────────────────────────
   "ai.prompt": {
     label: "AI prompt",

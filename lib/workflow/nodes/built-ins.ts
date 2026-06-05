@@ -54,6 +54,10 @@ import "./terminal"
 // unattended-headless mode, with run-scoped cleanup via the orchestrator.
 import "./terminal-session"
 
+// Script-file node — runs a .sh/.ps1/.py/… file under its detected
+// interpreter (lib/terminal/script-runner.ts), dock or unattended mode.
+import "./terminal-script"
+
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "./git"

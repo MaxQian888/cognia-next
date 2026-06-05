@@ -30,6 +30,11 @@ jest.mock("@/lib/twin/ingest/redact", () => {
     hasNoLeakingPii: () => state.piiOk,
   }
 })
+// The command_end fan-out (`fanOutCommandTrigger`) lazy-imports this —
+// mocked so the workflow runtime never loads in these tests.
+jest.mock("./command-trigger", () => ({
+  dispatchTerminalCommandTriggers: jest.fn(async () => undefined),
+}))
 
 const { recordTerminalHistory: mockRecordHistory } = jest.requireMock(
   "@/lib/db/terminal-history"
@@ -40,6 +45,9 @@ const { __mockSettingsState } = jest.requireMock("@/stores/settings/settings-sto
 const { __mockPiiState } = jest.requireMock("@/lib/twin/ingest/redact") as {
   __mockPiiState: { piiOk: boolean }
 }
+const { dispatchTerminalCommandTriggers: mockDispatchCommandTriggers } = jest.requireMock(
+  "./command-trigger"
+) as { dispatchTerminalCommandTriggers: jest.Mock }
 
 /** Flush the fire-and-forget persist chain (dynamic imports + awaits). */
 async function flushPersist(): Promise<void> {
@@ -225,6 +233,7 @@ const baseReq: SpawnRequest = {
 beforeEach(() => {
   __clearLiveSessionsForTesting()
   mockRecordHistory.mockClear()
+  mockDispatchCommandTriggers.mockClear()
   __mockSettingsState.persistHistory = undefined
   __mockPiiState.piiOk = true
 })
@@ -399,6 +408,55 @@ describe("spawnFromDock", () => {
     fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
     expect(store.commands).toHaveLength(1)
     expect(store.commands[0]).toMatchObject({ id: "s-1", cmd: "ls -la", exitCode: 0 })
+  })
+
+  it("command_end fans out to the trigger.terminal.command dispatcher", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: { rows: 24, cols: 80, shell: "" },
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (fake as any).write("pnpm test\r")
+    fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+    fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 1 })
+    await flushPersist()
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledTimes(1)
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledWith({
+      sessionId: "s-1",
+      projectId: "proj-a",
+      agentSpawner: null,
+      command: "pnpm test",
+      exitCode: 1,
+      endedAt: expect.any(Number),
+    })
+  })
+
+  it("command_end forwards the row's agentSpawner so the dispatcher can gate", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: { rows: 24, cols: 80, shell: "" },
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      agentSpawner: "run-42",
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (fake as any).write("echo hi\r")
+    fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+    fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
+    await flushPersist()
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledWith(
+      expect.objectContaining({ agentSpawner: "run-42" })
+    )
   })
 
   it("handles backspace + DEL while capturing input", async () => {

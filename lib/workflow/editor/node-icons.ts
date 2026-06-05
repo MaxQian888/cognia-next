@@ -36,6 +36,7 @@ import {
   GitCommitHorizontal as CommitIcon,
   ArrowUpFromLine as PushIcon,
   FilePlus2 as StageIcon,
+  Terminal as TerminalIcon,
   type LucideIcon,
 } from "lucide-react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
@@ -65,6 +66,14 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "action.git.commit": CommitIcon,
   "action.git.push": PushIcon,
   "action.git.branch": BranchIcon,
+  "action.system.terminal": TerminalIcon,
+  "action.terminal.session.open": TerminalIcon,
+  "action.terminal.session.run": TerminalIcon,
+  "action.terminal.session.close": TerminalIcon,
+  "action.terminal.script": TerminalIcon,
+  "action.terminal.readRecent": TerminalIcon,
+  "action.terminal.waitForExit": TerminalIcon,
+  "trigger.terminal.command": TerminalIcon,
   "ai.prompt": BotIcon,
   "ai.classify": BotIcon,
   "ai.extract": BotIcon,

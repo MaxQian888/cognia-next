@@ -192,14 +192,16 @@ export function wireSessionToStore(
         // `takeCapturedCommand()` is consume-once — capture exactly once and
         // share between the in-memory ring and the durable history write.
         const cmd = capture.takeCapturedCommand()
+        const endedAt = Date.now()
         store.pushCommand(session.info.id, {
           cmd,
           exitCode: event.exit_code,
-          endedAt: Date.now(),
+          endedAt,
         })
         // exit_code here is the LAST command's exit, not the shell
         // process's exit; the row's exitCode is only set on session exit.
         persistCommandHistory(session, store, cmd, event.exit_code)
+        fanOutCommandTrigger(session, store, cmd, event.exit_code, endedAt)
         break
       }
       case "cwd_changed":
@@ -264,6 +266,36 @@ function persistCommandHistory(
     })
   })().catch(() => {
     // Best-effort — history persistence must never surface as a terminal error.
+  })
+}
+
+/**
+ * Fan a finished command out to `trigger.terminal.command` workflow
+ * subscriptions. Fire-and-forget — the dispatcher itself applies the
+ * user-spawned-only, blank-command, and PII gates
+ * (`lib/terminal/command-trigger.ts`), and a workflow failure must never
+ * surface as a terminal error.
+ */
+function fanOutCommandTrigger(
+  session: TerminalSession,
+  store: TerminalStoreLike,
+  cmd: string,
+  exitCode: number | null,
+  endedAt: number
+): void {
+  const row = store.sessions[session.info.id]
+  void (async () => {
+    const { dispatchTerminalCommandTriggers } = await import("./command-trigger")
+    await dispatchTerminalCommandTriggers({
+      sessionId: session.info.id,
+      projectId: session.info.projectId,
+      agentSpawner: row?.agentSpawner ?? null,
+      command: cmd,
+      exitCode,
+      endedAt,
+    })
+  })().catch(() => {
+    // Best-effort — trigger fan-out must never break the terminal.
   })
 }
 

@@ -465,6 +465,43 @@ const TerminalSessionCloseParams = z.object({
   sessionId: requiredString("required"),
 })
 
+// Run a script file under its detected (or overridden) interpreter.
+// Executor at `lib/workflow/nodes/terminal-script.ts`.
+const TerminalScriptParams = z.object({
+  scriptPath: requiredString("required"),
+  interpreter: optionalString,
+  args: z.array(z.string()).optional(),
+  cwd: optionalString,
+  projectId: optionalString,
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+  unattended: z.boolean().optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+// Dock-parity nodes (read_recent / wait_for_exit) — executors in
+// `lib/workflow/nodes/terminal.ts`, delegating to `runTerminalDockAction`.
+const TerminalReadRecentParams = z.object({
+  tabId: requiredString("required"),
+  lineLimit: numberRange(1, 50).optional(),
+})
+
+const TerminalWaitForExitParams = z.object({
+  tabId: requiredString("required"),
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+})
+
+// All optional — an unscoped node fires for every command that ends in a
+// user-spawned dock tab. Scope by session, project, exit status, or a
+// command substring. Empty string = match any (mirrors the goal trigger).
+const TerminalCommandTriggerParams = z.object({
+  sessionId: optionalString,
+  projectId: optionalString,
+  status: z.enum(["success", "failure"]).or(z.literal("")).optional(),
+  commandContains: optionalString,
+})
+
 // ── Data ────────────────────────────────────────────────────────────────────
 
 const TransformParams = z.object({
@@ -578,6 +615,10 @@ export const PARAMS_SCHEMAS = {
   "action.terminal.session.open": TerminalSessionOpenParams,
   "action.terminal.session.run": TerminalSessionRunParams,
   "action.terminal.session.close": TerminalSessionCloseParams,
+  "action.terminal.script": TerminalScriptParams,
+  "action.terminal.readRecent": TerminalReadRecentParams,
+  "action.terminal.waitForExit": TerminalWaitForExitParams,
+  "trigger.terminal.command": TerminalCommandTriggerParams,
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,

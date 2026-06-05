@@ -101,6 +101,19 @@ export type WorkflowNodeKind =
   | "action.terminal.session.open"
   | "action.terminal.session.run"
   | "action.terminal.session.close"
+  // Run a script file (.sh / .ps1 / .py / .js / …) under the right
+  // interpreter — reuses `lib/terminal/script-runner.ts:detectScriptType`
+  // for the extension → interpreter mapping; same dock / unattended gates
+  // as `action.system.terminal`.
+  | "action.terminal.script"
+  // Dock parity nodes for the remaining `terminal_dock_*` actions: read the
+  // recent-commands ring of a tab, or wait for the next OSC 633 command_end.
+  | "action.terminal.readRecent"
+  | "action.terminal.waitForExit"
+  // Fires when a command finishes in a *user-spawned* dock tab (agent /
+  // workflow-spawned tabs are excluded to prevent self-trigger loops).
+  // TS-hook trigger — fan-out lives in `lib/terminal/command-trigger.ts`.
+  | "trigger.terminal.command"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -230,6 +243,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.terminal.session.open",
   "action.terminal.session.run",
   "action.terminal.session.close",
+  "action.terminal.script",
+  "action.terminal.readRecent",
+  "action.terminal.waitForExit",
+  "trigger.terminal.command",
   "ai.prompt",
   "ai.classify",
   "ai.extract",

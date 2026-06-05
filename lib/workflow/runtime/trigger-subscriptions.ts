@@ -33,6 +33,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",
   "trigger.goal.completed",
+  "trigger.terminal.command",
 ]
 
 interface SubscriptionState {
@@ -116,8 +117,20 @@ export interface TriggerMatchContext {
   sessionId?: string
   /** Goal id (goal.completed) — optional match; unspecified node matches any goal. */
   goalId?: string
-  /** Terminal goal status (goal.completed) — optional match; e.g. "completed". */
+  /**
+   * Outcome status — goal.completed sends the terminal goal status (e.g.
+   * "completed"); terminal.command sends "success" / "failure". Optional
+   * equality match against the node's `status` param.
+   */
   status?: string
+  /** Project id (terminal.command) — optional equality match. */
+  projectId?: string
+  /**
+   * Command line (terminal.command) — matched as a *substring* against the
+   * node's `commandContains` param. Already PII-gated by the dispatcher;
+   * an empty string only matches nodes without a `commandContains` filter.
+   */
+  command?: string
 }
 
 /**
@@ -153,6 +166,12 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.status === "string" && p.status.length > 0) {
     if (ctx.status !== p.status) return false
+  }
+  if (typeof p.projectId === "string" && p.projectId.length > 0) {
+    if (ctx.projectId !== p.projectId) return false
+  }
+  if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
+    if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false
   }
   return true
 }
