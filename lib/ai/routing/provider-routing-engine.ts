@@ -44,6 +44,13 @@ export interface RoutingEngineDeps {
    * metrics' session-scoped totalCost.
    */
   getTodaySpend?: (providerId: string) => number
+  /**
+   * Usable input context window (tokens) for a provider:model pair — the raw
+   * window minus an output/reserve allowance, resolved by the caller from the
+   * model catalog. Optional: when absent the context-window pre-check is
+   * skipped entirely.
+   */
+  getContextWindow?: (providerId: string, modelId: string) => number
 }
 
 /** Result of the routing engine's provider selection */
@@ -103,6 +110,12 @@ export class ProviderRoutingEngine {
     model?: string
     /** Routing override for this specific request */
     override?: RequestRoutingOverride
+    /**
+     * Rough token estimate of the outgoing prompt. When provided (and
+     * `deps.getContextWindow` is wired) entries whose window can't fit the
+     * input are deprioritized — LiteLLM-style context-window pre-check.
+     */
+    estimatedInputTokens?: number
   }): RoutingResult | null {
     const override = options.override
 
@@ -127,7 +140,8 @@ export class ProviderRoutingEngine {
           resolution.entries,
           override?.strategy || this.config.strategy,
           alias,
-          resolution.parameterDefaults
+          resolution.parameterDefaults,
+          options.estimatedInputTokens
         )
       }
     }
@@ -182,7 +196,8 @@ export class ProviderRoutingEngine {
     entries: ModelMappingEntry[],
     strategy: RoutingStrategy,
     alias: string,
-    parameterDefaults?: AliasResolutionResult["parameterDefaults"]
+    parameterDefaults?: AliasResolutionResult["parameterDefaults"],
+    estimatedInputTokens?: number
   ): RoutingResult | null {
     // Filter by circuit breaker and provider availability
     const available = entries.filter((e) => {
@@ -193,14 +208,37 @@ export class ProviderRoutingEngine {
 
     if (available.length === 0) return null
 
+    // Context-window pre-check (LiteLLM context_window_fallbacks): drop
+    // entries whose usable window can't fit the estimated input. When NOTHING
+    // fits, never dead-end — fall back to the largest-window entries (the
+    // least likely to fail), bypassing the strategy (an over-window model is
+    // going to fail anyway; window size dominates every other signal).
+    let working = available
+    let windowFallback = false
+    const getWindow = this.deps.getContextWindow
+    if (estimatedInputTokens !== undefined && getWindow) {
+      const fits = available.filter(
+        (e) => estimatedInputTokens <= getWindow(e.providerId, e.modelId)
+      )
+      if (fits.length > 0) {
+        working = fits
+      } else {
+        working = [...available].sort(
+          (a, b) => getWindow(b.providerId, b.modelId) - getWindow(a.providerId, a.modelId)
+        )
+        windowFallback = true
+      }
+    }
+
     // Filter by provider constraints (advisory: when every candidate is over
     // budget the original list survives, and the eventual selection carries an
     // overBudgetWarning instead of dead-ending the send).
-    const { allowed, overBudget } = this.applyConstraints(available)
-    const candidates = allowed.length > 0 ? allowed : available
+    const { allowed, overBudget } = this.applyConstraints(working)
+    const candidates = allowed.length > 0 ? allowed : working
 
-    // Apply strategy-based selection
-    const selected = this.applyStrategy(candidates, strategy)
+    // Apply strategy-based selection (window-fallback keeps the window-desc
+    // order instead).
+    const selected = windowFallback ? candidates[0] : this.applyStrategy(candidates, strategy)
     if (!selected) return null
 
     const fallbackEntries = candidates.filter(
@@ -220,7 +258,9 @@ export class ProviderRoutingEngine {
       alias,
       fallbackEntries,
       parameterDefaults,
-      reason: `Selected via ${strategy} strategy from alias "${alias}"`,
+      reason: windowFallback
+        ? `Estimated input exceeds every candidate's context window — picked the largest window from alias "${alias}"`
+        : `Selected via ${strategy} strategy from alias "${alias}"`,
       ...(overBudgetWarning ? { overBudgetWarning } : {}),
     }
   }

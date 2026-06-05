@@ -44,6 +44,7 @@ interface DepsState {
   cb?: Record<string, CircuitBreakerStateValue>
   unavailable?: Set<string>
   todaySpend?: Record<string, number>
+  contextWindow?: Record<string, number>
 }
 
 function makeDeps(state: DepsState = {}): RoutingEngineDeps {
@@ -53,6 +54,9 @@ function makeDeps(state: DepsState = {}): RoutingEngineDeps {
     isProviderAvailable: (id) => !state.unavailable?.has(id),
     getPricing: (pid, mid) => state.pricing?.[`${pid}:${mid}`],
     ...(state.todaySpend ? { getTodaySpend: (id) => state.todaySpend?.[id] ?? 0 } : {}),
+    ...(state.contextWindow
+      ? { getContextWindow: (pid, mid) => state.contextWindow?.[`${pid}:${mid}`] ?? 100000 }
+      : {}),
   }
 }
 
@@ -368,6 +372,63 @@ describe("ProviderRoutingEngine", () => {
         makeDeps({ pricing: { "openai:gpt-4o": 10, "anthropic:claude": 10 } })
       )
       expect(engine.selectProvider({ model: "alias" })).toBeNull()
+    })
+  })
+
+  describe("context-window pre-check", () => {
+    const reg = registry([
+      mapping("alias", [entry("openai", "small"), entry("anthropic", "large")]),
+    ])
+
+    it("deprioritizes entries whose window cannot fit the estimated input", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ contextWindow: { "openai:small": 8000, "anthropic:large": 200000 } })
+      )
+      const result = engine.selectProvider({ model: "alias", estimatedInputTokens: 50000 })
+      expect(result?.providerId).toBe("anthropic")
+    })
+
+    it("keeps the normal strategy order when everything fits", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ contextWindow: { "openai:small": 8000, "anthropic:large": 200000 } })
+      )
+      const result = engine.selectProvider({ model: "alias", estimatedInputTokens: 1000 })
+      expect(result?.providerId).toBe("openai")
+    })
+
+    it("falls back to the largest-window entry when nothing fits (never dead-ends)", () => {
+      const engine = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ contextWindow: { "openai:small": 8000, "anthropic:large": 200000 } })
+      )
+      const result = engine.selectProvider({ model: "alias", estimatedInputTokens: 500000 })
+      expect(result?.providerId).toBe("anthropic")
+      expect(result?.reason).toContain("context window")
+      // The smaller-window entry remains in the fallback chain.
+      expect(result?.fallbackEntries.map((e) => e.providerId)).toEqual(["openai"])
+    })
+
+    it("skips the check entirely without an estimate or without the dep", () => {
+      const withDep = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps({ contextWindow: { "openai:small": 8000, "anthropic:large": 200000 } })
+      )
+      expect(withDep.selectProvider({ model: "alias" })?.providerId).toBe("openai")
+
+      const withoutDep = new ProviderRoutingEngine(
+        reg,
+        { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+        makeDeps()
+      )
+      expect(
+        withoutDep.selectProvider({ model: "alias", estimatedInputTokens: 500000 })?.providerId
+      ).toBe("openai")
     })
   })
 

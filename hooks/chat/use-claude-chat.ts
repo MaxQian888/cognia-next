@@ -1154,6 +1154,9 @@ async function buildSendOptions(
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? userMessage : undefined,
+    // Routing context-window pre-check input (B4): always pass the raw user
+    // message (unlike twin/memory it needs no handshake gate).
+    routingContextHint: userMessage ? { promptText: userMessage } : undefined,
     ephemeralSkillIds,
     activeGoal,
   })

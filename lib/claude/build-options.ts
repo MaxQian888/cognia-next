@@ -56,6 +56,9 @@ import {
   type RoutingEngineDeps,
 } from "@/lib/ai/routing"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
+import { getModelConfig } from "@/types/provider/provider"
+import { getModelContextLimits, getModelMaxTokens } from "@/lib/ai/model-limits"
+import { estimateCJKTokenCount } from "@/lib/ai/rag/cjk-tokenizer"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
@@ -180,6 +183,13 @@ export interface BuildOptionsContext {
    * multiple twin-bound members per turn.
    */
   precomputedQueryEmbedding?: number[]
+  /**
+   * Optional hint for the routing engine's context-window pre-check: the
+   * outgoing prompt text. A rough CJK-aware token estimate is derived from it
+   * and alias entries whose window can't fit the input are deprioritized.
+   * Absent → the check is skipped (no-info passthrough).
+   */
+  routingContextHint?: { promptText?: string }
   /**
    * Optional long-term memory runtime dependencies (ADR — autonomous memory).
    * When supplied AND `memoryUserMessage` is set AND `appSettings.memory` is
@@ -507,9 +517,29 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // Durable today-spend mirror (hydrated from Dexie at boot, incremented
       // per turn) — makes `dailyCostBudget` survive reloads.
       getTodaySpend: (id) => useProviderCostMirrorStore.getState().getTodaySpend(id),
+      // Usable input window = catalog context length (heuristic fallback)
+      // minus an output/reserve allowance — feeds the engine's LiteLLM-style
+      // context-window pre-check.
+      getContextWindow: (id, modelId) => {
+        const config = getModelConfig(id, modelId)
+        const raw = config?.contextLength ?? getModelMaxTokens(modelId)
+        const limits = getModelContextLimits(modelId)
+        const maxOutput = config?.maxOutputTokens
+        const reserve = Math.min(
+          limits.reserveTokens,
+          typeof maxOutput === "number" && maxOutput > 0 ? maxOutput : Infinity
+        )
+        return Math.max(0, raw - reserve)
+      },
     }
+    // Rough token estimate of the outgoing prompt (CJK-aware). Only the text
+    // the caller handed us — history/system additions are not counted, which
+    // keeps the check conservative-but-cheap (O(prompt length), no awaits).
+    const promptText = ctx.routingContextHint?.promptText ?? ctx.twinUserMessage
+    const estimatedInputTokens =
+      promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
-    const result = engine.selectProvider({ model })
+    const result = engine.selectProvider({ model, estimatedInputTokens })
     if (result?.fromAlias && result.alias) {
       model = result.modelId
       providerId = result.providerId
