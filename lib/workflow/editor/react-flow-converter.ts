@@ -136,6 +136,10 @@ export function reactFlowToWorkflow(
         credentialRefs: data.credentialRefs,
         disabled: data.disabled,
         authoredBy: data.authoredBy,
+        // Per-node error handling — this reconstruction is field-by-field,
+        // so every persisted data field MUST be carried explicitly or the
+        // editor's save path silently drops it.
+        errorHandling: data.errorHandling,
       },
       width: typeof n.width === "number" ? n.width : undefined,
       height: typeof n.height === "number" ? n.height : undefined,

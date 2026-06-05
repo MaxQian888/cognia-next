@@ -46,6 +46,42 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it("preserves per-node errorHandling through safeParse (zod strips unknown keys)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1].data.errorHandling = {
+      retry: { maxRetries: 3, retryIntervalMs: 250, backoff: "fixed" },
+      onError: "defaultValue",
+      defaultValue: { completion: "fallback" },
+    }
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.nodes[1].data.errorHandling).toEqual(wf.nodes[1].data.errorHandling)
+    }
+  })
+
+  it("rejects malformed errorHandling (negative retries / unknown onError)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1].data.errorHandling = {
+      retry: { maxRetries: -1, retryIntervalMs: 0, backoff: "fixed" },
+    } as unknown as VisualWorkflow["nodes"][number]["data"]["errorHandling"]
+    expect(visualWorkflowSchema.safeParse(wf).success).toBe(false)
+
+    const wf2 = baseWorkflow()
+    wf2.nodes[1].data.errorHandling = {
+      onError: "explode",
+    } as unknown as VisualWorkflow["nodes"][number]["data"]["errorHandling"]
+    expect(visualWorkflowSchema.safeParse(wf2).success).toBe(false)
+  })
+
+  it("accepts error-kind edges", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n2", sourceHandle: "error", target: "n1", data: { kind: "error" } },
+    ]
+    expect(visualWorkflowSchema.safeParse(wf).success).toBe(true)
+  })
+
   it("accepts schemaVersion 2 and nodes carrying a parentId", () => {
     const wf = baseWorkflow({ schemaVersion: 2 })
     wf.nodes[1] = { ...wf.nodes[1], parentId: "n1" }

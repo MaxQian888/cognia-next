@@ -20,7 +20,7 @@
  * fallible node, orthogonal to the kind-specific decision handles.
  */
 
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { WorkflowNodeErrorHandling, WorkflowNodeKind } from "@/types/workflow/visual"
 
 export interface OutputHandleSpec {
   /** Stable handle id — used as the edge's `sourceHandle` and matched against
@@ -88,6 +88,36 @@ const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
 
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {
   return DEFAULT_TYPE_VERSIONS[kind] ?? 1
+}
+
+/**
+ * Whether a kind may carry per-node error handling (retry / onError). The
+ * fallible families — actions, AI, data, io, ocr, eval. Triggers never
+ * "fail downstream", annotations don't execute, and flow-control nodes are
+ * the routing fabric itself (their failure is a workflow bug, not a
+ * runtime condition to route around).
+ */
+export function supportsErrorHandling(kind: WorkflowNodeKind | string): boolean {
+  return (
+    kind.startsWith("action.") ||
+    kind.startsWith("ai.") ||
+    kind.startsWith("data.") ||
+    kind.startsWith("io.") ||
+    kind.startsWith("ocr.") ||
+    kind.startsWith("eval.")
+  )
+}
+
+/**
+ * Whether the node renders a dedicated "error" output handle — true only
+ * when the author opted into `onError: "errorBranch"` on a kind that
+ * supports error handling.
+ */
+export function hasErrorHandle(node: {
+  kind: WorkflowNodeKind | string
+  errorHandling?: WorkflowNodeErrorHandling
+}): boolean {
+  return supportsErrorHandling(node.kind) && node.errorHandling?.onError === "errorBranch"
 }
 
 /**

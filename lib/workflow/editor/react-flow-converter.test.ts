@@ -64,6 +64,20 @@ describe("workflowToReactFlow → reactFlowToWorkflow round-trip", () => {
     expect(back.viewport).toEqual(base.viewport)
   })
 
+  it("carries per-node errorHandling through the save round-trip", () => {
+    const base = sample()
+    base.nodes[1].data.errorHandling = {
+      retry: { maxRetries: 2, retryIntervalMs: 500, backoff: "exponential", maxIntervalMs: 5000 },
+      onError: "errorBranch",
+    }
+    const converted = workflowToReactFlow(base)
+    const back = reactFlowToWorkflow(base, converted.nodes, converted.edges, converted.viewport)
+    expect(back.nodes[1].data.errorHandling).toEqual({
+      retry: { maxRetries: 2, retryIntervalMs: 500, backoff: "exponential", maxIntervalMs: 5000 },
+      onError: "errorBranch",
+    })
+  })
+
   it("flattens kind + typeVersion into node data so the renderer can dispatch on them", () => {
     const converted = workflowToReactFlow(sample())
     expect(converted.nodes[0].data.kind).toBe("trigger.manual")

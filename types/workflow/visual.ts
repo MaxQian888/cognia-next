@@ -375,6 +375,33 @@ export interface WorkflowNode<TParams = Record<string, unknown>> {
  * React Flow v12's `Node<TData extends Record<string, unknown>>` constraint
  * without forcing every consumer to widen at the boundary.
  */
+/**
+ * Per-node error handling (n8n/Dify parity). Lives in node SETTINGS (not
+ * params — kind-agnostic), purely additive: nodes without it keep the legacy
+ * behavior (workflow-level `settings.errorPolicy`, workflow retryDefaults).
+ */
+export interface WorkflowNodeErrorHandling {
+  /** Per-node retry override; absent → workflow `settings.retryDefaults`. */
+  retry?: {
+    /** Extra attempts after the first failure (0 = no retry). */
+    maxRetries: number
+    retryIntervalMs: number
+    backoff: "fixed" | "exponential"
+    /** Cap for exponential mode. */
+    maxIntervalMs?: number
+  }
+  /**
+   * What to do when the step ultimately fails (after retries):
+   *  - "fail"        — legacy: defer to the workflow-level errorPolicy.
+   *  - "continue"    — output `{ error }` and RUN downstream (n8n semantics).
+   *  - "errorBranch" — route to edges leaving the node's "error" handle.
+   *  - "defaultValue"— substitute `defaultValue` as the output, run downstream.
+   */
+  onError?: "fail" | "continue" | "errorBranch" | "defaultValue"
+  /** Static output used when `onError === "defaultValue"`. */
+  defaultValue?: unknown
+}
+
 export interface WorkflowNodeData<TParams = Record<string, unknown>> {
   [key: string]: unknown
   /** User-visible label. Often the node type's default at create time. */
@@ -393,6 +420,8 @@ export interface WorkflowNodeData<TParams = Record<string, unknown>> {
    * authoring, undefined for nodes that pre-date the field.
    */
   authoredBy?: "ai" | "user"
+  /** Per-node error handling; absent = legacy "fail" behavior. */
+  errorHandling?: WorkflowNodeErrorHandling
 }
 
 export interface WorkflowEdge {
@@ -576,6 +605,9 @@ export type RunEventType =
   | "step_stream"
   // Token/cost usage snapshot for one step (payload = StepUsage).
   | "step_usage"
+  // Emitted before each retry backoff wait (payload
+  // `{ attempt, maxAttempts, delayMs, error }`).
+  | "step_retrying"
 
 export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 

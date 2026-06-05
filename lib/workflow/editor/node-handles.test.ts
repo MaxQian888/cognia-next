@@ -1,4 +1,10 @@
-import { defaultTypeVersionFor, outputHandlesFor, pickContainerTarget } from "./node-handles"
+import {
+  defaultTypeVersionFor,
+  hasErrorHandle,
+  outputHandlesFor,
+  pickContainerTarget,
+  supportsErrorHandling,
+} from "./node-handles"
 
 describe("outputHandlesFor", () => {
   it("returns null for plain single-output kinds", () => {
@@ -89,5 +95,48 @@ describe("defaultTypeVersionFor", () => {
 
   it("everything else stays at 1", () => {
     expect(defaultTypeVersionFor("flow.set")).toBe(1)
+  })
+})
+
+describe("supportsErrorHandling", () => {
+  it("allows the fallible families", () => {
+    for (const kind of [
+      "action.agent.turn",
+      "action.github.openPr",
+      "ai.prompt",
+      "data.transform",
+      "io.http",
+      "ocr.extract",
+      "eval.run",
+    ]) {
+      expect(supportsErrorHandling(kind)).toBe(true)
+    }
+  })
+
+  it("excludes triggers, flow control, and annotations", () => {
+    for (const kind of [
+      "trigger.manual",
+      "trigger.cron",
+      "flow.branch",
+      "flow.join",
+      "flow.loop",
+      "annotation.note",
+    ]) {
+      expect(supportsErrorHandling(kind)).toBe(false)
+    }
+  })
+})
+
+describe("hasErrorHandle", () => {
+  it("is true only for errorBranch on a supported kind", () => {
+    expect(hasErrorHandle({ kind: "io.http", errorHandling: { onError: "errorBranch" } })).toBe(
+      true
+    )
+    expect(hasErrorHandle({ kind: "io.http", errorHandling: { onError: "continue" } })).toBe(false)
+    expect(hasErrorHandle({ kind: "io.http" })).toBe(false)
+    // Unsupported kind never grows the handle, even if data says errorBranch.
+    expect(hasErrorHandle({ kind: "flow.branch", errorHandling: { onError: "errorBranch" } })).toBe(
+      false
+    )
   })
 })

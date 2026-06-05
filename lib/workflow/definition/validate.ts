@@ -33,12 +33,30 @@ const positionSchema = z.object({
   y: z.number().finite(),
 })
 
+// Per-node error handling (mirrors types/workflow/visual.ts
+// WorkflowNodeErrorHandling). MUST stay in the schema — zod strips unknown
+// keys, so omitting it here would silently drop the field before the
+// orchestrator ever sees it.
+const errorHandlingSchema = z.object({
+  retry: z
+    .object({
+      maxRetries: z.number().int().min(0).max(20),
+      retryIntervalMs: z.number().int().min(0),
+      backoff: z.enum(["fixed", "exponential"]),
+      maxIntervalMs: z.number().int().min(0).optional(),
+    })
+    .optional(),
+  onError: z.enum(["fail", "continue", "errorBranch", "defaultValue"]).optional(),
+  defaultValue: z.unknown().optional(),
+})
+
 const nodeDataSchema = z.object({
   label: z.string().min(1, "Node label is required"),
   params: z.record(z.string(), z.unknown()),
   notes: z.string().optional(),
   credentialRefs: z.record(z.string(), z.string()).optional(),
   disabled: z.boolean().optional(),
+  errorHandling: errorHandlingSchema.optional(),
 })
 
 const nodeSchema = z.object({
@@ -63,7 +81,9 @@ const edgeSchema = z.object({
   label: z.string().optional(),
   data: z
     .object({
-      kind: z.enum(["default", "conditional", "parallel", "loop"]).optional(),
+      // Keep in sync with WorkflowEdgeKind — "error" marks error-branch
+      // edges (orchestrator's isErrorEdge also accepts sourceHandle "error").
+      kind: z.enum(["default", "conditional", "parallel", "loop", "error"]).optional(),
     })
     .optional(),
 })
