@@ -1,4 +1,4 @@
-import { parseLive2dManifest } from "./manifest"
+import { extractMotionGroupCounts, parseLive2dManifest } from "./manifest"
 
 function modernJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -20,6 +20,34 @@ function modernJson(overrides: Record<string, unknown> = {}): string {
     },
   })
 }
+
+describe("extractMotionGroupCounts", () => {
+  it("counts the motions per group", () => {
+    expect(
+      extractMotionGroupCounts(
+        modernJson({
+          Motions: {
+            Idle: [{ File: "a" }, { File: "b" }, { File: "c" }],
+            TapBody: [{ File: "d" }],
+          },
+        })
+      )
+    ).toEqual({ Idle: 3, TapBody: 1 })
+  })
+
+  it("treats a non-array group as zero motions", () => {
+    expect(extractMotionGroupCounts(modernJson({ Motions: { Idle: "oops" } }))).toEqual({
+      Idle: 0,
+    })
+  })
+
+  it("returns an empty map for invalid or motion-less json", () => {
+    expect(extractMotionGroupCounts("not json")).toEqual({})
+    expect(extractMotionGroupCounts("42")).toEqual({})
+    expect(extractMotionGroupCounts(JSON.stringify({ FileReferences: {} }))).toEqual({})
+    expect(extractMotionGroupCounts(JSON.stringify({}))).toEqual({})
+  })
+})
 
 describe("parseLive2dManifest", () => {
   it("parses a modern model3.json and resolves paths against the settings dir", () => {

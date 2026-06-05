@@ -114,6 +114,69 @@ describe("Live2dCanvas", () => {
     await waitFor(() => expect(loaded.scale.set).toHaveBeenCalledWith(-(96 / 400), 96 / 400))
   })
 
+  it("applies the per-model transform on top of the fit", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ transform: { scale: 1.5, offsetX: 0.1, offsetY: -0.1 } })
+    // The transform effect lands once the model state commits.
+    const expectedScale = (96 / 400) * 1.5
+    await waitFor(() => expect(loaded.scale.set).toHaveBeenCalledWith(expectedScale, expectedScale))
+    expect(loaded.position.set).toHaveBeenCalledWith(48 + 0.1 * 96, 48 - 0.1 * 96)
+  })
+
+  it("re-fits live when the transform prop changes (no model rebuild)", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    const view = renderCanvas()
+    await waitFor(() => expect(addChild).toHaveBeenCalled())
+    const initCalls = getPetModel.mock.calls.length
+    loaded.scale.set.mockClear()
+    view.rerender(
+      <Live2dCanvas
+        modelId="m1"
+        bones={bones}
+        stage={stage}
+        state="idle"
+        oneShot={null}
+        reducedMotion={false}
+        size={96}
+        transform={{ scale: 2, offsetX: 0, offsetY: 0 }}
+      />
+    )
+    await waitFor(() =>
+      expect(loaded.scale.set).toHaveBeenCalledWith((96 / 400) * 2, (96 / 400) * 2)
+    )
+    // The heavy init effect did not re-run.
+    expect(getPetModel.mock.calls.length).toBe(initCalls)
+  })
+
+  it("extracts motion-group counts from the stored settings and feeds random overrides", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    getPetModel.mockResolvedValue({ ...row, motionGroups: ["Idle"] })
+    getPetModelEntries.mockResolvedValue([
+      {
+        path: "Hiyori.model3.json",
+        blob: new Blob([
+          JSON.stringify({
+            FileReferences: {
+              Moc: "a.moc3",
+              Motions: { Idle: [{ File: "a" }, { File: "b" }, { File: "c" }, { File: "d" }] },
+            },
+          }),
+        ]),
+      },
+    ])
+    const rng = jest.spyOn(Math, "random").mockReturnValue(0.6)
+    try {
+      renderCanvas({ motionOverrides: { idle: { motionGroup: "Idle" } } })
+      // 0.6 * 4 motions → index 2, idle priority (1).
+      await waitFor(() => expect(loaded.motion).toHaveBeenCalledWith("Idle", 2, 1))
+    } finally {
+      rng.mockRestore()
+    }
+  })
+
   it("stops the ticker when paused (hidden window)", async () => {
     load.mockResolvedValue({ ok: true, model: makeLoadedModel(), dispose: jest.fn() })
     renderCanvas({ paused: true })

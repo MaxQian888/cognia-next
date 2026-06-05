@@ -26,11 +26,13 @@ interface Args {
   caps: Live2dCapabilities
   reducedMotion: boolean
   walking?: boolean
+  overrides?: import("@/types/pet").Live2dMotionOverrides
 }
 
 function setup(initial: Args) {
   return renderHook(
-    (p: Args) => useLive2dMotion(p.model, p.state, p.oneShot, p.caps, p.reducedMotion, p.walking),
+    (p: Args) =>
+      useLive2dMotion(p.model, p.state, p.oneShot, p.caps, p.reducedMotion, p.walking, p.overrides),
     {
       initialProps: initial,
     }
@@ -261,6 +263,95 @@ describe("useLive2dMotion", () => {
         caps: walkCaps,
         reducedMotion: true,
         walking: true,
+      })
+      expect(model.motion).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("per-model overrides", () => {
+    const countedCaps: Live2dCapabilities = {
+      motionGroups: ["Idle", "Tap", "Special"],
+      expressionIds: ["happy"],
+      motionGroupCounts: { Special: 4, Tap: 1 },
+    }
+
+    it("threads overrides into the resting plan", () => {
+      const { model } = makeModel()
+      setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: countedCaps,
+        reducedMotion: false,
+        overrides: { idle: { motionGroup: "Tap", motionIndex: 0 } },
+      })
+      expect(model.motion).toHaveBeenCalledWith("Tap", 0, 1)
+    })
+
+    it("threads overrides into the one-shot plan (namespaced key)", () => {
+      const { model } = makeModel()
+      const overrides = { "shot:wave": { motionGroup: "Special", motionIndex: 1 } }
+      const view = setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: countedCaps,
+        reducedMotion: false,
+        overrides,
+      })
+      ;(model.motion as jest.Mock).mockClear()
+      view.rerender({
+        model,
+        state: "idle",
+        oneShot: "wave",
+        caps: countedCaps,
+        reducedMotion: false,
+        overrides,
+      })
+      expect(model.motion).toHaveBeenCalledWith("Special", 1, 3)
+    })
+
+    it("draws a random in-range index when the override leaves it unset", () => {
+      const { model } = makeModel()
+      const rng = jest.spyOn(Math, "random").mockReturnValue(0.6)
+      try {
+        setup({
+          model,
+          state: "idle",
+          oneShot: null,
+          caps: countedCaps,
+          reducedMotion: false,
+          overrides: { idle: { motionGroup: "Special" } },
+        })
+        // 0.6 * 4 → index 2.
+        expect(model.motion).toHaveBeenCalledWith("Special", 2, 1)
+      } finally {
+        rng.mockRestore()
+      }
+    })
+
+    it("falls back to index 0 when the group count is unknown or 1", () => {
+      const { model } = makeModel()
+      setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: countedCaps,
+        reducedMotion: false,
+        overrides: { idle: { motionGroup: "Idle" } }, // count unknown
+      })
+      expect(model.motion).toHaveBeenCalledWith("Idle", 0, 1)
+    })
+
+    it("an engine-default override applies no motion (native breathing)", () => {
+      const { model } = makeModel()
+      setup({
+        model,
+        state: "idle",
+        oneShot: null,
+        caps: countedCaps,
+        reducedMotion: false,
+        overrides: { idle: {} },
       })
       expect(model.motion).not.toHaveBeenCalled()
     })

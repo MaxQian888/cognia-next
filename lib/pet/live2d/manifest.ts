@@ -49,6 +49,31 @@ function asString(value: unknown): string | undefined {
 }
 
 /**
+ * Motion count per group from a settings JSON text. Used by the motion hook to
+ * draw a random index for override entries with an unset `motionIndex`; works
+ * for legacy rows too because it reads the stored settings blob, not the row.
+ * Unparseable input yields an empty map (the hook falls back to index 0).
+ */
+export function extractMotionGroupCounts(jsonText: string): Record<string, number> {
+  let json: unknown
+  try {
+    json = JSON.parse(jsonText)
+  } catch {
+    return {}
+  }
+  if (typeof json !== "object" || json === null) return {}
+  const refs = (json as Record<string, unknown>).FileReferences
+  if (typeof refs !== "object" || refs === null) return {}
+  const motions = (refs as CubismFileReferences).Motions
+  if (typeof motions !== "object" || motions === null) return {}
+  const counts: Record<string, number> = {}
+  for (const [group, defs] of Object.entries(motions as Record<string, unknown>)) {
+    counts[group] = Array.isArray(defs) ? defs.length : 0
+  }
+  return counts
+}
+
+/**
  * Parse the settings JSON for `settingsPath`. Modern models expose
  * `FileReferences.{Moc,Textures,Motions,Expressions,Physics,Pose}`; anything
  * shaped like Cubism 2 (filename `*.model.json`, or top-level `model`/`motions`)

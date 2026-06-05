@@ -6755,6 +6755,54 @@
           "cubism2Unsupported": "暂不支持 Cubism 2 模型。",
           "zipFailed": "无法读取 .zip 压缩包。",
           "downloadFailed": "无法下载示例模型。"
+        },
+        "configure": "配置",
+        "config": {
+          "title": "自定义 {name}",
+          "description": "调整模型的摆放方式，以及每个宠物状态播放的动作。修改会实时预览，保存后生效。",
+          "tabTransform": "变换",
+          "tabMotion": "动作映射",
+          "scale": "缩放",
+          "offsetX": "水平偏移",
+          "offsetY": "垂直偏移",
+          "resetTransform": "重置变换",
+          "resetMappings": "重置全部映射",
+          "resetAll": "全部重置",
+          "save": "保存",
+          "cancel": "取消",
+          "columnKey": "状态",
+          "motionGroup": "动作组",
+          "motionIndex": "动作",
+          "indexRandom": "随机",
+          "expression": "表情",
+          "optionDefault": "默认",
+          "optionEngine": "引擎默认",
+          "optionNoExpression": "无表情",
+          "oneShotTag": "一次性",
+          "test": "测试",
+          "previewState": "预览状态",
+          "previewUnavailable": "实时预览需要 Live2D 运行时 —— 设置仍可保存。"
+        },
+        "stateLabels": {
+          "idle": "待机",
+          "thinking": "思考中",
+          "waiting": "等待中",
+          "review": "审阅中",
+          "happy": "开心",
+          "sad": "难过",
+          "error": "出错",
+          "sleeping": "睡觉",
+          "greeting": "打招呼",
+          "evolving": "进化中",
+          "interacting": "互动中"
+        },
+        "oneShotLabels": {
+          "wave": "挥手",
+          "happy": "欢呼",
+          "fed": "进食",
+          "petted": "被抚摸",
+          "evolving": "进化",
+          "levelUp": "升级"
         }
       }
     }

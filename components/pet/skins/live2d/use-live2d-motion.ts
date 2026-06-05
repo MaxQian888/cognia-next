@@ -9,7 +9,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import type { PetOneShot, PetVisualState } from "@/types/pet"
+import type { Live2dMotionOverrides, PetOneShot, PetVisualState } from "@/types/pet"
 import { resolveLive2dPlan, resolveLive2dWalkPlan } from "@/lib/pet/live2d/state-mapping"
 import type { Live2dCapabilities, MotionPlan } from "@/lib/pet/live2d/types"
 
@@ -32,15 +32,29 @@ const PRIORITY_VALUE: Record<MotionPlan["priority"], number> = {
   force: 3,
 }
 
-/** Apply a resolved plan to the model. */
-function applyPlan(model: Live2dModelLike, plan: MotionPlan): void {
+/**
+ * Apply a resolved plan to the model. A plan with a group but no index means
+ * "random each play" (the override editor's Random option) — the index is
+ * drawn here, at play time, from the group's motion count when known.
+ */
+function applyPlan(
+  model: Live2dModelLike,
+  plan: MotionPlan,
+  caps: Live2dCapabilities,
+  random: () => number = Math.random
+): void {
   if (plan.expressionId !== undefined) {
     model.expression(plan.expressionId)
   }
   // parameterFallback === true means no motion matched: leave the engine's
   // native breathing / eye-blink in control rather than forcing a motion.
   if (!plan.parameterFallback && plan.motionGroup !== undefined) {
-    model.motion(plan.motionGroup, plan.motionIndex ?? 0, PRIORITY_VALUE[plan.priority])
+    let index = plan.motionIndex
+    if (index === undefined) {
+      const count = caps.motionGroupCounts?.[plan.motionGroup] ?? 0
+      index = count > 1 ? Math.floor(random() * count) : 0
+    }
+    model.motion(plan.motionGroup, index, PRIORITY_VALUE[plan.priority])
   }
 }
 
@@ -61,7 +75,8 @@ export function useLive2dMotion(
   oneShot: PetOneShot | null,
   caps: Live2dCapabilities,
   reducedMotion: boolean,
-  walking = false
+  walking = false,
+  overrides?: Live2dMotionOverrides
 ): void {
   const prevState = useRef<PetVisualState | null>(null)
   const prevOneShot = useRef<PetOneShot | null>(null)
@@ -103,14 +118,14 @@ export function useLive2dMotion(
     prevWalking.current = walking
 
     if (oneShotEntered) {
-      applyPlan(model, resolveLive2dPlan(state, oneShot, caps, false))
+      applyPlan(model, resolveLive2dPlan(state, oneShot, caps, false, overrides), caps)
       return
     }
     // While walking, the walk plan replaces the resting plan (edge-triggered the
     // same way); a finished one-shot falls back into the walk loop too.
     if (walking && oneShot === null) {
       if (walkingChanged || stateChanged || leftReduced) {
-        applyPlan(model, resolveLive2dWalkPlan(caps, false))
+        applyPlan(model, resolveLive2dWalkPlan(caps, false), caps)
       }
       return
     }
@@ -118,7 +133,7 @@ export function useLive2dMotion(
     // left reduced mode / stopped walking) — avoids replaying the same idle
     // motion every render.
     if (oneShot === null && (stateChanged || leftReduced || walkingChanged)) {
-      applyPlan(model, resolveLive2dPlan(state, null, caps, false))
+      applyPlan(model, resolveLive2dPlan(state, null, caps, false, overrides), caps)
     }
-  }, [model, state, oneShot, caps, reducedMotion, walking])
+  }, [model, state, oneShot, caps, reducedMotion, walking, overrides])
 }

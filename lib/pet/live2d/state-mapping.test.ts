@@ -150,6 +150,85 @@ describe("resolveLive2dPlan — reduced motion", () => {
   })
 })
 
+describe("resolveLive2dPlan — per-model overrides", () => {
+  it("an override entry fully governs its key (group + expression + index)", () => {
+    const plan = resolveLive2dPlan("happy", null, RICH, false, {
+      happy: { motionGroup: "Special", motionIndex: 2, expressionId: "sleepy" },
+    })
+    expect(plan).toEqual({
+      priority: "normal",
+      parameterFallback: false,
+      motionGroup: "Special",
+      motionIndex: 2,
+      expressionId: "sleepy",
+    })
+  })
+
+  it("keeps the priority rule (one-shots force, idle states idle)", () => {
+    expect(
+      resolveLive2dPlan("idle", "wave", RICH, false, {
+        "shot:wave": { motionGroup: "Special" },
+      }).priority
+    ).toBe("force")
+    expect(
+      resolveLive2dPlan("sleeping", null, RICH, false, {
+        sleeping: { motionGroup: "Special" },
+      }).priority
+    ).toBe("idle")
+  })
+
+  it("an unset motionIndex means random (left undefined for the hook)", () => {
+    const plan = resolveLive2dPlan("idle", null, RICH, false, {
+      idle: { motionGroup: "Special" },
+    })
+    expect(plan.motionGroup).toBe("Special")
+    expect(plan.motionIndex).toBeUndefined()
+  })
+
+  it("an empty entry is the explicit engine default (no motion, no expression)", () => {
+    const plan = resolveLive2dPlan("happy", null, RICH, false, { happy: {} })
+    expect(plan).toEqual({ priority: "normal", parameterFallback: true })
+  })
+
+  it("a dangling motion group falls through to the convention tables", () => {
+    const plan = resolveLive2dPlan("happy", null, RICH, false, {
+      happy: { motionGroup: "Gone" },
+    })
+    // Convention: happy → TapBody + happy expression.
+    expect(plan.motionGroup).toBe("TapBody")
+    expect(plan.expressionId).toBe("happy")
+  })
+
+  it("an unavailable expression is dropped while the group still applies", () => {
+    const plan = resolveLive2dPlan("idle", null, RICH, false, {
+      idle: { motionGroup: "Special", expressionId: "gone" },
+    })
+    expect(plan.motionGroup).toBe("Special")
+    expect(plan.expressionId).toBeUndefined()
+  })
+
+  it("one-shot keys are namespaced — a state override never hijacks the one-shot", () => {
+    const overrides = { happy: { motionGroup: "Special" } }
+    // The one-shot "happy" uses the "shot:happy" key → convention applies.
+    const plan = resolveLive2dPlan("idle", "happy", RICH, false, overrides)
+    expect(plan.motionGroup).toBe("TapBody")
+    expect(plan.priority).toBe("force")
+  })
+
+  it("reduced motion still wins over overrides", () => {
+    const plan = resolveLive2dPlan("happy", null, RICH, true, {
+      happy: { motionGroup: "Special" },
+    })
+    expect(plan).toEqual({ priority: "idle", parameterFallback: false })
+  })
+
+  it.each([...ALL_STATES])("omitted overrides leave %s identical to the convention plan", (s) => {
+    expect(resolveLive2dPlan(s, null, RICH, false, undefined)).toEqual(
+      resolveLive2dPlan(s, null, RICH, false)
+    )
+  })
+})
+
 describe("resolveLive2dWalkPlan", () => {
   it("prefers a real walk-ish group at idle priority", () => {
     const caps: Live2dCapabilities = { motionGroups: ["Idle", "Walk"], expressionIds: [] }

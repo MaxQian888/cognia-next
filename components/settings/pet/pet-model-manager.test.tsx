@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
 // Drive the live model list / usage from mutable module state.
@@ -26,6 +26,15 @@ jest.mock("./pet-model-import", () => ({
   filesToEntries: (...a: unknown[]) => filesToEntries(...a),
   importModelFromEntries: (...a: unknown[]) => importModelFromEntries(...a),
   downloadSampleModel: (...a: unknown[]) => downloadSampleModel(...a),
+}))
+
+// The config dialog has its own deep suite — record which model it opens for.
+const configDialogProps = jest.fn()
+jest.mock("./pet-model-config-dialog", () => ({
+  PetModelConfigDialog: (props: { model: { id: string }; open: boolean }) => {
+    configDialogProps(props)
+    return props.open ? <div data-testid="pet-config-dialog">{props.model.id}</div> : null
+  },
 }))
 
 import { PetModelManager } from "./pet-model-manager"
@@ -183,5 +192,19 @@ describe("PetModelManager", () => {
     fireEvent.change(input, { target: { files: [new File(["x"], "model.zip")] } })
     await waitFor(() => expect(importModelFromEntries).toHaveBeenCalled())
     expect(onPatch).not.toHaveBeenCalled()
+  })
+
+  it("opens the per-model config dialog from the Configure button and closes it", () => {
+    modelList = [model("m1", "Hiyori"), model("m2", "Haru")]
+    setup()
+    expect(screen.queryByTestId("pet-config-dialog")).toBeNull()
+    fireEvent.click(screen.getByTestId("pet-model-configure-m2"))
+    expect(screen.getByTestId("pet-config-dialog")).toHaveTextContent("m2")
+    // Close through the dialog's onOpenChange.
+    const props = configDialogProps.mock.calls.at(-1)![0] as {
+      onOpenChange: (open: boolean) => void
+    }
+    act(() => props.onOpenChange(false))
+    expect(screen.queryByTestId("pet-config-dialog")).toBeNull()
   })
 })

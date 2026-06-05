@@ -6755,6 +6755,54 @@
           "cubism2Unsupported": "Cubism 2 models aren't supported.",
           "zipFailed": "The .zip couldn't be read.",
           "downloadFailed": "The sample model couldn't be downloaded."
+        },
+        "configure": "Configure",
+        "config": {
+          "title": "Customize {name}",
+          "description": "Adjust how this model is placed and which motions play for each pet state. Changes preview live and apply on save.",
+          "tabTransform": "Transform",
+          "tabMotion": "Motion mapping",
+          "scale": "Scale",
+          "offsetX": "Horizontal offset",
+          "offsetY": "Vertical offset",
+          "resetTransform": "Reset transform",
+          "resetMappings": "Reset all mappings",
+          "resetAll": "Reset all",
+          "save": "Save",
+          "cancel": "Cancel",
+          "columnKey": "State",
+          "motionGroup": "Motion group",
+          "motionIndex": "Motion",
+          "indexRandom": "Random",
+          "expression": "Expression",
+          "optionDefault": "Default",
+          "optionEngine": "Engine default",
+          "optionNoExpression": "No expression",
+          "oneShotTag": "one-shot",
+          "test": "Test",
+          "previewState": "Preview state",
+          "previewUnavailable": "Live preview needs the Live2D runtime — settings still save."
+        },
+        "stateLabels": {
+          "idle": "Idle",
+          "thinking": "Thinking",
+          "waiting": "Waiting",
+          "review": "Reviewing",
+          "happy": "Happy",
+          "sad": "Sad",
+          "error": "Error",
+          "sleeping": "Sleeping",
+          "greeting": "Greeting",
+          "evolving": "Evolving",
+          "interacting": "Interacting"
+        },
+        "oneShotLabels": {
+          "wave": "Wave",
+          "happy": "Cheer",
+          "fed": "Fed",
+          "petted": "Petted",
+          "evolving": "Evolution",
+          "levelUp": "Level up"
         }
       }
     }

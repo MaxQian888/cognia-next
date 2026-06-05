@@ -5,11 +5,13 @@ import type { PetBones, PetStage } from "@/types/pet"
 // the error boundary. A thrown error in the lazy child is caught by the
 // boundary and degrades to the SVG fallback.
 let canvasShouldThrow = false
+const canvasProps = jest.fn()
 jest.mock("./live2d/live2d-canvas", () => ({
   __esModule: true,
-  default: ({ modelId }: { modelId: string }) => {
+  default: (props: { modelId: string }) => {
     if (canvasShouldThrow) throw new Error("boom")
-    return <div data-testid="live2d-canvas">{modelId}</div>
+    canvasProps(props)
+    return <div data-testid="live2d-canvas">{props.modelId}</div>
   },
 }))
 
@@ -20,8 +22,9 @@ jest.mock("./svg-skin", () => ({
 }))
 
 let activeModelId: string | undefined
+let activeRow: unknown
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
-  useActiveLive2dModel: () => ({ modelId: activeModelId, row: undefined, coreReady: true }),
+  useActiveLive2dModel: () => ({ modelId: activeModelId, row: activeRow, coreReady: true }),
 }))
 
 let settingsNull = false
@@ -47,7 +50,9 @@ const baseProps = {
 
 beforeEach(() => {
   canvasShouldThrow = false
+  canvasProps.mockClear()
   activeModelId = "m1"
+  activeRow = undefined
   settingsNull = false
 })
 
@@ -73,6 +78,35 @@ describe("live2dSkin", () => {
     activeModelId = "m1"
     render(<>{live2dSkin.render(baseProps)}</>)
     await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toBeInTheDocument())
+  })
+
+  it("passes the row's normalized customization to the canvas", async () => {
+    activeRow = {
+      id: "m1",
+      transform: { scale: 9, offsetX: 0.1 }, // out of range → clamped on read
+      motionOverrides: { happy: { motionGroup: "Tap" } },
+    }
+    render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(canvasProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transform: { scale: 2, offsetX: 0.1, offsetY: 0 },
+          motionOverrides: { happy: { motionGroup: "Tap" } },
+        })
+      )
+    )
+  })
+
+  it("defaults the transform when the row has no customization", async () => {
+    render(<>{live2dSkin.render(baseProps)}</>)
+    await waitFor(() =>
+      expect(canvasProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transform: { scale: 1, offsetX: 0, offsetY: 0 },
+          motionOverrides: undefined,
+        })
+      )
+    )
   })
 
   it("degrades to the SVG fallback when the canvas throws", async () => {

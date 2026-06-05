@@ -7,10 +7,11 @@
 
 "use client"
 
-import { Component, lazy, Suspense, type ReactNode } from "react"
+import { Component, lazy, Suspense, useMemo, type ReactNode } from "react"
 import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { normalizeTransform } from "@/lib/pet/live2d/transform"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 // Import the SVG skin directly (not via the registry) — the registry imports
 // this module, so going through `getSkin` would form an init-time cycle.
@@ -53,8 +54,13 @@ class Live2dErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 function Live2dSkinBoundary(props: PetSkinRenderProps) {
   const settings = useSettingsStore((s) => s.settings)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
-  const { modelId } = useActiveLive2dModel(pet)
+  const { modelId, row } = useActiveLive2dModel(pet)
   const fallback = svgFallback(props)
+
+  // Per-model customization rides the reactive row (liveQuery re-emits on
+  // save, so editor changes reach the live pet immediately). Memoized so the
+  // canvas's re-fit effect doesn't churn on unrelated renders.
+  const transform = useMemo(() => normalizeTransform(row?.transform), [row?.transform])
 
   // No active model → render the SVG fallback directly (no lazy chunk needed).
   if (!modelId) return <>{fallback}</>
@@ -62,7 +68,13 @@ function Live2dSkinBoundary(props: PetSkinRenderProps) {
   return (
     <Live2dErrorBoundary fallback={fallback}>
       <Suspense fallback={fallback}>
-        <Live2dCanvas {...props} modelId={modelId} lowPower={pet.lowPower ?? false} />
+        <Live2dCanvas
+          {...props}
+          modelId={modelId}
+          lowPower={pet.lowPower ?? false}
+          transform={transform}
+          motionOverrides={row?.motionOverrides}
+        />
       </Suspense>
     </Live2dErrorBoundary>
   )

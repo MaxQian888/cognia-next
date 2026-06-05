@@ -6,7 +6,13 @@
 // pick the first one the loaded model actually exposes, with a graceful fallback
 // to the engine's native breathing / eye-blink when nothing matches.
 
-import type { PetOneShot, PetVisualState } from "@/types/pet"
+import type {
+  Live2dMotionOverride,
+  Live2dMotionOverrides,
+  PetOneShot,
+  PetVisualState,
+} from "@/types/pet"
+import { overrideKeyFor } from "./state-keys"
 import type { Live2dCapabilities, MotionPlan } from "./types"
 
 /** Strip everything but alphanumerics and lowercase, so "Tap@Body" ≈ "tapbody". */
@@ -95,27 +101,68 @@ export function resolveLive2dWalkPlan(
 }
 
 /**
+ * Build a plan from a user-authored override entry, or null when the entry is
+ * unusable (references a group the model no longer exposes → fall through to
+ * the convention tables). An EMPTY entry ({}) is the explicit "engine default":
+ * no motion, no expression, parameterFallback.
+ */
+function planFromOverride(
+  override: Live2dMotionOverride,
+  caps: Live2dCapabilities,
+  priority: MotionPlan["priority"]
+): MotionPlan | null {
+  const wantsGroup = override.motionGroup !== undefined
+  const groupAvailable = wantsGroup && caps.motionGroups.includes(override.motionGroup!)
+  // A dangling group reference invalidates the entry — convention takes over.
+  if (wantsGroup && !groupAvailable) return null
+
+  const plan: MotionPlan = {
+    priority,
+    parameterFallback: !wantsGroup,
+  }
+  if (groupAvailable) {
+    plan.motionGroup = override.motionGroup
+    // undefined motionIndex = "random each play"; the HOOK draws the index at
+    // play time (this resolver stays pure/deterministic).
+    if (override.motionIndex !== undefined) plan.motionIndex = override.motionIndex
+  }
+  if (override.expressionId !== undefined && caps.expressionIds.includes(override.expressionId)) {
+    plan.expressionId = override.expressionId
+  }
+  return plan
+}
+
+/**
  * Resolve the motion plan for the current state. `reducedMotion` collapses to a
  * still plan (idle priority, no group, no expression) so the model rests on its
- * native breathing without forcing any motion.
+ * native breathing without forcing any motion. A per-model override entry for
+ * the active key (see `overrideKeyFor`) fully governs that key; unset keys use
+ * the naming-convention tables.
  */
 export function resolveLive2dPlan(
   state: PetVisualState,
   oneShot: PetOneShot | null,
   caps: Live2dCapabilities,
-  reducedMotion: boolean
+  reducedMotion: boolean,
+  overrides?: Live2dMotionOverrides
 ): MotionPlan {
   if (reducedMotion) {
     return { priority: "idle", parameterFallback: false }
   }
 
-  const intent = oneShot ? ONE_SHOT_INTENT[oneShot] : STATE_INTENT[state]
   const priority: MotionPlan["priority"] = oneShot
     ? "force"
     : IDLE_PRIORITY_STATES.has(state)
       ? "idle"
       : "normal"
 
+  const override = overrides?.[overrideKeyFor(state, oneShot)]
+  if (override) {
+    const plan = planFromOverride(override, caps, priority)
+    if (plan) return plan
+  }
+
+  const intent = oneShot ? ONE_SHOT_INTENT[oneShot] : STATE_INTENT[state]
   const motionGroup = firstMatch(intent.groups, caps.motionGroups)
   const expressionId = intent.expressions
     ? firstMatch(intent.expressions, caps.expressionIds)

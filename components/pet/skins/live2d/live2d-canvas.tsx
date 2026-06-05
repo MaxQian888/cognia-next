@@ -14,14 +14,25 @@
 import { useEffect, useRef, useState } from "react"
 import { createLive2dLoader } from "@/lib/pet/live2d/loader"
 import { getPetModel, getPetModelEntries } from "@/lib/db/pet-models"
-import type { Live2DManifest } from "@/lib/pet/live2d/types"
-import type { PetSkinRenderProps } from "@/types/pet"
+import { extractMotionGroupCounts } from "@/lib/pet/live2d/manifest"
+import { readBlobText } from "@/lib/pet/live2d/read-blob-text"
+import type { Live2DManifest, Live2dCapabilities } from "@/lib/pet/live2d/types"
+import {
+  DEFAULT_LIVE2D_TRANSFORM,
+  type Live2dMotionOverrides,
+  type Live2dTransform,
+  type PetSkinRenderProps,
+} from "@/types/pet"
 import { useLive2dMotion, type Live2dModelLike } from "./use-live2d-motion"
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
   /** Low-power mode: 30fps ticker cap + antialias off (init-time). */
   lowPower?: boolean
+  /** Per-model user transform applied on top of the fit (normalized). */
+  transform?: Live2dTransform
+  /** Per-model state→motion/expression overrides. */
+  motionOverrides?: Live2dMotionOverrides
   /** Reports a typed failure so the boundary can degrade to the SVG skin. */
   onError?: (code: string) => void
 }
@@ -60,18 +71,25 @@ const useStrictModeSafeInit = () => {
 }
 
 /**
- * Fit a model into a square box of `size` px, centered. Facing left mirrors
- * the model by negating the X scale (the canvas buffer stays untouched).
+ * Fit a model into a square box of `size` px, centered, then apply the user's
+ * per-model transform (scale multiplier + offsets as canvas-size fractions).
+ * Facing left mirrors the model by negating the X scale (the canvas buffer
+ * stays untouched).
  * NOTE: `model.width/height` reflect the CURRENT scale, so the fit scale must
  * be derived from the unscaled bounds — read them with scale reset to 1.
  */
-function fitModel(model: PixiModelLike, size: number, facing: "left" | "right" = "right"): void {
+function fitModel(
+  model: PixiModelLike,
+  size: number,
+  facing: "left" | "right" = "right",
+  transform: Live2dTransform = DEFAULT_LIVE2D_TRANSFORM
+): void {
   model.anchor?.set(0.5, 0.5)
-  model.position?.set(size / 2, size / 2)
   model.scale?.set(1, 1)
   const largest = Math.max(model.width, model.height)
-  const scale = largest > 0 ? size / largest : 1
+  const scale = (largest > 0 ? size / largest : 1) * transform.scale
   model.scale?.set(facing === "left" ? -scale : scale, scale)
+  model.position?.set(size / 2 + transform.offsetX * size, size / 2 + transform.offsetY * size)
 }
 
 export default function Live2dCanvas({
@@ -83,13 +101,18 @@ export default function Live2dCanvas({
   locomotion,
   paused,
   lowPower = false,
+  transform,
+  motionOverrides,
   onError,
 }: Live2dCanvasProps) {
   const ready = useStrictModeSafeInit()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const appRef = useRef<PixiAppLike | null>(null)
   const [model, setModel] = useState<PixiModelLike | null>(null)
-  const [caps, setCaps] = useState({ motionGroups: [] as string[], expressionIds: [] as string[] })
+  const [caps, setCaps] = useState<Live2dCapabilities>({
+    motionGroups: [],
+    expressionIds: [],
+  })
 
   // Report errors through a ref so the async init closure doesn't capture a
   // stale callback and so changing `onError` never re-runs the heavy effect.
@@ -172,7 +195,27 @@ export default function Live2dCanvas({
         const loaded = result.model as PixiModelLike
         fitModel(loaded, size)
         app.stage.addChild(loaded)
-        setCaps({ motionGroups: row.motionGroups, expressionIds: row.expressionIds })
+        // Motion counts per group power the "random index" override option;
+        // read from the stored settings blob so legacy rows work too.
+        let motionGroupCounts: Record<string, number> = {}
+        try {
+          const settingsEntry = entries.find((e) => e.path === row.settingsPath)
+          if (settingsEntry) {
+            motionGroupCounts = extractMotionGroupCounts(await readBlobText(settingsEntry.blob))
+          }
+        } catch {
+          // Counts are best-effort — the hook falls back to index 0.
+        }
+        if (cancelled) {
+          // The cleanup already ran: it disposed `dispose`/destroyed the app,
+          // but this load finished after — drop the late state writes.
+          return
+        }
+        setCaps({
+          motionGroups: row.motionGroups,
+          expressionIds: row.expressionIds,
+          motionGroupCounts,
+        })
         setModel(loaded)
       } catch {
         if (!cancelled) onErrorRef.current?.("modelFailed")
@@ -203,13 +246,14 @@ export default function Live2dCanvas({
 
   const facing = locomotion?.facing ?? "right"
 
-  // Resize + re-fit on size/facing change without rebuilding the model.
+  // Resize + re-fit on size/facing/transform change without rebuilding the
+  // model — this is what makes the transform editor's live preview cheap.
   useEffect(() => {
     const app = appRef.current
     if (!app || !model) return
     app.renderer.resize(size, size)
-    fitModel(model, size, facing)
-  }, [size, model, facing])
+    fitModel(model, size, facing, transform)
+  }, [size, model, facing, transform])
 
   // Reduced motion / paused (hidden window, minimized widget) stops the ticker.
   useEffect(() => {
@@ -226,7 +270,15 @@ export default function Live2dCanvas({
     app.ticker.maxFPS = lowPower ? MAX_FPS_LOW_POWER : MAX_FPS_DEFAULT
   }, [lowPower, model])
 
-  useLive2dMotion(model, state, oneShot, caps, reducedMotion, locomotion?.mode === "walking")
+  useLive2dMotion(
+    model,
+    state,
+    oneShot,
+    caps,
+    reducedMotion,
+    locomotion?.mode === "walking",
+    motionOverrides
+  )
 
   return (
     <canvas ref={canvasRef} data-pet-skin-root="live2d" style={{ width: size, height: size }} />

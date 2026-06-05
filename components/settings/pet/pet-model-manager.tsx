@@ -9,7 +9,7 @@
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Trash2Icon, UploadIcon, FolderIcon, DownloadIcon } from "lucide-react"
+import { Trash2Icon, UploadIcon, FolderIcon, DownloadIcon, SettingsIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -27,6 +27,7 @@ import {
   downloadSampleModel,
   type ImportOutcome,
 } from "./pet-model-import"
+import { PetModelConfigDialog } from "./pet-model-config-dialog"
 
 export interface PetModelManagerProps {
   settings: PetSettings
@@ -48,6 +49,8 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
   const [busy, setBusy] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [configModelId, setConfigModelId] = useState<string | null>(null)
+  const configModel = models.find((m) => m.id === configModelId) ?? null
 
   const activeId = settings.activeLive2dModelId
 
@@ -129,17 +132,41 @@ export function PetModelManager({ settings, onPatch }: PetModelManagerProps) {
                   <span className="rounded bg-secondary px-1.5 py-0.5 text-xs">{t("active")}</span>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={t("delete")}
-                onClick={() => void handleDelete(m.id)}
-              >
-                <Trash2Icon className="size-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("configure")}
+                  data-testid={`pet-model-configure-${m.id}`}
+                  onClick={() => setConfigModelId(m.id)}
+                >
+                  <SettingsIcon className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("delete")}
+                  onClick={() => void handleDelete(m.id)}
+                >
+                  <Trash2Icon className="size-4" />
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
+      )}
+
+      {configModel && (
+        <PetModelConfigDialog
+          // Keyed by model id so each editing session mounts fresh — the
+          // dialog seeds its draft from the row at mount (no reseed effect).
+          key={configModel.id}
+          model={configModel}
+          open
+          onOpenChange={(open) => {
+            if (!open) setConfigModelId(null)
+          }}
+        />
       )}
 
       <p className="text-xs text-muted-foreground">{t("importHint")}</p>
