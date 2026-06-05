@@ -44,6 +44,7 @@ import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { runLoopContainer } from "./loop-container"
 import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
+import { isJoinCancel, JoinCancelError, losingBranchScope } from "./branch-scope"
 import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
 import { registerRun, unregisterRun } from "./run-cancel-registry"
@@ -257,15 +258,31 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
 
   // Forward-edge dependency map for cheap ready checks (top-level only —
   // body-internal edges are the loop runtime's concern).
+  const topLevelForwardEdges = validated.edges.filter(
+    (e) => !backEdgeIds.has(e.id) && !childNodeIds.has(e.source) && !childNodeIds.has(e.target)
+  )
   const stepDeps = new Map<string, Set<string>>()
   for (const n of validated.nodes) {
     if (!childNodeIds.has(n.id)) stepDeps.set(n.id, new Set())
   }
-  for (const edge of validated.edges) {
-    if (backEdgeIds.has(edge.id)) continue
-    if (childNodeIds.has(edge.source) || childNodeIds.has(edge.target)) continue
+  for (const edge of topLevelForwardEdges) {
     stepDeps.get(edge.target)?.add(edge.source)
   }
+
+  // flow.join fan-in policy (P3). "any"/"race" joins become ready on their
+  // FIRST completed dependency; "race" additionally cancels the losing
+  // branches. TOP-LEVEL joins only — a join inside a loop body falls back to
+  // "all" (the loop runtime has its own readiness; documented limitation).
+  const joinPolicyOf = (stepId: string): "any" | "race" | null => {
+    const n = validated.nodes.find((n) => n.id === stepId)
+    if (!n || n.type !== "flow.join" || n.parentId) return null
+    const policy = (n.data.params as { joinPolicy?: unknown }).joinPolicy
+    return policy === "any" || policy === "race" ? policy : null
+  }
+
+  // Per-step abort controllers (children of the run-level `ac`) so a race
+  // join can cancel ONLY the losing branches without touching siblings.
+  const stepControllers = new Map<string, AbortController>()
 
   // If "Run from here" was requested, mark every node that is NOT the
   // start step OR a descendant of it as skipped before stepping. This
@@ -338,10 +355,41 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     if (firstFailure) return false
     const deps = stepDeps.get(stepId)
     if (!deps) return false
+    // "any"/"race" joins proceed on their FIRST completed dependency —
+    // late arrivals drain (any) or get cancelled (race) afterwards.
+    if (deps.size > 0 && joinPolicyOf(stepId)) {
+      for (const dep of deps) {
+        if (completed.has(dep)) return true
+      }
+      return false
+    }
     for (const dep of deps) {
       if (!completed.has(dep) && !skipped.has(dep)) return false
     }
     return true
+  }
+
+  /**
+   * Race cancellation: once a race join proceeds, abort the in-flight steps
+   * and pre-skip the pending steps of every losing branch. Cancelled steps
+   * land as `step_skipped` (see the JoinCancel mapping in the catch below)
+   * and never write the idempotency cache, so a later resume re-runs them
+   * only if the join outcome is gone.
+   */
+  const cancelLosingBranches = (joinId: string): void => {
+    const deps = stepDeps.get(joinId)
+    if (!deps) return
+    const winner = [...deps].find((d) => completed.has(d))
+    if (!winner) return
+    for (const loser of deps) {
+      if (loser === winner || completed.has(loser)) continue
+      const scope = losingBranchScope(topLevelForwardEdges, joinId, winner, loser)
+      for (const id of scope) {
+        if (completed.has(id)) continue
+        skipped.add(id)
+        stepControllers.get(id)?.abort(new JoinCancelError(joinId))
+      }
+    }
   }
 
   const scheduleOne = (stepId: string): Promise<void> => {
@@ -369,6 +417,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       }
     }
 
+    // Child abort controller — follows the run-level signal AND can be
+    // aborted individually by a race join cancelling this branch.
+    const stepAc = new AbortController()
+    const onRunAbort = () => stepAc.abort(ac.signal.reason ?? new Error("Workflow run aborted"))
+    if (ac.signal.aborted) onRunAbort()
+    else ac.signal.addEventListener("abort", onRunAbort, { once: true })
+    stepControllers.set(stepId, stepAc)
+
     return (async () => {
       try {
         getPluginEventHooks().dispatchWorkflowNodeStart(workflow.id, node.id, node.type)
@@ -382,7 +438,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 trigger,
                 upstream: upstreamMap,
                 runId,
-                signal: ac.signal,
+                signal: stepAc.signal,
                 cache,
                 retryPolicy,
                 secretResolver,
@@ -396,7 +452,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 trigger,
                 upstream: upstreamMap,
                 runId,
-                signal: ac.signal,
+                signal: stepAc.signal,
                 cache,
                 retryPolicy,
                 secretResolver,
@@ -406,6 +462,13 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
               })
         stepOutputs.set(stepId, result.output)
         completed.add(stepId)
+        // A join-cancel may have raced this step's own completion — keep the
+        // completed/skipped sets disjoint so progress counting stays exact.
+        skipped.delete(stepId)
+        // P3: a race join cancels the losing branches the moment it proceeds.
+        if (node.type === "flow.join" && joinPolicyOf(stepId) === "race") {
+          cancelLosingBranches(stepId)
+        }
         runRow = { ...runRow, lastCompletedStepId: stepId }
         await persistRunState({
           runId,
@@ -446,6 +509,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
           }
         }
       } catch (err) {
+        // Race-join cancellation is NOT a failure: map to skipped, never
+        // cache, never set firstFailure. (`skipped` already contains the id —
+        // cancelLosingBranches adds it before aborting — but keep this
+        // idempotent in case the abort raced the step's own completion.)
+        if (isJoinCancel(stepAc.signal.reason) || isJoinCancel(err)) {
+          skipped.add(stepId)
+          return
+        }
         const errorObj = err instanceof Error ? err : new Error(String(err))
         getPluginEventHooks().dispatchWorkflowNodeError(workflow.id, stepId, errorObj)
         const policy = validated.settings.errorPolicy
@@ -516,6 +587,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         // firstFailure are ignored.
         if (!firstFailure) firstFailure = { stepId, err }
         ac.abort(errorObj)
+      } finally {
+        ac.signal.removeEventListener("abort", onRunAbort)
+        stepControllers.delete(stepId)
       }
     })()
   }

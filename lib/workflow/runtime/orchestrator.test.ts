@@ -1255,6 +1255,161 @@ describe("runWorkflow — per-node errorHandling", () => {
   })
 })
 
+// ── flow.join fan-in policies: any / race (P3) ───────────────────────────────
+describe("runWorkflow — flow.join any/race", () => {
+  /** Two parallel branches into a join: fast (immediate) vs slow (gated). */
+  function buildRaceWorkflow(joinPolicy: "all" | "any" | "race"): {
+    workflow: VisualWorkflow
+    releaseSlow: () => void
+    slowStarted: () => boolean
+    slowFinished: () => boolean
+  } {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let started = false
+    let finished = false
+    registerNodeExecutor({
+      kind: "data.slowstep" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        started = true
+        await Promise.race([
+          gate,
+          new Promise((_, reject) => {
+            ctx.signal.addEventListener(
+              "abort",
+              () => reject(ctx.signal.reason ?? new Error("aborted")),
+              { once: true }
+            )
+            if (ctx.signal.aborted) reject(ctx.signal.reason ?? new Error("aborted"))
+          }),
+        ])
+        finished = true
+        return { output: { slow: true } }
+      },
+    })
+    const workflow: VisualWorkflow = {
+      id: "wf_race",
+      schemaVersion: 1,
+      name: "race",
+      createdAt: 0,
+      updatedAt: 0,
+      nodes: [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_fast",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "fast", params: { variable: "f", value: "fast" } },
+        },
+        {
+          id: "n_slow",
+          type: "data.slowstep" as never,
+          typeVersion: 1,
+          position: { x: 200, y: 120 },
+          data: { label: "slow", params: {} },
+        },
+        {
+          id: "n_join",
+          type: "flow.join",
+          typeVersion: 1,
+          position: { x: 400, y: 60 },
+          data: { label: "join", params: { joinPolicy } },
+        },
+        {
+          id: "n_after",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 600, y: 60 },
+          data: { label: "after", params: { variable: "a", value: "done" } },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "n_start", target: "n_fast" },
+        { id: "e2", source: "n_start", target: "n_slow" },
+        { id: "e3", source: "n_fast", target: "n_join" },
+        { id: "e4", source: "n_slow", target: "n_join" },
+        { id: "e5", source: "n_join", target: "n_after" },
+      ],
+      settings: {
+        errorPolicy: "stop",
+        timeoutMs: 60_000,
+        concurrency: 1,
+        // Both branches must run concurrently for the race to be real.
+        maxConcurrency: 4,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+      },
+    }
+    return {
+      workflow,
+      releaseSlow: release,
+      slowStarted: () => started,
+      slowFinished: () => finished,
+    }
+  }
+
+  it('"all" waits for every branch (slow branch must finish)', async () => {
+    const { workflow, releaseSlow } = buildRaceWorkflow("all")
+    const runPromise = runWorkflow({ workflow, trigger })
+    // The join cannot proceed until the slow branch is released.
+    releaseSlow()
+    const r = await runPromise
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_slow")).toBeDefined()
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_join")).toBeDefined()
+  })
+
+  it('"any" proceeds on the first arrival and drains the slow branch', async () => {
+    const { workflow, releaseSlow, slowStarted } = buildRaceWorkflow("any")
+    const runPromise = runWorkflow({ workflow, trigger })
+    // Give the run a beat, then release the slow branch so the run can drain.
+    await new Promise((r) => setTimeout(r, 50))
+    releaseSlow()
+    const r = await runPromise
+    expect(r.status).toBe("succeeded")
+    expect(slowStarted()).toBe(true)
+    const events = await listRunEvents(r.runId)
+    // The join + downstream completed.
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_join")).toBeDefined()
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_after")).toBeDefined()
+  })
+
+  it('"race" cancels the slow branch and marks it skipped (never failed)', async () => {
+    const { workflow, slowFinished } = buildRaceWorkflow("race")
+    // Never release the slow branch — the race cancellation must unblock it.
+    const r = await runWorkflow({ workflow, trigger })
+    expect(r.status).toBe("succeeded")
+    expect(slowFinished()).toBe(false)
+    const events = await listRunEvents(r.runId)
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_join")).toBeDefined()
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_after")).toBeDefined()
+    // Cancelled branch: skipped, and the run did NOT fail because of it.
+    expect(events.find((e) => e.type === "step_skipped" && e.stepId === "n_slow")).toBeDefined()
+    // Shared ancestor untouched.
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_start")).toBeDefined()
+  })
+
+  it('"race" never caches the cancelled step (resume would re-run it)', async () => {
+    const { workflow } = buildRaceWorkflow("race")
+    const r = await runWorkflow({ workflow, trigger })
+    expect(r.status).toBe("succeeded")
+    const events = await listRunEvents(r.runId)
+    // No step_completed for the cancelled branch — the idempotency cache only
+    // persists completions, so a resume cannot replay a cancelled result.
+    expect(events.find((e) => e.type === "step_completed" && e.stepId === "n_slow")).toBeUndefined()
+  })
+})
+
 // ───────────────────────────────────────────────────────────────────────────
 // Editor debugging options: seedOutputs / restrictToStepIds / honorPinData.
 // ───────────────────────────────────────────────────────────────────────────
