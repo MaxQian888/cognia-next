@@ -1247,3 +1247,163 @@ describe("repairImportedVscodeThemes", () => {
     expect(out).toBe(s)
   })
 })
+
+// ---- Alias routing actions ----
+
+describe("routing actions", () => {
+  const mapping = (id: string, alias: string) => ({
+    id,
+    alias,
+    providers: [{ providerId: "openai", modelId: "gpt-4o" }],
+    distribution: "priority" as const,
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+
+  beforeEach(() => {
+    dbSettings.saveSettings.mockImplementation(async (p: Partial<AppSettings>) =>
+      baseSettings({ ...(useSettingsStore.getState().settings ?? {}), ...p })
+    )
+  })
+
+  it("setRoutingConfig merges the patch over the current (or default) config", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().setRoutingConfig({ strategy: "cost" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      routingConfig: expect.objectContaining({ strategy: "cost", maxFallbackAttempts: 3 }),
+    })
+  })
+
+  it("upsertModelMapping appends a new mapping and stamps updatedAt", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().upsertModelMapping(mapping("m1", "fast"))
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved).toHaveLength(1)
+    expect(saved[0].alias).toBe("fast")
+    expect(saved[0].updatedAt).toBeGreaterThan(1)
+  })
+
+  it("upsertModelMapping replaces an existing mapping by id", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ modelMappings: [mapping("m1", "fast"), mapping("m2", "smart")] }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().upsertModelMapping({ ...mapping("m1", "faster") })
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved).toHaveLength(2)
+    expect(saved.find((m: { id: string }) => m.id === "m1")?.alias).toBe("faster")
+  })
+
+  it("removeModelMapping drops by id", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ modelMappings: [mapping("m1", "fast"), mapping("m2", "smart")] }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().removeModelMapping("m1")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved.map((m: { id: string }) => m.id)).toEqual(["m2"])
+  })
+
+  it("activateRoutingPreset(merge) snapshots, adapts to enabled providers, and merges by alias", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("m1", "fast"), mapping("m2", "custom-alias")],
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "" },
+          groq: { providerId: "groq", enabled: false, defaultModel: "" },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("budget", "merge")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    // Snapshot captured for revert.
+    expect(saved.routingPresets.activePresetId).toBe("preset-budget")
+    expect(saved.routingPresets.preActivationSnapshot.mappings).toHaveLength(2)
+    // Strategy comes from the preset.
+    expect(saved.routingConfig.strategy).toBe("cost")
+    // The user's non-preset alias survives a merge; the preset's "fast"
+    // replaces the user's "fast".
+    const aliases = saved.modelMappings.map((m: { alias: string }) => m.alias)
+    expect(aliases).toContain("custom-alias")
+    expect(aliases.filter((a: string) => a === "fast")).toHaveLength(1)
+    // groq is disabled -> no groq entries survive adaptation (deepseek +
+    // always-enabled anthropic remain eligible).
+    const providers = saved.modelMappings.flatMap((m: { providers: { providerId: string }[] }) =>
+      m.providers.map((p) => p.providerId)
+    )
+    expect(providers).not.toContain("groq")
+  })
+
+  it("activateRoutingPreset(overwrite) replaces the whole mapping list", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("m2", "custom-alias")],
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "" },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("budget", "overwrite")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    expect(saved.modelMappings.map((m: { alias: string }) => m.alias)).not.toContain("custom-alias")
+  })
+
+  it("revertRoutingPreset restores the snapshot and clears activation state", async () => {
+    const original = [mapping("m1", "fast")]
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("p1", "preset-thing")],
+        routingPresets: {
+          customPresets: [],
+          activePresetId: "preset-budget",
+          preActivationSnapshot: {
+            strategy: "balanced",
+            mappings: original,
+            routingConfig: {
+              strategy: "balanced",
+              allowPerRequestOverride: true,
+              providerConstraints: [],
+              requestTimeoutMs: 30000,
+              maxFallbackAttempts: 3,
+            },
+            timestamp: 1,
+          },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().revertRoutingPreset()
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    expect(saved.modelMappings).toEqual(original)
+    expect(saved.routingPresets.activePresetId).toBeNull()
+    expect(saved.routingPresets.preActivationSnapshot).toBeNull()
+  })
+
+  it("revertRoutingPreset is a no-op without a snapshot", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().revertRoutingPreset()
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("activateRoutingPreset is a no-op for an unknown preset id", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("nope" as never, "merge")
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+})

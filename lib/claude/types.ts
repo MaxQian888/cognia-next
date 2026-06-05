@@ -1728,6 +1728,12 @@ export interface AppSettings {
    * masking it with the fallback's outcome.
    */
   routingFallbackEnabled?: boolean
+  /**
+   * Routing-preset activation state: custom presets, the active preset id,
+   * and the pre-activation snapshot that powers one-click revert. See
+   * `@/types/provider/routing-presets` and the routing settings tab.
+   */
+  routingPresets?: import("@/types/provider/routing-presets").RoutingPresetsState
 
   // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
   background?: import("@/types/appearance").BackgroundSettings

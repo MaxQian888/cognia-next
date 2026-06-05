@@ -1,0 +1,82 @@
+"use client"
+
+// Orchestrator for the routing tab: global-scope banner + strategy + presets
+// + alias mappings + per-provider constraints + live preview. The config it
+// edits is GLOBAL (AppSettings.modelMappings / routingConfig) even though the
+// tab renders inside a per-provider dialog — hence the banner.
+
+import { useTranslations } from "next-intl"
+import { FlaskConical, GitMerge, Globe, Layers, Shield, Sparkles } from "lucide-react"
+
+import {
+  SettingsAlert,
+  SettingsCard,
+  SettingsDivider,
+} from "@/components/settings/common/settings-section"
+import { RoutingStrategyPicker } from "./routing-strategy-picker"
+import { RoutingPresetCards } from "./routing-preset-cards"
+import { ModelAliasList } from "./model-alias-list"
+import { ProviderConstraintsEditor } from "./provider-constraints-editor"
+import { RoutingTestPanel } from "./routing-test-panel"
+
+export function RoutingConfigPanel() {
+  const t = useTranslations("providers.routingView")
+
+  return (
+    <div className="space-y-5">
+      <SettingsAlert icon={<Globe className="h-4 w-4" />}>{t("globalScopeNote")}</SettingsAlert>
+
+      <SettingsCard
+        icon={<Sparkles className="h-4 w-4" />}
+        title={t("presetsTitle")}
+        description={t("presetsDesc")}
+      >
+        <RoutingPresetCards />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Layers className="h-4 w-4" />}
+        title={t("strategyTitle")}
+        description={t("strategyDesc")}
+      >
+        <RoutingStrategyPicker />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<GitMerge className="h-4 w-4" />}
+        title={t("aliasesTitle")}
+        description={t("aliasesDesc")}
+      >
+        <ModelAliasList />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Shield className="h-4 w-4" />}
+        title={t("constraintsTitle")}
+        description={t("constraintsDesc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <ProviderConstraintsEditor />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<FlaskConical className="h-4 w-4" />}
+        title={t("testTitle")}
+        description={t("testDesc")}
+      >
+        <RoutingTestPanel />
+      </SettingsCard>
+    </div>
+  )
+}
+
+export default RoutingConfigPanel

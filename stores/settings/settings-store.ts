@@ -49,6 +49,14 @@ import {
   setProviderKey,
   type KeyringProviderId,
 } from "@/lib/tts/keyring"
+import {
+  DEFAULT_ROUTING_CONFIG,
+  type ModelMapping,
+  type RoutingConfig,
+} from "@/types/provider/model-mapping"
+import type { BuiltInPresetId } from "@/types/provider/routing-presets"
+import { DEFAULT_ROUTING_PRESETS_STATE } from "@/types/provider/routing-presets"
+import { adaptPresetToEnabledProviders, getBuiltInPreset } from "@/lib/ai/routing/built-in-presets"
 
 interface SettingsState {
   settings: AppSettings | null
@@ -202,6 +210,22 @@ interface SettingsState {
   updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
   deleteCustomTheme: (id: string) => void
   setActiveCustomTheme: (id: string | null) => void
+
+  // ---- Alias routing (model mappings / strategy / presets) ----
+  /** Merge a patch into `routingConfig` (strategy, constraints, timeouts). */
+  setRoutingConfig: (patch: Partial<RoutingConfig>) => Promise<void>
+  /** Insert or replace a model-alias mapping (stamps `updatedAt`). */
+  upsertModelMapping: (mapping: ModelMapping) => Promise<void>
+  removeModelMapping: (mappingId: string) => Promise<void>
+  /**
+   * Activate a built-in routing preset. Snapshots the current strategy /
+   * mappings / config into `routingPresets.preActivationSnapshot` first so
+   * `revertRoutingPreset` can undo. `mode` decides whether preset mappings
+   * merge into (alias-keyed replace) or wholesale overwrite the existing list.
+   */
+  activateRoutingPreset: (presetId: BuiltInPresetId, mode: "merge" | "overwrite") => Promise<void>
+  /** Restore the pre-activation snapshot (no-op when none exists). */
+  revertRoutingPreset: () => Promise<void>
 
   setDefaultProvider: (providerId: string) => Promise<void>
   setProviderConfig: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
@@ -874,6 +898,104 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       void saveSettings({ activeCustomThemeId: id }).catch((err) =>
         console.warn("setActiveCustomTheme persist failed", err)
       )
+    },
+
+    // ---- Alias routing (model mappings / strategy / presets) ----
+
+    setRoutingConfig: async (patch) => {
+      const cur = get().settings?.routingConfig ?? DEFAULT_ROUTING_CONFIG
+      const next = await saveSettings({ routingConfig: { ...cur, ...patch } })
+      set({ settings: next })
+    },
+
+    upsertModelMapping: async (mapping) => {
+      const list = get().settings?.modelMappings ?? []
+      const stamped = { ...mapping, updatedAt: Date.now() }
+      const idx = list.findIndex((m) => m.id === mapping.id)
+      const updated =
+        idx >= 0 ? list.map((m) => (m.id === mapping.id ? stamped : m)) : [...list, stamped]
+      const next = await saveSettings({ modelMappings: updated })
+      set({ settings: next })
+    },
+
+    removeModelMapping: async (mappingId) => {
+      const list = get().settings?.modelMappings ?? []
+      const next = await saveSettings({ modelMappings: list.filter((m) => m.id !== mappingId) })
+      set({ settings: next })
+    },
+
+    activateRoutingPreset: async (presetId, mode) => {
+      const cur = get().settings
+      const preset = getBuiltInPreset(presetId)
+      if (!preset) return
+
+      // Adapt to the providers that are actually enabled right now. Anthropic
+      // works without a providerSettings entry (sidecar OAuth/API key), so it
+      // is always considered enabled unless explicitly disabled.
+      const enabledIds = new Set<string>()
+      for (const [id, s] of Object.entries(cur?.providerSettings ?? {})) {
+        if (s.enabled !== false) enabledIds.add(id)
+      }
+      if (cur?.providerSettings?.["anthropic"]?.enabled !== false) enabledIds.add("anthropic")
+      for (const cp of cur?.customProviders ?? []) {
+        if (cp.enabled !== false) enabledIds.add(cp.id)
+      }
+      const adapted = adaptPresetToEnabledProviders(preset, enabledIds)
+
+      const existingMappings = cur?.modelMappings ?? []
+      const existingConfig = cur?.routingConfig ?? DEFAULT_ROUTING_CONFIG
+      const presets = cur?.routingPresets ?? DEFAULT_ROUTING_PRESETS_STATE
+
+      const now = Date.now()
+      const stamped: ModelMapping[] = adapted.mappings.map((m, i) => ({
+        ...m,
+        id: `${preset.id}-${m.alias}-${now + i}`,
+        createdAt: now,
+        updatedAt: now,
+      }))
+
+      // Merge = preset aliases replace same-alias mappings, everything else
+      // survives. Overwrite = the preset's list wins wholesale.
+      const presetAliases = new Set(stamped.map((m) => m.alias.toLowerCase()))
+      const mergedMappings =
+        mode === "overwrite"
+          ? stamped
+          : [
+              ...existingMappings.filter((m) => !presetAliases.has(m.alias.toLowerCase())),
+              ...stamped,
+            ]
+
+      const next = await saveSettings({
+        modelMappings: mergedMappings,
+        routingConfig: { ...existingConfig, ...adapted.routingConfig, strategy: adapted.strategy },
+        routingPresets: {
+          ...presets,
+          activePresetId: preset.id,
+          preActivationSnapshot: {
+            strategy: existingConfig.strategy,
+            mappings: existingMappings,
+            routingConfig: existingConfig,
+            timestamp: now,
+          },
+        },
+      })
+      set({ settings: next })
+    },
+
+    revertRoutingPreset: async () => {
+      const cur = get().settings
+      const snapshot = cur?.routingPresets?.preActivationSnapshot
+      if (!snapshot) return
+      const next = await saveSettings({
+        modelMappings: snapshot.mappings,
+        routingConfig: snapshot.routingConfig,
+        routingPresets: {
+          ...(cur?.routingPresets ?? DEFAULT_ROUTING_PRESETS_STATE),
+          activePresetId: null,
+          preActivationSnapshot: null,
+        },
+      })
+      set({ settings: next })
     },
 
     setDefaultProvider: async (providerId) => {

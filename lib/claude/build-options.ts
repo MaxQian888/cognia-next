@@ -42,23 +42,14 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@/lib/ai/providers/inference-params"
-import {
-  resolveModelPriceUsdPer1M,
-  type PriceLookupSettings,
-} from "@/lib/ai/providers/model-pricing"
-import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
-import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
-import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
-import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
   ProviderRoutingEngine,
   createMappingRegistry,
   type RoutingEngineDeps,
 } from "@/lib/ai/routing"
+import { buildRoutingEngineDeps } from "@/lib/ai/routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
-import { getModelConfig } from "@/types/provider/provider"
-import { getModelContextLimits, getModelMaxTokens } from "@/lib/ai/model-limits"
 import { estimateCJKTokenCount } from "@/lib/ai/rag/cjk-tokenizer"
 
 /**
@@ -491,51 +482,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (model && appSettings?.modelMappings && appSettings.modelMappings.length > 0) {
     const registry = createMappingRegistry(appSettings.modelMappings)
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
-    const deps: RoutingEngineDeps = {
-      // Real reliability telemetry (ADR-0043 Phase 4), fed per-turn by
-      // `recordProviderOutcome`. A provider with zero recorded requests reports
-      // `undefined` so the engine treats it as "no-info" and keeps priority
-      // order until rolling stats accrue.
-      getHealthMetrics: (id) => {
-        const m = useHealthMetricsStore.getState().getMetrics(id)
-        return m.totalRequests > 0 ? m : undefined
-      },
-      getCircuitBreakerState: (id) => useCircuitBreakerStore.getState().getState(id),
-      isProviderAvailable: (id) => {
-        // An OPEN circuit breaker takes a provider out of rotation; otherwise
-        // fall back to the provider's enabled flag.
-        if (!useCircuitBreakerStore.getState().isAvailable(id)) return false
-        const enabled = appSettings.providerSettings?.[id]?.enabled
-        // Custom providers carry their own `enabled` flag.
-        const custom = appSettings.customProviders?.find((p) => p.id === id)
-        return enabled !== false || (custom?.enabled !== false && Boolean(custom))
-      },
-      getPricing: (id, modelId) =>
-        resolveModelPriceUsdPer1M(id, modelId, {
-          providerSettings: appSettings.providerSettings,
-          customProviders: appSettings.customProviders,
-        } as PriceLookupSettings),
-      // Durable today-spend mirror (hydrated from Dexie at boot, incremented
-      // per turn) — makes `dailyCostBudget` survive reloads.
-      getTodaySpend: (id) => useProviderCostMirrorStore.getState().getTodaySpend(id),
-      // Trailing-minute RPM/TPM window (fed by recordProviderOutcome) — the
-      // engine deprioritizes providers at their configured rate ceiling.
-      getRate: (id) => useRateLimitStore.getState().getRate(id),
-      // Usable input window = catalog context length (heuristic fallback)
-      // minus an output/reserve allowance — feeds the engine's LiteLLM-style
-      // context-window pre-check.
-      getContextWindow: (id, modelId) => {
-        const config = getModelConfig(id, modelId)
-        const raw = config?.contextLength ?? getModelMaxTokens(modelId)
-        const limits = getModelContextLimits(modelId)
-        const maxOutput = config?.maxOutputTokens
-        const reserve = Math.min(
-          limits.reserveTokens,
-          typeof maxOutput === "number" && maxOutput > 0 ? maxOutput : Infinity
-        )
-        return Math.max(0, raw - reserve)
-      },
-    }
+    // Live-store-backed deps shared with the routing-tab preview panel —
+    // health metrics, circuit breaker, today-spend mirror, rate window,
+    // pricing, and the context-window resolver all live in
+    // `lib/ai/routing/build-preview-engine.ts`.
+    const deps: RoutingEngineDeps = buildRoutingEngineDeps(appSettings)
     // Rough token estimate of the outgoing prompt (CJK-aware). Only the text
     // the caller handed us — history/system additions are not counted, which
     // keeps the check conservative-but-cheap (O(prompt length), no awaits).

@@ -1,0 +1,36 @@
+import { render, screen } from "@testing-library/react"
+import { RoutingConfigPanel } from "./routing-config-panel"
+import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
+
+const stateRef: { current: Record<string, unknown> } = {
+  current: {
+    settings: {
+      modelMappings: [],
+      routingConfig: DEFAULT_ROUTING_CONFIG,
+      routingPresets: undefined,
+      providerSettings: {},
+      customProviders: [],
+    },
+    setRoutingConfig: jest.fn(),
+    upsertModelMapping: jest.fn(),
+    removeModelMapping: jest.fn(),
+    activateRoutingPreset: jest.fn(),
+    revertRoutingPreset: jest.fn(),
+  },
+}
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(stateRef.current),
+}))
+
+describe("RoutingConfigPanel", () => {
+  it("renders the global banner and all five sections", () => {
+    render(<RoutingConfigPanel />)
+    expect(screen.getByText(/Routing configuration is global/)).toBeInTheDocument()
+    expect(screen.getByText("Quick Presets")).toBeInTheDocument()
+    expect(screen.getByText("Routing Strategy")).toBeInTheDocument()
+    expect(screen.getByText("Model Aliases")).toBeInTheDocument()
+    expect(screen.getByText("Provider Constraints")).toBeInTheDocument()
+    expect(screen.getByText("Routing Preview")).toBeInTheDocument()
+  })
+})
