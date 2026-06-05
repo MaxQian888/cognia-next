@@ -48,4 +48,36 @@ describe("speakAsPet", () => {
   it("returns null when the model output is empty", async () => {
     expect(await speakAsPet(client("   "), { soul, bones, userText: "hello" })).toBeNull()
   })
+
+  it("keeps the legacy system prompt when no extra layers are passed", async () => {
+    const c = client("ok")
+    await speakAsPet(c, { soul, bones, userText: "hello" })
+    const system = (c.complete as jest.Mock).mock.calls[0][1].system as string
+    expect(system).toBe(
+      `You are Boba, a rare cat desktop pet. ` +
+        `Personality: smug and sleepy. ` +
+        `Reply in ONE short, playful sentence, in character. ` +
+        `Never reveal or ask for personal data. Do not give long answers.`
+    )
+  })
+
+  it("layers state/history/recall/emotion/locale into the system prompt", async () => {
+    const c = client("[happy] yay")
+    await speakAsPet(c, {
+      soul,
+      bones,
+      userText: "hello",
+      state: { mood: "content", energy: 50, bond: 30, level: 2 },
+      historyText: "User: hi\nYou: hey",
+      recallText: "- Works late",
+      emotionInstruction: true,
+      locale: "zh-CN",
+    })
+    const system = (c.complete as jest.Mock).mock.calls[0][1].system as string
+    expect(system).toContain("mood: content")
+    expect(system).toContain("Recent things you said together:")
+    expect(system).toContain("## What you remember about the user")
+    expect(system).toContain("emotion tag in square brackets")
+    expect(system).toContain("(zh-CN)")
+  })
 })

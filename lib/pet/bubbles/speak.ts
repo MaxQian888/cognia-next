@@ -7,6 +7,7 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetBones, PetSoul } from "@/types/pet"
 import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { buildPetSystemPrompt, type PetPromptState } from "@/lib/pet/llm/persona"
 
 const MAX_REPLY = 200
 
@@ -17,6 +18,13 @@ export interface SpeakArgs {
   userText: string
   /** Optional persona prose from a bound Character to colour the voice. */
   persona?: string
+  /** Optional prompt layers (lib/pet/llm/persona.ts). When ALL are absent the
+   *  system prompt is byte-identical to the original — the compatibility lock. */
+  state?: PetPromptState
+  historyText?: string
+  recallText?: string
+  emotionInstruction?: boolean
+  locale?: string
 }
 
 /** Trim a raw reply to a single short, quote-free line. */
@@ -33,14 +41,17 @@ export function sanitizeReply(raw: string): string {
   return s
 }
 
-function buildSystemPrompt({ soul, bones, persona }: SpeakArgs): string {
-  const personaLine = persona ? ` Your human's current persona is: ${persona}.` : ""
-  return (
-    `You are ${soul.name}, a ${bones.rarity} ${bones.species} desktop pet. ` +
-    `Personality: ${soul.personality}.${personaLine} ` +
-    `Reply in ONE short, playful sentence, in character. ` +
-    `Never reveal or ask for personal data. Do not give long answers.`
-  )
+function buildSystemPrompt(args: SpeakArgs): string {
+  return buildPetSystemPrompt({
+    soul: args.soul,
+    bones: args.bones,
+    persona: args.persona,
+    state: args.state,
+    historyText: args.historyText,
+    recallText: args.recallText,
+    emotionInstruction: args.emotionInstruction,
+    locale: args.locale,
+  })
 }
 
 /**
