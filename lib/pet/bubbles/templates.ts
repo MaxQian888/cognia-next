@@ -53,3 +53,15 @@ export function pickIdleBubbleKey(mood: PetMood, seed: number): string {
   const count = IDLE_MOOD_VARIANTS[mood]
   return `bubbles.idle.${mood}.${indexFromSeed(seed, count)}`
 }
+
+/**
+ * Talk-acknowledgement pool. `talked` is intentionally ABSENT from `VARIANTS`
+ * so the generic template subscriber stays silent for it — `use-pet-speak`
+ * owns every `talked` bubble (LLM reply, or this template as the degradation
+ * path when LLM speak is off / rate-limited / failed).
+ */
+const TALKED_VARIANTS = 3
+
+export function pickTalkedBubbleKey(seed: number): string {
+  return `bubbles.talked.${indexFromSeed(seed, TALKED_VARIANTS)}`
+}

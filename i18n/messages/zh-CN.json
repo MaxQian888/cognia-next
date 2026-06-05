@@ -6671,6 +6671,14 @@
         "label": "静音气泡",
         "description": "让宠物保持安静（仍会动画）。"
       },
+      "llmSpeak": {
+        "label": "AI 对话",
+        "description": "让宠物用一句简短的 AI 回复来回应你输入的话（需主动开启，有频率限制和隐私门控）。",
+        "modelHint": "建议选择便宜、快速的模型——回复只有一句话。",
+        "provider": "服务商",
+        "model": "模型",
+        "useDefault": "使用聊天默认值"
+      },
       "size": {
         "label": "大小（{size}px）"
       },
@@ -19524,7 +19532,13 @@
       "showMainWindow": "显示主窗口"
     },
     "overlay": {
-      "petLabel": "桌面宠物"
+      "petLabel": "桌面宠物",
+      "talkPlaceholder": "对宠物说点什么…",
+      "talkSend": "发送"
+    },
+    "talkInput": {
+      "placeholder": "对宠物说点什么…",
+      "send": "发送"
     },
     "statCard": {
       "unhatched": "未孵化",
@@ -19660,6 +19674,7 @@
       "fed": ["好吃！", "美味！", "吧唧吧唧。"],
       "played": ["真好玩！", "再来！", "哇哦！"],
       "petted": ["呼噜…", "真舒服。", "♥"],
+      "talked": ["我在听呢！", "再多说点？", "嘿嘿，好哦！"],
       "hatched": ["你好，世界！", "我来啦！"],
       "greeting": ["嗨！", "欢迎回来！", "嘿！"],
       "inboundMessage": ["来消息了！", "叮！"],

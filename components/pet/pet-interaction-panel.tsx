@@ -4,9 +4,11 @@
 
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CookieIcon, Gamepad2Icon, HeartIcon, MessageCircleIcon } from "lucide-react"
+import { CookieIcon, Gamepad2Icon, HeartIcon, MessageCircleIcon, SendIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { levelProgress } from "@/lib/pet/xp/leveling"
 import type { PetNeedKind, PetProfile } from "@/types/pet"
@@ -37,7 +39,8 @@ export interface PetInteractionPanelProps {
   onFeed: () => void
   onPlay: () => void
   onPet: () => void
-  onTalk: () => void
+  /** Talk action. Submitted composer text rides along; bare click omits it. */
+  onTalk: (text?: string) => void
   className?: string
 }
 
@@ -52,6 +55,14 @@ export function PetInteractionPanel({
 }: PetInteractionPanelProps) {
   const t = useTranslations("pet")
   const progress = levelProgress(profile.xp)
+  const [talkOpen, setTalkOpen] = useState(false)
+  const [talkText, setTalkText] = useState("")
+
+  const submitTalk = () => {
+    const text = talkText.trim()
+    onTalk(text || undefined)
+    setTalkText("")
+  }
 
   return (
     <div data-testid="pet-interaction-panel" className={cn("flex w-72 flex-col gap-3", className)}>
@@ -88,10 +99,39 @@ export function PetInteractionPanel({
         <Button size="sm" variant="secondary" onClick={onPet} aria-label={t("actions.pet")}>
           <HeartIcon className="size-4" />
         </Button>
-        <Button size="sm" variant="secondary" onClick={onTalk} aria-label={t("actions.talk")}>
+        <Button
+          size="sm"
+          variant={talkOpen ? "default" : "secondary"}
+          onClick={() => setTalkOpen((o) => !o)}
+          aria-label={t("actions.talk")}
+        >
           <MessageCircleIcon className="size-4" />
         </Button>
       </div>
+
+      {talkOpen && (
+        <div className="flex items-center gap-2" data-testid="pet-talk-composer">
+          <Input
+            value={talkText}
+            placeholder={t("talkInput.placeholder")}
+            aria-label={t("talkInput.placeholder")}
+            className="h-8 text-xs"
+            maxLength={500}
+            onChange={(e) => setTalkText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitTalk()
+            }}
+          />
+          <Button
+            size="sm"
+            className="h-8 shrink-0"
+            onClick={submitTalk}
+            aria-label={t("talkInput.send")}
+          >
+            <SendIcon className="size-3.5" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

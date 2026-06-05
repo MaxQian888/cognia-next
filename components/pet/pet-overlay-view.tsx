@@ -52,6 +52,9 @@ import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 import { PetQuickMenu } from "./pet-quick-menu"
+import { SendIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 
 const DRAG_THRESHOLD_PX = 4
 
@@ -107,20 +110,33 @@ export function PetOverlayView() {
   // messages (requesting the current snapshot on connect) and exposes
   // `sendInteraction` to the click handler + quick menu via a stable ref so the
   // pointer callbacks don't re-bind every render.
-  const sendInteractionRef = useRef<(kind: "fed" | "played" | "petted" | "talked") => void>(
-    () => {}
-  )
+  const sendInteractionRef = useRef<
+    (kind: "fed" | "played" | "petted" | "talked", text?: string) => void
+  >(() => {})
   useEffect(() => {
     const bridge = startOverlayPetBridge()
-    sendInteractionRef.current = (kind) => {
+    sendInteractionRef.current = (kind, text) => {
       lastInteractionRef.current = performance.now()
-      bridge.sendInteraction(kind)
+      if (text === undefined) bridge.sendInteraction(kind)
+      else bridge.sendInteraction(kind, text)
     }
     return () => {
       sendInteractionRef.current = () => {}
       bridge.dispose()
     }
   }, [])
+
+  // Talk composer (quick-menu "Talk" opens it). The typed text rides the
+  // bridge to the main window, which runs the LLM side channel and broadcasts
+  // the reply bubble back — this window never builds an LLM client.
+  const [talkOpen, setTalkOpen] = useState(false)
+  const [talkText, setTalkText] = useState("")
+  const submitTalk = () => {
+    const text = talkText.trim()
+    sendInteractionRef.current("talked", text || undefined)
+    setTalkText("")
+    setTalkOpen(false)
+  }
 
   // Persist the click-through flag alongside the live OS-window toggle. `save`
   // is a shallow top-level merge, so the whole `petSettings` is passed.
@@ -326,7 +342,7 @@ export function PetOverlayView() {
         onFeed: () => sendInteractionRef.current("fed"),
         onPlay: () => sendInteractionRef.current("played"),
         onPet: () => sendInteractionRef.current("petted"),
-        onTalk: () => sendInteractionRef.current("talked"),
+        onTalk: () => setTalkOpen(true),
         onClickThrough: handleClickThrough,
         onHideDesktopPet: () => void closePetWindow(),
         onShowMainWindow: () => void showMainWindow(),
@@ -339,7 +355,39 @@ export function PetOverlayView() {
         // wander ground math rests the window bottom on the work-area bottom.
         className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
       >
-        {bubble && <PetBubbleView bubble={bubble} className="mb-2" />}
+        {talkOpen ? (
+          <div
+            data-testid="pet-overlay-talk-composer"
+            className="mb-2 flex w-full max-w-60 items-center gap-1.5 rounded-lg border bg-popover p-1.5 shadow-lg"
+          >
+            <Input
+              autoFocus
+              value={talkText}
+              placeholder={t("talkPlaceholder")}
+              aria-label={t("talkPlaceholder")}
+              className="h-7 text-xs"
+              maxLength={500}
+              onChange={(e) => setTalkText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitTalk()
+                if (e.key === "Escape") {
+                  setTalkText("")
+                  setTalkOpen(false)
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              className="h-7 w-7 shrink-0 p-0"
+              onClick={submitTalk}
+              aria-label={t("talkSend")}
+            >
+              <SendIcon className="size-3.5" />
+            </Button>
+          </div>
+        ) : (
+          bubble && <PetBubbleView bubble={bubble} className="mb-2" />
+        )}
         {profile && view ? (
           <div
             data-testid="pet-overlay-pet"

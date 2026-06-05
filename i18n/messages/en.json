@@ -6671,6 +6671,14 @@
         "label": "Mute bubbles",
         "description": "Keep the pet quiet (it still animates)."
       },
+      "llmSpeak": {
+        "label": "Talk with AI",
+        "description": "Let the pet answer typed talk messages with a tiny AI reply (opt-in, rate-limited, PII-gated).",
+        "modelHint": "Pick a cheap, fast model — replies are one short sentence.",
+        "provider": "Provider",
+        "model": "Model",
+        "useDefault": "Use chat default"
+      },
       "size": {
         "label": "Size ({size}px)"
       },
@@ -19524,7 +19532,13 @@
       "showMainWindow": "Show main window"
     },
     "overlay": {
-      "petLabel": "Desktop pet"
+      "petLabel": "Desktop pet",
+      "talkPlaceholder": "Say something to your pet…",
+      "talkSend": "Send"
+    },
+    "talkInput": {
+      "placeholder": "Say something to your pet…",
+      "send": "Send"
     },
     "statCard": {
       "unhatched": "Unhatched",
@@ -19660,6 +19674,7 @@
       "fed": ["Yum!", "Tasty!", "Nom nom."],
       "played": ["So fun!", "Again!", "Wheee!"],
       "petted": ["Purr…", "That's nice.", "♥"],
+      "talked": ["I'm listening!", "Tell me more?", "Hehe, okay!"],
       "hatched": ["Hello world!", "I'm here!"],
       "greeting": ["Hi there!", "Welcome back!", "Hey!"],
       "inboundMessage": ["You've got mail!", "Ping!"],

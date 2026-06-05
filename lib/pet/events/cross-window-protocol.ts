@@ -14,6 +14,8 @@ import type { PetOneShot, PetVisualState } from "@/types/pet"
 /** Bridge wire text for a speech bubble — already localized by the main side. */
 export interface PetBridgeBubble {
   text: string
+  /** Bubble provenance so the overlay can style LLM replies like the widget. */
+  origin?: "template" | "llm" | "system"
 }
 
 /** Interaction kinds the overlay can send back to the main controller. */
@@ -24,7 +26,7 @@ export type PetBridgeMessage =
   | { v: 1; t: "visual-state"; state: PetVisualState }
   | { v: 1; t: "one-shot"; shot: PetOneShot }
   | { v: 1; t: "bubble"; bubble: PetBridgeBubble | null }
-  | { v: 1; t: "interaction"; kind: PetBridgeInteractionKind }
+  | { v: 1; t: "interaction"; kind: PetBridgeInteractionKind; text?: string }
   | { v: 1; t: "request-state" }
 
 /** The `BroadcastChannel` name shared by both window sides. */
@@ -60,6 +62,11 @@ const INTERACTION_KINDS: ReadonlySet<string> = new Set<PetBridgeInteractionKind>
   "talked",
 ])
 
+const BUBBLE_ORIGINS: ReadonlySet<string> = new Set(["template", "llm", "system"])
+
+/** Defensive cap on interaction text — `speakAsPet` also slices to 500. */
+const MAX_INTERACTION_TEXT = 500
+
 /**
  * Encode a message for the wire. Identity today, but typed so every post site
  * goes through one place if the transport ever needs framing.
@@ -92,14 +99,31 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
     case "bubble": {
       if (raw.bubble === null) return { v: 1, t: "bubble", bubble: null }
       if (isRecord(raw.bubble) && typeof raw.bubble.text === "string") {
-        return { v: 1, t: "bubble", bubble: { text: raw.bubble.text } }
+        const origin =
+          typeof raw.bubble.origin === "string" && BUBBLE_ORIGINS.has(raw.bubble.origin)
+            ? (raw.bubble.origin as PetBridgeBubble["origin"])
+            : undefined
+        return {
+          v: 1,
+          t: "bubble",
+          bubble: { text: raw.bubble.text, ...(origin ? { origin } : {}) },
+        }
       }
       return null
     }
-    case "interaction":
-      return typeof raw.kind === "string" && INTERACTION_KINDS.has(raw.kind)
-        ? { v: 1, t: "interaction", kind: raw.kind as PetBridgeInteractionKind }
-        : null
+    case "interaction": {
+      if (typeof raw.kind !== "string" || !INTERACTION_KINDS.has(raw.kind)) return null
+      const text =
+        typeof raw.text === "string" && raw.text.trim().length > 0
+          ? raw.text.slice(0, MAX_INTERACTION_TEXT)
+          : undefined
+      return {
+        v: 1,
+        t: "interaction",
+        kind: raw.kind as PetBridgeInteractionKind,
+        ...(text ? { text } : {}),
+      }
+    }
     case "request-state":
       return { v: 1, t: "request-state" }
     default:

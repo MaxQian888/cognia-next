@@ -27,15 +27,36 @@ describe("PetInteractionPanel", () => {
     expect(document.querySelector('[data-need="bond"]')).not.toBeNull()
   })
 
-  it("wires the four interaction actions", () => {
+  it("wires feed/play/pet directly; talk toggles the composer", () => {
     const h = setup()
     fireEvent.click(screen.getByLabelText(/feed|actions\.feed/i))
     fireEvent.click(screen.getByLabelText(/play|actions\.play/i))
-    fireEvent.click(screen.getByLabelText(/pet|actions\.pet/i))
-    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    fireEvent.click(screen.getByLabelText(/^pet$|actions\.pet/i))
     expect(h.onFeed).toHaveBeenCalled()
     expect(h.onPlay).toHaveBeenCalled()
     expect(h.onPet).toHaveBeenCalled()
-    expect(h.onTalk).toHaveBeenCalled()
+
+    expect(screen.queryByTestId("pet-talk-composer")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    expect(screen.getByTestId("pet-talk-composer")).toBeInTheDocument()
+    // Toggling talk alone never emits the event.
+    expect(h.onTalk).not.toHaveBeenCalled()
+  })
+
+  it("submits typed talk text and clears the input", () => {
+    const h = setup()
+    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    const input = screen.getByPlaceholderText("Say something to your pet…")
+    fireEvent.change(input, { target: { value: "  hi Boba  " } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(h.onTalk).toHaveBeenCalledWith("hi Boba")
+    expect(input).toHaveValue("")
+  })
+
+  it("submits bare talk (no text) as undefined via the send button", () => {
+    const h = setup()
+    fireEvent.click(screen.getByLabelText(/talk|actions\.talk/i))
+    fireEvent.click(screen.getByLabelText("Send"))
+    expect(h.onTalk).toHaveBeenCalledWith(undefined)
   })
 })

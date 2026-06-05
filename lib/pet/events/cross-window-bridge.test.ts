@@ -87,7 +87,11 @@ describe("startMainPetBridge", () => {
     startMainPetBridge({ channel, store: store as never })
     store.emit({ bubble: { text: "hey", origin: "template" } })
     store.emit({ bubble: null })
-    expect(channel.msgs()).toContainEqual({ v: 1, t: "bubble", bubble: { text: "hey" } })
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "bubble",
+      bubble: { text: "hey", origin: "template" },
+    })
     expect(channel.msgs()).toContainEqual({ v: 1, t: "bubble", bubble: null })
   })
 
@@ -121,7 +125,20 @@ describe("startMainPetBridge", () => {
     const emit = jest.fn()
     startMainPetBridge({ channel, store: store as never, emit })
     channel.deliver({ v: 1, t: "interaction", kind: "petted" })
-    expect(emit).toHaveBeenCalledWith({ source: "user", kind: "petted" })
+    expect(emit).toHaveBeenCalledWith({ source: "user", kind: "petted", meta: undefined })
+  })
+
+  it("forwards typed talk text as event meta", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const emit = jest.fn()
+    startMainPetBridge({ channel, store: store as never, emit })
+    channel.deliver({ v: 1, t: "interaction", kind: "talked", text: "hi pet" })
+    expect(emit).toHaveBeenCalledWith({
+      source: "user",
+      kind: "talked",
+      meta: { userText: "hi pet" },
+    })
   })
 
   it("re-broadcasts a snapshot on request-state", () => {
@@ -132,7 +149,11 @@ describe("startMainPetBridge", () => {
     startMainPetBridge({ channel, store: store as never })
     channel.deliver({ v: 1, t: "request-state" })
     expect(channel.msgs()).toContainEqual({ v: 1, t: "visual-state", state: "happy" })
-    expect(channel.msgs()).toContainEqual({ v: 1, t: "bubble", bubble: { text: "yo" } })
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "bubble",
+      bubble: { text: "yo", origin: "llm" },
+    })
   })
 
   it("ignores malformed inbound messages", () => {
@@ -230,6 +251,36 @@ describe("startOverlayPetBridge", () => {
     const { sendInteraction } = startOverlayPetBridge({ channel, store: store as never })
     sendInteraction("talked")
     expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "talked" })
+  })
+
+  it("sendInteraction carries trimmed talk text and caps it at 500 chars", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const { sendInteraction } = startOverlayPetBridge({ channel, store: store as never })
+    sendInteraction("talked", "hello pet")
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "interaction",
+      kind: "talked",
+      text: "hello pet",
+    })
+    sendInteraction("talked", "   ")
+    expect(channel.msgs()).toContainEqual({ v: 1, t: "interaction", kind: "talked" })
+    sendInteraction("talked", "y".repeat(600))
+    expect(channel.msgs()).toContainEqual({
+      v: 1,
+      t: "interaction",
+      kind: "talked",
+      text: "y".repeat(500),
+    })
+  })
+
+  it("applies the broadcast bubble origin when present", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    startOverlayPetBridge({ channel, store: store as never })
+    channel.deliver({ v: 1, t: "bubble", bubble: { text: "from llm", origin: "llm" } })
+    expect(store.__state.setBubble).toHaveBeenCalledWith({ text: "from llm", origin: "llm" })
   })
 
   it("dispose closes the channel", () => {

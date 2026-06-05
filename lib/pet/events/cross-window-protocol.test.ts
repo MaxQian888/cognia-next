@@ -10,8 +10,10 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "visual-state", state: "thinking" },
     { v: 1, t: "one-shot", shot: "levelUp" },
     { v: 1, t: "bubble", bubble: { text: "hi" } },
+    { v: 1, t: "bubble", bubble: { text: "hi", origin: "llm" } },
     { v: 1, t: "bubble", bubble: null },
     { v: 1, t: "interaction", kind: "fed" },
+    { v: 1, t: "interaction", kind: "talked", text: "hello pet" },
     { v: 1, t: "request-state" },
   ]
 
@@ -25,13 +27,31 @@ describe("cross-window-protocol", () => {
     }
   })
 
-  it("strips extra bubble fields to the wire shape", () => {
-    const decoded = decodePetBridgeMessage({
+  it("keeps a valid bubble origin and strips an unknown one", () => {
+    expect(
+      decodePetBridgeMessage({ v: 1, t: "bubble", bubble: { text: "hello", origin: "llm" } })
+    ).toEqual({ v: 1, t: "bubble", bubble: { text: "hello", origin: "llm" } })
+    expect(
+      decodePetBridgeMessage({ v: 1, t: "bubble", bubble: { text: "hello", origin: "weird" } })
+    ).toEqual({ v: 1, t: "bubble", bubble: { text: "hello" } })
+  })
+
+  it("caps interaction text at 500 chars and drops empty/non-string text", () => {
+    const long = "x".repeat(600)
+    expect(decodePetBridgeMessage({ v: 1, t: "interaction", kind: "talked", text: long })).toEqual({
       v: 1,
-      t: "bubble",
-      bubble: { text: "hello", origin: "llm" },
+      t: "interaction",
+      kind: "talked",
+      text: "x".repeat(500),
     })
-    expect(decoded).toEqual({ v: 1, t: "bubble", bubble: { text: "hello" } })
+    expect(decodePetBridgeMessage({ v: 1, t: "interaction", kind: "talked", text: "   " })).toEqual(
+      { v: 1, t: "interaction", kind: "talked" }
+    )
+    expect(decodePetBridgeMessage({ v: 1, t: "interaction", kind: "talked", text: 7 })).toEqual({
+      v: 1,
+      t: "interaction",
+      kind: "talked",
+    })
   })
 
   describe("rejection", () => {

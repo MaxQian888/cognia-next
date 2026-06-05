@@ -1,6 +1,8 @@
 // User-facing pet preferences. Persisted as `AppSettings.petSettings` via the
 // settings store `save()` action (see `components/settings/pet/pet-section.tsx`).
 
+import type { UtilityModelConfig } from "@/lib/claude/types"
+
 /** Which corner the floating widget docks to. */
 export type PetAnchor = "bottom-right" | "bottom-left" | "top-right" | "top-left"
 
@@ -74,6 +76,13 @@ export interface PetSettings {
    * antialiasing at init, and lengthens wander rest intervals.
    */
   lowPower?: boolean
+  /**
+   * Opt-in LLM speak for the talk interaction (`speakAsPet` side channel).
+   * Absent or `enabled: false` → talk shows a template bubble only; the pet
+   * never spends a token. Mirrors the `labelSummary` utility-config pattern:
+   * optional provider/model override, resolved by `buildUtilityLlmClient`.
+   */
+  llmSpeak?: UtilityModelConfig
 }
 
 export const DEFAULT_PET_WANDER: PetWanderSettings = {

@@ -498,7 +498,7 @@ describe("PetOverlayView", () => {
       fireEvent.contextMenu(screen.getByTestId("pet-overlay-root"))
     }
 
-    it("right-click feed/play/pet/talk send the matching interaction over the bridge", async () => {
+    it("right-click feed/play send the matching interaction over the bridge", async () => {
       const user = userEvent.setup()
       withPet()
       render(<PetOverlayView />)
@@ -510,10 +510,36 @@ describe("PetOverlayView", () => {
       openMenu()
       await user.click(screen.getByText("play"))
       expect(bridgeSendInteraction).toHaveBeenCalledWith("played")
+    })
+
+    it("right-click talk opens the composer; submit rides the bridge with text", async () => {
+      const user = userEvent.setup()
+      withPet()
+      render(<PetOverlayView />)
 
       openMenu()
       await user.click(screen.getByText("talk"))
-      expect(bridgeSendInteraction).toHaveBeenCalledWith("talked")
+      // Menu talk opens the composer instead of firing a bare interaction.
+      expect(bridgeSendInteraction).not.toHaveBeenCalledWith("talked")
+      const input = screen.getByLabelText("talkPlaceholder")
+      fireEvent.change(input, { target: { value: "hi pet" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      expect(bridgeSendInteraction).toHaveBeenCalledWith("talked", "hi pet")
+      // Composer closes after submit.
+      expect(screen.queryByTestId("pet-overlay-talk-composer")).not.toBeInTheDocument()
+    })
+
+    it("escape closes the composer without sending", async () => {
+      const user = userEvent.setup()
+      withPet()
+      render(<PetOverlayView />)
+
+      openMenu()
+      await user.click(screen.getByText("talk"))
+      const input = screen.getByLabelText("talkPlaceholder")
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(screen.queryByTestId("pet-overlay-talk-composer")).not.toBeInTheDocument()
+      expect(bridgeSendInteraction).not.toHaveBeenCalled()
     })
 
     it("click-through turns on the OS flag and persists clickThrough=true", async () => {

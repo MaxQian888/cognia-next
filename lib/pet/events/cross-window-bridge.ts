@@ -65,7 +65,11 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   const broadcastSnapshot = () => {
     const s = store.getState()
     post(channel, { v: 1, t: "visual-state", state: s.visualState })
-    post(channel, { v: 1, t: "bubble", bubble: s.bubble ? { text: s.bubble.text } : null })
+    post(channel, {
+      v: 1,
+      t: "bubble",
+      bubble: s.bubble ? { text: s.bubble.text, origin: s.bubble.origin } : null,
+    })
   }
 
   const unsub = store.subscribe((state, prev) => {
@@ -76,7 +80,7 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
       post(channel, {
         v: 1,
         t: "bubble",
-        bubble: state.bubble ? { text: state.bubble.text } : null,
+        bubble: state.bubble ? { text: state.bubble.text, origin: state.bubble.origin } : null,
       })
     }
     // One-shots are an append-only queue drained by the animation hook; detect
@@ -91,7 +95,13 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
     const msg = decodePetBridgeMessage(event.data)
     if (!msg) return
     if (msg.t === "interaction") {
-      emit({ source: "user", kind: msg.kind })
+      // Forward overlay-typed talk text as event meta so `use-pet-speak` (main
+      // window) can run the LLM side channel for it.
+      emit({
+        source: "user",
+        kind: msg.kind,
+        meta: msg.text ? { userText: msg.text } : undefined,
+      })
     } else if (msg.t === "request-state") {
       broadcastSnapshot()
     }
@@ -111,7 +121,8 @@ export interface OverlayPetBridgeDeps {
 
 export interface OverlayPetBridge {
   dispose: () => void
-  sendInteraction: (kind: PetBridgeInteractionKind) => void
+  /** Post an interaction to the main window; talk may carry typed text. */
+  sendInteraction: (kind: PetBridgeInteractionKind, text?: string) => void
 }
 
 /**
@@ -139,7 +150,7 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
         break
       case "bubble": {
         const next: PetBubble | null = msg.bubble
-          ? { text: msg.bubble.text, origin: "system" }
+          ? { text: msg.bubble.text, origin: msg.bubble.origin ?? "system" }
           : null
         api.setBubble(next)
         break
@@ -156,6 +167,12 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
       channel.onmessage = null
       channel.close()
     },
-    sendInteraction: (kind) => post(channel, { v: 1, t: "interaction", kind }),
+    sendInteraction: (kind, text) =>
+      post(channel, {
+        v: 1,
+        t: "interaction",
+        kind,
+        ...(text && text.trim() ? { text: text.slice(0, 500) } : {}),
+      }),
   }
 }

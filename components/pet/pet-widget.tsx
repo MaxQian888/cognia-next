@@ -15,6 +15,7 @@ import { isTauri } from "@/lib/platform/detect"
 import { usePet } from "@/hooks/pet/use-pet"
 import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { usePetBubbles } from "@/hooks/pet/use-pet-bubbles"
+import { usePetSpeak } from "@/hooks/pet/use-pet-speak"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetStore } from "@/stores/pet/pet-store"
@@ -58,6 +59,9 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   const { profile, view, feed, play, petStroke, talk } = usePet(activeCharacterId)
   const { state, oneShot } = usePetAnimationState(reduced)
   usePetBubbles(settings.enabled && !settings.mutedBubbles)
+  // Owns every `talked` bubble (LLM side channel + template fallback). Main
+  // window only — overlay talk replays here through the cross-window bridge.
+  usePetSpeak({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
 
   // Resolve which skin actually renders — live2d only when picked, the Cubism
   // runtime is ready, and an active model exists; otherwise the SVG mascot.

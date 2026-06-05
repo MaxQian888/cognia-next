@@ -29,6 +29,8 @@ import {
   type PetWanderSettings,
 } from "@/types/pet"
 import { SettingsCard } from "../common/settings-section"
+import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
+import type { UtilityModelConfig } from "@/lib/claude/types"
 import { PetModelManager } from "./pet-model-manager"
 
 const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
@@ -48,6 +50,11 @@ export function PetSection() {
   const showDesktopPet = isTauri()
 
   const patch = (next: Partial<PetSettings>) => void save({ petSettings: { ...pet, ...next } })
+
+  // Patch the nested opt-in LLM-speak utility config.
+  const providers = useUtilityProviderOptions()
+  const patchLlmSpeak = (next: Partial<UtilityModelConfig>) =>
+    patch({ llmSpeak: { ...pet.llmSpeak, ...next } })
 
   // Patch the nested desktop-pet overlay block.
   const patchDesktop = (next: Partial<PetDesktopOverlaySettings>) =>
@@ -164,6 +171,34 @@ export function PetSection() {
           onCheckedChange={(v) => patch({ mutedBubbles: v })}
         />
       </div>
+
+      {/* Opt-in LLM speak for the talk interaction (off = template bubbles only). */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label htmlFor="pet-llm-speak">{t("llmSpeak.label")}</Label>
+          <p className="text-sm text-muted-foreground">{t("llmSpeak.description")}</p>
+        </div>
+        <Switch
+          id="pet-llm-speak"
+          checked={!!pet.llmSpeak?.enabled}
+          onCheckedChange={(v) => patchLlmSpeak({ enabled: v })}
+        />
+      </div>
+      {!!pet.llmSpeak?.enabled && (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-xs text-muted-foreground">{t("llmSpeak.modelHint")}</p>
+          <ModelOverrideFields
+            value={pet.llmSpeak}
+            providers={providers}
+            onChange={patchLlmSpeak}
+            labels={{
+              provider: t("llmSpeak.provider"),
+              model: t("llmSpeak.model"),
+              useDefault: t("llmSpeak.useDefault"),
+            }}
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label>{t("size.label", { size: pet.size })}</Label>
