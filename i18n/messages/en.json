@@ -19701,6 +19701,7 @@
       "goalComplete": ["Goal smashed!", "We did it!", "Victory!"],
       "levelUp": ["Level up!", "Getting stronger!"],
       "evolved": ["I evolved!", "New me!"],
+      "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
       "fed": ["Yum!", "Tasty!", "Nom nom."],
       "played": ["So fun!", "Again!", "Wheee!"],
       "petted": ["Purr…", "That's nice.", "♥"],

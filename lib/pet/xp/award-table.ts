@@ -30,6 +30,7 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   greeting: 0,
   levelUp: 0,
   evolved: 0,
+  achievementUnlocked: 0, // celebration only; the unlocking event already paid XP
 }
 
 /** Resolve XP for an event: explicit value wins, else the table, else 0. */

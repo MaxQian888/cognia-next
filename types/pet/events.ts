@@ -39,6 +39,7 @@ export type PetEventKind =
   | "hatched"
   | "levelUp"
   | "evolved"
+  | "achievementUnlocked"
   | "greeting"
 
 export interface PetEvent {

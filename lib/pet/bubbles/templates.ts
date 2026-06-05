@@ -22,6 +22,7 @@ const VARIANTS: Partial<Record<PetEventKind, number>> = {
   hatched: 2,
   greeting: 3,
   inboundMessage: 2,
+  achievementUnlocked: 2,
 }
 
 /** Mood-flavoured idle phrases (shown on idle ticks, keyed by mood). */

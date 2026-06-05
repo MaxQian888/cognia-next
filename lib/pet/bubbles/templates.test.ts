@@ -35,8 +35,17 @@ describe("pickBubbleKey", () => {
       "hatched",
       "greeting",
       "inboundMessage",
+      "achievementUnlocked",
     ]
     for (const k of kinds) expect(pickBubbleKey(k, 3)).not.toBeNull()
+  })
+
+  it("keeps achievementUnlocked within its variant pool", () => {
+    for (let seed = 0; seed < 10; seed++) {
+      expect(pickBubbleKey("achievementUnlocked", seed)).toMatch(
+        /^bubbles\.achievementUnlocked\.[0-1]$/
+      )
+    }
   })
 })
 

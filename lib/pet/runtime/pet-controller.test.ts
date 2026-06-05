@@ -3,8 +3,13 @@ import { handlePetEvent, whenPetEventsSettled } from "./pet-controller"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getPetProfile, listPetAchievements, upsertPetProfile } from "@/lib/db/pet"
 import { createDefaultProfile } from "@/lib/pet/defaults"
+import { __resetPetEventBusForTesting, getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
 import type { PetEvent } from "@/types/pet"
+
+afterEach(() => {
+  __resetPetEventBusForTesting()
+})
 
 beforeEach(async () => {
   await getDb().delete()
@@ -65,6 +70,32 @@ describe("handlePetEvent", () => {
     const ids = (await listPetAchievements()).map((a) => a.id)
     expect(ids).toContain("first-xp")
     expect(ids).toContain("hatched")
+  })
+
+  it("emits achievementUnlocked on the bus once per newly-unlocked id", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "achievementUnlocked") seen.push(e)
+    })
+
+    await handlePetEvent(event("goalComplete")) // unlocks first-xp + hatched
+    await whenPetEventsSettled()
+
+    const ids = seen.map((e) => e.meta?.achievementId)
+    expect(ids).toContain("first-xp")
+    expect(ids).toContain("hatched")
+    expect(seen.every((e) => e.source === "system" && e.at === 1000)).toBe(true)
+
+    // Replaying the same event unlocks nothing new → no further emits.
+    seen.length = 0
+    await handlePetEvent(event("goalComplete"))
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
   })
 
   it("serializes concurrent events without losing XP", async () => {

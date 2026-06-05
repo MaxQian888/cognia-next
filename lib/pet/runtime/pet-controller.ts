@@ -21,6 +21,7 @@ import { reducePetVisualState } from "@/lib/pet/state/reducer"
 import { applyPetEvent } from "@/lib/pet/runtime/apply-event"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { checkAchievements } from "@/lib/pet/achievements/check"
+import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
 
 async function process(event: PetEvent): Promise<void> {
@@ -48,6 +49,21 @@ async function process(event: PetEvent): Promise<void> {
   const unlocked = (await listPetAchievements()).map((a) => a.id)
   const newly = checkAchievements({ profile: nextProfile, bones, activity: [], counters }, unlocked)
   for (const id of newly) await recordPetAchievement(id, now)
+
+  // Announce unlocks on the bus so bubble/proactive subscribers can celebrate.
+  // Guarded against feedback: achievementUnlocked itself never unlocks anything
+  // new, awards no XP, and the serialized chain absorbs the re-entrant handling.
+  if (event.kind !== "achievementUnlocked") {
+    const bus = getPetEventBus()
+    for (const id of newly) {
+      bus.emit({
+        source: "system",
+        kind: "achievementUnlocked",
+        at: now,
+        meta: { achievementId: id },
+      })
+    }
+  }
 }
 
 let chain: Promise<void> = Promise.resolve()
