@@ -210,11 +210,19 @@ impl AutomationBackend for AtspiBackend {
     }
 
     fn pick_at_point(&self, _point: Point) -> Result<ElementInfo> {
-        // Minimum-viable: resolve to the currently focused window. True
-        // hit-testing requires AT-SPI accessibility-at-point lookup
-        // which we'll add when the full tree walker lands.
-        let snap = read_focused_window()?;
-        Ok(focused_to_element_info(&snap))
+        // The pick affordance moves the user's cursor onto the target
+        // before calling us, so "window under the cursor" IS the picked
+        // window — `xdotool getmouselocation --shell` resolves it without
+        // needing AT-SPI accessibility-at-point. Graceful fallback to the
+        // focused window (pre-existing behavior) when the window id can't
+        // be resolved (e.g. Wayland without XWayland hit-testing).
+        match window_under_cursor() {
+            Ok(info) => Ok(info),
+            Err(_) => {
+                let snap = read_focused_window()?;
+                Ok(focused_to_element_info(&snap))
+            }
+        }
     }
 }
 
@@ -366,6 +374,63 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
     guard.snapshot = Some(snap.clone());
     guard.captured_at = Instant::now();
     Ok(snap)
+}
+
+/// Run `xdotool <args>` and return trimmed stdout. Shared by the
+/// focused-window reader and the window-under-cursor pick.
+fn run_xdotool(args: &[&str]) -> Result<String> {
+    if !command_on_path("xdotool") {
+        return Err(AutomationError::BackendError {
+            message: "xdotool not on PATH — install xdotool to use the AT-SPI backend".into(),
+        });
+    }
+    let output = std::process::Command::new("xdotool")
+        .args(args)
+        .output()
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("xdotool spawn failed: {e}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(AutomationError::BackendError {
+            message: format!("xdotool exited {}: {stderr}", output.status),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Resolve the window under the cursor via
+/// `xdotool getmouselocation --shell` (prints `X=.. Y=.. SCREEN=..
+/// WINDOW=<id>` lines) plus name/pid lookups on the resolved id.
+fn window_under_cursor() -> Result<ElementInfo> {
+    use crate::automation::platform::shared::shell_vars::parse_shell_var;
+
+    let out = run_xdotool(&["getmouselocation", "--shell"])?;
+    let win_id = parse_shell_var(&out, "WINDOW").ok_or_else(|| AutomationError::BackendError {
+        message: "xdotool getmouselocation: no WINDOW".into(),
+    })?;
+    let title = run_xdotool(&["getwindowname", &win_id])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let pid = run_xdotool(&["getwindowpid", &win_id])
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    let process_name = pid.and_then(read_process_name_from_proc);
+    Ok(ElementInfo {
+        element_ref: ElementRef(format!("linux|window={win_id}")),
+        name: title.clone(),
+        automation_id: None,
+        control_type: None,
+        class_name: None,
+        bounding_rect: None,
+        is_enabled: true,
+        is_focused: false,
+        process_id: pid,
+        process_name,
+        window_title: title,
+        children: None,
+    })
 }
 
 fn read_via_xdotool() -> Result<FocusedSnapshot> {

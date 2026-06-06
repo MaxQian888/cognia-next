@@ -67,8 +67,10 @@ pub trait AutomationBackend {
     /// Backs the Inspector "Pick" affordance: the renderer overlay
     /// captures a point and calls this to materialise an `ElementInfo`.
     ///
-    /// macOS / Linux return `UnsupportedPlatform` until equivalent
-    /// AXUIElement / AT-SPI hit-testing ships (Phase 6.b).
+    /// Windows hit-tests through UIA. Linux resolves the window under
+    /// the cursor via xdotool (falling back to the focused window).
+    /// macOS resolves the frontmost window via osascript metadata —
+    /// true AXUIElement hit-testing is still Phase 6.b.
     fn pick_at_point(&self, point: Point) -> Result<ElementInfo>;
 }
 

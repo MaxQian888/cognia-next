@@ -17,3 +17,8 @@ pub mod credential_window;
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub mod keymap;
 pub mod screenshot;
+// KEY=value line parser for shell-tool output (`xdotool --shell`). Only
+// the Linux backend consumes it in production; compiled with tests
+// everywhere so the parser stays covered on the Windows dev host.
+#[cfg(any(target_os = "linux", test))]
+pub mod shell_vars;
