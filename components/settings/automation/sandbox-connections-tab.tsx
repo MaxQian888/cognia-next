@@ -78,7 +78,7 @@ export function SandboxConnectionsTab() {
           {connections.map((conn) => (
             <li
               key={conn.id}
-              className="flex items-center justify-between gap-3 rounded-md border p-3"
+              className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">

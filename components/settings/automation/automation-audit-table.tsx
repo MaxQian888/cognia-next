@@ -106,7 +106,7 @@ export function AutomationAuditTable() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>{t("title")}</CardTitle>
           <CardDescription>
@@ -122,7 +122,7 @@ export function AutomationAuditTable() {
             </Badge>
           </CardDescription>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
             <DownloadIcon className="size-4" /> {t("exportCsv")}
           </Button>
@@ -132,10 +132,10 @@ export function AutomationAuditTable() {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center gap-2 text-sm">
-          <FilterIcon className="size-4 text-muted-foreground" />
+        <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center">
+          <FilterIcon className="hidden size-4 text-muted-foreground sm:block" />
           <Select value={surfaceFilter} onValueChange={(v) => setSurfaceFilter(v as SurfaceFilter)}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -150,7 +150,7 @@ export function AutomationAuditTable() {
             value={decisionFilter}
             onValueChange={(v) => setDecisionFilter(v as DecisionFilter)}
           >
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -167,7 +167,7 @@ export function AutomationAuditTable() {
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
-          <div className="max-h-[480px] overflow-auto">
+          <div className="max-h-[480px] w-full overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -186,7 +186,12 @@ export function AutomationAuditTable() {
                       {new Date(row.ts).toLocaleString()}
                     </TableCell>
                     <TableCell>{row.surface}</TableCell>
-                    <TableCell className="font-mono text-xs">{row.command}</TableCell>
+                    <TableCell
+                      className="max-w-[140px] truncate font-mono text-xs"
+                      title={row.command}
+                    >
+                      {row.command}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant={
@@ -200,7 +205,10 @@ export function AutomationAuditTable() {
                         {row.decision}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell
+                      className="max-w-[160px] truncate text-xs"
+                      title={row.processName ?? row.windowTitle ?? undefined}
+                    >
                       {row.processName ?? row.windowTitle ?? "—"}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">

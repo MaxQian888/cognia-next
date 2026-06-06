@@ -444,7 +444,10 @@ function PermissionsTab() {
           {surfaces.map((s) => {
             const policy = settings.perSurface[s.id]
             return (
-              <div key={s.id} className="flex items-start justify-between gap-4">
+              <div
+                key={s.id}
+                className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+              >
                 <div className="space-y-0.5">
                   <Label className="font-medium">{s.label}</Label>
                   <p className="text-xs text-muted-foreground">{s.description}</p>

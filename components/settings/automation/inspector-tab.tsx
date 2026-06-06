@@ -313,7 +313,7 @@ export function InspectorTab() {
               />
             </div>
           )}
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
               <Label className="text-xs">{t("maxDepth")}</Label>
               <Input
@@ -406,7 +406,7 @@ export function InspectorTab() {
                 <pre className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] font-mono overflow-x-auto">
                   {locatorJson}
                 </pre>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
