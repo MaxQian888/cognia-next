@@ -426,6 +426,21 @@ export async function skillsFetchRemoteMd(url: string): Promise<string> {
   return transport.call<string>("skills_fetch_remote_md", { url })
 }
 
+/** Response of the Rust JSON GET proxy. Non-2xx statuses are returned (not thrown). */
+export interface SkillsRemoteGetResponse {
+  status: number
+  body: string
+  retryAfter?: string | null
+}
+
+export async function skillsFetchRemoteJson(req: {
+  url: string
+  bearerToken?: string
+  accept?: string
+}): Promise<SkillsRemoteGetResponse> {
+  return transport.call<SkillsRemoteGetResponse>("skills_fetch_remote_json", { req })
+}
+
 export async function skillsLoadRegistry(): Promise<RegistrySkillEntry[]> {
   return transport.call<RegistrySkillEntry[]>("skills_load_registry")
 }

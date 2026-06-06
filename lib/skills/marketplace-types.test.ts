@@ -6,7 +6,7 @@ import type { MarketplaceItem, MarketplaceSourceId, FetchSkillContent } from "./
 
 describe("marketplace-types", () => {
   it("accepts a minimal MarketplaceItem with both source ids", () => {
-    const sources: MarketplaceSourceId[] = ["registry", "skillsmp"]
+    const sources: MarketplaceSourceId[] = ["registry", "skillssh"]
     for (const source of sources) {
       const item: MarketplaceItem = {
         id: `${source}:1`,

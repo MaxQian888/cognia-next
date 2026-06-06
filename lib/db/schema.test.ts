@@ -292,6 +292,62 @@ describe("getDb", () => {
     expect(coding?.packVersionAtClone).toBe("9.9.9")
   })
 
+  // v78 — Skills installed from the defunct SkillsMP marketplace lose their
+  // provenance fields (canonicalId / marketplaceSkillId) and survive as
+  // plain local skills; everything else is untouched.
+  it("v78 upgrade hook detaches skillsmp:* installs and leaves others alone", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(77).stores({
+      skills: "&id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+    })
+    await legacy.open()
+    await legacy.table("skills").bulkPut([
+      {
+        id: "skill-mp",
+        name: "Old SkillsMP install",
+        content: "x",
+        source: "marketplace",
+        canonicalId: "skillsmp:42",
+        marketplaceSkillId: "42",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      {
+        id: "skill-registry",
+        name: "Registry install",
+        content: "y",
+        source: "marketplace",
+        canonicalId: "registry:ai-elements",
+        marketplaceSkillId: "ai-elements",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      {
+        id: "skill-local",
+        name: "Local skill",
+        content: "z",
+        source: "custom",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+    const detached = await db.skills.get("skill-mp")
+    expect(detached?.canonicalId).toBeUndefined()
+    expect(detached?.marketplaceSkillId).toBeUndefined()
+    expect(detached?.name).toBe("Old SkillsMP install")
+    // Registry installs and plain local skills survive verbatim.
+    const registry = await db.skills.get("skill-registry")
+    expect(registry?.canonicalId).toBe("registry:ai-elements")
+    expect(registry?.marketplaceSkillId).toBe("ai-elements")
+    const local = await db.skills.get("skill-local")
+    expect(local?.canonicalId).toBeUndefined()
+  })
+
   it("opens at schema v41 (IM connector complete gap closure)", async () => {
     const db = getDb()
     await db.open()

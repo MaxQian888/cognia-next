@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/protect-generated-files.mjs"],
+            "timeout": 15,
+            "statusMessage": "Checking protected paths"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/i18n-parity-guard.mjs"],
+            "timeout": 120,
+            "statusMessage": "Running i18n parity gate"
+          }
+        ]
+      }
+    ]
+  }
+}

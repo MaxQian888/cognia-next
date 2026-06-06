@@ -26,6 +26,7 @@ import {
   sendPrompt,
   subscribePluginToolExec,
   setApiKey,
+  skillsFetchRemoteJson,
   skillsFetchRemoteMd,
   skillsInstallNative,
   skillsLoadRegistry,
@@ -337,6 +338,16 @@ describe("skills commands", () => {
     await expect(skillsFetchRemoteMd("https://e/x.md")).resolves.toBe("# md")
     expect(callSpy).toHaveBeenCalledWith("skills_fetch_remote_md", {
       url: "https://e/x.md",
+    })
+  })
+
+  it("skillsFetchRemoteJson wraps the request in {req}", async () => {
+    callSpy.mockResolvedValueOnce({ status: 200, body: "{}", retryAfter: null })
+    await expect(
+      skillsFetchRemoteJson({ url: "https://skills.sh/api/search?q=x", bearerToken: "tok" })
+    ).resolves.toEqual({ status: 200, body: "{}", retryAfter: null })
+    expect(callSpy).toHaveBeenCalledWith("skills_fetch_remote_json", {
+      req: { url: "https://skills.sh/api/search?q=x", bearerToken: "tok" },
     })
   })
 

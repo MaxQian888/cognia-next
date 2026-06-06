@@ -9,8 +9,9 @@ jest.mock("@/lib/db/skills", () => ({
 jest.mock("./marketplace-registry", () => ({
   fetchRegistrySkillContent: jest.fn(),
 }))
-jest.mock("./marketplace-skillsmp", () => ({
-  fetchSkillsMpSkillContent: jest.fn(),
+jest.mock("./marketplace-skillssh", () => ({
+  fetchSkillsShDetail: jest.fn(),
+  fetchSkillsShSkillContent: jest.fn(),
 }))
 
 import {
@@ -22,7 +23,7 @@ import {
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { listSkills, deleteSkill, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import { fetchRegistrySkillContent } from "./marketplace-registry"
-import { fetchSkillsMpSkillContent } from "./marketplace-skillsmp"
+import { fetchSkillsShDetail, fetchSkillsShSkillContent } from "./marketplace-skillssh"
 import type { MarketplaceItem } from "./marketplace-types"
 
 const mockedParse = parseSkillMarkdown as unknown as jest.Mock
@@ -30,7 +31,8 @@ const mockedList = listSkills as unknown as jest.Mock
 const mockedDelete = deleteSkill as unknown as jest.Mock
 const mockedUpsert = upsertSkillByCanonicalId as unknown as jest.Mock
 const mockedRegFetch = fetchRegistrySkillContent as unknown as jest.Mock
-const mockedSmpFetch = fetchSkillsMpSkillContent as unknown as jest.Mock
+const mockedShDetail = fetchSkillsShDetail as unknown as jest.Mock
+const mockedShContent = fetchSkillsShSkillContent as unknown as jest.Mock
 
 beforeEach(() => {
   // resetAllMocks (not clearAllMocks) so leftover `mockResolvedValueOnce`
@@ -63,15 +65,15 @@ describe("fetchMarketplaceContent", () => {
     expect(mockedRegFetch).toHaveBeenCalled()
   })
 
-  it("dispatches to the skillsmp adapter", async () => {
-    mockedSmpFetch.mockResolvedValue({
+  it("dispatches to the skills.sh adapter", async () => {
+    mockedShContent.mockResolvedValue({
       content: "Y",
-      canonicalId: "skillsmp:id-1",
-      marketplaceSkillId: "id-1",
+      canonicalId: "skillssh:o/r/s",
+      marketplaceSkillId: "o/r/s",
     })
-    const out = await fetchMarketplaceContent(item({ source: "skillsmp" }))
+    const out = await fetchMarketplaceContent(item({ source: "skillssh", sourceId: "o/r/s" }))
     expect(out.content).toBe("Y")
-    expect(mockedSmpFetch).toHaveBeenCalled()
+    expect(mockedShContent).toHaveBeenCalled()
   })
 
   it("rejects unknown sources", async () => {
@@ -184,6 +186,73 @@ describe("installMarketplaceItem", () => {
         }),
       })
     )
+  })
+})
+
+describe("installMarketplaceItem — skills.sh multi-file branch", () => {
+  const shItem = (): MarketplaceItem =>
+    item({
+      id: "skillssh:o/r/s",
+      source: "skillssh",
+      sourceId: "o/r/s",
+      name: "find-skills",
+    })
+
+  it("installs the full snapshot as skill + resources with a content hash", async () => {
+    mockedShDetail.mockResolvedValue({
+      files: [
+        { path: "SKILL.md", contents: "---\nname: f\n---\nbody" },
+        { path: "scripts/run.sh", contents: "#!/bin/sh" },
+        { path: "references/notes.md", contents: "# notes" },
+      ],
+    })
+    // parseBundleManifest consumes the (mocked) parseSkillMarkdown.
+    mockedParse.mockReturnValue({
+      draft: { name: "find-skills", content: "body" },
+      warnings: [],
+    })
+    mockedUpsert.mockResolvedValue({ skill: { id: "sh-1" }, created: true })
+
+    const out = await installMarketplaceItem(shItem())
+    expect(out.created).toBe(true)
+    expect(mockedShDetail).toHaveBeenCalled()
+    const call = mockedUpsert.mock.calls[0][0]
+    expect(call.canonicalId).toBe("skillssh:o/r/s")
+    expect(call.draft.source).toBe("marketplace")
+    expect(call.draft.marketplaceSkillId).toBe("o/r/s")
+    expect(call.draft.marketplaceHash).toMatch(/^sha256:[0-9a-f]+$/)
+    expect(call.draft.resources).toHaveLength(2)
+    expect(call.draft.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "scripts/run.sh", kind: "script" }),
+        expect.objectContaining({ path: "references/notes.md", kind: "reference" }),
+      ])
+    )
+  })
+
+  it("refuses a snapshot without SKILL.md", async () => {
+    mockedShDetail.mockResolvedValue({
+      files: [{ path: "readme.md", contents: "x" }],
+    })
+    await expect(installMarketplaceItem(shItem())).rejects.toThrow(/no SKILL\.md/)
+    expect(mockedUpsert).not.toHaveBeenCalled()
+  })
+
+  it("threads item-level fallbacks for fields the manifest omits", async () => {
+    mockedShDetail.mockResolvedValue({
+      files: [{ path: "SKILL.md", contents: "---\nname: f\n---\nbody" }],
+    })
+    mockedParse.mockReturnValue({
+      draft: { name: "find-skills", content: "body" },
+      warnings: [],
+    })
+    mockedUpsert.mockResolvedValue({ skill: { id: "sh-2" }, created: true })
+    await installMarketplaceItem(shItem())
+    const call = mockedUpsert.mock.calls[0][0]
+    expect(call.draft.description).toBe("desc")
+    expect(call.draft.author).toBe("auth")
+    expect(call.draft.license).toBe("MIT")
+    expect(call.draft.resources).toBeUndefined()
   })
 })
 

@@ -1,12 +1,13 @@
-// Install a marketplace item into Dexie. The actual SKILL.md fetch is
+// Install a marketplace item into Dexie. The actual content fetch is
 // deferred to the source adapter (`marketplace-registry` or
-// `marketplace-skillsmp`). After the row lands in IndexedDB the user may
+// `marketplace-skillssh`). After the row lands in IndexedDB the user may
 // optionally call `pushAllToNative()` to project it onto disk.
 
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { listSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
 import { fetchRegistrySkillContent } from "./marketplace-registry"
-import { fetchSkillsMpSkillContent } from "./marketplace-skillsmp"
+import { fetchSkillsShDetail, fetchSkillsShSkillContent } from "./marketplace-skillssh"
+import { computeSkillsShFilesHash, filesToBundleResult } from "./skillssh-install"
 import { validateSkill } from "./validate"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
 import type { Skill, SkillStatus, SkillValidationError } from "@/lib/claude/types"
@@ -15,13 +16,47 @@ export async function fetchMarketplaceContent(item: MarketplaceItem): Promise<Fe
   switch (item.source) {
     case "registry":
       return fetchRegistrySkillContent(item)
-    case "skillsmp":
-      return fetchSkillsMpSkillContent(item)
+    case "skillssh":
+      return fetchSkillsShSkillContent(item)
     default: {
       const exhaustive: never = item.source
       throw new Error(`Unknown marketplace source: ${exhaustive as string}`)
     }
   }
+}
+
+/**
+ * Multi-file install for skills.sh items: the snapshot's full file set lands
+ * as skill + resources (scripts/references/assets), and a client-computed
+ * content hash is stored for the explicit "Check for updates" comparison.
+ * Idempotent — re-running replaces content, resources, and hash in place.
+ */
+async function installSkillsShItem(
+  item: MarketplaceItem
+): Promise<{ skill: Skill; created: boolean; validationErrors: SkillValidationError[] }> {
+  const detail = await fetchSkillsShDetail(item)
+  const bundled = filesToBundleResult(detail.files, item.name)
+  const marketplaceHash = await computeSkillsShFilesHash(detail.files)
+  const validationErrors = bundled.nonFatalValidationErrors
+  const status: SkillStatus = validationErrors.length > 0 ? "error" : "enabled"
+  const canonicalId = `skillssh:${item.sourceId}`
+  const { skill, created } = await upsertSkillByCanonicalId({
+    draft: {
+      ...bundled.draft,
+      description: bundled.draft.description ?? item.description,
+      tags: bundled.draft.tags ?? item.tags,
+      category: bundled.draft.category ?? item.category,
+      author: bundled.draft.author ?? item.author,
+      license: bundled.draft.license ?? item.license,
+      source: "marketplace",
+      marketplaceSkillId: item.sourceId,
+      marketplaceHash,
+      validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+      status,
+    },
+    canonicalId,
+  })
+  return { skill, created, validationErrors }
 }
 
 /**
@@ -37,6 +72,10 @@ export async function fetchMarketplaceContent(item: MarketplaceItem): Promise<Fe
 export async function installMarketplaceItem(
   item: MarketplaceItem
 ): Promise<{ skill: Skill; created: boolean; validationErrors: SkillValidationError[] }> {
+  // skills.sh installs carry the full file set (multi-file bundle path).
+  if (item.source === "skillssh") {
+    return installSkillsShItem(item)
+  }
   const fetched = await fetchMarketplaceContent(item)
   const { draft } = parseSkillMarkdown(fetched.content, {
     fallbackName: item.name,

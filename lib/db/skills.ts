@@ -39,6 +39,7 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
       | "license"
       | "canonicalId"
       | "marketplaceSkillId"
+      | "marketplaceHash"
       | "nativeDirectory"
       | "syncOrigin"
       | "syncFingerprint"
@@ -73,6 +74,7 @@ export async function createSkill(draft: SkillDraft): Promise<Skill> {
     license: draft.license,
     canonicalId: draft.canonicalId,
     marketplaceSkillId: draft.marketplaceSkillId,
+    marketplaceHash: draft.marketplaceHash,
     nativeDirectory: draft.nativeDirectory,
     syncOrigin: draft.syncOrigin ?? "frontend",
     syncFingerprint: draft.syncFingerprint,
@@ -221,6 +223,7 @@ export async function upsertSkillByCanonicalId(input: {
       license: draft.license ?? existing.license,
       canonicalId,
       marketplaceSkillId: draft.marketplaceSkillId ?? existing.marketplaceSkillId,
+      marketplaceHash: draft.marketplaceHash ?? existing.marketplaceHash,
       nativeDirectory: draft.nativeDirectory ?? existing.nativeDirectory,
       syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
       syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,

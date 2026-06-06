@@ -1878,6 +1878,28 @@ export class CogniaDB extends Dexie {
     this.version(77).stores({
       petConversation: "++id, at",
     })
+
+    // ── v78 — Detach skills installed from the defunct "SkillsMP" source. ────
+    // The speculative SkillsMP marketplace adapter was replaced by the real
+    // skills.sh integration; its canonicalId scheme (`skillsmp:<id>`) can
+    // never match the new `skillssh:owner/repo/slug` ids. Clearing the
+    // provenance fields turns those rows into plain local skills (they keep
+    // working) instead of phantom marketplace installs whose "installed"
+    // badge and update checks would silently never resolve. Idempotent: only
+    // rows whose canonicalId carries the `skillsmp:` prefix are touched.
+    this.version(78)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table("skills")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (typeof row.canonicalId === "string" && row.canonicalId.startsWith("skillsmp:")) {
+              row.canonicalId = undefined
+              row.marketplaceSkillId = undefined
+            }
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

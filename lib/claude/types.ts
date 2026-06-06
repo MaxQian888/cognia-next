@@ -1295,11 +1295,13 @@ export interface AppSettings {
   /** `MediaDeviceInfo.deviceId` of the user's last-picked microphone. */
   selectedMicId?: string
   /**
-   * Base URL for the SkillsMP skill marketplace API. Empty / unset disables
-   * the SkillsMP source in the Browse tab — the local registry remains
-   * available regardless. Trailing slash is stripped at read time.
+   * Optional Vercel OIDC token for the skills.sh `/api/v1` endpoints.
+   * Unlocks the leaderboard views (all-time / trending / hot) and curated
+   * collections in the Browse tab. Anonymous search, install, and security
+   * audits work without it. Short-lived (12h when pulled locally), so it is
+   * stored as a plain setting rather than in the keyring.
    */
-  skillsMpBaseUrl?: string
+  skillsShToken?: string
   /**
    * Skill bundle mirror targets. The cognia-owned canonical at
    * `<appData>/cognia/skills/<id>/` is always written; these toggles
@@ -2517,6 +2519,13 @@ export interface Skill {
   canonicalId?: string
   /** Marketplace item id this skill was installed from. */
   marketplaceSkillId?: string
+  /**
+   * Content hash of the marketplace snapshot this skill was installed from.
+   * Either the skills.sh `/api/v1` hash or a `sha256:`-prefixed client-side
+   * hash of the downloaded file set. Compared like-for-like by the explicit
+   * "Check for updates" action; distinct from `syncFingerprint` (native sync).
+   */
+  marketplaceHash?: string
   /** Path of the matching `~/.claude/skills/<dir>/` if synced to disk. */
   nativeDirectory?: string
   /** Which source last wrote this record. */

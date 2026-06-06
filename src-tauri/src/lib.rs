@@ -433,6 +433,7 @@ pub fn run() {
             skills::install::skills_empty_trash,
             skills::install::skills_list_trash,
             skills::remote::skills_fetch_remote_md,
+            skills::remote::skills_fetch_remote_json,
             skills::registry::skills_load_registry,
             skills::scanner::skills_scan_security,
             skills::scanner::skills_scan_resources,
