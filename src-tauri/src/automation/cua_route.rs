@@ -68,7 +68,15 @@ pub async fn screenshot(
                 }
                 Err(_) => (0, 0),
             };
-            Ok(Screenshot { bytes, width, height, captured_at: now_ms(), format: ImageFormat::Png })
+            Ok(Screenshot {
+                bytes,
+                width,
+                height,
+                captured_at: now_ms(),
+                format: ImageFormat::Png,
+                source_width: None,
+                source_height: None,
+            })
         }
     }
 }

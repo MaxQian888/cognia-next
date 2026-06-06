@@ -44,6 +44,7 @@ impl AutomationBackend for UiaBackend {
             has_screenshot: true,
             has_events: false, // M1.6 ships without UIA events; M2 adds them.
             has_a11y_tree: true, // UIA exposes a full element tree.
+            monitors: screenshot::list_monitors(),
         }
     }
 

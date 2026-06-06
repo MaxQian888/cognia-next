@@ -48,6 +48,7 @@ impl AutomationBackend for AtspiBackend {
             has_screenshot: !wayland_only,
             has_events: false,
             has_a11y_tree: false, // minimum-viable enigo backend: input only, no AT-SPI tree.
+            monitors: screenshot::list_monitors(),
         }
     }
 

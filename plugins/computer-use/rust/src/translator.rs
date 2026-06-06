@@ -177,6 +177,7 @@ impl From<&ComputerAction> for Action {
                         height: region[3] - region[1],
                     }),
                     format: Some(ImageFormat::Png),
+                    monitor_id: None,
                 },
             },
 

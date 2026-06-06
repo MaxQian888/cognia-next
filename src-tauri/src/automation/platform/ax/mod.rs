@@ -50,6 +50,7 @@ impl AutomationBackend for AxBackend {
             has_screenshot: true,
             has_events: false,
             has_a11y_tree: false, // minimum-viable enigo backend: input only, no AX tree.
+            monitors: screenshot::list_monitors(),
         }
     }
 

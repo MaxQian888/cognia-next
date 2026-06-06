@@ -34,6 +34,28 @@ pub struct Capabilities {
     /// persisted/round-tripped payloads deserializing.
     #[serde(default)]
     pub has_a11y_tree: bool,
+    /// Monitors visible to the capture backend. Empty when the backend
+    /// can't enumerate (stub / remote). `#[serde(default)]` keeps older
+    /// persisted/round-tripped payloads deserializing.
+    #[serde(default)]
+    pub monitors: Vec<MonitorInfo>,
+}
+
+/// One physical (or virtual) monitor as enumerated by xcap. `x`/`y` are
+/// virtual-desktop pixels — the same coordinate space `click` /
+/// `mouse_move` / `pick_at_point` use, so a caller can target a specific
+/// monitor by offsetting into its rect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorInfo {
+    pub id: String,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_primary: bool,
+    pub scale_factor: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,6 +132,10 @@ pub struct TreeOpts {
 pub struct ScreenshotOpts {
     pub region: Option<Rect>,
     pub format: Option<ImageFormat>,
+    /// Capture a specific monitor (id from `Capabilities.monitors`).
+    /// Absent / unknown id falls back to the primary monitor.
+    #[serde(default)]
+    pub monitor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -129,6 +155,15 @@ pub struct Screenshot {
     pub height: u32,
     pub captured_at: i64,
     pub format: ImageFormat,
+    /// Pre-downscale dimensions, set by `downscale_encoded` when the
+    /// screenshot-scaling setting shrank the frame. `None` means no
+    /// scaling was applied (`width`/`height` ARE the physical pixels).
+    /// The renderer-side coordinate scaler uses these to map model
+    /// coordinates back to physical pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,11 +587,27 @@ mod tests {
             has_screenshot: true,
             has_events: true,
             has_a11y_tree: true,
+            monitors: vec![MonitorInfo {
+                id: "1".into(),
+                name: "Primary".into(),
+                x: 0,
+                y: 0,
+                width: 2560,
+                height: 1440,
+                is_primary: true,
+                scale_factor: 1.25,
+            }],
         };
         let json = serde_json::to_string(&caps).unwrap();
         assert!(json.contains("\"hasUia\":true"));
         assert!(json.contains("\"hasA11yTree\":true"));
         assert!(json.contains("\"platform\":\"windows\""));
+        assert!(json.contains("\"isPrimary\":true"));
+        assert!(json.contains("\"scaleFactor\":1.25"));
+        // Older payloads without `monitors` must keep deserializing.
+        let legacy = r#"{"platform":"windows","hasUia":true,"hasInputSim":true,"hasScreenshot":true,"hasEvents":true,"hasA11yTree":true}"#;
+        let parsed: Capabilities = serde_json::from_str(legacy).unwrap();
+        assert!(parsed.monitors.is_empty());
     }
 
     #[test]

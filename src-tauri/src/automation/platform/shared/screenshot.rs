@@ -25,14 +25,23 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
             message: "no monitors detected".into(),
         });
     }
-    // `xcap` returns monitors in OS order; the primary is the one with
-    // `is_primary() == true`. Fall back to the first monitor if no primary
-    // flag is set (rare; happens on some virtual displays).
-    let mon = monitors
-        .iter()
-        .find(|m| m.is_primary())
+    // Explicit monitor pick first (`opts.monitor_id` from
+    // `Capabilities.monitors`); unknown / absent ids fall back to the
+    // primary. `xcap` returns monitors in OS order; the primary is the one
+    // with `is_primary() == true`. Fall back to the first monitor if no
+    // primary flag is set (rare; happens on some virtual displays).
+    let mon = opts
+        .monitor_id
+        .as_deref()
+        .and_then(|want| monitors.iter().find(|m| m.id().to_string() == want))
         .cloned()
-        .unwrap_or_else(|| monitors[0].clone());
+        .unwrap_or_else(|| {
+            monitors
+                .iter()
+                .find(|m| m.is_primary())
+                .cloned()
+                .unwrap_or_else(|| monitors[0].clone())
+        });
 
     let image = mon.capture_image().map_err(|e| AutomationError::BackendError {
         message: format!("monitor capture_image failed: {e}"),
@@ -63,6 +72,75 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
         height: final_h,
         captured_at: chrono::Utc::now().timestamp_millis(),
         format,
+        source_width: None,
+        source_height: None,
+    })
+}
+
+/// Enumerate monitors for `Capabilities.monitors`. Failure → empty vec —
+/// capabilities is a probe and must never error the whole call.
+pub fn list_monitors() -> Vec<MonitorInfo> {
+    let Ok(monitors) = Monitor::all() else {
+        return vec![];
+    };
+    monitors
+        .iter()
+        .map(|m| MonitorInfo {
+            id: m.id().to_string(),
+            name: m.name().to_string(),
+            x: m.x(),
+            y: m.y(),
+            width: m.width(),
+            height: m.height(),
+            is_primary: m.is_primary(),
+            scale_factor: m.scale_factor(),
+        })
+        .collect()
+}
+
+/// Downscale to fit within (max_w, max_h) preserving aspect ratio.
+/// No-op when already within bounds.
+pub(crate) fn resize_to_fit(image: RgbaImage, max_w: u32, max_h: u32) -> RgbaImage {
+    let (w, h) = (image.width(), image.height());
+    if w <= max_w && h <= max_h {
+        return image;
+    }
+    let scale = f64::min(f64::from(max_w) / f64::from(w), f64::from(max_h) / f64::from(h));
+    let nw = ((f64::from(w)) * scale).round().max(1.0) as u32;
+    let nh = ((f64::from(h)) * scale).round().max(1.0) as u32;
+    image::imageops::resize(&image, nw, nh, image::imageops::FilterType::Lanczos3)
+}
+
+/// Decode an already-encoded `Screenshot`, downscale to fit, re-encode.
+/// `desktop_screenshot` applies this AFTER capture so local and remote
+/// (cua) screenshots scale through one code path. No-op (returns the
+/// input untouched, `source_*` stays `None`) when already within bounds.
+pub fn downscale_encoded(shot: Screenshot, max_w: u32, max_h: u32) -> Result<Screenshot> {
+    if shot.width <= max_w && shot.height <= max_h {
+        return Ok(shot);
+    }
+    let raw = general_purpose::STANDARD.decode(&shot.bytes).map_err(|e| {
+        AutomationError::BackendError {
+            message: format!("downscale: b64 decode failed: {e}"),
+        }
+    })?;
+    let img = image::load_from_memory(&raw)
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("downscale: image decode failed: {e}"),
+        })?
+        .to_rgba8();
+    let resized = resize_to_fit(img, max_w, max_h);
+    let (nw, nh) = (resized.width(), resized.height());
+    let mut out = Vec::with_capacity((nw * nh * 4) as usize);
+    encode(&resized, shot.format, &mut out)?;
+    Ok(Screenshot {
+        bytes: general_purpose::STANDARD.encode(&out),
+        width: nw,
+        height: nh,
+        captured_at: shot.captured_at,
+        format: shot.format,
+        source_width: Some(shot.width),
+        source_height: Some(shot.height),
     })
 }
 
@@ -94,6 +172,8 @@ pub fn redact_screenshot(original: Screenshot) -> Result<Screenshot> {
         height: original.height,
         captured_at: original.captured_at,
         format: original.format,
+        source_width: original.source_width,
+        source_height: original.source_height,
     })
 }
 
@@ -108,7 +188,83 @@ mod tests {
             height: h,
             captured_at: 1_700_000_000,
             format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
         }
+    }
+
+    /// Build a real encoded PNG screenshot of the given dimensions.
+    fn encoded_shot(w: u32, h: u32) -> Screenshot {
+        let img = RgbaImage::new(w, h);
+        let mut bytes = Vec::new();
+        encode(&img, ImageFormat::Png, &mut bytes).unwrap();
+        Screenshot {
+            bytes: general_purpose::STANDARD.encode(&bytes),
+            width: w,
+            height: h,
+            captured_at: 1,
+            format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
+        }
+    }
+
+    #[test]
+    fn resize_to_fit_no_op_when_within_bounds() {
+        let img = RgbaImage::new(800, 600);
+        let out = resize_to_fit(img, 1280, 800);
+        assert_eq!((out.width(), out.height()), (800, 600));
+    }
+
+    #[test]
+    fn resize_to_fit_preserves_aspect_ratio() {
+        let img = RgbaImage::new(2560, 1440);
+        let out = resize_to_fit(img, 1280, 800);
+        // Limited by width: 2560→1280 (×0.5) → 1440→720.
+        assert_eq!((out.width(), out.height()), (1280, 720));
+    }
+
+    #[test]
+    fn resize_to_fit_never_collapses_to_zero() {
+        let img = RgbaImage::new(4000, 2);
+        let out = resize_to_fit(img, 100, 100);
+        assert!(out.width() >= 1 && out.height() >= 1);
+    }
+
+    #[test]
+    fn downscale_encoded_sets_source_dims() {
+        let out = downscale_encoded(encoded_shot(64, 32), 32, 32).unwrap();
+        assert_eq!((out.width, out.height), (32, 16));
+        assert_eq!(out.source_width, Some(64));
+        assert_eq!(out.source_height, Some(32));
+        // Payload must still be a decodable PNG of the new size.
+        let raw = general_purpose::STANDARD.decode(&out.bytes).unwrap();
+        let img = image::load_from_memory(&raw).unwrap();
+        assert_eq!((img.width(), img.height()), (32, 16));
+    }
+
+    #[test]
+    fn downscale_encoded_no_op_within_bounds() {
+        let original = encoded_shot(16, 16);
+        let original_b64 = original.bytes.clone();
+        let out = downscale_encoded(original, 1280, 800).unwrap();
+        assert_eq!(out.bytes, original_b64);
+        assert_eq!(out.source_width, None);
+        assert_eq!(out.source_height, None);
+    }
+
+    #[test]
+    fn downscale_encoded_rejects_garbage_payload() {
+        let bad = Screenshot {
+            bytes: "!!!not-base64!!!".into(),
+            width: 4000,
+            height: 4000,
+            captured_at: 1,
+            format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
+        };
+        assert!(downscale_encoded(bad, 100, 100).is_err());
     }
 
     #[test]

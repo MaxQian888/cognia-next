@@ -87,6 +87,7 @@ impl AutomationBackend for StubBackend {
             has_screenshot: false,
             has_events: false,
             has_a11y_tree: false,
+            monitors: vec![],
         }
     }
     fn get_focus(&self) -> Result<ElementInfo> {
