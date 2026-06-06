@@ -85,6 +85,14 @@ export interface CallContext {
    * `lib/claude/computer-use-target-state.ts`).
    */
   sandboxConnectionId?: string
+  /**
+   * Renderer-only session tag for per-session action-mapper state
+   * (coordinate scaling, screenshot dedup, consecutive-failure counters —
+   * see `lib/automation/anthropic-action-mapper.ts`). Serialized over the
+   * wire but ignored by the Rust side (serde tolerates unknown fields).
+   * Stamped by the computer-use plugin from the active chat session id.
+   */
+  sessionKey?: string
 }
 
 /**
@@ -156,6 +164,27 @@ export const desktop = {
     return transport.call<void>("desktop_type", {
       args: { text, opts, ctx },
     })
+  },
+
+  /**
+   * Clipboard-paste fast path: Rust saves the current clipboard, writes
+   * `text`, sends Ctrl/Cmd+V, then restores the clipboard. Gated +
+   * audited as a driving call ("paste"). Prefer over `type` for long or
+   * sensitive text — keystrokes never hit per-key hooks. (Plain `type`
+   * also upgrades to this path automatically past the configurable
+   * `pasteThresholdChars` setting.)
+   */
+  paste(text: string, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_paste", { args: { text, ctx } })
+  },
+
+  /**
+   * Launch an application (executable path or app name) or focus an
+   * existing window by process name. Driving call ("launch_app") — gated
+   * + audited.
+   */
+  launchApp(app: string, action: "launch" | "focus", ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_launch_app", { args: { app, action, ctx } })
   },
 
   keys(chord: KeyChord, ctx: CallContext = {}): Promise<void> {
@@ -411,6 +440,17 @@ export interface AuditSettings {
   exportEnabled: boolean
 }
 
+/**
+ * Screenshot down-scaling applied Rust-side before frames reach vision
+ * models. Disabled by default; 1280×800 (WXGA) is the Anthropic-recommended
+ * sweet spot for computer-use click accuracy vs token cost.
+ */
+export interface ScreenshotScalingSettings {
+  enabled: boolean
+  maxWidth: number
+  maxHeight: number
+}
+
 export interface AutomationSettings {
   enabled: boolean
   defaultTier: Tier
@@ -418,6 +458,18 @@ export interface AutomationSettings {
   perSurface: PerSurfacePolicies
   audit: AuditSettings
   redactScreenshots: boolean
+  screenshotScaling: ScreenshotScalingSettings
+  /**
+   * The action mapper returns "screen unchanged" text instead of a
+   * duplicate image when consecutive screenshots hash identically.
+   * Default ON.
+   */
+  screenshotDedup: boolean
+  /**
+   * `type` calls longer than this many chars transparently use the
+   * clipboard-paste fast path. 0 disables. Default 200.
+   */
+  pasteThresholdChars: number
 }
 
 export function defaultAutomationSettings(): AutomationSettings {
@@ -433,5 +485,8 @@ export function defaultAutomationSettings(): AutomationSettings {
     },
     audit: { retentionDays: 30, exportEnabled: true },
     redactScreenshots: false,
+    screenshotScaling: { enabled: false, maxWidth: 1280, maxHeight: 800 },
+    screenshotDedup: true,
+    pasteThresholdChars: 200,
   }
 }

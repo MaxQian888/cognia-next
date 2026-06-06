@@ -167,6 +167,30 @@ describe("desktop client", () => {
       args: { target, opts: { count: 3 }, ctx: { surface: "computerUse" } },
     })
   })
+
+  it("desktop.paste posts text through desktop_paste", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.paste("hello", { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_paste", {
+      args: { text: "hello", ctx: { surface: "workflow" } },
+    })
+  })
+
+  it("desktop.launchApp posts app + action", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.launchApp("notepad.exe", "launch", { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_launch_app", {
+      args: { app: "notepad.exe", action: "launch", ctx: { surface: "workflow" } },
+    })
+  })
+
+  it("desktop.launchApp focus variant", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.launchApp("notepad.exe", "focus")
+    expect(mockCall).toHaveBeenCalledWith("desktop_launch_app", {
+      args: { app: "notepad.exe", action: "focus", ctx: {} },
+    })
+  })
 })
 
 describe("defaultAutomationSettings", () => {
@@ -176,5 +200,12 @@ describe("defaultAutomationSettings", () => {
     expect(s.defaultTier).toBe("off")
     expect(s.perSurface.workflow.tier).toBe("off")
     expect(s.perSurface.plugin.perPluginOverrides).toEqual({})
+  })
+
+  it("includes behavior defaults (scaling off, dedup on, paste 200)", () => {
+    const s = defaultAutomationSettings()
+    expect(s.screenshotScaling).toEqual({ enabled: false, maxWidth: 1280, maxHeight: 800 })
+    expect(s.screenshotDedup).toBe(true)
+    expect(s.pasteThresholdChars).toBe(200)
   })
 })

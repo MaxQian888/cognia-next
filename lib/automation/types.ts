@@ -18,6 +18,25 @@ export interface Capabilities {
   hasInputSim: boolean
   hasScreenshot: boolean
   hasEvents: boolean
+  /** Monitors visible to the capture backend (empty for stub/remote). */
+  monitors: MonitorInfo[]
+}
+
+/**
+ * One physical (or virtual) monitor as enumerated by the capture backend.
+ * `x`/`y` are virtual-desktop pixels — the same coordinate space `click` /
+ * `mouseMove` / `pickAtPoint` use, so a caller can target a specific
+ * monitor by offsetting into its rect.
+ */
+export interface MonitorInfo {
+  id: string
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+  isPrimary: boolean
+  scaleFactor: number
 }
 
 export interface ElementRef {
@@ -79,6 +98,11 @@ export type ImageFormat = "png" | "jpeg"
 export interface ScreenshotOpts {
   region?: Rect
   format?: ImageFormat
+  /**
+   * Capture a specific monitor (id from `Capabilities.monitors`).
+   * Absent / unknown id falls back to the primary monitor.
+   */
+  monitorId?: string
 }
 
 export interface Screenshot {
@@ -88,6 +112,15 @@ export interface Screenshot {
   height: number
   capturedAt: number
   format: ImageFormat
+  /**
+   * Pre-downscale dimensions — present only when the Rust side shrank the
+   * frame (Settings → Automation → Behavior → screenshot scaling). Absent
+   * means `width`/`height` ARE the physical pixels. Consumed by
+   * `lib/automation/coordinate-scaler.ts` to map model coordinates back
+   * to physical pixels.
+   */
+  sourceWidth?: number
+  sourceHeight?: number
 }
 
 export type ClickTarget =
