@@ -52,6 +52,7 @@ import { WhitelistTab } from "./whitelist-tab"
 import { InspectorTab } from "./inspector-tab"
 import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
+import { BehaviorCard } from "./behavior-card"
 
 interface BackendInitFailure {
   platform: string
@@ -274,6 +275,8 @@ function OverviewTab() {
       <OverviewMetricsCard />
 
       <ScreenOffCard platform={caps?.platform} />
+
+      <BehaviorCard />
 
       <Card>
         <CardHeader>

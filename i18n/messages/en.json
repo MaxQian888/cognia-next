@@ -1022,6 +1022,24 @@
       "loading": "Loading audit log…",
       "title": "Audit Log"
     },
+    "behavior": {
+      "dedup": {
+        "help": "When consecutive screenshots are identical, send a short text note instead of the duplicate image. Saves tokens on long tasks.",
+        "label": "Skip unchanged screenshots"
+      },
+      "description": "How screenshots and typing are presented to the model.",
+      "pasteThreshold": {
+        "help": "Type actions longer than this many characters paste via the clipboard instead of typing key-by-key. 0 disables.",
+        "label": "Paste threshold (characters)"
+      },
+      "scaling": {
+        "help": "Resize captures to fit the target size before sending to the model. Improves click accuracy and cuts token cost (1280×800 recommended).",
+        "label": "Downscale screenshots",
+        "maxHeight": "Max height",
+        "maxWidth": "Max width"
+      },
+      "title": "Model behavior"
+    },
     "consent": {
       "actions": {
         "allowOnce": "Allow once",
