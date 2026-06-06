@@ -216,7 +216,59 @@ describe("useSkillMarketplace — token-gated views", () => {
   })
 })
 
+describe("useSkillMarketplace — loadMore edge cases", () => {
+  it("loadMore is a no-op in search and curated views", async () => {
+    const { result } = renderHook(() => useSkillMarketplace())
+    await waitFor(() => expect(result.current.state.loading).toBe(false))
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(fetchLeaderboardMock).not.toHaveBeenCalled()
+  })
+
+  it("loadMore failures surface as state.error (token errors flagged)", async () => {
+    fetchLeaderboardMock.mockResolvedValueOnce({
+      items: [sampleItem({ id: "lb-1" })],
+      hasMore: true,
+    })
+    const { result } = renderHook(() => useSkillMarketplace())
+    await waitFor(() => expect(result.current.state.loading).toBe(false))
+    await act(async () => {
+      result.current.setView("trending")
+    })
+    await waitFor(() => expect(result.current.state.items).toHaveLength(1))
+    fetchLeaderboardMock.mockRejectedValueOnce(new SkillsShTokenError("expired"))
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.state.error).toBe("expired")
+    expect(result.current.state.tokenError).toBe(true)
+    expect(result.current.state.loadingMore).toBe(false)
+  })
+
+  it("a hard refresh failure lands in state.error", async () => {
+    fetchLeaderboardMock.mockRejectedValue(new Error("offline"))
+    const { result } = renderHook(() => useSkillMarketplace())
+    await waitFor(() => expect(result.current.state.loading).toBe(false))
+    await act(async () => {
+      result.current.setView("all-time")
+    })
+    await waitFor(() => expect(result.current.state.error).toBe("offline"))
+    expect(result.current.state.tokenError).toBe(false)
+  })
+})
+
 describe("useSkillMarketplace — install/uninstall + installed set", () => {
+  it("uninstall toggles installingId and delegates", async () => {
+    const { result } = renderHook(() => useSkillMarketplace())
+    await waitFor(() => expect(result.current.state.loading).toBe(false))
+    await act(async () => {
+      await result.current.uninstall(sampleItem({ id: "u-1" }))
+    })
+    expect(uninstallMock).toHaveBeenCalled()
+    expect(result.current.installingId).toBeNull()
+  })
+
   it("install/uninstall toggles installingId", async () => {
     let resolveInstall: () => void = () => undefined
     installMock.mockImplementationOnce(

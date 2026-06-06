@@ -152,6 +152,31 @@ describe("fetchSkillsShLeaderboard (token-gated)", () => {
   })
 })
 
+describe("wire-format tolerance", () => {
+  it("search tolerates a missing skills array", async () => {
+    mockedGetJson.mockResolvedValueOnce({ query: "react" })
+    await expect(fetchSkillsShItems({ search: "react" })).resolves.toEqual([])
+  })
+
+  it("leaderboard tolerates missing data/pagination", async () => {
+    setToken("tok")
+    mockedGetJson.mockResolvedValueOnce({})
+    const page = await fetchSkillsShLeaderboard("all-time")
+    expect(page.items).toEqual([])
+    expect(page.hasMore).toBe(false)
+  })
+
+  it("curated tolerates missing data/skills/totalInstalls", async () => {
+    setToken("tok")
+    mockedGetJson.mockResolvedValueOnce({ data: [{ owner: "x" }] })
+    const owners = await fetchSkillsShCurated()
+    expect(owners).toEqual([{ owner: "x", totalInstalls: 0, items: [] }])
+    setToken("tok")
+    mockedGetJson.mockResolvedValueOnce({})
+    await expect(fetchSkillsShCurated()).resolves.toEqual([])
+  })
+})
+
 describe("fetchSkillsShCurated", () => {
   it("maps owners and their skills", async () => {
     setToken("tok")
@@ -228,6 +253,22 @@ describe("fetchSkillsShDetail", () => {
       /malformed/
     )
   })
+
+  it("falls back to the anonymous download when /api/v1 returns no files", async () => {
+    setToken("tok")
+    mockedGetJson
+      .mockResolvedValueOnce({ id: "vercel-labs/skills/find-skills", hash: "h", files: null })
+      .mockResolvedValueOnce({ files: [{ path: "SKILL.md", contents: "x" }] })
+    const detail = await fetchSkillsShDetail(ITEM)
+    expect(detail.hash).toBeUndefined()
+    expect(detail.files).toHaveLength(1)
+  })
+
+  it("propagates non-token /api/v1 failures instead of silently downloading", async () => {
+    setToken("tok")
+    mockedGetJson.mockRejectedValueOnce(new SkillsHttpError(503, "down"))
+    await expect(fetchSkillsShDetail(ITEM)).rejects.toThrow(/down/)
+  })
 })
 
 describe("fetchSkillsShAudit", () => {
@@ -296,6 +337,35 @@ describe("fetchSkillsShAudit", () => {
     const audit = await fetchSkillsShAudit(ITEM)
     expect(audit!.providers[0].risk).toBe("unknown")
     expect(audit!.worstRisk).toBe("unknown")
+  })
+
+  it("rethrows non-404 audit failures", async () => {
+    mockedGetJson.mockRejectedValueOnce(new SkillsHttpError(429, "rate limited", "9"))
+    await expect(fetchSkillsShAudit(ITEM)).rejects.toThrow(/rate limited/)
+    mockedGetJson.mockRejectedValueOnce(new Error("network"))
+    await expect(fetchSkillsShAudit(ITEM)).rejects.toThrow(/network/)
+  })
+
+  it("returns null when the /api/v1 audits array is empty (token path)", async () => {
+    setToken("tok")
+    mockedGetJson.mockResolvedValueOnce({ audits: [] })
+    await expect(fetchSkillsShAudit(ITEM)).resolves.toBeNull()
+  })
+
+  it("normalises pass/warn/fail statuses and low risk levels", async () => {
+    setToken("tok")
+    mockedGetJson.mockResolvedValueOnce({
+      audits: [
+        { provider: "A", status: "pass" },
+        { provider: "B", riskLevel: "LOW" },
+        { provider: "C", riskLevel: "NONE" },
+        { provider: "D", status: "warn" },
+        { provider: "E", status: "fail" },
+      ],
+    })
+    const audit = await fetchSkillsShAudit(ITEM)
+    expect(audit!.providers.map((p) => p.risk)).toEqual(["safe", "low", "safe", "medium", "high"])
+    expect(audit!.worstRisk).toBe("high")
   })
 })
 

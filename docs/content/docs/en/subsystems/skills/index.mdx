@@ -12,7 +12,7 @@ description: The smallest portable capability unit in Cognia — Markdown prompt
   `scripts/` / `references/` / `assets/` resources. The browser source of truth is Dexie
   (`lib/db/skills.ts`); everything else is a pipeline in or out of that table: a **bundle importer**
   (`lib/skills/bundle/loader.ts:65`) for zip / folder / OpenAI-Codex layouts, a **two-source
-  marketplace** (`skills-lock.json` registry + optional SkillsMP API), a **three-target native sync**
+  marketplace** (`skills-lock.json` registry + the skills.sh directory), a **three-target native sync**
   (`lib/skills/sync.ts:145` → `skills_install_mirrored` writing cognia / `~/.claude/skills` /
   `~/.agents/skills`), and the **send-time injector** (`lib/claude/build-options.ts:378`) that appends
   enabled skills to the system prompt and **unions** their `allowedTools`. A separate ADR-0026 tier —
@@ -25,7 +25,7 @@ description: The smallest portable capability unit in Cognia — Markdown prompt
   <Stat label="Dexie tables" value="2" hint="skills + skillResources — introduced at v8, index strings unchanged through v72" />
   <Stat label="Tauri commands" value="13" hint="scan / install_mirrored / trash / registry / remote fetch / security scan — lib/claude/ipc.ts:381-440" />
   <Stat label="Import paths" value="5" hint="markdown files · zip bundle · folder · Claude Code scan · discovery — skill-panel-toolbar.tsx" />
-  <Stat label="Marketplace sources" value="2" hint="registry (skills-lock.json, 6 entries) + SkillsMP API (opt-in via skillsMpBaseUrl)" />
+  <Stat label="Marketplace sources" value="2" hint="registry (skills-lock.json, 6 entries) + skills.sh directory (anonymous search/install; optional skillsShToken unlocks leaderboards)" />
   <Stat label="Built-in tool skills" value="40" hint="ADR-0026 tier — 6 Lark families, read/write/destructive, HITL confirm cards" />
   <Stat label="Security scan rules" value="9" hint="advisory regex scan — src-tauri/src/skills/scanner.rs:60" />
 </StatGrid>
@@ -54,7 +54,8 @@ lib/skills/
   export-toast.ts        # per-skill SKILL.md export with toast feedback
   executor.ts            # buildProgressiveSkillsPrompt + executeSkill stub
   sync.ts                # push / pull engine, SHA-256 fingerprints, 3 mirror targets
-  marketplace-*.ts       # types · registry adapter · SkillsMP adapter · install · teasers
+  marketplace-*.ts       # types · registry adapter · skills.sh adapter · install
+  skillssh-*.ts          # skills.sh: CORS-routed http · multi-file install · update check · install-from-URL
   bundle/                # loader · walk-zip · walk-folder · classify · parse · codex-yaml · limits
   built-in/              # ADR-0026 tier: types · registry · manifest · dispatcher · lark/ (40 skills)
 
@@ -80,7 +81,7 @@ flowchart LR
   subgraph In["Ways in"]
     WB["Workbench editor<br/>components/skills"]
     BU["Bundle import<br/>zip / folder / Codex"]
-    MP["Marketplace<br/>registry + SkillsMP"]
+    MP["Marketplace<br/>registry + skills.sh"]
     CC["CCSwitch / Claude Code<br/>~/.claude/skills scan"]
     PL["Plugin registerSkill<br/>overlay registry"]
   end
@@ -116,7 +117,7 @@ flowchart LR
 | [Authoring & workbench](./authoring-and-workbench) | `validate.ts` rules, 8 categories, 4 templates, AI assist, the master-detail panel, Monaco multi-file editor workspace, batch actions, keyboard shortcuts |
 | [Bundle import](./bundle-import) | `loadBundle` over zip / folder, resource classification, limits (200 MB zip · 50 resources · 16 MB web / 2 MB disk), OpenAI-Codex `agents/openai.yaml` sidecar, staging dialog |
 | [Native sync & security](./native-sync-and-security) | SHA-256 fingerprint push/pull, conflict rules, the three mirror targets + trash, all 13 Tauri commands, the 9-rule advisory security scanner |
-| [Marketplace](./marketplace) | `skills-lock.json` registry vs SkillsMP API, install/uninstall idempotency by `canonicalId`, the Rust remote-fetch proxy, teasers |
+| [Marketplace](./marketplace) | `skills-lock.json` registry vs the skills.sh directory, anonymous search/download/audit + optional token-gated leaderboards, CORS-routed transport, multi-file install + content hash, update detection, install-from-URL, Dexie v78 SkillsMP migration |
 | [Built-in skills (ADR-0026)](./built-in-skills) | The typed tool tier: registry, manifest filter chain, six-gate dispatcher, 40 Lark skills, lark-cli exec + auth bridge, HITL confirm-card round-trip |
 | [Loading & injection](./loading-and-injection) | The send-time hot path: id collection, triple enabled-filter, system-prompt section order, `allowedTools` **union**, plugin-skill bridge, container skills |
 | [Consumption surfaces](./consumption-surfaces) | Composer chips, session toggles, character editor, workflow nodes, scheduler, CCSwitch, Discover, plugins, teams, mobile sync |

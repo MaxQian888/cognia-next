@@ -96,6 +96,12 @@ describe("checkSkillsShUpdates", () => {
     expect(out[0].remoteHash).toMatch(/^sha256:/)
   })
 
+  it("stringifies non-Error failures", async () => {
+    mockedDetail.mockRejectedValueOnce("boom-string")
+    const out = await checkSkillsShUpdates([skill({ canonicalId: "skillssh:o/r/s" })])
+    expect(out[0].error).toBe("boom-string")
+  })
+
   it("captures per-skill failures without aborting the run", async () => {
     mockedDetail
       .mockRejectedValueOnce(new Error("network down"))

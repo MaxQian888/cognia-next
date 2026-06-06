@@ -5,7 +5,7 @@ import { ShieldCheckIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { SkillsShAudit, SkillsShRisk } from "@/lib/skills/marketplace-skillssh"
+import type { SkillsShRisk } from "@/lib/skills/marketplace-skillssh"
 import type { AuditEntry } from "@/hooks/skills"
 
 /** Risk level → Badge variant, following the security-scanner convention. */

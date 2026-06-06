@@ -49,6 +49,15 @@ describe("useUrlInstall", () => {
     expect(resolveMock).not.toHaveBeenCalled()
   })
 
+  it("stringifies non-Error resolver failures", async () => {
+    resolveMock.mockRejectedValue("plain-string")
+    const { result } = renderHook(() => useUrlInstall())
+    await act(async () => {
+      await result.current.run("o/r/s").catch(() => undefined)
+    })
+    expect(result.current.error).toBe("plain-string")
+  })
+
   it("surfaces resolver errors and resets busy", async () => {
     resolveMock.mockRejectedValue(new Error("No skill found at o/r/r"))
     const { result } = renderHook(() => useUrlInstall())

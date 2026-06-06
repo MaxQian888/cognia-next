@@ -87,6 +87,31 @@ describe("skillsHttpGet routing", () => {
     expect(result.text).toBe('{"ok":1}')
   })
 
+  it("tolerates a Capacitor response without headers and defaults Accept", async () => {
+    const request = jest.fn().mockResolvedValue({
+      status: 200,
+      data: "{}",
+      url: "https://skills.sh/x",
+    })
+    mockedGetCap.mockReturnValue({ request })
+    const result = await skillsHttpGet("https://skills.sh/x")
+    expect(result.retryAfter).toBeUndefined()
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ headers: { Accept: "application/json" } })
+    )
+  })
+
+  it("sends the bearer token through the web fetch path", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 })) as unknown as typeof fetch
+    global.fetch = fetchMock
+    await skillsHttpGet("https://skills.sh/x", { bearerToken: "tok", accept: "text/plain" })
+    expect(fetchMock).toHaveBeenCalledWith("https://skills.sh/x", {
+      headers: { Accept: "text/plain", Authorization: "Bearer tok" },
+    })
+  })
+
   it("uses fetch on web and returns the response", async () => {
     global.fetch = jest
       .fn()
@@ -139,6 +164,25 @@ describe("skillsHttpGetJson", () => {
     )) as SkillsHttpError
     expect(err).toBeInstanceOf(SkillsHttpError)
     expect(err.message).toContain("down")
+  })
+
+  it("prefers error over message and tolerates an empty error payload", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedRemoteJson.mockResolvedValueOnce({
+      status: 404,
+      body: '{"error":"not_found"}',
+      retryAfter: null,
+    })
+    const err = (await skillsHttpGetJson("https://skills.sh/x").catch(
+      (e: unknown) => e
+    )) as SkillsHttpError
+    expect(err.message).toContain("not_found")
+
+    mockedRemoteJson.mockResolvedValueOnce({ status: 500, body: "{}", retryAfter: null })
+    const bare = (await skillsHttpGetJson("https://skills.sh/x").catch(
+      (e: unknown) => e
+    )) as SkillsHttpError
+    expect(bare.message).toBe("https://skills.sh/x: http 500")
   })
 })
 
