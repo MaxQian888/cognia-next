@@ -12,6 +12,13 @@ interface NormalizeTaskTriggerOptions {
   now?: Date
 }
 
+/** Clamp jitter to a non-negative integer; invalid / zero values drop to undefined. */
+function normalizeJitterMs(jitterMs?: number): number | undefined {
+  const value = Number(jitterMs)
+  if (!Number.isFinite(value) || value <= 0) return undefined
+  return Math.floor(value)
+}
+
 function normalizeDependsOn(dependsOn?: string[]): string[] | undefined {
   if (!Array.isArray(dependsOn) || dependsOn.length === 0) {
     return undefined
@@ -69,6 +76,7 @@ export function normalizeTaskTrigger(
         cronExpression,
         timezone,
         dependsOn,
+        jitterMs: normalizeJitterMs(trigger.jitterMs),
       }
     }
 
@@ -86,6 +94,7 @@ export function normalizeTaskTrigger(
         type: "interval",
         intervalMs: Math.floor(intervalMs),
         dependsOn,
+        jitterMs: normalizeJitterMs(trigger.jitterMs),
       }
     }
 

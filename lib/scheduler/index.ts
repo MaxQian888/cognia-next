@@ -35,6 +35,18 @@ export {
   matchesCronExpression,
 } from "./cron-parser"
 
+// Backfill (slot enumeration is reused by the UI preview)
+export { enumerateBackfillSlots, BACKFILL_MAX_SLOTS } from "./backfill"
+
+// Runtime policy helpers
+export {
+  resolveOverlapPolicy,
+  applyJitter,
+  isPastEndAt,
+  isAtMaxRuns,
+  isSlotOutsideCatchupWindow,
+} from "./runtime-policy"
+
 // Trigger normalization and validation
 export { normalizeTaskTrigger, isValidTimezone } from "./trigger-normalizer"
 export {

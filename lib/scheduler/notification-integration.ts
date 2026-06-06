@@ -26,10 +26,11 @@ export const WEBHOOK_DELIVERY_LIMITS = {
   timeoutMs: 10_000,
 } as const
 
-type TaskEventType = "start" | "progress" | "complete" | "error"
+type TaskEventType = "start" | "progress" | "complete" | "error" | "auto-paused"
 
 function centerLevelFor(eventType: TaskEventType): NotificationLevel {
   if (eventType === "error") return "error"
+  if (eventType === "auto-paused") return "warning"
   if (eventType === "complete") return "success"
   return "info"
 }
@@ -138,6 +139,13 @@ function getNotificationContent(
         icon: "❌",
       }
 
+    case "auto-paused":
+      return {
+        title: `Task Auto-Paused: ${task.name}`,
+        body: `The scheduled task "${task.name}" was paused after ${task.config.pauseAfterConsecutiveFailures ?? "several"} consecutive failures. Resume it from the scheduler once the underlying issue is fixed.`,
+        icon: "⏸️",
+      }
+
     default:
       return {
         title: `Task Event: ${task.name}`,
@@ -170,6 +178,9 @@ function sendToastNotification(title: string, body: string, eventType: TaskEvent
       break
     case "error":
       toast.error(title, { description: body })
+      break
+    case "auto-paused":
+      toast.warning(title, { description: body })
       break
     case "start":
     case "progress":

@@ -577,7 +577,7 @@ describe("TaskScheduler", () => {
         expect(secondExecution).toEqual(
           expect.objectContaining({
             status: "skipped",
-            terminalReason: "concurrency-blocked",
+            terminalReason: "overlap-skipped",
           })
         )
 
@@ -1389,6 +1389,653 @@ describe("TaskScheduler", () => {
 
       expect(executor).not.toHaveBeenCalled()
       sched.stop()
+    })
+  })
+
+  describe("runtime semantics upgrades", () => {
+    function makeMockDriver() {
+      let dueCb: TaskDueCallback | null = null
+      const driver: SchedulerTimingDriver & { fire: TaskDueCallback } = {
+        supportsLeaderElection: false,
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+        onDue: jest.fn((cb: TaskDueCallback) => {
+          dueCb = cb
+        }),
+        arm: jest.fn(),
+        disarm: jest.fn(),
+        fire: (taskId, firedAtMs) => dueCb?.(taskId, firedAtMs),
+      }
+      return driver
+    }
+
+    function makePolicyTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+      return {
+        id: "policy-task",
+        name: "Policy Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1000,
+          timeout: 30000,
+          runMissedOnStartup: false,
+          overlapPolicy: "skip",
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      }
+    }
+
+    /** Executor whose first call blocks until released; later calls succeed. */
+    function makeBlockingExecutor() {
+      let release: ((result: { success: boolean }) => void) | undefined
+      let calls = 0
+      const executor = jest.fn().mockImplementation(() => {
+        calls += 1
+        if (calls === 1) {
+          return new Promise<{ success: boolean }>((resolve) => {
+            release = resolve
+          })
+        }
+        return Promise.resolve({ success: true })
+      })
+      return { executor, release: () => release?.({ success: true }) }
+    }
+
+    let scheduler: TaskSchedulerImpl
+
+    beforeEach(() => {
+      scheduler = createTaskScheduler()
+    })
+
+    describe("overlap policies", () => {
+      it("allow: runs concurrently with a running execution", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "allow-task",
+          config: { ...makePolicyTask().config, overlapPolicy: "allow" },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(task.id)
+
+        expect(second?.status).toBe("completed")
+        expect(executor).toHaveBeenCalledTimes(2)
+
+        release()
+        const firstExec = await first
+        expect(firstExec?.status).toBe("completed")
+      })
+
+      it("queue-one: buffers the start and drains it after completion", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "queue-one-task",
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-one" },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(task.id)
+
+        // Buffered: placeholder only, no persisted execution row for it yet.
+        expect(second?.status).toBe("pending")
+        expect(executor).toHaveBeenCalledTimes(1)
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+
+      it("queue-one: a newer start displaces the buffered one as overlap-skipped", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "queue-one-displace",
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-one" },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        await scheduler.runTaskNow(task.id)
+        await scheduler.runTaskNow(task.id)
+
+        // The displaced buffered start became a persisted skipped row.
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "skipped", terminalReason: "overlap-skipped" })
+        )
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+
+        // Running + exactly one drained start (newest wins).
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+
+      it("queue-all: drops starts beyond maxQueueSize as overlap-skipped", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "queue-all-task",
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-all", maxQueueSize: 1 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const buffered = await scheduler.runTaskNow(task.id)
+        const overflow = await scheduler.runTaskNow(task.id)
+
+        expect(buffered?.status).toBe("pending")
+        expect(overflow?.status).toBe("skipped")
+        expect(overflow?.terminalReason).toBe("overlap-skipped")
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+
+      it("cancel-previous: aborts the running execution and starts the new one", async () => {
+        const { executor } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "cancel-prev-task",
+          config: { ...makePolicyTask().config, overlapPolicy: "cancel-previous", maxRetries: 2 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(task.id)
+        const firstExec = await first
+
+        expect(firstExec?.status).toBe("cancelled")
+        expect(firstExec?.terminalReason).toBe("overlap-cancelled")
+        expect(second?.status).toBe("completed")
+        // Cancelled runs are terminal: no retry of the first execution.
+        await jest.advanceTimersByTimeAsync(60_000)
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    describe("lifecycle limits", () => {
+      it("expires a task whose endAt passed instead of executing it", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const task = makePolicyTask({
+          id: "ended-task",
+          endAt: new Date(Date.now() - 1000),
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire("ended-task", Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "expired", lastTerminalReason: "ended" })
+        )
+        expect(driver.disarm).toHaveBeenCalledWith("ended-task")
+        sched.stop()
+      })
+
+      it("expires a task that already consumed its maxRuns budget", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver)
+        await sched.initialize()
+
+        const task = makePolicyTask({
+          id: "max-runs-task",
+          runCount: 3,
+          config: { ...makePolicyTask().config, maxRuns: 3 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        driver.fire("max-runs-task", Date.now())
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).not.toHaveBeenCalled()
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "expired", lastTerminalReason: "max-runs-reached" })
+        )
+        sched.stop()
+      })
+
+      it("expires after the run that consumes the final maxRuns slot", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const task = makePolicyTask({
+          id: "final-run-task",
+          runCount: 0,
+          config: { ...makePolicyTask().config, maxRuns: 1 },
+        })
+        // runTaskNow + updateTaskStats see runCount 0; the post-run re-fetch
+        // in updateNextRunTime sees the consumed budget.
+        mockSchedulerDb.getTask
+          .mockResolvedValueOnce(task)
+          .mockResolvedValueOnce(task)
+          .mockResolvedValue({ ...task, runCount: 1 })
+
+        const execution = await scheduler.runTaskNow(task.id)
+
+        expect(execution?.status).toBe("completed")
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "expired", lastTerminalReason: "max-runs-reached" })
+        )
+      })
+    })
+
+    describe("pause-on-failure", () => {
+      it("auto-pauses after the consecutive-failure threshold and notifies", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: false, error: "boom" })
+        registerTaskExecutor("test", executor)
+        const { notifyTaskEvent } = jest.requireMock("./notification-integration") as {
+          notifyTaskEvent: jest.Mock
+        }
+
+        const task = makePolicyTask({
+          id: "pause-task",
+          consecutiveFailures: 1,
+          config: { ...makePolicyTask().config, pauseAfterConsecutiveFailures: 2 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: "paused",
+            lastTerminalReason: "auto-paused",
+            consecutiveFailures: 2,
+          })
+        )
+        expect(notifyTaskEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "pause-task" }),
+          expect.anything(),
+          "auto-paused"
+        )
+      })
+
+      it("stays active below the threshold and increments the counter", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: false, error: "boom" })
+        registerTaskExecutor("test", executor)
+
+        const task = makePolicyTask({
+          id: "below-threshold",
+          config: { ...makePolicyTask().config, pauseAfterConsecutiveFailures: 3 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ consecutiveFailures: 1 })
+        )
+        expect(mockSchedulerDb.updateTask).not.toHaveBeenCalledWith(
+          expect.objectContaining({ status: "paused" })
+        )
+      })
+
+      it("resets the consecutive counter on success", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const task = makePolicyTask({
+          id: "reset-task",
+          consecutiveFailures: 2,
+          config: { ...makePolicyTask().config, pauseAfterConsecutiveFailures: 3 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ consecutiveFailures: 0 })
+        )
+      })
+    })
+
+    describe("forward chains", () => {
+      it("fires onSuccessTaskIds after a successful run", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const target = makePolicyTask({ id: "success-target" })
+        const source = makePolicyTask({
+          id: "chain-source",
+          onSuccessTaskIds: ["success-target"],
+          onFailureTaskIds: ["failure-target"],
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "chain-source" ? source : id === "success-target" ? target : null
+        )
+
+        await scheduler.runTaskNow(source.id)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "success-target" }),
+          expect.anything(),
+          expect.anything()
+        )
+        // The failure branch must not fire on success.
+        expect(executor).not.toHaveBeenCalledWith(
+          expect.objectContaining({ id: "failure-target" }),
+          expect.anything(),
+          expect.anything()
+        )
+      })
+
+      it("fires onFailureTaskIds only on terminal failure", async () => {
+        const executor = jest.fn().mockImplementation(async (task: ScheduledTask) => {
+          if (task.id === "fail-source") return { success: false, error: "boom" }
+          return { success: true }
+        })
+        registerTaskExecutor("test", executor)
+
+        const cleanup = makePolicyTask({ id: "cleanup-target" })
+        const source = makePolicyTask({
+          id: "fail-source",
+          onSuccessTaskIds: ["success-target"],
+          onFailureTaskIds: ["cleanup-target"],
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "fail-source" ? source : id === "cleanup-target" ? cleanup : null
+        )
+
+        await scheduler.runTaskNow(source.id)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "cleanup-target" }),
+          expect.anything(),
+          expect.anything()
+        )
+        expect(executor).not.toHaveBeenCalledWith(
+          expect.objectContaining({ id: "success-target" }),
+          expect.anything(),
+          expect.anything()
+        )
+      })
+
+      it("waits for the retry chain before firing the failure chain", async () => {
+        const executor = jest.fn().mockImplementation(async (task: ScheduledTask) => {
+          if (task.id === "retry-source") return { success: false, error: "boom" }
+          return { success: true }
+        })
+        registerTaskExecutor("test", executor)
+
+        const cleanup = makePolicyTask({ id: "retry-cleanup" })
+        const source = makePolicyTask({
+          id: "retry-source",
+          onFailureTaskIds: ["retry-cleanup"],
+          config: { ...makePolicyTask().config, maxRetries: 1, retryDelay: 1000 },
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "retry-source" ? source : id === "retry-cleanup" ? cleanup : null
+        )
+
+        await scheduler.runTaskNow(source.id)
+        // Retry pending — failure chain must not fire yet.
+        expect(executor).not.toHaveBeenCalledWith(
+          expect.objectContaining({ id: "retry-cleanup" }),
+          expect.anything(),
+          expect.anything()
+        )
+
+        await jest.advanceTimersByTimeAsync(5_000)
+
+        expect(executor).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "retry-cleanup" }),
+          expect.anything(),
+          expect.anything()
+        )
+        // Source ran twice (original + one retry), cleanup once.
+        const cleanupCalls = executor.mock.calls.filter(
+          (c) => (c[0] as ScheduledTask).id === "retry-cleanup"
+        )
+        expect(cleanupCalls).toHaveLength(1)
+      })
+
+      it("skips missing or non-active forward targets", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const pausedTarget = makePolicyTask({ id: "paused-target", status: "paused" })
+        const source = makePolicyTask({
+          id: "skip-source",
+          onSuccessTaskIds: ["ghost-target", "paused-target"],
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "skip-source" ? source : id === "paused-target" ? pausedTarget : null
+        )
+
+        await scheduler.runTaskNow(source.id)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(1)
+        expect(executor).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "skip-source" }),
+          expect.anything(),
+          expect.anything()
+        )
+      })
+    })
+
+    describe("backfill", () => {
+      it("runs each slot sequentially with backfill provenance, without touching nextRunAt", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const createdAt = new Date(Date.now() - 60 * 60_000)
+        const task = makePolicyTask({
+          id: "backfill-task",
+          trigger: { type: "interval", intervalMs: 10 * 60_000 }, // 10 min
+          createdAt,
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const start = new Date(createdAt.getTime() + 10 * 60_000)
+        const end = new Date(createdAt.getTime() + 30 * 60_000)
+        const executions = await scheduler.backfillTask(task.id, { start, end })
+
+        expect(executions).toHaveLength(3)
+        expect(executor).toHaveBeenCalledTimes(3)
+
+        const backfillRows = mockSchedulerDb.createExecution.mock.calls
+          .map(([execution]) => execution)
+          .filter((execution) => execution.triggerSource === "backfill")
+        expect(backfillRows).toHaveLength(3)
+        // Oldest-first slot order.
+        expect(backfillRows.map((e) => e.scheduledFor?.getTime())).toEqual([
+          createdAt.getTime() + 10 * 60_000,
+          createdAt.getTime() + 20 * 60_000,
+          createdAt.getTime() + 30 * 60_000,
+        ])
+      })
+
+      it("rejects backfill for non-recurring triggers", async () => {
+        const task = makePolicyTask({
+          id: "once-backfill",
+          trigger: { type: "once", runAt: new Date(Date.now() + 60_000) },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await expect(
+          scheduler.backfillTask(task.id, { start: new Date(0), end: new Date() })
+        ).rejects.toMatchObject({ code: "INVALID_TRIGGER" })
+      })
+
+      it("rejects backfill for unknown tasks", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        await expect(
+          scheduler.backfillTask("ghost", { start: new Date(0), end: new Date() })
+        ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" })
+      })
+    })
+
+    describe("catch-up window", () => {
+      it("skips missed slots older than catchupWindowMs with their own reason", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const now = Date.now()
+        const overdueTask = makePolicyTask({
+          id: "windowed-task",
+          trigger: { type: "interval", intervalMs: 60_000 },
+          // Two missed slots: 5min ago (outside window) and 4min ago (outside),
+          // window 2min → both skipped as catchup-window-expired.
+          nextRunAt: new Date(now - 5 * 60_000),
+          createdAt: new Date(now - 60 * 60_000),
+          config: {
+            ...makePolicyTask().config,
+            runMissedOnStartup: true,
+            maxMissedRuns: 2,
+            catchupWindowMs: 2 * 60_000,
+          },
+        })
+        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+
+        await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
+
+        expect(executor).not.toHaveBeenCalled()
+        const skipped = mockSchedulerDb.createExecution.mock.calls
+          .map(([execution]) => execution)
+          .filter((execution) => execution.terminalReason === "catchup-window-expired")
+        expect(skipped).toHaveLength(2)
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "windowed-task",
+            lastTerminalReason: "catchup-window-expired",
+          })
+        )
+      })
+
+      it("runs fresh missed slots and skips only the stale ones", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const now = Date.now()
+        const overdueTask = makePolicyTask({
+          id: "partial-window-task",
+          trigger: { type: "interval", intervalMs: 60_000 },
+          // Missed slots at -3min (stale) and -2min (fresh) with a 2.5min window.
+          nextRunAt: new Date(now - 3 * 60_000),
+          createdAt: new Date(now - 60 * 60_000),
+          config: {
+            ...makePolicyTask().config,
+            runMissedOnStartup: true,
+            maxMissedRuns: 2,
+            catchupWindowMs: 2.5 * 60_000,
+          },
+        })
+        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
+
+        await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
+
+        expect(executor).toHaveBeenCalledTimes(1)
+        const skipped = mockSchedulerDb.createExecution.mock.calls
+          .map(([execution]) => execution)
+          .filter((execution) => execution.terminalReason === "catchup-window-expired")
+        expect(skipped).toHaveLength(1)
+        expect(skipped[0].scheduledFor?.getTime()).toBe(now - 3 * 60_000)
+      })
+
+      it("keeps today's behavior when no window is configured", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const now = Date.now()
+        const overdueTask = makePolicyTask({
+          id: "no-window-task",
+          trigger: { type: "interval", intervalMs: 60_000 },
+          nextRunAt: new Date(now - 5 * 60_000),
+          createdAt: new Date(now - 60 * 60_000),
+          config: {
+            ...makePolicyTask().config,
+            runMissedOnStartup: true,
+            maxMissedRuns: 2,
+          },
+        })
+        mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([overdueTask])
+        mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
+
+        await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
+
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    describe("scheduling jitter", () => {
+      it("arms with jitter but keeps the canonical slot in scheduledFor", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+
+        const driver = makeMockDriver()
+        // rng pinned to ~1 → jitter is the full jitterMs.
+        const sched = createTaskScheduler(driver, { rng: () => 0.999999 })
+        await sched.initialize()
+
+        const task = await sched.createTask({
+          name: "Jittered Task",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60_000, jitterMs: 5_000 },
+        })
+
+        const canonicalMs = task.nextRunAt!.getTime()
+        expect(driver.arm).toHaveBeenCalledWith(task.id, canonicalMs + 5_000)
+
+        // When the (jittered) fire arrives, the canonical slot is preserved.
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        driver.fire(task.id, canonicalMs + 5_000)
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ scheduledFor: new Date(canonicalMs) })
+        )
+        sched.stop()
+      })
+
+      it("arms at the canonical time when jitter is unset", async () => {
+        const driver = makeMockDriver()
+        const sched = createTaskScheduler(driver, { rng: () => 0.999999 })
+        await sched.initialize()
+
+        const task = await sched.createTask({
+          name: "Unjittered Task",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        })
+
+        expect(driver.arm).toHaveBeenCalledWith(task.id, task.nextRunAt!.getTime())
+        sched.stop()
+      })
     })
   })
 })

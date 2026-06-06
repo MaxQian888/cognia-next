@@ -181,7 +181,7 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
     maxMissedRuns:
       initialValues?.config?.maxMissedRuns ?? DEFAULT_EXECUTION_CONFIG.maxMissedRuns ?? 1,
     allowConcurrent:
-      initialValues?.config?.allowConcurrent ?? DEFAULT_EXECUTION_CONFIG.allowConcurrent,
+      initialValues?.config?.allowConcurrent ?? DEFAULT_EXECUTION_CONFIG.allowConcurrent ?? false,
     showAdvanced: false,
     cronError: null,
     payloadError: null,

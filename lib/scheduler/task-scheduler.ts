@@ -18,7 +18,15 @@ import {
   DEFAULT_NOTIFICATION_CONFIG,
 } from "@/types/scheduler"
 import { getNextCronTime } from "./cron-parser"
+import { enumerateBackfillSlots } from "./backfill"
 import { schedulerDb } from "./scheduler-db"
+import {
+  applyJitter,
+  isAtMaxRuns,
+  isPastEndAt,
+  isSlotOutsideCatchupWindow,
+  resolveOverlapPolicy,
+} from "./runtime-policy"
 import { notifyTaskEvent } from "./notification-integration"
 import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
@@ -80,10 +88,24 @@ interface ExecuteTaskContext {
   deferNextRunUpdate?: boolean
 }
 
+/** A buffered start waiting for the running execution to finish (queue-one / queue-all). */
+interface QueuedStart {
+  triggerSource: TaskExecutionTriggerSource
+  scheduledFor?: Date
+  deferNextRunUpdate?: boolean
+}
+
 class TaskSchedulerImpl {
   /** Ids currently armed in the timing driver (mirrors driver state for getStatus). */
   private armedTaskIds: Set<string> = new Set()
-  private runningExecutions: Map<string, TaskExecution> = new Map()
+  /** Canonical (un-jittered) armed slot per task — `scheduledFor` always uses this. */
+  private armedCanonicalMs: Map<string, number> = new Map()
+  /** Running executions per task (executionId → execution); >1 entry under "allow". */
+  private runningByTask: Map<string, Map<string, TaskExecution>> = new Map()
+  /** Abort controllers per running execution (cancel-previous + timeout share them). */
+  private executionControllers: Map<string, AbortController> = new Map()
+  /** Buffered starts per task for the queue-one / queue-all overlap policies. */
+  private queues: Map<string, QueuedStart[]> = new Map()
   private retryChains: Set<string> = new Set()
   private isInitialized = false
   private checkInterval: ReturnType<typeof setInterval> | null = null
@@ -97,9 +119,33 @@ class TaskSchedulerImpl {
    * was injected via `createTaskScheduler(driver)` for tests.
    */
   private driver: SchedulerTimingDriver | null
+  /** Injectable randomness source for deterministic jitter in tests. */
+  private rng: () => number
 
-  constructor(driver?: SchedulerTimingDriver) {
+  constructor(driver?: SchedulerTimingDriver, opts: { rng?: () => number } = {}) {
     this.driver = driver ?? null
+    this.rng = opts.rng ?? Math.random
+  }
+
+  /** Whether any execution of this task is currently running. */
+  private isTaskRunning(taskId: string): boolean {
+    return (this.runningByTask.get(taskId)?.size ?? 0) > 0
+  }
+
+  private trackRunning(execution: TaskExecution): void {
+    let perTask = this.runningByTask.get(execution.taskId)
+    if (!perTask) {
+      perTask = new Map()
+      this.runningByTask.set(execution.taskId, perTask)
+    }
+    perTask.set(execution.id, execution)
+  }
+
+  private untrackRunning(execution: TaskExecution): void {
+    const perTask = this.runningByTask.get(execution.taskId)
+    if (!perTask) return
+    perTask.delete(execution.id)
+    if (perTask.size === 0) this.runningByTask.delete(execution.taskId)
   }
 
   /** True when this instance is the timing authority allowed to arm tasks. */
@@ -221,11 +267,20 @@ class TaskSchedulerImpl {
    */
   private async handleTaskDue(taskId: string, firedAtMs: number): Promise<void> {
     this.armedTaskIds.delete(taskId)
+    // Jitter only shifts the armed epoch; the canonical slot identity is
+    // preserved here so interval cadence and missed-run math stay stable.
+    const canonicalMs = this.armedCanonicalMs.get(taskId) ?? firedAtMs
+    this.armedCanonicalMs.delete(taskId)
     const task = await schedulerDb.getTask(taskId)
     if (!task || task.status !== "active") return
+    // Lifecycle bounds may have been crossed between arm and fire.
+    if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {
+      await this.expireTask(task, isAtMaxRuns(task) ? "max-runs-reached" : "ended")
+      return
+    }
     this.executeTask(task, 0, {
       triggerSource: "schedule",
-      scheduledFor: new Date(firedAtMs),
+      scheduledFor: new Date(canonicalMs),
     }).catch((err) => {
       log.error(`Error executing scheduled task ${task.name}:`, err)
     })
@@ -372,7 +427,30 @@ class TaskSchedulerImpl {
   }
 
   private async reconcileMissedRecurringTask(task: ScheduledTask, now: Date): Promise<void> {
-    const { dueSlots, nextFutureSlot } = this.collectMissedRunSlots(task, now)
+    const { dueSlots: rawDueSlots, nextFutureSlot } = this.collectMissedRunSlots(task, now)
+
+    // Time-based catch-up window: slots older than catchupWindowMs are skipped
+    // with their own terminal reason instead of being re-run (Temporal
+    // CatchupWindow semantics). Applied after the count cap.
+    let dueSlots = rawDueSlots
+    const windowMs = task.config.catchupWindowMs
+    if (typeof windowMs === "number" && windowMs > 0 && rawDueSlots.length > 0) {
+      const expired = rawDueSlots.filter((slot) => isSlotOutsideCatchupWindow(slot, now, windowMs))
+      dueSlots = rawDueSlots.filter((slot) => !isSlotOutsideCatchupWindow(slot, now, windowMs))
+      for (const slot of expired) {
+        await this.createSkippedExecution(task, {
+          triggerSource: "catch-up",
+          scheduledFor: slot,
+          terminalReason: "catchup-window-expired",
+          message: `Skipped: missed slot older than the catch-up window (${windowMs}ms)`,
+        })
+      }
+      if (dueSlots.length === 0 && expired.length > 0) {
+        await this.persistNextFutureSlot(task, nextFutureSlot, "catchup-window-expired")
+        return
+      }
+    }
+
     if (dueSlots.length === 0) {
       if (task.nextRunAt && task.nextRunAt <= now) {
         await this.createSkippedExecution(task, {
@@ -521,6 +599,9 @@ class TaskSchedulerImpl {
       notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
       status: "active",
       tags: input.tags,
+      endAt: input.endAt,
+      onSuccessTaskIds: input.onSuccessTaskIds,
+      onFailureTaskIds: input.onFailureTaskIds,
       runCount: 0,
       successCount: 0,
       failureCount: 0,
@@ -590,6 +671,10 @@ class TaskSchedulerImpl {
       ...(input.notification && { notification: { ...task.notification, ...input.notification } }),
       ...(input.status !== undefined && { status: input.status }),
       ...(input.tags !== undefined && { tags: input.tags }),
+      // endAt: null clears the bound, undefined leaves it untouched
+      ...(input.endAt !== undefined && { endAt: input.endAt ?? undefined }),
+      ...(input.onSuccessTaskIds !== undefined && { onSuccessTaskIds: input.onSuccessTaskIds }),
+      ...(input.onFailureTaskIds !== undefined && { onFailureTaskIds: input.onFailureTaskIds }),
       updatedAt: now,
     }
 
@@ -693,12 +778,52 @@ class TaskSchedulerImpl {
   }
 
   /**
+   * Manually re-run the past schedule slots of a cron/interval task inside
+   * [start, end] (Temporal backfill semantics). Slots execute sequentially,
+   * oldest first, with `triggerSource: "backfill"` and the slot as
+   * `scheduledFor`; the live `nextRunAt` cadence is never touched
+   * (`deferNextRunUpdate`). Runs go through the task's normal overlap policy,
+   * so a live fire mid-backfill is governed uniformly.
+   */
+  async backfillTask(taskId: string, range: { start: Date; end: Date }): Promise<TaskExecution[]> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task) {
+      throw SchedulerError.taskNotFound(taskId)
+    }
+    if (task.trigger.type !== "cron" && task.trigger.type !== "interval") {
+      throw SchedulerError.invalidTrigger("Backfill supports cron and interval triggers only", {
+        triggerType: task.trigger.type,
+      })
+    }
+
+    const slots = enumerateBackfillSlots(task, range.start, range.end)
+    log.info(`Backfilling task ${task.name}: ${slots.length} slot(s) in range`)
+
+    const executions: TaskExecution[] = []
+    for (const slot of slots) {
+      const execution = await this.executeTask(task, 0, {
+        triggerSource: "backfill",
+        scheduledFor: slot,
+        deferNextRunUpdate: true,
+      })
+      executions.push(execution)
+    }
+    return executions
+  }
+
+  /**
    * Schedule a task for execution by arming the timing driver at its next-run
    * instant. The driver (renderer timers or the Rust alarm daemon) invokes
    * `handleTaskDue` when the instant elapses; overdue instants fire promptly.
    */
   private async scheduleTask(task: ScheduledTask): Promise<void> {
     if (task.status !== "active") return
+
+    // Lazy lifecycle check: never arm a task that has crossed its bounds.
+    if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {
+      await this.expireTask(task, isAtMaxRuns(task) ? "max-runs-reached" : "ended")
+      return
+    }
 
     const nextRun = task.nextRunAt || this.calculateNextRunTime(task)
     if (!nextRun) {
@@ -713,7 +838,10 @@ class TaskSchedulerImpl {
     }
 
     this.armedTaskIds.add(task.id)
-    await driver.arm(task.id, nextRun.getTime())
+    // Arm with optional jitter; remember the canonical slot for handleTaskDue.
+    const canonicalMs = nextRun.getTime()
+    this.armedCanonicalMs.set(task.id, canonicalMs)
+    await driver.arm(task.id, applyJitter(canonicalMs, task.trigger.jitterMs, this.rng))
 
     log.debug(`Scheduled task ${task.name} for ${nextRun.toISOString()}`)
   }
@@ -725,7 +853,31 @@ class TaskSchedulerImpl {
     if (this.armedTaskIds.delete(taskId)) {
       log.debug(`Unscheduled task: ${taskId}`)
     }
+    this.armedCanonicalMs.delete(taskId)
     void this.driver?.disarm(taskId)
+  }
+
+  /**
+   * Expire a task that crossed a lifecycle bound (`endAt` passed or `maxRuns`
+   * consumed). Mirrors `expireMissedOneTimeTask` minus the skipped-execution
+   * record — nothing was due; the schedule simply ended.
+   */
+  private async expireTask(
+    task: ScheduledTask,
+    reason: "ended" | "max-runs-reached"
+  ): Promise<void> {
+    const now = new Date()
+    await schedulerDb.updateTask({
+      ...task,
+      status: "expired",
+      nextRunAt: undefined,
+      lastTerminalReason: reason,
+      lastTerminalAt: now,
+      updatedAt: now,
+    })
+    this.unscheduleTask(task.id)
+    this.queues.delete(task.id)
+    log.info(`Task ${task.name} expired (${reason})`)
   }
 
   /**
@@ -742,25 +894,90 @@ class TaskSchedulerImpl {
     const isRetryExecution = triggerSource === "retry"
     const retryChainActive = this.retryChains.has(task.id)
 
-    // Check for concurrent execution
-    if (
-      !task.config.allowConcurrent &&
-      (this.runningExecutions.has(task.id) || (retryChainActive && !isRetryExecution))
-    ) {
-      const terminalReason =
-        retryChainActive && !isRetryExecution ? "retry-chain-active" : "concurrency-blocked"
-
-      log.warn(`Task ${task.name} execution skipped due to ${terminalReason}`)
-      return this.createSkippedExecution(task, {
-        triggerSource,
-        scheduledFor: context.scheduledFor,
-        terminalReason,
-        message:
-          terminalReason === "retry-chain-active"
-            ? "Skipped: retry chain is still active for this task"
-            : "Skipped: concurrent execution not allowed",
-        retryAttempt,
-      })
+    // Overlap policy: decide what happens when this start collides with a
+    // running execution (or an active retry chain, which is a continuation of
+    // the same logical run).
+    const overlapPolicy = resolveOverlapPolicy(task.config)
+    const retryBlocked = retryChainActive && !isRetryExecution
+    if (overlapPolicy !== "allow" && (this.isTaskRunning(task.id) || retryBlocked)) {
+      switch (overlapPolicy) {
+        case "queue-one":
+        case "queue-all": {
+          const queue = this.queues.get(task.id) ?? []
+          const queuedStart: QueuedStart = {
+            triggerSource,
+            scheduledFor: context.scheduledFor,
+            deferNextRunUpdate: context.deferNextRunUpdate,
+          }
+          if (overlapPolicy === "queue-one") {
+            // Newest wins: any displaced pending start is dropped as skipped.
+            for (const displaced of queue) {
+              await this.createSkippedExecution(task, {
+                triggerSource: displaced.triggerSource,
+                scheduledFor: displaced.scheduledFor,
+                terminalReason: "overlap-skipped",
+                message: "Skipped: displaced by a newer buffered start (queue-one)",
+              })
+            }
+            this.queues.set(task.id, [queuedStart])
+            log.debug(`Task ${task.name} start buffered (queue-one)`)
+            return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
+          }
+          const maxQueueSize = Math.max(
+            1,
+            task.config.maxQueueSize ?? DEFAULT_EXECUTION_CONFIG.maxQueueSize ?? 10
+          )
+          if (queue.length >= maxQueueSize) {
+            log.warn(`Task ${task.name} start dropped: queue full (${maxQueueSize})`)
+            return this.createSkippedExecution(task, {
+              triggerSource,
+              scheduledFor: context.scheduledFor,
+              terminalReason: "overlap-skipped",
+              message: `Skipped: start buffer full (queue-all, max ${maxQueueSize})`,
+              retryAttempt,
+            })
+          }
+          queue.push(queuedStart)
+          this.queues.set(task.id, queue)
+          log.debug(`Task ${task.name} start buffered (queue-all, ${queue.length} pending)`)
+          return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
+        }
+        case "cancel-previous": {
+          if (retryBlocked) {
+            // A pending retry timer cannot be aborted safely — treat as skip.
+            log.warn(`Task ${task.name} execution skipped due to retry-chain-active`)
+            return this.createSkippedExecution(task, {
+              triggerSource,
+              scheduledFor: context.scheduledFor,
+              terminalReason: "retry-chain-active",
+              message: "Skipped: retry chain is still active for this task",
+              retryAttempt,
+            })
+          }
+          // Abort every running execution of this task, then proceed.
+          const perTask = this.runningByTask.get(task.id)
+          for (const runningId of perTask ? Array.from(perTask.keys()) : []) {
+            this.executionControllers.get(runningId)?.abort("overlap-cancelled")
+          }
+          log.info(`Task ${task.name}: cancelled previous execution(s) (cancel-previous)`)
+          break
+        }
+        case "skip":
+        default: {
+          const terminalReason = retryBlocked ? "retry-chain-active" : "overlap-skipped"
+          log.warn(`Task ${task.name} execution skipped due to ${terminalReason}`)
+          return this.createSkippedExecution(task, {
+            triggerSource,
+            scheduledFor: context.scheduledFor,
+            terminalReason,
+            message:
+              terminalReason === "retry-chain-active"
+                ? "Skipped: retry chain is still active for this task"
+                : "Skipped: concurrent execution not allowed (overlap policy: skip)",
+            retryAttempt,
+          })
+        }
+      }
     }
 
     // Create execution record
@@ -781,7 +998,9 @@ class TaskSchedulerImpl {
     let shouldRetry = false
     let nextRetryAt: Date | undefined
 
-    this.runningExecutions.set(task.id, execution)
+    const controller = new AbortController()
+    this.executionControllers.set(executionId, controller)
+    this.trackRunning(execution)
     await schedulerDb.createExecution(execution)
     this.broadcastExecutionStatus(execution)
 
@@ -806,10 +1025,11 @@ class TaskSchedulerImpl {
         throw SchedulerError.executorNotFound(task.type)
       }
 
-      // Execute with timeout
+      // Execute with timeout (controller is shared with cancel-previous aborts)
       const result = await this.executeWithTimeout(
         (signal) => executor(task, execution, signal),
-        task.config.timeout
+        task.config.timeout,
+        controller
       )
 
       // Update execution
@@ -882,7 +1102,7 @@ class TaskSchedulerImpl {
 
       // Trigger dependent tasks on success
       if (result.success) {
-        this.triggerDependentTasks(task.id).catch((err) => {
+        this.triggerDependentTasks(task, "success").catch((err) => {
           log.error("Failed to trigger dependent tasks:", err)
         })
       } else if (retryAttempt < task.config.maxRetries) {
@@ -910,13 +1130,16 @@ class TaskSchedulerImpl {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
+      const isCancelled = error instanceof SchedulerError && error.code === "EXECUTION_CANCELLED"
 
-      execution.status = "failed"
+      execution.status = isCancelled ? "cancelled" : "failed"
       execution.error = errorMessage
       execution.completedAt = new Date()
       execution.duration = execution.completedAt.getTime() - startTime.getTime()
       execution.terminalReason = this.getTerminalReasonFromError(error)
-      execution.logs.push(this.createLog("error", `Execution error: ${errorMessage}`))
+      execution.logs.push(
+        this.createLog(isCancelled ? "warn" : "error", `Execution error: ${errorMessage}`)
+      )
 
       log.error(`Task ${task.name} failed with error:`, error)
 
@@ -936,9 +1159,10 @@ class TaskSchedulerImpl {
         await notifyTaskEvent(task, execution, "error")
       }
 
-      // Handle retry with exponential backoff + jitter
+      // Handle retry with exponential backoff + jitter.
+      // Timeouts and overlap-cancellations are terminal — never retried.
       const isTimeout = error instanceof SchedulerError && error.code === "EXECUTION_TIMEOUT"
-      if (!isTimeout && retryAttempt < task.config.maxRetries) {
+      if (!isTimeout && !isCancelled && retryAttempt < task.config.maxRetries) {
         const delay = this.calculateRetryDelay(task.config, retryAttempt)
         shouldRetry = true
         nextRetryAt = new Date(Date.now() + delay)
@@ -965,12 +1189,22 @@ class TaskSchedulerImpl {
       // Update task statistics
       await this.updateTaskStats(task, execution)
     } finally {
-      this.runningExecutions.delete(task.id)
+      this.untrackRunning(execution)
+      this.executionControllers.delete(executionId)
       await schedulerDb.updateExecution(execution)
       this.broadcastExecutionStatus(execution)
 
       if (!shouldRetry) {
         this.retryChains.delete(task.id)
+
+        // Forward failure chain fires only on a *terminal* failure (cancelled
+        // runs were displaced, not failed — they trigger nothing).
+        if (execution.status === "failed") {
+          this.triggerDependentTasks(task, "failure").catch((err) => {
+            log.error("Failed to trigger failure-chain tasks:", err)
+          })
+        }
+
         if (!context.deferNextRunUpdate) {
           const referenceDate = execution.scheduledFor ?? execution.startedAt
           await this.updateNextRunTime(task, {
@@ -978,6 +1212,10 @@ class TaskSchedulerImpl {
             intervalBase: referenceDate,
           })
         }
+
+        // Drain one buffered start (queue-one / queue-all). A retry chain is a
+        // continuation of the same logical run, so draining waits for it.
+        this.drainQueuedStart(task.id)
       }
     }
 
@@ -985,21 +1223,87 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * Execute a function with timeout using AbortController
+   * Pop and run the FIFO head of a task's buffered-start queue. Each drained
+   * run drains the next on its own completion (via its `finally`).
+   */
+  private drainQueuedStart(taskId: string): void {
+    if (this.retryChains.has(taskId)) return
+    const queue = this.queues.get(taskId)
+    if (!queue || queue.length === 0) {
+      this.queues.delete(taskId)
+      return
+    }
+    const next = queue.shift()!
+    if (queue.length === 0) this.queues.delete(taskId)
+
+    void schedulerDb
+      .getTask(taskId)
+      .then((latest) => {
+        if (!latest) return
+        return this.executeTask(latest, 0, {
+          triggerSource: next.triggerSource,
+          scheduledFor: next.scheduledFor,
+          deferNextRunUpdate: next.deferNextRunUpdate,
+        })
+      })
+      .catch((err) => {
+        log.error(`Error executing buffered start for task ${taskId}:`, err)
+      })
+  }
+
+  /**
+   * Synthetic (non-persisted) execution returned to the caller when a start is
+   * buffered by a queue overlap policy. A real execution record is created
+   * when the buffered start actually runs.
+   */
+  private createQueuedPlaceholderExecution(
+    task: ScheduledTask,
+    executionId: string,
+    queued: QueuedStart
+  ): TaskExecution {
+    const now = new Date()
+    return {
+      id: executionId,
+      taskId: task.id,
+      taskName: task.name,
+      taskType: task.type,
+      status: "pending",
+      retryAttempt: 0,
+      triggerSource: queued.triggerSource,
+      scheduledFor: queued.scheduledFor,
+      startedAt: now,
+      logs: [
+        this.createLog(
+          "info",
+          "Start buffered by overlap policy; it will run when the current execution finishes"
+        ),
+      ],
+    }
+  }
+
+  /**
+   * Execute a function with timeout using AbortController. The controller may
+   * be externally owned (per-execution) so the `cancel-previous` overlap
+   * policy can abort a running execution; the abort reason distinguishes a
+   * timeout from an overlap cancellation.
    */
   private async executeWithTimeout<T>(
     fn: (signal: AbortSignal) => Promise<T>,
-    timeoutMs: number
+    timeoutMs: number,
+    controller: AbortController = new AbortController()
   ): Promise<T> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const timer = setTimeout(() => controller.abort("execution-timeout"), timeoutMs)
 
     try {
       const result = await Promise.race([
         fn(controller.signal),
         new Promise<never>((_resolve, reject) => {
           controller.signal.addEventListener("abort", () => {
-            reject(SchedulerError.executionTimeout("task", timeoutMs))
+            reject(
+              controller.signal.reason === "overlap-cancelled"
+                ? SchedulerError.executionCancelled("task")
+                : SchedulerError.executionTimeout("task", timeoutMs)
+            )
           })
         }),
       ])
@@ -1023,15 +1327,39 @@ class TaskSchedulerImpl {
       updatedAt: new Date(),
     }
 
+    let autoPaused = false
     if (execution.status === "completed") {
       updates.successCount = baseTask.successCount + 1
       updates.lastError = undefined
+      updates.consecutiveFailures = 0
     } else if (execution.status === "failed") {
       updates.failureCount = baseTask.failureCount + 1
       updates.lastError = execution.error
+      // A retry chain counts as ONE logical failure: only the terminal attempt
+      // (no further retry scheduled) increments the consecutive counter.
+      if (execution.terminalReason !== "retry-scheduled") {
+        const consecutive = (baseTask.consecutiveFailures ?? 0) + 1
+        updates.consecutiveFailures = consecutive
+        const threshold = baseTask.config.pauseAfterConsecutiveFailures
+        if (typeof threshold === "number" && threshold > 0 && consecutive >= threshold) {
+          autoPaused = true
+          updates.status = "paused"
+          updates.lastTerminalReason = "auto-paused"
+        }
+      }
     }
 
-    await schedulerDb.updateTask({ ...baseTask, ...updates })
+    const updatedTask = { ...baseTask, ...updates }
+    await schedulerDb.updateTask(updatedTask)
+
+    if (autoPaused) {
+      this.unscheduleTask(task.id)
+      this.queues.delete(task.id)
+      log.warn(
+        `Task ${task.name} auto-paused after ${updates.consecutiveFailures} consecutive failures`
+      )
+      await notifyTaskEvent(updatedTask, execution, "auto-paused")
+    }
   }
 
   /**
@@ -1041,23 +1369,35 @@ class TaskSchedulerImpl {
     task: ScheduledTask,
     options: { fromDate?: Date; intervalBase?: Date } = {}
   ): Promise<void> {
-    const nextRunAt = this.calculateNextRunTime(task, options)
+    // Re-fetch the latest row: `task` may be a pre-execution snapshot, and a
+    // wholesale put from it would clobber stats / status written by
+    // `updateTaskStats` (runCount, auto-pause, consecutiveFailures).
+    const latest = (await schedulerDb.getTask(task.id)) ?? task
+
+    // Lifecycle bounds: a task that just consumed its maxRuns budget (or whose
+    // endAt passed) expires instead of re-arming.
+    if (latest.status === "active" && (isPastEndAt(latest, new Date()) || isAtMaxRuns(latest))) {
+      await this.expireTask(latest, isAtMaxRuns(latest) ? "max-runs-reached" : "ended")
+      return
+    }
+
+    const nextRunAt = this.calculateNextRunTime(latest, options)
 
     if (nextRunAt) {
       await schedulerDb.updateTask({
-        ...task,
+        ...latest,
         nextRunAt,
         updatedAt: new Date(),
       })
 
       // Reschedule
-      if (task.status === "active") {
-        await this.scheduleTask({ ...task, nextRunAt })
+      if (latest.status === "active") {
+        await this.scheduleTask({ ...latest, nextRunAt })
       }
-    } else if (task.trigger.type === "once") {
+    } else if (latest.trigger.type === "once") {
       // One-time task completed, mark as expired
       await schedulerDb.updateTask({
-        ...task,
+        ...latest,
         status: "expired",
         updatedAt: new Date(),
       })
@@ -1165,6 +1505,9 @@ class TaskSchedulerImpl {
     if (error instanceof SchedulerError && error.code === "EXECUTION_TIMEOUT") {
       return "execution-timeout"
     }
+    if (error instanceof SchedulerError && error.code === "EXECUTION_CANCELLED") {
+      return "overlap-cancelled"
+    }
     return "execution-error"
   }
 
@@ -1203,43 +1546,82 @@ class TaskSchedulerImpl {
   private dependencyChainVisited: Set<string> = new Set()
 
   /**
-   * Trigger tasks that depend on the completed task.
-   * Includes cycle detection to prevent infinite loops.
+   * Trigger tasks chained to the finished task.
+   *
+   * - `success`: inverse `dependsOn` dependents (success-gated AND-join,
+   *   unchanged behavior) plus the forward `onSuccessTaskIds` list.
+   * - `failure`: the forward `onFailureTaskIds` list only.
+   *
+   * Forward chains are fire-and-forget (no AND-join). Both directions share
+   * the cycle guard so a task appearing on multiple edges fires once.
    */
-  private async triggerDependentTasks(completedTaskId: string): Promise<void> {
+  private async triggerDependentTasks(
+    sourceTask: ScheduledTask,
+    outcome: "success" | "failure"
+  ): Promise<void> {
+    const sourceTaskId = sourceTask.id
     // Cycle detection: if this task is already in the chain, abort
-    if (this.dependencyChainVisited.has(completedTaskId)) {
-      log.warn(`Dependency cycle detected at task ${completedTaskId}, aborting chain`)
+    if (this.dependencyChainVisited.has(sourceTaskId)) {
+      log.warn(`Dependency cycle detected at task ${sourceTaskId}, aborting chain`)
       return
     }
 
-    this.dependencyChainVisited.add(completedTaskId)
+    this.dependencyChainVisited.add(sourceTaskId)
 
     try {
-      const activeTasks = await schedulerDb.getTasksByStatus("active")
-      const dependentTasks = activeTasks.filter(
-        (t) => t.trigger.dependsOn && t.trigger.dependsOn.includes(completedTaskId)
-      )
+      const firedTaskIds = new Set<string>()
 
-      for (const depTask of dependentTasks) {
-        // Skip if this dependent task is already in the chain (another cycle check)
-        if (this.dependencyChainVisited.has(depTask.id)) {
-          log.warn(`Skipping task "${depTask.name}" to prevent dependency cycle`)
+      if (outcome === "success") {
+        const activeTasks = await schedulerDb.getTasksByStatus("active")
+        const dependentTasks = activeTasks.filter(
+          (t) => t.trigger.dependsOn && t.trigger.dependsOn.includes(sourceTaskId)
+        )
+
+        for (const depTask of dependentTasks) {
+          // Skip if this dependent task is already in the chain (another cycle check)
+          if (this.dependencyChainVisited.has(depTask.id)) {
+            log.warn(`Skipping task "${depTask.name}" to prevent dependency cycle`)
+            continue
+          }
+
+          const allDepsComplete = await this.checkAllDependenciesComplete(depTask)
+          if (allDepsComplete) {
+            log.info(`All dependencies met for task "${depTask.name}", triggering execution`)
+            firedTaskIds.add(depTask.id)
+            this.executeTask(depTask, 0, { triggerSource: "dependency" }).catch((err) => {
+              log.error(`Error executing dependent task ${depTask.name}:`, err)
+            })
+          }
+        }
+      }
+
+      const forwardIds =
+        outcome === "success" ? sourceTask.onSuccessTaskIds : sourceTask.onFailureTaskIds
+      for (const targetId of forwardIds ?? []) {
+        if (firedTaskIds.has(targetId)) continue
+        if (this.dependencyChainVisited.has(targetId)) {
+          log.warn(`Skipping forward-chain target ${targetId} to prevent dependency cycle`)
           continue
         }
-
-        const allDepsComplete = await this.checkAllDependenciesComplete(depTask)
-        if (allDepsComplete) {
-          log.info(`All dependencies met for task "${depTask.name}", triggering execution`)
-          this.executeTask(depTask, 0, { triggerSource: "dependency" }).catch((err) => {
-            log.error(`Error executing dependent task ${depTask.name}:`, err)
-          })
+        const target = await schedulerDb.getTask(targetId)
+        if (!target) {
+          log.warn(`Forward-chain target ${targetId} not found, skipping`)
+          continue
         }
+        if (target.status !== "active") {
+          log.warn(`Forward-chain target "${target.name}" is ${target.status}, skipping`)
+          continue
+        }
+        log.info(`Forward ${outcome} chain firing task "${target.name}"`)
+        firedTaskIds.add(targetId)
+        this.executeTask(target, 0, { triggerSource: "dependency" }).catch((err) => {
+          log.error(`Error executing forward-chain task ${target.name}:`, err)
+        })
       }
     } catch (error) {
       log.error("Error checking dependent tasks:", error)
     } finally {
-      this.dependencyChainVisited.delete(completedTaskId)
+      this.dependencyChainVisited.delete(sourceTaskId)
     }
   }
 
@@ -1406,10 +1788,14 @@ class TaskSchedulerImpl {
    * Get scheduler status
    */
   getStatus(): { initialized: boolean; scheduledCount: number; runningCount: number } {
+    let runningCount = 0
+    for (const perTask of this.runningByTask.values()) {
+      runningCount += perTask.size
+    }
     return {
       initialized: this.isInitialized,
       scheduledCount: this.armedTaskIds.size,
-      runningCount: this.runningExecutions.size,
+      runningCount,
     }
   }
 }
@@ -1421,8 +1807,11 @@ let schedulerInstance: TaskSchedulerImpl | null = null
  * Create a new task scheduler instance (factory pattern).
  * Useful for testing or creating isolated scheduler instances.
  */
-export function createTaskScheduler(driver?: SchedulerTimingDriver): TaskSchedulerImpl {
-  return new TaskSchedulerImpl(driver)
+export function createTaskScheduler(
+  driver?: SchedulerTimingDriver,
+  opts: { rng?: () => number } = {}
+): TaskSchedulerImpl {
+  return new TaskSchedulerImpl(driver, opts)
 }
 
 /**

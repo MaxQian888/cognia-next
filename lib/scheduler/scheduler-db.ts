@@ -27,6 +27,10 @@ interface DBScheduledTask {
   notification: string // JSON serialized TaskNotificationConfig
   status: string
   tags?: string // JSON serialized string[]
+  endAt?: string // ISO date string
+  onSuccessTaskIds?: string // JSON serialized string[]
+  onFailureTaskIds?: string // JSON serialized string[]
+  consecutiveFailures?: number
   lastRunAt?: string // ISO date string
   nextRunAt?: string // ISO date string
   runCount: number
@@ -364,6 +368,10 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     notification: JSON.stringify(task.notification),
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
+    endAt: task.endAt?.toISOString(),
+    onSuccessTaskIds: task.onSuccessTaskIds ? JSON.stringify(task.onSuccessTaskIds) : undefined,
+    onFailureTaskIds: task.onFailureTaskIds ? JSON.stringify(task.onFailureTaskIds) : undefined,
+    consecutiveFailures: task.consecutiveFailures,
     lastRunAt: task.lastRunAt?.toISOString(),
     nextRunAt: task.nextRunAt?.toISOString(),
     runCount: task.runCount,
@@ -379,6 +387,13 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
 
 function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
   const trigger = JSON.parse(dbTask.trigger)
+  const config = JSON.parse(dbTask.config) as ScheduledTask["config"]
+  // Load-time migration: derive overlapPolicy from the legacy boolean for
+  // tasks persisted before the policy field existed. Idempotent — an
+  // explicit policy is never clobbered. Persists on the task's next update.
+  if (config.overlapPolicy === undefined) {
+    config.overlapPolicy = config.allowConcurrent ? "allow" : "skip"
+  }
   return {
     id: dbTask.id,
     name: dbTask.name,
@@ -389,10 +404,14 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
       runAt: trigger.runAt ? new Date(trigger.runAt) : undefined,
     },
     payload: JSON.parse(dbTask.payload),
-    config: JSON.parse(dbTask.config),
+    config,
     notification: JSON.parse(dbTask.notification),
     status: dbTask.status as ScheduledTask["status"],
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
+    endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,
+    onSuccessTaskIds: dbTask.onSuccessTaskIds ? JSON.parse(dbTask.onSuccessTaskIds) : undefined,
+    onFailureTaskIds: dbTask.onFailureTaskIds ? JSON.parse(dbTask.onFailureTaskIds) : undefined,
+    consecutiveFailures: dbTask.consecutiveFailures,
     lastRunAt: dbTask.lastRunAt ? new Date(dbTask.lastRunAt) : undefined,
     nextRunAt: dbTask.nextRunAt ? new Date(dbTask.nextRunAt) : undefined,
     runCount: dbTask.runCount,

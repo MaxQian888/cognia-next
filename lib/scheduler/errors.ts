@@ -9,6 +9,7 @@ export type SchedulerErrorCode =
   | "EXECUTOR_NOT_FOUND"
   | "EXECUTION_TIMEOUT"
   | "EXECUTION_FAILED"
+  | "EXECUTION_CANCELLED"
   | "CONCURRENT_EXECUTION"
   | "INVALID_CRON"
   | "INVALID_TRIGGER"
@@ -74,6 +75,15 @@ export class SchedulerError extends Error {
       taskName,
       timeoutMs,
     })
+  }
+
+  /** Raised when a running execution is aborted by the `cancel-previous` overlap policy. */
+  static executionCancelled(taskName: string): SchedulerError {
+    return new SchedulerError(
+      "EXECUTION_CANCELLED",
+      `Execution cancelled by a newer start (cancel-previous overlap policy)`,
+      { taskName }
+    )
   }
 
   static initFailed(reason: string, cause?: Error): SchedulerError {

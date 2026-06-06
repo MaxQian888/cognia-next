@@ -30,6 +30,32 @@ describe("trigger-normalizer", () => {
       })
     })
 
+    it("floors and keeps positive jitterMs on cron and interval triggers", () => {
+      expect(
+        normalizeTaskTrigger({ type: "cron", cronExpression: "0 9 * * *", jitterMs: 1500.9 })
+          .jitterMs
+      ).toBe(1500)
+      expect(
+        normalizeTaskTrigger({ type: "interval", intervalMs: 60000, jitterMs: 250 }).jitterMs
+      ).toBe(250)
+    })
+
+    it("drops zero, negative, or invalid jitterMs", () => {
+      expect(
+        normalizeTaskTrigger({ type: "interval", intervalMs: 60000, jitterMs: 0 }).jitterMs
+      ).toBeUndefined()
+      expect(
+        normalizeTaskTrigger({ type: "interval", intervalMs: 60000, jitterMs: -5 }).jitterMs
+      ).toBeUndefined()
+      expect(
+        normalizeTaskTrigger({
+          type: "interval",
+          intervalMs: 60000,
+          jitterMs: Number.NaN,
+        }).jitterMs
+      ).toBeUndefined()
+    })
+
     it("throws for invalid cron expression", () => {
       expect(() =>
         normalizeTaskTrigger({

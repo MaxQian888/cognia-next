@@ -360,5 +360,89 @@ describe("SchedulerDatabase", () => {
       expect(retrievedExecution?.scheduledFor instanceof Date).toBe(true)
       expect(retrievedExecution?.retryScheduledAt instanceof Date).toBe(true)
     })
+
+    it("round-trips lifecycle, chain, and policy fields", async () => {
+      const endAt = new Date(Date.now() + 86_400_000)
+      const task = createMockTask({
+        id: "policy-roundtrip",
+        endAt,
+        onSuccessTaskIds: ["next-1", "next-2"],
+        onFailureTaskIds: ["cleanup-1"],
+        consecutiveFailures: 2,
+        config: {
+          timeout: 1000,
+          maxRetries: 0,
+          retryDelay: 100,
+          runMissedOnStartup: false,
+          overlapPolicy: "queue-all",
+          maxQueueSize: 5,
+          maxRuns: 20,
+          pauseAfterConsecutiveFailures: 3,
+          catchupWindowMs: 3_600_000,
+        },
+        trigger: { type: "interval", intervalMs: 60_000, jitterMs: 2_000 },
+      })
+
+      await schedulerDb.createTask(task)
+      const retrieved = await schedulerDb.getTask("policy-roundtrip")
+
+      expect(retrieved?.endAt?.toISOString()).toBe(endAt.toISOString())
+      expect(retrieved?.onSuccessTaskIds).toEqual(["next-1", "next-2"])
+      expect(retrieved?.onFailureTaskIds).toEqual(["cleanup-1"])
+      expect(retrieved?.consecutiveFailures).toBe(2)
+      expect(retrieved?.config.overlapPolicy).toBe("queue-all")
+      expect(retrieved?.config.maxQueueSize).toBe(5)
+      expect(retrieved?.config.maxRuns).toBe(20)
+      expect(retrieved?.config.pauseAfterConsecutiveFailures).toBe(3)
+      expect(retrieved?.config.catchupWindowMs).toBe(3_600_000)
+      expect(retrieved?.trigger.jitterMs).toBe(2_000)
+    })
+
+    it("leaves optional new fields undefined when unset", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "no-new-fields" }))
+      const retrieved = await schedulerDb.getTask("no-new-fields")
+
+      expect(retrieved?.endAt).toBeUndefined()
+      expect(retrieved?.onSuccessTaskIds).toBeUndefined()
+      expect(retrieved?.onFailureTaskIds).toBeUndefined()
+      expect(retrieved?.consecutiveFailures).toBeUndefined()
+    })
+  })
+
+  describe("overlapPolicy load-time migration", () => {
+    it("derives 'allow' from legacy allowConcurrent: true", async () => {
+      const task = createMockTask({ id: "legacy-allow" })
+      task.config.allowConcurrent = true
+      delete task.config.overlapPolicy
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("legacy-allow")
+      expect(retrieved?.config.overlapPolicy).toBe("allow")
+    })
+
+    it("derives 'skip' from legacy allowConcurrent: false", async () => {
+      const task = createMockTask({ id: "legacy-skip" })
+      task.config.allowConcurrent = false
+      delete task.config.overlapPolicy
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("legacy-skip")
+      expect(retrieved?.config.overlapPolicy).toBe("skip")
+    })
+
+    it("never clobbers an explicit overlapPolicy (idempotent)", async () => {
+      const task = createMockTask({ id: "explicit-policy" })
+      task.config.allowConcurrent = true
+      task.config.overlapPolicy = "cancel-previous"
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("explicit-policy")
+      expect(retrieved?.config.overlapPolicy).toBe("cancel-previous")
+
+      // Re-persist and re-read: still untouched.
+      await schedulerDb.updateTask(retrieved!)
+      const again = await schedulerDb.getTask("explicit-policy")
+      expect(again?.config.overlapPolicy).toBe("cancel-previous")
+    })
   })
 })

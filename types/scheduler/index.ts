@@ -61,6 +61,7 @@ export type TaskExecutionTriggerSource =
   | "dependency"
   | "catch-up"
   | "remote"
+  | "backfill"
 
 export type TaskExecutionTerminalReason =
   | "completed"
@@ -72,6 +73,23 @@ export type TaskExecutionTerminalReason =
   | "missed-run-skipped"
   | "once-expired"
   | "retry-scheduled"
+  | "overlap-skipped"
+  | "overlap-cancelled"
+  | "catchup-window-expired"
+  | "max-runs-reached"
+  | "ended"
+  | "auto-paused"
+
+/**
+ * How a due fire interacts with an already-running execution of the same task.
+ * Mirrors Temporal Schedule overlap policies:
+ * - `allow`           start regardless (ALLOW_ALL)
+ * - `skip`            drop the new start (SKIP)
+ * - `queue-one`       keep at most one pending start, newest wins (BUFFER_ONE)
+ * - `queue-all`       FIFO-buffer starts up to `maxQueueSize` (BUFFER_ALL)
+ * - `cancel-previous` abort the running execution, then start (CANCEL_OTHER)
+ */
+export type TaskOverlapPolicy = "allow" | "skip" | "queue-one" | "queue-all" | "cancel-previous"
 
 // Task status
 export type ScheduledTaskStatus = "active" | "paused" | "disabled" | "expired"
@@ -258,6 +276,12 @@ export interface TaskTrigger {
   timezone?: string
   /** Task IDs that must complete successfully before this task runs */
   dependsOn?: string[]
+  /**
+   * Max random delay (ms) added to the *armed* fire time of cron/interval
+   * triggers to avoid thundering herds. The canonical slot (`nextRunAt`,
+   * `scheduledFor`, missed-run math) is never jittered.
+   */
+  jitterMs?: number
 }
 
 /**
@@ -294,8 +318,26 @@ export interface TaskExecutionConfig {
   runMissedOnStartup: boolean
   /** Maximum number of missed executions to run */
   maxMissedRuns?: number
-  /** Whether to allow concurrent executions */
-  allowConcurrent: boolean
+  /**
+   * Whether to allow concurrent executions.
+   * @deprecated Superseded by `overlapPolicy`; kept for persisted-task
+   * back-compat (`true` → "allow", `false` → "skip"). The scheduler reads
+   * `overlapPolicy` first.
+   */
+  allowConcurrent?: boolean
+  /** Overlap policy applied when a fire collides with a running execution. */
+  overlapPolicy?: TaskOverlapPolicy
+  /** Max buffered starts for `queue-all` (overflow is dropped as "overlap-skipped"). */
+  maxQueueSize?: number
+  /** Auto-expire the task after this many total runs (failures count). */
+  maxRuns?: number
+  /** Auto-pause the task after this many consecutive terminal failures. */
+  pauseAfterConsecutiveFailures?: number
+  /**
+   * Time window (ms) for catch-up: missed slots older than this are skipped
+   * with reason "catchup-window-expired" instead of being re-run.
+   */
+  catchupWindowMs?: number
 }
 
 /**
@@ -313,6 +355,14 @@ export interface ScheduledTask {
   status: ScheduledTaskStatus
   /** Tags for categorization */
   tags?: string[]
+  /** Auto-expire the task once this instant passes (checked lazily at arm/fire). */
+  endAt?: Date
+  /** Forward chain: tasks fired (fire-and-forget) after a successful run. */
+  onSuccessTaskIds?: string[]
+  /** Forward chain: tasks fired (fire-and-forget) after a terminal failure. */
+  onFailureTaskIds?: string[]
+  /** Consecutive terminal failures since the last success (drives auto-pause). */
+  consecutiveFailures?: number
   /** Last execution time */
   lastRunAt?: Date
   /** Next scheduled execution time */
@@ -386,6 +436,9 @@ export interface CreateScheduledTaskInput {
   config?: Partial<TaskExecutionConfig>
   notification?: Partial<TaskNotificationConfig>
   tags?: string[]
+  endAt?: Date
+  onSuccessTaskIds?: string[]
+  onFailureTaskIds?: string[]
 }
 
 /**
@@ -400,6 +453,9 @@ export interface UpdateScheduledTaskInput {
   notification?: Partial<TaskNotificationConfig>
   status?: ScheduledTaskStatus
   tags?: string[]
+  endAt?: Date | null
+  onSuccessTaskIds?: string[]
+  onFailureTaskIds?: string[]
 }
 
 /**
@@ -439,6 +495,8 @@ export const DEFAULT_EXECUTION_CONFIG: TaskExecutionConfig = {
   runMissedOnStartup: false,
   maxMissedRuns: 1,
   allowConcurrent: false,
+  overlapPolicy: "skip",
+  maxQueueSize: 10,
 }
 
 /**
