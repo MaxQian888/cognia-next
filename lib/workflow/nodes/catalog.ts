@@ -393,6 +393,18 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Hourglass",
     keywords: ["desktop", "wait", "element", "appear"],
   },
+  "action.desktop.paste": {
+    label: "Paste text",
+    description: "Paste text via the clipboard (saves + restores the user clipboard).",
+    iconName: "ClipboardPaste",
+    keywords: ["desktop", "paste", "clipboard", "text", "input"],
+  },
+  "action.desktop.launchApp": {
+    label: "Launch app",
+    description: "Launch an application by path/name, or focus an existing window by process.",
+    iconName: "Rocket",
+    keywords: ["desktop", "launch", "open", "app", "application", "focus", "start"],
+  },
   "trigger.desktop.event": {
     label: "On UIA event",
     description: "Fire when a UIA focus / structure / property event matches.",

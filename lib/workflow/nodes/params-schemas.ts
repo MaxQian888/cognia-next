@@ -662,6 +662,8 @@ export const PARAMS_SCHEMAS = {
   "action.desktop.windowClose": z.object({}).passthrough(),
   "action.desktop.windowResize": z.object({}).passthrough(),
   "action.desktop.wait": z.object({}).passthrough(),
+  "action.desktop.paste": z.object({}).passthrough(),
+  "action.desktop.launchApp": z.object({}).passthrough(),
   "trigger.desktop.event": z.object({}).passthrough(),
   // System: integrated terminal
   "action.system.terminal": SystemTerminalParams,

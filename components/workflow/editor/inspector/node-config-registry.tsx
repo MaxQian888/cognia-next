@@ -25,6 +25,8 @@ import {
   DesktopWindowCloseConfig,
   DesktopWindowResizeConfig,
   DesktopWaitConfig,
+  DesktopPasteConfig,
+  DesktopLaunchAppConfig,
 } from "./forms/desktop"
 import {
   GithubClosePrConfig,
@@ -164,6 +166,8 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.desktop.windowClose": DesktopWindowCloseConfig,
   "action.desktop.windowResize": DesktopWindowResizeConfig,
   "action.desktop.wait": DesktopWaitConfig,
+  "action.desktop.paste": DesktopPasteConfig,
+  "action.desktop.launchApp": DesktopLaunchAppConfig,
   // Actions: system (Wave 3 — integrated terminal)
   "action.system.terminal": SystemTerminalConfig,
   "action.terminal.session.open": TerminalSessionOpenConfig,

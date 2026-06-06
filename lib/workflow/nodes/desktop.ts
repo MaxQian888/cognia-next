@@ -192,6 +192,34 @@ registerNodeExecutor({
 })
 
 registerNodeExecutor({
+  kind: "action.desktop.paste",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const text = str(ctx.params, "text") ?? ""
+    if (!text) {
+      throw new Error("action.desktop.paste requires a non-empty 'text'")
+    }
+    await desktop.paste(text, callCtx(ctx.params))
+    return { output: { pasted: true, chars: text.length } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.desktop.launchApp",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params
+    const app = str(params, "app") ?? ""
+    if (!app) {
+      throw new Error("action.desktop.launchApp requires a non-empty 'app' (path or name)")
+    }
+    const action = str(params, "action") === "focus" ? ("focus" as const) : ("launch" as const)
+    await desktop.launchApp(app, action, callCtx(params))
+    return { output: { app, action } }
+  },
+})
+
+registerNodeExecutor({
   kind: "action.desktop.invokePattern",
   typeVersion: 1,
   execute: async (ctx) => {

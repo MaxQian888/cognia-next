@@ -93,6 +93,8 @@ export type WorkflowNodeKind =
   | "action.desktop.windowClose"
   | "action.desktop.windowResize"
   | "action.desktop.wait"
+  | "action.desktop.paste"
+  | "action.desktop.launchApp"
   | "trigger.desktop.event"
   // Wave 3 — integrated terminal action. Runs a command in a dock tab
   // (or spawns a fresh tab), surfaces stdout / exit code downstream.
@@ -247,6 +249,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.desktop.windowClose",
   "action.desktop.windowResize",
   "action.desktop.wait",
+  "action.desktop.paste",
+  "action.desktop.launchApp",
   "trigger.desktop.event",
   "action.system.terminal",
   "action.terminal.session.open",

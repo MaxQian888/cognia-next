@@ -222,6 +222,71 @@ export function DesktopKeysConfig({ params, onChange }: Props) {
   )
 }
 
+export function DesktopPasteConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopPaste")
+  const text = readString(params, "text")
+  return (
+    <DesktopActionForm
+      params={params}
+      onChange={onChange}
+      showSelector={false}
+      extraFields={
+        <Field
+          label={t("text.label")}
+          htmlFor="paste-text"
+          hint={t("text.hint")}
+          name="text"
+          required
+        >
+          <Textarea
+            id="paste-text"
+            rows={3}
+            value={text}
+            onChange={(e) => onChange(patchParam(params, "text", e.target.value))}
+            placeholder={t("text.placeholder")}
+          />
+        </Field>
+      }
+    />
+  )
+}
+
+export function DesktopLaunchAppConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopLaunchApp")
+  const app = readString(params, "app")
+  const action = readString(params, "action") || "launch"
+  return (
+    <DesktopActionForm
+      params={params}
+      onChange={onChange}
+      showSelector={false}
+      extraFields={
+        <>
+          <Field label={t("app.label")} htmlFor="la-app" hint={t("app.hint")} name="app" required>
+            <Input
+              id="la-app"
+              placeholder={t("app.placeholder")}
+              value={app}
+              onChange={(e) => onChange(patchParam(params, "app", e.target.value))}
+            />
+          </Field>
+          <Field label={t("action.label")} htmlFor="la-action" name="action">
+            <Select value={action} onValueChange={(v) => onChange(patchParam(params, "action", v))}>
+              <SelectTrigger id="la-action">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="launch">{t("action.launch")}</SelectItem>
+                <SelectItem value="focus">{t("action.focus")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        </>
+      }
+    />
+  )
+}
+
 const INVOKE_PATTERNS = [
   "Invoke",
   "Toggle",

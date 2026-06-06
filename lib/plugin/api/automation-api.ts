@@ -75,6 +75,11 @@ export interface PluginAutomationAPI {
   // ----------------------------------------------------- type (automation:type)
   /** Type literal text into the focused element. */
   type(text: string, opts?: TypeOpts): Promise<void>
+  /**
+   * Clipboard-paste fast path: the host saves the clipboard, writes `text`,
+   * sends Ctrl/Cmd+V, then restores. Prefer over `type` for long text.
+   */
+  paste(text: string): Promise<void>
   /** Send a keyboard chord (e.g. Ctrl+C). */
   keys(chord: KeyChord): Promise<void>
   /** Hold a key chord down for `durationMs`. */
@@ -91,6 +96,8 @@ export interface PluginAutomationAPI {
   // -------------------------------------------------- window (automation:window)
   /** Focus / close / minimize / maximize / resize a window. */
   windowOp(target: ElementRef, op: WindowOp): Promise<void>
+  /** Launch an app by path/name, or focus an existing window by process name. */
+  launchApp(app: string, action: "launch" | "focus"): Promise<void>
 }
 
 /**
@@ -118,6 +125,7 @@ export function createAutomationAPI(pluginId: string): PluginAutomationAPI {
     mouseButton: (button, transition) => desktop.mouseButton(button, transition, ctx),
     // type
     type: (text, opts = {}) => desktop.type(text, opts, ctx),
+    paste: (text) => desktop.paste(text, ctx),
     keys: (chord) => desktop.keys(chord, ctx),
     holdKey: (chord, durationMs) => desktop.holdKey(chord, durationMs, ctx),
     // pointer
@@ -126,6 +134,7 @@ export function createAutomationAPI(pluginId: string): PluginAutomationAPI {
     scroll: (target, opts = {}) => desktop.scroll(target, opts, ctx),
     // window
     windowOp: (target, op) => desktop.windowOp(target, op, ctx),
+    launchApp: (app, action) => desktop.launchApp(app, action, ctx),
   }
 
   return createGuardedAPI(pluginId, api, {
@@ -139,11 +148,13 @@ export function createAutomationAPI(pluginId: string): PluginAutomationAPI {
     click: "automation:click",
     mouseButton: "automation:click",
     type: "automation:type",
+    paste: "automation:type",
     keys: "automation:type",
     holdKey: "automation:type",
     mouseMove: "automation:pointer",
     drag: "automation:pointer",
     scroll: "automation:pointer",
     windowOp: "automation:window",
+    launchApp: "automation:window",
   })
 }

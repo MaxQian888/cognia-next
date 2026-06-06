@@ -14,9 +14,11 @@ jest.mock("@/lib/automation/client", () => {
     screenshot: jest.fn(),
     click: jest.fn(),
     type: jest.fn(),
+    paste: jest.fn(),
     keys: jest.fn(),
     invokePattern: jest.fn(),
     windowOp: jest.fn(),
+    launchApp: jest.fn(),
     auditSnapshot: jest.fn(),
     settingsGet: jest.fn(),
     settingsSet: jest.fn(),
@@ -212,6 +214,54 @@ describe("action.desktop.keys", () => {
     const exec = getExecutor("action.desktop.keys", 1)!
     await exec.execute(makeCtx({ chord: "ctrl+shift+t" }))
     expect(mocks.keys).toHaveBeenCalledWith(["ctrl+shift+t"], expect.any(Object))
+  })
+})
+
+describe("action.desktop.paste", () => {
+  it("throws when text is empty", async () => {
+    const exec = getExecutor("action.desktop.paste", 1)!
+    await expect(exec.execute(makeCtx({}))).rejects.toThrow(/text/)
+  })
+
+  it("forwards text with the workflow surface", async () => {
+    mocks.paste.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.paste", 1)!
+    const out = await exec.execute(makeCtx({ text: "hello world" }))
+    expect(mocks.paste).toHaveBeenCalledWith(
+      "hello world",
+      expect.objectContaining({ surface: "workflow" })
+    )
+    expect(out).toEqual({ output: { pasted: true, chars: 11 } })
+  })
+})
+
+describe("action.desktop.launchApp", () => {
+  it("throws when app is empty", async () => {
+    const exec = getExecutor("action.desktop.launchApp", 1)!
+    await expect(exec.execute(makeCtx({}))).rejects.toThrow(/app/)
+  })
+
+  it("launches by default", async () => {
+    mocks.launchApp.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.launchApp", 1)!
+    const out = await exec.execute(makeCtx({ app: "notepad.exe" }))
+    expect(mocks.launchApp).toHaveBeenCalledWith(
+      "notepad.exe",
+      "launch",
+      expect.objectContaining({ surface: "workflow" })
+    )
+    expect(out).toEqual({ output: { app: "notepad.exe", action: "launch" } })
+  })
+
+  it("focus variant routes through", async () => {
+    mocks.launchApp.mockResolvedValueOnce(undefined)
+    const exec = getExecutor("action.desktop.launchApp", 1)!
+    await exec.execute(makeCtx({ app: "notepad.exe", action: "focus" }))
+    expect(mocks.launchApp).toHaveBeenCalledWith(
+      "notepad.exe",
+      "focus",
+      expect.objectContaining({ surface: "workflow" })
+    )
   })
 })
 
