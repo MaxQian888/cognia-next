@@ -16,6 +16,8 @@ use tauri::{AppHandle, Emitter, State};
 use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
 use crate::automation::commands::{err_to_string, now_ms, AutomationState};
 use crate::automation::dispatcher::{execute_action, run_gated, GateContext};
+use crate::automation::model_view;
+use crate::automation::platform::shared::screenshot as screenshot_helpers;
 use crate::automation::permission::{Surface, Tier};
 use crate::automation::types::{
     Action, ActionOutput, BashAction, BashResult, TextEditorAction, TextEditorResult,
@@ -58,11 +60,27 @@ pub struct CallContext {
     /// per-session from `computerUseTarget` (`lib/automation/sandbox-target.ts`).
     #[serde(default)]
     sandbox_connection_id: Option<String>,
+    /// Renderer-supplied session tag keying the per-session model-view
+    /// state (coordinate scaling / screenshot dedup / failure counters in
+    /// `automation::model_view`). Stamped by the computer-use plugin from
+    /// the active chat session id.
+    #[serde(default)]
+    session_key: Option<String>,
 }
 
 impl CallContext {
     fn surface(&self) -> Surface {
         self.surface.unwrap_or(Surface::ComputerUse)
+    }
+
+    /// Key for the per-session model-view state: explicit session tag →
+    /// sandbox connection id → "local".
+    fn view_key(&self) -> String {
+        self.session_key
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| self.sandbox_connection_id.clone().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| "local".to_string())
     }
 
     /// Build the dispatcher gate context. `click_x` / `click_y` are derived
@@ -131,12 +149,29 @@ pub async fn plugin_computer_use_execute(
         }
     }
 
-    let canonical = Action::from(&action);
+    let view_key = ctx.view_key();
+    // Model-view translation: when screenshot scaling is active the model's
+    // coordinates are in scaled space — map them back to physical pixels
+    // (and clamp Wait) BEFORE gating so the policy engine sees real
+    // coordinates. Out-of-bounds coordinates fail fast without dispatching;
+    // a misplaced click is worse than a retried one.
+    let canonical = match model_view::map_action(&view_key, Action::from(&action)) {
+        Ok(a) => a,
+        Err(e) => {
+            let mut msg = err_to_string(&e);
+            if let Some(guidance) = model_view::note_action_failure(&view_key) {
+                msg.push_str(&guidance);
+            }
+            return Ok(build_computer_result(None, Some(msg)));
+        }
+    };
     let point = canonical.point();
     let handle = state.handle.clone();
     let cua = state.cua.clone();
     let remote = ctx.sandbox_connection_id.clone();
     let gctx = ctx.gate_context(point);
+    let scaling = state.gate.settings().screenshot_scaling;
+    let dedup_enabled = state.gate.settings().screenshot_dedup;
 
     // Audit/gate under the legacy "computer_use" command name so consent +
     // audit behaviour is unchanged; the canonical action drives execution.
@@ -146,17 +181,67 @@ pub async fn plugin_computer_use_execute(
         let remote = remote.as_deref().filter(|s| !s.is_empty());
         execute_action(&handle, &cua, remote, canonical).await
     })
-    .await
-    .map_err(|e| err_to_string(&e))?;
+    .await;
+
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            // Consecutive-failure guidance: after N failed actions in a row
+            // the model is told to stop and ask the user instead of looping.
+            let mut msg = err_to_string(&e);
+            if let Some(guidance) = model_view::note_action_failure(&view_key) {
+                msg.push_str(&guidance);
+            }
+            return Err(msg);
+        }
+    };
 
     Ok(match output {
-        ActionOutput::Screenshot(sc) => build_computer_result(Some(sc), None),
-        ActionOutput::Cursor(p) => build_cursor_position_result(p),
+        ActionOutput::Screenshot(sc) => {
+            // Down-scale for the model when the operator opted in (Settings →
+            // Automation → Behavior); covers local AND cua-remote frames.
+            let sc = if scaling.enabled {
+                screenshot_helpers::downscale_encoded(sc, scaling.max_width, scaling.max_height)
+                    .map_err(|e| err_to_string(&e))?
+            } else {
+                sc
+            };
+            // Dedup: identical consecutive frames return a short text note
+            // instead of re-sending the full image. `record_screenshot`
+            // also stores the scaled/source dims for coordinate mapping.
+            let unchanged = model_view::record_screenshot(&view_key, &sc);
+            if dedup_enabled && unchanged {
+                build_unchanged_screen_result()
+            } else {
+                build_computer_result(Some(sc), None)
+            }
+        }
+        ActionOutput::Cursor(p) => {
+            model_view::note_action_success(&view_key);
+            build_cursor_position_result(p)
+        }
         // click / type / scroll / drag / mouse_button / hold_key / wait all
         // resolve to Void — a bare OK with no payload, matching the prior
         // `build_computer_result(None, None)`.
-        _ => build_computer_result(None, None),
+        _ => {
+            model_view::note_action_success(&view_key);
+            build_computer_result(None, None)
+        }
     })
+}
+
+/// Text-only OK result for a deduped (unchanged) screen — no image bytes,
+/// no display dims, so the model treats it as a tool note rather than a
+/// fresh frame.
+fn build_unchanged_screen_result() -> ComputerResult {
+    ComputerResult {
+        ok: true,
+        output: Some("screen unchanged since previous screenshot — no new image attached".into()),
+        error: None,
+        display_width_px: None,
+        display_height_px: None,
+        cursor: None,
+    }
 }
 
 // =============================================================================

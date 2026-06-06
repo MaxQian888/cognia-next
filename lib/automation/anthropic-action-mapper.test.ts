@@ -32,12 +32,40 @@ jest.mock("@/lib/automation/client", () => ({
 }))
 
 import { desktop } from "@/lib/automation/client"
-import { dispatchAnthropicAction } from "./anthropic-action-mapper"
+import type { AutomationSettings } from "@/lib/automation/client"
+import { dispatchAnthropicAction, resetMapperState } from "./anthropic-action-mapper"
 
 const mockedDesktop = desktop as jest.Mocked<typeof desktop>
 const ctx = { surface: "computerUse" as const }
 
+/** Minimal settings stub — the mapper only reads `screenshotDedup`. */
+function settingsWith(dedup: boolean): AutomationSettings {
+  return { screenshotDedup: dedup } as AutomationSettings
+}
+
+function shot(
+  bytes: string,
+  width: number,
+  height: number,
+  source?: { width: number; height: number }
+) {
+  return {
+    bytes,
+    width,
+    height,
+    capturedAt: 0,
+    format: "png" as const,
+    ...(source ? { sourceWidth: source.width, sourceHeight: source.height } : {}),
+  }
+}
+
+beforeEach(() => {
+  // Default: settings resolve with dedup ON (the production default).
+  mockedDesktop.settingsGet.mockResolvedValue(settingsWith(true))
+})
+
 afterEach(() => {
+  resetMapperState()
   jest.clearAllMocks()
 })
 
@@ -326,5 +354,143 @@ describe("dispatchAnthropicAction", () => {
     mockedDesktop.type.mockRejectedValueOnce("string-error")
     const result = await dispatchAnthropicAction({ action: "type", text: "x" }, ctx)
     expect(result).toEqual({ ok: false, error: "string-error" })
+  })
+
+  describe("screenshot dedup", () => {
+    it("returns text for identical consecutive frames", async () => {
+      mockedDesktop.screenshot.mockResolvedValue(shot("SAME", 10, 10))
+      const sCtx = { ...ctx, sessionKey: "dedup-1" }
+      const first = await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      expect(first.output).toBe("SAME")
+      const second = await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      expect(second.ok).toBe(true)
+      expect(second.output).toContain("unchanged")
+      expect(second.display_width_px).toBeUndefined()
+    })
+
+    it("a successful driving action resets dedup", async () => {
+      mockedDesktop.screenshot.mockResolvedValue(shot("SAME", 10, 10))
+      mockedDesktop.click.mockResolvedValue(undefined)
+      const sCtx = { ...ctx, sessionKey: "dedup-2" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      await dispatchAnthropicAction({ action: "left_click", coordinate: [1, 1] }, sCtx)
+      const third = await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      expect(third.output).toBe("SAME")
+    })
+
+    it("dedup can be disabled via settings", async () => {
+      mockedDesktop.settingsGet.mockResolvedValue(settingsWith(false))
+      mockedDesktop.screenshot.mockResolvedValue(shot("SAME", 10, 10))
+      const sCtx = { ...ctx, sessionKey: "dedup-3" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      const second = await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      expect(second.output).toBe("SAME")
+    })
+
+    it("dedup state is keyed per session", async () => {
+      mockedDesktop.screenshot.mockResolvedValue(shot("SAME", 10, 10))
+      await dispatchAnthropicAction({ action: "screenshot" }, { ...ctx, sessionKey: "a" })
+      const otherSession = await dispatchAnthropicAction(
+        { action: "screenshot" },
+        { ...ctx, sessionKey: "b" }
+      )
+      expect(otherSession.output).toBe("SAME")
+    })
+  })
+
+  describe("coordinate scaling", () => {
+    it("scales click coordinates up when the screenshot was downscaled", async () => {
+      mockedDesktop.screenshot.mockResolvedValueOnce(
+        shot("X", 640, 360, { width: 1280, height: 720 })
+      )
+      mockedDesktop.click.mockResolvedValueOnce(undefined)
+      const sCtx = { ...ctx, sessionKey: "scale-1" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      await dispatchAnthropicAction({ action: "left_click", coordinate: [320, 180] }, sCtx)
+      expect(mockedDesktop.click).toHaveBeenCalledWith(
+        { kind: "point", x: 640, y: 360 },
+        expect.anything(),
+        sCtx
+      )
+    })
+
+    it("rejects out-of-bounds clicks without dispatching", async () => {
+      mockedDesktop.screenshot.mockResolvedValueOnce(
+        shot("X", 640, 360, { width: 1280, height: 720 })
+      )
+      const sCtx = { ...ctx, sessionKey: "scale-2" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      const r = await dispatchAnthropicAction(
+        { action: "left_click", coordinate: [900, 100] },
+        sCtx
+      )
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain("out of bounds")
+      expect(mockedDesktop.click).not.toHaveBeenCalled()
+    })
+
+    it("scales drag endpoints and scroll targets", async () => {
+      mockedDesktop.screenshot.mockResolvedValueOnce(
+        shot("X", 100, 100, { width: 200, height: 200 })
+      )
+      mockedDesktop.drag.mockResolvedValueOnce(undefined)
+      mockedDesktop.scroll.mockResolvedValueOnce(undefined)
+      const sCtx = { ...ctx, sessionKey: "scale-3" }
+      await dispatchAnthropicAction({ action: "screenshot" }, sCtx)
+      await dispatchAnthropicAction(
+        { action: "left_click_drag", start_coordinate: [10, 10], coordinate: [50, 50] },
+        sCtx
+      )
+      expect(mockedDesktop.drag).toHaveBeenCalledWith(
+        { x: 20, y: 20 },
+        { x: 100, y: 100 },
+        { button: "left" },
+        sCtx
+      )
+      await dispatchAnthropicAction(
+        { action: "scroll", coordinate: [50, 50], scroll_direction: "down", scroll_amount: 1 },
+        sCtx
+      )
+      expect(mockedDesktop.scroll).toHaveBeenCalledWith(
+        { kind: "point", x: 100, y: 100 },
+        { dy: 120 },
+        sCtx
+      )
+    })
+  })
+
+  describe("loop guards", () => {
+    it("caps wait at 30s and reports the clamp", async () => {
+      jest.useFakeTimers()
+      try {
+        const promise = dispatchAnthropicAction({ action: "wait", duration: 120 }, ctx)
+        jest.advanceTimersByTime(30_000)
+        const result = await promise
+        expect(result.ok).toBe(true)
+        expect(result.output).toContain("capped")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("appends guidance after 5 consecutive failures", async () => {
+      mockedDesktop.click.mockRejectedValue(new Error("boom"))
+      const sCtx = { ...ctx, sessionKey: "fail-1" }
+      let last: Awaited<ReturnType<typeof dispatchAnthropicAction>> | undefined
+      for (let i = 0; i < 5; i++) {
+        last = await dispatchAnthropicAction({ action: "left_click", coordinate: [1, 1] }, sCtx)
+      }
+      expect(last?.ok).toBe(false)
+      expect(last?.error).toContain("consecutive")
+      // A success resets the streak — next failure has no guidance.
+      mockedDesktop.click.mockResolvedValueOnce(undefined)
+      await dispatchAnthropicAction({ action: "left_click", coordinate: [1, 1] }, sCtx)
+      mockedDesktop.click.mockRejectedValueOnce(new Error("boom"))
+      const afterReset = await dispatchAnthropicAction(
+        { action: "left_click", coordinate: [1, 1] },
+        sCtx
+      )
+      expect(afterReset.error).toBe("boom")
+    })
   })
 })

@@ -56,6 +56,10 @@ function buildChatCallContext(): CallContext {
     pluginId: PLUGIN_ID,
   }
   if (sessionId) {
+    // Keys the per-session model-view state (coordinate scaling, screenshot
+    // dedup, failure counters) on both sides: `automation::model_view` for
+    // the Rust executeIpc path, the TS action mapper for MCP dispatch.
+    ctx.sessionKey = sessionId
     const settings = getActiveComputerUseSettings(sessionId)
     if (settings?.requireConsent === true) {
       ctx.forceTier = "perCall"

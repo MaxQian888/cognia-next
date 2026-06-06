@@ -192,6 +192,7 @@ describe("computer-use plugin activate()", () => {
         {
           surface: "computerUse",
           pluginId: "cognia-computer-use",
+          sessionKey: "sess-1",
           forceTier: "perCall",
           screenOffMode: true,
         }
@@ -206,7 +207,7 @@ describe("computer-use plugin activate()", () => {
       await tool!.execute({ action: "screenshot" }, { config: {} })
       expect(mockedDispatchAction).toHaveBeenCalledWith(
         { action: "screenshot" },
-        { surface: "computerUse", pluginId: "cognia-computer-use" }
+        { surface: "computerUse", pluginId: "cognia-computer-use", sessionKey: "sess-2" }
       )
     })
   })

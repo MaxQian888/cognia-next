@@ -21,6 +21,11 @@
 
 import { desktop, type CallContext } from "@/lib/automation/client"
 import {
+  modelToScreen,
+  recordScreenshotDims,
+  resetScalerState,
+} from "@/lib/automation/coordinate-scaler"
+import {
   elementRefValue,
   keyChord,
   type ClickOpts,
@@ -35,6 +40,101 @@ import {
  * `plugins/computer-use/rust/src/translator.rs::WHEEL_DELTA_PER_AMOUNT`.
  */
 const WHEEL_DELTA_PER_AMOUNT = 120
+
+/**
+ * Cap for model-requested waits — keeps a confused model from parking a
+ * gated automation session for minutes. Mirrors
+ * `automation::model_view::MAX_WAIT_MS` (the Rust chat-path twin).
+ */
+const MAX_WAIT_MS = 30_000
+
+/**
+ * After this many consecutive failed actions, guidance is appended to the
+ * error so the model stops hammering a broken interaction. Mirrors
+ * `automation::model_view::CONSECUTIVE_FAILURE_GUIDANCE_AT`.
+ */
+const CONSECUTIVE_FAILURE_GUIDANCE_AT = 5
+
+/**
+ * Per-capture-target mapper state: screenshot-dedup hash + consecutive
+ * failure counter. Keyed like the coordinate scaler — `ctx.sessionKey` /
+ * sandbox connection id / "local". Module-level map, same pattern as
+ * `lib/claude/computer-use-target-state.ts`. The Rust chat path keeps its
+ * own twin in `automation::model_view`; this copy serves the renderer-side
+ * MCP / external-bridge dispatch.
+ */
+const mapperState = new Map<string, { lastShotHash: string | null; failures: number }>()
+
+function targetKey(ctx: CallContext): string {
+  return ctx.sessionKey ?? ctx.sandboxConnectionId ?? "local"
+}
+
+function stateFor(ctx: CallContext) {
+  const key = targetKey(ctx)
+  let e = mapperState.get(key)
+  if (!e) {
+    e = { lastShotHash: null, failures: 0 }
+    mapperState.set(key, e)
+  }
+  return e
+}
+
+/** FNV-1a over the base64 payload — cheap, no image decode. */
+function hashPayload(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+/** Test-only: clear dedup/failure/scaling state. */
+export function resetMapperState(): void {
+  mapperState.clear()
+  resetScalerState()
+}
+
+/**
+ * Successful non-screenshot action: the screen likely changed, so the next
+ * screenshot must be a real image; the failure streak resets.
+ */
+function trackResult(ctx: CallContext, result: ComputerActionResult): ComputerActionResult {
+  const e = stateFor(ctx)
+  if (result.ok) {
+    e.failures = 0
+    e.lastShotHash = null
+    return result
+  }
+  return trackFailure(ctx, result)
+}
+
+function trackFailure(ctx: CallContext, result: ComputerActionResult): ComputerActionResult {
+  const e = stateFor(ctx)
+  e.failures += 1
+  if (e.failures >= CONSECUTIVE_FAILURE_GUIDANCE_AT) {
+    return {
+      ...result,
+      error: `${result.error ?? "action failed"} (${e.failures} consecutive action failures — stop and ask the user before retrying)`,
+    }
+  }
+  return result
+}
+
+/**
+ * Translate a model-space coordinate into physical pixels via the
+ * coordinate scaler. Returns a ready-to-return error result for
+ * out-of-bounds coordinates (the dispatch is skipped — a misplaced click
+ * is worse than a retried one).
+ */
+function scaleOrFail(
+  ctx: CallContext,
+  coordinate: [number, number]
+): { ok: true; point: [number, number] } | { ok: false; result: ComputerActionResult } {
+  const r = modelToScreen(targetKey(ctx), coordinate)
+  if (!r.ok) return { ok: false, result: { ok: false, error: r.error } }
+  return { ok: true, point: [r.x, r.y] }
+}
 
 /**
  * Union of every action shape the Anthropic `computer_20251124` tool can
@@ -116,6 +216,27 @@ export async function dispatchAnthropicAction(
     switch (action.action) {
       case "screenshot": {
         const shot = await desktop.screenshot({}, ctx)
+        // Record dims for the coordinate scaler (identity when the Rust
+        // side didn't downscale) and clear the failure streak.
+        recordScreenshotDims(targetKey(ctx), shot)
+        const e = stateFor(ctx)
+        e.failures = 0
+        // Dedup: identical consecutive frames (no intervening driving
+        // action) return a short text note instead of the full image.
+        const hash = hashPayload(shot.bytes)
+        let dedupEnabled = true
+        try {
+          dedupEnabled = (await desktop.settingsGet()).screenshotDedup
+        } catch {
+          // Settings unavailable (web stub / test mount) — keep default ON.
+        }
+        if (dedupEnabled && e.lastShotHash === hash) {
+          return {
+            ok: true,
+            output: "screen unchanged since previous screenshot — no new image attached",
+          }
+        }
+        e.lastShotHash = hash
         return {
           ok: true,
           output: shot.bytes,
@@ -134,24 +255,32 @@ export async function dispatchAnthropicAction(
       case "triple_click":
         return await clickAt(action.coordinate, { button: "left", count: 3 }, ctx)
       case "mouse_move": {
-        const [x, y] = action.coordinate
+        const s = scaleOrFail(ctx, action.coordinate)
+        if (!s.ok) return trackFailure(ctx, s.result)
+        const [x, y] = s.point
         await desktop.mouseMove({ x, y }, ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       }
       case "left_click_drag": {
-        const [fx, fy] = action.start_coordinate
-        const [tx, ty] = action.coordinate
+        const from = scaleOrFail(ctx, action.start_coordinate)
+        if (!from.ok) return trackFailure(ctx, from.result)
+        const to = scaleOrFail(ctx, action.coordinate)
+        if (!to.ok) return trackFailure(ctx, to.result)
+        const [fx, fy] = from.point
+        const [tx, ty] = to.point
         await desktop.drag({ x: fx, y: fy }, { x: tx, y: ty }, { button: "left" }, ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       }
       case "left_mouse_down":
         await desktop.mouseButton("left", "down", ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       case "left_mouse_up":
         await desktop.mouseButton("left", "up", ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       case "scroll": {
-        const [x, y] = action.coordinate
+        const s = scaleOrFail(ctx, action.coordinate)
+        if (!s.ok) return trackFailure(ctx, s.result)
+        const [x, y] = s.point
         const units = (action.scroll_amount ?? 0) * WHEEL_DELTA_PER_AMOUNT
         const opts: ScrollOpts =
           action.scroll_direction === "up"
@@ -163,26 +292,32 @@ export async function dispatchAnthropicAction(
                 : { dx: units }
         const target: ScrollTarget = { kind: "point", x, y }
         await desktop.scroll(target, opts, ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       }
       case "type":
         await desktop.type(action.text, {}, ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       case "key":
         await desktop.keys(keyChord(action.text), ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       case "hold_key": {
         const ms = Math.max(0, Math.round((action.duration ?? 0) * 1000))
         await desktop.holdKey(keyChord(action.text), ms, ctx)
-        return { ok: true }
+        return trackResult(ctx, { ok: true })
       }
       case "wait": {
-        // Implemented renderer-side — no Rust round-trip needed. The
-        // setTimeout floor of 4ms isn't a concern because the model would
-        // never emit a wait shorter than ~250ms in practice.
-        const ms = Math.max(0, Math.round((action.duration ?? 0) * 1000))
+        // Implemented renderer-side — no Rust round-trip needed. Capped at
+        // MAX_WAIT_MS so a confused model can't park the session; the cap
+        // is reported back so the model knows the wait was shortened.
+        const requested = Math.max(0, Math.round((action.duration ?? 0) * 1000))
+        const ms = Math.min(requested, MAX_WAIT_MS)
         await new Promise((resolve) => setTimeout(resolve, ms))
-        return { ok: true }
+        return ms < requested
+          ? {
+              ok: true,
+              output: `wait capped at ${MAX_WAIT_MS / 1000}s (requested ${requested / 1000}s)`,
+            }
+          : { ok: true }
       }
       case "cursor_position": {
         const point = await desktop.cursorPosition(ctx)
@@ -201,17 +336,20 @@ export async function dispatchAnthropicAction(
       }
     }
   } catch (err) {
-    return { ok: false, error: errorMessage(err) }
+    return trackFailure(ctx, { ok: false, error: errorMessage(err) })
   }
 }
 
-function clickAt(
+async function clickAt(
   coordinate: [number, number],
   opts: ClickOpts,
   ctx: CallContext
 ): Promise<ComputerActionResult> {
-  const target: ClickTarget = { kind: "point", x: coordinate[0], y: coordinate[1] }
-  return desktop.click(target, opts, ctx).then(() => ({ ok: true }))
+  const s = scaleOrFail(ctx, coordinate)
+  if (!s.ok) return trackFailure(ctx, s.result)
+  const target: ClickTarget = { kind: "point", x: s.point[0], y: s.point[1] }
+  await desktop.click(target, opts, ctx)
+  return trackResult(ctx, { ok: true })
 }
 
 function errorMessage(err: unknown): string {

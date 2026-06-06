@@ -16,11 +16,29 @@
 import { desktop, type CallContext } from "./client"
 import { extract as defaultExtract, type ExtractDeps } from "@/lib/ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
+import { OcrError } from "@/lib/ocr/errors"
 import type { ImageFormat, Screenshot, ScreenshotOpts } from "./types"
 import type { OcrInput, OcrResult } from "@/types/ocr"
 
 function mimeForFormat(format: ImageFormat): string {
   return format === "jpeg" ? "image/jpeg" : "image/png"
+}
+
+/**
+ * Wrap a phase failure in a descriptive `OcrError` so the tool layer shows
+ * the model "screen OCR failed at <phase>: <reason>" instead of a bare
+ * provider/transport stack. Typed `OcrError`s pass through unchanged —
+ * their code/provider already carry the diagnosis.
+ */
+function rethrowPhase(phase: "capture" | "extract", err: unknown): never {
+  if (err instanceof OcrError) throw err
+  const reason = err instanceof Error ? err.message : String(err)
+  throw new OcrError(
+    phase === "capture" ? "invalid_input" : "provider_failed",
+    "ocr-screen",
+    `screen OCR failed at ${phase}: ${reason}`,
+    err
+  )
 }
 
 export interface OcrScreenDeps {
@@ -37,15 +55,24 @@ export async function ocrScreenWith(
   deps: OcrScreenDeps,
   args: { opts?: ScreenshotOpts; ctx?: CallContext; languages?: string[] } = {}
 ): Promise<OcrResult> {
-  const shot = await deps.screenshot(args.opts ?? {}, args.ctx ?? { surface: "computerUse" })
+  let shot: Pick<Screenshot, "bytes" | "format">
+  try {
+    shot = await deps.screenshot(args.opts ?? {}, args.ctx ?? { surface: "computerUse" })
+  } catch (err) {
+    rethrowPhase("capture", err)
+  }
   const mimeType = mimeForFormat(shot.format)
-  return deps.extract(
-    {
-      source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${shot.bytes}`, mimeType },
-      languages: args.languages,
-    },
-    deps.ocrDeps
-  )
+  try {
+    return await deps.extract(
+      {
+        source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${shot.bytes}`, mimeType },
+        languages: args.languages,
+      },
+      deps.ocrDeps
+    )
+  } catch (err) {
+    rethrowPhase("extract", err)
+  }
 }
 
 /** Production entry: real screenshot + keyring-backed OCR deps. */

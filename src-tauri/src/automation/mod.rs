@@ -20,6 +20,7 @@ pub mod commands;
 pub mod consent;
 pub mod cua_route;
 pub mod dispatcher;
+pub mod model_view;
 pub mod permission;
 pub mod persist;
 pub mod platform;
