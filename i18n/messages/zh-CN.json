@@ -11544,6 +11544,90 @@
       "listHandle": "调整任务列表宽度",
       "detailHandle": "调整详情面板宽度"
     },
+    "overlapPolicies": {
+      "label": "重叠策略",
+      "maxQueueSize": "最大排队数",
+      "skip": {
+        "title": "跳过",
+        "desc": "已有运行中的执行时，丢弃新的触发"
+      },
+      "allow": {
+        "title": "全部允许",
+        "desc": "无视运行中的执行，直接开始"
+      },
+      "queueOne": {
+        "title": "排队一个",
+        "desc": "最多缓冲一个待运行触发，新的覆盖旧的"
+      },
+      "queueAll": {
+        "title": "全部排队",
+        "desc": "按顺序缓冲触发，直到队列上限"
+      },
+      "cancelPrevious": {
+        "title": "取消前次",
+        "desc": "中止正在运行的执行，再开始新的"
+      }
+    },
+    "lifecycle": {
+      "title": "生命周期",
+      "description": "到达日期或运行次数后自动让任务过期",
+      "endDate": "结束日期",
+      "endTime": "结束时间",
+      "maxRuns": "最大运行次数",
+      "help": "留空 / 0 表示不限制。失败的运行也计入次数。",
+      "endAtInvalid": "结束日期无效",
+      "endAtInPast": "结束时间必须在未来"
+    },
+    "jitter": {
+      "label": "抖动（秒）",
+      "help": "每次触发随机延迟 0–N 秒，避免负载尖峰。0 表示禁用。"
+    },
+    "pauseAfterFailures": {
+      "label": "连续失败后自动暂停",
+      "help": "0 表示不自动暂停"
+    },
+    "catchupWindow": {
+      "label": "补跑窗口（分钟）",
+      "help": "超过该时长的错过运行将被跳过而不是补跑。0 表示不限制。"
+    },
+    "successChain": {
+      "title": "成功后运行",
+      "description": "本任务成功完成后启动的任务",
+      "add": "添加任务",
+      "none": "未配置成功链"
+    },
+    "failureChain": {
+      "title": "失败后运行",
+      "description": "本任务最终失败（重试耗尽）后启动的任务",
+      "add": "添加任务",
+      "none": "未配置失败链"
+    },
+    "backfill": {
+      "open": "回填历史运行…",
+      "title": "回填历史运行",
+      "description": "补跑落在过去某个时间范围内的调度槽位。按顺序执行，不影响实时调度。",
+      "start": "开始",
+      "end": "结束",
+      "slotCount": "{count, plural, =0 {该范围内没有槽位} other {将运行 # 个槽位}}",
+      "slotCountCapped": "将运行 {count}+ 个槽位（已封顶）",
+      "confirm": "执行回填",
+      "inProgress": "运行中…",
+      "success": "已完成 {count} 次运行",
+      "error": "回填失败：{message}",
+      "unsupportedTrigger": "回填仅支持 cron 和间隔类任务",
+      "rangeInvalid": "结束必须晚于开始",
+      "endMustBePast": "范围必须在过去"
+    },
+    "triggerSources": {
+      "schedule": "定时",
+      "run-now": "手动",
+      "retry": "重试",
+      "event": "事件",
+      "dependency": "链式",
+      "catch-up": "补跑",
+      "remote": "远程",
+      "backfill": "回填"
+    },
     "searchTasks": "搜索任务...",
     "cancelSelect": "取消",
     "bulkSelect": "多选",

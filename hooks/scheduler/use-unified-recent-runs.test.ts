@@ -53,6 +53,13 @@ describe("toUnifiedFromTaskExecution", () => {
     expect(run.logs![0]).toMatchObject({ level: "info", message: "started" })
   })
 
+  it("carries the execution's trigger provenance through", () => {
+    expect(
+      toUnifiedFromTaskExecution({ ...baseExec, triggerSource: "backfill" }).triggerSource
+    ).toBe("backfill")
+    expect(toUnifiedFromTaskExecution(baseExec).triggerSource).toBeUndefined()
+  })
+
   it("routes connection:* task types to the connector kind", () => {
     const run = toUnifiedFromTaskExecution({
       ...baseExec,

@@ -54,6 +54,14 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
               </SheetTitle>
               <p className="text-xs text-muted-foreground mt-1">
                 {t(`kindFilter.${run.kind}`) || run.kind} · {run.origin.tableName}
+                {run.triggerSource && (
+                  <span
+                    className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
+                    data-testid="run-sheet-trigger-source"
+                  >
+                    {t(`triggerSources.${run.triggerSource}`) || run.triggerSource}
+                  </span>
+                )}
               </p>
             </div>
             <RunStatusPill status={toRunStatusPill(run.status)} />

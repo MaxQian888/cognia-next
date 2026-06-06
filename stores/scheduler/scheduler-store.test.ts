@@ -32,6 +32,7 @@ jest.mock("@/lib/scheduler/task-scheduler", () => {
     pauseTask: jest.fn(),
     resumeTask: jest.fn(),
     runTaskNow: jest.fn(),
+    backfillTask: jest.fn(),
     getTask: jest.fn(),
     getAllTasks: jest.fn(),
     start: jest.fn(),
@@ -53,6 +54,7 @@ const taskSchedulerMock = jest.requireMock("@/lib/scheduler/task-scheduler") as 
     pauseTask: jest.Mock
     resumeTask: jest.Mock
     runTaskNow: jest.Mock
+    backfillTask: jest.Mock
     getTask: jest.Mock
     getAllTasks: jest.Mock
     start: jest.Mock
@@ -163,6 +165,7 @@ beforeEach(() => {
     status: "running",
     startedAt: new Date(),
   })
+  mockScheduler.backfillTask.mockResolvedValue([])
   mockScheduler.getTask.mockResolvedValue(null)
   mockScheduler.getAllTasks.mockResolvedValue([])
   mockScheduler.exportTasks.mockResolvedValue({ tasks: [] })
@@ -765,6 +768,36 @@ describe("useSchedulerStore", () => {
         await result.current.resumeTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("backfillTask", () => {
+    it("returns the run count and refreshes when slots ran", async () => {
+      mockScheduler.backfillTask.mockResolvedValueOnce([{ id: "e1" }, { id: "e2" }])
+      const { result } = renderHook(() => useSchedulerStore())
+      let count = 0
+      await act(async () => {
+        count = await result.current.backfillTask("task-1", {
+          start: new Date(0),
+          end: new Date(1000),
+        })
+      })
+      expect(count).toBe(2)
+      expect(mockScheduler.backfillTask).toHaveBeenCalledWith("task-1", {
+        start: new Date(0),
+        end: new Date(1000),
+      })
+    })
+
+    it("rethrows and stores the error message when the engine fails", async () => {
+      mockScheduler.backfillTask.mockRejectedValueOnce(new Error("bf-fail"))
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await expect(
+          result.current.backfillTask("task-1", { start: new Date(0), end: new Date(1000) })
+        ).rejects.toThrow("bf-fail")
+      })
+      expect(result.current.error).toBe("bf-fail")
     })
   })
 

@@ -8,6 +8,7 @@ export { FilterChips } from "./filter-chips"
 export { TaskSidebarItem } from "./task-sidebar-item"
 export { SchedulerSidebar, SchedulerSidebarContent } from "./scheduler-sidebar"
 export { SchedulerShell, SCHEDULER_PANEL_STORAGE_KEY } from "./scheduler-shell"
+export { BackfillDialog } from "./backfill-dialog"
 export { SchedulerDashboardView } from "./scheduler-dashboard-view"
 
 // Detail components (new)

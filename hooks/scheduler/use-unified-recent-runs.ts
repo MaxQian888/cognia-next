@@ -137,6 +137,7 @@ export function toUnifiedFromTaskExecution(exec: TaskExecution): UnifiedExecutio
     result: exec.output,
     error: exec.error ? { message: exec.error } : undefined,
     logs: exec.logs.map(mapTaskExecLog),
+    triggerSource: exec.triggerSource,
     origin: { tableName: "schedulerDb.executions", nativeId: exec.id },
   }
 }

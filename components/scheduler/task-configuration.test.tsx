@@ -122,7 +122,7 @@ describe("TaskConfiguration", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0)
   })
 
-  it("formats timeout in seconds and shows allowConcurrent state", () => {
+  it("formats timeout in seconds and derives the overlap policy from legacy allowConcurrent", () => {
     render(
       <TaskConfiguration
         task={buildTask({
@@ -132,7 +132,55 @@ describe("TaskConfiguration", () => {
     )
     expect(screen.getByText("45s")).toBeInTheDocument()
     expect(screen.getByText("5")).toBeInTheDocument()
-    expect(screen.getByText("allowed")).toBeInTheDocument()
+    expect(screen.getByText("overlapPolicies.allow.title")).toBeInTheDocument()
+  })
+
+  it("shows an explicit overlap policy over the legacy boolean", () => {
+    render(
+      <TaskConfiguration
+        task={buildTask({
+          config: {
+            timeout: 30_000,
+            maxRetries: 1,
+            allowConcurrent: true,
+            overlapPolicy: "queue-all",
+          } as never,
+        })}
+      />
+    )
+    expect(screen.getByText("overlapPolicies.queueAll.title")).toBeInTheDocument()
+  })
+
+  it("renders optional lifecycle / policy rows only when configured", () => {
+    const { rerender } = render(<TaskConfiguration task={buildTask()} />)
+    expect(screen.queryByText("lifecycle.maxRuns")).not.toBeInTheDocument()
+    expect(screen.queryByText("pauseAfterFailures.label")).not.toBeInTheDocument()
+    expect(screen.queryByText("catchupWindow.label")).not.toBeInTheDocument()
+    expect(screen.queryByText("jitter.label")).not.toBeInTheDocument()
+    expect(screen.queryByText("lifecycle.endDate")).not.toBeInTheDocument()
+
+    rerender(
+      <TaskConfiguration
+        task={buildTask({
+          endAt: new Date("2026-12-31T00:00:00Z"),
+          runCount: 3,
+          trigger: { type: "interval", intervalMs: 60_000, jitterMs: 5_000 } as never,
+          config: {
+            timeout: 30_000,
+            maxRetries: 1,
+            overlapPolicy: "skip",
+            maxRuns: 10,
+            pauseAfterConsecutiveFailures: 4,
+            catchupWindowMs: 120_000,
+          } as never,
+        })}
+      />
+    )
+    expect(screen.getByText("lifecycle.endDate")).toBeInTheDocument()
+    expect(screen.getByText("3/10")).toBeInTheDocument()
+    expect(screen.getByText("4")).toBeInTheDocument()
+    expect(screen.getByText("2 min")).toBeInTheDocument()
+    expect(screen.getByText("5s")).toBeInTheDocument()
   })
 
   it("shows systemDefault when trigger has no timezone", () => {

@@ -13,6 +13,7 @@ import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { useBreakpoint } from "@/hooks/ui"
 import {
+  BackfillDialog,
   SchedulerSidebar,
   SchedulerSidebarContent,
   SchedulerShell,
@@ -61,6 +62,7 @@ export default function SchedulerPage() {
     pauseTask,
     resumeTask,
     runTaskNow,
+    backfillTask,
     selectTask,
     setFilter,
     clearFilter,
@@ -142,6 +144,7 @@ export default function SchedulerPage() {
   const [showQuickWorkflowDialog, setShowQuickWorkflowDialog] = useState(false)
   const [showBackupDialog, setShowBackupDialog] = useState(false)
   const [showDependencyDialog, setShowDependencyDialog] = useState(false)
+  const [showBackfillDialog, setShowBackfillDialog] = useState(false)
 
   // Derived
   const inspectTask = useMemo(
@@ -268,6 +271,10 @@ export default function SchedulerPage() {
           notification: input.notification,
           config: input.config,
           tags: input.tags,
+          // null clears a previously-set end bound; undefined would leave it.
+          endAt: input.endAt ?? null,
+          onSuccessTaskIds: input.onSuccessTaskIds ?? [],
+          onFailureTaskIds: input.onFailureTaskIds ?? [],
         })
         setShowEditSheet(false)
       } finally {
@@ -574,6 +581,7 @@ export default function SchedulerPage() {
                     allTasks={tasks}
                     onSelectTask={handleSelectTask}
                     onOpenDependencyGraph={() => setShowDependencyDialog(true)}
+                    onBackfill={() => setShowBackfillDialog(true)}
                   />
                 </SchedulerErrorBoundary>
               ) : selectedUnifiedItem ? (
@@ -698,6 +706,16 @@ export default function SchedulerPage() {
         tasks={tasks}
         focusTaskId={selectedTask?.id}
         onSelectTask={handleSelectTask}
+      />
+
+      <BackfillDialog
+        open={showBackfillDialog}
+        onOpenChange={setShowBackfillDialog}
+        task={selectedTask ?? null}
+        onBackfill={(range) => {
+          if (!selectedTask) return Promise.resolve(0)
+          return backfillTask(selectedTask.id, range)
+        }}
       />
 
       <SchedulerBulkToolbar

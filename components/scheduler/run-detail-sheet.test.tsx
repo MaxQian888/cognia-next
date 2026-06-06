@@ -58,6 +58,24 @@ describe("RunDetailSheet", () => {
     expect(screen.getByTestId("run-sheet-result")).toHaveTextContent("reply")
   })
 
+  it("shows a trigger-source badge when the run carries provenance", () => {
+    render(
+      <RunDetailSheet
+        open={true}
+        onOpenChange={() => {}}
+        run={makeRun({ triggerSource: "backfill" })}
+      />
+    )
+    expect(screen.getByTestId("run-sheet-trigger-source")).toHaveTextContent(
+      "triggerSources.backfill"
+    )
+  })
+
+  it("omits the trigger-source badge when absent", () => {
+    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
+    expect(screen.queryByTestId("run-sheet-trigger-source")).not.toBeInTheDocument()
+  })
+
   it("hides the result block and shows the error block when the run failed", () => {
     render(
       <RunDetailSheet

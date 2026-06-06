@@ -11544,6 +11544,90 @@
       "listHandle": "Resize task list",
       "detailHandle": "Resize detail pane"
     },
+    "overlapPolicies": {
+      "label": "Overlap policy",
+      "maxQueueSize": "Max queued starts",
+      "skip": {
+        "title": "Skip",
+        "desc": "Drop a new start while a run is in progress"
+      },
+      "allow": {
+        "title": "Allow all",
+        "desc": "Start regardless of running executions"
+      },
+      "queueOne": {
+        "title": "Queue one",
+        "desc": "Buffer at most one pending start; the newest wins"
+      },
+      "queueAll": {
+        "title": "Queue all",
+        "desc": "Buffer starts in order, up to the queue limit"
+      },
+      "cancelPrevious": {
+        "title": "Cancel previous",
+        "desc": "Abort the running execution, then start the new one"
+      }
+    },
+    "lifecycle": {
+      "title": "Lifecycle",
+      "description": "Automatically expire the task after a date or a number of runs",
+      "endDate": "End date",
+      "endTime": "End time",
+      "maxRuns": "Max runs",
+      "help": "Leave empty / 0 for no limit. Failed runs count toward the run limit.",
+      "endAtInvalid": "Invalid end date",
+      "endAtInPast": "End time must be in the future"
+    },
+    "jitter": {
+      "label": "Jitter (seconds)",
+      "help": "Random delay (0–N s) added to each fire to avoid load spikes. 0 disables."
+    },
+    "pauseAfterFailures": {
+      "label": "Auto-pause after consecutive failures",
+      "help": "0 disables auto-pause"
+    },
+    "catchupWindow": {
+      "label": "Catch-up window (minutes)",
+      "help": "Missed runs older than this are skipped instead of re-run. 0 = no limit."
+    },
+    "successChain": {
+      "title": "Run on success",
+      "description": "Tasks started after this task completes successfully",
+      "add": "Add task",
+      "none": "No success chain configured"
+    },
+    "failureChain": {
+      "title": "Run on failure",
+      "description": "Tasks started after this task fails terminally (all retries exhausted)",
+      "add": "Add task",
+      "none": "No failure chain configured"
+    },
+    "backfill": {
+      "open": "Backfill past runs…",
+      "title": "Backfill past runs",
+      "description": "Re-run the schedule slots that fall inside a past time range. Runs are executed in order and do not affect the live schedule.",
+      "start": "From",
+      "end": "To",
+      "slotCount": "{count, plural, =0 {No slots in this range} one {# slot will run} other {# slots will run}}",
+      "slotCountCapped": "{count}+ slots (capped) will run",
+      "confirm": "Run backfill",
+      "inProgress": "Running…",
+      "success": "{count, plural, one {# run} other {# runs}} completed",
+      "error": "Backfill failed: {message}",
+      "unsupportedTrigger": "Backfill is only available for cron and interval tasks",
+      "rangeInvalid": "End must be after start",
+      "endMustBePast": "The range must be in the past"
+    },
+    "triggerSources": {
+      "schedule": "Scheduled",
+      "run-now": "Manual",
+      "retry": "Retry",
+      "event": "Event",
+      "dependency": "Chained",
+      "catch-up": "Catch-up",
+      "remote": "Remote",
+      "backfill": "Backfill"
+    },
     "searchTasks": "Search tasks...",
     "cancelSelect": "Cancel",
     "bulkSelect": "Select",

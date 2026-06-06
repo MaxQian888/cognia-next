@@ -160,4 +160,104 @@ describe("TaskForm", () => {
     // Sanity check — component must not throw, and the form still mounts.
     expect(document.querySelector("input")).not.toBeNull()
   })
+
+  it("shows lifecycle and jitter controls for recurring triggers only", () => {
+    const first = render(
+      <TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />
+    )
+    // Default trigger is cron — recurring controls present.
+    expect(screen.getByTestId("scheduler-end-date-input")).toBeInTheDocument()
+    expect(screen.getByTestId("scheduler-max-runs-input")).toBeInTheDocument()
+    expect(screen.getByTestId("scheduler-jitter-input")).toBeInTheDocument()
+    first.unmount()
+
+    // Fresh mount with a one-time trigger — recurring controls absent.
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{
+          name: "Once task",
+          type: "chat",
+          trigger: { type: "once", runAt: new Date(Date.now() + 86_400_000) } as never,
+        }}
+      />
+    )
+    expect(screen.queryByTestId("scheduler-end-date-input")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("scheduler-jitter-input")).not.toBeInTheDocument()
+  })
+
+  it("submits overlap policy, lifecycle bounds, and jitter", async () => {
+    const onSubmit = jest.fn(async () => undefined)
+    render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
+
+    const nameInput = document.querySelector("input") as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "Policy task" } })
+    fireEvent.change(screen.getByTestId("scheduler-end-date-input"), {
+      target: { value: "2030-01-01" },
+    })
+    fireEvent.change(screen.getByTestId("scheduler-max-runs-input"), {
+      target: { value: "5" },
+    })
+    fireEvent.change(screen.getByTestId("scheduler-jitter-input"), {
+      target: { value: "30" },
+    })
+
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Policy task",
+        endAt: expect.any(Date),
+        trigger: expect.objectContaining({ jitterMs: 30_000 }),
+        config: expect.objectContaining({
+          overlapPolicy: "skip",
+          allowConcurrent: false,
+          maxRuns: 5,
+        }),
+      })
+    )
+  })
+
+  it("seeds the overlap policy from legacy allowConcurrent and mirrors it on submit", async () => {
+    const onSubmit = jest.fn(async () => undefined)
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={jest.fn()}
+        initialValues={{
+          name: "Legacy concurrent",
+          type: "chat",
+          trigger: { type: "cron", cronExpression: "0 9 * * *", timezone: "UTC" } as never,
+          config: { allowConcurrent: true } as never,
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ overlapPolicy: "allow", allowConcurrent: true }),
+      })
+    )
+  })
+
+  it("rejects an end time in the past", async () => {
+    const onSubmit = jest.fn(async () => undefined)
+    render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
+
+    const nameInput = document.querySelector("input") as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "Past end" } })
+    fireEvent.change(screen.getByTestId("scheduler-end-date-input"), {
+      target: { value: "2000-01-01" },
+    })
+
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByText("lifecycle.endAtInPast")
+
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

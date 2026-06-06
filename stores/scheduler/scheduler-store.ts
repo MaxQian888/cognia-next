@@ -83,6 +83,8 @@ interface SchedulerActions {
     taskId: string,
     opts?: { triggerSource?: TaskExecutionTriggerSource }
   ) => Promise<TaskExecution | null>
+  /** Re-run past schedule slots in [start, end]; resolves with the run count. */
+  backfillTask: (taskId: string, range: { start: Date; end: Date }) => Promise<number>
 
   // Data Loading
   loadTasks: () => Promise<void>
@@ -308,6 +310,25 @@ export const useSchedulerStore = create<SchedulerStore>()(
           set({ error: errorMessage })
           log.error("SchedulerStore: Run task failed", error as Error)
           return null
+        } finally {
+          set({ isLoading: false })
+        }
+      },
+
+      backfillTask: async (taskId, range) => {
+        set({ isLoading: true, error: null })
+        try {
+          const scheduler = getTaskScheduler()
+          const executions = await scheduler.backfillTask(taskId, range)
+          if (executions.length > 0) {
+            await get().refreshAll()
+          }
+          return executions.length
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to backfill task"
+          set({ error: errorMessage })
+          log.error("SchedulerStore: Backfill failed", error as Error)
+          throw error
         } finally {
           set({ isLoading: false })
         }
