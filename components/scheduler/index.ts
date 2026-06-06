@@ -6,7 +6,8 @@
 // Layout components (new)
 export { FilterChips } from "./filter-chips"
 export { TaskSidebarItem } from "./task-sidebar-item"
-export { SchedulerSidebar } from "./scheduler-sidebar"
+export { SchedulerSidebar, SchedulerSidebarContent } from "./scheduler-sidebar"
+export { SchedulerShell, SCHEDULER_PANEL_STORAGE_KEY } from "./scheduler-shell"
 export { SchedulerDashboardView } from "./scheduler-dashboard-view"
 
 // Detail components (new)

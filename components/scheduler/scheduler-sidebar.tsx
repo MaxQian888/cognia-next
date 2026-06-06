@@ -78,7 +78,21 @@ export interface SchedulerSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function SchedulerSidebar({
+/**
+ * Chrome wrapper — the offcanvas/collapsible `<Sidebar>` used on tablet and
+ * mobile. Desktop renders `SchedulerSidebarContent` directly inside a
+ * resizable panel instead (mirrors the InboxSidebar/InboxSidebarContent
+ * dual-export pattern).
+ */
+export function SchedulerSidebar(props: SchedulerSidebarProps) {
+  return (
+    <Sidebar collapsible="icon" className="border-r">
+      <SchedulerSidebarContent {...props} />
+    </Sidebar>
+  )
+}
+
+export function SchedulerSidebarContent({
   tasks,
   systemTasks,
   unifiedItems,
@@ -167,7 +181,7 @@ export function SchedulerSidebar({
     !!unifiedItems && unifiedItems.length > 0 && filteredUnified && filteredUnified.length === 0
 
   return (
-    <Sidebar collapsible="icon" className="border-r">
+    <>
       {/* Header */}
       <SidebarHeader>
         <div className="flex items-center gap-2 px-3 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
@@ -350,6 +364,6 @@ export function SchedulerSidebar({
           </div>
         </div>
       </SidebarFooter>
-    </Sidebar>
+    </>
   )
 }

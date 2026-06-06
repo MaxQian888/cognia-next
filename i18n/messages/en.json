@@ -11540,6 +11540,10 @@
     "showMore": "Show more",
     "remaining": "remaining",
     "cleanupOldExecutions": "Cleanup old executions (30d)",
+    "resize": {
+      "listHandle": "Resize task list",
+      "detailHandle": "Resize detail pane"
+    },
     "searchTasks": "Search tasks...",
     "cancelSelect": "Cancel",
     "bulkSelect": "Select",

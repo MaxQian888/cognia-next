@@ -11540,6 +11540,10 @@
     "showMore": "显示更多",
     "remaining": "剩余",
     "cleanupOldExecutions": "清理旧执行记录（30天）",
+    "resize": {
+      "listHandle": "调整任务列表宽度",
+      "detailHandle": "调整详情面板宽度"
+    },
     "searchTasks": "搜索任务...",
     "cancelSelect": "取消",
     "bulkSelect": "多选",

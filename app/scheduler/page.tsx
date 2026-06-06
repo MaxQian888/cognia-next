@@ -5,16 +5,17 @@
  * Main page for managing scheduled tasks — SidebarProvider Master-Detail layout.
  */
 
-import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
-import { cn } from "@/lib/utils"
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
+import { useBreakpoint } from "@/hooks/ui"
 import {
   SchedulerSidebar,
+  SchedulerSidebarContent,
+  SchedulerShell,
   SchedulerDashboardView,
   SchedulerSkeleton,
   SchedulerErrorBoundary,
@@ -114,18 +115,9 @@ export default function SchedulerPage() {
   const [mobileView, setMobileView] = useState<"list" | "detail">("list")
   const [searchQuery, setSearchQuery] = useState(filter.search || "")
   const [activeFilter, setActiveFilter] = useState("all")
-  // Mobile detection — useSyncExternalStore is the React-prescribed way to
-  // read external state (matchMedia) without setState-in-effect.
-  const isMobile = useSyncExternalStore(
-    (notify) => {
-      if (typeof window === "undefined") return () => {}
-      const mq = window.matchMedia("(max-width: 639px)")
-      mq.addEventListener("change", notify)
-      return () => mq.removeEventListener("change", notify)
-    },
-    () => window.matchMedia("(max-width: 639px)").matches,
-    () => false
-  )
+  // Shared three-tier breakpoint (matches the Inbox shell): mobile < 768px.
+  const breakpoint = useBreakpoint()
+  const isMobile = breakpoint === "mobile"
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
   const prefersReducedMotion = useReducedMotion()
 
@@ -448,107 +440,84 @@ export default function SchedulerPage() {
     }
   }
 
+  const renderSidebar = (variant: "chrome" | "content") => {
+    const SidebarComponent = variant === "chrome" ? SchedulerSidebar : SchedulerSidebarContent
+    return (
+      <SidebarComponent
+        tasks={filteredTasks}
+        systemTasks={systemTasks}
+        unifiedItems={unifiedItems}
+        countsByKind={countsByKind}
+        selectedTaskId={selectedTask?.id ?? null}
+        schedulerStatus={schedulerStatus}
+        statistics={statistics}
+        activeCount={activeTasks.length}
+        pausedCount={pausedTasks.length}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        activeFilter={activeFilter}
+        onFilterChange={setActiveFilter}
+        onSelectTask={handleSelectTask}
+        onSelectSystemTask={setInspectTaskId}
+        onSelectUnifiedItem={(item) => {
+          // Render the unified detail view in-place. App-kind items route
+          // through the dedicated TaskDetailView via the orchestrator.
+          if (item.kind === "app") {
+            handleSelectTask(item.sourceId)
+            setSelectedUnifiedItem(null)
+          } else if (item.kind === "system") {
+            setInspectTaskId(item.sourceId)
+            setSelectedUnifiedItem(null)
+          } else {
+            selectTask(null)
+            setSelectedUnifiedItem(item)
+          }
+        }}
+        onRunNow={handleRunNow}
+        onPause={handlePause}
+        onResume={handleResume}
+        onDelete={setDeleteTaskId}
+        onUnifiedRunNow={dispatchUnified("runNow")}
+        onUnifiedPause={dispatchUnified("pause")}
+        onUnifiedResume={dispatchUnified("resume")}
+        onUnifiedDelete={dispatchUnified("delete")}
+        selectedUnifiedIds={multiSelection}
+        onToggleUnifiedSelection={(item) => toggleMultiSelection(item.unifiedId)}
+        onCreate={handleCreateClick}
+        highlightedIndex={highlightedIndex}
+      />
+    )
+  }
+
   return (
-    <SidebarProvider
-      data-bg-target="chat"
-      className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden"
-    >
-      {/* Mobile detail view — full-screen push. Supports both the app-kind
-          rich path (selectedTask) and any unified-kind path
-          (selectedUnifiedItem) so users on mobile aren't dead-ended on
-          workflow / backup / plugin / connector selections. */}
-      <AnimatePresence>
-        {isMobile && mobileView === "detail" && (selectedTask || selectedUnifiedItem) && (
-          <motion.div
-            key="mobile-detail"
-            data-testid="scheduler-mobile-detail-shell"
-            className="absolute inset-0 z-30 bg-background"
-            {...(prefersReducedMotion
-              ? {}
-              : {
-                  initial: { x: "100%" },
-                  animate: { x: 0 },
-                  exit: { x: "100%" },
-                  transition: { duration: 0.22, ease: "easeOut" },
-                })}
-          >
-            <SchedulerMobileDetailView
-              task={selectedTask ?? undefined}
-              executions={executions}
-              unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
-              isLoading={isLoading}
-              onBack={() => {
-                setMobileView("list")
-                selectTask(null)
-                setSelectedUnifiedItem(null)
-              }}
-              onPause={handlePause}
-              onResume={handleResume}
-              onRunNow={handleRunNow}
-              onDelete={setDeleteTaskId}
-              onEdit={() => setShowEditSheet(true)}
-              onUnifiedRunNow={dispatchUnified("runNow")}
-              onUnifiedPause={dispatchUnified("pause")}
-              onUnifiedResume={dispatchUnified("resume")}
-              onUnifiedDelete={dispatchUnified("delete")}
-              onSelectRun={setSelectedRun}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Desktop + mobile list layout */}
-      <div
-        className={cn(
-          "flex h-full w-full min-w-0 flex-1",
-          isMobile && mobileView === "detail" && "hidden"
-        )}
-      >
-        <SchedulerSidebar
-          tasks={filteredTasks}
-          systemTasks={systemTasks}
-          unifiedItems={unifiedItems}
-          countsByKind={countsByKind}
-          selectedTaskId={selectedTask?.id ?? null}
-          schedulerStatus={schedulerStatus}
-          statistics={statistics}
-          activeCount={activeTasks.length}
-          pausedCount={pausedTasks.length}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-          onSelectTask={handleSelectTask}
-          onSelectSystemTask={setInspectTaskId}
-          onSelectUnifiedItem={(item) => {
-            // Render the unified detail view in-place. App-kind items route
-            // through the dedicated TaskDetailView via the orchestrator.
-            if (item.kind === "app") {
-              handleSelectTask(item.sourceId)
-              setSelectedUnifiedItem(null)
-            } else if (item.kind === "system") {
-              setInspectTaskId(item.sourceId)
-              setSelectedUnifiedItem(null)
-            } else {
+    <>
+      <SchedulerShell
+        sidebar={renderSidebar}
+        isMobileDetailOpen={mobileView === "detail" && Boolean(selectedTask || selectedUnifiedItem)}
+        mobileDetail={
+          <SchedulerMobileDetailView
+            task={selectedTask ?? undefined}
+            executions={executions}
+            unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
+            isLoading={isLoading}
+            onBack={() => {
+              setMobileView("list")
               selectTask(null)
-              setSelectedUnifiedItem(item)
-            }
-          }}
-          onRunNow={handleRunNow}
-          onPause={handlePause}
-          onResume={handleResume}
-          onDelete={setDeleteTaskId}
-          onUnifiedRunNow={dispatchUnified("runNow")}
-          onUnifiedPause={dispatchUnified("pause")}
-          onUnifiedResume={dispatchUnified("resume")}
-          onUnifiedDelete={dispatchUnified("delete")}
-          selectedUnifiedIds={multiSelection}
-          onToggleUnifiedSelection={(item) => toggleMultiSelection(item.unifiedId)}
-          onCreate={handleCreateClick}
-          highlightedIndex={highlightedIndex}
-        />
-
-        <SidebarInset data-bg-target="chat">
+              setSelectedUnifiedItem(null)
+            }}
+            onPause={handlePause}
+            onResume={handleResume}
+            onRunNow={handleRunNow}
+            onDelete={setDeleteTaskId}
+            onEdit={() => setShowEditSheet(true)}
+            onUnifiedRunNow={dispatchUnified("runNow")}
+            onUnifiedPause={dispatchUnified("pause")}
+            onUnifiedResume={dispatchUnified("resume")}
+            onUnifiedDelete={dispatchUnified("delete")}
+            onSelectRun={setSelectedRun}
+          />
+        }
+        header={
           <SchedulerContentHeader
             selectedTaskName={selectedTask?.name}
             isRefreshing={isLoading}
@@ -567,88 +536,86 @@ export default function SchedulerPage() {
             onOpenTemplates={() => setShowTemplateGallery(true)}
             onCleanup={handleCleanup}
           />
-
-          <div className="flex-1 min-h-0 overflow-auto">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={
-                  selectedTask
-                    ? `task:${selectedTask.id}`
-                    : selectedUnifiedItem
-                      ? `unified:${selectedUnifiedItem.unifiedId}`
-                      : "dashboard"
-                }
-                className="h-full"
-                {...(prefersReducedMotion
-                  ? {}
-                  : {
-                      initial: { opacity: 0 },
-                      animate: { opacity: 1 },
-                      exit: { opacity: 0 },
-                      transition: { duration: 0.15 },
-                    })}
-              >
-                {selectedTask ? (
-                  <SchedulerErrorBoundary panelName="detail">
-                    <TaskDetailView
-                      task={selectedTask}
-                      executions={executions}
-                      isLoading={isLoading}
-                      onPause={handlePause}
-                      onResume={handleResume}
-                      onRunNow={handleRunNow}
-                      onDelete={setDeleteTaskId}
-                      onEdit={() => setShowEditSheet(true)}
-                      onCancelPluginExecution={cancelPluginExecution}
-                      isPluginExecutionActive={isPluginExecutionActive}
-                      onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
-                      allTasks={tasks}
-                      onSelectTask={handleSelectTask}
-                      onOpenDependencyGraph={() => setShowDependencyDialog(true)}
-                    />
-                  </SchedulerErrorBoundary>
-                ) : selectedUnifiedItem ? (
-                  <SchedulerErrorBoundary panelName="detail">
-                    <UnifiedTaskDetailView
-                      item={selectedUnifiedItem}
-                      onRunNow={dispatchUnified("runNow")}
-                      onPause={dispatchUnified("pause")}
-                      onResume={dispatchUnified("resume")}
-                      onDelete={dispatchUnified("delete")}
-                      onSelectRun={setSelectedRun}
-                    />
-                  </SchedulerErrorBoundary>
-                ) : (
-                  <SchedulerErrorBoundary panelName="dashboard">
-                    <SchedulerDashboardView
-                      statistics={statistics}
-                      activeTasks={activeTasks}
-                      pausedTasks={pausedTasks}
-                      upcomingTasks={upcomingTasks}
-                      recentExecutions={recentExecutions}
-                      schedulerStatus={schedulerStatus}
-                      onSelectTask={handleSelectTask}
-                      tasks={tasks}
-                      countsByKind={countsByKind}
-                      activeCountsByKind={activeCountsByKind}
-                      onSelectRun={setSelectedRun}
-                    />
-                  </SchedulerErrorBoundary>
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        </SidebarInset>
-
-        {/* xl: right-side quick-look rail — visible only at ≥1280px (hidden at
-            lg and below to preserve the existing two-pane layout). */}
-        <SchedulerUpcomingRail
-          upcomingTasks={upcomingTasks}
-          recentExecutions={recentExecutions}
-          onSelectTask={handleSelectTask}
-          onSelectRun={setSelectedRun}
-        />
-      </div>
+        }
+        detail={
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={
+                selectedTask
+                  ? `task:${selectedTask.id}`
+                  : selectedUnifiedItem
+                    ? `unified:${selectedUnifiedItem.unifiedId}`
+                    : "dashboard"
+              }
+              className="h-full"
+              {...(prefersReducedMotion
+                ? {}
+                : {
+                    initial: { opacity: 0 },
+                    animate: { opacity: 1 },
+                    exit: { opacity: 0 },
+                    transition: { duration: 0.15 },
+                  })}
+            >
+              {selectedTask ? (
+                <SchedulerErrorBoundary panelName="detail">
+                  <TaskDetailView
+                    task={selectedTask}
+                    executions={executions}
+                    isLoading={isLoading}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onRunNow={handleRunNow}
+                    onDelete={setDeleteTaskId}
+                    onEdit={() => setShowEditSheet(true)}
+                    onCancelPluginExecution={cancelPluginExecution}
+                    isPluginExecutionActive={isPluginExecutionActive}
+                    onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
+                    allTasks={tasks}
+                    onSelectTask={handleSelectTask}
+                    onOpenDependencyGraph={() => setShowDependencyDialog(true)}
+                  />
+                </SchedulerErrorBoundary>
+              ) : selectedUnifiedItem ? (
+                <SchedulerErrorBoundary panelName="detail">
+                  <UnifiedTaskDetailView
+                    item={selectedUnifiedItem}
+                    onRunNow={dispatchUnified("runNow")}
+                    onPause={dispatchUnified("pause")}
+                    onResume={dispatchUnified("resume")}
+                    onDelete={dispatchUnified("delete")}
+                    onSelectRun={setSelectedRun}
+                  />
+                </SchedulerErrorBoundary>
+              ) : (
+                <SchedulerErrorBoundary panelName="dashboard">
+                  <SchedulerDashboardView
+                    statistics={statistics}
+                    activeTasks={activeTasks}
+                    pausedTasks={pausedTasks}
+                    upcomingTasks={upcomingTasks}
+                    recentExecutions={recentExecutions}
+                    schedulerStatus={schedulerStatus}
+                    onSelectTask={handleSelectTask}
+                    tasks={tasks}
+                    countsByKind={countsByKind}
+                    activeCountsByKind={activeCountsByKind}
+                    onSelectRun={setSelectedRun}
+                  />
+                </SchedulerErrorBoundary>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        }
+        rail={
+          <SchedulerUpcomingRail
+            upcomingTasks={upcomingTasks}
+            recentExecutions={recentExecutions}
+            onSelectTask={handleSelectTask}
+            onSelectRun={setSelectedRun}
+          />
+        }
+      />
 
       <SystemTaskInspectSheet
         open={!!inspectTaskId}
@@ -737,6 +704,6 @@ export default function SchedulerPage() {
         selectedItems={unifiedItems.filter((item) => multiSelection.includes(item.unifiedId))}
         onClearSelection={clearMultiSelection}
       />
-    </SidebarProvider>
+    </>
   )
 }
