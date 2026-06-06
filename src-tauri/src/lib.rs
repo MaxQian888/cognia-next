@@ -733,6 +733,8 @@ pub fn run() {
             automation::commands::desktop_screenshot,
             automation::commands::desktop_click,
             automation::commands::desktop_type,
+            automation::commands::desktop_paste,
+            automation::commands::desktop_launch_app,
             automation::commands::desktop_keys,
             automation::commands::desktop_invoke_pattern,
             automation::commands::desktop_mouse_move,

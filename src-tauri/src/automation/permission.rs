@@ -170,6 +170,28 @@ impl Default for AuditSettings {
     }
 }
 
+/// Screenshot down-scaling applied before frames reach vision models.
+/// Disabled by default — the operator opts in via Settings → Automation →
+/// Behavior. 1280×800 (WXGA) is the Anthropic-recommended sweet spot for
+/// computer-use click accuracy vs token cost.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScreenshotScalingSettings {
+    pub enabled: bool,
+    pub max_width: u32,
+    pub max_height: u32,
+}
+
+impl Default for ScreenshotScalingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_width: 1280,
+            max_height: 800,
+        }
+    }
+}
+
 /// Top-level settings struct persisted under `AppSettings.automation`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -180,6 +202,14 @@ pub struct AutomationSettings {
     pub per_surface: PerSurfacePolicies,
     pub audit: AuditSettings,
     pub redact_screenshots: bool,
+    pub screenshot_scaling: ScreenshotScalingSettings,
+    /// Renderer-side action mapper returns "screen unchanged" text instead
+    /// of a duplicate image when consecutive screenshots hash identically.
+    /// Default ON.
+    pub screenshot_dedup: bool,
+    /// `type` calls longer than this many chars transparently use the
+    /// clipboard-paste fast path. 0 disables. Default 200.
+    pub paste_threshold_chars: u32,
 }
 
 impl Default for AutomationSettings {
@@ -191,6 +221,9 @@ impl Default for AutomationSettings {
             per_surface: PerSurfacePolicies::default(),
             audit: AuditSettings::default(),
             redact_screenshots: false,
+            screenshot_scaling: ScreenshotScalingSettings::default(),
+            screenshot_dedup: true,
+            paste_threshold_chars: 200,
         }
     }
 }
@@ -231,6 +264,8 @@ impl<'a> Call<'a> {
             | "scroll"
             | "hold_key"
             | "mouse_button"
+            | "paste"
+            | "launch_app"
             | "computer_use"
             | "bash"
             | "text_editor" => CallKind::Driving,
@@ -431,6 +466,46 @@ mod tests {
             plugin_id: None,
             target: TargetMeta::default(),
         }
+    }
+
+    #[test]
+    fn settings_defaults_include_behavior_fields() {
+        let s = AutomationSettings::default();
+        assert!(!s.screenshot_scaling.enabled);
+        assert_eq!(s.screenshot_scaling.max_width, 1280);
+        assert_eq!(s.screenshot_scaling.max_height, 800);
+        assert!(s.screenshot_dedup);
+        assert_eq!(s.paste_threshold_chars, 200);
+    }
+
+    #[test]
+    fn settings_old_payload_without_behavior_fields_deserializes() {
+        // Pre-existing persisted JSON (no behavior fields) must keep
+        // round-tripping via the container-level #[serde(default)].
+        let json = r#"{"enabled":true,"defaultTier":"off","whitelist":{"processNames":[],"windowTitlePatterns":[]},"audit":{"retentionDays":30,"exportEnabled":true},"redactScreenshots":false}"#;
+        let s: AutomationSettings = serde_json::from_str(json).unwrap();
+        assert!(s.enabled);
+        assert!(s.screenshot_dedup);
+        assert_eq!(s.paste_threshold_chars, 200);
+        assert!(!s.screenshot_scaling.enabled);
+    }
+
+    #[test]
+    fn paste_and_launch_app_are_driving_calls() {
+        let paste = Call {
+            command: "paste",
+            surface: Surface::Workflow,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(paste.kind(), CallKind::Driving));
+        let launch = Call {
+            command: "launch_app",
+            surface: Surface::Workflow,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        };
+        assert!(matches!(launch.kind(), CallKind::Driving));
     }
 
     #[test]

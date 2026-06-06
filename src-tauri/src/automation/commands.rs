@@ -393,12 +393,27 @@ pub async fn desktop_screenshot(
     // separate `error: None`, `decision: "allow"`), but the bytes the
     // model sees are a black image of identical dimensions.
     let redact_enabled = state.gate.settings().redact_screenshots;
+    // Screenshot down-scaling (Settings → Automation → Behavior). Applied
+    // after capture + redaction so local AND cua-remote frames scale through
+    // one code path; `downscale_encoded` is a no-op when already within
+    // bounds and stamps `source_width/height` for the renderer-side
+    // coordinate scaler when it shrinks.
+    let scaling = state.gate.settings().screenshot_scaling;
     command_body!(app, state, ctx, "screenshot", async {
         let shot = super::cua_route::screenshot(&state.handle, &state.cua, ctx.remote_connection_id(), opts.clone()).await?;
-        if redact_enabled
+        let shot = if redact_enabled
             && super::platform::shared::credential_window::is_credential_window_focused()
         {
-            super::platform::shared::screenshot::redact_screenshot(shot)
+            super::platform::shared::screenshot::redact_screenshot(shot)?
+        } else {
+            shot
+        };
+        if scaling.enabled {
+            super::platform::shared::screenshot::downscale_encoded(
+                shot,
+                scaling.max_width,
+                scaling.max_height,
+            )
         } else {
             Ok(shot)
         }
@@ -452,12 +467,186 @@ pub async fn desktop_type(
     let ctx = args.ctx;
     let text = args.text;
     let opts = args.opts;
+    // Transparent clipboard fast path: long text pastes instead of typing
+    // char-by-char (faster, and keystrokes never hit per-key hooks). Only
+    // for the local host — remote (cua) targets have no host clipboard.
+    // The audit row keeps the caller-facing command name "type".
+    let threshold = state.gate.settings().paste_threshold_chars;
+    let use_paste = threshold > 0
+        && text.chars().count() as u32 > threshold
+        && ctx.remote_connection_id().is_none();
+    if use_paste {
+        let app2 = app.clone();
+        command_body!(
+            app,
+            state,
+            ctx,
+            "type",
+            paste_via_clipboard(&app2, &state.handle, &text).await
+        )
+    } else {
+        command_body!(
+            app,
+            state,
+            ctx,
+            "type",
+            super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), opts.clone()).await
+        )
+    }
+}
+
+/// Clipboard-paste fast path: save current clipboard text → write `text` →
+/// send the platform paste chord → restore the previous clipboard. Far
+/// faster than char-by-char `type` for long text and avoids leaking
+/// keystrokes to per-key hooks. Restore is best-effort — a non-text
+/// clipboard reads as `Err`, in which case we skip restore rather than
+/// fail the paste.
+async fn paste_via_clipboard(
+    app: &tauri::AppHandle,
+    handle: &AutomationHandle,
+    text: &str,
+) -> Result<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let previous = app.clipboard().read_text().ok();
+    app.clipboard()
+        .write_text(text.to_string())
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("clipboard write failed: {e}"),
+        })?;
+    let chord = if cfg!(target_os = "macos") {
+        "meta+v"
+    } else {
+        "ctrl+v"
+    };
+    let sent = handle.send_keys(KeyChord(chord.into())).await;
+    // Give the target app time to consume the clipboard before restore.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    if let Some(prev) = previous {
+        let _ = app.clipboard().write_text(prev);
+    }
+    sent
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteArgs {
+    pub text: String,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+/// Explicit clipboard-paste command ("paste" on the gate — driving call,
+/// audited). Remote targets fall back to a plain `type` through the cua
+/// route since the host clipboard doesn't exist there.
+#[tauri::command]
+pub async fn desktop_paste(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: PasteArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let text = args.text;
+    if ctx.remote_connection_id().is_some() {
+        return command_body!(
+            app,
+            state,
+            ctx,
+            "paste",
+            super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), TypeOpts::default()).await
+        );
+    }
+    let app2 = app.clone();
     command_body!(
         app,
         state,
         ctx,
-        "type",
-        super::cua_route::type_text(&state.handle, &state.cua, ctx.remote_connection_id(), text.clone(), opts.clone()).await
+        "paste",
+        paste_via_clipboard(&app2, &state.handle, &text).await
+    )
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LaunchAction {
+    Launch,
+    Focus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchAppArgs {
+    /// Executable path or app name ("notepad.exe", "C:\\...\\app.exe",
+    /// "Safari", "firefox").
+    pub app: String,
+    pub action: LaunchAction,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+/// Spawn the app via the platform shell. Detached — we don't track the
+/// child; "did it open" is observable through the next screenshot/find.
+fn spawn_app(app: &str) -> Result<()> {
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", app])
+            .spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").args(["-a", app]).spawn()
+    } else {
+        std::process::Command::new("sh")
+            .args([
+                "-c",
+                &format!("gtk-launch {a} 2>/dev/null || xdg-open {a}", a = shell_escape(app)),
+            ])
+            .spawn()
+    };
+    result
+        .map(|_| ())
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("launch '{app}' failed: {e}"),
+        })
+}
+
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// Launch an application or focus an existing window by process name.
+/// Driving call ("launch_app") — gated + audited like click/type.
+#[tauri::command]
+pub async fn desktop_launch_app(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: LaunchAppArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let target_app = args.app;
+    let action = args.action;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "launch_app",
+        async {
+            match action {
+                LaunchAction::Launch => spawn_app(&target_app),
+                LaunchAction::Focus => {
+                    // Reuse the backend: find by process name → window_op(focus).
+                    let locator = Locator {
+                        process_name: Some(target_app.clone()),
+                        ..Default::default()
+                    };
+                    match state.handle.find(locator).await? {
+                        Some(el) => state.handle.window_op(el, WindowOp::Focus).await,
+                        None => Err(AutomationError::BackendError {
+                            message: format!("no window found for process '{target_app}'"),
+                        }),
+                    }
+                }
+            }
+        }
+        .await
     )
 }
 
@@ -1142,6 +1331,30 @@ mod tests {
             process_name: Some(proc.into()),
             window_title: Some("test window".into()),
         }
+    }
+
+    #[test]
+    fn launch_app_args_deserialize() {
+        let v: LaunchAppArgs =
+            serde_json::from_str(r#"{"app":"notepad.exe","action":"launch"}"#).unwrap();
+        assert_eq!(v.app, "notepad.exe");
+        assert!(matches!(v.action, LaunchAction::Launch));
+        let v: LaunchAppArgs =
+            serde_json::from_str(r#"{"app":"notepad.exe","action":"focus"}"#).unwrap();
+        assert!(matches!(v.action, LaunchAction::Focus));
+    }
+
+    #[test]
+    fn paste_args_deserialize_with_default_ctx() {
+        let v: PasteArgs = serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+        assert_eq!(v.text, "hello");
+        assert!(v.ctx.surface.is_none());
+    }
+
+    #[test]
+    fn shell_escape_quotes_single_quotes() {
+        assert_eq!(shell_escape("fire'fox"), r"'fire'\''fox'");
+        assert_eq!(shell_escape("plain"), "'plain'");
     }
 
     #[test]
