@@ -16325,6 +16325,7 @@
         "duplicateEdge": "These nodes are already connected",
         "handleRequired": "Pick one of this node's output handles",
         "unknownHandle": "Unknown output handle on the source node",
+        "errorHandleDisabled": "Enable \"Route to error branch\" in the node's error handling first",
         "notConnecting": "Not in connect mode"
       }
     },
@@ -16446,7 +16447,8 @@
         "succeeded": "Ran {ago} · {duration}",
         "succeededNoDuration": "Ran {ago}",
         "failed": "Failed {ago}",
-        "skipped": "Skipped {ago}"
+        "skipped": "Skipped {ago}",
+        "handled": "Failed (handled) {ago}"
       }
     },
     "dataView": {
@@ -16969,6 +16971,9 @@
         "costEstimateSuffix": "est.",
         "servedBy": "Served by",
         "streaming": "Live output",
+        "attempts": "Retry attempts",
+        "attemptBadge": "#{attempt}/{max}",
+        "retryIn": "· retried after {delay}",
         "error": "Error",
         "nonRetryable": "This error is marked non-retryable; retries were skipped.",
         "skipReason": "Skip reason",

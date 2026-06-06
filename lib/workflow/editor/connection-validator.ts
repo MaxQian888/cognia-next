@@ -16,8 +16,8 @@
  * surface `reason` to the user via toast / inline warning.
  */
 
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
-import { outputHandlesFor } from "./node-handles"
+import type { WorkflowNodeErrorHandling, WorkflowNodeKind } from "@/types/workflow/visual"
+import { hasErrorHandle, outputHandlesFor } from "./node-handles"
 
 export interface ConnectionParams {
   source: string | null
@@ -34,7 +34,19 @@ export interface NodeShapeForValidation {
      * does); enables labeled-output-handle validation for v2 nodes. */
     typeVersion?: number
     params?: Record<string, unknown>
+    /** Per-node error handling — enables error-handle gating. */
+    errorHandling?: WorkflowNodeErrorHandling
   }
+}
+
+export interface ValidateConnectionOptions {
+  /**
+   * Workflow-level error policy. When provided, edges drawn from the
+   * "error" handle are rejected unless the source node opted into
+   * `onError: "errorBranch"` OR the workflow uses the legacy
+   * `errorPolicy: "branch"`. Omitted → permissive (shape-only callers).
+   */
+  errorPolicy?: "stop" | "continue" | "branch"
 }
 
 export interface EdgeShapeForValidation {
@@ -53,7 +65,8 @@ export type ValidationResult = { valid: true } | { valid: false; reason: string;
 export function validateConnection(
   params: ConnectionParams,
   nodes: NodeShapeForValidation[],
-  edges: EdgeShapeForValidation[]
+  edges: EdgeShapeForValidation[],
+  options?: ValidateConnectionOptions
 ): ValidationResult {
   if (!params.source || !params.target) {
     return {
@@ -89,6 +102,24 @@ export function validateConnection(
       reasonKey: "annotation",
     }
   }
+  // Error-handle gating: the red "error" handle only carries edges when the
+  // source node opted into errorBranch (or the workflow uses the legacy
+  // branch policy). Enforced only when the caller passed options — shape-only
+  // callers keep the permissive posture.
+  if (params.sourceHandle === "error" && options) {
+    const perNode = hasErrorHandle({
+      kind: source.data.kind,
+      errorHandling: source.data.errorHandling,
+    })
+    if (!perNode && options.errorPolicy !== "branch") {
+      return {
+        valid: false,
+        reason: 'Enable "Route to error branch" in the node\'s error handling first.',
+        reasonKey: "errorHandleDisabled",
+      }
+    }
+  }
+
   // Labeled-output-handle integrity (branch/switch v2). Only enforceable when
   // the caller supplied typeVersion + params (the canvas always does); shape-
   // only callers skip this check, preserving the "allow over block" posture.

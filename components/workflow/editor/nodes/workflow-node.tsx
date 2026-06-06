@@ -21,7 +21,7 @@ import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
 import { getEdgeById, hasEdgeBetween } from "@/lib/workflow/editor/edge-index"
-import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
+import { hasErrorHandle, outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { useShallow } from "zustand/react/shallow"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
@@ -126,14 +126,18 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
     if (lastRun.durationMs < 1000) return `${lastRun.durationMs}ms`
     return `${(lastRun.durationMs / 1000).toFixed(1)}s`
   })()
-  const colors =
-    lastRun.status === "succeeded"
+  // "handled" = the step failed but its per-node error handling substituted
+  // an output and the run continued — amber warning, not plain success.
+  const colors = lastRun.handled
+    ? "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+    : lastRun.status === "succeeded"
       ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
       : lastRun.status === "failed"
         ? "border-rose-500/30 bg-rose-500/5 text-rose-700 dark:text-rose-300"
         : "border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-300"
-  const message =
-    lastRun.status === "succeeded"
+  const message = lastRun.handled
+    ? t("handled", { ago })
+    : lastRun.status === "succeeded"
       ? duration
         ? t("succeeded", { ago, duration })
         : t("succeededNoDuration", { ago })
@@ -145,7 +149,7 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
       title={lastRun.errorMessage ?? undefined}
       className={cn("border-t px-3 py-1 text-[10px] font-medium", colors)}
       data-testid="wf-node-last-run-footer"
-      data-status={lastRun.status}
+      data-status={lastRun.handled ? "handled" : lastRun.status}
     >
       {message}
       {lastRun.attempt > 1 ? <span className="ml-1 opacity-70">×{lastRun.attempt}</span> : null}
@@ -253,13 +257,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
     connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
   }
 
-  // Error-branch handle: shown on fallible nodes (not triggers/annotations)
-  // when the workflow opts into `errorPolicy: "branch"`.
+  // Error-branch handle: per-node `errorHandling.onError === "errorBranch"`
+  // is the primary signal; the legacy workflow-level `errorPolicy: "branch"`
+  // keeps showing the handle on every fallible node for existing workflows.
   const showErrorHandle =
     showOutput &&
-    storeBits?.errorPolicy === "branch" &&
     !data.kind.startsWith("trigger.") &&
-    !isAnnotation
+    !isAnnotation &&
+    (hasErrorHandle({ kind: data.kind, errorHandling: data.errorHandling }) ||
+      storeBits?.errorPolicy === "branch")
 
   // Labeled decision handles (branch/switch v2) — single source of truth in
   // `node-handles.ts`, shared with the connection validator and smart edge.

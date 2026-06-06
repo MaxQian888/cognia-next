@@ -524,24 +524,37 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
 
         // Per-node error handling (data.errorHandling.onError) wins over the
         // workflow-level policy. mode null → legacy behavior below.
+        // Handled failures emit a `step_completed` with the substituted
+        // output AFTER the recorded `step_failed`: the data view shows what
+        // downstream actually consumed, the resume path replays it through
+        // the event-log cache hydration, and the run summary derives the
+        // "succeeded with handled failure" warning state from the pair.
         const nodeFailure = resolveNodeFailure(node)
         if (nodeFailure.mode === "continue") {
           // n8n semantics: downstream RUNS with an error-shaped output —
           // NOT the legacy workflow-level "continue" (which skips downstream).
-          stepOutputs.set(stepId, buildErrorOutput(errorObj))
+          const output = buildErrorOutput(errorObj)
+          stepOutputs.set(stepId, output)
+          cache.set(stepId, output)
           completed.add(stepId)
+          await logger.stepCompleted(stepId, output)
           return
         }
         if (nodeFailure.mode === "defaultValue") {
           stepOutputs.set(stepId, nodeFailure.defaultValue)
+          cache.set(stepId, nodeFailure.defaultValue)
           completed.add(stepId)
+          await logger.stepCompleted(stepId, nodeFailure.defaultValue)
           return
         }
         if (nodeFailure.mode === "errorBranch") {
           const errorEdges = outgoing.filter(isErrorEdge)
           if (errorEdges.length > 0) {
-            stepOutputs.set(stepId, buildErrorOutput(errorObj))
+            const output = buildErrorOutput(errorObj)
+            stepOutputs.set(stepId, output)
+            cache.set(stepId, output)
             completed.add(stepId)
+            await logger.stepCompleted(stepId, output)
             for (const edge of outgoing) {
               if (!isErrorEdge(edge)) {
                 propagateSkip(validated as VisualWorkflow, edge.target, skipped)

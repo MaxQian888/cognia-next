@@ -16325,6 +16325,7 @@
         "duplicateEdge": "这两个节点已经连接",
         "handleRequired": "请选择该节点的一个输出端口",
         "unknownHandle": "源节点上不存在该输出端口",
+        "errorHandleDisabled": "请先在该节点的错误处理中启用「走错误分支」",
         "notConnecting": "当前不在连线模式"
       }
     },
@@ -16446,7 +16447,8 @@
         "succeeded": "{ago} 运行 · 用时 {duration}",
         "succeededNoDuration": "{ago} 运行",
         "failed": "{ago} 失败",
-        "skipped": "{ago} 跳过"
+        "skipped": "{ago} 跳过",
+        "handled": "{ago} 失败（已处理）"
       }
     },
     "dataView": {
@@ -16969,6 +16971,9 @@
         "costEstimateSuffix": "估算",
         "servedBy": "实际提供方",
         "streaming": "实时输出",
+        "attempts": "重试记录",
+        "attemptBadge": "#{attempt}/{max}",
+        "retryIn": "· {delay} 后重试",
         "error": "错误",
         "nonRetryable": "该错误被标记为不可重试；已跳过重试。",
         "skipReason": "跳过原因",

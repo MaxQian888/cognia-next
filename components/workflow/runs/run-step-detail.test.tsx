@@ -115,6 +115,22 @@ describe("RunStepDetail", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0)
   })
 
+  it("lists retry attempts from step_retrying events", () => {
+    wrap([
+      ev({ ts: 10, type: "step_started", payload: { params: {} } }),
+      ev({
+        ts: 12,
+        type: "step_retrying",
+        payload: { attempt: 1, maxAttempts: 3, delayMs: 500, error: "rate limited" },
+      }),
+      ev({ ts: 20, type: "step_started", payload: { params: {} } }),
+      ev({ ts: 30, type: "step_completed", payload: { output: {} } }),
+    ])
+    const attempts = screen.getByTestId("step-attempts")
+    expect(attempts.textContent).toContain("#1/3")
+    expect(attempts.textContent).toContain("rate limited")
+  })
+
   it("shows error details for a failed step", () => {
     wrap([
       ev({ ts: 10, type: "step_started", payload: { params: {} } }),

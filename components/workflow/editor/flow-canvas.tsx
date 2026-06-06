@@ -216,7 +216,9 @@ export function FlowCanvas({
   const onConnect = useCallback(
     (connection: Connection) => {
       const s = useStore.getState()
-      const result = validateConnection(connection, s.nodes, s.edges)
+      const result = validateConnection(connection, s.nodes, s.edges, {
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      })
       if (!result.valid) {
         toast.error(tConnection(result.reasonKey))
         return
@@ -238,7 +240,9 @@ export function FlowCanvas({
   const isValidConnection = useCallback(
     (connection: Connection | { source: string | null; target: string | null }) => {
       const s = useStore.getState()
-      return validateConnection(connection, s.nodes, s.edges).valid
+      return validateConnection(connection, s.nodes, s.edges, {
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      }).valid
     },
     [useStore]
   )

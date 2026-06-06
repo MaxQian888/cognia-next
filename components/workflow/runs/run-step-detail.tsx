@@ -86,6 +86,12 @@ export function RunStepDetail({
 
   const logEvents = useMemo(() => stepEvents.filter((e) => e.type === "run_log"), [stepEvents])
 
+  // Retry history (step_retrying events — one per backoff wait).
+  const retryEvents = useMemo(
+    () => stepEvents.filter((e) => e.type === "step_retrying"),
+    [stepEvents]
+  )
+
   // Live streaming output (step_stream events) + the step's token/cost usage.
   const stream = useMemo(() => reduceStepStream(stepEvents, stepId), [stepEvents, stepId])
   const usage = useMemo(() => {
@@ -206,6 +212,39 @@ export function RunStepDetail({
               {stream.text}
               <span className="animate-pulse">▌</span>
             </pre>
+          </Section>
+        ) : null}
+
+        {retryEvents.length > 0 ? (
+          <Section title={t("attempts")}>
+            <div
+              className="space-y-1.5 rounded-md border bg-muted/30 p-2"
+              data-testid="step-attempts"
+            >
+              {retryEvents.map((e) => {
+                const payload = e.payload as
+                  | { attempt?: number; maxAttempts?: number; delayMs?: number; error?: string }
+                  | undefined
+                return (
+                  <div key={e.id} className="flex items-start gap-2 text-xs">
+                    <Badge variant="outline" className="shrink-0 font-mono text-wf-status-running">
+                      {t("attemptBadge", {
+                        attempt: payload?.attempt ?? 0,
+                        max: payload?.maxAttempts ?? 0,
+                      })}
+                    </Badge>
+                    <div className="min-w-0 flex-1 break-words text-muted-foreground">
+                      {payload?.error ?? "—"}
+                      {typeof payload?.delayMs === "number" ? (
+                        <span className="ml-1 opacity-70">
+                          {t("retryIn", { delay: formatDurationMs(payload.delayMs) })}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </Section>
         ) : null}
 

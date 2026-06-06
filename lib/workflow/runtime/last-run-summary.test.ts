@@ -48,6 +48,30 @@ describe("deriveLastRunSummary", () => {
     expect(out["n1"].errorMessage).toBe("oops")
   })
 
+  it("flags handled failures (failed → completed with no new attempt)", () => {
+    // The orchestrator's per-node onError emits step_completed with the
+    // substituted output right after the recorded step_failed.
+    const out = deriveLastRunSummary([
+      ev(0, "step_started", "n1"),
+      ev(10, "step_failed", "n1", { message: "boom" }),
+      ev(11, "step_completed", "n1", { output: { failed: true, error: "boom" } }),
+    ])
+    expect(out["n1"].status).toBe("succeeded")
+    expect(out["n1"].handled).toBe(true)
+    expect(out["n1"].errorMessage).toBe("boom")
+  })
+
+  it("does NOT flag handled when a retry succeeded normally", () => {
+    const out = deriveLastRunSummary([
+      ev(0, "step_started", "n1"),
+      ev(10, "step_failed", "n1", { message: "transient" }),
+      ev(20, "step_started", "n1"),
+      ev(30, "step_completed", "n1"),
+    ])
+    expect(out["n1"].status).toBe("succeeded")
+    expect(out["n1"].handled).toBeUndefined()
+  })
+
   it("counts retry attempts and keeps the latest terminal", () => {
     const out = deriveLastRunSummary([
       ev(0, "step_started", "n1"),
