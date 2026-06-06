@@ -60,6 +60,9 @@ describe("createWorkflow", () => {
     expect(wf.nodes).toEqual([])
     expect(wf.edges).toEqual([])
     expect(wf.settings.errorPolicy).toBe("stop")
+    // New workflows default to parallel ready-set scheduling. Regression for
+    // the field-enumerated cloneSettings dropping maxConcurrency.
+    expect(wf.settings.maxConcurrency).toBe(4)
     expect(wf.viewport).toEqual({ x: 0, y: 0, zoom: 1 })
     expect(wf.createdAt).toBe(wf.updatedAt)
   })

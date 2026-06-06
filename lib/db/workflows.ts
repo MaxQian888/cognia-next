@@ -228,6 +228,10 @@ function cloneSettings(s: WorkflowSettings): WorkflowSettings {
     errorPolicy: s.errorPolicy,
     timeoutMs: s.timeoutMs,
     concurrency: s.concurrency,
+    // Field-enumerated clone — every WorkflowSettings field must be carried
+    // explicitly, or new-workflow defaults silently lose it (caught by the
+    // smoke run when DEFAULT_WORKFLOW_SETTINGS gained maxConcurrency).
+    maxConcurrency: s.maxConcurrency,
     retryDefaults: { ...s.retryDefaults },
     timezone: s.timezone,
   }
