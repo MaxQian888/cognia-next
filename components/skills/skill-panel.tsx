@@ -22,6 +22,7 @@ import { SkillBatchActionsBar } from "./skill-batch-actions-bar"
 import { SkillDetailPanel } from "./skill-detail-panel"
 import { SkillImportDialog } from "./skill-import-dialog"
 import { SkillDeleteDialog } from "./skill-delete-dialog"
+import { SkillUrlInstallDialog } from "./skill-url-install-dialog"
 import {
   Sheet,
   SheetContent,
@@ -133,6 +134,7 @@ export function SkillPanel({ className }: Props) {
         <SkillEditorHost />
         <SkillImportHost />
         <SkillDeleteHost />
+        <SkillUrlInstallDialog />
       </div>
     </SkillPanelProvider>
   )

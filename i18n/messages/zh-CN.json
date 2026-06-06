@@ -7137,7 +7137,10 @@
       "exportAll": "导出全部",
       "syncNative": "与 ~/.claude/skills/ 同步",
       "syncNativeDesktopOnly": "本地同步需要桌面端。",
-      "moreActions": "更多操作"
+      "moreActions": "更多操作",
+      "checkUpdates": "检查更新",
+      "checkingUpdates": "检查中…",
+      "installFromUrl": "从 URL…"
     },
     "card": {
       "edit": "编辑",
@@ -7170,7 +7173,9 @@
       "metaLastUsed": "最近使用：{when}",
       "metaTools": "工具",
       "noResources": "暂无打包资源。",
-      "addResource": "添加资源"
+      "addResource": "添加资源",
+      "update": "更新",
+      "updateAvailable": "有更新"
     },
     "editor": {
       "name": "名称",
@@ -7254,7 +7259,6 @@
     "marketplace": {
       "title": "技能市场",
       "sourceRegistry": "精选注册表",
-      "sourceSkillsmp": "SkillsMP",
       "sourceAll": "全部来源",
       "install": "安装",
       "installing": "安装中…",
@@ -7268,10 +7272,69 @@
       "loading": "加载市场中…",
       "empty": "暂无技能。",
       "errorLoad": "加载市场失败（{error}）。",
-      "configureSkillsmp": "在 设置 → API 配置 SkillsMP 基础地址以启用此来源。",
       "selectItemTitle": "未选择技能",
       "selectItemHint": "选择一个技能查看详情。",
-      "listAriaLabel": "市场条目"
+      "listAriaLabel": "市场条目",
+      "sourceSkillssh": "skills.sh",
+      "installs": "{count} 次安装",
+      "update": "更新",
+      "updating": "正在更新…",
+      "updateAvailable": "有更新",
+      "loadMore": "加载更多",
+      "views": {
+        "search": "搜索",
+        "allTime": "总榜",
+        "trending": "趋势",
+        "hot": "热门",
+        "curated": "精选"
+      },
+      "curatedOwnerInstalls": "全部技能共 {count} 次安装",
+      "searchHint": "输入至少 2 个字符以搜索 skills.sh",
+      "webBlocked": "浏览 skills.sh 需要桌面或移动应用——浏览器版本仅显示内置精选库。",
+      "tokenExpired": "skills.sh token 已过期或无效——已切换为匿名结果。",
+      "rateLimited": "已触发 skills.sh 速率限制，请 {seconds} 秒后重试。",
+      "audit": {
+        "title": "安全审计",
+        "loading": "正在加载审计结果…",
+        "noData": "暂无审计数据",
+        "ariaLabel": "安全审计结果",
+        "risk": {
+          "safe": "安全",
+          "low": "低风险",
+          "medium": "中风险",
+          "high": "高风险",
+          "critical": "严重风险",
+          "unknown": "未验证"
+        }
+      },
+      "files": {
+        "title": "{count} 个文件",
+        "loading": "正在加载文件列表…",
+        "empty": "无可用文件清单",
+        "ariaLabel": "技能文件"
+      },
+      "urlInstall": {
+        "open": "从 URL 安装…",
+        "title": "从 URL 安装",
+        "description": "粘贴 skills.sh 链接、owner/repo/skill 三段式标识或 GitHub 仓库地址。",
+        "placeholder": "https://skills.sh/owner/repo/skill",
+        "hint": "支持：skills.sh 链接 · owner/repo/skill · owner/repo（单技能仓库）",
+        "install": "安装",
+        "installing": "正在安装…",
+        "errorInvalid": "无法识别的输入——请粘贴 skills.sh 链接或 owner/repo/skill。",
+        "ariaLabel": "技能引用"
+      },
+      "teaser": {
+        "title": "解锁排行榜与官方精选",
+        "body": "搜索与一键安装开箱即用。填入 Vercel OIDC token 可浏览 skills.sh 的总榜 / 趋势 / 热门排行榜与官方精选合集。",
+        "tokenPlaceholder": "Vercel OIDC token",
+        "save": "保存 token",
+        "saving": "保存中…",
+        "clear": "移除",
+        "saved": "skills.sh token 已保存。",
+        "cleared": "skills.sh token 已移除。",
+        "docsLink": "如何获取 token"
+      }
     },
     "analytics": {
       "loading": "正在加载统计…",
@@ -7407,7 +7470,11 @@
       "importPartCreated": "新增 {count}",
       "importPartUpdated": "更新 {count}",
       "importPartSkipped": "跳过 {count}",
-      "importPartErrored": "失败 {count}"
+      "importPartErrored": "失败 {count}",
+      "updated": "{name} 已更新。",
+      "updatesFound": "{count} 个技能有更新。",
+      "updatesNone": "所有技能均为最新。",
+      "updatesError": "检查更新失败（{error}）。"
     },
     "validation": {
       "empty": "没有验证问题。",
@@ -7424,11 +7491,6 @@
         "trigger": "附加技能",
         "removeChip": "移除 {name}"
       }
-    },
-    "marketplaceEmpty": {
-      "title": "市场未配置",
-      "subtitle": "在设置里配置 SkillsMP 端点即可浏览和安装社区技能。下面是部分可用示例：",
-      "configure": "去设置配置"
     },
     "back": "返回"
   },

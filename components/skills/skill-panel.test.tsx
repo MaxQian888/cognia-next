@@ -60,6 +60,13 @@ jest.mock("@/hooks/skills", () => ({
   }),
   useSkillAi: () => ({ run: aiRun }),
   useSkillShortcuts: () => {},
+  URL_INSTALL_INVALID: "invalid",
+  useUrlInstall: () => ({
+    run: jest.fn(),
+    busy: false,
+    error: null,
+    clearError: jest.fn(),
+  }),
 }))
 
 const mobileRef = { current: false }

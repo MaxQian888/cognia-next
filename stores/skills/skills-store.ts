@@ -76,6 +76,8 @@ interface SkillsStoreState {
   importStaging: ImportStaging | null
   /** When non-null, show the delete confirmation. */
   deleteTarget: { skillId: string; name: string } | null
+  /** When true, show the "Install from URL" dialog. */
+  urlInstallOpen: boolean
   /** VSCode-style workspace state for the Editor tab. UI-only, not persisted. */
   editorWorkspace: EditorWorkspace
 
@@ -95,6 +97,7 @@ interface SkillsStoreState {
   closeEditor: () => void
   setImportStaging: (staging: ImportStaging | null) => void
   setDeleteTarget: (target: { skillId: string; name: string } | null) => void
+  setUrlInstallOpen: (open: boolean) => void
   openSkillInEditor: (skillId: string, mainContent: string) => void
   openFile: (file: EditorFile) => void
   closeFile: (id: string, force?: boolean) => void
@@ -163,6 +166,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   createSeed: null,
   importStaging: null,
   deleteTarget: null,
+  urlInstallOpen: false,
   editorWorkspace: DEFAULT_WORKSPACE,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -188,6 +192,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   closeEditor: () => set({ editorTarget: null, createSeed: null }),
   setImportStaging: (staging) => set({ importStaging: staging }),
   setDeleteTarget: (target) => set({ deleteTarget: target }),
+  setUrlInstallOpen: (open) => set({ urlInstallOpen: open }),
 
   openSkillInEditor: (skillId, mainContent) =>
     set({

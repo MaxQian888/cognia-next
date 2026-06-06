@@ -10,9 +10,14 @@ export { useSkillAi, type UseSkillAi } from "./use-skill-ai"
 export { useSkillAnalytics, type SkillAnalytics } from "./use-skill-analytics"
 export {
   useSkillMarketplace,
+  type AuditEntry,
+  type FileTreeEntry,
   type MarketplaceSourceFilter,
+  type MarketplaceView,
   type UseSkillMarketplace,
 } from "./use-skill-marketplace"
+export { useSkillUpdate, type UseSkillUpdate } from "./use-skill-update"
+export { URL_INSTALL_INVALID, useUrlInstall, type UseUrlInstall } from "./use-url-install"
 export { useSkillSync, type UseSkillSync } from "./use-skill-sync"
 export { useSkillValidation } from "./use-skill-validation"
 export { useSkillShortcuts } from "./use-skill-shortcuts"

@@ -7137,7 +7137,10 @@
       "exportAll": "Export all",
       "syncNative": "Sync with ~/.claude/skills/",
       "syncNativeDesktopOnly": "Native sync requires desktop mode.",
-      "moreActions": "More actions"
+      "moreActions": "More actions",
+      "checkUpdates": "Check for updates",
+      "checkingUpdates": "Checking…",
+      "installFromUrl": "From URL…"
     },
     "card": {
       "edit": "Edit",
@@ -7170,7 +7173,9 @@
       "metaLastUsed": "Last used {when}",
       "metaTools": "Tools",
       "noResources": "No resources bundled.",
-      "addResource": "Add resource"
+      "addResource": "Add resource",
+      "update": "Update",
+      "updateAvailable": "Update available"
     },
     "editor": {
       "name": "Name",
@@ -7254,7 +7259,6 @@
     "marketplace": {
       "title": "Marketplace",
       "sourceRegistry": "Curated registry",
-      "sourceSkillsmp": "SkillsMP",
       "sourceAll": "All sources",
       "install": "Install",
       "installing": "Installing…",
@@ -7268,10 +7272,69 @@
       "loading": "Loading marketplace…",
       "empty": "No skills found.",
       "errorLoad": "Could not load marketplace ({error}).",
-      "configureSkillsmp": "Configure the SkillsMP base URL in Settings → API to enable this source.",
       "selectItemTitle": "No skill selected",
       "selectItemHint": "Select a skill to view details.",
-      "listAriaLabel": "Marketplace items"
+      "listAriaLabel": "Marketplace items",
+      "sourceSkillssh": "skills.sh",
+      "installs": "{count} installs",
+      "update": "Update",
+      "updating": "Updating…",
+      "updateAvailable": "Update available",
+      "loadMore": "Load more",
+      "views": {
+        "search": "Search",
+        "allTime": "All-time",
+        "trending": "Trending",
+        "hot": "Hot",
+        "curated": "Curated"
+      },
+      "curatedOwnerInstalls": "{count} installs across skills",
+      "searchHint": "Type at least 2 characters to search skills.sh",
+      "webBlocked": "Browsing skills.sh requires the desktop or mobile app — the browser build only shows the curated registry.",
+      "tokenExpired": "skills.sh token expired or invalid — showing anonymous results.",
+      "rateLimited": "skills.sh rate limit reached, retry in {seconds}s.",
+      "audit": {
+        "title": "Security audits",
+        "loading": "Loading audits…",
+        "noData": "No audit data yet",
+        "ariaLabel": "Security audit results",
+        "risk": {
+          "safe": "Safe",
+          "low": "Low risk",
+          "medium": "Medium risk",
+          "high": "High risk",
+          "critical": "Critical",
+          "unknown": "Unverified"
+        }
+      },
+      "files": {
+        "title": "{count, plural, one {# file} other {# files}}",
+        "loading": "Loading file list…",
+        "empty": "No file manifest available",
+        "ariaLabel": "Skill files"
+      },
+      "urlInstall": {
+        "open": "Install from URL…",
+        "title": "Install from URL",
+        "description": "Paste a skills.sh link, an owner/repo/skill triple, or a GitHub repository.",
+        "placeholder": "https://skills.sh/owner/repo/skill",
+        "hint": "Accepted: skills.sh URL · owner/repo/skill · owner/repo (single-skill repos)",
+        "install": "Install",
+        "installing": "Installing…",
+        "errorInvalid": "Unrecognized input — paste a skills.sh URL or owner/repo/skill.",
+        "ariaLabel": "Skill reference"
+      },
+      "teaser": {
+        "title": "Unlock leaderboards & curated picks",
+        "body": "Search and one-click install work out of the box. Add a Vercel OIDC token to browse the all-time / trending / hot leaderboards and curated collections from skills.sh.",
+        "tokenPlaceholder": "Vercel OIDC token",
+        "save": "Save token",
+        "saving": "Saving…",
+        "clear": "Remove",
+        "saved": "skills.sh token saved.",
+        "cleared": "skills.sh token removed.",
+        "docsLink": "How to get a token"
+      }
     },
     "analytics": {
       "loading": "Loading analytics…",
@@ -7407,7 +7470,11 @@
       "importPartCreated": "{count} created",
       "importPartUpdated": "{count} updated",
       "importPartSkipped": "{count} skipped",
-      "importPartErrored": "{count} errored"
+      "importPartErrored": "{count} errored",
+      "updated": "{name} updated.",
+      "updatesFound": "{count, plural, one {# update available} other {# updates available}}.",
+      "updatesNone": "All skills are up to date.",
+      "updatesError": "Update check failed ({error})."
     },
     "validation": {
       "empty": "No validation issues.",
@@ -7424,11 +7491,6 @@
         "trigger": "Attach skill",
         "removeChip": "Remove {name}"
       }
-    },
-    "marketplaceEmpty": {
-      "title": "Marketplace not configured",
-      "subtitle": "Configure a SkillsMP endpoint in settings to browse and install community skills. A few examples of what's available:",
-      "configure": "Configure in settings"
     },
     "back": "Back"
   },
