@@ -88,12 +88,12 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       ...(settings
         ? {
             defaultProvider: settings.defaultProvider,
-            providerSettings: settings.providerSettings as Parameters<
-              typeof executeAgent
-            >[1]["providerSettings"],
-            customProviders: settings.customProviders as Parameters<
-              typeof executeAgent
-            >[1]["customProviders"],
+            providerSettings: settings.providerSettings as NonNullable<
+              Parameters<typeof executeAgent>[1]
+            >["providerSettings"],
+            customProviders: settings.customProviders as NonNullable<
+              Parameters<typeof executeAgent>[1]
+            >["customProviders"],
           }
         : {}),
     })

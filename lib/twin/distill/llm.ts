@@ -189,7 +189,8 @@ export function createLlmClient(config: LlmConfig): LlmClient {
       }
       // Usage settles only after the stream finishes; awaiting it here keeps
       // the cumulative snapshot correct for getUsageSnapshot() callers.
-      addUsage(await result.usage.catch(() => undefined))
+      // (`usage` is a PromiseLike without .catch — wrap before swallowing.)
+      addUsage(await Promise.resolve(result.usage).catch(() => undefined))
     },
     getUsageSnapshot() {
       return { ...usage }
