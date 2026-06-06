@@ -14,6 +14,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillListItem } from "./skill-list-item"
+import { useSkillsStore } from "@/stores/skills/skills-store"
 import type { Skill } from "@/lib/claude/types"
 
 const baseSkill: Skill = {
@@ -34,6 +35,7 @@ const handlers = {
 
 beforeEach(() => {
   tauriRef.current = false
+  useSkillsStore.setState({ updateAvailable: {} })
   for (const fn of Object.values(handlers)) fn.mockReset()
 })
 
@@ -107,6 +109,17 @@ describe("SkillListItem", () => {
       />
     )
     expect(screen.getByTestId("skill-sync-dot")).toHaveClass("bg-destructive")
+  })
+
+  it("shows the update badge when the store flags this skill", () => {
+    useSkillsStore.setState({ updateAvailable: { s1: true } })
+    render(<SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />)
+    expect(screen.getByTestId("skill-update-badge")).toBeInTheDocument()
+  })
+
+  it("hides the update badge for unflagged skills", () => {
+    render(<SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />)
+    expect(screen.queryByTestId("skill-update-badge")).not.toBeInTheDocument()
   })
 
   it("shows a validation badge when the skill has validation errors", () => {

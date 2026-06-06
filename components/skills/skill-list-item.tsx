@@ -2,7 +2,7 @@
 
 import { memo } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon } from "lucide-react"
+import { AlertTriangleIcon, ArrowUpCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -10,6 +10,7 @@ import type { Skill } from "@/lib/claude/types"
 import { inferCategory } from "@/lib/db/skills"
 import { getCategoryMeta } from "@/lib/skills/categories"
 import { isTauri } from "@/lib/tauri"
+import { useSkillsStore } from "@/stores/skills/skills-store"
 
 interface Props {
   skill: Skill
@@ -38,6 +39,7 @@ export const SkillListItem = memo(function SkillListItem({
   const status = skill.status ?? "enabled"
   const Icon = category.icon
   const errorCount = skill.validationErrors?.length ?? 0
+  const updateAvailable = useSkillsStore((s) => Boolean(s.updateAvailable[skill.id]))
 
   return (
     <div className="flex items-center gap-2 pl-2">
@@ -72,6 +74,16 @@ export const SkillListItem = memo(function SkillListItem({
           )}
         </span>
         <span className="flex shrink-0 items-center gap-1">
+          {updateAvailable && (
+            <Badge
+              variant="secondary"
+              className="h-5 gap-1 text-[10px]"
+              data-testid="skill-update-badge"
+            >
+              <ArrowUpCircleIcon className="size-3" />
+              {t("detail.updateAvailable")}
+            </Badge>
+          )}
           {errorCount > 0 && (
             <Badge
               variant="destructive"

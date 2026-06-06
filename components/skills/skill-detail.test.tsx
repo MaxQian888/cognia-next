@@ -20,8 +20,17 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
   ),
 }))
 
+const updateOneMock = jest.fn(async () => undefined)
 jest.mock("@/hooks/skills", () => ({
   useSkillValidation: jest.fn(),
+  useSkillUpdate: () => ({
+    statuses: {},
+    checkAll: jest.fn(),
+    updateOne: updateOneMock,
+    checking: false,
+    updatingId: null,
+    hasUpdate: () => false,
+  }),
 }))
 
 jest.mock("@/lib/tauri", () => ({
@@ -40,8 +49,9 @@ jest.mock("./skill-sync-section", () => ({
   SkillSyncSection: () => <div data-testid="sync-section" />,
 }))
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SkillDetail } from "./skill-detail"
+import { useSkillsStore } from "@/stores/skills"
 import type { Skill } from "@/lib/claude/types"
 
 const skill = {
@@ -69,5 +79,20 @@ describe("SkillDetail", () => {
     expect(screen.getByText("tabResources")).toBeInTheDocument()
     expect(screen.getByText("tabSecurity")).toBeInTheDocument()
     expect(screen.getByText("tabValidation")).toBeInTheDocument()
+  })
+
+  it("hides the update banner when the skill has no pending update", () => {
+    useSkillsStore.setState({ updateAvailable: {} })
+    render(<SkillDetail skill={skill} />)
+    expect(screen.queryByTestId("skill-update-banner")).not.toBeInTheDocument()
+  })
+
+  it("shows the update banner and runs the one-click update when flagged", async () => {
+    useSkillsStore.setState({ updateAvailable: { s1: true } })
+    render(<SkillDetail skill={skill} />)
+    expect(screen.getByTestId("skill-update-banner")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("skill-update-button"))
+    await waitFor(() => expect(updateOneMock).toHaveBeenCalledWith(skill))
+    useSkillsStore.setState({ updateAvailable: {} })
   })
 })

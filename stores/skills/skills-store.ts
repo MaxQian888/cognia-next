@@ -78,6 +78,13 @@ interface SkillsStoreState {
   deleteTarget: { skillId: string; name: string } | null
   /** When true, show the "Install from URL" dialog. */
   urlInstallOpen: boolean
+  /**
+   * skillId → "newer snapshot available" flags from the last explicit
+   * "Check for updates" run. Shared so the toolbar (which runs the check),
+   * the list rows, and the detail pane (which render badges/buttons) stay
+   * in sync without prop-drilling.
+   */
+  updateAvailable: Record<string, boolean>
   /** VSCode-style workspace state for the Editor tab. UI-only, not persisted. */
   editorWorkspace: EditorWorkspace
 
@@ -98,6 +105,8 @@ interface SkillsStoreState {
   setImportStaging: (staging: ImportStaging | null) => void
   setDeleteTarget: (target: { skillId: string; name: string } | null) => void
   setUrlInstallOpen: (open: boolean) => void
+  setUpdateAvailable: (map: Record<string, boolean>) => void
+  clearUpdateAvailable: (skillId: string) => void
   openSkillInEditor: (skillId: string, mainContent: string) => void
   openFile: (file: EditorFile) => void
   closeFile: (id: string, force?: boolean) => void
@@ -167,6 +176,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   importStaging: null,
   deleteTarget: null,
   urlInstallOpen: false,
+  updateAvailable: {},
   editorWorkspace: DEFAULT_WORKSPACE,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -193,6 +203,14 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   setImportStaging: (staging) => set({ importStaging: staging }),
   setDeleteTarget: (target) => set({ deleteTarget: target }),
   setUrlInstallOpen: (open) => set({ urlInstallOpen: open }),
+  setUpdateAvailable: (map) => set({ updateAvailable: map }),
+  clearUpdateAvailable: (skillId) =>
+    set((s) => {
+      if (!s.updateAvailable[skillId]) return s
+      const next = { ...s.updateAvailable }
+      delete next[skillId]
+      return { updateAvailable: next }
+    }),
 
   openSkillInEditor: (skillId, mainContent) =>
     set({

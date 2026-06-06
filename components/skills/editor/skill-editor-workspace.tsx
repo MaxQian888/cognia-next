@@ -29,9 +29,11 @@ import {
 import { SkillFileTree } from "./skill-file-tree"
 import { SkillTabStrip } from "./skill-tab-strip"
 import { SkillMonacoEditor } from "./skill-monaco-editor"
+import { SkillPlainEditor } from "./skill-plain-editor"
 import { SkillValidationPanel } from "./skill-validation-panel"
 import { useEditorWorkspace } from "./use-editor-workspace"
 import { languageFromPath } from "./language-from-path"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
 
 export function SkillEditorWorkspace() {
   const t = useTranslations("skills.editor")
@@ -42,6 +44,7 @@ export function SkillEditorWorkspace() {
   const updateDraftContent = useSkillsStore((s) => s.updateDraftContent)
   const toggleRightPane = useSkillsStore((s) => s.toggleRightPane)
   const { saveActive, saveAll, savedAllSignal } = useEditorWorkspace()
+  const isMobile = useIsMobile()
   const [closeTarget, setCloseTarget] = useState<{ fileId: string; path: string } | null>(null)
   const [fileTreeSheetOpen, setFileTreeSheetOpen] = useState(false)
   const [validationSheetOpen, setValidationSheetOpen] = useState(false)
@@ -169,16 +172,27 @@ export function SkillEditorWorkspace() {
         </div>
         <div className="flex flex-1 overflow-hidden">
           <div className="flex flex-1 flex-col">
-            {activeFile && (
-              <SkillMonacoEditor
-                key={activeFile.id}
-                value={activeFile.draftContent}
-                language={activeFile.language}
-                onChange={(v) => updateDraftContent(activeFile.id, v)}
-                skillId={ws.activeSkillId ?? undefined}
-                documentId={activeFile.id}
-              />
-            )}
+            {activeFile &&
+              // Monaco's virtual-keyboard handling is unusable on touch
+              // devices — swap in the plain-textarea fallback there. The
+              // key={} remount keeps undo stacks per file in both modes.
+              (isMobile ? (
+                <SkillPlainEditor
+                  key={activeFile.id}
+                  value={activeFile.draftContent}
+                  language={activeFile.language}
+                  onChange={(v) => updateDraftContent(activeFile.id, v)}
+                />
+              ) : (
+                <SkillMonacoEditor
+                  key={activeFile.id}
+                  value={activeFile.draftContent}
+                  language={activeFile.language}
+                  onChange={(v) => updateDraftContent(activeFile.id, v)}
+                  skillId={ws.activeSkillId ?? undefined}
+                  documentId={activeFile.id}
+                />
+              ))}
             <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-1 font-mono text-[10px] text-muted-foreground">
               <span>
                 {activeFile?.language} •{" "}
@@ -241,9 +255,9 @@ export function SkillEditorWorkspace() {
         </SheetContent>
       </Sheet>
 
-      {/* Mobile: validation panel as Sheet */}
+      {/* Mobile: validation panel as a thumb-reachable bottom drawer */}
       <Sheet open={validationSheetOpen} onOpenChange={setValidationSheetOpen}>
-        <SheetContent side="right" className="w-80 p-0 sm:w-96">
+        <SheetContent side="bottom" className="h-[60vh] p-0 safe-area-pb">
           <SheetHeader className="border-b px-4 py-3">
             <SheetTitle>{t("panelValidation")}</SheetTitle>
             <SheetDescription>{skill.name}</SheetDescription>

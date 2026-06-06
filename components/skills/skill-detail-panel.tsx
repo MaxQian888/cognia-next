@@ -34,7 +34,7 @@ export function SkillDetailPanel() {
 
   return (
     <Sheet open={detailSkillId !== null} onOpenChange={(o) => !o && closeDetail()}>
-      <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
+      <SheetContent side="right" className="w-full p-0 safe-area-pb sm:max-w-2xl">
         <SheetHeader className="sr-only">
           <SheetTitle>{skill?.name ?? t("fallbackName")}</SheetTitle>
           <SheetDescription>{skill?.description ?? ""}</SheetDescription>

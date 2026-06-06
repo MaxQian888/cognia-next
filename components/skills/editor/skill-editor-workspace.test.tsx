@@ -46,6 +46,11 @@ jest.mock("@/lib/db/skill-resources", () => ({
   updateResource: jest.fn(),
 }))
 
+const mobileRef = { current: false }
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => mobileRef.current,
+}))
+
 import { fireEvent, render, screen } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillEditorWorkspace } from "./skill-editor-workspace"
@@ -54,6 +59,7 @@ beforeEach(() => {
   skillRef.current = undefined
   resourcesRef.current = []
   liveQueryIdx = 0
+  mobileRef.current = false
   useSkillsStore.setState({
     editorWorkspace: {
       activeSkillId: null,
@@ -84,6 +90,29 @@ describe("SkillEditorWorkspace", () => {
     // SKILL.md appears multiple times — desktop file tree + tab strip + mobile sheet body.
     expect(screen.getAllByText("SKILL.md").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  })
+
+  it("on mobile, swaps Monaco for the plain-textarea editor", () => {
+    mobileRef.current = true
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    render(<SkillEditorWorkspace />)
+    expect(screen.getByTestId("skill-plain-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+    // Edits flow through the same draft-content store path.
+    fireEvent.change(screen.getByTestId("skill-plain-editor"), {
+      target: { value: "edited body" },
+    })
+    expect(
+      useSkillsStore.getState().editorWorkspace.openFiles.find((f) => f.id === "main")?.draftContent
+    ).toBe("edited body")
   })
 
   it("opens an AlertDialog when closing a dirty tab and discards on confirm", () => {

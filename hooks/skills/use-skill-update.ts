@@ -13,6 +13,7 @@ import {
   marketplaceItemFromSkill,
   type SkillUpdateStatus,
 } from "@/lib/skills/skillssh-updates"
+import { useSkillsStore } from "@/stores/skills/skills-store"
 import type { Skill } from "@/lib/claude/types"
 
 export interface UseSkillUpdate {
@@ -32,6 +33,8 @@ export function useSkillUpdate(): UseSkillUpdate {
   const [statuses, setStatuses] = useState<Record<string, SkillUpdateStatus>>({})
   const [checking, setChecking] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const setUpdateAvailable = useSkillsStore((s) => s.setUpdateAvailable)
+  const clearUpdateAvailable = useSkillsStore((s) => s.clearUpdateAvailable)
 
   const checkAll = useCallback(async () => {
     setChecking(true)
@@ -39,30 +42,39 @@ export function useSkillUpdate(): UseSkillUpdate {
       const skills = await listSkills()
       const results = await checkSkillsShUpdates(skills)
       setStatuses(Object.fromEntries(results.map((r) => [r.skillId, r])))
+      // Mirror the boolean flags into the store so list rows + detail pane
+      // (which don't own this hook instance) render their badges.
+      setUpdateAvailable(
+        Object.fromEntries(results.filter((r) => r.hasUpdate).map((r) => [r.skillId, true]))
+      )
       return results.filter((r) => r.hasUpdate).length
     } finally {
       setChecking(false)
     }
-  }, [])
+  }, [setUpdateAvailable])
 
-  const updateOne = useCallback(async (skill: Skill) => {
-    const item = marketplaceItemFromSkill(skill)
-    if (!item) {
-      throw new Error(`Skill "${skill.name}" was not installed from skills.sh`)
-    }
-    setUpdatingId(skill.id)
-    try {
-      await installMarketplaceItem(item)
-      // The row now matches the remote snapshot — clear its update flag.
-      setStatuses((s) => {
-        const prev = s[skill.id]
-        if (!prev) return s
-        return { ...s, [skill.id]: { ...prev, hasUpdate: false, currentHash: prev.remoteHash } }
-      })
-    } finally {
-      setUpdatingId(null)
-    }
-  }, [])
+  const updateOne = useCallback(
+    async (skill: Skill) => {
+      const item = marketplaceItemFromSkill(skill)
+      if (!item) {
+        throw new Error(`Skill "${skill.name}" was not installed from skills.sh`)
+      }
+      setUpdatingId(skill.id)
+      try {
+        await installMarketplaceItem(item)
+        // The row now matches the remote snapshot — clear its update flag.
+        clearUpdateAvailable(skill.id)
+        setStatuses((s) => {
+          const prev = s[skill.id]
+          if (!prev) return s
+          return { ...s, [skill.id]: { ...prev, hasUpdate: false, currentHash: prev.remoteHash } }
+        })
+      } finally {
+        setUpdatingId(null)
+      }
+    },
+    [clearUpdateAvailable]
+  )
 
   const hasUpdate = useCallback(
     (skillId: string) => statuses[skillId]?.hasUpdate === true,

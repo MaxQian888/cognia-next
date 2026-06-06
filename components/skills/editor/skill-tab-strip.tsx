@@ -27,7 +27,7 @@ export function SkillTabStrip({ files, activeFileId, onSelect, onClose }: Props)
             aria-label={f.path}
             onClick={() => onSelect(f.id)}
             className={cn(
-              "group flex shrink-0 cursor-pointer items-center gap-2 px-3 py-1.5 text-xs",
+              "group flex min-h-11 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs md:min-h-0",
               active ? "border-l border-r bg-background" : "hover:bg-muted"
             )}
           >
@@ -38,7 +38,7 @@ export function SkillTabStrip({ files, activeFileId, onSelect, onClose }: Props)
             <button
               type="button"
               aria-label={t("closeTab", { path: f.path })}
-              className="ml-1 rounded p-0.5 opacity-60 hover:bg-destructive/20 hover:opacity-100"
+              className="ml-1 rounded p-1.5 opacity-60 hover:bg-destructive/20 hover:opacity-100 md:p-0.5"
               onClick={(e) => {
                 e.stopPropagation()
                 onClose(f.id, dirty)

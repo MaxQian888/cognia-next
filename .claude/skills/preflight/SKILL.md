@@ -1,11 +1,11 @@
 ---
 name: preflight
-description: Pre-commit audit fan-out for cognia-next. Dispatches the five project auditors (test-gap, i18n, static-export, tauri-rust, pii-gate) in parallel over the current diff, synthesizes one report, and ends with the exact gate commands. Use before committing, before claiming "done", or when asked to preflight/审查/提交前检查 a change.
+description: Pre-commit audit fan-out for cognia-next. Dispatches the six project auditors (test-gap, i18n, static-export, tauri-rust, pii-gate, wiring) in parallel over the current diff, synthesizes one report, and ends with the exact gate commands. Use before committing, before claiming "done", or when asked to preflight/审查/提交前检查 a change.
 ---
 
 # Preflight (parallel audit fan-out)
 
-Orchestrates the project's five read-only auditors over the current change,
+Orchestrates the project's six read-only auditors over the current change,
 then reports one prioritized list. Auditors report; YOU decide and fix.
 
 ## 1. Scope the diff
@@ -31,6 +31,7 @@ the file list. Skip an auditor only when its trigger set is empty:
 | `static-export-auditor`  | `app/`, `next.config.ts`, `package.json` deps, or new Node-ish imports in bundled code |
 | `tauri-rust-reviewer`    | anything under `src-tauri/`                                  |
 | `pii-gate-auditor`       | `lib/claude/ lib/ai/ lib/connectors/ lib/twin/ lib/memory/ lib/vector/ sidecar/` or any new outbound call |
+| `wiring-auditor`         | any NEW module/component/command/plugin/initializer/setting — verifies it is reachable at runtime |
 
 When unsure whether an auditor applies, run it — a clean "no findings" is
 cheap; a missed finding is not.
