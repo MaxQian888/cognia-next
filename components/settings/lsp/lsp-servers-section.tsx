@@ -37,7 +37,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { LspEditDialog } from "./add-lsp-dialog"
+import { LspEditDialog } from "./lsp-edit-dialog"
+import { LspEffectivePreview } from "./lsp-effective-preview"
 
 export function LspServersSection() {
   const t = useTranslations("settings.lspServers")
@@ -225,6 +226,8 @@ export function LspServersSection() {
           </Table>
         )}
       </div>
+
+      <LspEffectivePreview userServers={userServers} />
 
       <LspEditDialog
         open={dialogOpen}

@@ -13994,6 +13994,19 @@
       "customGroup": "Your servers",
       "description": "Add Language Server Protocol (LSP) servers — they power completion, hover, diagnostics, and go-to-definition in the Skills, Canvas, and Artifact editors. Servers added here run on every cognia launch.",
       "editAriaLabel": "Edit {name}",
+      "effectivePreview": {
+        "description": "What actually runs after merging built-in defaults, your servers, and the active project's .cognia/lsp.json.",
+        "empty": "No servers left after resolution — everything is disabled.",
+        "overridden": "Overridden",
+        "overridesBuiltin": "Overrides built-in",
+        "source": {
+          "builtin": "Built-in",
+          "plugin": "Plugin",
+          "project": "Project",
+          "user": "User"
+        },
+        "title": "Effective configuration"
+      },
       "empty": "No Language Servers configured yet. Click \"Add server\" to point cognia at a binary you have installed (e.g. eslint-server, pyright-langserver, rust-analyzer).",
       "enabledAriaLabel": "Toggle {name}",
       "overrideAriaLabel": "Override {name}",

@@ -176,7 +176,7 @@ export function LspEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="add-lsp-dialog" className="max-h-[85vh] overflow-y-auto">
+      <DialogContent data-testid="lsp-edit-dialog" className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? t("editTitle") : t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>

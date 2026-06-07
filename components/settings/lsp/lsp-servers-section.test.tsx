@@ -23,7 +23,7 @@ jest.mock("next-intl", () => ({
 
 // Stub the dialog so table tests don't drive the full form. The mock submits
 // a complete entry (id included), mirroring the real dialog's contract.
-jest.mock("./add-lsp-dialog", () => ({
+jest.mock("./lsp-edit-dialog", () => ({
   LspEditDialog: ({
     open,
     onSubmit,

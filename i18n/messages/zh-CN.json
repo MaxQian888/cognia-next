@@ -13994,6 +13994,19 @@
       "customGroup": "你的服务器",
       "description": "添加 Language Server Protocol (LSP) 服务器，为 Skills、Canvas 和 Artifact 编辑器提供补全、悬停、诊断和跳转到定义。在这里添加的服务器会在每次启动 cognia 时自动加载。",
       "editAriaLabel": "编辑 {name}",
+      "effectivePreview": {
+        "description": "合并内置默认、你的服务器和当前项目 .cognia/lsp.json 后实际生效的配置。",
+        "empty": "解析后没有剩余服务器 — 全部已禁用。",
+        "overridden": "已覆盖",
+        "overridesBuiltin": "覆盖内置",
+        "source": {
+          "builtin": "内置",
+          "plugin": "插件",
+          "project": "项目",
+          "user": "用户"
+        },
+        "title": "生效配置"
+      },
       "empty": "尚未配置语言服务器。点击\"添加服务器\"指向你机器上已安装的二进制（如 eslint-server / pyright-langserver / rust-analyzer）。",
       "enabledAriaLabel": "切换 {name}",
       "overrideAriaLabel": "覆盖 {name}",

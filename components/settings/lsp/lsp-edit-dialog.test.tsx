@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
       key,
 }))
 
-import { LspEditDialog } from "./add-lsp-dialog"
+import { LspEditDialog } from "./lsp-edit-dialog"
 import type { LspServerConfig } from "@/types/lsp/config"
 
 const fill = (label: string, value: string) =>
@@ -20,7 +20,7 @@ const fill = (label: string, value: string) =>
 describe("LspEditDialog", () => {
   it("renders nothing when `open=false`", () => {
     render(<LspEditDialog open={false} onOpenChange={() => {}} onSubmit={() => {}} />)
-    expect(screen.queryByTestId("add-lsp-dialog")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lsp-edit-dialog")).not.toBeInTheDocument()
   })
 
   it("renders the full field set when open", () => {
